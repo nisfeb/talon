@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <!--
+      Declares that our dynamic per-conversation shortcuts are valid
+      share targets for text or image payloads. The category here must
+      match the category attached to each ShortcutInfoCompat in
+      ShortcutsPublisher.
+    -->
+    <share-target android:targetClass="io.nisfeb.talon.MainActivity">
+        <data android:mimeType="text/plain" />
+        <data android:mimeType="image/*" />
+        <category android:name="io.nisfeb.talon.category.SHARE" />
+    </share-target>
+</shortcuts>

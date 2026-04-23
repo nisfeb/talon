@@ -1,0 +1,40 @@
+# Gradle
+.gradle/
+build/
+!gradle-wrapper.jar
+
+# Kotlin
+.kotlin/
+
+# Android
+local.properties
+captures/
+.externalNativeBuild/
+.cxx/
+*.apk
+*.aab
+*.ap_
+*.dex
+
+# Keystores (anything shipped with a real signing key)
+*.keystore
+*.jks
+
+# IDEs
+.idea/
+*.iml
+*.iws
+*.ipr
+.vscode/
+
+# OS cruft
+.DS_Store
+Thumbs.db
+
+# Logs / crash reports
+*.log
+hs_err_pid*
+
+# Misc
+*.swp
+*.swo
