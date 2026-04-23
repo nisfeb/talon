@@ -182,7 +182,9 @@ object Story {
             out.withSpan(SpanStyle(textDecoration = TextDecoration.LineThrough)) { renderInlineArray(arr, this) }
             return
         }
-        obj["code"]?.jsonPrimitive?.let {
+        // Tlon emits both `code` (older) and `inline-code` (newer) for
+        // monospace spans — treat them identically.
+        (obj["code"] ?: obj["inline-code"])?.jsonPrimitive?.let {
             out.withSpan(MONO_SPAN) { append(if (it.isString) it.content else it.content) }
             return
         }
@@ -208,6 +210,61 @@ object Story {
     ) {
         val arr = runCatching { element.jsonArray }.getOrNull() ?: return
         arr.forEach { renderInline(it, out) }
+    }
+
+    /**
+     * Tlon's `block.listing` is a recursive structure:
+     *   { "list": {
+     *       "type": "ordered"|"unordered",
+     *       "contents": [inline…],   // optional intro before items
+     *       "items":    [ { "item": [inline…] }
+     *                   | { "list": {…} }      // nested sub-list
+     *                   ]
+     *   } }
+     * We flatten to a single AnnotatedString with bullets / numbers +
+     * indentation per level. Good enough to read; visually simple.
+     */
+    private fun renderListing(
+        listing: JsonObject,
+        out: androidx.compose.ui.text.AnnotatedString.Builder,
+        depth: Int,
+    ) {
+        val list = listing["list"] as? JsonObject ?: return
+        renderList(list, out, depth)
+    }
+
+    private fun renderList(
+        list: JsonObject,
+        out: androidx.compose.ui.text.AnnotatedString.Builder,
+        depth: Int,
+    ) {
+        val ordered = list["type"]?.jsonPrimitive?.contentOrNullSafe() == "ordered"
+        val contents = list["contents"] as? JsonArray
+        val items = list["items"] as? JsonArray ?: return
+
+        val indent = "  ".repeat(depth)
+
+        // Optional intro text ("Next steps:" style) appears before items.
+        if (contents != null && contents.isNotEmpty()) {
+            if (out.length > 0 && !out.toString().endsWith('\n')) out.append('\n')
+            out.append(indent)
+            renderInlineArray(contents, out)
+        }
+
+        items.forEachIndexed { idx, raw ->
+            val itemObj = raw as? JsonObject ?: return@forEachIndexed
+            (itemObj["item"] as? JsonArray)?.let { inlineArr ->
+                if (out.length > 0 && !out.toString().endsWith('\n')) out.append('\n')
+                val bullet = if (ordered) "${idx + 1}. " else "• "
+                out.append(indent)
+                out.append(bullet)
+                renderInlineArray(inlineArr, out)
+                return@forEachIndexed
+            }
+            (itemObj["list"] as? JsonObject)?.let { nested ->
+                renderList(nested, out, depth + 1)
+            }
+        }
     }
 
     // ───────── blocks ─────────
@@ -255,6 +312,12 @@ object Story {
             }
             if (text.isNotEmpty()) return StoryPart.Text(text)
         }
+        (block["listing"] as? JsonObject)?.let { listing ->
+            val text = buildAnnotatedString {
+                renderListing(listing, this, depth = 0)
+            }
+            if (text.isNotEmpty()) return StoryPart.Text(text)
+        }
         // Unknown block kinds: walk one level deep looking for any
         // url-shaped field. Lets us render ad-hoc "file attachment"
         // shapes as a tappable LinkPreview instead of an opaque [tag].
@@ -265,16 +328,24 @@ object Story {
                 ?: inner["href"]?.jsonPrimitive?.contentOrNullSafe()
                 ?: inner["src"]?.jsonPrimitive?.contentOrNullSafe()
             if (!url.isNullOrBlank()) {
-                val title = inner["title"]?.jsonPrimitive?.contentOrNullSafe()
+                val baseName = inner["title"]?.jsonPrimitive?.contentOrNullSafe()
                     ?: inner["name"]?.jsonPrimitive?.contentOrNullSafe()
                     ?: inner["alt"]?.jsonPrimitive?.contentOrNullSafe()
                     ?: url.substringAfterLast('/').substringBefore('?').ifBlank { url }
+                val size = inner["size"]?.jsonPrimitive?.longOrNull
+                val title = if (size != null) {
+                    "$baseName • ${humanFileSize(size)}"
+                } else baseName
+                val siteLabel = when (tag) {
+                    "file" -> "📎 File"
+                    else -> tag
+                }
                 return StoryPart.LinkPreview(
                     url = url,
                     title = title,
-                    description = null,
+                    description = inner["mime"]?.jsonPrimitive?.contentOrNullSafe(),
                     imageUrl = null,
-                    siteName = tag,
+                    siteName = siteLabel,
                 )
             }
         }
@@ -315,12 +386,71 @@ object Story {
                 replyDa = null,
             )
         }
+        // Tlon's "File Upload" reference block. Shape in the wild is
+        // roughly {"cite": {"bait"|"file"|"url": {...}}} with fields
+        // like url/src/href + name/title + size. If we can find a URL
+        // treat it as a LinkPreview so it at least shows up and opens.
+        for (key in listOf("file", "bait", "upload", "url")) {
+            val inner = cite[key] as? JsonObject ?: continue
+            val url = inner["url"]?.jsonPrimitive?.contentOrNullSafe()
+                ?: inner["href"]?.jsonPrimitive?.contentOrNullSafe()
+                ?: inner["src"]?.jsonPrimitive?.contentOrNullSafe()
+            val name = inner["name"]?.jsonPrimitive?.contentOrNullSafe()
+                ?: inner["title"]?.jsonPrimitive?.contentOrNullSafe()
+                ?: url?.substringAfterLast('/')?.substringBefore('?')
+            val sizeLabel = inner["size"]?.jsonPrimitive?.longOrNull
+                ?.let { humanFileSize(it) }
+            if (url != null || name != null) {
+                val label = buildString {
+                    append(name ?: "File upload")
+                    if (sizeLabel != null) append(" • ").append(sizeLabel)
+                }
+                return if (url != null) {
+                    StoryPart.LinkPreview(
+                        url = url,
+                        title = label,
+                        description = null,
+                        imageUrl = null,
+                        siteName = "File",
+                    )
+                } else {
+                    StoryPart.Citation(
+                        label = label,
+                        openTarget = null,
+                        postDa = null,
+                        replyDa = null,
+                    )
+                }
+            }
+        }
+        // Last-ditch: if the cite object itself has a direct url, use it.
+        val directUrl = cite["url"]?.jsonPrimitive?.contentOrNullSafe()
+            ?: cite["href"]?.jsonPrimitive?.contentOrNullSafe()
+        if (directUrl != null) {
+            return StoryPart.LinkPreview(
+                url = directUrl,
+                title = cite["title"]?.jsonPrimitive?.contentOrNullSafe()
+                    ?: directUrl.substringAfterLast('/').substringBefore('?'),
+                description = null,
+                imageUrl = null,
+                siteName = "Reference",
+            )
+        }
         return StoryPart.Citation(
             label = "Reference",
             openTarget = null,
             postDa = null,
             replyDa = null,
         )
+    }
+
+    private fun humanFileSize(bytes: Long): String {
+        if (bytes < 1024) return "$bytes B"
+        val kb = bytes / 1024.0
+        if (kb < 1024) return "%.1f KB".format(kb)
+        val mb = kb / 1024.0
+        if (mb < 1024) return "%.1f MB".format(mb)
+        return "%.2f GB".format(mb / 1024.0)
     }
 
     private fun JsonPrimitive.contentOrNullSafe(): String? =

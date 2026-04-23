@@ -24,4 +24,6 @@ data class GroupEntity(
 data class ChannelGroupEntity(
     @PrimaryKey val nest: String,
     val groupFlag: String,
+    /** Display title from the channel's meta block, if set. */
+    val title: String? = null,
 )

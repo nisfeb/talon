@@ -61,6 +61,14 @@ class TlonChatRepo(private val db: AppDatabase) {
     @Volatile private var lastEventMs: Long = 0L
 
     /**
+     * Mirrors UI-organizational state (pins, group order, folders,
+     * notify prefs) to the user's %settings agent so it survives app
+     * reinstall and syncs across devices. Exposed so UI layers can
+     * call the sync-aware mutations instead of the raw DAOs.
+     */
+    val settingsSync: SettingsSync = SettingsSync(db)
+
+    /**
      * Called once per incoming message delta from another author, after
      * the row has been written to Room. UI layers wire this to their
      * notification / in-app banner logic. `replyToUs` is true when the
@@ -134,6 +142,19 @@ class TlonChatRepo(private val db: AppDatabase) {
                 .onFailure { Log.e(TAG, "clubs scry failed", it) }
             runCatching { bootstrapGroups(ch) }
                 .onFailure { Log.e(TAG, "groups scry failed", it) }
+        }
+
+        // Settings sync — scries our desk and also subscribes so any
+        // other device's changes stream in. Only need to do this on
+        // firstRun; the subscription re-establishes automatically once
+        // we attach the new channel instance below.
+        settingsSync.attach(ch)
+        if (firstRun) {
+            runCatching { settingsSync.bootstrap() }
+                .onFailure { Log.e(TAG, "settings bootstrap failed", it) }
+        } else {
+            runCatching { ch.subscribe("settings", "/desk/${SettingsSync.DESK}") }
+                .onFailure { Log.e(TAG, "settings subscribe failed", it) }
         }
 
         // Watchdog: if we don't see an event for 90s, the SSE is likely
@@ -233,7 +254,14 @@ class TlonChatRepo(private val db: AppDatabase) {
     private suspend fun postContent(whom: String, content: JsonArray): String {
         val ch = channel ?: error("not connected")
         val sent = System.currentTimeMillis()
-        val id = UrbitTime.formatPostId(ourPatp, UrbitTime.unixMsToDa(sent))
+        val da = UrbitTime.unixMsToDa(sent)
+        // %channels mints post ids with its own entropy (not purely a
+        // function of essay.sent), so we can't predict the server id
+        // locally. Use a sentinel "local_<da>" id for the optimistic
+        // insert and reap it when the SSE echo's server-id row arrives
+        // for the same (whom, author, sentMs).
+        val id = if (whom.startsWith("chat/")) "local_${da}"
+        else UrbitTime.formatPostId(ourPatp, da)
         val essay = buildEssay(content, sent)
         val addDelta = buildJsonObject {
             put("add", buildJsonObject {
@@ -448,6 +476,119 @@ class TlonChatRepo(private val db: AppDatabase) {
     }
 
     /**
+     * Fill holes in a conversation by re-fetching the last `count` posts
+     * ending at the current newest known post. Uses the same older-than-
+     * cursor scries as pagination, so anything that should have arrived
+     * via SSE but got dropped (e.g. pre-buffer-fix events that were ACK'd
+     * but never applied) gets backfilled. Idempotent upsert — no dupes.
+     */
+    suspend fun refreshConversation(whom: String, count: Int = 100) {
+        val ch = channel ?: run {
+            Log.w(TAG, "refreshConversation($whom): no channel")
+            return
+        }
+        val newest = db.messages().newestIdFor(whom)
+        // In path form Urbit @ud atoms need dotted-decimal (3-digit groups).
+        val dottedCursor = newest?.let {
+            runCatching { UrbitTime.daToUd(java.math.BigInteger(it)) }.getOrNull()
+        }
+        val app = when {
+            whom.startsWith("~") -> "chat"
+            whom.startsWith("0v") -> "chat"
+            whom.startsWith("chat/") -> "channels"
+            else -> return
+        }
+        val postsKey = if (app == "channels") "posts" else "writs"
+
+        // Build a probe list: try known path versions + two shapes
+        // (cursor-based `older` and no-cursor `newest`) for each.
+        //
+        // For channels we prefer `/post` (full shape with reference/cite
+        // blocks intact) over `/outline` (lightweight: outline strips
+        // file-reference blocks, which is what hid shared-file posts).
+        val paths = buildList {
+            val versions = listOf("v4", "v3", "v2", "v1", "v5")
+            val channelMarks = listOf("post", "outline")
+            val writMarks = listOf("heavy", "light")
+            for (v in versions) {
+                when (app) {
+                    "chat" -> for (mark in writMarks) {
+                        when {
+                            whom.startsWith("~") -> add("/$v/dm/$whom/writs/newest/$count/$mark")
+                            whom.startsWith("0v") -> add("/$v/club/$whom/writs/newest/$count/$mark")
+                        }
+                    }
+                    "channels" -> for (mark in channelMarks) {
+                        add("/$v/$whom/posts/newest/$count/$mark")
+                    }
+                }
+                if (dottedCursor != null) {
+                    when (app) {
+                        "chat" -> for (mark in writMarks) {
+                            when {
+                                whom.startsWith("~") -> add("/$v/dm/$whom/writs/older/$dottedCursor/$count/$mark")
+                                whom.startsWith("0v") -> add("/$v/club/$whom/writs/older/$dottedCursor/$count/$mark")
+                            }
+                        }
+                        "channels" -> for (mark in channelMarks) {
+                            add("/$v/$whom/posts/older/$dottedCursor/$count/$mark")
+                        }
+                    }
+                }
+            }
+        }
+
+        var body: JsonElement? = null
+        var lastErr: Throwable? = null
+        var winningPath: String? = null
+        for (path in paths) {
+            val attempt = runCatching { ch.scry(app, path) }
+            if (attempt.isSuccess) {
+                body = attempt.getOrNull()
+                winningPath = path
+                break
+            } else {
+                lastErr = attempt.exceptionOrNull()
+            }
+        }
+        if (body == null) {
+            Log.w(TAG, "refreshConversation($whom) all ${paths.size} probes failed; last err: ${lastErr?.message}")
+            return
+        }
+        Log.i(TAG, "refreshConversation($whom): winning path $app $winningPath")
+        val obj = body as? JsonObject
+        if (obj == null) {
+            Log.w(TAG, "refreshConversation($whom): scry body not object: ${body::class.simpleName}")
+            return
+        }
+        val posts = obj[postsKey] as? JsonObject
+        if (posts == null) {
+            Log.w(TAG, "refreshConversation($whom): no '$postsKey' key; keys=${obj.keys}")
+            return
+        }
+        val messages = mutableListOf<MessageEntity>()
+        val reactions = mutableListOf<ReactionEntity>()
+        posts.forEach { (_, post) -> ingestPost(whom, post, messages, reactions) }
+        if (messages.isNotEmpty()) db.messages().upsertAll(messages)
+        if (reactions.isNotEmpty()) db.reactions().upsertAll(reactions)
+        // Clean up stale optimistic-insert rows for channels whose id
+        // format we'd gotten wrong in earlier builds. One-shot; no-op
+        // once all such ghosts are gone.
+        val purgedBefore = if (whom.startsWith("chat/")) {
+            val before = db.messages().countFor(whom)
+            db.messages().purgeStaleLocalIds(whom)
+            val after = db.messages().countFor(whom)
+            before - after
+        } else 0
+        Log.i(TAG, "refreshConversation($whom): ${posts.size} posts ingested (purged $purgedBefore stale ~ ids)")
+        // DEBUG: dump our 3 most recent posts to spot any remaining dupe.
+        val mine = db.messages().debugByAuthor(whom, ourPatp)
+        mine.take(3).forEach { r ->
+            Log.i(TAG, "  mine [sent=${r.sentMs}] id=${r.id}: ${r.contentPreview.take(120)}")
+        }
+    }
+
+    /**
      * Fetch older posts for a conversation and upsert them. Returns true
      * if the server claims more history is available below what we just
      * loaded; false if we've hit the bottom (or the scry errored, in
@@ -462,28 +603,60 @@ class TlonChatRepo(private val db: AppDatabase) {
         if (paginationExhausted.contains(whom)) return false
         val cursor = db.messages().oldestIdFor(whom) ?: return false
 
-        val (app, path, postsKey) = when {
+        val dotted = runCatching { UrbitTime.daToUd(java.math.BigInteger(cursor)) }
+            .getOrNull() ?: cursor
+        val (app, paths, postsKey) = when {
             whom.startsWith("~") -> Triple(
                 "chat",
-                "/v4/dm/$whom/writs/older/$cursor/$count/light",
+                buildList<String> {
+                    for (v in listOf("v4", "v3", "v2", "v1")) {
+                        for (mark in listOf("heavy", "light")) {
+                            add("/$v/dm/$whom/writs/older/$dotted/$count/$mark")
+                        }
+                    }
+                },
                 "writs",
             )
             whom.startsWith("0v") -> Triple(
                 "chat",
-                "/v4/club/$whom/writs/older/$cursor/$count/light",
+                buildList<String> {
+                    for (v in listOf("v4", "v3", "v2", "v1")) {
+                        for (mark in listOf("heavy", "light")) {
+                            add("/$v/club/$whom/writs/older/$dotted/$count/$mark")
+                        }
+                    }
+                },
                 "writs",
             )
             whom.startsWith("chat/") -> Triple(
                 "channels",
-                "/v5/$whom/posts/older/$cursor/$count/outline",
+                buildList<String> {
+                    for (v in listOf("v4", "v3", "v2", "v1", "v5")) {
+                        for (mark in listOf("post", "outline")) {
+                            add("/$v/$whom/posts/older/$dotted/$count/$mark")
+                        }
+                    }
+                },
                 "posts",
             )
             else -> return false
         }
 
-        val body = runCatching { ch.scry(app, path) }
-            .onFailure { Log.w(TAG, "loadOlder $whom failed", it) }
-            .getOrNull() as? JsonObject ?: return false
+        var body: JsonObject? = null
+        var lastErr: Throwable? = null
+        for (p in paths) {
+            val attempt = runCatching { ch.scry(app, p) }
+            if (attempt.isSuccess) {
+                body = attempt.getOrNull() as? JsonObject
+                break
+            } else {
+                lastErr = attempt.exceptionOrNull()
+            }
+        }
+        if (body == null) {
+            Log.w(TAG, "loadOlder $whom all versions failed; last err: ${lastErr?.message}")
+            return false
+        }
 
         val posts = body[postsKey] as? JsonObject
         if (posts != null) {
@@ -744,12 +917,21 @@ class TlonChatRepo(private val db: AppDatabase) {
             whom.startsWith("chat/") -> ch.poke(
                 app = "channels", mark = "channel-action-2",
                 payload = channelAction(whom, buildJsonObject {
-                    put("post", buildJsonObject { put("del", JsonPrimitive(postId)) })
+                    // channel-action-2's `%post` action takes an id + a
+                    // u-post update. Deleting = setting the post to ~.
+                    put("post", buildJsonObject {
+                        put("id", JsonPrimitive(postId))
+                        put("u-post", buildJsonObject {
+                            put("set", JsonNull)
+                        })
+                    })
                 }),
             )
             else -> error("unsupported whom: $whom")
         }
-        db.messages().softDelete(whom, postId)
+        // Do NOT soft-delete locally — wait for the server's SSE echo
+        // (applyChatDelta / applyChannelDelta handle the actual delete)
+        // so the row stays visible if the poke is rejected.
     }
 
     /**
@@ -759,7 +941,11 @@ class TlonChatRepo(private val db: AppDatabase) {
     suspend fun reply(whom: String, parentId: String, text: String): String {
         val ch = channel ?: error("not connected")
         val sent = System.currentTimeMillis()
-        val replyId = UrbitTime.formatPostId(ourPatp, UrbitTime.unixMsToDa(sent))
+        val da = UrbitTime.unixMsToDa(sent)
+        // Same local-sentinel id rule as postContent — %channels assigns
+        // unpredictable post ids so we can't pre-compute them.
+        val replyId = if (whom.startsWith("chat/")) "local_${da}"
+        else UrbitTime.formatPostId(ourPatp, da)
         val replyEssay = buildJsonObject {
             put("content", textToStory(text))
             put("author", ourPatp)
@@ -860,33 +1046,50 @@ class TlonChatRepo(private val db: AppDatabase) {
     }
 
     private suspend fun applyEvent(event: JsonElement) {
-        val obj = event as? JsonObject ?: return
+        val outer = event as? JsonObject ?: return
+        // Urbit's /~/channel/ SSE wraps each fact as:
+        //   { id: N, response: "diff"|"poke"|"subscribe", mark: "...", json: {…} }
+        // The actual per-agent payload lives in obj["json"]. Acks and
+        // subscribe-replies have no json and can be skipped.
+        if (outer["response"]?.jsonPrimitive?.contentIfString() != "diff") return
+        val payload = outer["json"] as? JsonObject ?: return
 
         // %chat writ-response-4: { whom, id, response }
-        val whom = obj["whom"]?.jsonPrimitive?.contentIfString()
-        val directId = obj["id"]?.jsonPrimitive?.contentIfString()
+        val whom = payload["whom"]?.jsonPrimitive?.contentIfString()
+        val directId = payload["id"]?.jsonPrimitive?.contentIfString()
         if (whom != null && directId != null) {
-            applyChatDelta(whom, directId, obj["response"] as? JsonObject ?: return)
+            applyChatDelta(whom, directId, payload["response"] as? JsonObject ?: return)
             return
         }
 
         // %channels r-channels-5: { nest, response }
-        val nest = obj["nest"]?.jsonPrimitive?.contentIfString()
-        val channelResponse = obj["response"] as? JsonObject
+        val nest = payload["nest"]?.jsonPrimitive?.contentIfString()
+        val channelResponse = payload["response"] as? JsonObject
         if (nest != null && channelResponse != null) {
             applyChannelDelta(nest, channelResponse)
             return
         }
 
         // %activity update — variants keyed by "activity"/"read"/"del"/etc.
-        if (obj.containsKey("activity") || obj.containsKey("read") || obj.containsKey("del")) {
-            applyActivityUpdate(obj)
+        if (payload.containsKey("activity") || payload.containsKey("read") || payload.containsKey("del")) {
+            applyActivityUpdate(payload)
             return
         }
 
         // %contacts /v1/news — {page}, {peer}, or {wipe} envelope.
-        if (obj.containsKey("page") || obj.containsKey("peer")) {
-            applyContactsNews(obj)
+        if (payload.containsKey("page") || payload.containsKey("peer")) {
+            applyContactsNews(payload)
+            return
+        }
+
+        // %settings events — wrapped as {put-entry|del-entry|put-bucket|…}.
+        if (
+            payload.containsKey("put-entry") ||
+            payload.containsKey("del-entry") ||
+            payload.containsKey("put-bucket") ||
+            payload.containsKey("del-bucket")
+        ) {
+            settingsSync.applySettingsEvent(payload)
             return
         }
     }
@@ -961,6 +1164,9 @@ class TlonChatRepo(private val db: AppDatabase) {
 
     private suspend fun applyChannelDelta(nest: String, response: JsonObject) {
         (response["posts"] as? JsonObject)?.let { posts ->
+            posts.keys.firstOrNull()?.let { firstKey ->
+                Log.i(TAG, "applyChannelDelta $nest server-echoed id=$firstKey")
+            }
             val messages = mutableListOf<MessageEntity>()
             val reactions = mutableListOf<ReactionEntity>()
             posts.forEach { (_, post) -> ingestPost(nest, post, messages, reactions) }
@@ -970,6 +1176,7 @@ class TlonChatRepo(private val db: AppDatabase) {
         }
         (response["post"] as? JsonObject)?.let { wrap ->
             val id = wrap["id"]?.jsonPrimitive?.contentIfString() ?: return@let
+            Log.i(TAG, "applyChannelDelta $nest r-post id=$id")
             val rPost = wrap["r-post"] as? JsonObject ?: return@let
 
             (rPost["set"] as? JsonObject)?.let { post ->
@@ -980,6 +1187,11 @@ class TlonChatRepo(private val db: AppDatabase) {
                 if (rx.isNotEmpty()) {
                     db.reactions().clearForPost(nest, id)
                     db.reactions().upsertAll(rx)
+                }
+                // Reap any optimistic-local row for this same post so
+                // our own sends stop showing as duplicates.
+                msgs.firstOrNull { it.id == id && it.author == ourPatp }?.let { mine ->
+                    db.messages().reapLocalTwin(nest, ourPatp, mine.sentMs)
                 }
                 // Only top-level posts from peers trigger a notification;
                 // reply inserts come via the reply variant below.
@@ -1334,8 +1546,17 @@ class TlonChatRepo(private val db: AppDatabase) {
                     ?.takeIf { it.isNotBlank() },
             )
             val channels = groupObj["channels"] as? JsonObject ?: continue
-            for ((nest, _) in channels) {
-                channelGroups += ChannelGroupEntity(nest = nest, groupFlag = flag)
+            for ((nest, channel) in channels) {
+                val channelObj = channel as? JsonObject
+                val channelMeta = channelObj?.get("meta") as? JsonObject
+                val channelTitle = channelMeta?.get("title")
+                    ?.jsonPrimitive?.contentIfString()
+                    ?.takeIf { it.isNotBlank() }
+                channelGroups += ChannelGroupEntity(
+                    nest = nest,
+                    groupFlag = flag,
+                    title = channelTitle,
+                )
             }
         }
         if (groups.isNotEmpty()) db.groups().upsertGroups(groups)
@@ -1404,7 +1625,8 @@ class TlonChatRepo(private val db: AppDatabase) {
         val sent = essay["sent"]?.jsonPrimitive?.longOrNull ?: 0L
         val kind = essay["kind"]?.jsonPrimitive?.contentIfString() ?: "/chat"
         val content = essay["content"] ?: JsonArray(emptyList())
-        val json = content.toString()
+        val merged = mergeBlobIntoContent(content, essay["blob"])
+        val json = merged.toString()
         // Parse the story ahead of UI time. First-paint of a message in a
         // LazyColumn is what drives visible scroll jank — doing the
         // JSON→AnnotatedString conversion now (on Dispatchers.IO) means
@@ -1419,6 +1641,59 @@ class TlonChatRepo(private val db: AppDatabase) {
             contentJson = json,
             kind = kind,
         )
+    }
+
+    /**
+     * Tlon stores file attachments in `essay.blob` — a JSON-string whose
+     * contents decode to an array of `{type, version, fileUri, name,
+     * mimeType, size}` entries. None of the normal story block types
+     * exist for these yet, so we hoist each file entry into a synthetic
+     * `{"block": {"file": {…}}}` prepended to the content. The story
+     * renderer's unknown-block fallback picks this up and shows it as a
+     * tappable LinkPreview with filename + size.
+     */
+    private fun mergeBlobIntoContent(
+        content: JsonElement,
+        blob: JsonElement?,
+    ): JsonElement {
+        val blobStr = blob?.let { el ->
+            (el as? JsonPrimitive)?.contentIfString()
+        } ?: return content
+        if (blobStr.isBlank()) return content
+        val parsed = runCatching { Json.parseToJsonElement(blobStr) }.getOrNull()
+            ?: return content
+        val arr = parsed as? JsonArray ?: return content
+        if (arr.isEmpty()) return content
+        val synthetic = buildJsonArray {
+            for (entry in arr) {
+                val o = entry as? JsonObject ?: continue
+                val type = o["type"]?.jsonPrimitive?.contentIfString()
+                if (type != "file") continue
+                val uri = o["fileUri"]?.jsonPrimitive?.contentIfString()
+                    ?: o["url"]?.jsonPrimitive?.contentIfString()
+                    ?: continue
+                add(
+                    buildJsonObject {
+                        put("block", buildJsonObject {
+                            put("file", buildJsonObject {
+                                put("url", uri)
+                                o["name"]?.jsonPrimitive?.contentIfString()
+                                    ?.let { put("name", it) }
+                                o["size"]?.jsonPrimitive?.longOrNull
+                                    ?.let { put("size", it) }
+                                o["mimeType"]?.jsonPrimitive?.contentIfString()
+                                    ?.let { put("mime", it) }
+                            })
+                        })
+                    }
+                )
+            }
+        }
+        if (synthetic.isEmpty()) return content
+        return buildJsonArray {
+            synthetic.forEach { add(it) }
+            (content as? JsonArray)?.forEach { add(it) }
+        }
     }
 
     /**
@@ -1517,7 +1792,8 @@ class TlonChatRepo(private val db: AppDatabase) {
         val author = replyEssay["author"]?.jsonPrimitive?.contentIfString() ?: ""
         val sent = replyEssay["sent"]?.jsonPrimitive?.longOrNull ?: 0L
         val content = replyEssay["content"] ?: JsonArray(emptyList())
-        val json = content.toString()
+        val merged = mergeBlobIntoContent(content, replyEssay["blob"])
+        val json = merged.toString()
         StoryCache.partsFor(replyId, json)
         return MessageEntity(
             whom = whom,

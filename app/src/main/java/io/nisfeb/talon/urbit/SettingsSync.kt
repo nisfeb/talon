@@ -1,0 +1,479 @@
+package io.nisfeb.talon.urbit
+
+import android.util.Log
+import io.nisfeb.talon.data.AppDatabase
+import io.nisfeb.talon.data.FolderEntity
+import io.nisfeb.talon.data.FolderMemberEntity
+import io.nisfeb.talon.data.GroupOrderEntity
+import io.nisfeb.talon.data.NotifyPreferenceEntity
+import io.nisfeb.talon.data.PinEntity
+import kotlinx.coroutines.flow.first
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.intOrNull
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.longOrNull
+import kotlinx.serialization.json.put
+
+/**
+ * Mirrors local UI-state (pins, group order, folders, notify prefs)
+ * to the user's %settings agent on the ship. Source of truth is the
+ * ship — on login we scry and replace Room with whatever %settings
+ * holds, then pokes flow both ways: local change → poke, remote
+ * change → subscription event → Room write.
+ *
+ * All per-row values are small JSON blobs; we never store message
+ * content here.
+ */
+class SettingsSync(private val db: AppDatabase) {
+
+    companion object {
+        private const val TAG = "SettingsSync"
+        const val DESK = "talon"
+        const val BUCKET_PINS = "pins"
+        const val BUCKET_GROUP_ORDERS = "group-orders"
+        const val BUCKET_FOLDERS = "folders"
+        const val BUCKET_FOLDER_MEMBERS = "folder-members"
+        const val BUCKET_NOTIFY_PREFS = "notify-prefs"
+    }
+
+    @Volatile private var channel: UrbitChannel? = null
+
+    fun attach(channel: UrbitChannel) {
+        this.channel = channel
+    }
+
+    /**
+     * On session start: scry `%settings /desk/<DESK>` for everything
+     * we care about and overwrite local Room tables with whatever the
+     * ship holds. Ship wins — local edits made offline without a poke
+     * don't survive this. Subscribe afterward so live changes flow in.
+     */
+    suspend fun bootstrap() {
+        val ch = channel ?: return
+        val body = runCatching { ch.scry("settings", "/desk/$DESK") }
+            .onFailure { Log.w(TAG, "bootstrap scry failed", it) }
+            .getOrNull() as? JsonObject
+
+        // Ship returns { "desk": { <bucket>: { <entry>: <value> } } }
+        // or the inner desk map directly. Handle both.
+        val deskMap = (body?.get("desk") as? JsonObject) ?: body
+
+        val hasAnyBucket = deskMap != null && deskMap.keys.any {
+            (deskMap[it] as? JsonObject)?.isNotEmpty() == true
+        }
+
+        if (!hasAnyBucket) {
+            // Ship has nothing yet for this desk — upload local state
+            // so this device's existing pins/folders/etc. survive and
+            // become the starting point for cross-device sync.
+            Log.i(TAG, "seeding %settings from local state")
+            seedFromLocal()
+        } else {
+            // Ship has state: treat it as authoritative, replace local.
+            applyBucket(BUCKET_PINS, deskMap!![BUCKET_PINS] as? JsonObject)
+            applyBucket(BUCKET_GROUP_ORDERS, deskMap[BUCKET_GROUP_ORDERS] as? JsonObject)
+            applyBucket(BUCKET_FOLDERS, deskMap[BUCKET_FOLDERS] as? JsonObject)
+            applyBucket(BUCKET_FOLDER_MEMBERS, deskMap[BUCKET_FOLDER_MEMBERS] as? JsonObject)
+            applyBucket(BUCKET_NOTIFY_PREFS, deskMap[BUCKET_NOTIFY_PREFS] as? JsonObject)
+        }
+
+        // Subscribe for live updates from other devices.
+        runCatching { ch.subscribe("settings", "/desk/$DESK") }
+            .onFailure { Log.w(TAG, "subscribe failed", it) }
+    }
+
+    /** First-time setup: push whatever's in Room to the ship. */
+    private suspend fun seedFromLocal() {
+        // Pins
+        db.pins().stream().first()
+            .takeIf { it.isNotEmpty() }?.let { pins ->
+                pokePutBucket(
+                    BUCKET_PINS,
+                    buildJsonObject {
+                        pins.forEach { p ->
+                            put(p.whom, buildJsonObject { put("ordinal", p.ordinal) })
+                        }
+                    },
+                )
+            }
+        // Group orders
+        db.groupOrders().stream().first()
+            .takeIf { it.isNotEmpty() }?.let { orders ->
+                pokePutBucket(
+                    BUCKET_GROUP_ORDERS,
+                    buildJsonObject {
+                        orders.forEach { o ->
+                            put(o.flag, buildJsonObject { put("ordinal", o.ordinal) })
+                        }
+                    },
+                )
+            }
+        // Folders
+        db.folders().streamFolders().first()
+            .takeIf { it.isNotEmpty() }?.let { folders ->
+                pokePutBucket(
+                    BUCKET_FOLDERS,
+                    buildJsonObject {
+                        folders.forEach { f ->
+                            put(f.id.toString(), buildJsonObject {
+                                put("name", f.name)
+                                put("sortOrder", f.sortOrder)
+                            })
+                        }
+                    },
+                )
+            }
+        // Folder members
+        db.folders().streamMembers().first()
+            .takeIf { it.isNotEmpty() }?.let { members ->
+                pokePutBucket(
+                    BUCKET_FOLDER_MEMBERS,
+                    buildJsonObject {
+                        members.forEach { m ->
+                            put(folderMemberKey(m.folderId, m.whom), buildJsonObject {
+                                put("ordinal", m.ordinal)
+                            })
+                        }
+                    },
+                )
+            }
+        // Notify prefs aren't accessible by bulk stream in current DAO.
+        // Future: add a streamAll() if we need to seed them on first run.
+    }
+
+    /** Apply a %settings SSE fact to the right bucket. */
+    suspend fun applySettingsEvent(payload: JsonObject) {
+        // Expected shapes (defensively handled):
+        //   {put-entry: {desk, bucket-key, entry-key, value}}
+        //   {del-entry: {desk, bucket-key, entry-key}}
+        //   {put-bucket: {desk, bucket-key, bucket}}
+        //   {del-bucket: {desk, bucket-key}}
+        (payload["put-entry"] as? JsonObject)?.let { e ->
+            if (e.desk() != DESK) return
+            val bucket = e.bucketKey() ?: return
+            val entry = e.entryKey() ?: return
+            val value = e["value"] ?: JsonNull
+            applyEntry(bucket, entry, value)
+            return
+        }
+        (payload["del-entry"] as? JsonObject)?.let { e ->
+            if (e.desk() != DESK) return
+            val bucket = e.bucketKey() ?: return
+            val entry = e.entryKey() ?: return
+            removeEntry(bucket, entry)
+            return
+        }
+        (payload["put-bucket"] as? JsonObject)?.let { e ->
+            if (e.desk() != DESK) return
+            val bucket = e.bucketKey() ?: return
+            applyBucket(bucket, e["bucket"] as? JsonObject)
+            return
+        }
+        (payload["del-bucket"] as? JsonObject)?.let { e ->
+            if (e.desk() != DESK) return
+            val bucket = e.bucketKey() ?: return
+            clearBucketLocally(bucket)
+            return
+        }
+    }
+
+    // ───────── outbound ─────────
+
+    suspend fun upsertPin(whom: String, ordinal: Int) {
+        db.pins().upsertRaw(whom, ordinal)
+        pokePutEntry(
+            BUCKET_PINS, whom,
+            buildJsonObject { put("ordinal", ordinal) },
+        )
+    }
+
+    suspend fun pin(whom: String) {
+        // Pin at bottom, same semantics as PinDao.pin — but route
+        // through our settings-aware upsert so the ship gets the poke.
+        val existing = db.pins().isPinnedCount(whom) > 0
+        if (existing) return
+        val next = (db.pins().maxOrdinal() ?: -1) + 1
+        upsertPin(whom, next)
+    }
+
+    suspend fun removePin(whom: String) {
+        db.pins().remove(whom)
+        pokeDelEntry(BUCKET_PINS, whom)
+    }
+
+    suspend fun reorderPins(whoms: List<String>) {
+        db.pins().reorder(whoms)
+        // Push the full new bucket — one poke for the whole reorder
+        // beats N pokes for N entries.
+        pokePutBucket(
+            BUCKET_PINS,
+            buildJsonObject {
+                whoms.forEachIndexed { i, w ->
+                    put(w, buildJsonObject { put("ordinal", i) })
+                }
+            },
+        )
+    }
+
+    suspend fun reorderGroupOrders(flags: List<String>) {
+        db.groupOrders().reorder(flags)
+        pokePutBucket(
+            BUCKET_GROUP_ORDERS,
+            buildJsonObject {
+                flags.forEachIndexed { i, f ->
+                    put(f, buildJsonObject { put("ordinal", i) })
+                }
+            },
+        )
+    }
+
+    suspend fun createFolder(name: String, sortOrder: Int): Long {
+        val id = db.folders().createFolder(FolderEntity(name = name, sortOrder = sortOrder))
+        pokePutEntry(
+            BUCKET_FOLDERS, id.toString(),
+            buildJsonObject {
+                put("name", name)
+                put("sortOrder", sortOrder)
+            },
+        )
+        return id
+    }
+
+    suspend fun renameFolder(id: Long, name: String) {
+        db.folders().rename(id, name)
+        pokePutEntry(
+            BUCKET_FOLDERS, id.toString(),
+            buildJsonObject { put("name", name) },
+        )
+    }
+
+    suspend fun deleteFolder(id: Long) {
+        db.folders().deleteMembersOf(id)
+        db.folders().delete(id)
+        pokeDelEntry(BUCKET_FOLDERS, id.toString())
+        // Also clear any folder-members entries keyed by this folder.
+        // %settings has no wildcard del — so push a fresh bucket minus
+        // anything with this folder id prefix. Cheap because typically
+        // few folders.
+        clearFolderMembersForFolder(id)
+    }
+
+    suspend fun addFolderMember(folderId: Long, whom: String) {
+        val next = db.folders().maxOrdinalIn(folderId) + 1
+        db.folders().addMemberRaw(folderId, whom, next)
+        pokePutEntry(
+            BUCKET_FOLDER_MEMBERS, folderMemberKey(folderId, whom),
+            buildJsonObject { put("ordinal", next) },
+        )
+    }
+
+    suspend fun removeFolderMember(folderId: Long, whom: String) {
+        db.folders().removeMember(folderId, whom)
+        pokeDelEntry(BUCKET_FOLDER_MEMBERS, folderMemberKey(folderId, whom))
+    }
+
+    suspend fun reorderFolderMembers(folderId: Long, whoms: List<String>) {
+        db.folders().reorderMembers(folderId, whoms)
+        whoms.forEachIndexed { i, w ->
+            pokePutEntry(
+                BUCKET_FOLDER_MEMBERS, folderMemberKey(folderId, w),
+                buildJsonObject { put("ordinal", i) },
+            )
+        }
+    }
+
+    suspend fun setNotifyLevel(whom: String, level: String) {
+        db.notifyPrefs().upsert(NotifyPreferenceEntity(whom, level))
+        pokePutEntry(
+            BUCKET_NOTIFY_PREFS, whom,
+            buildJsonObject { put("level", level) },
+        )
+    }
+
+    // ───────── inbound appliers ─────────
+
+    private suspend fun applyBucket(bucket: String, entries: JsonObject?) {
+        // Replace-on-apply: any local row not in the incoming bucket
+        // will be wiped. For bucket reorders this is the right call.
+        when (bucket) {
+            BUCKET_PINS -> {
+                val list = entries.orEmpty().mapNotNull { (k, v) ->
+                    val ordinal = (v as? JsonObject)?.get("ordinal")
+                        ?.jsonPrimitive?.intOrNull ?: return@mapNotNull null
+                    PinEntity(whom = k, ordinal = ordinal)
+                }
+                db.pins().replaceAll(list)
+            }
+            BUCKET_GROUP_ORDERS -> {
+                val list = entries.orEmpty().mapNotNull { (k, v) ->
+                    val ordinal = (v as? JsonObject)?.get("ordinal")
+                        ?.jsonPrimitive?.intOrNull ?: return@mapNotNull null
+                    GroupOrderEntity(flag = k, ordinal = ordinal)
+                }
+                db.groupOrders().replaceAll(list)
+            }
+            BUCKET_FOLDERS -> {
+                val list = entries.orEmpty().mapNotNull { (k, v) ->
+                    val id = k.toLongOrNull() ?: return@mapNotNull null
+                    val obj = v as? JsonObject ?: return@mapNotNull null
+                    val name = obj["name"]?.jsonPrimitive?.contentIfStr() ?: return@mapNotNull null
+                    val sortOrder = obj["sortOrder"]?.jsonPrimitive?.intOrNull ?: 0
+                    FolderEntity(id = id, name = name, sortOrder = sortOrder)
+                }
+                db.folders().replaceAll(list)
+            }
+            BUCKET_FOLDER_MEMBERS -> {
+                val list = entries.orEmpty().mapNotNull { (k, v) ->
+                    val (folderId, whom) = parseFolderMemberKey(k) ?: return@mapNotNull null
+                    val ordinal = (v as? JsonObject)?.get("ordinal")
+                        ?.jsonPrimitive?.intOrNull ?: 0
+                    FolderMemberEntity(folderId = folderId, whom = whom, ordinal = ordinal)
+                }
+                db.folders().replaceAllMembers(list)
+            }
+            BUCKET_NOTIFY_PREFS -> {
+                val list = entries.orEmpty().mapNotNull { (k, v) ->
+                    val level = (v as? JsonObject)?.get("level")
+                        ?.jsonPrimitive?.contentIfStr() ?: return@mapNotNull null
+                    NotifyPreferenceEntity(whom = k, level = level)
+                }
+                db.notifyPrefs().replaceAll(list)
+            }
+        }
+    }
+
+    private suspend fun applyEntry(bucket: String, entry: String, value: JsonElement) {
+        when (bucket) {
+            BUCKET_PINS -> {
+                val ordinal = (value as? JsonObject)?.get("ordinal")
+                    ?.jsonPrimitive?.intOrNull ?: return
+                db.pins().upsertRaw(entry, ordinal)
+            }
+            BUCKET_GROUP_ORDERS -> {
+                val ordinal = (value as? JsonObject)?.get("ordinal")
+                    ?.jsonPrimitive?.intOrNull ?: return
+                db.groupOrders().upsertRaw(entry, ordinal)
+            }
+            BUCKET_FOLDERS -> {
+                val id = entry.toLongOrNull() ?: return
+                val obj = value as? JsonObject ?: return
+                val name = obj["name"]?.jsonPrimitive?.contentIfStr() ?: return
+                val sortOrder = obj["sortOrder"]?.jsonPrimitive?.intOrNull ?: 0
+                db.folders().upsert(FolderEntity(id, name, sortOrder))
+            }
+            BUCKET_FOLDER_MEMBERS -> {
+                val (folderId, whom) = parseFolderMemberKey(entry) ?: return
+                val ordinal = (value as? JsonObject)?.get("ordinal")
+                    ?.jsonPrimitive?.intOrNull ?: 0
+                db.folders().addMemberRaw(folderId, whom, ordinal)
+            }
+            BUCKET_NOTIFY_PREFS -> {
+                val level = (value as? JsonObject)?.get("level")
+                    ?.jsonPrimitive?.contentIfStr() ?: return
+                db.notifyPrefs().upsert(NotifyPreferenceEntity(entry, level))
+            }
+        }
+    }
+
+    private suspend fun removeEntry(bucket: String, entry: String) {
+        when (bucket) {
+            BUCKET_PINS -> db.pins().remove(entry)
+            BUCKET_GROUP_ORDERS -> db.groupOrders().remove(entry)
+            BUCKET_FOLDERS -> {
+                val id = entry.toLongOrNull() ?: return
+                db.folders().deleteMembersOf(id)
+                db.folders().delete(id)
+            }
+            BUCKET_FOLDER_MEMBERS -> {
+                val (folderId, whom) = parseFolderMemberKey(entry) ?: return
+                db.folders().removeMember(folderId, whom)
+            }
+            BUCKET_NOTIFY_PREFS -> db.notifyPrefs().clear(entry)
+        }
+    }
+
+    private suspend fun clearBucketLocally(bucket: String) {
+        when (bucket) {
+            BUCKET_PINS -> db.pins().replaceAll(emptyList())
+            BUCKET_GROUP_ORDERS -> db.groupOrders().replaceAll(emptyList())
+            BUCKET_FOLDERS -> db.folders().replaceAll(emptyList())
+            BUCKET_FOLDER_MEMBERS -> db.folders().replaceAllMembers(emptyList())
+            BUCKET_NOTIFY_PREFS -> db.notifyPrefs().replaceAll(emptyList())
+        }
+    }
+
+    private suspend fun clearFolderMembersForFolder(folderId: Long) {
+        db.folders().deleteMembersOf(folderId)
+        // No wildcard settings del — best-effort: we'd re-push bucket.
+        // Skipped for v1; drift tolerated because the folder itself
+        // was deleted so its members are orphaned and filtered out.
+    }
+
+    // ───────── poke helpers ─────────
+
+    private suspend fun pokePutEntry(bucket: String, entry: String, value: JsonElement) {
+        val ch = channel ?: return
+        val payload = buildJsonObject {
+            put("put-entry", buildJsonObject {
+                put("desk", DESK)
+                put("bucket-key", bucket)
+                put("entry-key", entry)
+                put("value", value)
+            })
+        }
+        runCatching { ch.poke(app = "settings", mark = "settings-event", payload = payload) }
+            .onFailure { Log.w(TAG, "put-entry $bucket/$entry failed", it) }
+    }
+
+    private suspend fun pokeDelEntry(bucket: String, entry: String) {
+        val ch = channel ?: return
+        val payload = buildJsonObject {
+            put("del-entry", buildJsonObject {
+                put("desk", DESK)
+                put("bucket-key", bucket)
+                put("entry-key", entry)
+            })
+        }
+        runCatching { ch.poke(app = "settings", mark = "settings-event", payload = payload) }
+            .onFailure { Log.w(TAG, "del-entry $bucket/$entry failed", it) }
+    }
+
+    private suspend fun pokePutBucket(bucket: String, entries: JsonObject) {
+        val ch = channel ?: return
+        val payload = buildJsonObject {
+            put("put-bucket", buildJsonObject {
+                put("desk", DESK)
+                put("bucket-key", bucket)
+                put("bucket", entries)
+            })
+        }
+        runCatching { ch.poke(app = "settings", mark = "settings-event", payload = payload) }
+            .onFailure { Log.w(TAG, "put-bucket $bucket failed", it) }
+    }
+
+    // ───────── helpers ─────────
+
+    private fun folderMemberKey(folderId: Long, whom: String) = "$folderId:$whom"
+    private fun parseFolderMemberKey(key: String): Pair<Long, String>? {
+        val colon = key.indexOf(':')
+        if (colon <= 0) return null
+        val id = key.substring(0, colon).toLongOrNull() ?: return null
+        val whom = key.substring(colon + 1)
+        return id to whom
+    }
+
+    private fun JsonObject.desk(): String? =
+        this["desk"]?.jsonPrimitive?.contentIfStr()
+    private fun JsonObject.bucketKey(): String? =
+        this["bucket-key"]?.jsonPrimitive?.contentIfStr()
+    private fun JsonObject.entryKey(): String? =
+        this["entry-key"]?.jsonPrimitive?.contentIfStr()
+
+    private fun JsonPrimitive.contentIfStr(): String? =
+        if (isString) content else null
+}

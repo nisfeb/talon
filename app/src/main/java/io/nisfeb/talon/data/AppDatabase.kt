@@ -21,7 +21,7 @@ import androidx.room.RoomDatabase
         PinEntity::class,
         GroupOrderEntity::class,
     ],
-    version = 14,
+    version = 16,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {

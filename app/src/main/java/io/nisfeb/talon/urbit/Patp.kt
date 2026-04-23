@@ -7,7 +7,11 @@ package io.nisfeb.talon.urbit
  * permissive regex — three-or-six letter syllables joined by dashes —
  * which matches every real ship and rejects obvious garbage.
  */
+// Try the 6-letter syllable first. If 3-letter is tried first, `~finned`
+// greedily matches as `~fin` (3 letters) and aborts because the next
+// char `n` is still a patp-char — so we'd never recognize real stars
+// or planets like ~sarlev / ~finned-palmer.
 val PATP_REGEX: Regex =
-    Regex("~(?:[a-z]{3}|[a-z]{6})(?:-(?:[a-z]{3}|[a-z]{6}))*")
+    Regex("~(?:[a-z]{6}|[a-z]{3})(?:-(?:[a-z]{6}|[a-z]{3}))*")
 
 fun String.isPatp(): Boolean = PATP_REGEX.matches(this)

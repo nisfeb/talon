@@ -18,4 +18,16 @@ interface NotifyPreferenceDao {
 
     @Query("SELECT * FROM notify_preferences WHERE whom = :whom LIMIT 1")
     fun stream(whom: String): Flow<NotifyPreferenceEntity?>
+
+    @Query("DELETE FROM notify_preferences")
+    suspend fun clearAll()
+
+    @androidx.room.Insert(onConflict = androidx.room.OnConflictStrategy.REPLACE)
+    suspend fun insertAll(rows: List<NotifyPreferenceEntity>)
+
+    @androidx.room.Transaction
+    suspend fun replaceAll(rows: List<NotifyPreferenceEntity>) {
+        clearAll()
+        if (rows.isNotEmpty()) insertAll(rows)
+    }
 }

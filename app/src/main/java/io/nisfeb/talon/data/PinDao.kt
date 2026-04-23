@@ -43,4 +43,17 @@ interface PinDao {
     suspend fun reorder(whoms: List<String>) {
         whoms.forEachIndexed { i, w -> upsertRaw(w, i) }
     }
+
+    @Query("DELETE FROM pins")
+    suspend fun clear()
+
+    @androidx.room.Insert(onConflict = androidx.room.OnConflictStrategy.REPLACE)
+    suspend fun insertAll(pins: List<PinEntity>)
+
+    /** Full-replace the table from an authoritative snapshot. */
+    @Transaction
+    suspend fun replaceAll(pins: List<PinEntity>) {
+        clear()
+        if (pins.isNotEmpty()) insertAll(pins)
+    }
 }

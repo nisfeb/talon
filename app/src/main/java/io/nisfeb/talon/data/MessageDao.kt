@@ -56,6 +56,73 @@ interface MessageDao {
     """)
     suspend fun oldestIdFor(whom: String): String?
 
+    /** Newest non-deleted top-level post id for a conversation (refresh cursor). */
+    @Query("""
+        SELECT id FROM messages
+        WHERE whom = :whom AND isDeleted = 0 AND parentId IS NULL
+        ORDER BY sentMs DESC, id DESC LIMIT 1
+    """)
+    suspend fun newestIdFor(whom: String): String?
+
+    /** Count all rows for a conversation, ignoring filters. Debug only. */
+    @Query("SELECT COUNT(*) FROM messages WHERE whom = :whom")
+    suspend fun countFor(whom: String): Int
+
+    /**
+     * Remove stale optimistic-insert rows for a channel where id still
+     * starts with "~". Channel post ids from the ship are raw @ud; any
+     * leading-tilde row is a ghost from a pre-fix local send whose
+     * echo arrived under a different id. Safe because %channels never
+     * assigns author-prefixed ids.
+     */
+    @Query("DELETE FROM messages WHERE whom = :whom AND (id LIKE '~%' OR id LIKE 'local_%')")
+    suspend fun purgeStaleLocalIds(whom: String)
+
+    /**
+     * Reap our own `local_*` optimistic-insert twin for a post that the
+     * server just echoed back under its own id. Scoped to (whom,
+     * author, sentMs) so it only targets the exact matching twin.
+     */
+    @Query("""
+        DELETE FROM messages
+        WHERE whom = :whom
+          AND author = :author
+          AND sentMs = :sentMs
+          AND id LIKE 'local_%'
+    """)
+    suspend fun reapLocalTwin(whom: String, author: String, sentMs: Long)
+
+    /** Count visible (top-level, not deleted) rows for a conversation. Debug only. */
+    @Query("SELECT COUNT(*) FROM messages WHERE whom = :whom AND isDeleted = 0 AND parentId IS NULL")
+    suspend fun countVisibleFor(whom: String): Int
+
+    /** Find all rows by author in a conversation. Debug only. */
+    @Query("""
+        SELECT id, author, sentMs, parentId, isDeleted, SUBSTR(contentJson, 1, 120) AS contentPreview
+        FROM messages
+        WHERE whom = :whom AND author = :author
+        ORDER BY sentMs DESC
+    """)
+    suspend fun debugByAuthor(whom: String, author: String): List<DebugRow>
+
+    /** Find rows whose contentJson contains a substring. Debug only. */
+    @Query("""
+        SELECT id, author, sentMs, parentId, isDeleted, SUBSTR(contentJson, 1, 500) AS contentPreview
+        FROM messages
+        WHERE whom = :whom AND contentJson LIKE '%' || :needle || '%'
+        ORDER BY sentMs DESC LIMIT 10
+    """)
+    suspend fun debugSearch(whom: String, needle: String): List<DebugRow>
+
+    data class DebugRow(
+        val id: String,
+        val author: String,
+        val sentMs: Long,
+        val parentId: String?,
+        val isDeleted: Boolean,
+        val contentPreview: String,
+    )
+
     /** Reply count per top-level post in this conversation. */
     @Query("""
         SELECT parentId AS postId, COUNT(*) AS count

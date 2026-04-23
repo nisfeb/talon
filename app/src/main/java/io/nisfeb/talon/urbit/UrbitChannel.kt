@@ -1,9 +1,12 @@
 package io.nisfeb.talon.urbit
 
+import android.util.Log
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.flow.channelFlow
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -50,8 +53,15 @@ class UrbitChannel internal constructor(
     /**
      * Opens the SSE stream. Hot flow — every collector shares the same
      * connection for the life of this UrbitChannel instance.
+     *
+     * Events are buffered through an UNLIMITED intermediate Channel so
+     * that bursts (e.g. 10 messages delivered back-to-back after a
+     * reconnect) never drop events due to downstream backpressure —
+     * the DB writes in applyEvent are slow enough that the default
+     * rendezvous/buffered channel would shed events under load.
      */
-    fun events(): Flow<UrbitEvent> = callbackFlow {
+    fun events(): Flow<UrbitEvent> = channelFlow {
+        val inbox = Channel<UrbitEvent>(Channel.UNLIMITED)
         val request = Request.Builder()
             .url(channelUrl)
             .header("Accept", "text/event-stream")
@@ -59,15 +69,29 @@ class UrbitChannel internal constructor(
         val listener = object : EventSourceListener() {
             override fun onEvent(source: EventSource, id: String?, type: String?, data: String) {
                 val element = runCatching { json.parseToJsonElement(data) }.getOrNull() ?: return
-                trySend(UrbitEvent(id?.toLongOrNull(), element))
+                val result = inbox.trySend(UrbitEvent(id?.toLongOrNull(), element))
+                if (result.isFailure) {
+                    Log.w("UrbitChannel", "SSE event dropped: inbox closed or full")
+                }
             }
             override fun onFailure(source: EventSource, t: Throwable?, response: okhttp3.Response?) {
-                close(t ?: RuntimeException("SSE closed: ${response?.code}"))
+                inbox.close(t ?: RuntimeException("SSE closed: ${response?.code}"))
             }
-            override fun onClosed(source: EventSource) { close() }
+            override fun onClosed(source: EventSource) { inbox.close() }
         }
         val es = EventSources.createFactory(http).newEventSource(request, listener)
-        awaitClose { es.cancel() }
+        // Drain the inbox into the channelFlow's send slot. Suspends when
+        // the collector is slow, but inbox is unlimited so the SSE callback
+        // never has to block on OkHttp's dispatcher thread.
+        val forwarder = launch {
+            for (event in inbox) send(event)
+            close()
+        }
+        awaitClose {
+            es.cancel()
+            inbox.close()
+            forwarder.cancel()
+        }
     }
 
     suspend fun subscribe(app: String, path: String, onShip: String = ship): Long {

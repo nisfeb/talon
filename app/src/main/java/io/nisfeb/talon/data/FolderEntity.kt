@@ -28,4 +28,9 @@ data class FolderEntity(
 data class FolderMemberEntity(
     val folderId: Long,
     val whom: String,
+    /**
+     * Per-folder display order. User-set via drag-reorder within the
+     * folder tab. Rewritten in bulk so no fractional indexing needed.
+     */
+    val ordinal: Int = 0,
 )

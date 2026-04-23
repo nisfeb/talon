@@ -17,10 +17,13 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
@@ -34,8 +37,11 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.AttachFile
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.NotificationsOff
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -52,6 +58,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
@@ -62,6 +69,12 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.isShiftPressed
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.graphics.graphicsLayer
 import android.content.Intent
@@ -152,55 +165,62 @@ fun DmChatScreen(
 
     val listState = rememberLazyListState()
 
-    // Pinned ↔ the last item's bottom is inside the viewport. Flips to
-    // false the moment the user scrolls up, and back to true only once
-    // they return to the bottom — which is exactly the follow-new-messages
-    // behavior we want.
+    // The LazyColumn below uses `reverseLayout = true` with rows passed
+    // in reverse order, so item index 0 is the newest message and is
+    // drawn at the viewport's bottom. "Pinned to bottom" therefore means
+    // firstVisibleItemIndex == 0 with no scroll offset, which is also
+    // the default resting state — no chasing needed as items measure,
+    // because async content only ever grows upward (visually) from the
+    // anchor.
     val isPinnedToBottom by remember {
         derivedStateOf {
-            val info = listState.layoutInfo
-            if (info.totalItemsCount == 0) return@derivedStateOf true
-            val lastVisible = info.visibleItemsInfo.lastOrNull()
-                ?: return@derivedStateOf false
-            lastVisible.index == info.totalItemsCount - 1 &&
-                (lastVisible.offset + lastVisible.size) <= info.viewportEndOffset
+            listState.firstVisibleItemIndex == 0 &&
+                listState.firstVisibleItemScrollOffset == 0
         }
     }
 
-    // On first data arrival, either jump to a notification-specified
-    // message (if it's in the loaded window) or anchor to the bottom.
-    // Subsequent size changes follow only when pinned near the bottom.
-    // `forceBottomTick` is bumped by the send handler to override the
-    // pinned-check — user sent something, take them to their own message.
+    // Notification deep-link: jump to the specified message. With
+    // reversed data the target's reversed index = (lastIndex - originalIndex).
     var hasAnchored by remember(whom) { mutableStateOf(false) }
-    var forceBottomTick by remember(whom) { mutableStateOf(0) }
-    LaunchedEffect(rows.size, initialScrollMessageId, forceBottomTick) {
+    LaunchedEffect(rows.size, initialScrollMessageId) {
         if (rows.isEmpty()) return@LaunchedEffect
         if (!hasAnchored && initialScrollMessageId != null) {
-            val idx = rows.indexOfFirst { item ->
+            val originalIdx = rows.indexOfFirst { item ->
                 item is ChatListItem.Message && item.row.m.id == initialScrollMessageId
             }
-            if (idx >= 0) {
-                listState.scrollToItem(idx)
+            if (originalIdx >= 0) {
+                listState.scrollToItem(rows.lastIndex - originalIdx)
                 hasAnchored = true
                 onScrollConsumed()
                 return@LaunchedEffect
             }
-            // Target not in the loaded window — fall through to the
-            // bottom-anchor so we don't leave the user stranded at top.
+            // Target not in the loaded window — fall through and let
+            // reverseLayout land us at the newest (bottom).
         }
-        if (!hasAnchored || isPinnedToBottom || forceBottomTick > 0) {
-            listState.scrollHardToBottom(rows.lastIndex)
-            hasAnchored = true
+        hasAnchored = true
+    }
+
+    // Send-triggered: snap to the newest. With reverseLayout this is
+    // trivially index 0; no chasing, no retry loop.
+    var forceBottomTick by remember(whom) { mutableStateOf(0) }
+    LaunchedEffect(forceBottomTick) {
+        if (forceBottomTick > 0 && rows.isNotEmpty()) {
+            listState.scrollToItem(0)
         }
     }
 
-    // Keep the bottom pinned while the IME is animating open/closed. The
-    // Column itself shrinks from below via windowInsetsPadding(safeDrawing),
-    // but the LazyColumn's scroll position is anchored to the *top*, so the
-    // newest message drops out of the bottom edge unless we chase it.
-    // Snapshot "was at bottom" before the IME state flips, because once
-    // the viewport shrinks isPinnedToBottom immediately goes false.
+    // Auto-follow new incoming messages when the user is near the bottom.
+    // With reverseLayout, "near the bottom" means firstVisibleItemIndex
+    // close to 0. We tolerate up to 2 items of scroll so a tiny finger
+    // wiggle doesn't strand the user off-feed.
+    LaunchedEffect(rows.size) {
+        if (rows.isNotEmpty() && listState.firstVisibleItemIndex <= 2) {
+            listState.scrollToItem(0)
+        }
+    }
+
+    // IME open/close: with reverseLayout the bottom is index 0, so all
+    // we need to do is re-anchor to 0 if the user was pinned. No chase.
     val isImeVisible = WindowInsets.isImeVisible
     var wasPinnedBeforeIme by remember(whom) { mutableStateOf(true) }
     LaunchedEffect(isPinnedToBottom, isImeVisible) {
@@ -208,7 +228,7 @@ fun DmChatScreen(
     }
     LaunchedEffect(isImeVisible) {
         if (rows.isNotEmpty() && wasPinnedBeforeIme) {
-            listState.scrollHardToBottom(rows.lastIndex)
+            listState.scrollToItem(0)
         }
     }
 
@@ -217,21 +237,37 @@ fun DmChatScreen(
         runCatching { repo.markRead(whom) }
     }
 
-    // Scroll-back: when the user drags close to the top of the loaded
-    // history, pull another page of older posts. Serialized on a flag so
-    // we don't fan out a request per visible-item tick.
+    // Backfill any messages that slipped through SSE (e.g. via bursts
+    // that overflowed the old bounded channel buffer). Cheap scry,
+    // idempotent upsert — no dupes, fills holes. Grab a wide window so
+    // historical gaps are covered even on busy channels.
+    LaunchedEffect(whom) {
+        runCatching { repo.refreshConversation(whom, count = 500) }
+    }
+
+    // Scroll-back: when the user scrolls visually upward toward the
+    // oldest loaded post, pull another page. With reverseLayout the
+    // visual top is the HIGHEST reversed index, so we watch for the
+    // last visible index approaching rows.lastIndex.
     var paginating by remember(whom) { mutableStateOf(false) }
     var paginationExhausted by remember(whom) { mutableStateOf(false) }
     LaunchedEffect(whom) {
-        snapshotFlow { listState.firstVisibleItemIndex }
-            .collect { idx ->
-                if (idx < 4 && !paginating && !paginationExhausted && rows.isNotEmpty()) {
-                    paginating = true
-                    val hasMore = runCatching { repo.loadOlder(whom) }.getOrDefault(false)
-                    if (!hasMore) paginationExhausted = true
-                    paginating = false
-                }
+        snapshotFlow {
+            listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
+        }.collect { maxIdx ->
+            val total = rows.size
+            if (
+                total > 0 &&
+                maxIdx >= total - 4 &&
+                !paginating &&
+                !paginationExhausted
+            ) {
+                paginating = true
+                val hasMore = runCatching { repo.loadOlder(whom) }.getOrDefault(false)
+                if (!hasMore) paginationExhausted = true
+                paginating = false
             }
+        }
     }
 
     val scope = rememberCoroutineScope()
@@ -249,6 +285,19 @@ fun DmChatScreen(
     var uploading by remember { mutableStateOf(false) }
     val canSend = remember(whom) {
         whom.startsWith("~") || whom.startsWith("0v") || whom.startsWith("chat/")
+    }
+    // Recorded-but-unsent voice clip. When non-null, the composer row is
+    // replaced with a preview widget so the user can review and
+    // send/discard rather than fire-and-forget.
+    var pendingVoice by remember(whom) {
+        mutableStateOf<PendingVoice?>(null)
+    }
+    // Clean up any stray recorded file if the user navigates away with
+    // a preview still pending.
+    DisposableEffect(whom) {
+        onDispose {
+            pendingVoice?.file?.delete()
+        }
     }
 
     val pickImage = rememberLauncherForActivityResult(
@@ -387,7 +436,11 @@ fun DmChatScreen(
     }.collectAsState(initial = null)
     val notifyLevel = notifyPref?.level ?: NotifyLevel.DEFAULT
 
-    Column(modifier = modifier.windowInsetsPadding(WindowInsets.safeDrawing)) {
+    Column(
+        modifier = modifier
+            .systemBarsPadding()
+            .imePadding(),
+    ) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -419,9 +472,7 @@ fun DmChatScreen(
                         onClick = {
                             notifyMenuOpen = false
                             scope.launch {
-                                db.notifyPrefs().upsert(
-                                    NotifyPreferenceEntity(whom, NotifyLevel.ALL),
-                                )
+                                repo.settingsSync.setNotifyLevel(whom, NotifyLevel.ALL)
                             }
                         },
                     )
@@ -430,9 +481,7 @@ fun DmChatScreen(
                         onClick = {
                             notifyMenuOpen = false
                             scope.launch {
-                                db.notifyPrefs().upsert(
-                                    NotifyPreferenceEntity(whom, NotifyLevel.MENTIONS),
-                                )
+                                repo.settingsSync.setNotifyLevel(whom, NotifyLevel.MENTIONS)
                             }
                         },
                     )
@@ -441,9 +490,7 @@ fun DmChatScreen(
                         onClick = {
                             notifyMenuOpen = false
                             scope.launch {
-                                db.notifyPrefs().upsert(
-                                    NotifyPreferenceEntity(whom, NotifyLevel.NONE),
-                                )
+                                repo.settingsSync.setNotifyLevel(whom, NotifyLevel.NONE)
                             }
                         },
                     )
@@ -455,9 +502,10 @@ fun DmChatScreen(
             state = listState,
             modifier = Modifier.weight(1f).fillMaxSize(),
             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+            reverseLayout = true,
         ) {
             items(
-                items = rows,
+                items = rows.asReversed(),
                 key = { it.key },
                 contentType = { it.contentType },
             ) { item ->
@@ -507,6 +555,44 @@ fun DmChatScreen(
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
             )
         }
+        // Voice preview swaps in instead of the normal composer while
+        // the user is reviewing a just-recorded clip.
+        pendingVoice?.let { pv ->
+            VoicePreviewRow(
+                pending = pv,
+                sending = uploading,
+                onCancel = {
+                    pv.file.delete()
+                    pendingVoice = null
+                },
+                onSend = {
+                    uploading = true
+                    sendError = null
+                    val file = pv.file
+                    val durationMs = pv.durationMs
+                    pendingVoice = null
+                    scope.launch {
+                        runCatching {
+                            val bytes = file.readBytes()
+                            val hostedUrl = repo.uploadImage(
+                                bytes = bytes,
+                                contentType = "audio/mp4",
+                                fileName = file.name,
+                            )
+                            val seconds = (durationMs / 1000L).coerceAtLeast(1L)
+                            val label = "🎙 Voice ${seconds}s"
+                            repo.send(whom, "[$label]($hostedUrl)")
+                        }.onFailure { err ->
+                            android.util.Log.e("DmChatScreen", "voice send failed", err)
+                            sendError = "voice send failed: ${err.message ?: err::class.simpleName}"
+                        }
+                        file.delete()
+                        uploading = false
+                    }
+                },
+            )
+            return@Column
+        }
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -550,48 +636,53 @@ fun DmChatScreen(
             VoiceRecordButton(
                 enabled = canSend && !uploading,
                 onRecorded = { file, durationMs ->
-                    uploading = true
-                    sendError = null
-                    scope.launch {
-                        runCatching {
-                            val bytes = file.readBytes()
-                            val hostedUrl = repo.uploadImage(
-                                bytes = bytes,
-                                contentType = "audio/mp4",
-                                fileName = file.name,
-                            )
-                            val seconds = (durationMs / 1000L).coerceAtLeast(1L)
-                            val label = "🎙 Voice ${seconds}s"
-                            repo.send(whom, "[$label]($hostedUrl)")
-                        }.onFailure { err ->
-                            sendError = "voice send failed: ${err.message ?: err::class.simpleName}"
-                        }
-                        file.delete()
-                        uploading = false
-                    }
+                    // Stage the recording in a preview row; user either
+                    // listens + sends or discards.
+                    pendingVoice = PendingVoice(file, durationMs)
                 },
             )
-            OutlinedTextField(
-                value = draft,
-                onValueChange = { draft = it },
-                placeholder = { Text("Message") },
-                enabled = canSend && !uploading,
-                textStyle = MaterialTheme.typography.bodyMedium,
-                modifier = Modifier.weight(1f),
-            )
-            IconButton(
-                onClick = {
-                    val body = draft.text.trim()
-                    if (body.isEmpty() || !canSend) return@IconButton
+            val doSend: () -> Boolean = {
+                val body = draft.text.trim()
+                if (body.isEmpty() || !canSend || uploading) {
+                    false
+                } else {
                     draft = TextFieldValue("")
                     drafts.clear(whom)
                     sendError = null
                     forceBottomTick += 1
                     scope.launch {
                         runCatching { repo.send(whom, body) }
-                            .onFailure { err -> sendError = "send failed: ${err.message ?: err::class.simpleName}" }
+                            .onFailure { err ->
+                                android.util.Log.e("DmChatScreen", "send failed", err)
+                                sendError = "send failed: ${err.message ?: err::class.simpleName}"
+                            }
                     }
-                },
+                    true
+                }
+            }
+            OutlinedTextField(
+                value = draft,
+                onValueChange = { draft = it },
+                placeholder = { Text("Message") },
+                enabled = canSend && !uploading,
+                textStyle = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier
+                    .weight(1f)
+                    // Hardware keyboard: Enter sends, Shift+Enter adds a
+                    // newline (fall-through to default IME behavior).
+                    .onPreviewKeyEvent { e ->
+                        if (
+                            e.type == KeyEventType.KeyDown &&
+                            e.key == Key.Enter &&
+                            !e.isShiftPressed
+                        ) {
+                            doSend()
+                            true
+                        } else false
+                    },
+            )
+            IconButton(
+                onClick = { doSend() },
                 enabled = canSend && !uploading && draft.text.isNotBlank(),
                 modifier = Modifier.size(36.dp),
             ) {
@@ -748,12 +839,19 @@ private fun MessageRow(
     // Swipe left to open the thread — standard messaging-app gesture.
     // Below the threshold the row rubber-bands back; past it, we fire.
     val offsetX = remember { androidx.compose.runtime.mutableStateOf(0f) }
+    // "local_*" ids mark optimistic rows that haven't been echoed by the
+    // server yet — dim them so the user sees which messages are in
+    // flight vs confirmed.
+    val isPending = remember(m.id) { m.id.startsWith("local_") }
 
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .combinedClickable(onClick = {}, onLongClick = { onLongPress(m) })
-            .graphicsLayer { translationX = offsetX.value }
+            .graphicsLayer {
+                translationX = offsetX.value
+                alpha = if (isPending) 0.55f else 1f
+            }
             .pointerInput(m.id) {
                 var crossedThreshold = false
                 detectHorizontalDragGestures(
@@ -902,7 +1000,13 @@ private fun MessageActionSheet(
     val canReply = message.parentId == null
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
         Column(
-            modifier = Modifier.fillMaxWidth().padding(16.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp)
+                // Software nav bars on older Androids / gesture phones
+                // without bottom insets-handling push the last button
+                // under the system area otherwise.
+                .windowInsetsPadding(WindowInsets.navigationBars),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Text("React", style = MaterialTheme.typography.labelLarge)
@@ -988,26 +1092,6 @@ private sealed interface ChatListItem {
     data class Message(val row: DisplayRow) : ChatListItem {
         override val key: String get() = row.m.id
         override val contentType: String get() = "message"
-    }
-}
-
-/**
- * Scrolls the LazyColumn hard against the bottom, retrying until the
- * layout reports it can't scroll any further forward. Needed because
- * message rows measure asynchronously (image decode, inline link
- * previews, reactions wrap) — a single scrollToItem + scrollBy fires
- * before the final heights are known and lands short of the true end.
- */
-private suspend fun LazyListState.scrollHardToBottom(lastIndex: Int) {
-    if (lastIndex < 0) return
-    scrollToItem(lastIndex, Int.MAX_VALUE)
-    // Chase the true bottom for ~500ms: after each frame, if more
-    // layout has resolved and we can scroll further, do so. Eight
-    // retries at 60fps gives async image decodes time to land.
-    repeat(8) {
-        kotlinx.coroutines.delay(60)
-        if (!canScrollForward) return
-        scrollBy(Float.MAX_VALUE)
     }
 }
 
@@ -1142,4 +1226,111 @@ private fun decodeDimensions(bytes: ByteArray): Pair<Int, Int> {
     val w = if (opts.outWidth > 0) opts.outWidth else 0
     val h = if (opts.outHeight > 0) opts.outHeight else 0
     return w to h
+}
+
+/** Recorded-but-unsent voice clip, waiting on user review. */
+private data class PendingVoice(val file: java.io.File, val durationMs: Long)
+
+/**
+ * Mini player + cancel/send controls that replaces the normal composer
+ * while the user reviews a just-recorded voice note.
+ */
+@Composable
+private fun VoicePreviewRow(
+    pending: PendingVoice,
+    sending: Boolean,
+    onCancel: () -> Unit,
+    onSend: () -> Unit,
+) {
+    val context = LocalContext.current
+    // Use ExoPlayer for consistent playback with the inline audio player
+    // used elsewhere in chat.
+    val player = remember(pending.file) {
+        androidx.media3.exoplayer.ExoPlayer.Builder(context).build().apply {
+            setMediaItem(androidx.media3.common.MediaItem.fromUri(
+                android.net.Uri.fromFile(pending.file)
+            ))
+            prepare()
+        }
+    }
+    DisposableEffect(player) { onDispose { player.release() } }
+
+    var isPlaying by remember { mutableStateOf(false) }
+    DisposableEffect(player) {
+        val listener = object : androidx.media3.common.Player.Listener {
+            override fun onIsPlayingChanged(p: Boolean) { isPlaying = p }
+        }
+        player.addListener(listener)
+        onDispose { player.removeListener(listener) }
+    }
+
+    val seconds = (pending.durationMs / 1000L).coerceAtLeast(1L)
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 4.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        IconButton(
+            onClick = {
+                if (isPlaying) player.pause()
+                else {
+                    // Restart from 0 if we finished playing last time.
+                    if (player.currentPosition >= player.duration.coerceAtLeast(1L)) {
+                        player.seekTo(0L)
+                    }
+                    player.play()
+                }
+            },
+            enabled = !sending,
+            modifier = Modifier.size(36.dp),
+        ) {
+            Icon(
+                imageVector = if (isPlaying)
+                    Icons.Filled.Pause
+                else
+                    Icons.Filled.PlayArrow,
+                contentDescription = if (isPlaying) "Pause" else "Play",
+                modifier = Modifier.size(22.dp),
+            )
+        }
+        Text(
+            "🎙 ${seconds}s",
+            style = MaterialTheme.typography.bodyMedium,
+            modifier = Modifier
+                .weight(1f)
+                .padding(horizontal = 8.dp),
+        )
+        IconButton(
+            onClick = onCancel,
+            enabled = !sending,
+            modifier = Modifier.size(36.dp),
+        ) {
+            Icon(
+                imageVector = Icons.Filled.Close,
+                contentDescription = "Discard recording",
+                modifier = Modifier.size(22.dp),
+            )
+        }
+        IconButton(
+            onClick = onSend,
+            enabled = !sending,
+            modifier = Modifier.size(36.dp),
+        ) {
+            if (sending) {
+                CircularProgressIndicator(
+                    strokeWidth = 2.dp,
+                    modifier = Modifier.size(20.dp),
+                )
+            } else {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.Send,
+                    contentDescription = "Send recording",
+                    modifier = Modifier.size(22.dp),
+                )
+            }
+        }
+    }
 }

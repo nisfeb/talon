@@ -25,4 +25,16 @@ interface GroupOrderDao {
     suspend fun reorder(flags: List<String>) {
         flags.forEachIndexed { i, flag -> upsertRaw(flag, i) }
     }
+
+    @Query("DELETE FROM group_orders")
+    suspend fun clear()
+
+    @androidx.room.Insert(onConflict = androidx.room.OnConflictStrategy.REPLACE)
+    suspend fun insertAll(rows: List<GroupOrderEntity>)
+
+    @Transaction
+    suspend fun replaceAll(rows: List<GroupOrderEntity>) {
+        clear()
+        if (rows.isNotEmpty()) insertAll(rows)
+    }
 }

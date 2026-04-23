@@ -75,6 +75,7 @@ import io.nisfeb.talon.ui.FolderAssignmentSheet
 import io.nisfeb.talon.ui.contactMapFlow
 import io.nisfeb.talon.urbit.StoryCache
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
 import sh.calvin.reorderable.ReorderableItem
 import sh.calvin.reorderable.rememberReorderableLazyListState
@@ -107,11 +108,13 @@ fun DmListScreen(
             // Defensive: guarantee one row per whom. The DAO query already
             // enforces this, but any future change must not be allowed to
             // reach LazyColumn's duplicate-key crash.
-            messages
+            val result = messages
                 .distinctBy { it.whom }
                 .map { m -> m to (unreadMap[m.whom] ?: 0) }
+            HomeListSnapshot.rows = result
+            result
         }
-    }.collectAsState(initial = emptyList())
+    }.collectAsState(initial = HomeListSnapshot.rows)
 
     val contactMap by remember {
         contactMapFlow(
@@ -119,17 +122,25 @@ fun DmListScreen(
             db.clubs().stream(),
             db.groups().streamGroups(),
             db.groups().streamChannelGroups(),
-        )
-    }.collectAsState(initial = ContactMap.EMPTY)
+        ).onEach { HomeListSnapshot.contactMap = it }
+    }.collectAsState(initial = HomeListSnapshot.contactMap)
 
     val app = (LocalContext.current.applicationContext as TalonApplication)
     val drafts by app.drafts.state.collectAsState()
 
-    val folders by remember { db.folders().streamFolders() }.collectAsState(initial = emptyList())
-    val members by remember { db.folders().streamMembers() }.collectAsState(initial = emptyList())
-    val pins by remember { db.pins().stream() }.collectAsState(initial = emptyList())
+    val folders by remember {
+        db.folders().streamFolders().onEach { HomeListSnapshot.folders = it }
+    }.collectAsState(initial = HomeListSnapshot.folders)
+    val members by remember {
+        db.folders().streamMembers().onEach { HomeListSnapshot.members = it }
+    }.collectAsState(initial = HomeListSnapshot.members)
+    val pins by remember {
+        db.pins().stream().onEach { HomeListSnapshot.pins = it }
+    }.collectAsState(initial = HomeListSnapshot.pins)
     val pinnedWhoms = remember(pins) { pins.map { it.whom }.toSet() }
-    val groupOrders by remember { db.groupOrders().stream() }.collectAsState(initial = emptyList())
+    val groupOrders by remember {
+        db.groupOrders().stream().onEach { HomeListSnapshot.groupOrders = it }
+    }.collectAsState(initial = HomeListSnapshot.groupOrders)
 
     // selectedFolderId = null means the special "All" tab.
     var selectedFolderId by remember { mutableStateOf<Long?>(null) }
@@ -144,15 +155,34 @@ fun DmListScreen(
     val membersByFolder = remember(members) {
         members.groupBy(FolderMemberEntity::folderId) { it.whom }
     }
-    val filteredRows = remember(rows, selectedFolderId, membersByFolder) {
+    // Per-folder display order: map whom → ordinal for the selected folder.
+    val folderMemberOrdinals = remember(members, selectedFolderId) {
+        val folderId = selectedFolderId ?: return@remember emptyMap<String, Int>()
+        members.filter { it.folderId == folderId }
+            .associate { it.whom to it.ordinal }
+    }
+    val filteredRows = remember(rows, selectedFolderId, membersByFolder, folderMemberOrdinals) {
         val folderId = selectedFolderId ?: return@remember rows
         val whomSet = membersByFolder[folderId].orEmpty().toSet()
         rows.filter { (m, _) -> m.whom in whomSet }
+            // Stable sort: user-set ordinal first, then latest-first for ties.
+            .sortedWith(
+                compareBy<Pair<MessageEntity, Int>> { (m, _) ->
+                    folderMemberOrdinals[m.whom] ?: Int.MAX_VALUE
+                }.thenByDescending { (m, _) -> m.sentMs }
+            )
     }
 
     // Which groups are currently expanded. Transient state — resets on
     // process death; can be persisted later if folks ask for it.
-    var expandedGroups by remember { mutableStateOf<Set<String>>(emptySet()) }
+    // Persist expanded-group set across navigations so groups stay open
+    // when the user returns from a chat.
+    var expandedGroups by remember { mutableStateOf(HomeListSnapshot.expandedGroups) }
+    // Mirror every change back into the snapshot so the next mount
+    // starts from the user's latest expansion state.
+    androidx.compose.runtime.LaunchedEffect(expandedGroups) {
+        HomeListSnapshot.expandedGroups = expandedGroups
+    }
 
     // For the "All" tab we render a structured home list (Pinned →
     // Groups → DMs); for any selected folder we fall back to a flat
@@ -178,7 +208,9 @@ fun DmListScreen(
         homeRows.filterIsInstance<HomeRow.GroupHead>().map { it.flag }
     }
 
-    val listState = rememberLazyListState()
+    // Reuse a singleton LazyListState so the user's scroll position in
+    // the home list survives navigating into a chat and back out.
+    val listState = HomeListSnapshot.listState
     val reorderState = rememberReorderableLazyListState(listState) { from, to ->
         val fromKey = from.key as? String ?: return@rememberReorderableLazyListState
         val toKey = to.key as? String ?: return@rememberReorderableLazyListState
@@ -191,7 +223,7 @@ fun DmListScreen(
                 val ti = order.indexOf(toWhom)
                 if (fi < 0 || ti < 0 || fi == ti) return@rememberReorderableLazyListState
                 order.add(ti, order.removeAt(fi))
-                db.pins().reorder(order)
+                app.repo.settingsSync.reorderPins(order)
             }
             fromKey.startsWith("group:") && toKey.startsWith("group:") -> {
                 val fromFlag = fromKey.removePrefix("group:")
@@ -201,7 +233,18 @@ fun DmListScreen(
                 val ti = order.indexOf(toFlag)
                 if (fi < 0 || ti < 0 || fi == ti) return@rememberReorderableLazyListState
                 order.add(ti, order.removeAt(fi))
-                db.groupOrders().reorder(order)
+                app.repo.settingsSync.reorderGroupOrders(order)
+            }
+            fromKey.startsWith("fmem:") && toKey.startsWith("fmem:") -> {
+                val folderId = selectedFolderId ?: return@rememberReorderableLazyListState
+                val fromWhom = fromKey.removePrefix("fmem:")
+                val toWhom = toKey.removePrefix("fmem:")
+                val order = filteredRows.map { it.first.whom }.toMutableList()
+                val fi = order.indexOf(fromWhom)
+                val ti = order.indexOf(toWhom)
+                if (fi < 0 || ti < 0 || fi == ti) return@rememberReorderableLazyListState
+                order.add(ti, order.removeAt(fi))
+                app.repo.settingsSync.reorderFolderMembers(folderId, order)
             }
             // Any other cross-section / cross-kind swap: silently ignore.
         }
@@ -284,25 +327,33 @@ fun DmListScreen(
             verticalArrangement = Arrangement.spacedBy(0.dp),
         ) {
             if (selectedFolderId != null) {
-                // Folder view — flat filtered list, no pinned / groups.
+                // Folder view — flat filtered list. Each row is draggable
+                // so the user can curate per-folder ordering.
                 items(
                     items = filteredRows,
-                    key = { it.first.whom },
-                    contentType = { "conv" },
+                    key = { "fmem:${it.first.whom}" },
+                    contentType = { "fmem" },
                 ) { (m, unread) ->
-                    val haptic = LocalHapticFeedback.current
-                    ConversationRow(
-                        m = m,
-                        unread = unread,
-                        contactMap = contactMap,
-                        draft = drafts[m.whom],
-                        onClick = { onOpenConversation(m.whom) },
-                        onLongClick = {
-                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                            folderSheetWhom = m.whom
-                        },
-                    )
-                    HorizontalDivider()
+                    ReorderableItem(reorderState, key = "fmem:${m.whom}") { _ ->
+                        val haptic = LocalHapticFeedback.current
+                        ConversationRow(
+                            m = m,
+                            unread = unread,
+                            contactMap = contactMap,
+                            draft = drafts[m.whom],
+                            onClick = { onOpenConversation(m.whom) },
+                            onLongClick = {
+                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                folderSheetWhom = m.whom
+                            },
+                            dragHandleModifier = Modifier.longPressDraggableHandle(
+                                onDragStarted = {
+                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                },
+                            ),
+                        )
+                        HorizontalDivider()
+                    }
                 }
             } else {
                 // All view — structured home list.
@@ -423,22 +474,20 @@ fun DmListScreen(
             isPinned = pinned,
             onTogglePin = {
                 scope.launch {
-                    if (pinned) db.pins().remove(whom)
-                    else db.pins().pin(whom)
+                    if (pinned) app.repo.settingsSync.removePin(whom)
+                    else app.repo.settingsSync.pin(whom)
                 }
             },
             onToggle = { folder, checked ->
                 scope.launch {
-                    if (checked) db.folders().addMember(folder.id, whom)
-                    else db.folders().removeMember(folder.id, whom)
+                    if (checked) app.repo.settingsSync.addFolderMember(folder.id, whom)
+                    else app.repo.settingsSync.removeFolderMember(folder.id, whom)
                 }
             },
             onCreateNew = { name ->
                 scope.launch {
-                    val id = db.folders().createFolder(
-                        FolderEntity(name = name, sortOrder = folders.size),
-                    )
-                    db.folders().addMember(id, whom)
+                    val id = app.repo.settingsSync.createFolder(name, folders.size)
+                    app.repo.settingsSync.addFolderMember(id, whom)
                 }
             },
             onDismiss = { folderSheetWhom = null },
@@ -449,7 +498,7 @@ fun DmListScreen(
         FolderRenameDialog(
             folder = folder,
             onRename = { newName ->
-                scope.launch { db.folders().rename(folder.id, newName) }
+                scope.launch { app.repo.settingsSync.renameFolder(folder.id, newName) }
                 renamingFolder = null
             },
             onDelete = {
@@ -468,8 +517,7 @@ fun DmListScreen(
             confirmButton = {
                 TextButton(onClick = {
                     scope.launch {
-                        db.folders().deleteMembersOf(folder.id)
-                        db.folders().delete(folder.id)
+                        app.repo.settingsSync.deleteFolder(folder.id)
                     }
                     if (selectedFolderId == folder.id) selectedFolderId = null
                     confirmDeleteFolder = null
@@ -485,9 +533,7 @@ fun DmListScreen(
         FolderCreateDialog(
             onCreate = { name ->
                 scope.launch {
-                    db.folders().createFolder(
-                        FolderEntity(name = name, sortOrder = folders.size),
-                    )
+                    app.repo.settingsSync.createFolder(name, folders.size)
                 }
                 creatingFolder = false
             },
@@ -637,6 +683,7 @@ private fun ConversationRow(
     draft: String?,
     onClick: () -> Unit,
     onLongClick: () -> Unit,
+    dragHandleModifier: Modifier? = null,
 ) {
     val preview = remember(m.id, m.contentJson) {
         StoryCache.textFor(m.id, m.contentJson)
@@ -707,6 +754,16 @@ private fun ConversationRow(
                     .background(MaterialTheme.colorScheme.primary)
                     .padding(horizontal = 10.dp, vertical = 4.dp),
             )
+        }
+        if (dragHandleModifier != null) {
+            Box(modifier = dragHandleModifier.padding(start = 4.dp)) {
+                Icon(
+                    imageVector = Icons.Filled.DragHandle,
+                    contentDescription = "Drag to reorder",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(20.dp),
+                )
+            }
         }
     }
 }
@@ -982,4 +1039,24 @@ private fun GroupChannelRow(
             )
         }
     }
+}
+
+
+/**
+ * Process-wide snapshot of the home-list state. Lets DmListScreen
+ * re-mount (e.g. after navigating back from a chat) with the last-seen
+ * rows + contactMap already populated, so content previews stay visible
+ * while the Room Flow reconnects — no empty-to-full flicker.
+ */
+private object HomeListSnapshot {
+    @Volatile var rows: List<Pair<MessageEntity, Int>> = emptyList()
+    @Volatile var contactMap: ContactMap = ContactMap.EMPTY
+    @Volatile var expandedGroups: Set<String> = emptySet()
+    @Volatile var pins: List<io.nisfeb.talon.data.PinEntity> = emptyList()
+    @Volatile var groupOrders: List<io.nisfeb.talon.data.GroupOrderEntity> = emptyList()
+    @Volatile var folders: List<FolderEntity> = emptyList()
+    @Volatile var members: List<FolderMemberEntity> = emptyList()
+    // Shared LazyListState so scroll position persists across mounts.
+    val listState: androidx.compose.foundation.lazy.LazyListState =
+        androidx.compose.foundation.lazy.LazyListState()
 }

@@ -34,6 +34,10 @@ class ContactMap(
         channelGroups.associate { it.nest to it.groupFlag }
     private val flagToNests: Map<String, List<String>> =
         channelGroups.groupBy(ChannelGroupEntity::groupFlag) { it.nest }
+    private val nestToTitle: Map<String, String> =
+        channelGroups.mapNotNull { ch ->
+            ch.title?.takeIf { it.isNotBlank() }?.let { ch.nest to it }
+        }.toMap()
 
     // ───────── ships ─────────
 
@@ -70,7 +74,10 @@ class ContactMap(
         whom.startsWith("~") -> displayName(whom)
         whom.startsWith("0v") -> byClub[whom]?.title?.takeIf { it.isNotBlank() } ?: whom
         whom.startsWith("chat/") -> {
-            val channel = "#" + whom.substringAfterLast('/')
+            // Prefer the channel's meta.title (what users set in Tlon);
+            // fall back to a "#slug" derived from the nest's last segment.
+            val channelTitle = nestToTitle[whom]
+            val channel = channelTitle ?: ("#" + whom.substringAfterLast('/'))
             val groupTitle = nestToFlag[whom]?.let { byGroupFlag[it]?.title }
             if (!groupTitle.isNullOrBlank()) "$groupTitle · $channel" else channel
         }
@@ -103,8 +110,13 @@ class ContactMap(
     /** All channel whoms known to belong to a group. */
     fun channelsOfGroup(flag: String): List<String> = flagToNests[flag].orEmpty()
 
-    /** Just the "#name" portion of a channel whom. */
-    fun channelShortName(whom: String): String = "#" + whom.substringAfterLast('/')
+    /**
+     * Short channel label for nested rows under their group header —
+     * prefers the channel's meta.title, falls back to a "#slug" when no
+     * title is set on the ship side.
+     */
+    fun channelShortName(whom: String): String =
+        nestToTitle[whom] ?: ("#" + whom.substringAfterLast('/'))
 
     companion object {
         val EMPTY = ContactMap()
