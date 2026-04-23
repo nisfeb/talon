@@ -20,8 +20,9 @@ import androidx.room.RoomDatabase
         NotifyPreferenceEntity::class,
         PinEntity::class,
         GroupOrderEntity::class,
+        ReactionUsageEntity::class,
     ],
-    version = 16,
+    version = 17,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -36,6 +37,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun notifyPrefs(): NotifyPreferenceDao
     abstract fun pins(): PinDao
     abstract fun groupOrders(): GroupOrderDao
+    abstract fun reactionUsage(): ReactionUsageDao
 
     companion object {
         fun build(context: Context): AppDatabase =

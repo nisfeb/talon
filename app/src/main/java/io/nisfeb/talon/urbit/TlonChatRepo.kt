@@ -914,6 +914,7 @@ class TlonChatRepo(
             else -> error("unsupported whom: $whom")
         }
         db.reactions().upsert(ReactionEntity(whom, postId, ourPatp, emoji))
+        runCatching { db.reactionUsage().bump(emoji) }
     }
 
     /** Remove our reaction from a post. */

@@ -62,6 +62,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -259,10 +260,20 @@ fun DmListScreen(
             modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            Icon(
+                painter = painterResource(
+                    id = io.nisfeb.talon.R.mipmap.ic_launcher_monochrome,
+                ),
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(28.dp),
+            )
             Text(
-                "Messages",
+                "Talon",
                 style = MaterialTheme.typography.titleLarge,
-                modifier = Modifier.weight(1f).padding(vertical = 8.dp),
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(start = 8.dp, top = 8.dp, bottom = 8.dp),
             )
             IconButton(onClick = onOpenSearch) {
                 Icon(Icons.Filled.Search, contentDescription = "Search")

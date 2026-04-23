@@ -41,13 +41,18 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import io.nisfeb.talon.data.AppDatabase
 import io.nisfeb.talon.data.MessageEntity
 import io.nisfeb.talon.data.ReactionEntity
 import io.nisfeb.talon.ui.ContactMap
+import io.nisfeb.talon.ui.EmojiCatalog
+import io.nisfeb.talon.ui.EmojiPickerDropdown
 import io.nisfeb.talon.ui.ReactionPalette
+import io.nisfeb.talon.ui.detectEmojiQuery
 import io.nisfeb.talon.ui.StoryRenderer
 import io.nisfeb.talon.ui.contactMapFlow
 import io.nisfeb.talon.urbit.StoryCache
@@ -132,8 +137,12 @@ fun ThreadScreen(
 
     val scope = rememberCoroutineScope()
     val context = androidx.compose.ui.platform.LocalContext.current
-    var draft by remember(parentId) { mutableStateOf("") }
+    var draft by remember(parentId) { mutableStateOf(TextFieldValue("")) }
     var sendError by remember(parentId) { mutableStateOf<String?>(null) }
+    val emojiQuery = detectEmojiQuery(draft.text, draft.selection.start)
+    val emojiSuggestions = remember(emojiQuery) {
+        emojiQuery?.let { (q, _) -> EmojiCatalog.search(q, limit = 6) } ?: emptyList()
+    }
     var pendingDelete by remember(parentId) { mutableStateOf<MessageEntity?>(null) }
 
     val onMentionTap: (String) -> Unit = remember(onOpenConversation) {
@@ -217,6 +226,25 @@ fun ThreadScreen(
             }
         }
         HorizontalDivider()
+        if (emojiSuggestions.isNotEmpty() && emojiQuery != null) {
+            EmojiPickerDropdown(
+                suggestions = emojiSuggestions,
+                onPick = { entry ->
+                    val (_, colonIdx) = emojiQuery
+                    val caret = draft.selection.start
+                    val before = draft.text.substring(0, colonIdx)
+                    val after = draft.text.substring(caret)
+                    val inserted = "${entry.glyph} "
+                    val newText = before + inserted + after
+                    val newCaret = before.length + inserted.length
+                    draft = TextFieldValue(
+                        text = newText,
+                        selection = TextRange(newCaret),
+                    )
+                },
+                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+            )
+        }
         if (sendError != null) {
             Text(
                 sendError!!,
@@ -237,9 +265,9 @@ fun ThreadScreen(
             )
             IconButton(
                 onClick = {
-                    val body = draft.trim()
+                    val body = draft.text.trim()
                     if (body.isEmpty()) return@IconButton
-                    draft = ""
+                    draft = TextFieldValue("")
                     sendError = null
                     scope.launch {
                         runCatching { repo.reply(whom, parentId, body) }
@@ -248,7 +276,7 @@ fun ThreadScreen(
                             }
                     }
                 },
-                enabled = draft.isNotBlank(),
+                enabled = draft.text.isNotBlank(),
             ) {
                 Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Send")
             }

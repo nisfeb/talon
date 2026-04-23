@@ -13,13 +13,16 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.size
@@ -42,6 +45,7 @@ import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.NotificationsOff
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -101,8 +105,11 @@ import io.nisfeb.talon.ui.ContactProfileSheet
 import io.nisfeb.talon.ui.LinkPreviewCard
 import io.nisfeb.talon.ui.firstLinkUrl
 import io.nisfeb.talon.ui.ContactMap
+import io.nisfeb.talon.ui.EmojiCatalog
+import io.nisfeb.talon.ui.EmojiPickerDropdown
 import io.nisfeb.talon.ui.MentionPicker
 import io.nisfeb.talon.ui.ReactionPalette
+import io.nisfeb.talon.ui.detectEmojiQuery
 import io.nisfeb.talon.ui.StoryRenderer
 import io.nisfeb.talon.ui.VoiceRecordButton
 import io.nisfeb.talon.ui.contactMapFlow
@@ -378,6 +385,10 @@ fun DmChatScreen(
     val suggestions = remember(mention, allShips, contactMap) {
         mention?.let { (q, _) -> suggestionsFor(q, contactMap, allShips) } ?: emptyList()
     }
+    val emojiQuery = detectEmojiQuery(draft.text, draft.selection.start)
+    val emojiSuggestions = remember(emojiQuery) {
+        emojiQuery?.let { (q, _) -> EmojiCatalog.search(q, limit = 6) } ?: emptyList()
+    }
 
     var actionTarget by remember { mutableStateOf<MessageEntity?>(null) }
     var editing by remember { mutableStateOf<MessageEntity?>(null) }
@@ -602,6 +613,25 @@ fun DmChatScreen(
             }
         }
         HorizontalDivider()
+        if (emojiSuggestions.isNotEmpty() && emojiQuery != null) {
+            EmojiPickerDropdown(
+                suggestions = emojiSuggestions,
+                onPick = { entry ->
+                    val (_, colonIdx) = emojiQuery
+                    val caret = draft.selection.start
+                    val before = draft.text.substring(0, colonIdx)
+                    val after = draft.text.substring(caret)
+                    val inserted = "${entry.glyph} "
+                    val newText = before + inserted + after
+                    val newCaret = before.length + inserted.length
+                    draft = TextFieldValue(
+                        text = newText,
+                        selection = TextRange(newCaret),
+                    )
+                },
+                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+            )
+        }
         if (suggestions.isNotEmpty() && mention != null) {
             MentionPicker(
                 suggestions = suggestions,
@@ -1186,12 +1216,33 @@ private fun MessageActionSheet(
                 .windowInsetsPadding(WindowInsets.navigationBars),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
+            val app = (LocalContext.current.applicationContext as TalonApplication)
+            val topUsage by remember {
+                app.db.reactionUsage().streamTop(8)
+            }.collectAsState(initial = emptyList())
+            var searchOpen by remember { mutableStateOf(false) }
+            var searchQuery by remember { mutableStateOf("") }
+
+            // Merge usage-ranked codes with the default palette so the
+            // row is always 8 wide even before the user has reacted much.
+            val suggested = remember(topUsage) {
+                val used = topUsage.map { it.shortcode }
+                val fallback = ReactionPalette.picker.map { it.first }
+                (used + fallback.filter { it !in used }).take(8)
+            }
+
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     "React",
                     style = MaterialTheme.typography.labelLarge,
                     modifier = Modifier.weight(1f),
                 )
+                IconButton(onClick = {
+                    searchOpen = !searchOpen
+                    if (!searchOpen) searchQuery = ""
+                }) {
+                    Icon(Icons.Filled.Search, contentDescription = "Search emojis")
+                }
                 if (showAiEmoji) {
                     TextButton(onClick = onAiEmoji, enabled = !aiEmojiWorking) {
                         if (aiEmojiWorking) {
@@ -1206,15 +1257,51 @@ private fun MessageActionSheet(
                 }
             }
             FlowRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                ReactionPalette.picker.forEach { (code, emoji) ->
+                suggested.forEach { code ->
+                    val glyph = ReactionPalette.display(code)
                     Text(
-                        emoji,
+                        glyph,
                         style = MaterialTheme.typography.headlineSmall,
                         modifier = Modifier
                             .clip(RoundedCornerShape(8.dp))
                             .clickable { onPickReaction(code) }
                             .padding(horizontal = 8.dp, vertical = 4.dp),
                     )
+                }
+            }
+            if (searchOpen) {
+                OutlinedTextField(
+                    value = searchQuery,
+                    onValueChange = { searchQuery = it },
+                    placeholder = { Text("Search emojis") },
+                    singleLine = true,
+                    leadingIcon = {
+                        Icon(Icons.Filled.Search, contentDescription = null)
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 4.dp),
+                )
+                val results = remember(searchQuery) {
+                    if (searchQuery.isBlank()) emptyList()
+                    else EmojiCatalog.search(searchQuery, limit = 60)
+                }
+                if (results.isNotEmpty()) {
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        modifier = Modifier.padding(top = 6.dp),
+                    ) {
+                        results.forEach { e ->
+                            Text(
+                                e.glyph,
+                                style = MaterialTheme.typography.headlineSmall,
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .clickable { onPickReaction(e.shortcode) }
+                                    .padding(horizontal = 6.dp, vertical = 4.dp),
+                            )
+                        }
+                    }
                 }
             }
             HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))

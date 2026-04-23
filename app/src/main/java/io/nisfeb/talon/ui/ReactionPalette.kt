@@ -36,5 +36,6 @@ object ReactionPalette {
      * Best-effort emoji for a raw TlonReact string. If the code isn't
      * known, return it verbatim so we don't swallow unknown reactions.
      */
-    fun display(raw: String): String = table[raw] ?: raw
+    fun display(raw: String): String =
+        table[raw] ?: EmojiCatalog.glyphFor(raw) ?: raw
 }
