@@ -38,6 +38,18 @@ interface BookmarkDao {
         ORDER BY b.bookmarkedMs DESC
     """)
     fun streamBookmarked(): Flow<List<BookmarkedMessage>>
+
+    @Query("DELETE FROM bookmarks")
+    suspend fun clear()
+
+    @androidx.room.Insert(onConflict = androidx.room.OnConflictStrategy.REPLACE)
+    suspend fun insertAll(rows: List<BookmarkEntity>)
+
+    @androidx.room.Transaction
+    suspend fun replaceAll(rows: List<BookmarkEntity>) {
+        clear()
+        if (rows.isNotEmpty()) insertAll(rows)
+    }
 }
 
 data class BookmarkedMessage(

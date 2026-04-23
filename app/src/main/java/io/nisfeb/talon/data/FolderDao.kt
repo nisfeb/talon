@@ -27,6 +27,9 @@ interface FolderDao {
     @Query("SELECT * FROM folders ORDER BY sortOrder ASC, id ASC")
     fun streamFolders(): Flow<List<FolderEntity>>
 
+    @Query("SELECT * FROM folders WHERE id = :id LIMIT 1")
+    suspend fun get(id: Long): FolderEntity?
+
     @Query("SELECT * FROM folder_members")
     fun streamMembers(): Flow<List<FolderMemberEntity>>
 

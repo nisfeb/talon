@@ -1,7 +1,9 @@
 package io.nisfeb.talon.urbit
 
 import android.util.Log
+import io.nisfeb.talon.ai.AiSettings
 import io.nisfeb.talon.data.AppDatabase
+import io.nisfeb.talon.data.BookmarkEntity
 import io.nisfeb.talon.data.FolderEntity
 import io.nisfeb.talon.data.FolderMemberEntity
 import io.nisfeb.talon.data.GroupOrderEntity
@@ -29,7 +31,10 @@ import kotlinx.serialization.json.put
  * All per-row values are small JSON blobs; we never store message
  * content here.
  */
-class SettingsSync(private val db: AppDatabase) {
+class SettingsSync(
+    private val db: AppDatabase,
+    private val aiSettings: AiSettings,
+) {
 
     companion object {
         private const val TAG = "SettingsSync"
@@ -39,6 +44,9 @@ class SettingsSync(private val db: AppDatabase) {
         const val BUCKET_FOLDERS = "folders"
         const val BUCKET_FOLDER_MEMBERS = "folder-members"
         const val BUCKET_NOTIFY_PREFS = "notify-prefs"
+        const val BUCKET_BOOKMARKS = "bookmarks"
+        const val BUCKET_AI_SETTINGS = "ai-settings"
+        private const val AI_ENTRY = "config"
     }
 
     @Volatile private var channel: UrbitChannel? = null
@@ -80,6 +88,12 @@ class SettingsSync(private val db: AppDatabase) {
             applyBucket(BUCKET_FOLDERS, deskMap[BUCKET_FOLDERS] as? JsonObject)
             applyBucket(BUCKET_FOLDER_MEMBERS, deskMap[BUCKET_FOLDER_MEMBERS] as? JsonObject)
             applyBucket(BUCKET_NOTIFY_PREFS, deskMap[BUCKET_NOTIFY_PREFS] as? JsonObject)
+            applyBucket(BUCKET_BOOKMARKS, deskMap[BUCKET_BOOKMARKS] as? JsonObject)
+            // AI settings: only applied if the local device has opted
+            // into sync — otherwise we respect the device's local key.
+            if (aiSettings.state.value.syncEnabled) {
+                applyBucket(BUCKET_AI_SETTINGS, deskMap[BUCKET_AI_SETTINGS] as? JsonObject)
+            }
         }
 
         // Subscribe for live updates from other devices.
@@ -144,6 +158,20 @@ class SettingsSync(private val db: AppDatabase) {
             }
         // Notify prefs aren't accessible by bulk stream in current DAO.
         // Future: add a streamAll() if we need to seed them on first run.
+        // Bookmarks
+        db.bookmarks().streamAll().first()
+            .takeIf { it.isNotEmpty() }?.let { bookmarks ->
+                pokePutBucket(
+                    BUCKET_BOOKMARKS,
+                    buildJsonObject {
+                        bookmarks.forEach { b ->
+                            put(bookmarkKey(b.whom, b.postId), buildJsonObject {
+                                put("ts", b.bookmarkedMs)
+                            })
+                        }
+                    },
+                )
+            }
     }
 
     /** Apply a %settings SSE fact to the right bucket. */
@@ -246,9 +274,15 @@ class SettingsSync(private val db: AppDatabase) {
 
     suspend fun renameFolder(id: Long, name: String) {
         db.folders().rename(id, name)
+        // Send the full folder row so remote devices don't regress
+        // sortOrder to 0 when they apply the put-entry.
+        val sortOrder = db.folders().get(id)?.sortOrder ?: 0
         pokePutEntry(
             BUCKET_FOLDERS, id.toString(),
-            buildJsonObject { put("name", name) },
+            buildJsonObject {
+                put("name", name)
+                put("sortOrder", sortOrder)
+            },
         )
     }
 
@@ -285,6 +319,68 @@ class SettingsSync(private val db: AppDatabase) {
                 buildJsonObject { put("ordinal", i) },
             )
         }
+    }
+
+    /**
+     * Push the current AI settings to %settings. Call when user has
+     * opted into sync and we want to mirror provider/model/key/toggles
+     * to the ship.
+     */
+    suspend fun pushAiSettings() {
+        val cfg = aiSettings.state.value
+        pokePutEntry(
+            BUCKET_AI_SETTINGS, AI_ENTRY,
+            buildJsonObject {
+                put("provider", cfg.provider.name)
+                put("apiKey", cfg.apiKey)
+                cfg.model?.let { put("model", it) }
+                put("catchMeUpEnabled", cfg.catchMeUpEnabled)
+                put("emojiReactEnabled", cfg.emojiReactEnabled)
+            },
+        )
+    }
+
+    /** Nuke the ship's AI settings bucket — when user turns sync off. */
+    suspend fun clearAiSettingsOnShip() {
+        val ch = channel ?: return
+        val payload = buildJsonObject {
+            put("del-bucket", buildJsonObject {
+                put("desk", DESK)
+                put("bucket-key", BUCKET_AI_SETTINGS)
+            })
+        }
+        runCatching { ch.poke(app = "settings", mark = "settings-event", payload = payload) }
+            .onFailure { Log.w(TAG, "del-bucket ai-settings failed", it) }
+    }
+
+    private fun applyAiEntry(obj: JsonObject) {
+        val providerStr = obj["provider"]?.jsonPrimitive?.contentIfStr() ?: return
+        val provider = runCatching { AiSettings.Provider.valueOf(providerStr) }
+            .getOrNull() ?: return
+        val apiKey = obj["apiKey"]?.jsonPrimitive?.contentIfStr().orEmpty()
+        val model = obj["model"]?.jsonPrimitive?.contentIfStr()
+        fun bool(key: String, default: Boolean) =
+            obj[key]?.jsonPrimitive?.content?.toBooleanStrictOrNull() ?: default
+        aiSettings.applyRemote(
+            provider = provider,
+            apiKey = apiKey,
+            model = model,
+            catchMeUpEnabled = bool("catchMeUpEnabled", true),
+            emojiReactEnabled = bool("emojiReactEnabled", true),
+        )
+    }
+
+    suspend fun addBookmark(whom: String, postId: String, ts: Long) {
+        db.bookmarks().upsert(BookmarkEntity(whom, postId, ts))
+        pokePutEntry(
+            BUCKET_BOOKMARKS, bookmarkKey(whom, postId),
+            buildJsonObject { put("ts", ts) },
+        )
+    }
+
+    suspend fun removeBookmark(whom: String, postId: String) {
+        db.bookmarks().remove(whom, postId)
+        pokeDelEntry(BUCKET_BOOKMARKS, bookmarkKey(whom, postId))
     }
 
     suspend fun setNotifyLevel(whom: String, level: String) {
@@ -344,6 +440,19 @@ class SettingsSync(private val db: AppDatabase) {
                 }
                 db.notifyPrefs().replaceAll(list)
             }
+            BUCKET_BOOKMARKS -> {
+                val list = entries.orEmpty().mapNotNull { (k, v) ->
+                    val (whom, postId) = parseBookmarkKey(k) ?: return@mapNotNull null
+                    val ts = (v as? JsonObject)?.get("ts")
+                        ?.jsonPrimitive?.longOrNull ?: 0L
+                    BookmarkEntity(whom = whom, postId = postId, bookmarkedMs = ts)
+                }
+                db.bookmarks().replaceAll(list)
+            }
+            BUCKET_AI_SETTINGS -> {
+                val entry = entries?.get(AI_ENTRY) as? JsonObject ?: return
+                applyAiEntry(entry)
+            }
         }
     }
 
@@ -377,6 +486,17 @@ class SettingsSync(private val db: AppDatabase) {
                     ?.jsonPrimitive?.contentIfStr() ?: return
                 db.notifyPrefs().upsert(NotifyPreferenceEntity(entry, level))
             }
+            BUCKET_BOOKMARKS -> {
+                val (whom, postId) = parseBookmarkKey(entry) ?: return
+                val ts = (value as? JsonObject)?.get("ts")
+                    ?.jsonPrimitive?.longOrNull ?: 0L
+                db.bookmarks().upsert(BookmarkEntity(whom, postId, ts))
+            }
+            BUCKET_AI_SETTINGS -> {
+                if (entry == AI_ENTRY) {
+                    (value as? JsonObject)?.let(::applyAiEntry)
+                }
+            }
         }
     }
 
@@ -394,6 +514,16 @@ class SettingsSync(private val db: AppDatabase) {
                 db.folders().removeMember(folderId, whom)
             }
             BUCKET_NOTIFY_PREFS -> db.notifyPrefs().clear(entry)
+            BUCKET_BOOKMARKS -> {
+                val (whom, postId) = parseBookmarkKey(entry) ?: return
+                db.bookmarks().remove(whom, postId)
+            }
+            BUCKET_AI_SETTINGS -> {
+                // Ship removed config — clear local AI settings
+                // (only if local is in sync mode so we don't wipe a
+                // device that didn't opt in).
+                if (aiSettings.state.value.syncEnabled) aiSettings.clear()
+            }
         }
     }
 
@@ -404,6 +534,7 @@ class SettingsSync(private val db: AppDatabase) {
             BUCKET_FOLDERS -> db.folders().replaceAll(emptyList())
             BUCKET_FOLDER_MEMBERS -> db.folders().replaceAllMembers(emptyList())
             BUCKET_NOTIFY_PREFS -> db.notifyPrefs().replaceAll(emptyList())
+            BUCKET_BOOKMARKS -> db.bookmarks().replaceAll(emptyList())
         }
     }
 
@@ -465,6 +596,16 @@ class SettingsSync(private val db: AppDatabase) {
         val id = key.substring(0, colon).toLongOrNull() ?: return null
         val whom = key.substring(colon + 1)
         return id to whom
+    }
+
+    // Bookmark keys use `|` as the separator because both whom and
+    // postId can contain `:` (e.g. `chat/~host/name` whoms, or club
+    // ids with dotted structure).
+    private fun bookmarkKey(whom: String, postId: String) = "$whom|$postId"
+    private fun parseBookmarkKey(key: String): Pair<String, String>? {
+        val pipe = key.indexOf('|')
+        if (pipe <= 0 || pipe >= key.length - 1) return null
+        return key.substring(0, pipe) to key.substring(pipe + 1)
     }
 
     private fun JsonObject.desk(): String? =

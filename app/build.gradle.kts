@@ -89,4 +89,5 @@ dependencies {
     implementation(libs.media3.ui)
 
     implementation(libs.reorderable)
+    implementation(libs.androidx.security.crypto)
 }

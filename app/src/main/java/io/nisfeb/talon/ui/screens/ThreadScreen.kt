@@ -134,6 +134,7 @@ fun ThreadScreen(
     val context = androidx.compose.ui.platform.LocalContext.current
     var draft by remember(parentId) { mutableStateOf("") }
     var sendError by remember(parentId) { mutableStateOf<String?>(null) }
+    var pendingDelete by remember(parentId) { mutableStateOf<MessageEntity?>(null) }
 
     val onMentionTap: (String) -> Unit = remember(onOpenConversation) {
         { patp -> onOpenConversation(patp) }
@@ -188,6 +189,7 @@ fun ThreadScreen(
                         onLinkTap = onLinkTap,
                         onImageTap = onImageTap,
                         onCitationTap = onCitationTap,
+                        onLongPress = { pendingDelete = it },
                         showHeader = true,
                         highlighted = true,
                     )
@@ -208,6 +210,7 @@ fun ThreadScreen(
                     onLinkTap = onLinkTap,
                     onImageTap = onImageTap,
                     onCitationTap = onCitationTap,
+                    onLongPress = { pendingDelete = it },
                     showHeader = row.showHeader,
                     highlighted = false,
                 )
@@ -251,6 +254,46 @@ fun ThreadScreen(
             }
         }
     }
+
+    // Long-press → confirm → delete. Only offered for the user's own
+    // messages and for any channel message (server enforces admin
+    // permission and drops unauthorized pokes).
+    pendingDelete?.let { target ->
+        val isMine = target.author == ourPatp
+        val isChannel = whom.startsWith("chat/")
+        if (!(isMine || isChannel)) {
+            pendingDelete = null
+            return@let
+        }
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { pendingDelete = null },
+            title = { Text("Delete this message?") },
+            text = { Text("This cannot be undone.") },
+            confirmButton = {
+                androidx.compose.material3.TextButton(onClick = {
+                    val t = target
+                    pendingDelete = null
+                    scope.launch {
+                        runCatching {
+                            repo.delete(whom, t.id, parentId = t.parentId)
+                        }.onFailure {
+                            sendError = "delete failed: ${it.message ?: it::class.simpleName}"
+                        }
+                    }
+                }) {
+                    Text(
+                        if (isMine) "Delete" else "Delete (admin)",
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+            },
+            dismissButton = {
+                androidx.compose.material3.TextButton(onClick = { pendingDelete = null }) {
+                    Text("Cancel")
+                }
+            },
+        )
+    }
 }
 
 @OptIn(ExperimentalFoundationApi::class, ExperimentalLayoutApi::class)
@@ -264,6 +307,7 @@ private fun ThreadMessage(
     onLinkTap: (String) -> Unit,
     onImageTap: (String) -> Unit,
     onCitationTap: (String) -> Unit,
+    onLongPress: (MessageEntity) -> Unit,
     showHeader: Boolean,
     highlighted: Boolean,
 ) {
@@ -277,6 +321,7 @@ private fun ThreadMessage(
     Column(
         modifier = Modifier
             .fillMaxWidth()
+            .combinedClickable(onClick = {}, onLongClick = { onLongPress(m) })
             .background(
                 if (highlighted) MaterialTheme.colorScheme.surfaceVariant
                 else MaterialTheme.colorScheme.surface

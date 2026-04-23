@@ -1,6 +1,5 @@
 package io.nisfeb.talon.urbit
 
-import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.awaitClose
@@ -69,10 +68,9 @@ class UrbitChannel internal constructor(
         val listener = object : EventSourceListener() {
             override fun onEvent(source: EventSource, id: String?, type: String?, data: String) {
                 val element = runCatching { json.parseToJsonElement(data) }.getOrNull() ?: return
-                val result = inbox.trySend(UrbitEvent(id?.toLongOrNull(), element))
-                if (result.isFailure) {
-                    Log.w("UrbitChannel", "SSE event dropped: inbox closed or full")
-                }
+                // inbox is UNLIMITED so trySend only fails after close,
+                // at which point the whole flow is shutting down anyway.
+                inbox.trySend(UrbitEvent(id?.toLongOrNull(), element))
             }
             override fun onFailure(source: EventSource, t: Throwable?, response: okhttp3.Response?) {
                 inbox.close(t ?: RuntimeException("SSE closed: ${response?.code}"))

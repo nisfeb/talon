@@ -32,7 +32,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import io.nisfeb.talon.data.AppDatabase
+import io.nisfeb.talon.data.ContactEntity
 import io.nisfeb.talon.data.MessageEntity
+import io.nisfeb.talon.ui.Avatar
 import io.nisfeb.talon.ui.ContactMap
 import io.nisfeb.talon.ui.contactMapFlow
 import io.nisfeb.talon.urbit.StoryCache
@@ -55,6 +57,11 @@ fun SearchScreen(
         if (trimmed.length < 2) flowOf(emptyList())
         else db.messages().search(trimmed)
     }.collectAsState(initial = emptyList<MessageEntity>())
+
+    val people by remember(trimmed) {
+        if (trimmed.length < 2) flowOf(emptyList())
+        else db.contacts().search(trimmed)
+    }.collectAsState(initial = emptyList<ContactEntity>())
 
     val contactMap by remember {
         contactMapFlow(
@@ -89,7 +96,7 @@ fun SearchScreen(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(16.dp),
             )
-        } else if (results.isEmpty()) {
+        } else if (results.isEmpty() && people.isEmpty()) {
             Text(
                 "No matches.",
                 style = MaterialTheme.typography.bodyMedium,
@@ -101,13 +108,31 @@ fun SearchScreen(
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(vertical = 8.dp),
             ) {
-                items(
-                    items = results,
-                    key = { "${it.whom}:${it.id}" },
-                    contentType = { "hit" },
-                ) { m ->
-                    ResultRow(m, contactMap) { onOpenConversation(m.whom) }
-                    HorizontalDivider()
+                if (people.isNotEmpty()) {
+                    item(key = "__people_header", contentType = "header") {
+                        SectionHeader("People")
+                    }
+                    items(
+                        items = people,
+                        key = { "person:${it.ship}" },
+                        contentType = { "person" },
+                    ) { p ->
+                        PersonRow(p) { onOpenConversation(p.ship) }
+                        HorizontalDivider()
+                    }
+                }
+                if (results.isNotEmpty()) {
+                    item(key = "__msgs_header", contentType = "header") {
+                        SectionHeader("Messages")
+                    }
+                    items(
+                        items = results,
+                        key = { "${it.whom}:${it.id}" },
+                        contentType = { "hit" },
+                    ) { m ->
+                        ResultRow(m, contactMap) { onOpenConversation(m.whom) }
+                        HorizontalDivider()
+                    }
                 }
             }
         }
@@ -139,3 +164,51 @@ private fun ResultRow(m: MessageEntity, contactMap: ContactMap, onClick: () -> U
 }
 
 private val DATE_FORMAT = SimpleDateFormat("MMM d HH:mm", Locale.getDefault())
+
+@Composable
+private fun SectionHeader(label: String) {
+    Text(
+        label.uppercase(Locale.getDefault()),
+        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+    )
+}
+
+@Composable
+private fun PersonRow(contact: ContactEntity, onClick: () -> Unit) {
+    val label = contact.nickname?.takeIf { it.isNotBlank() } ?: contact.ship
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Avatar(
+            label = label,
+            url = contact.avatarUrl,
+            colorHex = contact.color,
+            size = 40.dp,
+        )
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            Text(
+                label,
+                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
+                maxLines = 1,
+            )
+            if (!contact.nickname.isNullOrBlank() && contact.nickname != contact.ship) {
+                Text(
+                    contact.ship,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                )
+            }
+        }
+    }
+}

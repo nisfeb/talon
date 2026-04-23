@@ -50,7 +50,10 @@ import okhttp3.RequestBody.Companion.toRequestBody
  * Also exposes imperative send/react/delete/edit methods that poke the
  * appropriate agent and optimistically update Room.
  */
-class TlonChatRepo(private val db: AppDatabase) {
+class TlonChatRepo(
+    private val db: AppDatabase,
+    private val aiSettings: io.nisfeb.talon.ai.AiSettings,
+) {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     @Volatile private var started = false
@@ -61,12 +64,33 @@ class TlonChatRepo(private val db: AppDatabase) {
     @Volatile private var lastEventMs: Long = 0L
 
     /**
+     * The chat the user is currently viewing, if any. Used to suppress
+     * unread-badge bumps for that whom — if they're looking at it,
+     * any new messages are effectively already read. Set from UI
+     * lifecycle hooks (DmChatScreen mount/unmount).
+     */
+    @Volatile private var openWhom: String? = null
+
+    fun setOpenChat(whom: String?) {
+        val prev = openWhom
+        openWhom = whom
+        if (prev != null && prev != whom) {
+            // Exiting: final mark-read to catch anything that arrived
+            // between the last activity event and now.
+            scope.launch { runCatching { markRead(prev) } }
+        }
+        if (whom != null && prev != whom) {
+            scope.launch { runCatching { markRead(whom) } }
+        }
+    }
+
+    /**
      * Mirrors UI-organizational state (pins, group order, folders,
      * notify prefs) to the user's %settings agent so it survives app
      * reinstall and syncs across devices. Exposed so UI layers can
      * call the sync-aware mutations instead of the raw DAOs.
      */
-    val settingsSync: SettingsSync = SettingsSync(db)
+    val settingsSync: SettingsSync = SettingsSync(db, aiSettings)
 
     /**
      * Called once per incoming message delta from another author, after
@@ -222,6 +246,38 @@ class TlonChatRepo(private val db: AppDatabase) {
     /** Plain text message. Routes by whom prefix. Returns minted post id. */
     suspend fun send(whom: String, text: String): String =
         postContent(whom, textToStory(text))
+
+    /**
+     * Send a message quoting another post. Prepends a cite block to
+     * the user's text (which can be empty) so recipients see the
+     * quoted post above the new message. Currently only supported
+     * when both messages are in the same channel — DMs use a
+     * different referent shape that we don't yet build.
+     */
+    suspend fun sendQuote(
+        whom: String,
+        text: String,
+        quotedNest: String,
+        quotedPostId: String,
+    ): String {
+        val quoteBlock = buildJsonObject {
+            put("block", buildJsonObject {
+                put("cite", buildJsonObject {
+                    put("chan", buildJsonObject {
+                        put("nest", quotedNest)
+                        put("where", "/msg/$quotedPostId")
+                    })
+                })
+            })
+        }
+        val content = buildJsonArray {
+            add(quoteBlock)
+            if (text.isNotBlank()) {
+                textToStory(text).forEach { add(it) }
+            }
+        }
+        return postContent(whom, content)
+    }
 
     /**
      * Send an image message. `src` is the hosted URL returned by
@@ -555,7 +611,6 @@ class TlonChatRepo(private val db: AppDatabase) {
             Log.w(TAG, "refreshConversation($whom) all ${paths.size} probes failed; last err: ${lastErr?.message}")
             return
         }
-        Log.i(TAG, "refreshConversation($whom): winning path $app $winningPath")
         val obj = body as? JsonObject
         if (obj == null) {
             Log.w(TAG, "refreshConversation($whom): scry body not object: ${body::class.simpleName}")
@@ -574,18 +629,7 @@ class TlonChatRepo(private val db: AppDatabase) {
         // Clean up stale optimistic-insert rows for channels whose id
         // format we'd gotten wrong in earlier builds. One-shot; no-op
         // once all such ghosts are gone.
-        val purgedBefore = if (whom.startsWith("chat/")) {
-            val before = db.messages().countFor(whom)
-            db.messages().purgeStaleLocalIds(whom)
-            val after = db.messages().countFor(whom)
-            before - after
-        } else 0
-        Log.i(TAG, "refreshConversation($whom): ${posts.size} posts ingested (purged $purgedBefore stale ~ ids)")
-        // DEBUG: dump our 3 most recent posts to spot any remaining dupe.
-        val mine = db.messages().debugByAuthor(whom, ourPatp)
-        mine.take(3).forEach { r ->
-            Log.i(TAG, "  mine [sent=${r.sentMs}] id=${r.id}: ${r.contentPreview.take(120)}")
-        }
+        if (whom.startsWith("chat/")) db.messages().purgeStaleLocalIds(whom)
     }
 
     /**
@@ -902,36 +946,72 @@ class TlonChatRepo(private val db: AppDatabase) {
     }
 
     /** Delete a message. Author-only on the server. */
-    suspend fun delete(whom: String, postId: String) {
+    /**
+     * Delete a message. For replies (parentId != null) the poke is
+     * routed through the parent's reply-action. We never soft-delete
+     * locally here — wait for the server's SSE echo so the row stays
+     * visible if the poke is rejected (e.g. user isn't an admin when
+     * trying to delete someone else's channel post).
+     */
+    suspend fun delete(whom: String, postId: String, parentId: String? = null) {
         val ch = channel ?: error("not connected")
-        val delta = buildJsonObject { put("del", JsonNull) }
+        val isReply = parentId != null
         when {
-            whom.startsWith("~") -> ch.poke(
-                app = "chat", mark = "chat-dm-action-2",
-                payload = dmAction(whom, postId, delta),
-            )
-            whom.startsWith("0v") -> ch.poke(
-                app = "chat", mark = "chat-club-action-2",
-                payload = clubAction(whom, postId, delta),
-            )
-            whom.startsWith("chat/") -> ch.poke(
-                app = "channels", mark = "channel-action-2",
-                payload = channelAction(whom, buildJsonObject {
-                    // channel-action-2's `%post` action takes an id + a
-                    // u-post update. Deleting = setting the post to ~.
-                    put("post", buildJsonObject {
-                        put("id", JsonPrimitive(postId))
-                        put("u-post", buildJsonObject {
-                            put("set", JsonNull)
+            whom.startsWith("~") -> {
+                val payload = if (isReply) {
+                    dmAction(whom, parentId!!, buildJsonObject {
+                        put("reply", buildJsonObject {
+                            put("id", postId)
+                            put("delta", buildJsonObject { put("del", JsonNull) })
                         })
                     })
-                }),
-            )
+                } else {
+                    dmAction(whom, postId, buildJsonObject { put("del", JsonNull) })
+                }
+                ch.poke(app = "chat", mark = "chat-dm-action-2", payload = payload)
+            }
+            whom.startsWith("0v") -> {
+                val payload = if (isReply) {
+                    clubAction(whom, parentId!!, buildJsonObject {
+                        put("reply", buildJsonObject {
+                            put("id", postId)
+                            put("delta", buildJsonObject { put("del", JsonNull) })
+                        })
+                    })
+                } else {
+                    clubAction(whom, postId, buildJsonObject { put("del", JsonNull) })
+                }
+                ch.poke(app = "chat", mark = "chat-club-action-2", payload = payload)
+            }
+            whom.startsWith("chat/") -> {
+                val inner = if (isReply) {
+                    // channel-action-2 reply-delete mirrors reply-add:
+                    // nests under post.reply.{id, action.del}.
+                    buildJsonObject {
+                        put("post", buildJsonObject {
+                            put("reply", buildJsonObject {
+                                put("id", parentId!!)
+                                put("action", buildJsonObject {
+                                    put("del", JsonPrimitive(postId))
+                                })
+                            })
+                        })
+                    }
+                } else {
+                    buildJsonObject {
+                        put("post", buildJsonObject {
+                            put("id", JsonPrimitive(postId))
+                            put("u-post", buildJsonObject { put("set", JsonNull) })
+                        })
+                    }
+                }
+                ch.poke(
+                    app = "channels", mark = "channel-action-2",
+                    payload = channelAction(whom, inner),
+                )
+            }
             else -> error("unsupported whom: $whom")
         }
-        // Do NOT soft-delete locally — wait for the server's SSE echo
-        // (applyChatDelta / applyChannelDelta handle the actual delete)
-        // so the row stays visible if the poke is rejected.
     }
 
     /**
@@ -1164,9 +1244,6 @@ class TlonChatRepo(private val db: AppDatabase) {
 
     private suspend fun applyChannelDelta(nest: String, response: JsonObject) {
         (response["posts"] as? JsonObject)?.let { posts ->
-            posts.keys.firstOrNull()?.let { firstKey ->
-                Log.i(TAG, "applyChannelDelta $nest server-echoed id=$firstKey")
-            }
             val messages = mutableListOf<MessageEntity>()
             val reactions = mutableListOf<ReactionEntity>()
             posts.forEach { (_, post) -> ingestPost(nest, post, messages, reactions) }
@@ -1176,7 +1253,6 @@ class TlonChatRepo(private val db: AppDatabase) {
         }
         (response["post"] as? JsonObject)?.let { wrap ->
             val id = wrap["id"]?.jsonPrimitive?.contentIfString() ?: return@let
-            Log.i(TAG, "applyChannelDelta $nest r-post id=$id")
             val rPost = wrap["r-post"] as? JsonObject ?: return@let
 
             (rPost["set"] as? JsonObject)?.let { post ->
@@ -1275,16 +1351,25 @@ class TlonChatRepo(private val db: AppDatabase) {
     private suspend fun bootstrapActivity(channel: UrbitChannel) {
         val body = channel.scry("activity", "/v4/activity")
         val obj = body as? JsonObject ?: return
+        val focused = openWhom
         val rows = obj.entries.mapNotNull { (sourceKey, summary) ->
             toUnread(sourceKey, summary as? JsonObject ?: return@mapNotNull null)
+        }.map { row ->
+            // Respect the focus-override so a post-mark-read scry race
+            // doesn't re-bump the badge while the user is still looking.
+            if (row.whom == focused) row.copy(count = 0, notifyCount = 0) else row
         }
         if (rows.isNotEmpty()) db.unreads().upsertAll(rows)
     }
 
     private suspend fun applyActivityUpdate(obj: JsonObject) {
+        val focused = openWhom
         (obj["activity"] as? JsonObject)?.let { map ->
             val rows = map.entries.mapNotNull { (key, summary) ->
                 toUnread(key, summary as? JsonObject ?: return@mapNotNull null)
+            }.map { row ->
+                // User is actively looking at this chat — treat as read.
+                if (row.whom == focused) row.copy(count = 0, notifyCount = 0) else row
             }
             if (rows.isNotEmpty()) db.unreads().upsertAll(rows)
             return
@@ -1294,7 +1379,12 @@ class TlonChatRepo(private val db: AppDatabase) {
             val summary = read["activity"] as? JsonObject ?: return@let
             val whom = sourceToWhom(source) ?: return@let
             toUnread(sourceKey = null, summary = summary, overrideWhom = whom)
-                ?.let { db.unreads().upsert(it) }
+                ?.let { row ->
+                    val adjusted = if (row.whom == focused) {
+                        row.copy(count = 0, notifyCount = 0)
+                    } else row
+                    db.unreads().upsert(adjusted)
+                }
             return
         }
         (obj["del"] as? JsonObject)?.let { source ->

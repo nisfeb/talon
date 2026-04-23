@@ -21,4 +21,7 @@ interface UnreadDao {
 
     @Query("SELECT * FROM unreads")
     fun stream(): Flow<List<UnreadEntity>>
+
+    @Query("SELECT * FROM unreads WHERE whom = :whom LIMIT 1")
+    fun streamFor(whom: String): Flow<UnreadEntity?>
 }

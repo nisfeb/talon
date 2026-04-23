@@ -32,6 +32,7 @@ import io.nisfeb.talon.ui.screens.DmListScreen
 import io.nisfeb.talon.ui.ContactProfileSheet
 import io.nisfeb.talon.ui.screens.ImageViewerScreen
 import io.nisfeb.talon.ui.screens.LoginScreen
+import io.nisfeb.talon.ui.screens.SettingsScreen
 import io.nisfeb.talon.ui.screens.NewDmScreen
 import io.nisfeb.talon.ui.screens.ProfileEditScreen
 import io.nisfeb.talon.ui.screens.SearchScreen
@@ -99,6 +100,7 @@ fun TalonApp(
     var statusFeedOpen by remember { mutableStateOf(false) }
     var bookmarksOpen by remember { mutableStateOf(false) }
     var activityOpen by remember { mutableStateOf(false) }
+    var settingsOpen by remember { mutableStateOf(false) }
     var profileSheetShip by remember { mutableStateOf<String?>(null) }
 
     // Auto-restore any persisted session so a fresh process launch lands
@@ -203,6 +205,7 @@ fun TalonApp(
         BackHandler(enabled = statusFeedOpen) { statusFeedOpen = false }
         BackHandler(enabled = bookmarksOpen) { bookmarksOpen = false }
         BackHandler(enabled = activityOpen) { activityOpen = false }
+        BackHandler(enabled = settingsOpen) { settingsOpen = false }
         BackHandler(enabled = pendingShare != null) { onShareConsumed() }
         BackHandler(enabled = searchOpen) { searchOpen = false }
         BackHandler(enabled = newDmOpen) { newDmOpen = false }
@@ -256,6 +259,11 @@ fun TalonApp(
                     openWhom = whom
                 },
                 onBack = { activityOpen = false },
+                modifier = mod,
+            )
+
+            settingsOpen -> SettingsScreen(
+                onBack = { settingsOpen = false },
                 modifier = mod,
             )
 
@@ -389,6 +397,7 @@ fun TalonApp(
                 onOpenStatusFeed = { statusFeedOpen = true },
                 onOpenBookmarks = { bookmarksOpen = true },
                 onOpenActivity = { activityOpen = true },
+                onOpenSettings = { settingsOpen = true },
                 onSignOut = {
                     app.repo.stop()
                     app.shortcuts.stop()

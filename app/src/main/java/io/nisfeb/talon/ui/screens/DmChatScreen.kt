@@ -232,9 +232,16 @@ fun DmChatScreen(
         }
     }
 
-    // Mark read whenever the user opens (or reopens) a conversation.
-    LaunchedEffect(whom) {
-        runCatching { repo.markRead(whom) }
+    // Tell the repo which chat is focused so unread-badge bumps for
+    // this whom are suppressed while the user is looking at it. The
+    // repo fires markRead on enter and exit automatically.
+    DisposableEffect(whom) {
+        repo.setOpenChat(whom)
+        // Also flatten the home list's cached unread snapshot for this
+        // whom so the back-out re-mount paints with 0 instantly rather
+        // than flashing the stale pre-entry count.
+        homeSnapshotZeroUnread(whom)
+        onDispose { repo.setOpenChat(null) }
     }
 
     // Backfill any messages that slipped through SSE (e.g. via bursts
@@ -377,6 +384,31 @@ fun DmChatScreen(
     var confirmingDelete by remember { mutableStateOf<MessageEntity?>(null) }
     var profileSheetShip by remember { mutableStateOf<String?>(null) }
 
+    // AI: catch-me-up. Feature toggled on when a key is configured.
+    // Banner appears when the chat has unreads and we haven't summarized
+    // this visit yet. We snapshot unread on chat-open so marking-read
+    // (which fires immediately) doesn't hide the banner mid-render.
+    val talonApp = (context.applicationContext as TalonApplication)
+    val aiConfigured by talonApp.aiSettings.state.collectAsState()
+    val unreadEntity by remember(whom) {
+        db.unreads().streamFor(whom)
+    }.collectAsState(initial = null)
+    var unreadSnapshot by remember(whom) { mutableStateOf<Int?>(null) }
+    androidx.compose.runtime.LaunchedEffect(whom, unreadEntity) {
+        if (unreadSnapshot == null && unreadEntity != null) {
+            unreadSnapshot = unreadEntity?.count ?: 0
+        }
+    }
+    var catchUpSummary by remember(whom) { mutableStateOf<String?>(null) }
+    var catchingUp by remember(whom) { mutableStateOf(false) }
+    var catchUpError by remember(whom) { mutableStateOf<String?>(null) }
+    var aiEmojiWorking by remember { mutableStateOf(false) }
+    // Pending quote: when non-null, the composer shows a preview and
+    // the next send prepends a cite block to the story so recipients
+    // see "quoting <msg>" above the user's text. Cleared after send or
+    // if the user dismisses the preview.
+    var pendingQuote by remember(whom) { mutableStateOf<MessageEntity?>(null) }
+
     // Stable callbacks so MessageRow params don't flip identity on each
     // DmChatScreen recomposition; otherwise LazyColumn rows keep missing
     // the skippable-function fast path during scroll. rememberUpdatedState
@@ -428,6 +460,15 @@ fun DmChatScreen(
                         sendError = "react failed: ${it.message ?: it::class.simpleName}"
                     }
                 }
+            }
+        }
+    // Long-press a reaction chip → show the full who-reacted list.
+    var reactionDetails by remember { mutableStateOf<List<ReactionEntity>?>(null) }
+    val onReactionLongPressForMessage: (MessageEntity, List<ReactionEntity>) -> Unit =
+        remember(haptic) {
+            { _, reactions ->
+                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                reactionDetails = reactions
             }
         }
 
@@ -498,6 +539,38 @@ fun DmChatScreen(
             }
         }
         HorizontalDivider()
+
+        // Catch-me-up banner. Shown only when AI is configured + enabled
+        // for this feature + chat has unreads we haven't summarized yet.
+        val showCatchUp = aiConfigured.hasKey() &&
+            aiConfigured.catchMeUpEnabled &&
+            (unreadSnapshot ?: 0) > 0 &&
+            catchUpSummary == null
+        if (showCatchUp) {
+            CatchMeUpBanner(
+                count = unreadSnapshot ?: 0,
+                loading = catchingUp,
+                onClick = {
+                    if (catchingUp) return@CatchMeUpBanner
+                    catchingUp = true
+                    catchUpError = null
+                    scope.launch {
+                        runCatching {
+                            val count = (unreadSnapshot ?: 0).coerceIn(1, 60)
+                            val latest = db.messages().latestFor(whom, count)
+                            // latestFor returns newest-first; the prompt
+                            // reads more naturally in chronological order.
+                            val ordered = latest.asReversed()
+                            talonApp.ai.catchMeUp(ordered) { patp ->
+                                contactMap.displayName(patp)
+                            }
+                        }.onSuccess { catchUpSummary = it }
+                            .onFailure { catchUpError = it.message ?: it::class.simpleName }
+                        catchingUp = false
+                    }
+                },
+            )
+        }
         LazyColumn(
             state = listState,
             modifier = Modifier.weight(1f).fillMaxSize(),
@@ -518,6 +591,7 @@ fun DmChatScreen(
                         onLongPress = onLongPressMessage,
                         onOpenThread = onOpenThreadForMessage,
                         onReactionTap = onReactionForMessage,
+                        onReactionLongPress = onReactionLongPressForMessage,
                         onMentionTap = onMentionTap,
                         onLinkTap = onLinkTap,
                         onImageTap = onImageTap,
@@ -553,6 +627,13 @@ fun DmChatScreen(
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.error,
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+            )
+        }
+        pendingQuote?.let { q ->
+            QuotePreviewRow(
+                target = q,
+                contactMap = contactMap,
+                onDismiss = { pendingQuote = null },
             )
         }
         // Voice preview swaps in instead of the normal composer while
@@ -643,19 +724,28 @@ fun DmChatScreen(
             )
             val doSend: () -> Boolean = {
                 val body = draft.text.trim()
-                if (body.isEmpty() || !canSend || uploading) {
+                val quote = pendingQuote
+                // Allow sending a bare quote with no accompanying text.
+                val canEmit = (body.isNotEmpty() || quote != null) && canSend && !uploading
+                if (!canEmit) {
                     false
                 } else {
                     draft = TextFieldValue("")
                     drafts.clear(whom)
                     sendError = null
                     forceBottomTick += 1
+                    pendingQuote = null
                     scope.launch {
-                        runCatching { repo.send(whom, body) }
-                            .onFailure { err ->
-                                android.util.Log.e("DmChatScreen", "send failed", err)
-                                sendError = "send failed: ${err.message ?: err::class.simpleName}"
+                        runCatching {
+                            if (quote != null) {
+                                repo.sendQuote(whom, body, quote.whom, quote.id)
+                            } else {
+                                repo.send(whom, body)
                             }
+                        }.onFailure { err ->
+                            android.util.Log.e("DmChatScreen", "send failed", err)
+                            sendError = "send failed: ${err.message ?: err::class.simpleName}"
+                        }
                     }
                     true
                 }
@@ -717,6 +807,11 @@ fun DmChatScreen(
                 actionTarget = null
                 onOpenThread(target.id)
             },
+            onQuote = {
+                actionTarget = null
+                pendingQuote = target
+            },
+            canQuote = whom.startsWith("chat/") && target.parentId == null,
             onCopy = {
                 actionTarget = null
                 val text = StoryCache.textFor(target.id, target.contentJson)
@@ -731,14 +826,12 @@ fun DmChatScreen(
                 actionTarget = null
                 scope.launch {
                     if (isBookmarked) {
-                        db.bookmarks().remove(target.whom, target.id)
+                        repo.settingsSync.removeBookmark(target.whom, target.id)
                     } else {
-                        db.bookmarks().upsert(
-                            BookmarkEntity(
-                                whom = target.whom,
-                                postId = target.id,
-                                bookmarkedMs = System.currentTimeMillis(),
-                            )
+                        repo.settingsSync.addBookmark(
+                            target.whom,
+                            target.id,
+                            System.currentTimeMillis(),
                         )
                     }
                 }
@@ -750,6 +843,31 @@ fun DmChatScreen(
             onDelete = {
                 actionTarget = null
                 confirmingDelete = target
+            },
+            showAiEmoji = aiConfigured.hasKey() && aiConfigured.emojiReactEnabled,
+            aiEmojiWorking = aiEmojiWorking,
+            onAiEmoji = {
+                if (aiEmojiWorking) return@MessageActionSheet
+                aiEmojiWorking = true
+                scope.launch {
+                    runCatching {
+                        val text = StoryCache.textFor(target.id, target.contentJson)
+                        talonApp.ai.suggestEmojiReact(text)
+                    }.onSuccess { code ->
+                        if (code != null) {
+                            runCatching { repo.react(whom, target.id, code) }
+                                .onFailure {
+                                    sendError = "react failed: ${it.message ?: it::class.simpleName}"
+                                }
+                        } else {
+                            sendError = "AI didn't return a known reaction"
+                        }
+                    }.onFailure {
+                        sendError = "AI react failed: ${it.message ?: it::class.simpleName}"
+                    }
+                    aiEmojiWorking = false
+                    actionTarget = null
+                }
             },
         )
     }
@@ -777,13 +895,55 @@ fun DmChatScreen(
                 TextButton(onClick = {
                     confirmingDelete = null
                     scope.launch {
-                        runCatching { repo.delete(whom, target.id) }
-                            .onFailure { sendError = "delete failed: ${it.message ?: it::class.simpleName}" }
+                        runCatching {
+                            repo.delete(whom, target.id, parentId = target.parentId)
+                        }.onFailure {
+                            sendError = "delete failed: ${it.message ?: it::class.simpleName}"
+                        }
                     }
                 }) { Text("Delete") }
             },
             dismissButton = {
                 TextButton(onClick = { confirmingDelete = null }) { Text("Cancel") }
+            },
+        )
+    }
+
+    catchUpSummary?.let { summary ->
+        AlertDialog(
+            onDismissRequest = { catchUpSummary = null },
+            title = { Text("Catch me up") },
+            text = {
+                Text(
+                    summary,
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { catchUpSummary = null }) { Text("Got it") }
+            },
+        )
+    }
+
+    reactionDetails?.let { list ->
+        ReactionDetailsSheet(
+            reactions = list,
+            contactMap = contactMap,
+            onDismiss = { reactionDetails = null },
+            onOpenProfile = { ship ->
+                reactionDetails = null
+                profileSheetShip = ship
+            },
+        )
+    }
+
+    catchUpError?.let { err ->
+        AlertDialog(
+            onDismissRequest = { catchUpError = null },
+            title = { Text("AI error") },
+            text = { Text(err) },
+            confirmButton = {
+                TextButton(onClick = { catchUpError = null }) { Text("OK") }
             },
         )
     }
@@ -818,6 +978,7 @@ private fun MessageRow(
     onLongPress: (MessageEntity) -> Unit,
     onOpenThread: (MessageEntity) -> Unit,
     onReactionTap: (MessageEntity, List<ReactionEntity>, String) -> Unit,
+    onReactionLongPress: (MessageEntity, List<ReactionEntity>) -> Unit,
     onMentionTap: (String) -> Unit,
     onLinkTap: (String) -> Unit,
     onImageTap: (String) -> Unit,
@@ -927,9 +1088,13 @@ private fun MessageRow(
                     verticalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
                     grouped.forEach { (emoji, count, mine) ->
-                        ReactionChip(emoji = emoji, count = count, mine = mine) {
-                            onReactionTap(m, row.reactions, emoji)
-                        }
+                        ReactionChip(
+                            emoji = emoji,
+                            count = count,
+                            mine = mine,
+                            onClick = { onReactionTap(m, row.reactions, emoji) },
+                            onLongClick = { onReactionLongPress(m, row.reactions) },
+                        )
                     }
                     if (row.replyCount > 0) {
                         Row(
@@ -952,8 +1117,15 @@ private fun MessageRow(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun ReactionChip(emoji: String, count: Int, mine: Boolean, onClick: () -> Unit) {
+private fun ReactionChip(
+    emoji: String,
+    count: Int,
+    mine: Boolean,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit = {},
+) {
     val bg = if (mine)
         MaterialTheme.colorScheme.primaryContainer
     else
@@ -963,7 +1135,7 @@ private fun ReactionChip(emoji: String, count: Int, mine: Boolean, onClick: () -
         modifier = Modifier
             .clip(RoundedCornerShape(12.dp))
             .background(bg)
-            .clickable(onClick = onClick)
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick)
             .padding(horizontal = 10.dp, vertical = 4.dp),
     ) {
         Text(ReactionPalette.display(emoji), style = MaterialTheme.typography.bodyMedium)
@@ -990,10 +1162,15 @@ private fun MessageActionSheet(
     onDismiss: () -> Unit,
     onPickReaction: (String) -> Unit,
     onReply: () -> Unit,
+    onQuote: () -> Unit,
+    canQuote: Boolean,
     onCopy: () -> Unit,
     onToggleBookmark: () -> Unit,
     onEdit: () -> Unit,
     onDelete: () -> Unit,
+    showAiEmoji: Boolean,
+    aiEmojiWorking: Boolean,
+    onAiEmoji: () -> Unit,
 ) {
     val sheetState = rememberModalBottomSheetState()
     val isMine = message.author == ourPatp
@@ -1009,7 +1186,25 @@ private fun MessageActionSheet(
                 .windowInsetsPadding(WindowInsets.navigationBars),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Text("React", style = MaterialTheme.typography.labelLarge)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    "React",
+                    style = MaterialTheme.typography.labelLarge,
+                    modifier = Modifier.weight(1f),
+                )
+                if (showAiEmoji) {
+                    TextButton(onClick = onAiEmoji, enabled = !aiEmojiWorking) {
+                        if (aiEmojiWorking) {
+                            CircularProgressIndicator(
+                                strokeWidth = 2.dp,
+                                modifier = Modifier.size(14.dp),
+                            )
+                            Spacer(Modifier.width(6.dp))
+                        }
+                        Text("🤖 AI pick")
+                    }
+                }
+            }
             FlowRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 ReactionPalette.picker.forEach { (code, emoji) ->
                     Text(
@@ -1030,12 +1225,22 @@ private fun MessageActionSheet(
             if (canReply) {
                 TextButton(onClick = onReply) { Text("Reply in thread") }
             }
-            if (isMine) {
-                if (isChannel) {
-                    TextButton(onClick = onEdit) { Text("Edit") }
-                }
+            if (canQuote) {
+                TextButton(onClick = onQuote) { Text("Quote") }
+            }
+            if (isMine && isChannel) {
+                TextButton(onClick = onEdit) { Text("Edit") }
+            }
+            // Delete: always allowed on your own messages. On channels
+            // we also show it for others' messages — the server
+            // enforces admin-only deletion and rejects if the user
+            // isn't authorized, leaving the row in place.
+            if (isMine || isChannel) {
                 TextButton(onClick = onDelete) {
-                    Text("Delete", color = MaterialTheme.colorScheme.error)
+                    Text(
+                        if (isMine) "Delete" else "Delete (admin)",
+                        color = MaterialTheme.colorScheme.error,
+                    )
                 }
             }
         }
@@ -1331,6 +1536,156 @@ private fun VoicePreviewRow(
                     modifier = Modifier.size(22.dp),
                 )
             }
+        }
+    }
+}
+
+@Composable
+private fun CatchMeUpBanner(
+    count: Int,
+    loading: Boolean,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.primaryContainer)
+            .clickable(enabled = !loading, onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Text("🤖", style = MaterialTheme.typography.bodyLarge)
+        Text(
+            if (loading) "Summarizing $count unread messages…"
+            else "Catch me up on $count unread messages",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onPrimaryContainer,
+            modifier = Modifier.weight(1f),
+        )
+        if (loading) {
+            CircularProgressIndicator(
+                strokeWidth = 2.dp,
+                modifier = Modifier.size(16.dp),
+            )
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ReactionDetailsSheet(
+    reactions: List<ReactionEntity>,
+    contactMap: ContactMap,
+    onDismiss: () -> Unit,
+    onOpenProfile: (String) -> Unit,
+) {
+    val sheetState = rememberModalBottomSheetState()
+    // Group by author so multi-reaction (rare but possible) collapses.
+    val sorted = remember(reactions) {
+        reactions.sortedBy { contactMap.displayName(it.author).lowercase() }
+    }
+    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 12.dp)
+                .windowInsetsPadding(WindowInsets.navigationBars),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Text(
+                "Reactions",
+                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
+                modifier = Modifier.padding(bottom = 4.dp),
+            )
+            HorizontalDivider()
+            sorted.forEach { r ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onOpenProfile(r.author) }
+                        .padding(vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    val label = contactMap.displayName(r.author)
+                    Avatar(
+                        label = label,
+                        url = contactMap.avatar(r.author),
+                        colorHex = contactMap.shipColor(r.author),
+                        size = 32.dp,
+                    )
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            label,
+                            style = MaterialTheme.typography.bodyLarge,
+                            maxLines = 1,
+                        )
+                        if (label != r.author) {
+                            Text(
+                                r.author,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                            )
+                        }
+                    }
+                    Text(
+                        ReactionPalette.display(r.emoji),
+                        style = MaterialTheme.typography.titleLarge,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun QuotePreviewRow(
+    target: MessageEntity,
+    contactMap: ContactMap,
+    onDismiss: () -> Unit,
+) {
+    val author = remember(target.author, contactMap) { contactMap.displayName(target.author) }
+    val preview = remember(target.id, target.contentJson) {
+        StoryCache.textFor(target.id, target.contentJson)
+            .replace('\n', ' ')
+            .take(160)
+    }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(IntrinsicSize.Min)
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Box(
+            modifier = Modifier
+                .width(3.dp)
+                .fillMaxHeight()
+                .background(MaterialTheme.colorScheme.primary),
+        )
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                "Quoting $author",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.primary,
+            )
+            Text(
+                preview.ifBlank { "(attachment)" },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 2,
+            )
+        }
+        IconButton(onClick = onDismiss, modifier = Modifier.size(28.dp)) {
+            Icon(
+                imageVector = Icons.Filled.Close,
+                contentDescription = "Cancel quote",
+                modifier = Modifier.size(18.dp),
+            )
         }
     }
 }

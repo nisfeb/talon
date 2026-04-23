@@ -85,6 +85,21 @@ object Markdown {
                 }
             }
 
+            // Bare URL autolink: http(s)://… — matches at word
+            // boundaries so we don't glom onto adjacent punctuation.
+            // The Markdown `[label](url)` path above takes precedence
+            // because that branch runs first.
+            if (c == 'h' && looksLikeUrlStart(text, i)) {
+                val end = urlEndAt(text, i)
+                if (end > i) {
+                    flushPlain()
+                    val url = text.substring(i, end)
+                    out.add(Token.Link(label = url, href = url))
+                    i = end
+                    continue
+                }
+            }
+
             // Link: [label](url)
             if (c == '[') {
                 val closeBracket = text.indexOf(']', i + 1)
@@ -162,4 +177,44 @@ object Markdown {
 
     private fun isPatpChar(c: Char): Boolean =
         c.isLetterOrDigit() || c == '-'
+
+    /**
+     * True if `text` at `i` begins with `http://` or `https://` and is
+     * positioned at a word boundary (so "foohttp://..." doesn't match).
+     */
+    private fun looksLikeUrlStart(text: String, i: Int): Boolean {
+        if (i > 0 && isWordChar(text[i - 1])) return false
+        return text.regionMatches(i, "http://", 0, 7, ignoreCase = true) ||
+            text.regionMatches(i, "https://", 0, 8, ignoreCase = true)
+    }
+
+    /**
+     * Return the exclusive end index of the URL that starts at `i`.
+     * Consumes printable non-whitespace characters, then trims trailing
+     * sentence punctuation that most URLs don't actually end with.
+     */
+    private fun urlEndAt(text: String, i: Int): Int {
+        var end = i
+        while (end < text.length) {
+            val ch = text[end]
+            if (ch.isWhitespace()) break
+            // Fence the URL on wrapping characters that shouldn't be
+            // part of it — they're almost always chat syntax or
+            // enclosing brackets, not URL payload.
+            if (ch == '<' || ch == '>' || ch == '"' || ch == '`') break
+            end++
+        }
+        // Strip common trailing punctuation. Parens are balanced (Tlon
+        // and Wikipedia-style URLs do have parens, so only strip an
+        // unbalanced close paren).
+        while (end > i) {
+            val last = text[end - 1]
+            val trim = last in setOf('.', ',', ';', ':', '!', '?', ']')
+            val unbalancedParen = last == ')' &&
+                text.substring(i, end).count { it == '(' } <
+                    text.substring(i, end).count { it == ')' }
+            if (trim || unbalancedParen) end-- else break
+        }
+        return end
+    }
 }

@@ -32,6 +32,8 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.DragHandle
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Search
@@ -95,6 +97,7 @@ fun DmListScreen(
     onOpenStatusFeed: () -> Unit,
     onOpenBookmarks: () -> Unit,
     onOpenActivity: () -> Unit,
+    onOpenSettings: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val scope = rememberCoroutineScope()
@@ -302,6 +305,13 @@ fun DmListScreen(
                         },
                     )
                     DropdownMenuItem(
+                        text = { Text("Settings") },
+                        onClick = {
+                            menuOpen = false
+                            onOpenSettings()
+                        },
+                    )
+                    DropdownMenuItem(
                         text = { Text("Sign out") },
                         onClick = {
                             menuOpen = false
@@ -459,6 +469,18 @@ fun DmListScreen(
                 .align(Alignment.BottomEnd)
                 .padding(16.dp),
         ) { Icon(Icons.Filled.Add, contentDescription = "New message") }
+
+        // Subtle off-screen unread indicators. Only visible in the
+        // structured (All-tab) view; the folder view is usually short.
+        if (selectedFolderId == null) {
+            UnreadOffscreenIndicators(
+                homeRows = homeRows,
+                listState = listState,
+                onScrollTo = { idx ->
+                    scope.launch { listState.animateScrollToItem(idx) }
+                },
+            )
+        }
     }
 
     folderSheetWhom?.let { whom ->
@@ -1048,6 +1070,114 @@ private fun GroupChannelRow(
  * rows + contactMap already populated, so content previews stay visible
  * while the Room Flow reconnects — no empty-to-full flicker.
  */
+/**
+ * Small arrow chips at the top and bottom of the home list that
+ * appear when there are unread conversations currently scrolled
+ * off-screen. Tap to jump to the nearest one in that direction.
+ */
+@Composable
+private fun androidx.compose.foundation.layout.BoxScope.UnreadOffscreenIndicators(
+    homeRows: List<HomeRow>,
+    listState: androidx.compose.foundation.lazy.LazyListState,
+    onScrollTo: (Int) -> Unit,
+) {
+    // Indices that count as "unread" for our purposes. Exclude group
+    // headers when expanded — their children already carry the unread
+    // flag and would double-report.
+    val unreadIndices = remember(homeRows) {
+        val expandedFlags = homeRows.asSequence()
+            .filterIsInstance<HomeRow.GroupHead>()
+            .filter { it.expanded }
+            .map { it.flag }
+            .toSet()
+        homeRows.mapIndexedNotNull { i, row ->
+            val hasUnread = when (row) {
+                is HomeRow.Pinned -> row.unread > 0
+                is HomeRow.Flat -> row.unread > 0
+                is HomeRow.GroupChild -> row.unread > 0
+                is HomeRow.GroupHead -> row.totalUnread > 0 && row.flag !in expandedFlags
+                is HomeRow.Header -> false
+            }
+            if (hasUnread) i else null
+        }
+    }
+
+    if (unreadIndices.isEmpty()) return
+
+    val firstVisible = listState.firstVisibleItemIndex
+    val lastVisible = listState.layoutInfo.visibleItemsInfo
+        .lastOrNull()?.index ?: -1
+
+    val unreadAbove = unreadIndices.filter { it < firstVisible }
+    val unreadBelow = unreadIndices.filter { it > lastVisible }
+
+    if (unreadAbove.isNotEmpty()) {
+        UnreadChip(
+            count = unreadAbove.size,
+            arrowUp = true,
+            onClick = { onScrollTo(unreadAbove.max()) },
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .padding(top = 72.dp),
+        )
+    }
+    if (unreadBelow.isNotEmpty()) {
+        UnreadChip(
+            count = unreadBelow.size,
+            arrowUp = false,
+            onClick = { onScrollTo(unreadBelow.min()) },
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(bottom = 20.dp),
+        )
+    }
+}
+
+@Composable
+private fun UnreadChip(
+    count: Int,
+    arrowUp: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier = modifier
+            .clip(RoundedCornerShape(50))
+            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.85f))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 10.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Icon(
+            imageVector = if (arrowUp)
+                Icons.Filled.KeyboardArrowUp
+            else
+                Icons.Filled.KeyboardArrowDown,
+            contentDescription = if (arrowUp) "Unread above" else "Unread below",
+            tint = MaterialTheme.colorScheme.onPrimary,
+            modifier = Modifier.size(16.dp),
+        )
+        Text(
+            "$count",
+            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+            color = MaterialTheme.colorScheme.onPrimary,
+        )
+    }
+}
+
+/**
+ * Zero the cached unread count for a specific whom. Called from the
+ * chat screen's open-hook so that when the user navigates back, the
+ * instant-hydrate path doesn't paint a stale badge for a fraction of
+ * a second before the Flow catches up.
+ */
+fun homeSnapshotZeroUnread(whom: String) {
+    HomeListSnapshot.rows = HomeListSnapshot.rows.map { (m, unread) ->
+        if (m.whom == whom && unread > 0) m to 0 else m to unread
+    }
+}
+
 private object HomeListSnapshot {
     @Volatile var rows: List<Pair<MessageEntity, Int>> = emptyList()
     @Volatile var contactMap: ContactMap = ContactMap.EMPTY

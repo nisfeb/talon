@@ -26,4 +26,20 @@ interface ContactDao {
         ORDER BY COALESCE(statusUpdatedMs, 0) DESC
     """)
     fun streamStatusFeed(): Flow<List<ContactEntity>>
+
+    /**
+     * People-search: match ship patp or nickname substring, case
+     * insensitive. Ordered by nickname-match first, then patp.
+     */
+    @Query("""
+        SELECT * FROM contacts
+        WHERE ship LIKE '%' || :q || '%' COLLATE NOCASE
+           OR (nickname IS NOT NULL AND nickname LIKE '%' || :q || '%' COLLATE NOCASE)
+        ORDER BY
+          CASE WHEN nickname LIKE '%' || :q || '%' COLLATE NOCASE THEN 0 ELSE 1 END,
+          nickname COLLATE NOCASE,
+          ship
+        LIMIT 30
+    """)
+    fun search(q: String): Flow<List<ContactEntity>>
 }
