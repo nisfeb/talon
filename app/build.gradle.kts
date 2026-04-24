@@ -90,4 +90,8 @@ dependencies {
 
     implementation(libs.reorderable)
     implementation(libs.androidx.security.crypto)
+
+    testImplementation(libs.junit)
+    testImplementation(libs.kotlinx.coroutines.test)
+    testImplementation(libs.kotlinx.serialization.json)
 }

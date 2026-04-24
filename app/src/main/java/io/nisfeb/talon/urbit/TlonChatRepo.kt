@@ -168,6 +168,11 @@ class TlonChatRepo(
             .onFailure { Log.e(TAG, "activity subscribe failed", it) }
         runCatching { ch.subscribe("contacts", "/v1/news") }
             .onFailure { Log.e(TAG, "contacts subscribe failed", it) }
+        // Groups live-updates: catches new channels added to existing
+        // groups, meta edits, etc. Without this, channel-add is only
+        // picked up on reconnect (bootstrap re-scry).
+        runCatching { ch.subscribe("groups", "/v1/groups") }
+            .onFailure { Log.e(TAG, "groups subscribe failed", it) }
 
         // Re-scry init-posts + activity every reconnect so we catch up on
         // anything that landed while the stream was down.
@@ -586,91 +591,7 @@ class TlonChatRepo(
         return parseAdminGroup(flag, body)
     }
 
-    private fun parseAdminGroup(flag: String, obj: JsonObject): AdminGroup {
-        val meta = obj["meta"] as? JsonObject
-        fun metaStr(key: String) = meta?.get(key)?.jsonPrimitive?.contentIfString()
-            ?.takeIf { it.isNotBlank() }
-
-        val host = flag.substringBefore('/')
-        // Schema renamed: `bloc` → `admins`, `fleet` → `seats`,
-        // `cordon` → `admissions`, `sects` → `roles`. Keep fallbacks
-        // to the older names for ships still on the legacy agent.
-        val adminArr = (obj["admins"] ?: obj["bloc"]) as? JsonArray
-        val adminSects = adminArr?.mapNotNull { it.jsonPrimitive.contentIfString() }
-            ?.toSet() ?: emptySet()
-
-        val members = (obj["seats"] ?: obj["fleet"]) as? JsonObject
-        val mems = members?.mapNotNull { (ship, entry) ->
-            val entryObj = entry as? JsonObject ?: return@mapNotNull null
-            val rolesArr = (entryObj["roles"] ?: entryObj["sects"]) as? JsonArray
-                ?: JsonArray(emptyList())
-            val sects = rolesArr.mapNotNull {
-                it.jsonPrimitive.contentIfString()
-            }.toSet()
-            AdminMember(
-                ship = ship,
-                sects = sects,
-                isAdmin = ship == host || "admin" in sects ||
-                    adminSects.any { it in sects },
-            )
-        }?.sortedBy { it.ship } ?: emptyList()
-
-        val admissions = (obj["admissions"] ?: obj["cordon"]) as? JsonObject
-        // New flat admissions schema has: banned, invited, pending,
-        // privacy, tokens, requests — no tagged union. Privacy drives
-        // whether we treat the group as open (public) or shut
-        // (private/secret) for back-compat with legacy pokes.
-        val privacy = admissions?.get("privacy")?.jsonPrimitive?.contentIfString()
-        val cordonKind = when {
-            // New schema path — derive from privacy.
-            privacy == "public" -> "open"
-            privacy != null -> "shut"
-            // Old tagged-union fallback for legacy agent:
-            admissions?.get("open") is JsonObject -> "open"
-            admissions?.get("shut") is JsonObject -> "shut"
-            else -> "shut"
-        }
-        val bannedSet = ((admissions?.get("banned") as? JsonObject)
-            ?.get("ships") as? JsonArray)
-            ?: ((admissions?.get("open") as? JsonObject)?.get("ships") as? JsonArray)
-        val bannedShips = bannedSet?.mapNotNull { it.jsonPrimitive.contentIfString() }
-            ?.toSet() ?: emptySet()
-        val seatKeys = (obj["seats"] as? JsonObject)?.keys ?: emptySet()
-        // `admissions.invited` = ships invited via a token (shareable
-        // link). Each value is `{token, at}`. Revoke by deleting the
-        // token via `entry.token.del: <tokenstr>`.
-        val invitedMap = (admissions?.get("invited") as? JsonObject)
-            ?.mapNotNull { (ship, v) ->
-                if (ship in seatKeys) return@mapNotNull null
-                val token = (v as? JsonObject)?.get("token")
-                    ?.jsonPrimitive?.contentIfString() ?: return@mapNotNull null
-                ship to token
-            }?.toMap() ?: emptyMap()
-        // `admissions.pending` = direct invites (no token). Revoke
-        // via `entry.pending.a-pending.del` with ships list.
-        val directInvitedShips = (admissions?.get("pending") as? JsonObject)
-            ?.keys?.filterNot { it in seatKeys }?.toSet() ?: emptySet()
-        // `admissions.requests` = inbound join requests. Approve/deny
-        // via `entry.ask.a-ask = "approve"|"deny"`.
-        val pendingShips = (admissions?.get("requests") as? JsonObject)
-            ?.keys?.toSet() ?: emptySet()
-
-        return AdminGroup(
-            flag = flag,
-            title = metaStr("title"),
-            description = metaStr("description"),
-            image = metaStr("image"),
-            cover = metaStr("cover"),
-            members = mems,
-            cordonKind = cordonKind,
-            privacy = privacy,
-            bannedShips = bannedShips,
-            invitedTokenByShip = invitedMap,
-            directInvitedShips = directInvitedShips,
-            pendingShips = pendingShips,
-            adminSects = adminSects,
-        )
-    }
+    // parseAdminGroup extracted to GroupAdminParser.kt for testability.
 
     /**
      * Create a new group hosted by our ship. Mirrors Tlon's
@@ -765,14 +686,7 @@ class TlonChatRepo(
         image: String,
         cover: String,
     ) {
-        pokeAGroup(flag, buildJsonObject {
-            put("meta", buildJsonObject {
-                put("title", title)
-                put("description", description)
-                put("image", image)
-                put("cover", cover)
-            })
-        })
+        pokeAGroup(flag, aGroupMetaUpdate(title, description, image, cover))
     }
 
     /**
@@ -781,58 +695,28 @@ class TlonChatRepo(
      */
     suspend fun inviteToGroup(flag: String, ship: String): Boolean {
         val ch = channel ?: error("not connected")
-        val p = if (!ship.startsWith("~")) "~$ship" else ship
         ch.poke(
             app = "groups",
             mark = "group-action-4",
-            payload = buildJsonObject {
-                put("invite", buildJsonObject {
-                    put("flag", flag)
-                    put("ships", buildJsonArray { add(JsonPrimitive(p)) })
-                    put("a-invite", buildJsonObject {
-                        put("token", JsonNull)
-                        put("note", JsonNull)
-                    })
-                })
-            },
+            payload = groupAction4InviteAdd(flag, ship),
         )
         return true
     }
 
     /** Remove a ship from the group (kick). */
     suspend fun kickFromGroup(flag: String, ship: String) {
-        val p = if (!ship.startsWith("~")) "~$ship" else ship
-        pokeAGroup(flag, buildJsonObject {
-            put("seat", buildJsonObject {
-                put("ships", buildJsonArray { add(JsonPrimitive(p)) })
-                put("a-seat", buildJsonObject { put("del", JsonNull) })
-            })
-        })
+        pokeAGroup(flag, aGroupSeatDel(ship))
     }
 
     /** Ban a ship from re-joining. */
     suspend fun banFromGroup(flag: String, ship: String): Boolean {
-        val p = if (!ship.startsWith("~")) "~$ship" else ship
-        pokeAGroup(flag, buildJsonObject {
-            put("entry", buildJsonObject {
-                put("ban", buildJsonObject {
-                    put("add-ships", buildJsonArray { add(JsonPrimitive(p)) })
-                })
-            })
-        })
+        pokeAGroup(flag, aGroupBanAdd(ship))
         return true
     }
 
     /** Remove a ship from the ban list. */
     suspend fun unbanFromGroup(flag: String, ship: String): Boolean {
-        val p = if (!ship.startsWith("~")) "~$ship" else ship
-        pokeAGroup(flag, buildJsonObject {
-            put("entry", buildJsonObject {
-                put("ban", buildJsonObject {
-                    put("del-ships", buildJsonArray { add(JsonPrimitive(p)) })
-                })
-            })
-        })
+        pokeAGroup(flag, aGroupBanDel(ship))
         return true
     }
 
@@ -840,16 +724,8 @@ class TlonChatRepo(
      * Toggle a role on a single member via `seat.a-seat.{add,del}-roles`.
      */
     suspend fun setMemberRole(flag: String, ship: String, role: String, add: Boolean) {
-        val p = if (!ship.startsWith("~")) "~$ship" else ship
-        val key = if (add) "add-roles" else "del-roles"
-        pokeAGroup(flag, buildJsonObject {
-            put("seat", buildJsonObject {
-                put("ships", buildJsonArray { add(JsonPrimitive(p)) })
-                put("a-seat", buildJsonObject {
-                    put(key, buildJsonArray { add(JsonPrimitive(role)) })
-                })
-            })
-        })
+        val diff = if (add) aGroupSeatAddRole(ship, role) else aGroupSeatDelRole(ship, role)
+        pokeAGroup(flag, diff)
     }
 
     /**
@@ -938,60 +814,42 @@ class TlonChatRepo(
     }
 
     /**
+     * Request access to a group we aren't a member of. Public groups
+     * auto-accept; private groups surface the request to admins; for
+     * secret groups this usually fails — matches Tlon's
+     * `requestGroupInvitation`.
+     */
+    suspend fun knockGroup(flag: String) {
+        val ch = channel ?: error("not connected")
+        ch.poke(
+            app = "groups",
+            mark = "group-knock",
+            payload = JsonPrimitive(flag),
+        )
+    }
+
+    /**
      * Revoke a token-based invite by deleting the token from
      * `admissions.tokens` — ships in `admissions.invited` all have
      * a token; the map maps ship → token.
      */
     suspend fun revokeTokenInvite(flag: String, token: String) {
-        pokeAGroup(flag, buildJsonObject {
-            put("entry", buildJsonObject {
-                put("token", buildJsonObject {
-                    put("del", token)
-                })
-            })
-        })
+        pokeAGroup(flag, aGroupTokenDel(token))
     }
 
-    /**
-     * Revoke a direct (no-token) invite: drop the ship from
-     * `admissions.pending` via `entry.pending.a-pending.del`.
-     */
+    /** Revoke a direct (no-token) invite via `entry.pending.a-pending.del`. */
     suspend fun revokeDirectInvite(flag: String, ship: String) {
-        val p = if (!ship.startsWith("~")) "~$ship" else ship
-        pokeAGroup(flag, buildJsonObject {
-            put("entry", buildJsonObject {
-                put("pending", buildJsonObject {
-                    put("ships", buildJsonArray { add(JsonPrimitive(p)) })
-                    put("a-pending", buildJsonObject { put("del", JsonNull) })
-                })
-            })
-        })
+        pokeAGroup(flag, aGroupPendingDel(ship))
     }
 
     /** Accept a join request: `ask` → `approve`. */
     suspend fun approveRequest(flag: String, ship: String) {
-        val p = if (!ship.startsWith("~")) "~$ship" else ship
-        pokeAGroup(flag, buildJsonObject {
-            put("entry", buildJsonObject {
-                put("ask", buildJsonObject {
-                    put("ships", buildJsonArray { add(JsonPrimitive(p)) })
-                    put("a-ask", "approve")
-                })
-            })
-        })
+        pokeAGroup(flag, aGroupAskResolve(ship, approve = true))
     }
 
     /** Deny a join request: `ask` → `deny`. */
     suspend fun denyRequest(flag: String, ship: String) {
-        val p = if (!ship.startsWith("~")) "~$ship" else ship
-        pokeAGroup(flag, buildJsonObject {
-            put("entry", buildJsonObject {
-                put("ask", buildJsonObject {
-                    put("ships", buildJsonArray { add(JsonPrimitive(p)) })
-                    put("a-ask", "deny")
-                })
-            })
-        })
+        pokeAGroup(flag, aGroupAskResolve(ship, approve = false))
     }
 
     /**
@@ -1004,23 +862,9 @@ class TlonChatRepo(
         ch.poke(
             app = "groups",
             mark = "group-action-4",
-            payload = buildJsonObject {
-                put("group", buildJsonObject {
-                    put("flag", flag)
-                    put("a-group", aGroup)
-                })
-            },
+            payload = groupAction4(flag, aGroup),
         )
     }
-
-    private fun wrapGroupDiff(flag: String, diff: JsonObject): JsonObject =
-        buildJsonObject {
-            put("flag", flag)
-            put("update", buildJsonObject {
-                put("time", JsonNull)
-                put("diff", diff)
-            })
-        }
 
     suspend fun updateProfile(
         nickname: String? = null,
@@ -1928,6 +1772,73 @@ class TlonChatRepo(
             settingsSync.applySettingsEvent(payload)
             return
         }
+
+        // %groups /v1/groups — {flag, r-group}. Carries group
+        // create/delete, meta, and channel add/edit/del. Without this
+        // branch, new channels never land in the home list until a
+        // reconnect triggers bootstrapGroups.
+        if (payload.containsKey("flag") && payload.containsKey("r-group")) {
+            applyGroupEvent(payload)
+            return
+        }
+    }
+
+    private suspend fun applyGroupEvent(payload: JsonObject) {
+        when (val intent = classifyGroupEvent(payload) ?: return) {
+            is GroupEventIntent.CreateGroup -> {
+                db.groups().upsertGroups(listOf(
+                    GroupEntity(
+                        flag = intent.flag,
+                        title = intent.title,
+                        image = intent.image,
+                    )
+                ))
+                if (intent.channels.isNotEmpty()) {
+                    db.groups().upsertChannelGroups(intent.channels.map { (nest, title) ->
+                        ChannelGroupEntity(
+                            nest = nest,
+                            groupFlag = intent.flag,
+                            title = title,
+                        )
+                    })
+                }
+            }
+            is GroupEventIntent.DeleteGroup -> {
+                db.groups().deleteChannelsForGroup(intent.flag)
+                db.groups().deleteGroup(intent.flag)
+            }
+            is GroupEventIntent.EditGroupMeta -> {
+                db.groups().upsertGroups(listOf(
+                    GroupEntity(
+                        flag = intent.flag,
+                        title = intent.title,
+                        image = intent.image,
+                    )
+                ))
+            }
+            is GroupEventIntent.AddChannel -> {
+                db.groups().upsertChannelGroups(listOf(
+                    ChannelGroupEntity(
+                        nest = intent.nest,
+                        groupFlag = intent.flag,
+                        title = intent.title,
+                    )
+                ))
+            }
+            is GroupEventIntent.EditChannel -> {
+                db.groups().upsertChannelGroups(listOf(
+                    ChannelGroupEntity(
+                        nest = intent.nest,
+                        groupFlag = intent.flag,
+                        title = intent.title,
+                    )
+                ))
+            }
+            is GroupEventIntent.DeleteChannel -> {
+                db.groups().deleteChannelGroup(intent.nest)
+            }
+            is GroupEventIntent.Unknown -> Unit
+        }
     }
 
     private suspend fun applyChatDelta(
@@ -1999,130 +1910,94 @@ class TlonChatRepo(
     }
 
     private suspend fun applyChannelDelta(nest: String, response: JsonObject) {
-        (response["posts"] as? JsonObject)?.let { posts ->
-            val messages = mutableListOf<MessageEntity>()
-            val reactions = mutableListOf<ReactionEntity>()
-            posts.forEach { (_, post) -> ingestPost(nest, post, messages, reactions) }
-            if (messages.isNotEmpty()) db.messages().upsertAll(messages)
-            if (reactions.isNotEmpty()) db.reactions().upsertAll(reactions)
-            return
-        }
-        (response["post"] as? JsonObject)?.let { wrap ->
-            // Server may echo ids in dot-grouped form (`170.141.184…`).
-            // Our DB stores them raw, so normalize by stripping dots.
-            val rawId = wrap["id"]?.jsonPrimitive?.contentIfString() ?: return@let
-            val id = rawId.replace(".", "")
-            val rPost = wrap["r-post"] as? JsonObject ?: return@let
-
-            (rPost["set"] as? JsonObject)?.let { post ->
-                // A tombstone object means the post was deleted:
-                // {type: "tombstone", author, id, deleted-at, seq}.
-                // No essay / seal — route to soft-delete.
-                if (post["type"]?.jsonPrimitive?.contentIfString() == "tombstone") {
-                    db.messages().softDelete(nest, id)
-                    db.reactions().clearForPost(nest, id)
-                    return
+        // Classification lives in ChannelEventRouter (pure, tested).
+        // This function only dispatches intents into DB/listener writes.
+        when (val intent = classifyChannelDelta(response)) {
+            is ChannelDeltaIntent.PostsBatch -> {
+                val messages = mutableListOf<MessageEntity>()
+                val reactions = mutableListOf<ReactionEntity>()
+                intent.posts.forEach { (_, post) ->
+                    ingestPost(nest, post, messages, reactions)
                 }
+                if (messages.isNotEmpty()) db.messages().upsertAll(messages)
+                if (reactions.isNotEmpty()) db.reactions().upsertAll(reactions)
+            }
+            is ChannelDeltaIntent.PostSet -> {
                 val msgs = mutableListOf<MessageEntity>()
                 val rx = mutableListOf<ReactionEntity>()
-                ingestPost(nest, post, msgs, rx)
+                ingestPost(nest, intent.post, msgs, rx)
                 db.messages().upsertAll(msgs)
                 if (rx.isNotEmpty()) {
-                    db.reactions().clearForPost(nest, id)
+                    db.reactions().clearForPost(nest, intent.id)
                     db.reactions().upsertAll(rx)
                 }
-                // Reap any optimistic-local row for this same post so
-                // our own sends stop showing as duplicates.
-                msgs.firstOrNull { it.id == id && it.author == ourPatp }?.let { mine ->
-                    db.messages().reapLocalTwin(nest, ourPatp, mine.sentMs)
+                msgs.firstOrNull { it.id == intent.id && it.author == ourPatp }?.let {
+                    db.messages().reapLocalTwin(nest, ourPatp, it.sentMs)
                 }
-                // Only top-level posts from peers trigger a notification;
-                // reply inserts come via the reply variant below.
-                msgs.firstOrNull { it.id == id && it.parentId == null }
+                msgs.firstOrNull { it.id == intent.id && it.parentId == null }
                     ?.takeIf { it.author != ourPatp }
                     ?.let { messageListener?.invoke(it, false) }
-                return
             }
-            if (rPost["set"] is JsonNull) {
-                // Legacy shape — older agent versions. Keep for safety.
+            is ChannelDeltaIntent.PostTombstone, is ChannelDeltaIntent.PostDeleted -> {
+                val id = when (intent) {
+                    is ChannelDeltaIntent.PostTombstone -> intent.id
+                    is ChannelDeltaIntent.PostDeleted -> intent.id
+                    else -> return
+                }
                 db.messages().softDelete(nest, id)
                 db.reactions().clearForPost(nest, id)
-                return
             }
-            (rPost["reacts"] as? JsonObject)?.let { reacts ->
-                db.reactions().clearForPost(nest, id)
-                val rx = reacts.entries.mapNotNull { (author, emoji) ->
+            is ChannelDeltaIntent.PostReactions -> {
+                db.reactions().clearForPost(nest, intent.id)
+                val rx = intent.reacts.entries.mapNotNull { (author, emoji) ->
                     val e = emoji.jsonPrimitive.contentIfString() ?: return@mapNotNull null
-                    ReactionEntity(nest, id, author, e)
+                    ReactionEntity(nest, intent.id, author, e)
                 }
                 if (rx.isNotEmpty()) db.reactions().upsertAll(rx)
-                return
             }
-            (rPost["essay"] as? JsonObject)?.let { essay ->
-                val entity = toEntity(nest, id, essay)
+            is ChannelDeltaIntent.PostEssay -> {
+                val entity = toEntity(nest, intent.id, intent.essay)
                 db.messages().upsert(entity)
-                // Edits don't need a notification; only fresh posts should.
-                return
+                // Edits don't trigger a notification.
             }
-            (rPost["reply"] as? JsonObject)?.let { reply ->
-                applyChannelReplyDelta(nest, parentId = id, reply)
-                return
-            }
+            is ChannelDeltaIntent.Reply ->
+                applyReplyIntent(nest, intent.parentId, intent.replyId, intent.inner)
+            is ChannelDeltaIntent.PendingPost,
+            is ChannelDeltaIntent.Unknown -> Unit
         }
     }
 
-    private suspend fun applyChannelReplyDelta(
+    private suspend fun applyReplyIntent(
         whom: String,
         parentId: String,
-        reply: JsonObject,
+        replyId: String,
+        inner: ReplyIntent,
     ) {
-        val rawReplyId = reply["id"]?.jsonPrimitive?.contentIfString() ?: return
-        val replyId = rawReplyId.replace(".", "")
-        val rReply = reply["r-reply"] as? JsonObject ?: return
-
-        (rReply["set"] as? JsonObject)?.let { full ->
-            if (full["type"]?.jsonPrimitive?.contentIfString() == "tombstone") {
+        when (inner) {
+            is ReplyIntent.Upsert -> {
+                val entity = toReplyEntity(whom, parentId, replyId, inner.replyEssay)
+                db.messages().upsert(entity)
+                if (entity.author == ourPatp) {
+                    db.messages().reapLocalTwin(whom, ourPatp, entity.sentMs)
+                } else {
+                    val parent = db.messages().getOne(whom, parentId)
+                    val replyToUs = parent?.author == ourPatp
+                    messageListener?.invoke(entity, replyToUs)
+                }
+            }
+            is ReplyIntent.Tombstone, is ReplyIntent.Deleted -> {
                 db.messages().softDelete(whom, replyId)
                 db.reactions().clearForPost(whom, replyId)
-                return
             }
-            val essay = full["reply-essay"] as? JsonObject ?: return@let
-            val entity = toReplyEntity(whom, parentId, replyId, essay)
-            db.messages().upsert(entity)
-            // Reap any optimistic `local_<da>` twin so our own replies
-            // don't show up twice — mirrors the top-level-post reap in
-            // applyChannelDelta.
-            if (entity.author == ourPatp) {
-                db.messages().reapLocalTwin(whom, ourPatp, entity.sentMs)
-            }
-            if (entity.author != ourPatp) {
-                val parent = db.messages().getOne(whom, parentId)
-                val replyToUs = parent?.author == ourPatp
-                messageListener?.invoke(entity, replyToUs)
-            }
-            (full["seal"] as? JsonObject)?.get("reacts")?.let { reacts ->
-                val obj = reacts as? JsonObject ?: return@let
+            is ReplyIntent.Reactions -> {
                 db.reactions().clearForPost(whom, replyId)
-                val rx = obj.entries.mapNotNull { (author, emoji) ->
+                val rx = inner.reacts.entries.mapNotNull { (author, emoji) ->
                     val e = emoji.jsonPrimitive.contentIfString() ?: return@mapNotNull null
                     ReactionEntity(whom, replyId, author, e)
                 }
                 if (rx.isNotEmpty()) db.reactions().upsertAll(rx)
             }
-            return
-        }
-        if (rReply["set"] is JsonNull) {
-            db.messages().softDelete(whom, replyId)
-            db.reactions().clearForPost(whom, replyId)
-            return
-        }
-        (rReply["reacts"] as? JsonObject)?.let { reacts ->
-            db.reactions().clearForPost(whom, replyId)
-            val rx = reacts.entries.mapNotNull { (author, emoji) ->
-                val e = emoji.jsonPrimitive.contentIfString() ?: return@mapNotNull null
-                ReactionEntity(whom, replyId, author, e)
-            }
-            if (rx.isNotEmpty()) db.reactions().upsertAll(rx)
+            is ReplyIntent.Unknown -> Unit
         }
     }
 
@@ -2179,42 +2054,8 @@ class TlonChatRepo(
      * UnreadEntity. Returns null for source kinds we don't surface
      * (groups, threads, base).
      */
-    private fun toUnread(
-        sourceKey: String?,
-        summary: JsonObject,
-        overrideWhom: String? = null,
-    ): UnreadEntity? {
-        val whom = overrideWhom
-            ?: sourceKeyToWhom(sourceKey ?: return null)
-            ?: return null
-        val count = summary["count"]?.jsonPrimitive?.longOrNull?.toInt() ?: 0
-        val notifyCount = summary["notify-count"]?.jsonPrimitive?.longOrNull?.toInt() ?: 0
-        val recency = summary["recency"]?.jsonPrimitive?.longOrNull ?: 0L
-        return UnreadEntity(
-            whom = whom,
-            count = count,
-            notifyCount = notifyCount,
-            recencyMs = recency,
-        )
-    }
-
-    private fun sourceKeyToWhom(key: String): String? = when {
-        key.startsWith("ship/") -> key.removePrefix("ship/")
-        key.startsWith("club/") -> key.removePrefix("club/")
-        key.startsWith("channel/") -> key.removePrefix("channel/")
-        else -> null
-    }
-
-    private fun sourceToWhom(source: JsonObject): String? {
-        (source["dm"] as? JsonObject)?.let { dm ->
-            dm["ship"]?.jsonPrimitive?.contentIfString()?.let { return it }
-            dm["club"]?.jsonPrimitive?.contentIfString()?.let { return it }
-        }
-        (source["channel"] as? JsonObject)?.let { ch ->
-            ch["nest"]?.jsonPrimitive?.contentIfString()?.let { return it }
-        }
-        return null
-    }
+    // toUnread / sourceKeyToWhom / sourceToWhom / activityReadSource /
+    // activityReadAction extracted to ActivityParser.kt for testing.
 
     /**
      * Poke %activity to mark a conversation read. Channels require the
@@ -2234,45 +2075,22 @@ class TlonChatRepo(
             )
         )
 
-        val source = when {
-            whom.startsWith("~") -> buildJsonObject {
-                put("dm", buildJsonObject { put("ship", whom) })
-            }
-            whom.startsWith("0v") -> buildJsonObject {
-                put("dm", buildJsonObject { put("club", whom) })
-            }
+        val groupFlag = if (
             whom.startsWith("chat/") ||
-                whom.startsWith("diary/") ||
-                whom.startsWith("heap/") -> {
-                val groupFlag = db.groups().channelGroupFor(whom)?.groupFlag
-                if (groupFlag == null) {
-                    Log.w(TAG, "markRead: no group flag for $whom; skipping poke")
-                    return
-                }
-                buildJsonObject {
-                    put("channel", buildJsonObject {
-                        put("nest", whom)
-                        put("group", groupFlag)
-                    })
-                }
+            whom.startsWith("diary/") ||
+            whom.startsWith("heap/")
+        ) {
+            db.groups().channelGroupFor(whom)?.groupFlag ?: run {
+                Log.w(TAG, "markRead: no group flag for $whom; skipping poke")
+                return
             }
-            else -> return
-        }
+        } else null
+        val source = activityReadSource(whom, groupFlag) ?: return
         runCatching {
             ch.poke(
                 app = "activity",
                 mark = "activity-action",
-                payload = buildJsonObject {
-                    put("read", buildJsonObject {
-                        put("source", source)
-                        put("action", buildJsonObject {
-                            put("all", buildJsonObject {
-                                put("time", JsonNull)
-                                put("deep", false)
-                            })
-                        })
-                    })
-                },
+                payload = activityReadAction(source),
             )
         }.onFailure { Log.w(TAG, "markRead poke failed for $whom", it) }
     }
@@ -2508,146 +2326,37 @@ class TlonChatRepo(
         messagesOut: MutableList<MessageEntity>,
         reactionsOut: MutableList<ReactionEntity>,
     ) {
-        val obj = post as? JsonObject ?: return
-        // Tombstones returned by paginate/bootstrap: {type: "tombstone",
-        // id, author, deleted-at, seq}. No seal/essay. Soft-delete so
-        // the stale row disappears on re-scry.
-        if (obj["type"]?.jsonPrimitive?.contentIfString() == "tombstone") {
-            val tombId = obj["id"]?.jsonPrimitive?.contentIfString()
-                ?.replace(".", "") ?: return
-            db.messages().softDelete(whom, tombId)
-            return
-        }
-        val seal = obj["seal"] as? JsonObject ?: return
-        // Server may give ids as raw digits or dot-grouped; normalize
-        // to raw so DB lookups match regardless of source path.
-        val id = seal["id"]?.jsonPrimitive?.contentIfString()?.replace(".", "") ?: return
-        val essay = obj["essay"] as? JsonObject ?: return
-        messagesOut.add(toEntity(whom, id, essay))
-
-        (seal["reacts"] as? JsonObject)?.forEach { (author, emoji) ->
-            val e = emoji.jsonPrimitive.contentIfString() ?: return@forEach
-            reactionsOut.add(ReactionEntity(whom, id, author, e))
-        }
-
-        (seal["replies"] as? JsonObject)?.forEach { (_, replyEl) ->
-            val reply = replyEl as? JsonObject ?: return@forEach
-            val replySeal = reply["seal"] as? JsonObject ?: return@forEach
-            val replyId = replySeal["id"]?.jsonPrimitive?.contentIfString()
-                ?.replace(".", "") ?: return@forEach
-            val replyEssay = reply["reply-essay"] as? JsonObject ?: return@forEach
-            messagesOut.add(toReplyEntity(whom, id, replyId, replyEssay))
-            (replySeal["reacts"] as? JsonObject)?.forEach { (author, emoji) ->
-                val e = emoji.jsonPrimitive.contentIfString() ?: return@forEach
-                reactionsOut.add(ReactionEntity(whom, replyId, author, e))
-            }
+        // Pure classification lives in PostIngest.kt.
+        val result = ingestedPost(whom, post)
+        messagesOut.addAll(result.messages)
+        reactionsOut.addAll(result.reactions)
+        // Pre-warm StoryCache so first-paint of a LazyColumn row is a
+        // cache hit instead of a JSON→AnnotatedString parse.
+        result.messages.forEach { StoryCache.partsFor(it.id, it.contentJson) }
+        // Process tombstones inline — soft-delete so stale rows from
+        // earlier scries disappear on re-ingest.
+        result.tombstones.forEach { id ->
+            db.messages().softDelete(whom, id)
+            db.reactions().clearForPost(whom, id)
         }
     }
 
     private fun toEntity(whom: String, id: String, essay: JsonObject): MessageEntity {
-        val author = essay["author"]?.jsonPrimitive?.contentIfString() ?: ""
-        val sent = essay["sent"]?.jsonPrimitive?.longOrNull ?: 0L
-        val kind = essay["kind"]?.jsonPrimitive?.contentIfString() ?: "/chat"
-        val content = essay["content"] ?: JsonArray(emptyList())
-        val merged = mergeBlobIntoContent(content, essay["blob"])
-        val json = merged.toString()
-        // Parse the story ahead of UI time. First-paint of a message in a
-        // LazyColumn is what drives visible scroll jank — doing the
-        // JSON→AnnotatedString conversion now (on Dispatchers.IO) means
-        // StoryCache.partsFor is an instant map hit when the row first
-        // composes.
-        StoryCache.partsFor(id, json)
-        // Notebook / gallery essays carry a `meta` object with title +
-        // cover image. For chat essays it's null; pulling optionally.
-        val meta = essay["meta"] as? JsonObject
-        val title = meta?.get("title")?.jsonPrimitive?.contentIfString()
-            ?.takeIf { it.isNotBlank() }
-        val image = meta?.get("image")?.jsonPrimitive?.contentIfString()
-            ?.takeIf { it.isNotBlank() }
-        return MessageEntity(
-            whom = whom,
-            id = id,
-            author = author,
-            sentMs = sent,
-            contentJson = json,
-            kind = kind,
-            title = title,
-            image = image,
-        )
+        // Thin wrapper so the two applyChannelDelta ingestion branches
+        // (full post set vs full post ingest) produce identical rows.
+        val entity = pureEntity(whom, id, essay)
+        StoryCache.partsFor(entity.id, entity.contentJson)
+        return entity
     }
 
-    /**
-     * Tlon stores file attachments in `essay.blob` — a JSON-string whose
-     * contents decode to an array of `{type, version, fileUri, name,
-     * mimeType, size}` entries. None of the normal story block types
-     * exist for these yet, so we hoist each file entry into a synthetic
-     * `{"block": {"file": {…}}}` prepended to the content. The story
-     * renderer's unknown-block fallback picks this up and shows it as a
-     * tappable LinkPreview with filename + size.
-     */
-    private fun mergeBlobIntoContent(
-        content: JsonElement,
-        blob: JsonElement?,
-    ): JsonElement {
-        val blobStr = blob?.let { el ->
-            (el as? JsonPrimitive)?.contentIfString()
-        } ?: return content
-        if (blobStr.isBlank()) return content
-        val parsed = runCatching { Json.parseToJsonElement(blobStr) }.getOrNull()
-            ?: return content
-        val arr = parsed as? JsonArray ?: return content
-        if (arr.isEmpty()) return content
-        val synthetic = buildJsonArray {
-            for (entry in arr) {
-                val o = entry as? JsonObject ?: continue
-                val type = o["type"]?.jsonPrimitive?.contentIfString()
-                if (type != "file") continue
-                val uri = o["fileUri"]?.jsonPrimitive?.contentIfString()
-                    ?: o["url"]?.jsonPrimitive?.contentIfString()
-                    ?: continue
-                add(
-                    buildJsonObject {
-                        put("block", buildJsonObject {
-                            put("file", buildJsonObject {
-                                put("url", uri)
-                                o["name"]?.jsonPrimitive?.contentIfString()
-                                    ?.let { put("name", it) }
-                                o["size"]?.jsonPrimitive?.longOrNull
-                                    ?.let { put("size", it) }
-                                o["mimeType"]?.jsonPrimitive?.contentIfString()
-                                    ?.let { put("mime", it) }
-                            })
-                        })
-                    }
-                )
-            }
-        }
-        if (synthetic.isEmpty()) return content
-        return buildJsonArray {
-            synthetic.forEach { add(it) }
-            (content as? JsonArray)?.forEach { add(it) }
-        }
-    }
+    // mergeBlobIntoContent extracted to PostIngest.kt.
 
     /**
-     * Parse composer text into a Story. Each non-empty line becomes its
-     * own verse with a break between them; within a line, Markdown
-     * walks the text and emits `{bold: …}`, `{italics: …}`, `{code: …}`,
-     * `{link: {href, content}}`, and `{ship: …}` inline spans.
+     * Parse composer text into a Story. See [chatTextToStory] —
+     * extracted so tests can exercise blockquote grouping without a
+     * repo instance.
      */
-    private fun textToStory(text: String): JsonArray = buildJsonArray {
-        val lines = text.split('\n')
-        lines.forEachIndexed { idx, line ->
-            val inline = Markdown.parseInlines(line)
-            val finalInline = if (idx < lines.lastIndex) {
-                buildJsonArray {
-                    inline.forEach { add(it) }
-                    add(buildJsonObject { put("break", JsonNull) })
-                }
-            } else inline
-            add(buildJsonObject { put("inline", finalInline) })
-        }
-    }
+    private fun textToStory(text: String): JsonArray = chatTextToStory(text)
 
     private fun buildEssay(
         content: JsonArray,
@@ -2671,103 +2380,20 @@ class TlonChatRepo(
         private const val ADMIN_CACHE_TTL_MS = 5L * 60_000L
     }
 
-    /** Wraps a writ diff for %chat's chat-dm-action-2 mark. */
-    private fun dmAction(peer: String, postId: String, delta: JsonObject): JsonObject =
-        buildJsonObject {
-            put("ship", peer)
-            put("diff", buildJsonObject {
-                put("id", postId)
-                put("delta", delta)
-            })
-        }
+    // dmAction / clubAction / channelAction / replyDelta extracted to WireShapes.kt.
 
-    /**
-     * Wraps a writ diff for %chat's chat-club-action-2 mark. The `uid: "0v4"`
-     * literal matches what Tlon's web client sends — it's a throwaway
-     * deduplication token the server doesn't currently rely on.
-     */
-    private fun clubAction(clubId: String, postId: String, delta: JsonObject): JsonObject =
-        buildJsonObject {
-            put("id", clubId)
-            put("diff", buildJsonObject {
-                put("uid", "0v4")
-                put("delta", buildJsonObject {
-                    put("writ", buildJsonObject {
-                        put("id", postId)
-                        put("delta", delta)
-                    })
-                })
-            })
-        }
-
-    private fun channelAction(nest: String, action: JsonObject): JsonObject =
-        buildJsonObject {
-            put("channel", buildJsonObject {
-                put("nest", nest)
-                put("action", action)
-            })
-        }
-
-    /** WritsDelta shape for the reply-add case. */
-    private fun replyDelta(replyId: String, replyEssay: JsonObject): JsonObject =
-        buildJsonObject {
-            put("reply", buildJsonObject {
-                put("id", replyId)
-                put("meta", JsonNull)
-                put("delta", buildJsonObject {
-                    put("add", buildJsonObject {
-                        put("reply-essay", replyEssay)
-                        put("time", JsonNull)
-                    })
-                })
-            })
-        }
-
-    /** Convert a reply-essay JsonObject into a MessageEntity tagged as a reply. */
+    /** Thin wrapper: pure reply-entity + StoryCache pre-warm. */
     private fun toReplyEntity(
         whom: String,
         parentId: String,
         replyId: String,
         replyEssay: JsonObject,
     ): MessageEntity {
-        val author = replyEssay["author"]?.jsonPrimitive?.contentIfString() ?: ""
-        val sent = replyEssay["sent"]?.jsonPrimitive?.longOrNull ?: 0L
-        val content = replyEssay["content"] ?: JsonArray(emptyList())
-        val merged = mergeBlobIntoContent(content, replyEssay["blob"])
-        val json = merged.toString()
-        StoryCache.partsFor(replyId, json)
-        return MessageEntity(
-            whom = whom,
-            id = replyId,
-            author = author,
-            sentMs = sent,
-            contentJson = json,
-            kind = "/chat",
-            parentId = parentId,
-        )
+        val entity = pureReplyEntity(whom, parentId, replyId, replyEssay)
+        StoryCache.partsFor(entity.id, entity.contentJson)
+        return entity
     }
 
     private fun JsonPrimitive.contentIfString(): String? =
         if (isString) content else content
-
-    /**
-     * Urbit's `dem:ag` parser (used by `slav %ud`) requires decimal
-     * atoms to be dot-grouped in threes from the right for values
-     * ≥ 1000. Tlon does this when sending ids as strings over the
-     * wire; we need to match. "170141184505..." → "170.141.184.505..."
-     */
-    private fun dotAtom(decimal: String): String {
-        if (decimal.length <= 3) return decimal
-        // Only dot-format pure digit strings — leave already-dotted or
-        // non-numeric values alone.
-        if (!decimal.all { it.isDigit() }) return decimal
-        val out = StringBuilder()
-        var i = decimal.length
-        while (i > 3) {
-            out.insert(0, "." + decimal.substring(i - 3, i))
-            i -= 3
-        }
-        out.insert(0, decimal.substring(0, i))
-        return out.toString()
-    }
 }

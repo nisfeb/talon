@@ -38,3 +38,11 @@ hs_err_pid*
 # Misc
 *.swp
 *.swo
+
+# Fakezod harness artifacts (see scripts/fakezod/README.md)
+scripts/fakezod/pier/
+scripts/fakezod/.urbit/
+scripts/fakezod/.tlon-apps/
+pier/
+.urbit/
+.tlon-apps/

@@ -1,0 +1,44 @@
+{
+  "activity": {
+    "channel/chat/~ricsul-bilwyt-dozzod-nisfeb/v2c3drm0": {
+      "notify-count": 1,
+      "unread": null,
+      "count": 3,
+      "recency": 1777054928725,
+      "recency-uv": "0v4.00000.qe49o.98biv.00000.00000",
+      "notify": true
+    },
+    "ship/~sampel-palnet": {
+      "notify-count": 0,
+      "unread": null,
+      "count": 1,
+      "recency": 1777054900000,
+      "recency-uv": "0v4.00000.qe49o.96xxx.00000.00000",
+      "notify": false
+    },
+    "club/0v2.abcde.fghij": {
+      "notify-count": 2,
+      "unread": null,
+      "count": 5,
+      "recency": 1777054910000,
+      "recency-uv": "0v4.00000.qe49o.97yyy.00000.00000",
+      "notify": true
+    },
+    "group/~ricsul-bilwyt-dozzod-nisfeb/v1h84eoe": {
+      "notify-count": 1,
+      "unread": null,
+      "count": 1,
+      "recency": 1777054928725,
+      "recency-uv": "0v4.00000.qe49o.98biv.00000.00000",
+      "notify": true
+    },
+    "base": {
+      "notify-count": 0,
+      "unread": null,
+      "count": 0,
+      "recency": 1777054928725,
+      "recency-uv": "0v4.00000.qe49o.98biv.00000.00000",
+      "notify": false
+    }
+  }
+}

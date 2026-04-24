@@ -510,95 +510,43 @@ object Story {
     }
 
     private fun renderCite(cite: JsonObject): StoryPart {
-        (cite["chan"] as? JsonObject)?.let { chan ->
-            val nest = chan["nest"]?.jsonPrimitive?.contentOrNullSafe()
-            val where = chan["where"]?.jsonPrimitive?.contentOrNullSafe().orEmpty()
-            val parsed = parseChanCiteWhere(where)
-            val label = if (nest != null) {
-                "Post in #" + nest.substringAfterLast('/')
-            } else {
-                "Channel post"
-            }
-            return StoryPart.Citation(
-                label = label,
-                openTarget = nest,
-                postDa = parsed?.first,
-                replyDa = parsed?.second,
+        val parsed = parseCite(cite)
+        return when (val t = parsed.target) {
+            is CiteTarget.ChannelPost -> StoryPart.Citation(
+                label = parsed.label,
+                openTarget = t.nest,
+                postDa = t.postDa,
+                replyDa = t.replyDa,
             )
-        }
-        cite["group"]?.jsonPrimitive?.contentOrNullSafe()?.let { flag ->
-            return StoryPart.Citation(
-                label = "Group $flag",
-                openTarget = null,
+            is CiteTarget.Group -> StoryPart.Citation(
+                label = parsed.label,
+                openTarget = "group:${t.flag}",
                 postDa = null,
                 replyDa = null,
             )
-        }
-        (cite["desk"] as? JsonObject)?.let { desk ->
-            val flag = desk["flag"]?.jsonPrimitive?.contentOrNullSafe()
-            return StoryPart.Citation(
-                label = if (flag != null) "App $flag" else "App reference",
-                openTarget = null,
-                postDa = null,
-                replyDa = null,
-            )
-        }
-        // Tlon's "File Upload" reference block. Shape in the wild is
-        // roughly {"cite": {"bait"|"file"|"url": {...}}} with fields
-        // like url/src/href + name/title + size. If we can find a URL
-        // treat it as a LinkPreview so it at least shows up and opens.
-        for (key in listOf("file", "bait", "upload", "url")) {
-            val inner = cite[key] as? JsonObject ?: continue
-            val url = inner["url"]?.jsonPrimitive?.contentOrNullSafe()
-                ?: inner["href"]?.jsonPrimitive?.contentOrNullSafe()
-                ?: inner["src"]?.jsonPrimitive?.contentOrNullSafe()
-            val name = inner["name"]?.jsonPrimitive?.contentOrNullSafe()
-                ?: inner["title"]?.jsonPrimitive?.contentOrNullSafe()
-                ?: url?.substringAfterLast('/')?.substringBefore('?')
-            val sizeLabel = inner["size"]?.jsonPrimitive?.longOrNull
-                ?.let { humanFileSize(it) }
-            if (url != null || name != null) {
-                val label = buildString {
-                    append(name ?: "File upload")
-                    if (sizeLabel != null) append(" • ").append(sizeLabel)
-                }
-                return if (url != null) {
-                    StoryPart.LinkPreview(
-                        url = url,
-                        title = label,
-                        description = null,
-                        imageUrl = null,
-                        siteName = "File",
-                    )
-                } else {
-                    StoryPart.Citation(
-                        label = label,
-                        openTarget = null,
-                        postDa = null,
-                        replyDa = null,
-                    )
-                }
-            }
-        }
-        // Last-ditch: if the cite object itself has a direct url, use it.
-        val directUrl = cite["url"]?.jsonPrimitive?.contentOrNullSafe()
-            ?: cite["href"]?.jsonPrimitive?.contentOrNullSafe()
-        if (directUrl != null) {
-            return StoryPart.LinkPreview(
-                url = directUrl,
-                title = cite["title"]?.jsonPrimitive?.contentOrNullSafe()
-                    ?: directUrl.substringAfterLast('/').substringBefore('?'),
+            is CiteTarget.Url -> StoryPart.LinkPreview(
+                url = t.url,
+                title = t.title ?: parsed.label,
                 description = null,
                 imageUrl = null,
                 siteName = "Reference",
             )
+            null -> {
+                if (parsed.label == "Reference") {
+                    android.util.Log.w(
+                        "StoryCite",
+                        "unhandled cite shape: keys=${cite.keys} " +
+                            "preview=${cite.toString().take(400)}",
+                    )
+                }
+                StoryPart.Citation(
+                    label = parsed.label,
+                    openTarget = null,
+                    postDa = null,
+                    replyDa = null,
+                )
+            }
         }
-        return StoryPart.Citation(
-            label = "Reference",
-            openTarget = null,
-            postDa = null,
-            replyDa = null,
-        )
     }
 
     private fun humanFileSize(bytes: Long): String {

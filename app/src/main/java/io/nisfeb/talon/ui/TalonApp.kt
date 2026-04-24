@@ -39,6 +39,7 @@ import io.nisfeb.talon.ui.screens.SearchScreen
 import io.nisfeb.talon.ui.screens.ActivityFeedScreen
 import io.nisfeb.talon.ui.screens.GroupAdminListScreen
 import io.nisfeb.talon.ui.screens.GroupAdminScreen
+import io.nisfeb.talon.ui.screens.GroupHomeScreen
 import io.nisfeb.talon.ui.screens.GroupInvitesScreen
 import io.nisfeb.talon.ui.screens.GalleryComposeScreen
 import io.nisfeb.talon.ui.screens.GalleryGridScreen
@@ -136,6 +137,20 @@ fun TalonApp(
     var notebookEditSentMs by remember { mutableStateOf(0L) }
     var openGalleryPostId by remember { mutableStateOf<String?>(null) }
     var galleryComposeOpen by remember { mutableStateOf(false) }
+    var openGroupFlag by remember { mutableStateOf<String?>(null) }
+
+    // Single entry point for "open this conversation target" clicks.
+    // `group:<flag>` (from citation taps) opens a lightweight
+    // GroupHomeScreen — a member sees the channel list, a non-member
+    // sees a Join CTA. Other targets route to the usual `openWhom`.
+    val openConversation: (String) -> Unit = { target ->
+        if (target.startsWith("group:")) {
+            openGroupFlag = target.removePrefix("group:")
+            openThread = null
+        } else {
+            openWhom = target
+        }
+    }
 
     // TalonApplication.onCreate restores the previously-active ship
     // into the ship-scoped fields (db, repo, session) and seeds
@@ -256,6 +271,7 @@ fun TalonApp(
         BackHandler(enabled = openNotebookPostId != null) { openNotebookPostId = null }
         BackHandler(enabled = galleryComposeOpen) { galleryComposeOpen = false }
         BackHandler(enabled = openGalleryPostId != null) { openGalleryPostId = null }
+        BackHandler(enabled = openGroupFlag != null) { openGroupFlag = null }
         BackHandler(enabled = pendingShare != null) { onShareConsumed() }
         BackHandler(enabled = searchOpen) { searchOpen = false }
         BackHandler(enabled = newDmOpen) { newDmOpen = false }
@@ -345,6 +361,16 @@ fun TalonApp(
                 modifier = mod,
             )
 
+            openGroupFlag != null -> GroupHomeScreen(
+                flag = openGroupFlag!!,
+                onBack = { openGroupFlag = null },
+                onOpenChannel = { nest ->
+                    openGroupFlag = null
+                    openWhom = nest
+                },
+                modifier = mod,
+            )
+
             settingsOpen -> SettingsScreen(
                 onBack = { settingsOpen = false },
                 modifier = mod,
@@ -428,10 +454,7 @@ fun TalonApp(
                 whom = openWhom!!,
                 parentId = openThread!!,
                 onBack = { openThread = null },
-                onOpenConversation = {
-                    openThread = null
-                    openWhom = it
-                },
+                onOpenConversation = openConversation,
                 onOpenImage = { viewerImageUrl = it },
                 modifier = mod,
             )
@@ -509,7 +532,7 @@ fun TalonApp(
                 onScrollConsumed = { pendingScrollMessageId = null },
                 onBack = { openWhom = null },
                 onOpenThread = { openThread = it },
-                onOpenConversation = { openWhom = it },
+                onOpenConversation = openConversation,
                 onOpenImage = { viewerImageUrl = it },
                 onOpenSelfProfile = { editingProfile = true },
                 modifier = mod,

@@ -21,4 +21,22 @@ interface GroupDao {
 
     @Query("SELECT * FROM channel_groups WHERE nest = :nest LIMIT 1")
     suspend fun channelGroupFor(nest: String): ChannelGroupEntity?
+
+    @Query("SELECT * FROM groups WHERE flag = :flag LIMIT 1")
+    suspend fun getGroup(flag: String): GroupEntity?
+
+    @Query("SELECT * FROM groups WHERE flag = :flag LIMIT 1")
+    fun streamGroup(flag: String): Flow<GroupEntity?>
+
+    @Query("SELECT * FROM channel_groups WHERE groupFlag = :flag")
+    fun streamChannelsForGroup(flag: String): Flow<List<ChannelGroupEntity>>
+
+    @Query("DELETE FROM groups WHERE flag = :flag")
+    suspend fun deleteGroup(flag: String)
+
+    @Query("DELETE FROM channel_groups WHERE groupFlag = :flag")
+    suspend fun deleteChannelsForGroup(flag: String)
+
+    @Query("DELETE FROM channel_groups WHERE nest = :nest")
+    suspend fun deleteChannelGroup(nest: String)
 }

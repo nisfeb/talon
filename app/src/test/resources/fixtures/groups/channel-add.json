@@ -1,0 +1,18 @@
+{
+  "flag": "~ricsul-bilwyt-dozzod-nisfeb/v1h84eoe",
+  "r-group": {
+    "channel": {
+      "nest": "chat/~ricsul-bilwyt-dozzod-nisfeb/random",
+      "r-channel": {
+        "add": {
+          "meta": {
+            "title": "Random",
+            "description": "off-topic chatter",
+            "image": "",
+            "cover": ""
+          }
+        }
+      }
+    }
+  }
+}
