@@ -39,6 +39,9 @@ hs_err_pid*
 *.swp
 *.swo
 
+# Mutation tester output (regenerated each run by scripts/mutate/mutate.sh)
+mutation-report.md
+
 # Fakezod harness artifacts (see scripts/fakezod/README.md)
 scripts/fakezod/pier/
 scripts/fakezod/.urbit/
