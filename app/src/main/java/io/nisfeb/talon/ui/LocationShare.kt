@@ -115,8 +115,10 @@ private suspend fun requestSingleUpdate(lm: LocationManager): Location? =
             else -> providers.first()
         }
         try {
+            // The listener self-removes in onLocationChanged, so this
+            // behaves as a single-shot update on every supported API.
             @Suppress("MissingPermission")
-            lm.requestSingleUpdate(provider, listener, looper)
+            lm.requestLocationUpdates(provider, 0L, 0f, listener, looper)
         } catch (e: SecurityException) {
             cont.resumeWithException(e)
         }

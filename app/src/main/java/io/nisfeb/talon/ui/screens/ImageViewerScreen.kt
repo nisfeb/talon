@@ -41,7 +41,7 @@ fun ImageViewerScreen(
     var offsetX by remember(url) { mutableStateOf(0f) }
     var offsetY by remember(url) { mutableStateOf(0f) }
 
-    val transform = rememberTransformableState { zoom, pan, _ ->
+    val transform = rememberTransformableState { _, zoom, pan, _ ->
         scale = (scale * zoom).coerceIn(1f, 6f)
         if (scale > 1f) {
             offsetX += pan.x
