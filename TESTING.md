@@ -79,6 +79,37 @@ When CI fails after you pull latest:
 4. **Markdown / widget test?** Composer output shifted. Usually
    intentional — update the test to match the new shape.
 
+## Mutation testing
+
+We ship a small mutation tester at `scripts/mutate/mutate.sh`. It walks
+each target source file, flips operators one at a time (==/!=, &&/||,
+comparison ops, boolean literals, agent-mark string literals, id
+normalization calls), runs the suite, and reports mutants that the
+tests don't kill.
+
+```sh
+./scripts/mutate/mutate.sh              # default: the urbit/ package
+./scripts/mutate/mutate.sh app/src/...  # specific files
+```
+
+Output: `mutation-report.md` (overwritten each run) plus a stdout
+summary with the list of surviving (test-gap) mutants.
+
+Current score: **~89%** on the urbit/ package. Remaining survivors
+are all defensive double-checks inside the inline Markdown tokenizer
+(e.g., `i + 1 < len` where the outer `while (i < len)` already
+guarantees that invariant) — **equivalent mutants**, not real gaps.
+If you add a new check that changes behavior, the mutator will catch
+it; the current survivors are inert syntactic variants.
+
+Run time is ~5 minutes on the full default target set.
+
+**When the mutator flags a new survivor**, decide whether it's an
+equivalent mutant (no observable behavior change) or a real gap
+(kill it by adding or strengthening a test). Document any equivalents
+you accept in the same source file with a short `// equivalent under
+<condition>` comment so future mutator runs can be triaged fast.
+
 ## Adding tests for a new feature
 
 Every new outbound poke needs a WireShapes test, ideally with the

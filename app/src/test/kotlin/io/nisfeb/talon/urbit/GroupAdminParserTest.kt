@@ -75,6 +75,26 @@ class GroupAdminParserTest {
     }
 
     @Test
+    fun `new-schema privacy wins over a legacy open tagged-union sibling`() {
+        // Regression guard: mutation-testing surfaced that `privacy != null
+        // -> "shut"` was indistinguishable from `privacy == null -> "shut"`
+        // for our other fixtures. Force the precedence by constructing a
+        // payload where the two branches disagree — private privacy AND
+        // a legacy `open` tagged-union both present (contradictory data,
+        // but pins down the "new schema wins" rule).
+        val raw = """
+            {"meta":{"title":"x","description":"","image":"","cover":""},
+             "admins":[],"seats":{},
+             "admissions":{"privacy":"private","open":{"ships":[]}}}
+        """.trimIndent()
+        val g = parse("~sampel/x", raw)
+        assertEquals("private", g.privacy)
+        // New-schema `privacy: private` must beat legacy `open` — if
+        // this flips, we've silently mis-ordered the when-branches.
+        assertEquals("shut", g.cordonKind)
+    }
+
+    @Test
     fun `invited ship already in seats is filtered out`() {
         // If a ship has joined, the invite is stale — don't re-expose
         // them in the Invited section.

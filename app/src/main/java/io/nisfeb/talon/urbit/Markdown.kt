@@ -89,7 +89,7 @@ object Markdown {
             // boundaries so we don't glom onto adjacent punctuation.
             // The Markdown `[label](url)` path above takes precedence
             // because that branch runs first.
-            if (c == 'h' && looksLikeUrlStart(text, i)) {
+            if ((c == 'h' || c == 'H') && looksLikeUrlStart(text, i)) {
                 val end = urlEndAt(text, i)
                 if (end > i) {
                     flushPlain()

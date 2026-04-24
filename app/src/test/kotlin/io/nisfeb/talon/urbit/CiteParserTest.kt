@@ -126,6 +126,49 @@ class CiteParserTest {
         assertEquals("hi", r.label)
     }
 
+    @Test
+    fun `file cite with url but no name derives a name from the URL tail`() {
+        // Regression guard: mutation-testing surfaced that the
+        // `url != null || name != null` branch was indistinguishable
+        // from `url == null || name != null` for our other fixtures.
+        // This case separates them: url set, name absent.
+        val r = parse("""{"file":{"url":"https://x/photo.png?size=large"}}""")
+        val t = r.target as CiteTarget.Url
+        assertEquals("https://x/photo.png?size=large", t.url)
+        // Tail (filename minus query) is the fallback display name.
+        assertTrue(r.label.contains("photo.png"))
+    }
+
+    @Test
+    fun `file cite with only a size but no url or name falls through to Reference`() {
+        // url == null && name == null → skip the file-block branch.
+        // Regression guard for the `!= null || != null` predicate.
+        val r = parse("""{"file":{"size":1024}}""")
+        assertEquals("Reference", r.label)
+        assertNull(r.target)
+    }
+
+    // ─── humanFileSize branches ────────────────────────────────
+
+    @Test
+    fun `file cite with size in MB range formats as MB`() {
+        val r = parse("""
+            {"file":{"url":"https://x/y","name":"big","size":10485760}}
+        """.trimIndent())
+        // 10 MiB — should format with an "MB" suffix.
+        assertTrue("label=${r.label}", r.label.contains("MB"))
+    }
+
+    @Test
+    fun `file cite with size in GB range formats as GB`() {
+        // 2 GiB — exceeds the mb<1024 cutoff. Catches the
+        // mutation-tester finding at CiteParser.kt line 139.
+        val r = parse("""
+            {"file":{"url":"https://x/y","name":"huge","size":2147483648}}
+        """.trimIndent())
+        assertTrue("label=${r.label}", r.label.contains("GB"))
+    }
+
     // ─── unknown fallback ──────────────────────────────────────────
 
     @Test
