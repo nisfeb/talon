@@ -19,8 +19,13 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
@@ -65,6 +70,16 @@ class TlonChatRepo(
     @Volatile private var ourPatp: String = ""
     @Volatile private var sessionJob: Job? = null
     @Volatile private var lastEventMs: Long = 0L
+
+    // Admin-groups cache: populated by refreshAdminGroups(), consumed
+    // by the Administration screen. Fetching the full per-group state
+    // is 30+ scries so we keep the last result around and only refresh
+    // when it's older than ADMIN_CACHE_TTL_MS or the caller asks for a
+    // forced reload.
+    private val _adminGroups = MutableStateFlow<List<AdminGroup>?>(null)
+    val adminGroupsFlow: StateFlow<List<AdminGroup>?> = _adminGroups.asStateFlow()
+    @Volatile private var adminGroupsFetchedMs: Long = 0L
+    private val adminGroupsMutex = Mutex()
 
     /**
      * The chat the user is currently viewing, if any. Used to suppress
@@ -394,6 +409,485 @@ class TlonChatRepo(
             )
         )
     }
+
+    // ───────── group administration ─────────
+
+    /**
+     * One admin-visible group: metadata, fleet (members + sects), and
+     * cordon shape so we know which invite/ban path to use.
+     */
+    data class AdminGroup(
+        val flag: String,
+        val title: String?,
+        val description: String?,
+        val image: String?,
+        val cover: String?,
+        val members: List<AdminMember>,
+        /** Derived privacy — "open" (public) or "shut" (private/secret).
+         *  Kept for back-compat with legacy invite/ban pokes. */
+        val cordonKind: String,
+        /** Raw privacy string from the new `admissions.privacy` field
+         *  when available: "public" | "private" | "secret" | etc. */
+        val privacy: String?,
+        /** Banned ships (under `admissions.banned.ships` in the new agent). */
+        val bannedShips: Set<String>,
+        /** Ships invited via token — revoke by deleting the token. */
+        val invitedTokenByShip: Map<String, String>,
+        /** Ships with a direct (no-token) invite — revoke via `entry.pending.del`. */
+        val directInvitedShips: Set<String>,
+        /** Ships that have asked to join. */
+        val pendingShips: Set<String>,
+        /** Sect names that confer admin powers — from `bloc`/`admins`. */
+        val adminSects: Set<String>,
+    )
+
+    data class AdminMember(
+        val ship: String,
+        val sects: Set<String>,
+        val isAdmin: Boolean,
+    )
+
+    /** One inbound invitation to a group, surfaced in the Invites UI. */
+    data class InviteSummary(
+        val flag: String,
+        val inviter: String?,
+        val title: String?,
+        val description: String?,
+        val image: String?,
+        val cover: String?,
+        val memberCount: Int?,
+    )
+
+    /**
+     * Return cached admin groups, refreshing in the background if the
+     * cache is stale or empty. Emits into [adminGroupsFlow] — the UI
+     * collects from the flow so the cached list paints instantly and
+     * the fresh list swaps in when it lands.
+     *
+     * @param force bypass the TTL check (pull-to-refresh)
+     */
+    suspend fun refreshAdminGroups(force: Boolean = false) {
+        val fresh = System.currentTimeMillis() - adminGroupsFetchedMs < ADMIN_CACHE_TTL_MS
+        if (!force && fresh && _adminGroups.value != null) return
+        adminGroupsMutex.withLock {
+            // Re-check after acquiring — another caller may have
+            // refreshed while we were waiting on the mutex.
+            val nowFresh = System.currentTimeMillis() - adminGroupsFetchedMs < ADMIN_CACHE_TTL_MS
+            if (!force && nowFresh && _adminGroups.value != null) return
+            runCatching { fetchAdminGroupsLive() }
+                .onSuccess {
+                    _adminGroups.value = it
+                    adminGroupsFetchedMs = System.currentTimeMillis()
+                }
+                .onFailure { Log.w(TAG, "refreshAdminGroups failed", it) }
+        }
+    }
+
+    /**
+     * Scry every group the ship belongs to and filter down to ones
+     * where the logged-in user is in the admin sect. Prefer
+     * [refreshAdminGroups]+[adminGroupsFlow] for UI use — this is the
+     * raw one-shot fetch.
+     */
+    suspend fun fetchAdminGroupsLive(): List<AdminGroup> {
+        val ch = channel ?: error("not connected")
+        val body = ch.scry("groups", "/v2/groups") as? JsonObject ?: return emptyList()
+        val me = ourPatp
+        Log.d(TAG, "fetchAdminGroups: ${body.size} total groups, me=$me")
+        // The `/v2/groups` scry can return a lightweight listing where
+        // `fleet`/`bloc` are absent. Re-scry each flag individually via
+        // `/v2/groups/<flag>` to get the full group state every time.
+        val out = mutableListOf<AdminGroup>()
+        for ((flag, _) in body) {
+            val full = runCatching {
+                ch.scry("groups", "/v2/groups/$flag") as? JsonObject
+            }.getOrNull()
+            if (full == null) {
+                Log.w(TAG, "  $flag: full scry returned null, skipping")
+                continue
+            }
+            if (flag == body.keys.first()) {
+                Log.d(TAG, "  sample keys for $flag: ${full.keys}")
+                Log.d(TAG, "  sample admins for $flag: ${full["admins"]}")
+                val seats = full["seats"] as? JsonObject
+                val firstSeat = seats?.entries?.firstOrNull()
+                Log.d(TAG, "  sample seat for $flag: " +
+                    "${firstSeat?.key} -> ${firstSeat?.value?.toString()?.take(500)}")
+                Log.d(TAG, "  total seats: ${seats?.size}")
+            }
+            val g = parseAdminGroup(flag, full)
+            val host = flag.substringBefore('/')
+            val isHost = host == me
+            val memberSects = g.members.firstOrNull { it.ship == me }?.sects.orEmpty()
+            val amAdmin = isHost || g.adminSects.any { it in memberSects } ||
+                "admin" in memberSects
+            Log.d(TAG, "  $flag host=$host members=${g.members.size} " +
+                "admin=$amAdmin sects=$memberSects bloc=${g.adminSects}")
+            if (amAdmin) out += g
+        }
+        return out.sortedBy { (it.title ?: it.flag).lowercase() }
+    }
+
+    /**
+     * Re-fetch a single group's admin view. Cheaper than re-scrying
+     * the whole directory after a poke.
+     */
+    suspend fun fetchGroupAdmin(flag: String): AdminGroup? {
+        val ch = channel ?: error("not connected")
+        val body = ch.scry("groups", "/v2/groups/$flag") as? JsonObject ?: return null
+        return parseAdminGroup(flag, body)
+    }
+
+    private fun parseAdminGroup(flag: String, obj: JsonObject): AdminGroup {
+        val meta = obj["meta"] as? JsonObject
+        fun metaStr(key: String) = meta?.get(key)?.jsonPrimitive?.contentIfString()
+            ?.takeIf { it.isNotBlank() }
+
+        val host = flag.substringBefore('/')
+        // Schema renamed: `bloc` → `admins`, `fleet` → `seats`,
+        // `cordon` → `admissions`, `sects` → `roles`. Keep fallbacks
+        // to the older names for ships still on the legacy agent.
+        val adminArr = (obj["admins"] ?: obj["bloc"]) as? JsonArray
+        val adminSects = adminArr?.mapNotNull { it.jsonPrimitive.contentIfString() }
+            ?.toSet() ?: emptySet()
+
+        val members = (obj["seats"] ?: obj["fleet"]) as? JsonObject
+        val mems = members?.mapNotNull { (ship, entry) ->
+            val entryObj = entry as? JsonObject ?: return@mapNotNull null
+            val rolesArr = (entryObj["roles"] ?: entryObj["sects"]) as? JsonArray
+                ?: JsonArray(emptyList())
+            val sects = rolesArr.mapNotNull {
+                it.jsonPrimitive.contentIfString()
+            }.toSet()
+            AdminMember(
+                ship = ship,
+                sects = sects,
+                isAdmin = ship == host || "admin" in sects ||
+                    adminSects.any { it in sects },
+            )
+        }?.sortedBy { it.ship } ?: emptyList()
+
+        val admissions = (obj["admissions"] ?: obj["cordon"]) as? JsonObject
+        // New flat admissions schema has: banned, invited, pending,
+        // privacy, tokens, requests — no tagged union. Privacy drives
+        // whether we treat the group as open (public) or shut
+        // (private/secret) for back-compat with legacy pokes.
+        val privacy = admissions?.get("privacy")?.jsonPrimitive?.contentIfString()
+        val cordonKind = when {
+            // New schema path — derive from privacy.
+            privacy == "public" -> "open"
+            privacy != null -> "shut"
+            // Old tagged-union fallback for legacy agent:
+            admissions?.get("open") is JsonObject -> "open"
+            admissions?.get("shut") is JsonObject -> "shut"
+            else -> "shut"
+        }
+        val bannedSet = ((admissions?.get("banned") as? JsonObject)
+            ?.get("ships") as? JsonArray)
+            ?: ((admissions?.get("open") as? JsonObject)?.get("ships") as? JsonArray)
+        val bannedShips = bannedSet?.mapNotNull { it.jsonPrimitive.contentIfString() }
+            ?.toSet() ?: emptySet()
+        val seatKeys = (obj["seats"] as? JsonObject)?.keys ?: emptySet()
+        // `admissions.invited` = ships invited via a token (shareable
+        // link). Each value is `{token, at}`. Revoke by deleting the
+        // token via `entry.token.del: <tokenstr>`.
+        val invitedMap = (admissions?.get("invited") as? JsonObject)
+            ?.mapNotNull { (ship, v) ->
+                if (ship in seatKeys) return@mapNotNull null
+                val token = (v as? JsonObject)?.get("token")
+                    ?.jsonPrimitive?.contentIfString() ?: return@mapNotNull null
+                ship to token
+            }?.toMap() ?: emptyMap()
+        // `admissions.pending` = direct invites (no token). Revoke
+        // via `entry.pending.a-pending.del` with ships list.
+        val directInvitedShips = (admissions?.get("pending") as? JsonObject)
+            ?.keys?.filterNot { it in seatKeys }?.toSet() ?: emptySet()
+        // `admissions.requests` = inbound join requests. Approve/deny
+        // via `entry.ask.a-ask = "approve"|"deny"`.
+        val pendingShips = (admissions?.get("requests") as? JsonObject)
+            ?.keys?.toSet() ?: emptySet()
+
+        return AdminGroup(
+            flag = flag,
+            title = metaStr("title"),
+            description = metaStr("description"),
+            image = metaStr("image"),
+            cover = metaStr("cover"),
+            members = mems,
+            cordonKind = cordonKind,
+            privacy = privacy,
+            bannedShips = bannedShips,
+            invitedTokenByShip = invitedMap,
+            directInvitedShips = directInvitedShips,
+            pendingShips = pendingShips,
+            adminSects = adminSects,
+        )
+    }
+
+    /** Update a group's title/description/image/cover via %meta poke. */
+    suspend fun updateGroupMeta(
+        flag: String,
+        title: String,
+        description: String,
+        image: String,
+        cover: String,
+    ) {
+        pokeAGroup(flag, buildJsonObject {
+            put("meta", buildJsonObject {
+                put("title", title)
+                put("description", description)
+                put("image", image)
+                put("cover", cover)
+            })
+        })
+    }
+
+    /**
+     * Invite one or more ships to a group. Works for all privacy
+     * levels — the ship gets an invite token in `admissions.invited`.
+     */
+    suspend fun inviteToGroup(flag: String, ship: String): Boolean {
+        val ch = channel ?: error("not connected")
+        val p = if (!ship.startsWith("~")) "~$ship" else ship
+        ch.poke(
+            app = "groups",
+            mark = "group-action-4",
+            payload = buildJsonObject {
+                put("invite", buildJsonObject {
+                    put("flag", flag)
+                    put("ships", buildJsonArray { add(JsonPrimitive(p)) })
+                    put("a-invite", buildJsonObject {
+                        put("token", JsonNull)
+                        put("note", JsonNull)
+                    })
+                })
+            },
+        )
+        return true
+    }
+
+    /** Remove a ship from the group (kick). */
+    suspend fun kickFromGroup(flag: String, ship: String) {
+        val p = if (!ship.startsWith("~")) "~$ship" else ship
+        pokeAGroup(flag, buildJsonObject {
+            put("seat", buildJsonObject {
+                put("ships", buildJsonArray { add(JsonPrimitive(p)) })
+                put("a-seat", buildJsonObject { put("del", JsonNull) })
+            })
+        })
+    }
+
+    /** Ban a ship from re-joining. */
+    suspend fun banFromGroup(flag: String, ship: String): Boolean {
+        val p = if (!ship.startsWith("~")) "~$ship" else ship
+        pokeAGroup(flag, buildJsonObject {
+            put("entry", buildJsonObject {
+                put("ban", buildJsonObject {
+                    put("add-ships", buildJsonArray { add(JsonPrimitive(p)) })
+                })
+            })
+        })
+        return true
+    }
+
+    /** Remove a ship from the ban list. */
+    suspend fun unbanFromGroup(flag: String, ship: String, cordonKind: String): Boolean {
+        val p = if (!ship.startsWith("~")) "~$ship" else ship
+        pokeAGroup(flag, buildJsonObject {
+            put("entry", buildJsonObject {
+                put("ban", buildJsonObject {
+                    put("del-ships", buildJsonArray { add(JsonPrimitive(p)) })
+                })
+            })
+        })
+        return true
+    }
+
+    /**
+     * Toggle a role on a single member via `seat.a-seat.{add,del}-roles`.
+     */
+    suspend fun setMemberRole(flag: String, ship: String, role: String, add: Boolean) {
+        val p = if (!ship.startsWith("~")) "~$ship" else ship
+        val key = if (add) "add-roles" else "del-roles"
+        pokeAGroup(flag, buildJsonObject {
+            put("seat", buildJsonObject {
+                put("ships", buildJsonArray { add(JsonPrimitive(p)) })
+                put("a-seat", buildJsonObject {
+                    put(key, buildJsonArray { add(JsonPrimitive(role)) })
+                })
+            })
+        })
+    }
+
+    /**
+     * Cache of inbound group invites. Populated by [refreshInvites]
+     * and consumed by the Invites screen. null = never loaded.
+     */
+    private val _invites = MutableStateFlow<List<InviteSummary>?>(null)
+    val invitesFlow: StateFlow<List<InviteSummary>?> = _invites.asStateFlow()
+
+    /**
+     * Try a series of candidate scry paths to find inbound invites.
+     * The renamed agent dropped `/gangs` (404); the new path is
+     * unknown until we probe. First hit wins; all attempts are logged
+     * so we can pin down the working path from a single round-trip.
+     */
+    /**
+     * Fetch inbound invites from the `groups-ui /v7/init` scry and
+     * filter to foreigns that have at least one valid invite. The
+     * init response also contains everything else the client needs,
+     * but we only read `foreigns` here.
+     */
+    suspend fun refreshInvites() {
+        val ch = channel ?: error("not connected")
+        val body = runCatching {
+            ch.scry("groups-ui", "/v7/init") as? JsonObject
+        }.onFailure { Log.w(TAG, "scry groups-ui/v7/init failed", it) }.getOrNull()
+        if (body == null) { _invites.value = emptyList(); return }
+        val foreigns = body["foreigns"] as? JsonObject
+        if (foreigns == null) {
+            Log.w(TAG, "refreshInvites: no foreigns in init response, keys=${body.keys}")
+            _invites.value = emptyList()
+            return
+        }
+        Log.d(TAG, "refreshInvites: ${foreigns.size} foreigns")
+        val out = mutableListOf<InviteSummary>()
+        for ((flag, foreign) in foreigns) {
+            val f = foreign as? JsonObject ?: continue
+            // invites is an array of {ship, token, valid, ...}; keep
+            // only foreigns with at least one valid invite.
+            val invites = f["invites"] as? JsonArray ?: continue
+            val firstValid = invites.asSequence()
+                .mapNotNull { it as? JsonObject }
+                .firstOrNull { (it["valid"] as? JsonPrimitive)?.content == "true" }
+                ?: continue
+            val inviter = firstValid["ship"]?.jsonPrimitive?.contentIfString()
+            val preview = f["preview"] as? JsonObject
+            val meta = preview?.get("meta") as? JsonObject
+            fun metaStr(k: String) = meta?.get(k)?.jsonPrimitive?.contentIfString()
+                ?.takeIf { it.isNotBlank() }
+            out += InviteSummary(
+                flag = flag,
+                inviter = inviter,
+                title = metaStr("title"),
+                description = metaStr("description"),
+                image = metaStr("image"),
+                cover = metaStr("cover"),
+                memberCount = null,
+            )
+        }
+        _invites.value = out.sortedBy { (it.title ?: it.flag).lowercase() }
+    }
+
+    /** Accept an inbound group invite via `group-join`. */
+    suspend fun acceptInvite(flag: String) {
+        val ch = channel ?: error("not connected")
+        ch.poke(
+            app = "groups",
+            mark = "group-join",
+            payload = buildJsonObject {
+                put("flag", flag)
+                put("join-all", true)
+            },
+        )
+        _invites.value = _invites.value?.filterNot { it.flag == flag }
+    }
+
+    /** Reject an inbound group invite via `invite-decline`. */
+    suspend fun rejectInvite(flag: String) {
+        val ch = channel ?: error("not connected")
+        ch.poke(
+            app = "groups",
+            mark = "invite-decline",
+            payload = JsonPrimitive(flag),
+        )
+        _invites.value = _invites.value?.filterNot { it.flag == flag }
+    }
+
+    /**
+     * Revoke a token-based invite by deleting the token from
+     * `admissions.tokens` — ships in `admissions.invited` all have
+     * a token; the map maps ship → token.
+     */
+    suspend fun revokeTokenInvite(flag: String, token: String) {
+        pokeAGroup(flag, buildJsonObject {
+            put("entry", buildJsonObject {
+                put("token", buildJsonObject {
+                    put("del", token)
+                })
+            })
+        })
+    }
+
+    /**
+     * Revoke a direct (no-token) invite: drop the ship from
+     * `admissions.pending` via `entry.pending.a-pending.del`.
+     */
+    suspend fun revokeDirectInvite(flag: String, ship: String) {
+        val p = if (!ship.startsWith("~")) "~$ship" else ship
+        pokeAGroup(flag, buildJsonObject {
+            put("entry", buildJsonObject {
+                put("pending", buildJsonObject {
+                    put("ships", buildJsonArray { add(JsonPrimitive(p)) })
+                    put("a-pending", buildJsonObject { put("del", JsonNull) })
+                })
+            })
+        })
+    }
+
+    /** Accept a join request: `ask` → `approve`. */
+    suspend fun approveRequest(flag: String, ship: String) {
+        val p = if (!ship.startsWith("~")) "~$ship" else ship
+        pokeAGroup(flag, buildJsonObject {
+            put("entry", buildJsonObject {
+                put("ask", buildJsonObject {
+                    put("ships", buildJsonArray { add(JsonPrimitive(p)) })
+                    put("a-ask", "approve")
+                })
+            })
+        })
+    }
+
+    /** Deny a join request: `ask` → `deny`. */
+    suspend fun denyRequest(flag: String, ship: String) {
+        val p = if (!ship.startsWith("~")) "~$ship" else ship
+        pokeAGroup(flag, buildJsonObject {
+            put("entry", buildJsonObject {
+                put("ask", buildJsonObject {
+                    put("ships", buildJsonArray { add(JsonPrimitive(p)) })
+                    put("a-ask", "deny")
+                })
+            })
+        })
+    }
+
+    /**
+     * Send a `group-action-4` poke wrapping the given `a-group` diff
+     * for the target group. All admin actions (meta, seat, entry,
+     * role) go through this helper.
+     */
+    private suspend fun pokeAGroup(flag: String, aGroup: JsonObject) {
+        val ch = channel ?: error("not connected")
+        ch.poke(
+            app = "groups",
+            mark = "group-action-4",
+            payload = buildJsonObject {
+                put("group", buildJsonObject {
+                    put("flag", flag)
+                    put("a-group", aGroup)
+                })
+            },
+        )
+    }
+
+    private fun wrapGroupDiff(flag: String, diff: JsonObject): JsonObject =
+        buildJsonObject {
+            put("flag", flag)
+            put("update", buildJsonObject {
+                put("time", JsonNull)
+                put("diff", diff)
+            })
+        }
 
     suspend fun updateProfile(
         nickname: String? = null,
@@ -1913,6 +2407,9 @@ class TlonChatRepo(
     companion object {
         private const val TAG = "TlonChatRepo"
         private val JSON_MEDIA_TYPE = "application/json".toMediaType()
+        // 5 minutes — refresh on screen entry if older, instant paint
+        // from cache within the window.
+        private const val ADMIN_CACHE_TTL_MS = 5L * 60_000L
     }
 
     /** Wraps a writ diff for %chat's chat-dm-action-2 mark. */

@@ -103,6 +103,8 @@ fun DmListScreen(
     onOpenStatusFeed: () -> Unit,
     onOpenBookmarks: () -> Unit,
     onOpenActivity: () -> Unit,
+    onOpenAdministration: () -> Unit = {},
+    onOpenInvites: () -> Unit = {},
     onOpenSettings: () -> Unit,
     /** Every ship the user is logged in with. The switcher drawer
      *  lists them and the header badge shows the active one when the
@@ -459,6 +461,20 @@ fun DmListScreen(
                         onClick = {
                             menuOpen = false
                             onOpenActivity()
+                        },
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Administration") },
+                        onClick = {
+                            menuOpen = false
+                            onOpenAdministration()
+                        },
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Invites") },
+                        onClick = {
+                            menuOpen = false
+                            onOpenInvites()
                         },
                     )
                     DropdownMenuItem(

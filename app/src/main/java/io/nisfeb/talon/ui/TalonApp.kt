@@ -37,6 +37,9 @@ import io.nisfeb.talon.ui.screens.NewDmScreen
 import io.nisfeb.talon.ui.screens.ProfileEditScreen
 import io.nisfeb.talon.ui.screens.SearchScreen
 import io.nisfeb.talon.ui.screens.ActivityFeedScreen
+import io.nisfeb.talon.ui.screens.GroupAdminListScreen
+import io.nisfeb.talon.ui.screens.GroupAdminScreen
+import io.nisfeb.talon.ui.screens.GroupInvitesScreen
 import io.nisfeb.talon.ui.screens.BookmarksScreen
 import io.nisfeb.talon.ui.screens.StatusFeedScreen
 import io.nisfeb.talon.ui.screens.ThreadScreen
@@ -110,6 +113,9 @@ fun TalonApp(
     var bookmarksOpen by remember { mutableStateOf(false) }
     var activityOpen by remember { mutableStateOf(false) }
     var settingsOpen by remember { mutableStateOf(false) }
+    var adminListOpen by remember { mutableStateOf(false) }
+    var adminGroupFlag by remember { mutableStateOf<String?>(null) }
+    var invitesOpen by remember { mutableStateOf(false) }
     var profileSheetShip by remember { mutableStateOf<String?>(null) }
 
     // TalonApplication.onCreate restores the previously-active ship
@@ -222,6 +228,11 @@ fun TalonApp(
         BackHandler(enabled = bookmarksOpen) { bookmarksOpen = false }
         BackHandler(enabled = activityOpen) { activityOpen = false }
         BackHandler(enabled = settingsOpen) { settingsOpen = false }
+        BackHandler(enabled = adminGroupFlag != null) { adminGroupFlag = null }
+        BackHandler(enabled = adminListOpen && adminGroupFlag == null) {
+            adminListOpen = false
+        }
+        BackHandler(enabled = invitesOpen) { invitesOpen = false }
         BackHandler(enabled = pendingShare != null) { onShareConsumed() }
         BackHandler(enabled = searchOpen) { searchOpen = false }
         BackHandler(enabled = newDmOpen) { newDmOpen = false }
@@ -288,6 +299,26 @@ fun TalonApp(
                     openWhom = whom
                 },
                 onBack = { activityOpen = false },
+                modifier = mod,
+            )
+
+            adminGroupFlag != null -> GroupAdminScreen(
+                repo = app.repo,
+                flag = adminGroupFlag!!,
+                onBack = { adminGroupFlag = null },
+                modifier = mod,
+            )
+
+            adminListOpen -> GroupAdminListScreen(
+                repo = app.repo,
+                onBack = { adminListOpen = false },
+                onOpenGroup = { adminGroupFlag = it },
+                modifier = mod,
+            )
+
+            invitesOpen -> GroupInvitesScreen(
+                repo = app.repo,
+                onBack = { invitesOpen = false },
                 modifier = mod,
             )
 
@@ -426,6 +457,8 @@ fun TalonApp(
                 onOpenStatusFeed = { statusFeedOpen = true },
                 onOpenBookmarks = { bookmarksOpen = true },
                 onOpenActivity = { activityOpen = true },
+                onOpenAdministration = { adminListOpen = true },
+                onOpenInvites = { invitesOpen = true },
                 onOpenSettings = { settingsOpen = true },
                 onSignOut = {
                     app.signOutActive()
