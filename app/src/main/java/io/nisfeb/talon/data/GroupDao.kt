@@ -39,4 +39,13 @@ interface GroupDao {
 
     @Query("DELETE FROM channel_groups WHERE nest = :nest")
     suspend fun deleteChannelGroup(nest: String)
+
+    @Query("UPDATE channel_groups SET pinnedPostId = :pinnedPostId WHERE nest = :nest")
+    suspend fun setPinnedPostId(nest: String, pinnedPostId: String?)
+
+    @Query("SELECT pinnedPostId FROM channel_groups WHERE nest = :nest LIMIT 1")
+    fun streamPinnedPostId(nest: String): Flow<String?>
+
+    @Query("SELECT pinnedPostId FROM channel_groups WHERE nest = :nest LIMIT 1")
+    suspend fun pinnedPostIdFor(nest: String): String?
 }

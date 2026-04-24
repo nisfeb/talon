@@ -54,6 +54,19 @@ internal fun channelAction(nest: String, action: JsonObject): JsonObject =
         })
     }
 
+/**
+ * `action.order: [dottedPostId, …]` — set a channel's pinned/arranged
+ * posts list. Tlon's pin feature is `order[0]`; pin by prepending the
+ * post's dotted id, unpin by filtering it out. Pass an empty list to
+ * clear.
+ */
+internal fun channelOrderAction(postIds: List<String>): JsonObject =
+    buildJsonObject {
+        put("order", buildJsonArray {
+            postIds.forEach { add(JsonPrimitive(dotAtom(it))) }
+        })
+    }
+
 /** Writs reply-add delta (DM / club). */
 internal fun replyDelta(replyId: String, replyEssay: JsonObject): JsonObject =
     buildJsonObject {

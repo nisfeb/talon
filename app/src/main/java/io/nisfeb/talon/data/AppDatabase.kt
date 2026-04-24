@@ -23,7 +23,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         GroupOrderEntity::class,
         ReactionUsageEntity::class,
     ],
-    version = 20,
+    version = 21,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -67,6 +67,15 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        private val MIGRATION_20_21 = object : Migration(20, 21) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // Channel-scoped pinned post (Tlon's order[0]).
+                db.execSQL(
+                    "ALTER TABLE channel_groups ADD COLUMN pinnedPostId TEXT"
+                )
+            }
+        }
+
         /**
          * Open the Room database for a specific ship. Each ship's
          * data lives in its own file so switching ships is a clean
@@ -81,7 +90,10 @@ abstract class AppDatabase : RoomDatabase() {
                 AppDatabase::class.java,
                 filename,
             )
-                .addMigrations(MIGRATION_17_18, MIGRATION_18_19, MIGRATION_19_20)
+                .addMigrations(
+                    MIGRATION_17_18, MIGRATION_18_19, MIGRATION_19_20,
+                    MIGRATION_20_21,
+                )
                 .fallbackToDestructiveMigration()
                 .build()
         }

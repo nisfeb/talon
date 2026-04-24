@@ -247,6 +247,8 @@ class TlonChatRepo(
                 .onFailure { Log.e(TAG, "clubs scry failed", it) }
             runCatching { bootstrapGroups(ch) }
                 .onFailure { Log.e(TAG, "groups scry failed", it) }
+            runCatching { bootstrapChannelOrders(ch) }
+                .onFailure { Log.e(TAG, "channel orders scry failed", it) }
         }
 
         // Settings sync — scries our desk and also subscribes so any
@@ -1747,6 +1749,36 @@ class TlonChatRepo(
         )
     }
 
+    /**
+     * Pin [postId] in [nest]. Tlon's pinned post is `channel.order[0]`;
+     * we prepend [postId] to the current order (dropping any existing
+     * occurrence) and ship the new list.
+     */
+    suspend fun pinPost(nest: String, postId: String) {
+        require(nest.startsWith("chat/")) { "pin only supported on chat channels: $nest" }
+        val ch = channel ?: error("not connected")
+        val current = db.groups().pinnedPostIdFor(nest)
+        // The banner only ever reads order[0]; keeping just [postId]
+        // matches behavior and dodges a full scry on every pin.
+        val next = if (current == postId) return else listOf(postId)
+        ch.poke(
+            app = "channels", mark = "channel-action-2",
+            payload = channelAction(nest, channelOrderAction(next)),
+        )
+        db.groups().setPinnedPostId(nest, postId)
+    }
+
+    /** Unpin whatever is currently pinned in [nest]. */
+    suspend fun unpinPost(nest: String) {
+        require(nest.startsWith("chat/")) { "pin only supported on chat channels: $nest" }
+        val ch = channel ?: error("not connected")
+        ch.poke(
+            app = "channels", mark = "channel-action-2",
+            payload = channelAction(nest, channelOrderAction(emptyList())),
+        )
+        db.groups().setPinnedPostId(nest, null)
+    }
+
     // ───────── ingest ─────────
 
     private suspend fun bootstrap(channel: UrbitChannel) {
@@ -2030,6 +2062,8 @@ class TlonChatRepo(
             }
             is ChannelDeltaIntent.Reply ->
                 applyReplyIntent(nest, intent.parentId, intent.replyId, intent.inner)
+            is ChannelDeltaIntent.OrderUpdate ->
+                db.groups().setPinnedPostId(nest, intent.postIds.firstOrNull())
             is ChannelDeltaIntent.PendingPost,
             is ChannelDeltaIntent.Unknown -> Unit
         }
@@ -2319,6 +2353,25 @@ class TlonChatRepo(
     }
 
     // ───────── groups ─────────
+
+    /**
+     * Scry the %channels agent for each chat channel's `order` field
+     * and mirror `order[0]` into `channel_groups.pinnedPostId`. Without
+     * this, the pinned banner only populates after the next SSE order
+     * event — on cold start we'd otherwise show nothing for channels
+     * pinned long ago.
+     */
+    private suspend fun bootstrapChannelOrders(channel: UrbitChannel) {
+        val body = channel.scry("channels", "/v5/channels")
+        val obj = body as? JsonObject ?: return
+        for ((nest, ch) in obj) {
+            if (!nest.startsWith("chat/")) continue
+            val chObj = ch as? JsonObject ?: continue
+            val order = chObj["order"] as? kotlinx.serialization.json.JsonArray
+            val pinned = order?.firstOrNull().asStr()?.replace(".", "")
+            db.groups().setPinnedPostId(nest, pinned)
+        }
+    }
 
     /**
      * Load group metadata + channel→group mapping. %groups /v2/groups

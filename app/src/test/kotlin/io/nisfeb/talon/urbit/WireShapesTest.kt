@@ -72,6 +72,26 @@ class WireShapesTest {
         assertTrue(ch["action"]!!.jsonObject.containsKey("post"))
     }
 
+    @Test
+    fun `channelOrderAction dot-groups each post id`() {
+        // Pin poke: channel-action-2 action carries {order: [dottedId]}.
+        // Ids must be dot-grouped per the channels schema's `id` serializer.
+        val out = channelOrderAction(listOf("170141184507933044937549665940933705728"))
+        val arr = out["order"]!!.jsonArray
+        assertEquals(1, arr.size)
+        assertEquals(
+            "170.141.184.507.933.044.937.549.665.940.933.705.728",
+            arr[0].jsonPrimitive.content,
+        )
+    }
+
+    @Test
+    fun `channelOrderAction with empty list clears pin`() {
+        // Unpin: set order to []. Banner clears when server echoes back.
+        val out = channelOrderAction(emptyList())
+        assertEquals(0, out["order"]!!.jsonArray.size)
+    }
+
     // ─── reply deltas ────────────────────────────────────────────
 
     @Test

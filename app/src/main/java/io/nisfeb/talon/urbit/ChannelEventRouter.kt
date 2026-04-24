@@ -1,5 +1,6 @@
 package io.nisfeb.talon.urbit
 
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 
@@ -41,6 +42,13 @@ internal sealed interface ChannelDeltaIntent {
     /** Optimistic pending insert — the server is about to commit. */
     data class PendingPost(val payload: JsonObject) : ChannelDeltaIntent
 
+    /**
+     * Channel's `order` list changed — used by Tlon for pinned posts.
+     * `postIds` is already undotted; `postIds.firstOrNull()` is the
+     * pinned post, or null when nothing is pinned (empty list).
+     */
+    data class OrderUpdate(val postIds: List<String>) : ChannelDeltaIntent
+
     /** Anything we don't recognize — caller can ignore or log. */
     data class Unknown(val keys: Set<String>) : ChannelDeltaIntent
 }
@@ -65,6 +73,13 @@ internal fun classifyChannelDelta(response: JsonObject): ChannelDeltaIntent {
     }
     (response["pending"] as? JsonObject)?.let { pending ->
         return ChannelDeltaIntent.PendingPost(pending)
+    }
+    // `order` is Tlon's "arranged posts" list. Today it powers a
+    // single pinned post (order[0]); the rest of the array is
+    // reserved for future ordering use cases.
+    (response["order"] as? JsonArray)?.let { order ->
+        val ids = order.mapNotNull { it.asStr()?.replace(".", "") }
+        return ChannelDeltaIntent.OrderUpdate(ids)
     }
     val wrap = response["post"] as? JsonObject
         ?: return ChannelDeltaIntent.Unknown(response.keys)

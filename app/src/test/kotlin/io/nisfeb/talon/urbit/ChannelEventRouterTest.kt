@@ -180,4 +180,34 @@ class ChannelEventRouterTest {
         val intent = classify(raw)
         assertTrue(intent is ChannelDeltaIntent.Unknown)
     }
+
+    // ─── order / pinned posts ────────────────────────────────────
+
+    @Test
+    fun `order response routes to OrderUpdate with undotted ids`() {
+        // Tlon's pin feature uses channel.order; SSE emits the new list
+        // directly. Ids arrive dot-grouped like every other @ud on the
+        // wire — we strip dots so DB lookups match.
+        val raw = """
+            {"order":["170.141.184.507.933.044.937.549.665.940.933.705.728",
+                      "170.141.184.507.933.044.937.549.665.940.933.705.729"]}
+        """.trimIndent()
+        val intent = classify(raw) as ChannelDeltaIntent.OrderUpdate
+        assertEquals(
+            listOf(
+                "170141184507933044937549665940933705728",
+                "170141184507933044937549665940933705729",
+            ),
+            intent.postIds,
+        )
+    }
+
+    @Test
+    fun `empty order list routes to OrderUpdate with empty list`() {
+        // Unpin = set order to []. Caller treats firstOrNull() as the
+        // pinned post, so an empty list clears the pinned banner.
+        val raw = """{"order":[]}"""
+        val intent = classify(raw) as ChannelDeltaIntent.OrderUpdate
+        assertEquals(emptyList<String>(), intent.postIds)
+    }
 }

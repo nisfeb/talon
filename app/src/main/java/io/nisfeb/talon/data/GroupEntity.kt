@@ -26,4 +26,11 @@ data class ChannelGroupEntity(
     val groupFlag: String,
     /** Display title from the channel's meta block, if set. */
     val title: String? = null,
+    /**
+     * Pinned post id (undotted @ud), or null if nothing is pinned.
+     * Tlon stores the full `channel.order` array but renders only the
+     * first element — we track just that, which is simpler and matches
+     * the feature's actual surface (one pinned post per channel).
+     */
+    val pinnedPostId: String? = null,
 )

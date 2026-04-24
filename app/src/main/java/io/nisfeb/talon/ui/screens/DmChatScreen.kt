@@ -46,6 +46,7 @@ import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.NotificationsOff
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material3.DropdownMenu
@@ -175,6 +176,13 @@ fun DmChatScreen(
             db.groups().streamChannelGroups(),
         )
     }.collectAsState(initial = ContactMap.EMPTY)
+
+    // Current pinned-post id for this channel (chat channels only);
+    // null for DMs / clubs / non-chat channels.
+    val pinnedPostId by remember(whom) {
+        if (whom.startsWith("chat/")) db.groups().streamPinnedPostId(whom)
+        else kotlinx.coroutines.flow.flowOf(null)
+    }.collectAsState(initial = null)
 
     val listState = rememberLazyListState()
 
@@ -619,6 +627,23 @@ fun DmChatScreen(
                 },
             )
         }
+        pinnedPostId?.let { pinId ->
+            PinnedPostBanner(
+                whom = whom,
+                postId = pinId,
+                db = db,
+                contactMap = contactMap,
+                onTap = {
+                    val idx = rows.indexOfFirst {
+                        it is ChatListItem.Message && it.row.m.id == pinId
+                    }
+                    if (idx >= 0) {
+                        val reverseIdx = rows.size - 1 - idx
+                        scope.launch { listState.animateScrollToItem(reverseIdx) }
+                    }
+                },
+            )
+        }
         LazyColumn(
             state = listState,
             modifier = Modifier.weight(1f).fillMaxSize(),
@@ -969,6 +994,7 @@ fun DmChatScreen(
             ourPatp = ourPatp,
             isChannel = whom.startsWith("chat/"),
             isBookmarked = isBookmarked,
+            isPinned = pinnedPostId == target.id,
             onDismiss = { actionTarget = null },
             onPickReaction = { emoji ->
                 actionTarget = null
@@ -1017,6 +1043,18 @@ fun DmChatScreen(
             onDelete = {
                 actionTarget = null
                 confirmingDelete = target
+            },
+            onTogglePin = {
+                val wasPinned = pinnedPostId == target.id
+                actionTarget = null
+                scope.launch {
+                    runCatching {
+                        if (wasPinned) repo.unpinPost(whom)
+                        else repo.pinPost(whom, target.id)
+                    }.onFailure {
+                        sendError = "pin failed: ${it.message ?: it::class.simpleName}"
+                    }
+                }
             },
             showAiEmoji = aiConfigured.hasKey() && aiConfigured.emojiReactEnabled,
             aiEmojiWorking = aiEmojiWorking,
@@ -1336,6 +1374,7 @@ private fun MessageActionSheet(
     ourPatp: String,
     isChannel: Boolean,
     isBookmarked: Boolean,
+    isPinned: Boolean,
     onDismiss: () -> Unit,
     onPickReaction: (String) -> Unit,
     onReply: () -> Unit,
@@ -1345,6 +1384,7 @@ private fun MessageActionSheet(
     onToggleBookmark: () -> Unit,
     onEdit: () -> Unit,
     onDelete: () -> Unit,
+    onTogglePin: () -> Unit,
     showAiEmoji: Boolean,
     aiEmojiWorking: Boolean,
     onAiEmoji: () -> Unit,
@@ -1467,6 +1507,15 @@ private fun MessageActionSheet(
             // edit pokes, and reply-edit isn't in either agent's mold.
             if (isMine && isChannel && message.parentId == null) {
                 TextButton(onClick = onEdit) { Text("Edit") }
+            }
+            // Pin / Unpin — chat channels only, top-level posts only.
+            // Admin-gated server-side; we show the button optimistically
+            // and let the ship NACK for non-admins (same pattern as
+            // channel-delete above).
+            if (isChannel && message.parentId == null) {
+                TextButton(onClick = onTogglePin) {
+                    Text(if (isPinned) "Unpin" else "Pin (admin)")
+                }
             }
             // Delete: always allowed on your own messages. On channels
             // we also show it for others' messages — the server
@@ -1805,6 +1854,60 @@ private fun CatchMeUpBanner(
                 strokeWidth = 2.dp,
                 modifier = Modifier.size(16.dp),
             )
+        }
+    }
+}
+
+/**
+ * Pinned post banner rendered above the channel's message list when
+ * an admin has pinned a post. Shows author + preview; taps scroll the
+ * list to the pinned message.
+ */
+@Composable
+private fun PinnedPostBanner(
+    whom: String,
+    postId: String,
+    db: AppDatabase,
+    contactMap: ContactMap,
+    onTap: () -> Unit,
+) {
+    val message by remember(whom, postId) {
+        db.messages().streamOne(whom, postId)
+    }.collectAsState(initial = null)
+    val m = message ?: return
+    val preview = remember(m.id, m.contentJson) {
+        StoryCache.textFor(m.id, m.contentJson).take(200).replace('\n', ' ')
+    }
+    val author = remember(m.author, contactMap) { contactMap.displayName(m.author) }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.secondaryContainer)
+            .clickable(onClick = onTap)
+            .padding(horizontal = 16.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Icon(
+            Icons.Filled.PushPin,
+            contentDescription = "Pinned",
+            tint = MaterialTheme.colorScheme.onSecondaryContainer,
+            modifier = Modifier.size(18.dp),
+        )
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                "Pinned · $author",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSecondaryContainer,
+            )
+            if (preview.isNotBlank()) {
+                Text(
+                    preview,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSecondaryContainer,
+                    maxLines = 1,
+                )
+            }
         }
     }
 }
