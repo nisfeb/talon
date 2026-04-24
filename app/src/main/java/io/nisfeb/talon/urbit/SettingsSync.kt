@@ -8,8 +8,8 @@ import io.nisfeb.talon.data.FolderEntity
 import io.nisfeb.talon.data.FolderMemberEntity
 import io.nisfeb.talon.data.GroupOrderEntity
 import io.nisfeb.talon.data.NotifyPreferenceEntity
-import io.nisfeb.talon.data.PinEntity
 import kotlinx.coroutines.flow.first
+import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
@@ -39,7 +39,6 @@ class SettingsSync(
     companion object {
         private const val TAG = "SettingsSync"
         const val DESK = "talon"
-        const val BUCKET_PINS = "pins"
         const val BUCKET_GROUP_ORDERS = "group-orders"
         const val BUCKET_FOLDERS = "folders"
         const val BUCKET_FOLDER_MEMBERS = "folder-members"
@@ -83,8 +82,7 @@ class SettingsSync(
             seedFromLocal()
         } else {
             // Ship has state: treat it as authoritative, replace local.
-            applyBucket(BUCKET_PINS, deskMap!![BUCKET_PINS] as? JsonObject)
-            applyBucket(BUCKET_GROUP_ORDERS, deskMap[BUCKET_GROUP_ORDERS] as? JsonObject)
+            applyBucket(BUCKET_GROUP_ORDERS, deskMap!![BUCKET_GROUP_ORDERS] as? JsonObject)
             applyBucket(BUCKET_FOLDERS, deskMap[BUCKET_FOLDERS] as? JsonObject)
             applyBucket(BUCKET_FOLDER_MEMBERS, deskMap[BUCKET_FOLDER_MEMBERS] as? JsonObject)
             applyBucket(BUCKET_NOTIFY_PREFS, deskMap[BUCKET_NOTIFY_PREFS] as? JsonObject)
@@ -103,18 +101,6 @@ class SettingsSync(
 
     /** First-time setup: push whatever's in Room to the ship. */
     private suspend fun seedFromLocal() {
-        // Pins
-        db.pins().stream().first()
-            .takeIf { it.isNotEmpty() }?.let { pins ->
-                pokePutBucket(
-                    BUCKET_PINS,
-                    buildJsonObject {
-                        pins.forEach { p ->
-                            put(p.whom, buildJsonObject { put("ordinal", p.ordinal) })
-                        }
-                    },
-                )
-            }
         // Group orders
         db.groupOrders().stream().first()
             .takeIf { it.isNotEmpty() }?.let { orders ->
@@ -151,6 +137,7 @@ class SettingsSync(
                         members.forEach { m ->
                             put(folderMemberKey(m.folderId, m.whom), buildJsonObject {
                                 put("ordinal", m.ordinal)
+                                put("kind", m.kind)
                             })
                         }
                     },
@@ -212,44 +199,21 @@ class SettingsSync(
 
     // ───────── outbound ─────────
 
-    suspend fun upsertPin(whom: String, ordinal: Int) {
-        db.pins().upsertRaw(whom, ordinal)
-        pokePutEntry(
-            BUCKET_PINS, whom,
-            buildJsonObject { put("ordinal", ordinal) },
-        )
-    }
-
-    suspend fun pin(whom: String) {
-        // Pin at bottom, same semantics as PinDao.pin — but route
-        // through our settings-aware upsert so the ship gets the poke.
-        val existing = db.pins().isPinnedCount(whom) > 0
-        if (existing) return
-        val next = (db.pins().maxOrdinal() ?: -1) + 1
-        upsertPin(whom, next)
-    }
-
-    suspend fun removePin(whom: String) {
-        db.pins().remove(whom)
-        pokeDelEntry(BUCKET_PINS, whom)
-    }
-
-    suspend fun reorderPins(whoms: List<String>) {
-        db.pins().reorder(whoms)
-        // Push the full new bucket — one poke for the whole reorder
-        // beats N pokes for N entries.
-        pokePutBucket(
-            BUCKET_PINS,
-            buildJsonObject {
-                whoms.forEachIndexed { i, w ->
-                    put(w, buildJsonObject { put("ordinal", i) })
-                }
-            },
-        )
-    }
-
-    suspend fun reorderGroupOrders(flags: List<String>) {
+    /**
+     * Fast local-only reorder. Use this from a drag `onMove` callback —
+     * it writes Room without touching the ship, so the LazyColumn can
+     * animate the swap in the same frame. Call [pushGroupOrders] once
+     * when the drag ends to sync the final order.
+     */
+    suspend fun reorderGroupOrdersLocal(flags: List<String>) {
         db.groupOrders().reorder(flags)
+    }
+
+    /** Push the current local group order to %settings in one batch. */
+    suspend fun pushGroupOrders() {
+        val flags = db.groupOrders().stream().first()
+            .sortedBy { it.ordinal }
+            .map { it.flag }
         pokePutBucket(
             BUCKET_GROUP_ORDERS,
             buildJsonObject {
@@ -258,6 +222,12 @@ class SettingsSync(
                 }
             },
         )
+    }
+
+    /** Combined local+push. Kept for callers that aren't drag-driven. */
+    suspend fun reorderGroupOrders(flags: List<String>) {
+        reorderGroupOrdersLocal(flags)
+        pushGroupOrders()
     }
 
     suspend fun createFolder(name: String, sortOrder: Int): Long {
@@ -299,10 +269,25 @@ class SettingsSync(
 
     suspend fun addFolderMember(folderId: Long, whom: String) {
         val next = db.folders().maxOrdinalIn(folderId) + 1
-        db.folders().addMemberRaw(folderId, whom, next)
+        db.folders().addMemberRaw(folderId, whom, next, FolderMemberEntity.KIND_WHOM)
         pokePutEntry(
             BUCKET_FOLDER_MEMBERS, folderMemberKey(folderId, whom),
-            buildJsonObject { put("ordinal", next) },
+            buildJsonObject {
+                put("ordinal", next)
+                put("kind", FolderMemberEntity.KIND_WHOM)
+            },
+        )
+    }
+
+    suspend fun addGroupToFolder(folderId: Long, groupFlag: String) {
+        val next = db.folders().maxOrdinalIn(folderId) + 1
+        db.folders().addMemberRaw(folderId, groupFlag, next, FolderMemberEntity.KIND_GROUP)
+        pokePutEntry(
+            BUCKET_FOLDER_MEMBERS, folderMemberKey(folderId, groupFlag),
+            buildJsonObject {
+                put("ordinal", next)
+                put("kind", FolderMemberEntity.KIND_GROUP)
+            },
         )
     }
 
@@ -311,14 +296,43 @@ class SettingsSync(
         pokeDelEntry(BUCKET_FOLDER_MEMBERS, folderMemberKey(folderId, whom))
     }
 
-    suspend fun reorderFolderMembers(folderId: Long, whoms: List<String>) {
+    /** Alias for clarity — groups live in the same table as whoms. */
+    suspend fun removeGroupFromFolder(folderId: Long, groupFlag: String) =
+        removeFolderMember(folderId, groupFlag)
+
+    /**
+     * Fast local-only reorder — Room write, no ship I/O. Call from a
+     * drag's `onMove` so the LazyColumn animates smoothly. Follow up
+     * with [pushFolderMembersOrder] when the drag ends.
+     */
+    suspend fun reorderFolderMembersLocal(folderId: Long, whoms: List<String>) {
         db.folders().reorderMembers(folderId, whoms)
-        whoms.forEachIndexed { i, w ->
+    }
+
+    /**
+     * Push the current folder's member order to %settings. N pokes for
+     * N members — kept off the drag-hot-path so it doesn't stall the
+     * reorder animation.
+     */
+    suspend fun pushFolderMembersOrder(folderId: Long) {
+        val members = db.folders().streamMembers().first()
+            .filter { it.folderId == folderId }
+            .sortedBy { it.ordinal }
+        members.forEachIndexed { i, m ->
             pokePutEntry(
-                BUCKET_FOLDER_MEMBERS, folderMemberKey(folderId, w),
-                buildJsonObject { put("ordinal", i) },
+                BUCKET_FOLDER_MEMBERS, folderMemberKey(folderId, m.whom),
+                buildJsonObject {
+                    put("ordinal", i)
+                    put("kind", m.kind)
+                },
             )
         }
+    }
+
+    /** Combined local+push. Kept for non-drag callers. */
+    suspend fun reorderFolderMembers(folderId: Long, whoms: List<String>) {
+        reorderFolderMembersLocal(folderId, whoms)
+        pushFolderMembersOrder(folderId)
     }
 
     /**
@@ -393,21 +407,29 @@ class SettingsSync(
 
     // ───────── inbound appliers ─────────
 
+    /**
+     * %settings stores each entry's value as a cord; Tlon wraps
+     * structured values as JSON strings. Un-stringify so downstream
+     * handlers can use the normal `asJsonObject` path. Falls through
+     * for non-string values in case some ship version still serves
+     * raw JSON.
+     */
+    private fun unwrap(v: JsonElement?): JsonElement? {
+        if (v == null) return null
+        if (v is JsonPrimitive && v.isString) {
+            return runCatching { Json.parseToJsonElement(v.content) }.getOrNull()
+                ?: v
+        }
+        return v
+    }
+
     private suspend fun applyBucket(bucket: String, entries: JsonObject?) {
         // Replace-on-apply: any local row not in the incoming bucket
         // will be wiped. For bucket reorders this is the right call.
         when (bucket) {
-            BUCKET_PINS -> {
-                val list = entries.orEmpty().mapNotNull { (k, v) ->
-                    val ordinal = (v as? JsonObject)?.get("ordinal")
-                        ?.jsonPrimitive?.intOrNull ?: return@mapNotNull null
-                    PinEntity(whom = k, ordinal = ordinal)
-                }
-                db.pins().replaceAll(list)
-            }
             BUCKET_GROUP_ORDERS -> {
                 val list = entries.orEmpty().mapNotNull { (k, v) ->
-                    val ordinal = (v as? JsonObject)?.get("ordinal")
+                    val ordinal = (unwrap(v) as? JsonObject)?.get("ordinal")
                         ?.jsonPrimitive?.intOrNull ?: return@mapNotNull null
                     GroupOrderEntity(flag = k, ordinal = ordinal)
                 }
@@ -416,7 +438,7 @@ class SettingsSync(
             BUCKET_FOLDERS -> {
                 val list = entries.orEmpty().mapNotNull { (k, v) ->
                     val id = k.toLongOrNull() ?: return@mapNotNull null
-                    val obj = v as? JsonObject ?: return@mapNotNull null
+                    val obj = unwrap(v) as? JsonObject ?: return@mapNotNull null
                     val name = obj["name"]?.jsonPrimitive?.contentIfStr() ?: return@mapNotNull null
                     val sortOrder = obj["sortOrder"]?.jsonPrimitive?.intOrNull ?: 0
                     FolderEntity(id = id, name = name, sortOrder = sortOrder)
@@ -426,15 +448,22 @@ class SettingsSync(
             BUCKET_FOLDER_MEMBERS -> {
                 val list = entries.orEmpty().mapNotNull { (k, v) ->
                     val (folderId, whom) = parseFolderMemberKey(k) ?: return@mapNotNull null
-                    val ordinal = (v as? JsonObject)?.get("ordinal")
-                        ?.jsonPrimitive?.intOrNull ?: 0
-                    FolderMemberEntity(folderId = folderId, whom = whom, ordinal = ordinal)
+                    val obj = unwrap(v) as? JsonObject
+                    val ordinal = obj?.get("ordinal")?.jsonPrimitive?.intOrNull ?: 0
+                    val kind = obj?.get("kind")?.jsonPrimitive?.contentIfStr()
+                        ?: FolderMemberEntity.KIND_WHOM
+                    FolderMemberEntity(
+                        folderId = folderId,
+                        whom = whom,
+                        ordinal = ordinal,
+                        kind = kind,
+                    )
                 }
                 db.folders().replaceAllMembers(list)
             }
             BUCKET_NOTIFY_PREFS -> {
                 val list = entries.orEmpty().mapNotNull { (k, v) ->
-                    val level = (v as? JsonObject)?.get("level")
+                    val level = (unwrap(v) as? JsonObject)?.get("level")
                         ?.jsonPrimitive?.contentIfStr() ?: return@mapNotNull null
                     NotifyPreferenceEntity(whom = k, level = level)
                 }
@@ -443,58 +472,56 @@ class SettingsSync(
             BUCKET_BOOKMARKS -> {
                 val list = entries.orEmpty().mapNotNull { (k, v) ->
                     val (whom, postId) = parseBookmarkKey(k) ?: return@mapNotNull null
-                    val ts = (v as? JsonObject)?.get("ts")
+                    val ts = (unwrap(v) as? JsonObject)?.get("ts")
                         ?.jsonPrimitive?.longOrNull ?: 0L
                     BookmarkEntity(whom = whom, postId = postId, bookmarkedMs = ts)
                 }
                 db.bookmarks().replaceAll(list)
             }
             BUCKET_AI_SETTINGS -> {
-                val entry = entries?.get(AI_ENTRY) as? JsonObject ?: return
+                val entry = unwrap(entries?.get(AI_ENTRY)) as? JsonObject ?: return
                 applyAiEntry(entry)
             }
         }
     }
 
     private suspend fun applyEntry(bucket: String, entry: String, value: JsonElement) {
+        val unwrapped = unwrap(value)
         when (bucket) {
-            BUCKET_PINS -> {
-                val ordinal = (value as? JsonObject)?.get("ordinal")
-                    ?.jsonPrimitive?.intOrNull ?: return
-                db.pins().upsertRaw(entry, ordinal)
-            }
             BUCKET_GROUP_ORDERS -> {
-                val ordinal = (value as? JsonObject)?.get("ordinal")
+                val ordinal = (unwrapped as? JsonObject)?.get("ordinal")
                     ?.jsonPrimitive?.intOrNull ?: return
                 db.groupOrders().upsertRaw(entry, ordinal)
             }
             BUCKET_FOLDERS -> {
                 val id = entry.toLongOrNull() ?: return
-                val obj = value as? JsonObject ?: return
+                val obj = unwrapped as? JsonObject ?: return
                 val name = obj["name"]?.jsonPrimitive?.contentIfStr() ?: return
                 val sortOrder = obj["sortOrder"]?.jsonPrimitive?.intOrNull ?: 0
                 db.folders().upsert(FolderEntity(id, name, sortOrder))
             }
             BUCKET_FOLDER_MEMBERS -> {
                 val (folderId, whom) = parseFolderMemberKey(entry) ?: return
-                val ordinal = (value as? JsonObject)?.get("ordinal")
-                    ?.jsonPrimitive?.intOrNull ?: 0
-                db.folders().addMemberRaw(folderId, whom, ordinal)
+                val obj = unwrapped as? JsonObject
+                val ordinal = obj?.get("ordinal")?.jsonPrimitive?.intOrNull ?: 0
+                val kind = obj?.get("kind")?.jsonPrimitive?.contentIfStr()
+                    ?: FolderMemberEntity.KIND_WHOM
+                db.folders().addMemberRaw(folderId, whom, ordinal, kind)
             }
             BUCKET_NOTIFY_PREFS -> {
-                val level = (value as? JsonObject)?.get("level")
+                val level = (unwrapped as? JsonObject)?.get("level")
                     ?.jsonPrimitive?.contentIfStr() ?: return
                 db.notifyPrefs().upsert(NotifyPreferenceEntity(entry, level))
             }
             BUCKET_BOOKMARKS -> {
                 val (whom, postId) = parseBookmarkKey(entry) ?: return
-                val ts = (value as? JsonObject)?.get("ts")
+                val ts = (unwrapped as? JsonObject)?.get("ts")
                     ?.jsonPrimitive?.longOrNull ?: 0L
                 db.bookmarks().upsert(BookmarkEntity(whom, postId, ts))
             }
             BUCKET_AI_SETTINGS -> {
                 if (entry == AI_ENTRY) {
-                    (value as? JsonObject)?.let(::applyAiEntry)
+                    (unwrapped as? JsonObject)?.let(::applyAiEntry)
                 }
             }
         }
@@ -502,7 +529,6 @@ class SettingsSync(
 
     private suspend fun removeEntry(bucket: String, entry: String) {
         when (bucket) {
-            BUCKET_PINS -> db.pins().remove(entry)
             BUCKET_GROUP_ORDERS -> db.groupOrders().remove(entry)
             BUCKET_FOLDERS -> {
                 val id = entry.toLongOrNull() ?: return
@@ -529,7 +555,6 @@ class SettingsSync(
 
     private suspend fun clearBucketLocally(bucket: String) {
         when (bucket) {
-            BUCKET_PINS -> db.pins().replaceAll(emptyList())
             BUCKET_GROUP_ORDERS -> db.groupOrders().replaceAll(emptyList())
             BUCKET_FOLDERS -> db.folders().replaceAll(emptyList())
             BUCKET_FOLDER_MEMBERS -> db.folders().replaceAllMembers(emptyList())
@@ -554,7 +579,10 @@ class SettingsSync(
                 put("desk", DESK)
                 put("bucket-key", bucket)
                 put("entry-key", entry)
-                put("value", value)
+                // %settings val is a cord — Tlon serializes complex
+                // values via JSON.stringify. Match that so the mark
+                // dejs accepts our pokes.
+                put("value", JsonPrimitive(Json.encodeToString(JsonElement.serializer(), value)))
             })
         }
         runCatching { ch.poke(app = "settings", mark = "settings-event", payload = payload) }
@@ -576,11 +604,18 @@ class SettingsSync(
 
     private suspend fun pokePutBucket(bucket: String, entries: JsonObject) {
         val ch = channel ?: return
+        // Each entry's value must be sent as a JSON string — see
+        // pokePutEntry for the reason.
+        val stringified = buildJsonObject {
+            entries.forEach { (k, v) ->
+                put(k, JsonPrimitive(Json.encodeToString(JsonElement.serializer(), v)))
+            }
+        }
         val payload = buildJsonObject {
             put("put-bucket", buildJsonObject {
                 put("desk", DESK)
                 put("bucket-key", bucket)
-                put("bucket", entries)
+                put("bucket", stringified)
             })
         }
         runCatching { ch.poke(app = "settings", mark = "settings-event", payload = payload) }

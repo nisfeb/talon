@@ -36,18 +36,38 @@ interface FolderDao {
     @Query("SELECT IFNULL(MAX(ordinal), -1) FROM folder_members WHERE folderId = :folderId")
     suspend fun maxOrdinalIn(folderId: Long): Int
 
-    @Query("INSERT OR IGNORE INTO folder_members (folderId, whom, ordinal) VALUES (:folderId, :whom, :ordinal)")
-    suspend fun addMemberRaw(folderId: Long, whom: String, ordinal: Int)
+    @Query(
+        "INSERT OR IGNORE INTO folder_members (folderId, whom, ordinal, kind) " +
+            "VALUES (:folderId, :whom, :ordinal, :kind)"
+    )
+    suspend fun addMemberRaw(folderId: Long, whom: String, ordinal: Int, kind: String)
 
-    /** Adds at the bottom of the folder's current ordering. Idempotent. */
+    /** Adds a channel/DM/club at the bottom of the folder. Idempotent. */
     @androidx.room.Transaction
     suspend fun addMember(folderId: Long, whom: String) {
         val next = maxOrdinalIn(folderId) + 1
-        addMemberRaw(folderId, whom, next)
+        addMemberRaw(folderId, whom, next, FolderMemberEntity.KIND_WHOM)
+    }
+
+    /** Adds a whole group (by flag) at the bottom of the folder. Idempotent. */
+    @androidx.room.Transaction
+    suspend fun addGroupMember(folderId: Long, groupFlag: String) {
+        val next = maxOrdinalIn(folderId) + 1
+        addMemberRaw(folderId, groupFlag, next, FolderMemberEntity.KIND_GROUP)
     }
 
     @Query("DELETE FROM folder_members WHERE folderId = :folderId AND whom = :whom")
     suspend fun removeMember(folderId: Long, whom: String)
+
+    @Query(
+        "SELECT * FROM folder_members WHERE folderId = :folderId AND kind = 'group'"
+    )
+    suspend fun groupMembersOf(folderId: Long): List<FolderMemberEntity>
+
+    @Query(
+        "SELECT folderId FROM folder_members WHERE whom = :flag AND kind = 'group'"
+    )
+    suspend fun foldersContainingGroup(flag: String): List<Long>
 
     @Query("UPDATE folder_members SET ordinal = :ordinal WHERE folderId = :folderId AND whom = :whom")
     suspend fun setOrdinal(folderId: Long, whom: String, ordinal: Int)

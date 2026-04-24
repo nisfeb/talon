@@ -68,6 +68,49 @@ sealed interface StoryPart {
         /** Dotted @da suffix of the cited reply, for reply cites. */
         val replyDa: String?,
     ) : StoryPart
+
+    /**
+     * Cross-zone clock widget emitted by `/tz`. The instant is encoded
+     * UTC in the message tag; the renderer localizes to the viewer's
+     * zones at display time.
+     */
+    @androidx.compose.runtime.Immutable
+    data class TzWidget(
+        val instantEpochMs: Long,
+        val sourceLabel: String,
+    ) : StoryPart
+
+    /**
+     * Calendar invite widget emitted by `/cal`. Renderer shows the
+     * event + an "Add to calendar" button that launches the OS
+     * calendar app via Intent.ACTION_INSERT.
+     */
+    @androidx.compose.runtime.Immutable
+    data class CalWidget(
+        val startEpochMs: Long,
+        val endEpochMs: Long,
+        val title: String,
+    ) : StoryPart
+
+    /**
+     * Poll widget emitted by `/poll`. Voting happens via the normal
+     * reaction UI — the keycap-digit emojis map 1:1 to options.
+     */
+    @androidx.compose.runtime.Immutable
+    data class PollWidget(
+        val question: String,
+        val options: List<String>,
+    ) : StoryPart
+
+    /**
+     * Location-share widget emitted by `/loc`. Renderer offers an
+     * "Open map" action that hands off to the OS map app.
+     */
+    @androidx.compose.runtime.Immutable
+    data class LocWidget(
+        val lat: Double,
+        val lng: Double,
+    ) : StoryPart
 }
 
 /**
@@ -118,14 +161,27 @@ object Story {
                 val rendered = buildAnnotatedString {
                     arr.forEach { renderInline(it, this) }
                 }
-                if (rendered.isNotEmpty()) out.add(StoryPart.Text(rendered))
+                if (rendered.isNotEmpty()) out.addAll(splitForWidgetTags(rendered))
             }
             obj["block"]?.let { block ->
                 val blockObj = runCatching { block.jsonObject }.getOrNull() ?: return@let
                 renderBlock(blockObj)?.let(out::add)
             }
         }
-        return out
+        // Our slash commands send a human-readable preamble (so plain
+        // clients see a usable fallback) followed by the structured
+        // `[…|…]` tag. Each line lands in its own verse, so the
+        // preamble survives the per-verse split. If the parsed parts
+        // contain a widget, strip all Text parts — the widget's own
+        // chrome carries the presentation on Talon.
+        val hasWidget = out.any { it.isStoryWidget() }
+        return if (hasWidget) out.filter { it !is StoryPart.Text } else out
+    }
+
+    private fun StoryPart.isStoryWidget(): Boolean = when (this) {
+        is StoryPart.TzWidget, is StoryPart.CalWidget,
+        is StoryPart.PollWidget, is StoryPart.LocWidget -> true
+        else -> false
     }
 
     /** Flat plain-text version — used for DM list previews and text search. */
@@ -137,8 +193,73 @@ object Story {
                 is StoryPart.Code -> "```\n${part.code}\n```"
                 is StoryPart.LinkPreview -> part.title ?: part.url
                 is StoryPart.Citation -> part.label
+                is StoryPart.TzWidget -> "[tz]"
+                is StoryPart.CalWidget -> "[cal] ${part.title}"
+                is StoryPart.PollWidget -> "📊 ${part.question}"
+                is StoryPart.LocWidget -> "📍 ${part.lat}, ${part.lng}"
             }
         }.trim()
+
+    /**
+     * Split a rendered AnnotatedString around the first widget tag we
+     * recognize (`[tz|…]`, `[cal|…]`, …). Returns leading Text +
+     * widget + trailing Text, stripping the tag from display. Only
+     * handles a single tag per text block — messages with more than
+     * one widget are rare and the tail goes back through [splitForWidgetTags]
+     * recursively.
+     */
+    private fun splitForWidgetTags(text: androidx.compose.ui.text.AnnotatedString): List<StoryPart> {
+        // Find the earliest widget match of any kind.
+        val tz = io.nisfeb.talon.ui.TZ_TAG_RE.find(text.text)
+        val cal = io.nisfeb.talon.ui.CAL_TAG_RE.find(text.text)
+        val poll = io.nisfeb.talon.ui.POLL_TAG_RE.find(text.text)
+        val loc = io.nisfeb.talon.ui.LOC_TAG_RE.find(text.text)
+        val first = listOfNotNull(tz, cal, poll, loc).minByOrNull { it.range.first }
+            ?: return listOf(StoryPart.Text(text))
+
+        val maybeWidget: StoryPart? = when (first) {
+            tz -> {
+                val instant = io.nisfeb.talon.ui.parseIsoUtc(first.groupValues[1])
+                instant?.let { StoryPart.TzWidget(it.time, first.groupValues[2]) }
+            }
+            cal -> {
+                io.nisfeb.talon.ui.decodeCalTag(first.value)?.let { d ->
+                    StoryPart.CalWidget(d.start.time, d.end.time, d.title)
+                }
+            }
+            poll -> {
+                io.nisfeb.talon.ui.decodePollTag(first.value)?.let { p ->
+                    StoryPart.PollWidget(p.question, p.options)
+                }
+            }
+            loc -> {
+                io.nisfeb.talon.ui.decodeLocTag(first.value)?.let { d ->
+                    StoryPart.LocWidget(d.lat, d.lng)
+                }
+            }
+            else -> null
+        }
+        val widget: StoryPart = maybeWidget ?: return listOf(StoryPart.Text(text))
+
+        // Our slash commands embed a plain-text summary alongside the
+        // tag so non-widget clients (plain Tlon, older Talon) see the
+        // event/poll/location. On Talon we only want the widget — the
+        // structured card is the canonical presentation, and the text
+        // lines are just a duplicate. Drop everything around the tag.
+        return listOf(widget)
+    }
+
+    private fun trimEndBlanks(s: androidx.compose.ui.text.AnnotatedString): androidx.compose.ui.text.AnnotatedString {
+        var end = s.length
+        while (end > 0 && s.text[end - 1].let { it == '\n' || it == ' ' || it == '\t' }) end--
+        return s.subSequence(0, end)
+    }
+
+    private fun trimStartBlanks(s: androidx.compose.ui.text.AnnotatedString): androidx.compose.ui.text.AnnotatedString {
+        var start = 0
+        while (start < s.length && s.text[start].let { it == '\n' || it == ' ' || it == '\t' }) start++
+        return s.subSequence(start, s.length)
+    }
 
     // ───────── inline spans ─────────
 
@@ -188,9 +309,19 @@ object Story {
             out.withSpan(MONO_SPAN) { append(if (it.isString) it.content else it.content) }
             return
         }
-        obj["block-quote"]?.let { arr ->
-            out.append("> ")
-            renderInlineArray(arr, out)
+        // Tlon has emitted both kebab (`block-quote`) and single-word
+        // (`blockquote`) over the years — accept either.
+        (obj["block-quote"] ?: obj["blockquote"])?.let { arr ->
+            out.withSpan(
+                SpanStyle(
+                    fontStyle = FontStyle.Italic,
+                    color = Color.Gray,
+                ),
+            ) {
+                out.append("“")
+                renderInlineArray(arr, out)
+                out.append("”")
+            }
             return
         }
         obj["task"]?.jsonObject?.let { task ->
@@ -315,6 +446,32 @@ object Story {
         (block["listing"] as? JsonObject)?.let { listing ->
             val text = buildAnnotatedString {
                 renderListing(listing, this, depth = 0)
+            }
+            if (text.isNotEmpty()) return StoryPart.Text(text)
+        }
+        // Some Tlon versions wrap multi-line blockquotes at block level
+        // instead of inline. Accept both tag spellings and render the
+        // contained inlines with quote styling.
+        (block["block-quote"] ?: block["blockquote"])?.let { content ->
+            val text = buildAnnotatedString {
+                withSpan(
+                    SpanStyle(
+                        fontStyle = FontStyle.Italic,
+                        color = Color.Gray,
+                    ),
+                ) {
+                    append("“")
+                    when (content) {
+                        is JsonArray -> renderInlineArray(content, this@buildAnnotatedString)
+                        is JsonObject -> {
+                            // Older format: { "block-quote": { "content": [...] } }
+                            val inner = content["content"] ?: content["inline"]
+                            if (inner != null) renderInlineArray(inner, this@buildAnnotatedString)
+                        }
+                        else -> {}
+                    }
+                    append("”")
+                }
             }
             if (text.isNotEmpty()) return StoryPart.Text(text)
         }

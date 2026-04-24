@@ -1,3 +1,5 @@
+@file:OptIn(kotlinx.serialization.ExperimentalSerializationApi::class)
+
 package io.nisfeb.talon.urbit
 
 import android.util.Log
@@ -27,6 +29,7 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.JsonUnquotedLiteral
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
@@ -354,6 +357,44 @@ class TlonChatRepo(
      * `contact-action-1` so older ships on mixed-version networks still
      * accept the poke.
      */
+    /**
+     * Set a local pet-name overlay for another ship via %contacts. This
+     * is the kip-scoped edit — the overlay lives on our ship only and
+     * never reaches the named peer.
+     */
+    suspend fun setPetName(ship: String, name: String) {
+        val ch = channel ?: error("not connected")
+        require(ship.startsWith("~")) { "setPetName: $ship isn't a patp" }
+        ch.poke(
+            app = "contacts",
+            mark = "contact-action-1",
+            payload = buildJsonObject {
+                put("edit", buildJsonObject {
+                    put("kip", ship)
+                    put("contact", buildJsonObject {
+                        put("nickname", buildJsonObject {
+                            put("type", "text")
+                            put("value", name)
+                        })
+                    })
+                })
+            },
+        )
+        // Optimistic local merge so the change shows without a round-trip.
+        val current = db.contacts().get(ship)
+        db.contacts().upsert(
+            ContactEntity(
+                ship = ship,
+                nickname = name.takeIf { it.isNotBlank() },
+                bio = current?.bio,
+                avatarUrl = current?.avatarUrl,
+                status = current?.status,
+                statusUpdatedMs = current?.statusUpdatedMs,
+                color = current?.color,
+            )
+        )
+    }
+
     suspend fun updateProfile(
         nickname: String? = null,
         bio: String? = null,
@@ -1078,28 +1119,31 @@ class TlonChatRepo(
     }
 
     /**
-     * Edit a message's text content. Channels only — %chat doesn't expose
-     * an edit action. Replaces the essay with a fresh one that keeps the
-     * original post id.
+     * Edit a top-level channel message's text content. %chat (DMs and
+     * clubs) rejects edit actions on the ships we've tested even though
+     * the action mold in newer Hoon sources includes an `%edit` variant
+     * — so we only offer this for %channels chat-channels. Reply
+     * editing isn't in the agent mold for either side.
      */
-    suspend fun edit(whom: String, postId: String, text: String) {
+    suspend fun edit(whom: String, postId: String, text: String, originalSentMs: Long) {
         val ch = channel ?: error("not connected")
         if (!whom.startsWith("chat/")) error("edit only supported on channel chats")
-        val sent = System.currentTimeMillis()
-        val essay = buildEssay(textToStory(text), sent)
-        ch.poke(
-            app = "channels",
-            mark = "channel-action-2",
-            payload = channelAction(whom, buildJsonObject {
-                put("post", buildJsonObject {
-                    put("edit", buildJsonObject {
-                        put("id", postId)
-                        put("essay", essay)
-                    })
+        // Preserve the original `sent` — the server sorts by it and
+        // re-using our current time would bump the post to "just now".
+        // Tlon keeps the original essay shell and only swaps content.
+        val essay = buildEssay(textToStory(text), originalSentMs)
+        val payload = channelAction(whom, buildJsonObject {
+            put("post", buildJsonObject {
+                // channel-action-2's `id` dejs is `(se %ud)` which runs
+                // `slav %ud` → `dem:ag`, and dem:ag demands Urbit-style
+                // dot-grouped decimals for numbers ≥ 1000.
+                put("edit", buildJsonObject {
+                    put("id", dotAtom(postId))
+                    put("essay", essay)
                 })
-            }),
-        )
-        // Server will echo via channel-response-5 with the new essay.
+            })
+        })
+        ch.poke(app = "channels", mark = "channel-action-2", payload = payload)
     }
 
     // ───────── ingest ─────────
@@ -1131,8 +1175,18 @@ class TlonChatRepo(
         // Urbit's /~/channel/ SSE wraps each fact as:
         //   { id: N, response: "diff"|"poke"|"subscribe", mark: "...", json: {…} }
         // The actual per-agent payload lives in obj["json"]. Acks and
-        // subscribe-replies have no json and can be skipped.
-        if (outer["response"]?.jsonPrimitive?.contentIfString() != "diff") return
+        // subscribe-replies have no json and can be skipped — but
+        // surface poke NACKs (and watch rejections) so silent server
+        // rejections are debuggable.
+        val response = outer["response"]?.jsonPrimitive?.contentIfString()
+        if (response == "poke" || response == "subscribe") {
+            val err = outer["err"]
+            if (err != null && err !is JsonNull) {
+                Log.w(TAG, "$response nack id=${outer["id"]} err=$err")
+            }
+            return
+        }
+        if (response != "diff") return
         val payload = outer["json"] as? JsonObject ?: return
 
         // %chat writ-response-4: { whom, id, response }
@@ -1508,15 +1562,24 @@ class TlonChatRepo(
         val fresh = mutableListOf<ContactEntity>()
 
         runCatching { channel.scry("contacts", "/v1/all") }.getOrNull()?.let { body ->
-            (body as? JsonObject)?.forEach { (ship, fields) ->
-                (fields as? JsonObject)?.let { f ->
-                    fresh.add(parseContact(ship, f))
-                }
+            (body as? JsonObject)?.forEach { (ship, entry) ->
+                val obj = entry as? JsonObject ?: return@forEach
+                // Newer ships wrap each entry as {contact: {...fields},
+                // mod-at: "..."}; older ones emit the flat field map.
+                val wrapped = obj["contact"] as? JsonObject
+                val fields = wrapped ?: obj
+                val modAt = parseContactModAt(obj)
+                fresh.add(parseContact(ship, fields, modAt))
             }
         }
 
         runCatching { channel.scry("contacts", "/v1/self") }.getOrNull()?.let { body ->
-            (body as? JsonObject)?.let { fresh.add(parseContact(ourPatp, it)) }
+            (body as? JsonObject)?.let { obj ->
+                val wrapped = obj["contact"] as? JsonObject
+                val fields = wrapped ?: obj
+                val modAt = parseContactModAt(obj)
+                fresh.add(parseContact(ourPatp, fields, modAt))
+            }
         }
 
         if (fresh.isNotEmpty()) {
@@ -1535,39 +1598,50 @@ class TlonChatRepo(
             val kip = page["kip"]?.jsonPrimitive?.contentIfString() ?: return
             if (!kip.startsWith("~")) return
             val contact = page["contact"] as? JsonObject ?: return
-            db.contacts().upsert(mergeContact(parseContact(kip, contact)))
+            // Prefer the server-provided mod-at. Fall back to our own
+            // observation time — we know the status just changed since
+            // this fact is the change event itself.
+            val modAt = parseContactModAt(page) ?: System.currentTimeMillis()
+            db.contacts().upsert(mergeContact(parseContact(kip, contact, modAt)))
             return
         }
         (event["peer"] as? JsonObject)?.let { peer ->
             val who = peer["who"]?.jsonPrimitive?.contentIfString() ?: return
             if (!who.startsWith("~")) return
             val contact = peer["contact"] as? JsonObject ?: return
-            db.contacts().upsert(mergeContact(parseContact(who, contact)))
+            val modAt = parseContactModAt(peer) ?: System.currentTimeMillis()
+            db.contacts().upsert(mergeContact(parseContact(who, contact, modAt)))
             return
         }
     }
 
     /**
-     * Preserve `statusUpdatedMs` when the status hasn't changed; stamp
-     * it to now when it has. Also merges avatar/bio/nickname with the
-     * existing row so a partial update doesn't clear unrelated fields.
+     * Merge an incoming contact record with what we already have. Keeps
+     * avatar/bio/nickname intact when the incoming row doesn't supply
+     * them, and preserves `statusUpdatedMs` unless the caller passed a
+     * fresh, authoritative one via `parseContact`. Never stamps "now"
+     * during bulk ingest — that was hiding real timestamps behind a
+     * uniform value.
      */
     private suspend fun mergeContact(incoming: ContactEntity): ContactEntity {
         val existing = db.contacts().get(incoming.ship)
-        val statusChanged = incoming.status.orEmpty() != existing?.status.orEmpty()
         return incoming.copy(
             nickname = incoming.nickname ?: existing?.nickname,
             bio = incoming.bio ?: existing?.bio,
             avatarUrl = incoming.avatarUrl ?: existing?.avatarUrl,
             statusUpdatedMs = when {
                 incoming.status.isNullOrBlank() -> null
-                statusChanged -> System.currentTimeMillis()
+                incoming.statusUpdatedMs != null -> incoming.statusUpdatedMs
                 else -> existing?.statusUpdatedMs
             },
         )
     }
 
-    private fun parseContact(ship: String, fields: JsonObject): ContactEntity {
+    private fun parseContact(
+        ship: String,
+        fields: JsonObject,
+        modAtMs: Long? = null,
+    ): ContactEntity {
         fun textField(name: String): String? {
             val field = fields[name] as? JsonObject ?: return null
             if (field["type"]?.jsonPrimitive?.contentIfString() != "text") return null
@@ -1581,14 +1655,34 @@ class TlonChatRepo(
                 ?: return null
             return normalizeHexColor(raw)
         }
+        val status = textField("status")
         return ContactEntity(
             ship = ship,
             nickname = textField("nickname"),
             bio = textField("bio"),
             avatarUrl = textField("avatar"),
-            status = textField("status"),
+            status = status,
+            // Only carry a server-provided timestamp here. `mergeContact`
+            // decides whether to stamp "now" for live observations.
+            statusUpdatedMs = if (status.isNullOrBlank()) null else modAtMs,
             color = colorField("color"),
         )
+    }
+
+    /**
+     * Best-effort parse of %contacts' `mod-at` envelope field. Tlon
+     * serializes it as a dotted unix-ms cord (e.g. "1.734.890.123.456").
+     * Older ships may emit a raw @da or omit it entirely — we only
+     * accept values that look like a sensible recent ms timestamp.
+     */
+    private fun parseContactModAt(envelope: JsonObject?): Long? {
+        val raw = envelope?.get("mod-at")?.jsonPrimitive?.contentIfString()
+            ?: return null
+        val digits = raw.replace(".", "")
+        if (digits.isEmpty() || !digits.all { it.isDigit() }) return null
+        val value = digits.toLongOrNull() ?: return null
+        // Sanity-bound: 2020-01-01 .. 2100-01-01 in unix-ms.
+        return if (value in 1_577_836_800_000L..4_102_444_800_000L) value else null
     }
 
     /**
@@ -1899,4 +1993,25 @@ class TlonChatRepo(
 
     private fun JsonPrimitive.contentIfString(): String? =
         if (isString) content else content
+
+    /**
+     * Urbit's `dem:ag` parser (used by `slav %ud`) requires decimal
+     * atoms to be dot-grouped in threes from the right for values
+     * ≥ 1000. Tlon does this when sending ids as strings over the
+     * wire; we need to match. "170141184505..." → "170.141.184.505..."
+     */
+    private fun dotAtom(decimal: String): String {
+        if (decimal.length <= 3) return decimal
+        // Only dot-format pure digit strings — leave already-dotted or
+        // non-numeric values alone.
+        if (!decimal.all { it.isDigit() }) return decimal
+        val out = StringBuilder()
+        var i = decimal.length
+        while (i > 3) {
+            out.insert(0, "." + decimal.substring(i - 3, i))
+            i -= 3
+        }
+        out.insert(0, decimal.substring(0, i))
+        return out.toString()
+    }
 }

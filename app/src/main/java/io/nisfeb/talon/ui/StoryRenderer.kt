@@ -81,6 +81,17 @@ fun StoryRenderer(
      * text — should bubble up here so the parent row's action sheet
      * stays reachable. */
     onLongPress: (() -> Unit)? = null,
+    /** Reactions on this message, used by the poll widget to render
+     *  per-option tallies. */
+    reactions: List<io.nisfeb.talon.data.ReactionEntity> = emptyList(),
+    /** Viewer's own patp — lets the poll widget highlight the row the
+     *  viewer already voted for. */
+    ourPatp: String? = null,
+    /** Tap-an-option callback: the renderer invokes this with the
+     *  keycap emoji the user tapped. Host is expected to do the same
+     *  toggle-on-same / replace-on-different logic used by the normal
+     *  reaction pills. */
+    onPollVote: ((emoji: String) -> Unit)? = null,
 ) {
     Column(
         modifier = modifier,
@@ -163,6 +174,30 @@ fun StoryRenderer(
                 is StoryPart.Citation -> InlineCitation(cite = part) {
                     part.openTarget?.let(onCitationTap)
                 }
+
+                is StoryPart.TzWidget -> TzWidgetBlock(
+                    instantEpochMs = part.instantEpochMs,
+                    sourceLabel = part.sourceLabel,
+                )
+
+                is StoryPart.CalWidget -> CalWidgetBlock(
+                    startEpochMs = part.startEpochMs,
+                    endEpochMs = part.endEpochMs,
+                    title = part.title,
+                )
+
+                is StoryPart.PollWidget -> PollWidgetBlock(
+                    question = part.question,
+                    options = part.options,
+                    reactions = reactions,
+                    ourPatp = ourPatp,
+                    onVote = onPollVote,
+                )
+
+                is StoryPart.LocWidget -> LocWidgetBlock(
+                    lat = part.lat,
+                    lng = part.lng,
+                )
             }
         }
 
@@ -301,6 +336,282 @@ private fun InlineCitation(
                 "Referenced post",
                 style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
             )
+        }
+    }
+}
+
+/**
+ * Viewer-side rendering for the `[poll|…]` tag. Shows the question
+ * and each option prefixed by its keycap-digit vote emoji. Voting is
+ * handled by the normal reaction UI — users long-press the message
+ * and react with the matching keycap emoji.
+ */
+@Composable
+private fun PollWidgetBlock(
+    question: String,
+    options: List<String>,
+    reactions: List<io.nisfeb.talon.data.ReactionEntity>,
+    ourPatp: String?,
+    onVote: ((emoji: String) -> Unit)?,
+) {
+    // Per-option tallies from the keycap-digit reactions. Any reaction
+    // with a non-keycap emoji is ignored for vote counting but still
+    // shows in the normal reaction bar.
+    val tallies = remember(reactions, options.size) {
+        IntArray(options.size).also { arr ->
+            for (r in reactions) {
+                val idx = VOTE_EMOJIS.indexOf(r.emoji)
+                if (idx in 0 until options.size) arr[idx] += 1
+            }
+        }
+    }
+    val mineIndex = remember(reactions, ourPatp) {
+        if (ourPatp == null) -1
+        else VOTE_EMOJIS.indexOf(
+            reactions.firstOrNull { it.author == ourPatp }?.emoji
+        )
+    }
+    val totalVotes = tallies.sum()
+    Surface(
+        shape = RoundedCornerShape(10.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp)) {
+            Text(
+                "📊 $question",
+                style = MaterialTheme.typography.titleSmall.copy(
+                    fontWeight = FontWeight.SemiBold,
+                ),
+            )
+            Text(
+                if (totalVotes == 0) "Tap an option to vote."
+                else "$totalVotes vote${if (totalVotes == 1) "" else "s"} · tap to change.",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 2.dp, bottom = 4.dp),
+            )
+            for ((i, opt) in options.withIndex()) {
+                val emoji = VOTE_EMOJIS.getOrNull(i) ?: "•"
+                val count = tallies[i]
+                val mine = i == mineIndex
+                val rowMod = if (onVote != null) {
+                    Modifier.fillMaxWidth().clickable { onVote(emoji) }
+                } else Modifier.fillMaxWidth()
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = if (mine) MaterialTheme.colorScheme.primaryContainer
+                    else androidx.compose.ui.graphics.Color.Transparent,
+                    modifier = Modifier.padding(vertical = 2.dp),
+                ) {
+                    Row(
+                        modifier = rowMod.padding(horizontal = 6.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            emoji,
+                            style = MaterialTheme.typography.titleMedium,
+                            modifier = Modifier.widthIn(min = 28.dp),
+                        )
+                        Text(
+                            opt,
+                            style = MaterialTheme.typography.bodyMedium.copy(
+                                fontWeight = if (mine) FontWeight.SemiBold
+                                else FontWeight.Normal,
+                            ),
+                            modifier = Modifier.weight(1f),
+                        )
+                        if (count > 0) {
+                            Text(
+                                count.toString(),
+                                style = MaterialTheme.typography.labelMedium.copy(
+                                    fontWeight = FontWeight.SemiBold,
+                                ),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Viewer-side rendering for the `[loc|lat|lng]` tag. Shows the
+ * coordinates and an "Open map" action that hands off to the native
+ * map app via a `geo:` URI, falling back to the OSM URL in a browser
+ * if no map app is installed.
+ */
+@Composable
+private fun LocWidgetBlock(
+    lat: Double,
+    lng: Double,
+) {
+    val ctx = LocalContext.current
+    Surface(
+        shape = RoundedCornerShape(10.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    "📍 Location",
+                    style = MaterialTheme.typography.titleSmall.copy(
+                        fontWeight = FontWeight.SemiBold,
+                    ),
+                )
+                Text(
+                    "%.5f, %.5f".format(lat, lng),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            androidx.compose.material3.TextButton(onClick = {
+                val geo = android.net.Uri.parse("geo:$lat,$lng?q=$lat,$lng")
+                val geoIntent = android.content.Intent(android.content.Intent.ACTION_VIEW, geo)
+                    .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                val ok = runCatching { ctx.startActivity(geoIntent) }.isSuccess
+                if (!ok) {
+                    val osm = android.net.Uri.parse(osmViewerUrl(lat, lng))
+                    runCatching {
+                        ctx.startActivity(
+                            android.content.Intent(android.content.Intent.ACTION_VIEW, osm)
+                                .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK),
+                        )
+                    }
+                }
+            }) { Text("Open") }
+        }
+    }
+}
+
+/**
+ * Viewer-side rendering for the `[cal|…]` tag. Shows the event title +
+ * human-friendly start/end, and an "Add to calendar" button that hands
+ * off to the OS calendar app via Intent.ACTION_INSERT.
+ */
+@Composable
+private fun CalWidgetBlock(
+    startEpochMs: Long,
+    endEpochMs: Long,
+    title: String,
+) {
+    val ctx = LocalContext.current
+    val start = remember(startEpochMs) { java.util.Date(startEpochMs) }
+    val end = remember(endEpochMs) { java.util.Date(endEpochMs) }
+    val summary = remember(startEpochMs, endEpochMs) { formatCalSummary(start, end) }
+    Surface(
+        shape = RoundedCornerShape(10.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    "📅 $title",
+                    style = MaterialTheme.typography.titleSmall.copy(
+                        fontWeight = FontWeight.SemiBold,
+                    ),
+                )
+                Text(
+                    summary,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            androidx.compose.material3.TextButton(onClick = {
+                val intent = android.content.Intent(android.content.Intent.ACTION_INSERT)
+                    .setData(android.provider.CalendarContract.Events.CONTENT_URI)
+                    .putExtra(
+                        android.provider.CalendarContract.EXTRA_EVENT_BEGIN_TIME,
+                        startEpochMs,
+                    )
+                    .putExtra(
+                        android.provider.CalendarContract.EXTRA_EVENT_END_TIME,
+                        endEpochMs,
+                    )
+                    .putExtra(android.provider.CalendarContract.Events.TITLE, title)
+                    .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                runCatching { ctx.startActivity(intent) }
+            }) { Text("Add") }
+        }
+    }
+}
+
+/**
+ * Viewer-side rendering for the `[tz|…]` tag. Shows the canonical US
+ * zones + UTC, and adds the viewer's own zone at the top if it's not
+ * already covered. A clock-emoji row draws attention without looking
+ * like a regular code block.
+ */
+@Composable
+private fun TzWidgetBlock(
+    instantEpochMs: Long,
+    sourceLabel: String,
+) {
+    val instant = remember(instantEpochMs) { java.util.Date(instantEpochMs) }
+    val zones = remember {
+        // Ordered: viewer's own zone first (when not already in the
+        // canon list), then canonical US + UTC.
+        val canon = listOf(
+            "Eastern" to java.util.TimeZone.getTimeZone("America/New_York"),
+            "Central" to java.util.TimeZone.getTimeZone("America/Chicago"),
+            "Pacific" to java.util.TimeZone.getTimeZone("America/Los_Angeles"),
+            "UTC" to java.util.TimeZone.getTimeZone("UTC"),
+        )
+        val viewer = java.util.TimeZone.getDefault()
+        val viewerId = viewer.id
+        val alreadyThere = canon.any { it.second.id == viewerId }
+        if (alreadyThere) canon
+        else {
+            val label = viewer.getDisplayName(
+                viewer.inDaylightTime(java.util.Date()),
+                java.util.TimeZone.SHORT,
+                java.util.Locale.getDefault(),
+            ).ifEmpty { viewerId }
+            listOf(label to viewer) + canon
+        }
+    }
+    Surface(
+        shape = RoundedCornerShape(10.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
+            Text(
+                "🕒 sender sent from $sourceLabel",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            for ((label, zone) in zones) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                ) {
+                    Text(
+                        label,
+                        style = MaterialTheme.typography.labelMedium.copy(
+                            fontWeight = FontWeight.SemiBold,
+                        ),
+                        modifier = Modifier.widthIn(min = 72.dp),
+                    )
+                    Text(
+                        formatInZone(instant, zone),
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                }
+            }
         }
     }
 }

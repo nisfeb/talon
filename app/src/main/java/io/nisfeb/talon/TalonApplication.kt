@@ -6,6 +6,7 @@ import io.nisfeb.talon.ai.AiFeatures
 import io.nisfeb.talon.ai.AiSettings
 import io.nisfeb.talon.data.AppDatabase
 import io.nisfeb.talon.ui.DraftStore
+import io.nisfeb.talon.ui.UiSettings
 import io.nisfeb.talon.urbit.SessionStore
 import io.nisfeb.talon.urbit.TlonChatRepo
 import io.nisfeb.talon.urbit.UrbitSession
@@ -33,6 +34,8 @@ class TalonApplication : Application() {
         private set
     lateinit var aiSettings: AiSettings
         private set
+    lateinit var uiSettings: UiSettings
+        private set
     lateinit var aiClient: AiClient
         private set
     lateinit var ai: AiFeatures
@@ -49,6 +52,7 @@ class TalonApplication : Application() {
         sessionStore = SessionStore(this)
         session = UrbitSession(http, sessionStore)
         aiSettings = AiSettings(this)
+        uiSettings = UiSettings(this)
         aiClient = AiClient(settingsProvider = { aiSettings.state.value })
         ai = AiFeatures(aiClient)
         repo = TlonChatRepo(db, aiSettings)

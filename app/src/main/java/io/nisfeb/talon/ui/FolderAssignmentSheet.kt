@@ -5,22 +5,16 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.PushPin
-import androidx.compose.material.icons.outlined.PushPin
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
@@ -39,9 +33,9 @@ import androidx.compose.ui.unit.dp
 import io.nisfeb.talon.data.FolderEntity
 
 /**
- * Bottom sheet that lets the user assign one conversation to zero or
- * more folders. Toggling a checkbox calls back up to the host screen,
- * which writes through to Room immediately.
+ * Bottom sheet that lets the user assign one conversation (or a whole
+ * group) to zero or more folders. Toggling a checkbox calls back up to
+ * the host screen, which writes through to Room immediately.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -49,8 +43,6 @@ fun FolderAssignmentSheet(
     conversationLabel: String,
     folders: List<FolderEntity>,
     selectedFolderIds: Set<Long>,
-    isPinned: Boolean,
-    onTogglePin: () -> Unit,
     onToggle: (FolderEntity, Boolean) -> Unit,
     onCreateNew: (name: String) -> Unit,
     onDismiss: () -> Unit,
@@ -70,33 +62,6 @@ fun FolderAssignmentSheet(
                 conversationLabel,
                 style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
             )
-            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
-
-            // Pin toggle row — promotes/demotes the conversation from the
-            // Pinned section at the top of the home list.
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                Icon(
-                    imageVector = if (isPinned) Icons.Filled.PushPin else Icons.Outlined.PushPin,
-                    contentDescription = null,
-                    tint = if (isPinned) MaterialTheme.colorScheme.primary
-                    else MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.size(22.dp),
-                )
-                Text(
-                    if (isPinned) "Unpin" else "Pin to top",
-                    style = MaterialTheme.typography.bodyLarge,
-                    modifier = Modifier.weight(1f),
-                )
-                TextButton(onClick = onTogglePin) {
-                    Text(if (isPinned) "Unpin" else "Pin")
-                }
-            }
             HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
 
             Text(

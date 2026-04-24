@@ -187,6 +187,16 @@ fun ThreadScreen(
             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
+            val onPollVoteHandler: (MessageEntity, List<ReactionEntity>, String) -> Unit =
+                { msg, rs, emoji ->
+                    val mine = rs.firstOrNull { it.author == ourPatp }?.emoji
+                    scope.launch {
+                        runCatching {
+                            if (mine == emoji) repo.unreact(whom, msg.id)
+                            else repo.react(whom, msg.id, emoji)
+                        }
+                    }
+                }
             parent?.let { p ->
                 item(key = "__parent") {
                     ThreadMessage(
@@ -199,6 +209,7 @@ fun ThreadScreen(
                         onImageTap = onImageTap,
                         onCitationTap = onCitationTap,
                         onLongPress = { pendingDelete = it },
+                        onPollVote = onPollVoteHandler,
                         showHeader = true,
                         highlighted = true,
                     )
@@ -220,6 +231,7 @@ fun ThreadScreen(
                     onImageTap = onImageTap,
                     onCitationTap = onCitationTap,
                     onLongPress = { pendingDelete = it },
+                    onPollVote = onPollVoteHandler,
                     showHeader = row.showHeader,
                     highlighted = false,
                 )
@@ -336,6 +348,7 @@ private fun ThreadMessage(
     onImageTap: (String) -> Unit,
     onCitationTap: (String) -> Unit,
     onLongPress: (MessageEntity) -> Unit,
+    onPollVote: (MessageEntity, List<ReactionEntity>, String) -> Unit,
     showHeader: Boolean,
     highlighted: Boolean,
 ) {
@@ -370,6 +383,9 @@ private fun ThreadMessage(
             onLinkTap = onLinkTap,
             onImageTap = onImageTap,
             onCitationTap = onCitationTap,
+            reactions = reactions,
+            ourPatp = ourPatp,
+            onPollVote = { emoji -> onPollVote(m, reactions, emoji) },
         )
         if (grouped.isNotEmpty()) {
             FlowRow(

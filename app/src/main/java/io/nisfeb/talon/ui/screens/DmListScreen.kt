@@ -29,7 +29,9 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Done
 import androidx.compose.material.icons.filled.DragHandle
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.KeyboardArrowDown
@@ -44,11 +46,13 @@ import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -78,6 +82,7 @@ import io.nisfeb.talon.ui.FolderAssignmentSheet
 import io.nisfeb.talon.ui.contactMapFlow
 import io.nisfeb.talon.urbit.StoryCache
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
 import sh.calvin.reorderable.ReorderableItem
@@ -120,6 +125,15 @@ fun DmListScreen(
         }
     }.collectAsState(initial = HomeListSnapshot.rows)
 
+    // Mention (notify-count) map, keyed by whom. Built off the same
+    // %activity summaries — `notifyCount` is the count of events that
+    // should actually ping you (@-mentions, replies to your posts, etc.).
+    val mentionCounts by remember {
+        db.unreads().stream().map { list ->
+            list.associate { it.whom to it.notifyCount }
+        }
+    }.collectAsState(initial = emptyMap())
+
     val contactMap by remember {
         contactMapFlow(
             db.contacts().stream(),
@@ -138,20 +152,49 @@ fun DmListScreen(
     val members by remember {
         db.folders().streamMembers().onEach { HomeListSnapshot.members = it }
     }.collectAsState(initial = HomeListSnapshot.members)
-    val pins by remember {
-        db.pins().stream().onEach { HomeListSnapshot.pins = it }
-    }.collectAsState(initial = HomeListSnapshot.pins)
-    val pinnedWhoms = remember(pins) { pins.map { it.whom }.toSet() }
     val groupOrders by remember {
         db.groupOrders().stream().onEach { HomeListSnapshot.groupOrders = it }
     }.collectAsState(initial = HomeListSnapshot.groupOrders)
 
-    // selectedFolderId = null means the special "All" tab.
-    var selectedFolderId by remember { mutableStateOf<Long?>(null) }
+    // Tab selection state. Either a custom folder is selected, or one
+    // of the three derived "special" tabs (All, Unread, Mentions).
+    // Seeded from HomeListSnapshot so back-navigation from a chat
+    // returns the user to whatever tab they were on, not the
+    // fresh-launch auto-landed folder.
+    var selectedFolderId by remember {
+        mutableStateOf(HomeListSnapshot.selectedFolderId)
+    }
+    var selectedSpecial by remember {
+        mutableStateOf(HomeListSnapshot.selectedSpecial)
+    }
+    var initialTabApplied by remember {
+        mutableStateOf(HomeListSnapshot.initialTabApplied)
+    }
+    LaunchedEffect(folders) {
+        if (!initialTabApplied) {
+            if (folders.isNotEmpty()) {
+                selectedFolderId = folders.first().id
+            }
+            initialTabApplied = true
+        }
+    }
+    // Mirror every selection change back into the snapshot so the
+    // next mount picks up where this one left off.
+    LaunchedEffect(selectedFolderId, selectedSpecial, initialTabApplied) {
+        HomeListSnapshot.selectedFolderId = selectedFolderId
+        HomeListSnapshot.selectedSpecial = selectedSpecial
+        HomeListSnapshot.initialTabApplied = initialTabApplied
+    }
     var folderSheetWhom by remember { mutableStateOf<String?>(null) }
+    // Separate state for group-kind folder assignment — different write path.
+    var folderSheetGroup by remember { mutableStateOf<String?>(null) }
     var renamingFolder by remember { mutableStateOf<FolderEntity?>(null) }
     var confirmDeleteFolder by remember { mutableStateOf<FolderEntity?>(null) }
     var creatingFolder by remember { mutableStateOf(false) }
+    // Edit mode: when on, rows are drag-reorderable (long-press anywhere
+    // on the row picks up the drag) and the long-press action sheet is
+    // suppressed. When off, long-press opens the action sheet as normal.
+    var editMode by remember { mutableStateOf(false) }
 
     val membersByWhom = remember(members) {
         members.groupBy(FolderMemberEntity::whom) { it.folderId }
@@ -165,11 +208,11 @@ fun DmListScreen(
         members.filter { it.folderId == folderId }
             .associate { it.whom to it.ordinal }
     }
+    // Kept for legacy call sites; folder view now renders via folderRows.
     val filteredRows = remember(rows, selectedFolderId, membersByFolder, folderMemberOrdinals) {
         val folderId = selectedFolderId ?: return@remember rows
         val whomSet = membersByFolder[folderId].orEmpty().toSet()
         rows.filter { (m, _) -> m.whom in whomSet }
-            // Stable sort: user-set ordinal first, then latest-first for ties.
             .sortedWith(
                 compareBy<Pair<MessageEntity, Int>> { (m, _) ->
                     folderMemberOrdinals[m.whom] ?: Int.MAX_VALUE
@@ -188,17 +231,15 @@ fun DmListScreen(
         HomeListSnapshot.expandedGroups = expandedGroups
     }
 
-    // For the "All" tab we render a structured home list (Pinned →
-    // Groups → DMs); for any selected folder we fall back to a flat
-    // filtered view so the folder is a pure subset of everything.
+    // For the "All" tab we render a structured home list (Groups →
+    // DMs); for any selected folder we fall back to a folder view.
     val allUnreads = remember(rows) { rows.associate { it.first.whom to it.second } }
     val homeRows = remember(
-        selectedFolderId, rows, pins, groupOrders, contactMap, expandedGroups, allUnreads,
+        selectedFolderId, rows, groupOrders, contactMap, expandedGroups, allUnreads,
     ) {
         if (selectedFolderId != null) emptyList()
         else buildHomeRows(
             allConvs = rows,
-            pinnedWhoms = pins.map { it.whom },
             contactMap = contactMap,
             expandedGroups = expandedGroups,
             allUnreads = allUnreads,
@@ -212,24 +253,43 @@ fun DmListScreen(
         homeRows.filterIsInstance<HomeRow.GroupHead>().map { it.flag }
     }
 
+    // Unread view rows — flat list of whoms with unread > 0, most recent
+    // first. Derived from the same `rows` snapshot; empty when caught up.
+    val unreadRows = remember(rows) {
+        rows.filter { (_, unread) -> unread > 0 }
+            .sortedByDescending { (m, _) -> m.sentMs }
+    }
+
+    // Folder view rows — a blend of group heads (collapsible) and loose
+    // conversation rows, in the user's per-folder ordinal order.
+    val folderRows = remember(
+        selectedFolderId, rows, members, contactMap, expandedGroups, allUnreads,
+    ) {
+        val fid = selectedFolderId ?: return@remember emptyList<HomeRow>()
+        val folderMembers = members.filter { it.folderId == fid }
+        buildFolderRows(
+            members = folderMembers,
+            allConvs = rows,
+            contactMap = contactMap,
+            expandedGroups = expandedGroups,
+            allUnreads = allUnreads,
+        )
+    }
+
     // Reuse a singleton LazyListState so the user's scroll position in
     // the home list survives navigating into a chat and back out.
     val listState = HomeListSnapshot.listState
+    // Tracks what was touched during a drag so onDragStopped knows what
+    // to push to %settings. Null means "nothing pending".
+    var pendingPushFolderId by remember { mutableStateOf<Long?>(null) }
+    var pendingPushGroupOrders by remember { mutableStateOf(false) }
+
     val reorderState = rememberReorderableLazyListState(listState) { from, to ->
         val fromKey = from.key as? String ?: return@rememberReorderableLazyListState
         val toKey = to.key as? String ?: return@rememberReorderableLazyListState
         when {
-            fromKey.startsWith("pin:") && toKey.startsWith("pin:") -> {
-                val fromWhom = fromKey.removePrefix("pin:")
-                val toWhom = toKey.removePrefix("pin:")
-                val order = pins.map { it.whom }.toMutableList()
-                val fi = order.indexOf(fromWhom)
-                val ti = order.indexOf(toWhom)
-                if (fi < 0 || ti < 0 || fi == ti) return@rememberReorderableLazyListState
-                order.add(ti, order.removeAt(fi))
-                app.repo.settingsSync.reorderPins(order)
-            }
-            fromKey.startsWith("group:") && toKey.startsWith("group:") -> {
+            selectedFolderId == null && selectedSpecial == SpecialTab.All &&
+                fromKey.startsWith("group:") && toKey.startsWith("group:") -> {
                 val fromFlag = fromKey.removePrefix("group:")
                 val toFlag = toKey.removePrefix("group:")
                 val order = effectiveGroupOrder.toMutableList()
@@ -237,20 +297,45 @@ fun DmListScreen(
                 val ti = order.indexOf(toFlag)
                 if (fi < 0 || ti < 0 || fi == ti) return@rememberReorderableLazyListState
                 order.add(ti, order.removeAt(fi))
-                app.repo.settingsSync.reorderGroupOrders(order)
+                // Local Room write only — smooth per-frame animation.
+                // We push to %settings once on drag release.
+                app.repo.settingsSync.reorderGroupOrdersLocal(order)
+                pendingPushGroupOrders = true
             }
-            fromKey.startsWith("fmem:") && toKey.startsWith("fmem:") -> {
+            // Folder-view drag: group-head rows and loose-conv rows both
+            // reorder the same folder_members table. Children and headers
+            // aren't reorderable.
+            fromKey.isFolderDraggableKey() && toKey.isFolderDraggableKey() -> {
                 val folderId = selectedFolderId ?: return@rememberReorderableLazyListState
-                val fromWhom = fromKey.removePrefix("fmem:")
-                val toWhom = toKey.removePrefix("fmem:")
-                val order = filteredRows.map { it.first.whom }.toMutableList()
+                val fromWhom = folderMemberWhomFromKey(fromKey) ?: return@rememberReorderableLazyListState
+                val toWhom = folderMemberWhomFromKey(toKey) ?: return@rememberReorderableLazyListState
+                val order = folderRows
+                    .mapNotNull { folderMemberWhomFromKey(it.key) }
+                    .toMutableList()
                 val fi = order.indexOf(fromWhom)
                 val ti = order.indexOf(toWhom)
                 if (fi < 0 || ti < 0 || fi == ti) return@rememberReorderableLazyListState
                 order.add(ti, order.removeAt(fi))
-                app.repo.settingsSync.reorderFolderMembers(folderId, order)
+                app.repo.settingsSync.reorderFolderMembersLocal(folderId, order)
+                pendingPushFolderId = folderId
             }
             // Any other cross-section / cross-kind swap: silently ignore.
+        }
+    }
+    val onDragStopped: () -> Unit = {
+        val folderId = pendingPushFolderId
+        val pushGroups = pendingPushGroupOrders
+        pendingPushFolderId = null
+        pendingPushGroupOrders = false
+        if (folderId != null || pushGroups) {
+            scope.launch {
+                if (folderId != null) {
+                    runCatching { app.repo.settingsSync.pushFolderMembersOrder(folderId) }
+                }
+                if (pushGroups) {
+                    runCatching { app.repo.settingsSync.pushGroupOrders() }
+                }
+            }
         }
     }
 
@@ -277,6 +362,14 @@ fun DmListScreen(
             )
             IconButton(onClick = onOpenSearch) {
                 Icon(Icons.Filled.Search, contentDescription = "Search")
+            }
+            IconButton(onClick = { editMode = !editMode }) {
+                Icon(
+                    imageVector = if (editMode) Icons.Filled.Done else Icons.Filled.Edit,
+                    contentDescription = if (editMode) "Finish reordering" else "Reorder",
+                    tint = if (editMode) MaterialTheme.colorScheme.primary
+                    else LocalContentColor.current,
+                )
             }
             var menuOpen by remember { mutableStateOf(false) }
             Box {
@@ -334,10 +427,22 @@ fun DmListScreen(
         }
         HorizontalDivider()
         BatteryExemptionBanner()
+        val totalUnread = remember(unreadRows) { unreadRows.sumOf { it.second } }
+        val totalMentions = remember(mentionCounts) { mentionCounts.values.sum() }
         FolderTabs(
             folders = folders,
             selectedFolderId = selectedFolderId,
-            onSelect = { selectedFolderId = it },
+            selectedSpecial = selectedSpecial,
+            unreadCount = totalUnread,
+            mentionCount = totalMentions,
+            editMode = editMode,
+            onSelectFolder = {
+                selectedFolderId = it
+            },
+            onSelectSpecial = {
+                selectedFolderId = null
+                selectedSpecial = it
+            },
             onLongPress = { f -> renamingFolder = f },
             onCreateNew = { creatingFolder = true },
         )
@@ -347,15 +452,19 @@ fun DmListScreen(
             contentPadding = PaddingValues(vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(0.dp),
         ) {
-            if (selectedFolderId != null) {
-                // Folder view — flat filtered list. Each row is draggable
-                // so the user can curate per-folder ordering.
-                items(
-                    items = filteredRows,
-                    key = { "fmem:${it.first.whom}" },
-                    contentType = { "fmem" },
-                ) { (m, unread) ->
-                    ReorderableItem(reorderState, key = "fmem:${m.whom}") { _ ->
+            if (selectedFolderId == null && selectedSpecial == SpecialTab.Unread) {
+                // Unread view — flat list of whoms with pending pings.
+                // Read-only (no drag-reorder, no section headers).
+                if (unreadRows.isEmpty()) {
+                    item(key = "__unread_empty") {
+                        SpecialEmpty("You're all caught up.")
+                    }
+                } else {
+                    items(
+                        items = unreadRows,
+                        key = { "unr:${it.first.whom}" },
+                        contentType = { "unr" },
+                    ) { (m, unread) ->
                         val haptic = LocalHapticFeedback.current
                         ConversationRow(
                             m = m,
@@ -364,50 +473,58 @@ fun DmListScreen(
                             draft = drafts[m.whom],
                             onClick = { onOpenConversation(m.whom) },
                             onLongClick = {
-                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                folderSheetWhom = m.whom
-                            },
-                            dragHandleModifier = Modifier.longPressDraggableHandle(
-                                onDragStarted = {
+                                if (!editMode) {
                                     haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                },
-                            ),
+                                    folderSheetWhom = m.whom
+                                }
+                            },
                         )
                         HorizontalDivider()
                     }
                 }
-            } else {
-                // All view — structured home list.
+            } else if (selectedFolderId == null && selectedSpecial == SpecialTab.Mentions) {
+                // Mentions view — whoms where %activity reports a non-zero
+                // notify-count (@-mentions and replies-to-your-posts).
+                val mentionRows = rows
+                    .filter { (m, _) -> (mentionCounts[m.whom] ?: 0) > 0 }
+                    .sortedByDescending { (m, _) -> m.sentMs }
+                if (mentionRows.isEmpty()) {
+                    item(key = "__mentions_empty") {
+                        SpecialEmpty("No mentions.")
+                    }
+                } else {
+                    items(
+                        items = mentionRows,
+                        key = { "men:${it.first.whom}" },
+                        contentType = { "men" },
+                    ) { (m, _) ->
+                        val haptic = LocalHapticFeedback.current
+                        ConversationRow(
+                            m = m,
+                            unread = mentionCounts[m.whom] ?: 0,
+                            contactMap = contactMap,
+                            draft = drafts[m.whom],
+                            onClick = { onOpenConversation(m.whom) },
+                            onLongClick = {
+                                if (!editMode) {
+                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    folderSheetWhom = m.whom
+                                }
+                            },
+                        )
+                        HorizontalDivider()
+                    }
+                }
+            } else if (selectedFolderId != null) {
+                // Folder view — user's curated mix of group heads (with
+                // collapsible children) and loose conversation rows.
                 items(
-                    items = homeRows,
+                    items = folderRows,
                     key = { it.key },
                     contentType = { it::class.simpleName.orEmpty() },
                 ) { row ->
                     when (row) {
                         is HomeRow.Header -> SectionHeader(row.label)
-                        is HomeRow.Pinned -> {
-                            ReorderableItem(reorderState, key = row.key) { _ ->
-                                val haptic = LocalHapticFeedback.current
-                                PinnedConversationRow(
-                                    whom = row.whom,
-                                    m = row.m,
-                                    unread = row.unread,
-                                    contactMap = contactMap,
-                                    draft = drafts[row.whom],
-                                    onClick = { onOpenConversation(row.whom) },
-                                    onLongClick = {
-                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                        folderSheetWhom = row.whom
-                                    },
-                                    dragHandleModifier = Modifier.longPressDraggableHandle(
-                                        onDragStarted = {
-                                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                        },
-                                    ),
-                                )
-                                HorizontalDivider()
-                            }
-                        }
                         is HomeRow.GroupHead -> {
                             ReorderableItem(reorderState, key = row.key) { _ ->
                                 val haptic = LocalHapticFeedback.current
@@ -424,15 +541,19 @@ fun DmListScreen(
                                             expandedGroups + row.flag
                                         }
                                     },
+                                    onLongClick = if (editMode) null else {
+                                        {
+                                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                            folderSheetGroup = row.flag
+                                        }
+                                    },
+                                    editMode = editMode,
                                     dragHandleModifier = Modifier.longPressDraggableHandle(
                                         onDragStarted = {
-                                            haptic.performHapticFeedback(
-                                                HapticFeedbackType.LongPress,
-                                            )
-                                            // Collapse while dragging so children
-                                            // don't get in the way of swap targets.
+                                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                             expandedGroups = expandedGroups - row.flag
                                         },
+                                        onDragStopped = { onDragStopped() },
                                     ),
                                 )
                                 HorizontalDivider()
@@ -448,8 +569,101 @@ fun DmListScreen(
                                 draft = drafts[row.whom],
                                 onClick = { onOpenConversation(row.whom) },
                                 onLongClick = {
-                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                    folderSheetWhom = row.whom
+                                    if (!editMode) {
+                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        folderSheetWhom = row.whom
+                                    }
+                                },
+                            )
+                            HorizontalDivider(modifier = Modifier.padding(start = 56.dp))
+                        }
+                        is HomeRow.Flat -> {
+                            ReorderableItem(reorderState, key = row.key) { _ ->
+                                val haptic = LocalHapticFeedback.current
+                                ConversationRow(
+                                    m = row.m,
+                                    unread = row.unread,
+                                    contactMap = contactMap,
+                                    draft = drafts[row.m.whom],
+                                    onClick = { onOpenConversation(row.m.whom) },
+                                    onLongClick = {
+                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        folderSheetWhom = row.m.whom
+                                    },
+                                    editMode = editMode,
+                                    dragHandleModifier = Modifier.longPressDraggableHandle(
+                                        onDragStarted = {
+                                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        },
+                                        onDragStopped = { onDragStopped() },
+                                    ),
+                                )
+                                HorizontalDivider()
+                            }
+                        }
+                    }
+                }
+            } else {
+                // All view — structured home list.
+                items(
+                    items = homeRows,
+                    key = { it.key },
+                    contentType = { it::class.simpleName.orEmpty() },
+                ) { row ->
+                    when (row) {
+                        is HomeRow.Header -> SectionHeader(row.label)
+                        is HomeRow.GroupHead -> {
+                            ReorderableItem(reorderState, key = row.key) { _ ->
+                                val haptic = LocalHapticFeedback.current
+                                GroupHeaderRow(
+                                    title = row.title,
+                                    avatarUrl = row.image,
+                                    childCount = row.childCount,
+                                    totalUnread = row.totalUnread,
+                                    expanded = row.expanded,
+                                    onToggle = {
+                                        expandedGroups = if (row.flag in expandedGroups) {
+                                            expandedGroups - row.flag
+                                        } else {
+                                            expandedGroups + row.flag
+                                        }
+                                    },
+                                    onLongClick = if (editMode) null else {
+                                        {
+                                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                            folderSheetGroup = row.flag
+                                        }
+                                    },
+                                    editMode = editMode,
+                                    dragHandleModifier = Modifier.longPressDraggableHandle(
+                                        onDragStarted = {
+                                            haptic.performHapticFeedback(
+                                                HapticFeedbackType.LongPress,
+                                            )
+                                            // Collapse while dragging so children
+                                            // don't get in the way of swap targets.
+                                            expandedGroups = expandedGroups - row.flag
+                                        },
+                                        onDragStopped = { onDragStopped() },
+                                    ),
+                                )
+                                HorizontalDivider()
+                            }
+                        }
+                        is HomeRow.GroupChild -> {
+                            val haptic = LocalHapticFeedback.current
+                            GroupChannelRow(
+                                whom = row.whom,
+                                m = row.m,
+                                unread = row.unread,
+                                contactMap = contactMap,
+                                draft = drafts[row.whom],
+                                onClick = { onOpenConversation(row.whom) },
+                                onLongClick = {
+                                    if (!editMode) {
+                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        folderSheetWhom = row.whom
+                                    }
                                 },
                             )
                             HorizontalDivider(modifier = Modifier.padding(start = 56.dp))
@@ -463,8 +677,10 @@ fun DmListScreen(
                                 draft = drafts[row.m.whom],
                                 onClick = { onOpenConversation(row.m.whom) },
                                 onLongClick = {
-                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                    folderSheetWhom = row.m.whom
+                                    if (!editMode) {
+                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        folderSheetWhom = row.m.whom
+                                    }
                                 },
                             )
                             HorizontalDivider()
@@ -499,18 +715,10 @@ fun DmListScreen(
         val selected = remember(whom, members) {
             membersByWhom[whom].orEmpty().toSet()
         }
-        val pinned = whom in pinnedWhoms
         FolderAssignmentSheet(
             conversationLabel = label,
             folders = folders,
             selectedFolderIds = selected,
-            isPinned = pinned,
-            onTogglePin = {
-                scope.launch {
-                    if (pinned) app.repo.settingsSync.removePin(whom)
-                    else app.repo.settingsSync.pin(whom)
-                }
-            },
             onToggle = { folder, checked ->
                 scope.launch {
                     if (checked) app.repo.settingsSync.addFolderMember(folder.id, whom)
@@ -524,6 +732,36 @@ fun DmListScreen(
                 }
             },
             onDismiss = { folderSheetWhom = null },
+        )
+    }
+
+    folderSheetGroup?.let { flag ->
+        val group = remember(flag, contactMap) {
+            contactMap.allGroups().firstOrNull { it.flag == flag }
+        }
+        val groupLabel = "Group · ${group?.title ?: flag}"
+        val selected = remember(flag, members) {
+            members.filter { it.whom == flag && it.kind == FolderMemberEntity.KIND_GROUP }
+                .map { it.folderId }
+                .toSet()
+        }
+        FolderAssignmentSheet(
+            conversationLabel = groupLabel,
+            folders = folders,
+            selectedFolderIds = selected,
+            onToggle = { folder, checked ->
+                scope.launch {
+                    if (checked) app.repo.settingsSync.addGroupToFolder(folder.id, flag)
+                    else app.repo.settingsSync.removeGroupFromFolder(folder.id, flag)
+                }
+            },
+            onCreateNew = { name ->
+                scope.launch {
+                    val id = app.repo.settingsSync.createFolder(name, folders.size)
+                    app.repo.settingsSync.addGroupToFolder(id, flag)
+                }
+            },
+            onDismiss = { folderSheetGroup = null },
         )
     }
 
@@ -580,27 +818,30 @@ fun DmListScreen(
 private fun FolderTabs(
     folders: List<FolderEntity>,
     selectedFolderId: Long?,
-    onSelect: (Long?) -> Unit,
+    selectedSpecial: SpecialTab,
+    unreadCount: Int,
+    mentionCount: Int,
+    editMode: Boolean,
+    onSelectFolder: (Long?) -> Unit,
+    onSelectSpecial: (SpecialTab) -> Unit,
     onLongPress: (FolderEntity) -> Unit,
     onCreateNew: () -> Unit,
 ) {
+    val specialActive = selectedFolderId == null
     LazyRow(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp),
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        item(key = "__all") {
-            TabChip(
-                text = "All",
-                selected = selectedFolderId == null,
-                onClick = { onSelect(null) },
-            )
-        }
         itemsIndexed(folders, key = { _, f -> f.id }) { _, folder ->
             TabChip(
                 text = folder.name,
                 selected = selectedFolderId == folder.id,
-                onClick = { onSelect(folder.id) },
+                onClick = { onSelectFolder(folder.id) },
                 onLongClick = { onLongPress(folder) },
+                // Pencil-to-rename only when the user is in edit mode.
+                onEditClick = if (editMode) {
+                    { onLongPress(folder) }
+                } else null,
             )
         }
         item(key = "__new") {
@@ -608,6 +849,37 @@ private fun FolderTabs(
                 text = "+",
                 selected = false,
                 onClick = onCreateNew,
+            )
+        }
+        // Special tabs on the right, in priority order:
+        //   Mentions (highest-signal) → Unread → All (scavenge pile).
+        // Mentions / Unread hide when empty — the tab is a pile of
+        // pending items, so no items = no tab.
+        if (mentionCount > 0 || selectedSpecial == SpecialTab.Mentions) {
+            item(key = "__mentions") {
+                TabChip(
+                    text = "Mentions",
+                    badgeCount = mentionCount,
+                    selected = specialActive && selectedSpecial == SpecialTab.Mentions,
+                    onClick = { onSelectSpecial(SpecialTab.Mentions) },
+                )
+            }
+        }
+        if (unreadCount > 0 || selectedSpecial == SpecialTab.Unread) {
+            item(key = "__unread") {
+                TabChip(
+                    text = "Unread",
+                    badgeCount = unreadCount,
+                    selected = specialActive && selectedSpecial == SpecialTab.Unread,
+                    onClick = { onSelectSpecial(SpecialTab.Unread) },
+                )
+            }
+        }
+        item(key = "__all") {
+            TabChip(
+                text = "All",
+                selected = specialActive && selectedSpecial == SpecialTab.All,
+                onClick = { onSelectSpecial(SpecialTab.All) },
             )
         }
     }
@@ -620,17 +892,15 @@ private fun TabChip(
     selected: Boolean,
     onClick: () -> Unit,
     onLongClick: (() -> Unit)? = null,
+    onEditClick: (() -> Unit)? = null,
+    badgeCount: Int = 0,
 ) {
     val bg = if (selected) MaterialTheme.colorScheme.primary
     else MaterialTheme.colorScheme.surfaceVariant
     val fg = if (selected) MaterialTheme.colorScheme.onPrimary
     else MaterialTheme.colorScheme.onSurfaceVariant
-    Text(
-        text,
-        style = MaterialTheme.typography.labelLarge.copy(
-            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
-        ),
-        color = fg,
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
             .clip(RoundedCornerShape(16.dp))
             .background(bg)
@@ -639,7 +909,43 @@ private fun TabChip(
                 onLongClick = onLongClick,
             )
             .padding(horizontal = 14.dp, vertical = 8.dp),
-    )
+    ) {
+        Text(
+            text,
+            style = MaterialTheme.typography.labelLarge.copy(
+                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+            ),
+            color = fg,
+        )
+        if (badgeCount > 0) {
+            // Amber count badge. On an unselected chip the chip bg is
+            // surfaceVariant, so amber primary pops; on a selected
+            // chip the chip bg is already primary — use onPrimary
+            // there so the count stays readable.
+            val badgeColor = if (selected) MaterialTheme.colorScheme.onPrimary
+            else MaterialTheme.colorScheme.primary
+            Text(
+                " " + if (badgeCount < 100) badgeCount.toString() else "99+",
+                style = MaterialTheme.typography.labelLarge.copy(
+                    fontWeight = FontWeight.Bold,
+                ),
+                color = badgeColor,
+            )
+        }
+        // Rename pencil — only surfaced on the active, renameable chip
+        // while the user is in edit mode.
+        if (selected && onEditClick != null) {
+            Icon(
+                imageVector = Icons.Filled.Edit,
+                contentDescription = "Rename folder",
+                tint = fg,
+                modifier = Modifier
+                    .padding(start = 6.dp)
+                    .size(14.dp)
+                    .clickable { onEditClick() },
+            )
+        }
+    }
 }
 
 @Composable
@@ -716,6 +1022,7 @@ private fun ConversationRow(
     draft: String?,
     onClick: () -> Unit,
     onLongClick: () -> Unit,
+    editMode: Boolean = false,
     dragHandleModifier: Modifier? = null,
 ) {
     val preview = remember(m.id, m.contentJson) {
@@ -730,10 +1037,18 @@ private fun ConversationRow(
         draft?.trim()?.replace('\n', ' ')?.take(160)
     }
 
+    // In edit mode, the entire row is the drag handle — long-press
+    // anywhere picks it up. Tap still opens the chat. The action-sheet
+    // long-press is suppressed so gestures don't collide.
+    val rowClickModifier = if (editMode && dragHandleModifier != null) {
+        Modifier.clickable(onClick = onClick).then(dragHandleModifier)
+    } else {
+        Modifier.combinedClickable(onClick = onClick, onLongClick = onLongClick)
+    }
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .combinedClickable(onClick = onClick, onLongClick = onLongClick)
+            .then(rowClickModifier)
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -788,15 +1103,13 @@ private fun ConversationRow(
                     .padding(horizontal = 10.dp, vertical = 4.dp),
             )
         }
-        if (dragHandleModifier != null) {
-            Box(modifier = dragHandleModifier.padding(start = 4.dp)) {
-                Icon(
-                    imageVector = Icons.Filled.DragHandle,
-                    contentDescription = "Drag to reorder",
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.size(20.dp),
-                )
-            }
+        if (editMode) {
+            Icon(
+                imageVector = Icons.Filled.DragHandle,
+                contentDescription = "Drag to reorder",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(start = 4.dp).size(20.dp),
+            )
         }
     }
 }
@@ -811,6 +1124,40 @@ private fun formatRelative(ms: Long): String {
         diff < 24 * 3600_000L -> TIME_TODAY.format(Date(ms))
         else -> DATE_OLD.format(Date(ms))
     }
+}
+
+/** Derived "special" tabs that aren't user-created folders. */
+private enum class SpecialTab { All, Unread, Mentions }
+
+@Composable
+private fun SpecialEmpty(text: String) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 48.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+/**
+ * Whether a HomeRow key represents a draggable row in the folder view.
+ * GroupHead rows and loose-conversation (Flat) rows are draggable;
+ * GroupChild and Header rows are not.
+ */
+private fun String.isFolderDraggableKey(): Boolean =
+    startsWith("group:") || startsWith("conv:")
+
+/** Map a HomeRow key to the folder_members.whom it represents. */
+private fun folderMemberWhomFromKey(key: String): String? = when {
+    key.startsWith("group:") -> key.removePrefix("group:")
+    key.startsWith("conv:") -> key.removePrefix("conv:")
+    else -> null
 }
 
 @Composable
@@ -831,107 +1178,6 @@ private fun SectionHeader(label: String) {
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun PinnedConversationRow(
-    whom: String,
-    m: MessageEntity?,
-    unread: Int,
-    contactMap: ContactMap,
-    draft: String?,
-    onClick: () -> Unit,
-    onLongClick: () -> Unit,
-    dragHandleModifier: Modifier,
-) {
-    val title = remember(whom, contactMap) { contactMap.conversationLabel(whom) }
-    val avatar = remember(whom, contactMap) { contactMap.conversationAvatar(whom) }
-    val preview = m?.let {
-        remember(it.id, it.contentJson) {
-            StoryCache.textFor(it.id, it.contentJson).take(200).replace('\n', ' ')
-        }
-    }
-    val draftPreview = remember(draft) {
-        draft?.trim()?.replace('\n', ' ')?.take(160)
-    }
-
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .combinedClickable(onClick = onClick, onLongClick = onLongClick)
-            .padding(horizontal = 16.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        Avatar(
-            label = title,
-            url = avatar,
-            colorHex = contactMap.conversationColor(whom),
-            size = 44.dp,
-        )
-        Column(
-            modifier = Modifier.weight(1f),
-            verticalArrangement = Arrangement.spacedBy(2.dp),
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(
-                    Icons.Filled.PushPin,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(12.dp),
-                )
-                Spacer(Modifier.width(4.dp))
-                Text(
-                    title,
-                    style = MaterialTheme.typography.titleMedium.copy(
-                        fontWeight = if (unread > 0) FontWeight.Bold else FontWeight.SemiBold,
-                    ),
-                )
-            }
-            if (!draftPreview.isNullOrEmpty()) {
-                Text(
-                    "Draft: $draftPreview",
-                    style = MaterialTheme.typography.bodyMedium.copy(fontStyle = FontStyle.Italic),
-                    color = MaterialTheme.colorScheme.primary,
-                    maxLines = 1,
-                )
-            } else if (!preview.isNullOrEmpty()) {
-                Text(
-                    preview,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                )
-            }
-        }
-        if (unread > 0) {
-            Text(
-                if (unread < 100) unread.toString() else "99+",
-                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
-                color = MaterialTheme.colorScheme.onPrimary,
-                modifier = Modifier
-                    .clip(CircleShape)
-                    .background(MaterialTheme.colorScheme.primary)
-                    .padding(horizontal = 10.dp, vertical = 4.dp),
-            )
-        }
-        // Drag handle — long-press the icon to pick it up and drag; a
-        // short tap opens the same pin/folder sheet as long-pressing the
-        // row, matching the affordance most users expect.
-        Box(
-            modifier = Modifier
-                .padding(start = 4.dp)
-                .clickable(onClick = onLongClick)
-                .then(dragHandleModifier),
-        ) {
-            Icon(
-                imageVector = Icons.Filled.DragHandle,
-                contentDescription = "Drag to reorder, tap for options",
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.size(20.dp),
-            )
-        }
-    }
-}
-
-@Composable
 private fun GroupHeaderRow(
     title: String,
     avatarUrl: String?,
@@ -939,17 +1185,24 @@ private fun GroupHeaderRow(
     totalUnread: Int,
     expanded: Boolean,
     onToggle: () -> Unit,
+    editMode: Boolean = false,
     dragHandleModifier: Modifier = Modifier,
+    onLongClick: (() -> Unit)? = null,
 ) {
     val rotation by animateFloatAsState(
         targetValue = if (expanded) 0f else -90f,
         animationSpec = tween(durationMillis = 160),
         label = "groupChevronRotation",
     )
+    val rowClickModifier = if (editMode) {
+        Modifier.clickable(onClick = onToggle).then(dragHandleModifier)
+    } else {
+        Modifier.combinedClickable(onClick = onToggle, onLongClick = onLongClick)
+    }
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onToggle)
+            .then(rowClickModifier)
             .padding(horizontal = 16.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -992,13 +1245,12 @@ private fun GroupHeaderRow(
                 .size(24.dp)
                 .graphicsLayer { rotationZ = rotation },
         )
-        // Drag handle — long-press to reorder within the Groups section.
-        Box(modifier = dragHandleModifier.padding(start = 4.dp)) {
+        if (editMode) {
             Icon(
                 imageVector = Icons.Filled.DragHandle,
                 contentDescription = "Drag to reorder",
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.size(20.dp),
+                modifier = Modifier.padding(start = 4.dp).size(20.dp),
             )
         }
     }
@@ -1103,7 +1355,6 @@ private fun androidx.compose.foundation.layout.BoxScope.UnreadOffscreenIndicator
             .toSet()
         homeRows.mapIndexedNotNull { i, row ->
             val hasUnread = when (row) {
-                is HomeRow.Pinned -> row.unread > 0
                 is HomeRow.Flat -> row.unread > 0
                 is HomeRow.GroupChild -> row.unread > 0
                 is HomeRow.GroupHead -> row.totalUnread > 0 && row.flag !in expandedFlags
@@ -1193,10 +1444,14 @@ private object HomeListSnapshot {
     @Volatile var rows: List<Pair<MessageEntity, Int>> = emptyList()
     @Volatile var contactMap: ContactMap = ContactMap.EMPTY
     @Volatile var expandedGroups: Set<String> = emptySet()
-    @Volatile var pins: List<io.nisfeb.talon.data.PinEntity> = emptyList()
     @Volatile var groupOrders: List<io.nisfeb.talon.data.GroupOrderEntity> = emptyList()
     @Volatile var folders: List<FolderEntity> = emptyList()
     @Volatile var members: List<FolderMemberEntity> = emptyList()
+    // Tab selection survives back-navigation from a chat so the user
+    // lands where they left off, not on the auto-landed folder.
+    @Volatile var selectedFolderId: Long? = null
+    @Volatile var selectedSpecial: SpecialTab = SpecialTab.All
+    @Volatile var initialTabApplied: Boolean = false
     // Shared LazyListState so scroll position persists across mounts.
     val listState: androidx.compose.foundation.lazy.LazyListState =
         androidx.compose.foundation.lazy.LazyListState()

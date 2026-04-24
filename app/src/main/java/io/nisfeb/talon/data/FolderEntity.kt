@@ -19,6 +19,12 @@ data class FolderEntity(
 /**
  * Join table: one row per (folder, whom) membership. A conversation
  * can live in multiple folders.
+ *
+ * `kind` distinguishes between a direct channel/DM/club reference
+ * (`KIND_WHOM`, the default) and a whole-group reference
+ * (`KIND_GROUP`, where `whom` holds the group flag `~ship/name`). A
+ * group-kind member renders as a collapsible header in the folder
+ * view, with all of its channels nested underneath.
  */
 @Entity(
     tableName = "folder_members",
@@ -33,4 +39,10 @@ data class FolderMemberEntity(
      * folder tab. Rewritten in bulk so no fractional indexing needed.
      */
     val ordinal: Int = 0,
-)
+    val kind: String = KIND_WHOM,
+) {
+    companion object {
+        const val KIND_WHOM = "whom"
+        const val KIND_GROUP = "group"
+    }
+}

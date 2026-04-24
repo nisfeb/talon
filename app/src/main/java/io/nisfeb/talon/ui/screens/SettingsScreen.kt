@@ -89,6 +89,18 @@ fun SettingsScreen(
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Text(
+                "Composer",
+                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
+            )
+            val hideButtons by app.uiSettings.hideComposerButtons.collectAsState()
+            FeatureToggleRow(
+                label = "Hide upload buttons",
+                description = "Reclaim composer space. Use /img, /file, and /mic instead.",
+                enabled = hideButtons,
+                onChange = { app.uiSettings.setHideComposerButtons(it) },
+            )
+            HorizontalDivider()
+            Text(
                 "AI",
                 style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
             )

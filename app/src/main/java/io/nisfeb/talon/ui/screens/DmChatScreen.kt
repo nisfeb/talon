@@ -41,6 +41,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.NotificationsOff
 import androidx.compose.material.icons.filled.Pause
@@ -105,11 +106,16 @@ import io.nisfeb.talon.ui.ContactProfileSheet
 import io.nisfeb.talon.ui.LinkPreviewCard
 import io.nisfeb.talon.ui.firstLinkUrl
 import io.nisfeb.talon.ui.ContactMap
+import io.nisfeb.talon.ui.CommandResult
 import io.nisfeb.talon.ui.EmojiCatalog
 import io.nisfeb.talon.ui.EmojiPickerDropdown
 import io.nisfeb.talon.ui.MentionPicker
 import io.nisfeb.talon.ui.ReactionPalette
+import io.nisfeb.talon.ui.SlashPicker
 import io.nisfeb.talon.ui.detectEmojiQuery
+import io.nisfeb.talon.ui.detectSlashTrigger
+import io.nisfeb.talon.ui.filterSlashCommands
+import io.nisfeb.talon.ui.runCommand
 import io.nisfeb.talon.ui.StoryRenderer
 import io.nisfeb.talon.ui.VoiceRecordButton
 import io.nisfeb.talon.ui.contactMapFlow
@@ -314,6 +320,15 @@ fun DmChatScreen(
         }
     }
 
+    // Location permission launcher for `/loc`. When /loc runs without
+    // the permission, we kick this off and tell the user to retry.
+    val locationPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        if (granted) sendError = "Location granted — run /loc again"
+        else sendError = "Location permission denied"
+    }
+
     val pickImage = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia(),
     ) { uri ->
@@ -389,11 +404,33 @@ fun DmChatScreen(
     val emojiSuggestions = remember(emojiQuery) {
         emojiQuery?.let { (q, _) -> EmojiCatalog.search(q, limit = 6) } ?: emptyList()
     }
+    val slashTrigger = detectSlashTrigger(draft.text, draft.selection.start)
+    val slashSuggestions = remember(slashTrigger) {
+        slashTrigger?.let { filterSlashCommands(it.query) } ?: emptyList()
+    }
 
     var actionTarget by remember { mutableStateOf<MessageEntity?>(null) }
     var editing by remember { mutableStateOf<MessageEntity?>(null) }
     var confirmingDelete by remember { mutableStateOf<MessageEntity?>(null) }
     var profileSheetShip by remember { mutableStateOf<String?>(null) }
+
+    // /mic slash-triggered recording. VoiceRecordButton handles the
+    // tap-bar case; this shadow state drives the parallel flow when a
+    // user kicks off recording via the slash command instead.
+    val slashRecorder = remember { io.nisfeb.talon.ui.VoiceRecorder(context) }
+    var slashMicActive by remember { mutableStateOf(false) }
+    androidx.compose.runtime.DisposableEffect(Unit) {
+        onDispose {
+            // Make sure we never leak the mic if the screen unmounts
+            // mid-recording (nav, rotation).
+            if (slashMicActive) slashRecorder.cancel()
+        }
+    }
+    val micPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        sendError = if (granted) "Mic granted — run /mic again" else "Mic permission denied"
+    }
 
     // AI: catch-me-up. Feature toggled on when a key is configured.
     // Banner appears when the chat has unreads and we haven't summarized
@@ -613,6 +650,24 @@ fun DmChatScreen(
             }
         }
         HorizontalDivider()
+        if (slashSuggestions.isNotEmpty() && slashTrigger != null) {
+            SlashPicker(
+                suggestions = slashSuggestions,
+                onPick = { cmd ->
+                    // Replace the typed "/query" fragment with "/name ".
+                    val caret = draft.selection.start
+                    val after = draft.text.substring(caret)
+                    val inserted = "/${cmd.name} "
+                    val newText = inserted + after
+                    val newCaret = inserted.length
+                    draft = TextFieldValue(
+                        text = newText,
+                        selection = TextRange(newCaret),
+                    )
+                },
+                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+            )
+        }
         if (emojiSuggestions.isNotEmpty() && emojiQuery != null) {
             EmojiPickerDropdown(
                 suggestions = emojiSuggestions,
@@ -666,6 +721,29 @@ fun DmChatScreen(
                 onDismiss = { pendingQuote = null },
             )
         }
+        if (slashMicActive) {
+            SlashMicRecordingBar(
+                onStop = {
+                    val result = slashRecorder.stop()
+                    slashMicActive = false
+                    if (result != null) {
+                        val (file, durMs) = result
+                        if (durMs < 300) {
+                            file.delete()
+                            sendError = "Too short — hold longer"
+                        } else {
+                            pendingVoice = PendingVoice(file, durMs)
+                        }
+                    } else {
+                        sendError = "Recording failed"
+                    }
+                },
+                onCancel = {
+                    slashRecorder.cancel()
+                    slashMicActive = false
+                },
+            )
+        }
         // Voice preview swaps in instead of the normal composer while
         // the user is reviewing a just-recorded clip.
         pendingVoice?.let { pv ->
@@ -711,47 +789,51 @@ fun DmChatScreen(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(2.dp),
         ) {
-            IconButton(
-                onClick = {
-                    pickImage.launch(
-                        PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
-                    )
-                },
-                enabled = canSend && !uploading,
-                modifier = Modifier.size(36.dp),
-            ) {
-                if (uploading) {
-                    CircularProgressIndicator(
-                        strokeWidth = 2.dp,
-                        modifier = Modifier.size(20.dp),
-                    )
-                } else {
+            val hideComposerButtons by talonApp.uiSettings.hideComposerButtons
+                .collectAsState()
+            if (!hideComposerButtons) {
+                IconButton(
+                    onClick = {
+                        pickImage.launch(
+                            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
+                        )
+                    },
+                    enabled = canSend && !uploading,
+                    modifier = Modifier.size(36.dp),
+                ) {
+                    if (uploading) {
+                        CircularProgressIndicator(
+                            strokeWidth = 2.dp,
+                            modifier = Modifier.size(20.dp),
+                        )
+                    } else {
+                        Icon(
+                            Icons.Outlined.Image,
+                            contentDescription = "Send image",
+                            modifier = Modifier.size(22.dp),
+                        )
+                    }
+                }
+                IconButton(
+                    onClick = { pickFile.launch("*/*") },
+                    enabled = canSend && !uploading,
+                    modifier = Modifier.size(36.dp),
+                ) {
                     Icon(
-                        Icons.Outlined.Image,
-                        contentDescription = "Send image",
+                        Icons.Filled.AttachFile,
+                        contentDescription = "Attach file",
                         modifier = Modifier.size(22.dp),
                     )
                 }
-            }
-            IconButton(
-                onClick = { pickFile.launch("*/*") },
-                enabled = canSend && !uploading,
-                modifier = Modifier.size(36.dp),
-            ) {
-                Icon(
-                    Icons.Filled.AttachFile,
-                    contentDescription = "Attach file",
-                    modifier = Modifier.size(22.dp),
+                VoiceRecordButton(
+                    enabled = canSend && !uploading,
+                    onRecorded = { file, durationMs ->
+                        // Stage the recording in a preview row; user either
+                        // listens + sends or discards.
+                        pendingVoice = PendingVoice(file, durationMs)
+                    },
                 )
             }
-            VoiceRecordButton(
-                enabled = canSend && !uploading,
-                onRecorded = { file, durationMs ->
-                    // Stage the recording in a preview row; user either
-                    // listens + sends or discards.
-                    pendingVoice = PendingVoice(file, durationMs)
-                },
-            )
             val doSend: () -> Boolean = {
                 val body = draft.text.trim()
                 val quote = pendingQuote
@@ -765,12 +847,74 @@ fun DmChatScreen(
                     sendError = null
                     forceBottomTick += 1
                     pendingQuote = null
-                    scope.launch {
-                        runCatching {
-                            if (quote != null) {
-                                repo.sendQuote(whom, body, quote.whom, quote.id)
+                    // Intercept the UI-dispatched commands (pickers /
+                    // recorder / permission prompts) before the coroutine
+                    // dispatcher. Pure handlers run in scope.launch below.
+                    val firstWord = body.trim().lowercase().substringBefore(' ')
+                    val handledInUi = when {
+                        quote != null -> false
+                        firstWord == "/img" -> {
+                            pickImage.launch(
+                                PickVisualMediaRequest(
+                                    ActivityResultContracts.PickVisualMedia.ImageOnly,
+                                ),
+                            )
+                            true
+                        }
+                        firstWord == "/file" -> {
+                            pickFile.launch("*/*")
+                            true
+                        }
+                        firstWord == "/mic" -> {
+                            val granted = androidx.core.content.ContextCompat
+                                .checkSelfPermission(
+                                    context,
+                                    android.Manifest.permission.RECORD_AUDIO,
+                                ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+                            if (!granted) {
+                                micPermissionLauncher.launch(
+                                    android.Manifest.permission.RECORD_AUDIO,
+                                )
+                                draft = TextFieldValue(body, TextRange(body.length))
                             } else {
-                                repo.send(whom, body)
+                                runCatching {
+                                    slashRecorder.start()
+                                    slashMicActive = true
+                                }.onFailure { err ->
+                                    sendError =
+                                        "mic start failed: ${err.message ?: err::class.simpleName}"
+                                }
+                            }
+                            true
+                        }
+                        firstWord == "/loc" &&
+                            !io.nisfeb.talon.ui.hasLocationPermission(context) -> {
+                            locationPermissionLauncher.launch(
+                                android.Manifest.permission.ACCESS_COARSE_LOCATION,
+                            )
+                            draft = TextFieldValue(body, TextRange(body.length))
+                            true
+                        }
+                        else -> false
+                    }
+                    if (!handledInUi) scope.launch {
+                        runCatching {
+                            val cmd = if (quote == null) {
+                                runCommand(body, repo, talonApp.http, context) { msg ->
+                                    sendError = msg
+                                }
+                            } else CommandResult.NotACommand
+                            when (cmd) {
+                                is CommandResult.Send -> repo.send(whom, cmd.body)
+                                is CommandResult.Handled -> { /* command did its work */ }
+                                is CommandResult.Error -> sendError = cmd.message
+                                is CommandResult.NotACommand -> {
+                                    if (quote != null) {
+                                        repo.sendQuote(whom, body, quote.whom, quote.id)
+                                    } else {
+                                        repo.send(whom, body)
+                                    }
+                                }
                             }
                         }.onFailure { err ->
                             android.util.Log.e("DmChatScreen", "send failed", err)
@@ -909,7 +1053,7 @@ fun DmChatScreen(
             onSave = { newText ->
                 editing = null
                 scope.launch {
-                    runCatching { repo.edit(whom, target.id, newText) }
+                    runCatching { repo.edit(whom, target.id, newText, target.sentMs) }
                         .onFailure { sendError = "edit failed: ${it.message ?: it::class.simpleName}" }
                 }
             },
@@ -1102,6 +1246,9 @@ private fun MessageRow(
                 onImageTap = onImageTap,
                 onCitationTap = onCitationTap,
                 onLongPress = { onLongPress(m) },
+                reactions = row.reactions,
+                ourPatp = ourPatp,
+                onPollVote = { emoji -> onReactionTap(m, row.reactions, emoji) },
             )
             val firstLink = remember(parts) { firstLinkUrl(parts) }
             if (firstLink != null) {
@@ -1315,7 +1462,10 @@ private fun MessageActionSheet(
             if (canQuote) {
                 TextButton(onClick = onQuote) { Text("Quote") }
             }
-            if (isMine && isChannel) {
+            // Edit is only supported on top-level channel messages that
+            // the user authored. %chat (DMs + clubs) silently ignores
+            // edit pokes, and reply-edit isn't in either agent's mold.
+            if (isMine && isChannel && message.parentId == null) {
                 TextButton(onClick = onEdit) { Text("Edit") }
             }
             // Delete: always allowed on your own messages. On channels
@@ -1724,6 +1874,36 @@ private fun ReactionDetailsSheet(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun SlashMicRecordingBar(
+    onStop: () -> Unit,
+    onCancel: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.errorContainer)
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Icon(
+            imageVector = Icons.Filled.Mic,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.error,
+            modifier = Modifier.size(18.dp),
+        )
+        Text(
+            "Recording…",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onErrorContainer,
+            modifier = Modifier.weight(1f),
+        )
+        TextButton(onClick = onCancel) { Text("Cancel") }
+        TextButton(onClick = onStop) { Text("Stop") }
     }
 }
 
