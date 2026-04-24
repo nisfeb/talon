@@ -55,10 +55,12 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -247,6 +249,42 @@ fun DmListScreen(
     // starts from the user's latest expansion state.
     androidx.compose.runtime.LaunchedEffect(expandedGroups) {
         snap.expandedGroups = expandedGroups
+    }
+
+    // Stable callbacks so LazyColumn rows stay skippable during scroll.
+    // Without rememberUpdatedState the fresh lambdas rebuilt on every
+    // DAO emission break the compose skippable fast-path; with it we
+    // keep a frozen callback identity that still dispatches through to
+    // the latest outer function. Same pattern as DmChatScreen.
+    val currentOnOpenConversation by rememberUpdatedState(onOpenConversation)
+    val hapticRoot = LocalHapticFeedback.current
+    val onRowOpen: (String) -> Unit = remember {
+        { whom -> currentOnOpenConversation(whom) }
+    }
+    val onRowLongPress: (String) -> Unit = remember(editMode) {
+        { whom ->
+            if (!editMode) {
+                hapticRoot.performHapticFeedback(HapticFeedbackType.LongPress)
+                folderSheetWhom = whom
+            }
+        }
+    }
+    val onGroupHeadToggle: (String) -> Unit = remember {
+        { flag ->
+            expandedGroups = if (flag in expandedGroups) {
+                expandedGroups - flag
+            } else {
+                expandedGroups + flag
+            }
+        }
+    }
+    val onGroupHeadLongPress: (String) -> Unit = remember(editMode) {
+        { flag ->
+            if (!editMode) {
+                hapticRoot.performHapticFeedback(HapticFeedbackType.LongPress)
+                folderSheetGroup = flag
+            }
+        }
     }
 
     // For the "All" tab we render a structured home list (Groups →
@@ -535,19 +573,13 @@ fun DmListScreen(
                         key = { "unr:${it.first.whom}" },
                         contentType = { "unr" },
                     ) { (m, unread) ->
-                        val haptic = LocalHapticFeedback.current
                         ConversationRow(
                             m = m,
                             unread = unread,
                             contactMap = contactMap,
                             draft = drafts[m.whom],
-                            onClick = { onOpenConversation(m.whom) },
-                            onLongClick = {
-                                if (!editMode) {
-                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                    folderSheetWhom = m.whom
-                                }
-                            },
+                            onClick = onRowOpen,
+                            onLongClick = onRowLongPress,
                         )
                         HorizontalDivider()
                     }
@@ -568,19 +600,13 @@ fun DmListScreen(
                         key = { "men:${it.first.whom}" },
                         contentType = { "men" },
                     ) { (m, _) ->
-                        val haptic = LocalHapticFeedback.current
                         ConversationRow(
                             m = m,
                             unread = mentionCounts[m.whom] ?: 0,
                             contactMap = contactMap,
                             draft = drafts[m.whom],
-                            onClick = { onOpenConversation(m.whom) },
-                            onLongClick = {
-                                if (!editMode) {
-                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                    folderSheetWhom = m.whom
-                                }
-                            },
+                            onClick = onRowOpen,
+                            onLongClick = onRowLongPress,
                         )
                         HorizontalDivider()
                     }
@@ -597,30 +623,19 @@ fun DmListScreen(
                         is HomeRow.Header -> SectionHeader(row.label)
                         is HomeRow.GroupHead -> {
                             ReorderableItem(reorderState, key = row.key) { _ ->
-                                val haptic = LocalHapticFeedback.current
                                 GroupHeaderRow(
+                                    flag = row.flag,
                                     title = row.title,
                                     avatarUrl = row.image,
                                     childCount = row.childCount,
                                     totalUnread = row.totalUnread,
                                     expanded = row.expanded,
-                                    onToggle = {
-                                        expandedGroups = if (row.flag in expandedGroups) {
-                                            expandedGroups - row.flag
-                                        } else {
-                                            expandedGroups + row.flag
-                                        }
-                                    },
-                                    onLongClick = if (editMode) null else {
-                                        {
-                                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                            folderSheetGroup = row.flag
-                                        }
-                                    },
+                                    onToggle = onGroupHeadToggle,
+                                    onLongClick = if (editMode) null else onGroupHeadLongPress,
                                     editMode = editMode,
                                     dragHandleModifier = Modifier.longPressDraggableHandle(
                                         onDragStarted = {
-                                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                            hapticRoot.performHapticFeedback(HapticFeedbackType.LongPress)
                                             expandedGroups = expandedGroups - row.flag
                                         },
                                         onDragStopped = { onDragStopped() },
@@ -630,40 +645,30 @@ fun DmListScreen(
                             }
                         }
                         is HomeRow.GroupChild -> {
-                            val haptic = LocalHapticFeedback.current
                             GroupChannelRow(
                                 whom = row.whom,
                                 m = row.m,
                                 unread = row.unread,
                                 contactMap = contactMap,
                                 draft = drafts[row.whom],
-                                onClick = { onOpenConversation(row.whom) },
-                                onLongClick = {
-                                    if (!editMode) {
-                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                        folderSheetWhom = row.whom
-                                    }
-                                },
+                                onClick = onRowOpen,
+                                onLongClick = onRowLongPress,
                             )
                             HorizontalDivider(modifier = Modifier.padding(start = 56.dp))
                         }
                         is HomeRow.Flat -> {
                             ReorderableItem(reorderState, key = row.key) { _ ->
-                                val haptic = LocalHapticFeedback.current
                                 ConversationRow(
                                     m = row.m,
                                     unread = row.unread,
                                     contactMap = contactMap,
                                     draft = drafts[row.m.whom],
-                                    onClick = { onOpenConversation(row.m.whom) },
-                                    onLongClick = {
-                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                        folderSheetWhom = row.m.whom
-                                    },
+                                    onClick = onRowOpen,
+                                    onLongClick = onRowLongPress,
                                     editMode = editMode,
                                     dragHandleModifier = Modifier.longPressDraggableHandle(
                                         onDragStarted = {
-                                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                            hapticRoot.performHapticFeedback(HapticFeedbackType.LongPress)
                                         },
                                         onDragStopped = { onDragStopped() },
                                     ),
@@ -684,30 +689,19 @@ fun DmListScreen(
                         is HomeRow.Header -> SectionHeader(row.label)
                         is HomeRow.GroupHead -> {
                             ReorderableItem(reorderState, key = row.key) { _ ->
-                                val haptic = LocalHapticFeedback.current
                                 GroupHeaderRow(
+                                    flag = row.flag,
                                     title = row.title,
                                     avatarUrl = row.image,
                                     childCount = row.childCount,
                                     totalUnread = row.totalUnread,
                                     expanded = row.expanded,
-                                    onToggle = {
-                                        expandedGroups = if (row.flag in expandedGroups) {
-                                            expandedGroups - row.flag
-                                        } else {
-                                            expandedGroups + row.flag
-                                        }
-                                    },
-                                    onLongClick = if (editMode) null else {
-                                        {
-                                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                            folderSheetGroup = row.flag
-                                        }
-                                    },
+                                    onToggle = onGroupHeadToggle,
+                                    onLongClick = if (editMode) null else onGroupHeadLongPress,
                                     editMode = editMode,
                                     dragHandleModifier = Modifier.longPressDraggableHandle(
                                         onDragStarted = {
-                                            haptic.performHapticFeedback(
+                                            hapticRoot.performHapticFeedback(
                                                 HapticFeedbackType.LongPress,
                                             )
                                             // Collapse while dragging so children
@@ -721,37 +715,25 @@ fun DmListScreen(
                             }
                         }
                         is HomeRow.GroupChild -> {
-                            val haptic = LocalHapticFeedback.current
                             GroupChannelRow(
                                 whom = row.whom,
                                 m = row.m,
                                 unread = row.unread,
                                 contactMap = contactMap,
                                 draft = drafts[row.whom],
-                                onClick = { onOpenConversation(row.whom) },
-                                onLongClick = {
-                                    if (!editMode) {
-                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                        folderSheetWhom = row.whom
-                                    }
-                                },
+                                onClick = onRowOpen,
+                                onLongClick = onRowLongPress,
                             )
                             HorizontalDivider(modifier = Modifier.padding(start = 56.dp))
                         }
                         is HomeRow.Flat -> {
-                            val haptic = LocalHapticFeedback.current
                             ConversationRow(
                                 m = row.m,
                                 unread = row.unread,
                                 contactMap = contactMap,
                                 draft = drafts[row.m.whom],
-                                onClick = { onOpenConversation(row.m.whom) },
-                                onLongClick = {
-                                    if (!editMode) {
-                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                        folderSheetWhom = row.m.whom
-                                    }
-                                },
+                                onClick = onRowOpen,
+                                onLongClick = onRowLongPress,
                             )
                             HorizontalDivider()
                         }
@@ -1198,8 +1180,8 @@ private fun ConversationRow(
     unread: Int,
     contactMap: ContactMap,
     draft: String?,
-    onClick: () -> Unit,
-    onLongClick: () -> Unit,
+    onClick: (String) -> Unit,
+    onLongClick: (String) -> Unit,
     editMode: Boolean = false,
     dragHandleModifier: Modifier? = null,
 ) {
@@ -1219,9 +1201,12 @@ private fun ConversationRow(
     // anywhere picks it up. Tap still opens the chat. The action-sheet
     // long-press is suppressed so gestures don't collide.
     val rowClickModifier = if (editMode && dragHandleModifier != null) {
-        Modifier.clickable(onClick = onClick).then(dragHandleModifier)
+        Modifier.clickable { onClick(m.whom) }.then(dragHandleModifier)
     } else {
-        Modifier.combinedClickable(onClick = onClick, onLongClick = onLongClick)
+        Modifier.combinedClickable(
+            onClick = { onClick(m.whom) },
+            onLongClick = { onLongClick(m.whom) },
+        )
     }
     Row(
         modifier = Modifier
@@ -1365,15 +1350,16 @@ private fun SectionHeader(label: String) {
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun GroupHeaderRow(
+    flag: String,
     title: String,
     avatarUrl: String?,
     childCount: Int,
     totalUnread: Int,
     expanded: Boolean,
-    onToggle: () -> Unit,
+    onToggle: (String) -> Unit,
     editMode: Boolean = false,
     dragHandleModifier: Modifier = Modifier,
-    onLongClick: (() -> Unit)? = null,
+    onLongClick: ((String) -> Unit)? = null,
 ) {
     val rotation by animateFloatAsState(
         targetValue = if (expanded) 0f else -90f,
@@ -1381,9 +1367,12 @@ private fun GroupHeaderRow(
         label = "groupChevronRotation",
     )
     val rowClickModifier = if (editMode) {
-        Modifier.clickable(onClick = onToggle).then(dragHandleModifier)
+        Modifier.clickable { onToggle(flag) }.then(dragHandleModifier)
     } else {
-        Modifier.combinedClickable(onClick = onToggle, onLongClick = onLongClick)
+        Modifier.combinedClickable(
+            onClick = { onToggle(flag) },
+            onLongClick = onLongClick?.let { { it(flag) } },
+        )
     }
     Row(
         modifier = Modifier
@@ -1450,8 +1439,8 @@ private fun GroupChannelRow(
     unread: Int,
     contactMap: ContactMap,
     draft: String?,
-    onClick: () -> Unit,
-    onLongClick: () -> Unit,
+    onClick: (String) -> Unit,
+    onLongClick: (String) -> Unit,
 ) {
     val shortName = remember(whom) { contactMap.channelShortName(whom) }
     val preview = m?.let {
@@ -1469,7 +1458,10 @@ private fun GroupChannelRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .combinedClickable(onClick = onClick, onLongClick = onLongClick)
+            .combinedClickable(
+                onClick = { onClick(whom) },
+                onLongClick = { onLongClick(whom) },
+            )
             .padding(start = 56.dp, end = 16.dp, top = 8.dp, bottom = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -1552,28 +1544,39 @@ private fun androidx.compose.foundation.layout.BoxScope.UnreadOffscreenIndicator
 
     if (unreadIndices.isEmpty()) return
 
-    val firstVisible = listState.firstVisibleItemIndex
-    val lastVisible = listState.layoutInfo.visibleItemsInfo
-        .lastOrNull()?.index ?: -1
+    // derivedStateOf so we only recompose when the chip-relevant
+    // derived values (counts + scroll targets) actually change —
+    // direct reads of firstVisibleItemIndex / visibleItemsInfo here
+    // would fire on every scroll frame, dragging the whole All tab.
+    val above by remember(unreadIndices, listState) {
+        derivedStateOf {
+            val firstVisible = listState.firstVisibleItemIndex
+            unreadIndices.filter { it < firstVisible }
+        }
+    }
+    val below by remember(unreadIndices, listState) {
+        derivedStateOf {
+            val lastVisible = listState.layoutInfo.visibleItemsInfo
+                .lastOrNull()?.index ?: -1
+            unreadIndices.filter { it > lastVisible }
+        }
+    }
 
-    val unreadAbove = unreadIndices.filter { it < firstVisible }
-    val unreadBelow = unreadIndices.filter { it > lastVisible }
-
-    if (unreadAbove.isNotEmpty()) {
+    if (above.isNotEmpty()) {
         UnreadChip(
-            count = unreadAbove.size,
+            count = above.size,
             arrowUp = true,
-            onClick = { onScrollTo(unreadAbove.max()) },
+            onClick = { onScrollTo(above.max()) },
             modifier = Modifier
                 .align(Alignment.TopCenter)
                 .padding(top = 72.dp),
         )
     }
-    if (unreadBelow.isNotEmpty()) {
+    if (below.isNotEmpty()) {
         UnreadChip(
-            count = unreadBelow.size,
+            count = below.size,
             arrowUp = false,
-            onClick = { onScrollTo(unreadBelow.min()) },
+            onClick = { onScrollTo(below.min()) },
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .padding(bottom = 20.dp),

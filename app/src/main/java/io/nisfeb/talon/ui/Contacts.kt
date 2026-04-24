@@ -14,16 +14,19 @@ import kotlinx.coroutines.flow.combine
  * once and pass the resulting map into rows so each row is an O(1)
  * lookup rather than a DB round-trip.
  *
- * Marked @Immutable so Compose can skip recomposing rows whose params
- * only include this map — we never mutate the internal maps after
- * construction.
+ * `data class` (not just `@Immutable`) so `==` is content-based — two
+ * ContactMap instances carrying equal lists compare equal, which keeps
+ * `remember(contactMap)` stable across Flow emissions that don't
+ * actually change the directory. Without that, any contacts/clubs/
+ * groups/channel_groups emission invalidates every row's name /
+ * avatar / label cache — enough to visibly drop scroll frames.
  */
 @Immutable
-class ContactMap(
-    contacts: List<ContactEntity> = emptyList(),
-    clubs: List<ClubEntity> = emptyList(),
-    groups: List<GroupEntity> = emptyList(),
-    channelGroups: List<ChannelGroupEntity> = emptyList(),
+data class ContactMap(
+    val contacts: List<ContactEntity> = emptyList(),
+    val clubs: List<ClubEntity> = emptyList(),
+    val groups: List<GroupEntity> = emptyList(),
+    val channelGroups: List<ChannelGroupEntity> = emptyList(),
 ) {
     private val byShip: Map<String, ContactEntity> =
         contacts.associateBy(ContactEntity::ship)
