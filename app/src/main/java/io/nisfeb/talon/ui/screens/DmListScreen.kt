@@ -49,6 +49,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -1025,7 +1026,12 @@ private fun FolderTabs(
         //   Mentions (highest-signal) → Unread → All (scavenge pile).
         // Mentions / Unread hide when empty — the tab is a pile of
         // pending items, so no items = no tab.
-        if (mentionCount > 0 || selectedSpecial == SpecialTab.Mentions) {
+        // Only keep the tab visible while actively selected — if the
+        // user switches to a folder (specialActive = false) or another
+        // special tab, the empty tab should disappear.
+        if (mentionCount > 0 ||
+            (specialActive && selectedSpecial == SpecialTab.Mentions)
+        ) {
             item(key = "__mentions") {
                 TabChip(
                     text = "Mentions",
@@ -1035,7 +1041,9 @@ private fun FolderTabs(
                 )
             }
         }
-        if (unreadCount > 0 || selectedSpecial == SpecialTab.Unread) {
+        if (unreadCount > 0 ||
+            (specialActive && selectedSpecial == SpecialTab.Unread)
+        ) {
             item(key = "__unread") {
                 TabChip(
                     text = "Unread",
@@ -1233,12 +1241,20 @@ private fun ConversationRow(
             modifier = Modifier.weight(1f),
             verticalArrangement = Arrangement.spacedBy(2.dp),
         ) {
-            Text(
-                title,
-                style = MaterialTheme.typography.titleMedium.copy(
-                    fontWeight = if (unread > 0) FontWeight.Bold else FontWeight.SemiBold,
-                ),
-            )
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                Text(
+                    title,
+                    style = MaterialTheme.typography.titleMedium.copy(
+                        fontWeight = if (unread > 0) FontWeight.Bold else FontWeight.SemiBold,
+                    ),
+                    modifier = Modifier.weight(1f, fill = false),
+                    maxLines = 1,
+                )
+                ChannelTypeBadge(m.whom)
+            }
             Text(
                 "$authorLabel · $timestamp",
                 style = MaterialTheme.typography.labelSmall,
@@ -1635,6 +1651,25 @@ private object HomeListSnapshot {
         val s = if (ship == null) ShipSnapshot() else perShip.getOrPut(ship) { ShipSnapshot() }
         active = s
         return s
+    }
+}
+
+@Composable
+private fun ChannelTypeBadge(whom: String) {
+    val (label, bg) = when {
+        whom.startsWith("diary/") -> "Notebook" to MaterialTheme.colorScheme.tertiaryContainer
+        whom.startsWith("heap/") -> "Gallery" to MaterialTheme.colorScheme.secondaryContainer
+        else -> return
+    }
+    Surface(
+        shape = RoundedCornerShape(6.dp),
+        color = bg,
+    ) {
+        Text(
+            label,
+            style = MaterialTheme.typography.labelSmall,
+            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+        )
     }
 }
 

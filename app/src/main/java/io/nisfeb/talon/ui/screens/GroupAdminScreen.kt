@@ -14,12 +14,14 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -72,6 +74,8 @@ fun GroupAdminScreen(
     }
     var pendingKick by remember { mutableStateOf<String?>(null) }
     var pendingBan by remember { mutableStateOf<String?>(null) }
+    var newChannelOpen by remember { mutableStateOf(false) }
+    var creatingChannel by remember { mutableStateOf(false) }
 
     // Contact map for nicknames on member rows. Updates live as
     // %contacts events come in.
@@ -107,8 +111,15 @@ fun GroupAdminScreen(
             Text(
                 group?.title ?: flag,
                 style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
-                modifier = Modifier.padding(start = 4.dp),
+                modifier = Modifier.padding(start = 4.dp).weight(1f),
+                maxLines = 1,
             )
+            IconButton(
+                enabled = !creatingChannel,
+                onClick = { newChannelOpen = true },
+            ) {
+                Icon(Icons.Filled.Add, contentDescription = "New channel")
+            }
         }
         HorizontalDivider()
         when {
@@ -316,6 +327,111 @@ fun GroupAdminScreen(
             },
         )
     }
+
+    if (newChannelOpen) {
+        NewChannelDialog(
+            busy = creatingChannel,
+            onDismiss = { if (!creatingChannel) newChannelOpen = false },
+            onCreate = { kind, title, description ->
+                creatingChannel = true
+                error = null
+                scope.launch {
+                    runCatching {
+                        repo.createChannel(flag, kind, title, description)
+                    }.onSuccess {
+                        creatingChannel = false
+                        newChannelOpen = false
+                    }.onFailure {
+                        creatingChannel = false
+                        error = it.message ?: it::class.simpleName
+                    }
+                }
+            },
+        )
+    }
+}
+
+@Composable
+private fun NewChannelDialog(
+    busy: Boolean,
+    onDismiss: () -> Unit,
+    onCreate: (kind: String, title: String, description: String) -> Unit,
+) {
+    var kind by remember { mutableStateOf("chat") }
+    var title by remember { mutableStateOf("") }
+    var description by remember { mutableStateOf("") }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("New channel") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    "Type",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    listOf(
+                        "chat" to "Chat",
+                        "diary" to "Notebook",
+                        "heap" to "Gallery",
+                    ).forEach { (k, label) ->
+                        val selected = k == kind
+                        OutlinedButton(
+                            onClick = { kind = k },
+                            enabled = !busy,
+                            colors = if (selected)
+                                androidx.compose.material3.ButtonDefaults.outlinedButtonColors(
+                                    containerColor = MaterialTheme.colorScheme.primaryContainer,
+                                )
+                            else androidx.compose.material3.ButtonDefaults.outlinedButtonColors(),
+                        ) { Text(label) }
+                    }
+                }
+                OutlinedTextField(
+                    value = title,
+                    onValueChange = { title = it },
+                    label = { Text("Title") },
+                    singleLine = true,
+                    enabled = !busy,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                OutlinedTextField(
+                    value = description,
+                    onValueChange = { description = it },
+                    label = { Text("Description (optional)") },
+                    enabled = !busy,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                if (busy) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(16.dp),
+                            strokeWidth = 2.dp,
+                        )
+                        Text(
+                            "Creating…",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                enabled = title.trim().isNotEmpty() && !busy,
+                onClick = { onCreate(kind, title.trim(), description.trim()) },
+            ) { Text("Create") }
+        },
+        dismissButton = {
+            TextButton(enabled = !busy, onClick = onDismiss) { Text("Cancel") }
+        },
+    )
 }
 
 @OptIn(ExperimentalFoundationApi::class)

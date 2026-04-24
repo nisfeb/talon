@@ -23,7 +23,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         GroupOrderEntity::class,
         ReactionUsageEntity::class,
     ],
-    version = 19,
+    version = 20,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -57,6 +57,16 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        private val MIGRATION_19_20 = object : Migration(19, 20) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // Notebook (diary) and gallery (heap) posts carry a
+                // meta with title + cover image. Stash them alongside
+                // the content so list screens don't need to re-parse.
+                db.execSQL("ALTER TABLE messages ADD COLUMN title TEXT")
+                db.execSQL("ALTER TABLE messages ADD COLUMN image TEXT")
+            }
+        }
+
         /**
          * Open the Room database for a specific ship. Each ship's
          * data lives in its own file so switching ships is a clean
@@ -71,7 +81,7 @@ abstract class AppDatabase : RoomDatabase() {
                 AppDatabase::class.java,
                 filename,
             )
-                .addMigrations(MIGRATION_17_18, MIGRATION_18_19)
+                .addMigrations(MIGRATION_17_18, MIGRATION_18_19, MIGRATION_19_20)
                 .fallbackToDestructiveMigration()
                 .build()
         }

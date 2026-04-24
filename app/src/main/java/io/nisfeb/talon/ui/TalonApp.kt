@@ -40,6 +40,12 @@ import io.nisfeb.talon.ui.screens.ActivityFeedScreen
 import io.nisfeb.talon.ui.screens.GroupAdminListScreen
 import io.nisfeb.talon.ui.screens.GroupAdminScreen
 import io.nisfeb.talon.ui.screens.GroupInvitesScreen
+import io.nisfeb.talon.ui.screens.GalleryComposeScreen
+import io.nisfeb.talon.ui.screens.GalleryGridScreen
+import io.nisfeb.talon.ui.screens.GalleryPostScreen
+import io.nisfeb.talon.ui.screens.NotebookComposeScreen
+import io.nisfeb.talon.ui.screens.NotebookListScreen
+import io.nisfeb.talon.ui.screens.NotebookPostScreen
 import io.nisfeb.talon.ui.screens.BookmarksScreen
 import io.nisfeb.talon.ui.screens.StatusFeedScreen
 import io.nisfeb.talon.ui.screens.ThreadScreen
@@ -117,6 +123,19 @@ fun TalonApp(
     var adminGroupFlag by remember { mutableStateOf<String?>(null) }
     var invitesOpen by remember { mutableStateOf(false) }
     var profileSheetShip by remember { mutableStateOf<String?>(null) }
+    // Notebook / gallery drill-down state. openWhom picks the channel;
+    // these pick the particular post / compose view within it.
+    var openNotebookPostId by remember { mutableStateOf<String?>(null) }
+    var notebookComposeOpen by remember { mutableStateOf(false) }
+    // Edit-mode params for the notebook compose screen. Null unless
+    // the user picked "Edit" from a post's overflow menu.
+    var notebookEditPostId by remember { mutableStateOf<String?>(null) }
+    var notebookEditTitle by remember { mutableStateOf("") }
+    var notebookEditImage by remember { mutableStateOf("") }
+    var notebookEditBody by remember { mutableStateOf("") }
+    var notebookEditSentMs by remember { mutableStateOf(0L) }
+    var openGalleryPostId by remember { mutableStateOf<String?>(null) }
+    var galleryComposeOpen by remember { mutableStateOf(false) }
 
     // TalonApplication.onCreate restores the previously-active ship
     // into the ship-scoped fields (db, repo, session) and seeds
@@ -233,6 +252,10 @@ fun TalonApp(
             adminListOpen = false
         }
         BackHandler(enabled = invitesOpen) { invitesOpen = false }
+        BackHandler(enabled = notebookComposeOpen) { notebookComposeOpen = false }
+        BackHandler(enabled = openNotebookPostId != null) { openNotebookPostId = null }
+        BackHandler(enabled = galleryComposeOpen) { galleryComposeOpen = false }
+        BackHandler(enabled = openGalleryPostId != null) { openGalleryPostId = null }
         BackHandler(enabled = pendingShare != null) { onShareConsumed() }
         BackHandler(enabled = searchOpen) { searchOpen = false }
         BackHandler(enabled = newDmOpen) { newDmOpen = false }
@@ -412,6 +435,70 @@ fun TalonApp(
                 onOpenImage = { viewerImageUrl = it },
                 modifier = mod,
             )
+
+            openWhom != null && openWhom!!.startsWith("diary/") -> when {
+                notebookComposeOpen -> NotebookComposeScreen(
+                    whom = openWhom!!,
+                    onBack = {
+                        notebookComposeOpen = false
+                        notebookEditPostId = null
+                    },
+                    onPosted = {
+                        notebookComposeOpen = false
+                        notebookEditPostId = null
+                    },
+                    editPostId = notebookEditPostId,
+                    initialTitle = notebookEditTitle,
+                    initialImage = notebookEditImage,
+                    initialBody = notebookEditBody,
+                    originalSentMs = notebookEditSentMs,
+                    modifier = mod,
+                )
+                openNotebookPostId != null -> NotebookPostScreen(
+                    whom = openWhom!!,
+                    postId = openNotebookPostId!!,
+                    onBack = { openNotebookPostId = null },
+                    onEdit = { title, image, body, sent ->
+                        notebookEditPostId = openNotebookPostId
+                        notebookEditTitle = title
+                        notebookEditImage = image
+                        notebookEditBody = body
+                        notebookEditSentMs = sent
+                        openNotebookPostId = null
+                        notebookComposeOpen = true
+                    },
+                    modifier = mod,
+                )
+                else -> NotebookListScreen(
+                    whom = openWhom!!,
+                    onBack = { openWhom = null },
+                    onOpenPost = { openNotebookPostId = it },
+                    onCompose = { notebookComposeOpen = true },
+                    modifier = mod,
+                )
+            }
+
+            openWhom != null && openWhom!!.startsWith("heap/") -> when {
+                galleryComposeOpen -> GalleryComposeScreen(
+                    whom = openWhom!!,
+                    onBack = { galleryComposeOpen = false },
+                    onPosted = { galleryComposeOpen = false },
+                    modifier = mod,
+                )
+                openGalleryPostId != null -> GalleryPostScreen(
+                    whom = openWhom!!,
+                    postId = openGalleryPostId!!,
+                    onBack = { openGalleryPostId = null },
+                    modifier = mod,
+                )
+                else -> GalleryGridScreen(
+                    whom = openWhom!!,
+                    onBack = { openWhom = null },
+                    onOpenPost = { openGalleryPostId = it },
+                    onCompose = { galleryComposeOpen = true },
+                    modifier = mod,
+                )
+            }
 
             openWhom != null -> DmChatScreen(
                 db = app.db,

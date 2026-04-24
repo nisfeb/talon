@@ -324,8 +324,48 @@ class TlonChatRepo(
         return postContent(whom, content)
     }
 
+    /**
+     * Post a notebook entry to a `diary/~host/slug` channel. Title is
+     * required; image (cover URL) optional. Body is plain markdown —
+     * parsed into block-level Verses via [MarkdownBlocks].
+     */
+    suspend fun sendNotebookPost(
+        nest: String,
+        title: String,
+        image: String,
+        bodyMarkdown: String,
+    ): String {
+        require(nest.startsWith("diary/")) { "not a diary channel: $nest" }
+        val content = MarkdownBlocks.toStory(bodyMarkdown)
+        val meta = buildJsonObject {
+            put("title", title)
+            put("image", image)
+            put("description", "")
+            put("cover", "")
+        }
+        return postContent(nest, content, kind = "/diary", meta = meta)
+    }
+
+    /**
+     * Post a gallery entry to a `heap/~host/slug` channel. Gallery
+     * posts are single-focus: typically one image, link, or short
+     * text. The caller supplies the content array directly.
+     */
+    suspend fun sendGalleryPost(
+        nest: String,
+        content: JsonArray,
+    ): String {
+        require(nest.startsWith("heap/")) { "not a heap channel: $nest" }
+        return postContent(nest, content, kind = "/heap", meta = null)
+    }
+
     /** Routes content → appropriate chat / club / channel poke + DB write. */
-    private suspend fun postContent(whom: String, content: JsonArray): String {
+    private suspend fun postContent(
+        whom: String,
+        content: JsonArray,
+        kind: String = "/chat",
+        meta: JsonObject? = null,
+    ): String {
         val ch = channel ?: error("not connected")
         val sent = System.currentTimeMillis()
         val da = UrbitTime.unixMsToDa(sent)
@@ -334,9 +374,15 @@ class TlonChatRepo(
         // locally. Use a sentinel "local_<da>" id for the optimistic
         // insert and reap it when the SSE echo's server-id row arrives
         // for the same (whom, author, sentMs).
-        val id = if (whom.startsWith("chat/")) "local_${da}"
+        // Same local-sentinel rule as chat: %channels mints its own
+        // id for diary/heap posts, so we can't predict it locally.
+        val id = if (
+            whom.startsWith("chat/") ||
+            whom.startsWith("diary/") ||
+            whom.startsWith("heap/")
+        ) "local_${da}"
         else UrbitTime.formatPostId(ourPatp, da)
-        val essay = buildEssay(content, sent)
+        val essay = buildEssay(content, sent, kind = kind, meta = meta)
         val addDelta = buildJsonObject {
             put("add", buildJsonObject {
                 put("essay", essay)
@@ -352,7 +398,9 @@ class TlonChatRepo(
                 app = "chat", mark = "chat-club-action-2",
                 payload = clubAction(whom, id, addDelta),
             )
-            whom.startsWith("chat/") -> ch.poke(
+            whom.startsWith("chat/") ||
+                whom.startsWith("diary/") ||
+                whom.startsWith("heap/") -> ch.poke(
                 app = "channels", mark = "channel-action-2",
                 payload = channelAction(whom, buildJsonObject {
                     put("post", buildJsonObject { put("add", essay) })
@@ -672,6 +720,41 @@ class TlonChatRepo(
     private fun randomBase32(length: Int): String {
         val chars = "0123456789abcdefghijklmnopqrstuv"
         return (1..length).map { chars.random() }.joinToString("")
+    }
+
+    /**
+     * Create a new channel inside a group. `kind` is the agent prefix:
+     * `chat`, `diary`, or `heap` — matching Tlon's wire names. Returns
+     * the new channel's nest (`<kind>/<host>/<slug>`).
+     */
+    suspend fun createChannel(
+        groupFlag: String,
+        kind: String,
+        title: String,
+        description: String = "",
+    ): String {
+        require(kind in setOf("chat", "diary", "heap")) { "unknown channel kind: $kind" }
+        val ch = channel ?: error("not connected")
+        val slug = "v" + randomBase32(7)
+        val nest = "$kind/$ourPatp/$slug"
+        ch.poke(
+            app = "channels",
+            mark = "channel-action-2",
+            payload = buildJsonObject {
+                put("create", buildJsonObject {
+                    put("kind", kind)
+                    put("group", groupFlag)
+                    put("name", slug)
+                    put("title", title)
+                    put("description", description)
+                    put("meta", JsonNull)
+                    put("readers", buildJsonArray { })
+                    put("writers", buildJsonArray { })
+                })
+            },
+        )
+        adminGroupsFetchedMs = 0L
+        return nest
     }
 
     /** Update a group's title/description/image/cover via %meta poke. */
@@ -1136,7 +1219,9 @@ class TlonChatRepo(
         val app = when {
             whom.startsWith("~") -> "chat"
             whom.startsWith("0v") -> "chat"
-            whom.startsWith("chat/") -> "channels"
+            whom.startsWith("chat/") ||
+                whom.startsWith("diary/") ||
+                whom.startsWith("heap/") -> "channels"
             else -> return
         }
         val postsKey = if (app == "channels") "posts" else "writs"
@@ -1257,7 +1342,9 @@ class TlonChatRepo(
                 },
                 "writs",
             )
-            whom.startsWith("chat/") -> Triple(
+            whom.startsWith("chat/") ||
+                whom.startsWith("diary/") ||
+                whom.startsWith("heap/") -> Triple(
                 "channels",
                 buildList<String> {
                     for (v in listOf("v4", "v3", "v2", "v1", "v5")) {
@@ -1569,7 +1656,9 @@ class TlonChatRepo(
                 }
                 ch.poke(app = "chat", mark = "chat-club-action-2", payload = payload)
             }
-            whom.startsWith("chat/") -> {
+            whom.startsWith("chat/") ||
+                whom.startsWith("diary/") ||
+                whom.startsWith("heap/") -> {
                 val inner = if (isReply) {
                     // channel-action-2 reply-delete mirrors reply-add:
                     // nests under post.reply.{id, action.del}.
@@ -1608,10 +1697,14 @@ class TlonChatRepo(
         val ch = channel ?: error("not connected")
         val sent = System.currentTimeMillis()
         val da = UrbitTime.unixMsToDa(sent)
+        Log.d(TAG, "reply whom=$whom parent=$parentId text.len=${text.length}")
         // Same local-sentinel id rule as postContent — %channels assigns
         // unpredictable post ids so we can't pre-compute them.
-        val replyId = if (whom.startsWith("chat/")) "local_${da}"
-        else UrbitTime.formatPostId(ourPatp, da)
+        val replyId = if (
+            whom.startsWith("chat/") ||
+            whom.startsWith("diary/") ||
+            whom.startsWith("heap/")
+        ) "local_${da}" else UrbitTime.formatPostId(ourPatp, da)
         val replyEssay = buildJsonObject {
             put("content", textToStory(text))
             put("author", ourPatp)
@@ -1638,21 +1731,22 @@ class TlonChatRepo(
                     toReplyEntity(whom, parentId, replyId, replyEssay)
                 )
             }
-            whom.startsWith("chat/") -> {
+            whom.startsWith("chat/") ||
+                whom.startsWith("diary/") ||
+                whom.startsWith("heap/") -> {
                 // channels c-reply shape nests under action:, not c-reply:
-                ch.poke(
-                    app = "channels", mark = "channel-action-2",
-                    payload = channelAction(whom, buildJsonObject {
-                        put("post", buildJsonObject {
-                            put("reply", buildJsonObject {
-                                put("id", parentId)
-                                put("action", buildJsonObject {
-                                    put("add", replyEssay)
-                                })
+                val payload = channelAction(whom, buildJsonObject {
+                    put("post", buildJsonObject {
+                        put("reply", buildJsonObject {
+                            put("id", parentId)
+                            put("action", buildJsonObject {
+                                put("add", replyEssay)
                             })
                         })
-                    }),
-                )
+                    })
+                })
+                Log.d(TAG, "reply payload: ${payload.toString().take(400)}")
+                ch.poke(app = "channels", mark = "channel-action-2", payload = payload)
                 db.messages().upsert(
                     toReplyEntity(whom, parentId, replyId, replyEssay)
                 )
@@ -1688,6 +1782,64 @@ class TlonChatRepo(
             })
         })
         ch.poke(app = "channels", mark = "channel-action-2", payload = payload)
+    }
+
+    /**
+     * Edit a notebook post — swap title/image/body while preserving
+     * the original `sent` so the post keeps its list position.
+     */
+    suspend fun editNotebookPost(
+        nest: String,
+        postId: String,
+        title: String,
+        image: String,
+        bodyMarkdown: String,
+        originalSentMs: Long,
+    ) {
+        require(nest.startsWith("diary/")) { "not a diary channel: $nest" }
+        val ch = channel ?: error("not connected")
+        val content = MarkdownBlocks.toStory(bodyMarkdown)
+        val meta = buildJsonObject {
+            put("title", title)
+            put("image", image)
+            put("description", "")
+            put("cover", "")
+        }
+        val essay = buildEssay(content, originalSentMs, kind = "/diary", meta = meta)
+        ch.poke(
+            app = "channels", mark = "channel-action-2",
+            payload = channelAction(nest, buildJsonObject {
+                put("post", buildJsonObject {
+                    put("edit", buildJsonObject {
+                        put("id", dotAtom(postId))
+                        put("essay", essay)
+                    })
+                })
+            }),
+        )
+    }
+
+    /** Edit a gallery post — replace its content array. */
+    suspend fun editGalleryPost(
+        nest: String,
+        postId: String,
+        content: JsonArray,
+        originalSentMs: Long,
+    ) {
+        require(nest.startsWith("heap/")) { "not a heap channel: $nest" }
+        val ch = channel ?: error("not connected")
+        val essay = buildEssay(content, originalSentMs, kind = "/heap", meta = null)
+        ch.poke(
+            app = "channels", mark = "channel-action-2",
+            payload = channelAction(nest, buildJsonObject {
+                put("post", buildJsonObject {
+                    put("edit", buildJsonObject {
+                        put("id", dotAtom(postId))
+                        put("essay", essay)
+                    })
+                })
+            }),
+        )
     }
 
     // ───────── ingest ─────────
@@ -2060,7 +2212,9 @@ class TlonChatRepo(
             whom.startsWith("0v") -> buildJsonObject {
                 put("dm", buildJsonObject { put("club", whom) })
             }
-            whom.startsWith("chat/") -> {
+            whom.startsWith("chat/") ||
+                whom.startsWith("diary/") ||
+                whom.startsWith("heap/") -> {
                 val groupFlag = db.groups().channelGroupFor(whom)?.groupFlag
                 if (groupFlag == null) {
                     Log.w(TAG, "markRead: no group flag for $whom; skipping poke")
@@ -2362,6 +2516,13 @@ class TlonChatRepo(
         // StoryCache.partsFor is an instant map hit when the row first
         // composes.
         StoryCache.partsFor(id, json)
+        // Notebook / gallery essays carry a `meta` object with title +
+        // cover image. For chat essays it's null; pulling optionally.
+        val meta = essay["meta"] as? JsonObject
+        val title = meta?.get("title")?.jsonPrimitive?.contentIfString()
+            ?.takeIf { it.isNotBlank() }
+        val image = meta?.get("image")?.jsonPrimitive?.contentIfString()
+            ?.takeIf { it.isNotBlank() }
         return MessageEntity(
             whom = whom,
             id = id,
@@ -2369,6 +2530,8 @@ class TlonChatRepo(
             sentMs = sent,
             contentJson = json,
             kind = kind,
+            title = title,
+            image = image,
         )
     }
 
@@ -2445,12 +2608,17 @@ class TlonChatRepo(
         }
     }
 
-    private fun buildEssay(content: JsonArray, sentMs: Long): JsonObject = buildJsonObject {
+    private fun buildEssay(
+        content: JsonArray,
+        sentMs: Long,
+        kind: String = "/chat",
+        meta: JsonObject? = null,
+    ): JsonObject = buildJsonObject {
         put("content", content)
         put("author", ourPatp)
         put("sent", sentMs)
-        put("kind", "/chat")
-        put("meta", JsonNull)
+        put("kind", kind)
+        put("meta", meta ?: JsonNull)
         put("blob", JsonNull)
     }
 

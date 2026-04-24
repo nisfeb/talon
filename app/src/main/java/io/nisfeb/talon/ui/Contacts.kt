@@ -73,9 +73,9 @@ class ContactMap(
     fun conversationLabel(whom: String): String = when {
         whom.startsWith("~") -> displayName(whom)
         whom.startsWith("0v") -> byClub[whom]?.title?.takeIf { it.isNotBlank() } ?: whom
-        whom.startsWith("chat/") -> {
-            // Prefer the channel's meta.title (what users set in Tlon);
-            // fall back to a "#slug" derived from the nest's last segment.
+        whom.startsWith("chat/") ||
+            whom.startsWith("diary/") ||
+            whom.startsWith("heap/") -> {
             val channelTitle = nestToTitle[whom]
             val channel = channelTitle ?: ("#" + whom.substringAfterLast('/'))
             val groupTitle = nestToFlag[whom]?.let { byGroupFlag[it]?.title }
@@ -92,7 +92,9 @@ class ContactMap(
      */
     fun conversationAvatar(whom: String): String? = when {
         whom.startsWith("~") -> byShip[whom]?.avatarUrl
-        whom.startsWith("chat/") -> nestToFlag[whom]?.let { byGroupFlag[it]?.image }
+        whom.startsWith("chat/") ||
+            whom.startsWith("diary/") ||
+            whom.startsWith("heap/") -> nestToFlag[whom]?.let { byGroupFlag[it]?.image }
         else -> null
     }
 
