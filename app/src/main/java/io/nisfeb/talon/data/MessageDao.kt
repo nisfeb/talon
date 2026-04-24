@@ -6,15 +6,31 @@ import androidx.room.Upsert
 import kotlinx.coroutines.flow.Flow
 
 @Dao
-interface MessageDao {
-    @Upsert
-    suspend fun upsert(message: MessageEntity)
+abstract class MessageDao {
+    /**
+     * Upsert a single message. Strips dot-grouping from id + parentId
+     * before the write so a dotted id can never reach the DB — that
+     * bug has burnt us twice (DMs doubled across the full history when
+     * SSE and bootstrap stored the same post under two keys). This is
+     * the last-line-of-defense guard; all our ingest paths should also
+     * normalize, but if one regresses, the DAO still keeps the DB sane.
+     */
+    open suspend fun upsert(message: MessageEntity) {
+        upsertRaw(message.normalized())
+    }
+
+    open suspend fun upsertAll(messages: List<MessageEntity>) {
+        upsertAllRaw(messages.map { it.normalized() })
+    }
 
     @Upsert
-    suspend fun upsertAll(messages: List<MessageEntity>)
+    protected abstract suspend fun upsertRaw(message: MessageEntity)
+
+    @Upsert
+    protected abstract suspend fun upsertAllRaw(messages: List<MessageEntity>)
 
     @Query("UPDATE messages SET isDeleted = 1 WHERE whom = :whom AND id = :id")
-    suspend fun softDelete(whom: String, id: String)
+    abstract suspend fun softDelete(whom: String, id: String)
 
     /** Top-level messages in one conversation, oldest first. */
     @Query("""
@@ -22,7 +38,7 @@ interface MessageDao {
         WHERE whom = :whom AND isDeleted = 0 AND parentId IS NULL
         ORDER BY sentMs ASC
     """)
-    fun stream(whom: String): Flow<List<MessageEntity>>
+    abstract fun stream(whom: String): Flow<List<MessageEntity>>
 
     /** Replies under a given parent, oldest first. */
     @Query("""
@@ -30,15 +46,15 @@ interface MessageDao {
         WHERE whom = :whom AND parentId = :parentId AND isDeleted = 0
         ORDER BY sentMs ASC
     """)
-    fun streamReplies(whom: String, parentId: String): Flow<List<MessageEntity>>
+    abstract fun streamReplies(whom: String, parentId: String): Flow<List<MessageEntity>>
 
     /** One specific message by key. Used to render the thread's parent row. */
     @Query("SELECT * FROM messages WHERE whom = :whom AND id = :id LIMIT 1")
-    fun streamOne(whom: String, id: String): Flow<MessageEntity?>
+    abstract fun streamOne(whom: String, id: String): Flow<MessageEntity?>
 
     /** Synchronous-from-suspend lookup. */
     @Query("SELECT * FROM messages WHERE whom = :whom AND id = :id LIMIT 1")
-    suspend fun getOne(whom: String, id: String): MessageEntity?
+    abstract suspend fun getOne(whom: String, id: String): MessageEntity?
 
     /**
      * Look up a post by its @da suffix within a conversation. Tlon cite
@@ -46,7 +62,7 @@ interface MessageDao {
      * "~author/<da>" key we store), so we suffix-match on id.
      */
     @Query("SELECT * FROM messages WHERE whom = :whom AND id LIKE '%/' || :da LIMIT 1")
-    suspend fun findByDa(whom: String, da: String): MessageEntity?
+    abstract suspend fun findByDa(whom: String, da: String): MessageEntity?
 
     /** Oldest non-deleted top-level post id for a conversation (pagination cursor). */
     @Query("""
@@ -54,7 +70,7 @@ interface MessageDao {
         WHERE whom = :whom AND isDeleted = 0 AND parentId IS NULL
         ORDER BY sentMs ASC LIMIT 1
     """)
-    suspend fun oldestIdFor(whom: String): String?
+    abstract suspend fun oldestIdFor(whom: String): String?
 
     /** Newest N top-level messages for a conversation, newest first. */
     @Query("""
@@ -63,7 +79,7 @@ interface MessageDao {
         ORDER BY sentMs DESC
         LIMIT :count
     """)
-    suspend fun latestFor(whom: String, count: Int): List<MessageEntity>
+    abstract suspend fun latestFor(whom: String, count: Int): List<MessageEntity>
 
     /** Newest non-deleted top-level post id for a conversation (refresh cursor). */
     @Query("""
@@ -71,7 +87,7 @@ interface MessageDao {
         WHERE whom = :whom AND isDeleted = 0 AND parentId IS NULL
         ORDER BY sentMs DESC, id DESC LIMIT 1
     """)
-    suspend fun newestIdFor(whom: String): String?
+    abstract suspend fun newestIdFor(whom: String): String?
 
     /**
      * Remove stale optimistic-insert rows for a channel where id still
@@ -81,7 +97,7 @@ interface MessageDao {
      * assigns author-prefixed ids.
      */
     @Query("DELETE FROM messages WHERE whom = :whom AND (id LIKE '~%' OR id LIKE 'local_%')")
-    suspend fun purgeStaleLocalIds(whom: String)
+    abstract suspend fun purgeStaleLocalIds(whom: String)
 
     /**
      * Find every (whom, id) whose id contains a dot. Used by the
@@ -90,11 +106,11 @@ interface MessageDao {
      * normalized id.
      */
     @Query("SELECT * FROM messages WHERE id LIKE '%.%'")
-    suspend fun findDottedIdRows(): List<MessageEntity>
+    abstract suspend fun findDottedIdRows(): List<MessageEntity>
 
     /** Hard-delete one specific (whom, id) — used during dedupe. */
     @Query("DELETE FROM messages WHERE whom = :whom AND id = :id")
-    suspend fun hardDelete(whom: String, id: String)
+    abstract suspend fun hardDelete(whom: String, id: String)
 
     /**
      * Reap our own `local_*` optimistic-insert twin for a post that the
@@ -108,7 +124,7 @@ interface MessageDao {
           AND sentMs = :sentMs
           AND id LIKE 'local_%'
     """)
-    suspend fun reapLocalTwin(whom: String, author: String, sentMs: Long)
+    abstract suspend fun reapLocalTwin(whom: String, author: String, sentMs: Long)
 
     /** Reply count per top-level post in this conversation. */
     @Query("""
@@ -117,7 +133,7 @@ interface MessageDao {
         WHERE whom = :whom AND parentId IS NOT NULL AND isDeleted = 0
         GROUP BY parentId
     """)
-    fun streamReplyCounts(whom: String): Flow<List<ReplyCount>>
+    abstract fun streamReplyCounts(whom: String): Flow<List<ReplyCount>>
 
     /**
      * Latest top-level message per conversation — drives the DM list.
@@ -140,7 +156,7 @@ interface MessageDao {
           )
         ORDER BY m.sentMs DESC
     """)
-    fun conversationLatest(): Flow<List<MessageEntity>>
+    abstract fun conversationLatest(): Flow<List<MessageEntity>>
 
     /**
      * Substring search across all messages' content JSON. v1 matches raw
@@ -155,7 +171,22 @@ interface MessageDao {
         ORDER BY sentMs DESC
         LIMIT 100
     """)
-    fun search(needle: String): Flow<List<MessageEntity>>
+    abstract fun search(needle: String): Flow<List<MessageEntity>>
 }
 
 data class ReplyCount(val postId: String, val count: Int)
+
+/**
+ * Force id + parentId to their canonical undotted form. The whole app
+ * only reads / writes undotted ids; wire payloads carry dotted @ud so
+ * any ingest path that forgets to strip dots produces a phantom twin.
+ */
+internal fun MessageEntity.normalized(): MessageEntity {
+    val rawId = id
+    val rawParent = parentId
+    if (!rawId.contains('.') && rawParent?.contains('.') != true) return this
+    return copy(
+        id = rawId.replace(".", ""),
+        parentId = rawParent?.replace(".", ""),
+    )
+}
