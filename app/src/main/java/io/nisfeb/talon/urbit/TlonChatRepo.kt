@@ -624,6 +624,56 @@ class TlonChatRepo(
         )
     }
 
+    /**
+     * Create a new group hosted by our ship. Mirrors Tlon's
+     * createDefaultGroup: spins up a group with one "General" chat
+     * channel. Returns the new group's flag (`~host/slug`).
+     */
+    suspend fun createGroup(title: String, description: String = ""): String {
+        val ch = channel ?: error("not connected")
+        val slug = "v" + randomBase32(7)
+        val groupId = "$ourPatp/$slug"
+        val channelSlug = "v" + randomBase32(7)
+        val channelId = "chat/$ourPatp/$channelSlug"
+        val body = buildJsonObject {
+            put("groupId", groupId)
+            put("meta", buildJsonObject {
+                put("title", title)
+                put("description", description)
+                put("image", "")
+                put("cover", "")
+            })
+            put("guestList", buildJsonArray { })
+            put("channels", buildJsonArray {
+                add(buildJsonObject {
+                    put("channelId", channelId)
+                    put("meta", buildJsonObject {
+                        put("title", "General")
+                        put("description", "")
+                        put("image", "")
+                        put("cover", "")
+                    })
+                })
+            })
+        }
+        ch.runThread(
+            desk = "groups",
+            inputMark = "group-create-thread",
+            threadName = "group-create-1",
+            outputMark = "group-ui-2",
+            body = body,
+        )
+        // Invalidate the admin-groups cache so the new group appears
+        // on the next Administration screen open.
+        adminGroupsFetchedMs = 0L
+        return groupId
+    }
+
+    private fun randomBase32(length: Int): String {
+        val chars = "0123456789abcdefghijklmnopqrstuv"
+        return (1..length).map { chars.random() }.joinToString("")
+    }
+
     /** Update a group's title/description/image/cover via %meta poke. */
     suspend fun updateGroupMeta(
         flag: String,

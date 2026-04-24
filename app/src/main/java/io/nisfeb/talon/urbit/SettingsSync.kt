@@ -348,6 +348,7 @@ class SettingsSync(
                 put("provider", cfg.provider.name)
                 put("apiKey", cfg.apiKey)
                 cfg.model?.let { put("model", it) }
+                cfg.baseUrl?.let { put("baseUrl", it) }
                 put("catchMeUpEnabled", cfg.catchMeUpEnabled)
                 put("emojiReactEnabled", cfg.emojiReactEnabled)
             },
@@ -373,12 +374,14 @@ class SettingsSync(
             .getOrNull() ?: return
         val apiKey = obj["apiKey"]?.jsonPrimitive?.contentIfStr().orEmpty()
         val model = obj["model"]?.jsonPrimitive?.contentIfStr()
+        val baseUrl = obj["baseUrl"]?.jsonPrimitive?.contentIfStr()
         fun bool(key: String, default: Boolean) =
             obj[key]?.jsonPrimitive?.content?.toBooleanStrictOrNull() ?: default
         aiSettings.applyRemote(
             provider = provider,
             apiKey = apiKey,
             model = model,
+            baseUrl = baseUrl,
             catchMeUpEnabled = bool("catchMeUpEnabled", true),
             emojiReactEnabled = bool("emojiReactEnabled", true),
         )

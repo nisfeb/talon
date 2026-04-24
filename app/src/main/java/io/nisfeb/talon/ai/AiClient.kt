@@ -54,6 +54,25 @@ class AiClient(private val settingsProvider: () -> AiSettings.Config) {
                 endpoint = "https://api.openai.com/v1/chat/completions",
                 defaultModel = "gpt-4o-mini",
             )
+            AiSettings.Provider.Custom -> {
+                val base = cfg.baseUrl?.trimEnd('/')
+                    ?: error("Custom provider requires a base URL")
+                // Accept either a base URL (".../v1") or a full
+                // endpoint (".../v1/chat/completions"); both are
+                // common in OpenAI-compatible docs.
+                val endpoint =
+                    if (base.endsWith("/chat/completions")) base
+                    else "$base/chat/completions"
+                openaiCompat(
+                    cfg, systemPrompt, userPrompt, maxOutputTokens,
+                    endpoint = endpoint,
+                    // No default — custom deployments dictate their
+                    // own model names, so model must be set.
+                    defaultModel = cfg.model ?: error(
+                        "Custom provider requires a model name",
+                    ),
+                )
+            }
         }
     }
 

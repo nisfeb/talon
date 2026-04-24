@@ -16,13 +16,17 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -51,6 +55,8 @@ fun GroupAdminListScreen(
     val loading = cached == null
     var refreshing by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
+    var newGroupOpen by remember { mutableStateOf(false) }
+    var creating by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
     LaunchedEffect(Unit) {
@@ -78,6 +84,12 @@ fun GroupAdminListScreen(
                     modifier = Modifier.size(18.dp).padding(end = 8.dp),
                     strokeWidth = 2.dp,
                 )
+            }
+            IconButton(
+                enabled = !creating,
+                onClick = { newGroupOpen = true },
+            ) {
+                Icon(Icons.Filled.Add, contentDescription = "New group")
             }
             IconButton(
                 enabled = !refreshing,
@@ -153,5 +165,77 @@ fun GroupAdminListScreen(
                 }
             }
         }
+    }
+
+    if (newGroupOpen) {
+        var title by remember { mutableStateOf("") }
+        var description by remember { mutableStateOf("") }
+        AlertDialog(
+            onDismissRequest = { if (!creating) newGroupOpen = false },
+            title = { Text("New group") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = title,
+                        onValueChange = { title = it },
+                        label = { Text("Title") },
+                        singleLine = true,
+                        enabled = !creating,
+                    )
+                    OutlinedTextField(
+                        value = description,
+                        onValueChange = { description = it },
+                        label = { Text("Description (optional)") },
+                        enabled = !creating,
+                    )
+                    if (creating) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(16.dp),
+                                strokeWidth = 2.dp,
+                            )
+                            Text(
+                                "Creating…",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = title.trim().isNotEmpty() && !creating,
+                    onClick = {
+                        creating = true
+                        error = null
+                        scope.launch {
+                            runCatching {
+                                repo.createGroup(title.trim(), description.trim())
+                            }.onSuccess { flag ->
+                                newGroupOpen = false
+                                creating = false
+                                // Refresh the admin list so the new group
+                                // appears, then open it for editing.
+                                runCatching { repo.refreshAdminGroups(force = true) }
+                                onOpenGroup(flag)
+                            }.onFailure {
+                                creating = false
+                                error = it.message ?: it::class.simpleName
+                            }
+                        }
+                    },
+                ) { Text("Create") }
+            },
+            dismissButton = {
+                TextButton(
+                    enabled = !creating,
+                    onClick = { newGroupOpen = false },
+                ) { Text("Cancel") }
+            },
+        )
     }
 }

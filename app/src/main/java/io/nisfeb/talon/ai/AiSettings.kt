@@ -22,6 +22,10 @@ class AiSettings(context: Context) {
         Anthropic("Anthropic (Claude)"),
         OpenRouter("OpenRouter"),
         OpenAi("OpenAI"),
+        // Custom OpenAI-compatible endpoint — user supplies baseUrl.
+        // Works with anything that speaks OpenAI's /chat/completions
+        // schema (local llama.cpp, LiteLLM, vLLM, etc).
+        Custom("Custom (OpenAI endpoint)"),
     }
 
     data class Config(
@@ -29,6 +33,9 @@ class AiSettings(context: Context) {
         val apiKey: String,
         // Optional model override. Each provider has a sensible default.
         val model: String?,
+        // Only used when provider = Custom. User-supplied OpenAI-
+        // compatible base URL (e.g. "https://api.example.com/v1").
+        val baseUrl: String? = null,
         // Per-feature toggles. Default on once a key is configured — if
         // the user set up AI, they probably want the features. Each can
         // be flipped off individually in Settings.
@@ -69,16 +76,18 @@ class AiSettings(context: Context) {
 
     val isConfigured: Boolean get() = _state.value.hasKey()
 
-    fun update(provider: Provider, apiKey: String, model: String?) {
+    fun update(provider: Provider, apiKey: String, model: String?, baseUrl: String? = null) {
         prefs.edit()
             .putString(KEY_PROVIDER, provider.name)
             .putString(KEY_API_KEY, apiKey)
             .putString(KEY_MODEL, model?.takeIf { it.isNotBlank() })
+            .putString(KEY_BASE_URL, baseUrl?.takeIf { it.isNotBlank() })
             .apply()
         _state.value = _state.value.copy(
             provider = provider,
             apiKey = apiKey,
             model = model?.takeIf { it.isNotBlank() },
+            baseUrl = baseUrl?.takeIf { it.isNotBlank() },
         )
         onStateChange?.invoke(_state.value, false)
     }
@@ -108,6 +117,7 @@ class AiSettings(context: Context) {
         provider: Provider,
         apiKey: String,
         model: String?,
+        baseUrl: String?,
         catchMeUpEnabled: Boolean,
         emojiReactEnabled: Boolean,
     ) {
@@ -115,6 +125,7 @@ class AiSettings(context: Context) {
             .putString(KEY_PROVIDER, provider.name)
             .putString(KEY_API_KEY, apiKey)
             .putString(KEY_MODEL, model?.takeIf { it.isNotBlank() })
+            .putString(KEY_BASE_URL, baseUrl?.takeIf { it.isNotBlank() })
             .putBoolean(Feature.CatchMeUp.key, catchMeUpEnabled)
             .putBoolean(Feature.EmojiReact.key, emojiReactEnabled)
             .putBoolean(KEY_SYNC, true)
@@ -123,6 +134,7 @@ class AiSettings(context: Context) {
             provider = provider,
             apiKey = apiKey,
             model = model?.takeIf { it.isNotBlank() },
+            baseUrl = baseUrl?.takeIf { it.isNotBlank() },
             catchMeUpEnabled = catchMeUpEnabled,
             emojiReactEnabled = emojiReactEnabled,
             syncEnabled = true,
@@ -134,6 +146,7 @@ class AiSettings(context: Context) {
             .remove(KEY_PROVIDER)
             .remove(KEY_API_KEY)
             .remove(KEY_MODEL)
+            .remove(KEY_BASE_URL)
             .remove(Feature.CatchMeUp.key)
             .remove(Feature.EmojiReact.key)
             .remove(KEY_SYNC)
@@ -148,10 +161,12 @@ class AiSettings(context: Context) {
             ?: Provider.Anthropic
         val key = prefs.getString(KEY_API_KEY, "").orEmpty()
         val model = prefs.getString(KEY_MODEL, null)?.takeIf { it.isNotBlank() }
+        val baseUrl = prefs.getString(KEY_BASE_URL, null)?.takeIf { it.isNotBlank() }
         return Config(
             provider = provider,
             apiKey = key,
             model = model,
+            baseUrl = baseUrl,
             catchMeUpEnabled = prefs.getBoolean(Feature.CatchMeUp.key, true),
             emojiReactEnabled = prefs.getBoolean(Feature.EmojiReact.key, true),
             syncEnabled = prefs.getBoolean(KEY_SYNC, false),
@@ -175,6 +190,7 @@ class AiSettings(context: Context) {
         private const val KEY_PROVIDER = "provider"
         private const val KEY_API_KEY = "api_key"
         private const val KEY_MODEL = "model"
+        private const val KEY_BASE_URL = "base_url"
         private const val KEY_SYNC = "sync_enabled"
     }
 }

@@ -58,12 +58,14 @@ fun SettingsScreen(
     var provider by remember { mutableStateOf(aiState.provider) }
     var apiKey by remember { mutableStateOf(aiState.apiKey) }
     var model by remember { mutableStateOf(aiState.model.orEmpty()) }
+    var baseUrl by remember { mutableStateOf(aiState.baseUrl.orEmpty()) }
     var revealKey by remember { mutableStateOf(false) }
     var providerMenuOpen by remember { mutableStateOf(false) }
 
     val dirty = provider != aiState.provider ||
         apiKey != aiState.apiKey ||
-        (model.ifBlank { null } != aiState.model)
+        (model.ifBlank { null } != aiState.model) ||
+        (baseUrl.ifBlank { null } != aiState.baseUrl)
 
     Column(modifier = modifier.windowInsetsPadding(WindowInsets.safeDrawing)) {
         Row(
@@ -156,25 +158,52 @@ fun SettingsScreen(
             OutlinedTextField(
                 value = model,
                 onValueChange = { model = it },
-                label = { Text("Model (optional)") },
+                label = {
+                    Text(
+                        if (provider == AiSettings.Provider.Custom) "Model"
+                        else "Model (optional)"
+                    )
+                },
                 placeholder = {
                     Text(
                         when (provider) {
                             AiSettings.Provider.Anthropic -> "claude-sonnet-4-5-20250929"
                             AiSettings.Provider.OpenRouter -> "anthropic/claude-sonnet-4"
                             AiSettings.Provider.OpenAi -> "gpt-4o-mini"
+                            AiSettings.Provider.Custom -> "e.g. llama-3.1-70b"
                         }
                     )
                 },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
             )
+            if (provider == AiSettings.Provider.Custom) {
+                OutlinedTextField(
+                    value = baseUrl,
+                    onValueChange = { baseUrl = it },
+                    label = { Text("Base URL") },
+                    placeholder = { Text("https://api.example.com/v1") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Text(
+                    "OpenAI-compatible endpoint. Accepts a base URL ending " +
+                        "in `/v1` or a full `/v1/chat/completions` URL.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
 
             Spacer(Modifier.height(4.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(
                     onClick = {
-                        app.aiSettings.update(provider, apiKey.trim(), model.trim().ifBlank { null })
+                        app.aiSettings.update(
+                            provider,
+                            apiKey.trim(),
+                            model.trim().ifBlank { null },
+                            baseUrl.trim().ifBlank { null },
+                        )
                     },
                     enabled = dirty,
                 ) { Text("Save") }
@@ -184,6 +213,7 @@ fun SettingsScreen(
                         provider = AiSettings.Provider.Anthropic
                         apiKey = ""
                         model = ""
+                        baseUrl = ""
                     },
                     enabled = aiState.hasKey(),
                 ) { Text("Remove key") }

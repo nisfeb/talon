@@ -10,6 +10,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
@@ -142,6 +143,32 @@ class UrbitChannel internal constructor(
             put("event-id", eventId)
         }
         put(buildJsonArray { add(msg) })
+    }
+
+    /**
+     * Run a spider thread and return its output JSON. Threads are
+     * one-shot RPCs that do synchronous work (like creating a group).
+     * Path: `/spider/<desk>/<input-mark>/<thread-name>/<output-mark>.json`.
+     */
+    suspend fun runThread(
+        desk: String,
+        inputMark: String,
+        threadName: String,
+        outputMark: String,
+        body: JsonElement,
+    ): JsonElement = withContext(Dispatchers.IO) {
+        val url = baseUrl.newBuilder()
+            .addPathSegments("spider/$desk/$inputMark/$threadName/$outputMark.json")
+            .build()
+        val request = Request.Builder()
+            .url(url)
+            .put(body.toString().toRequestBody(JSON_MEDIA_TYPE))
+            .build()
+        http.newCall(request).execute().use { resp ->
+            if (!resp.isSuccessful) error("thread $threadName: HTTP ${resp.code}")
+            val text = resp.body?.string().orEmpty()
+            if (text.isBlank()) JsonNull else json.parseToJsonElement(text)
+        }
     }
 
     /** Synchronous scry — reads a noun path without subscribing. */
