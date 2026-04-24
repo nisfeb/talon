@@ -104,6 +104,13 @@ fun DmListScreen(
     onOpenBookmarks: () -> Unit,
     onOpenActivity: () -> Unit,
     onOpenSettings: () -> Unit,
+    /** Every ship the user is logged in with. The switcher drawer
+     *  lists them and the header badge shows the active one when the
+     *  list has more than one entry. */
+    allShips: List<String> = emptyList(),
+    activeShip: String? = null,
+    onSwitchShip: (String) -> Unit = {},
+    onAddShip: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val scope = rememberCoroutineScope()
@@ -339,6 +346,26 @@ fun DmListScreen(
         }
     }
 
+    val drawerState = androidx.compose.material3.rememberDrawerState(
+        initialValue = androidx.compose.material3.DrawerValue.Closed,
+    )
+    androidx.compose.material3.ModalNavigationDrawer(
+        drawerState = drawerState,
+        drawerContent = {
+            ShipSwitcherDrawer(
+                ships = allShips,
+                activeShip = activeShip,
+                onPick = { ship ->
+                    scope.launch { drawerState.close() }
+                    onSwitchShip(ship)
+                },
+                onAdd = {
+                    scope.launch { drawerState.close() }
+                    onAddShip()
+                },
+            )
+        },
+    ) {
     Box(modifier = modifier.windowInsetsPadding(WindowInsets.safeDrawing)) {
     Column(modifier = Modifier.fillMaxSize()) {
         Row(
@@ -349,17 +376,27 @@ fun DmListScreen(
                 painter = painterResource(
                     id = io.nisfeb.talon.R.mipmap.ic_launcher_monochrome,
                 ),
-                contentDescription = null,
+                contentDescription = "Switch ship",
                 tint = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.size(28.dp),
+                modifier = Modifier
+                    .size(28.dp)
+                    .clickable { scope.launch { drawerState.open() } },
             )
             Text(
                 "Talon",
                 style = MaterialTheme.typography.titleLarge,
                 modifier = Modifier
-                    .weight(1f)
                     .padding(start = 8.dp, top = 8.dp, bottom = 8.dp),
             )
+            if (allShips.size > 1 && activeShip != null) {
+                Text(
+                    activeShip,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(start = 6.dp),
+                )
+            }
+            Spacer(Modifier.weight(1f))
             IconButton(onClick = onOpenSearch) {
                 Icon(Icons.Filled.Search, contentDescription = "Search")
             }
@@ -709,6 +746,7 @@ fun DmListScreen(
             )
         }
     }
+    } // ModalNavigationDrawer content
 
     folderSheetWhom?.let { whom ->
         val label = contactMap.conversationLabel(whom)
@@ -810,6 +848,87 @@ fun DmListScreen(
             },
             onDismiss = { creatingFolder = false },
         )
+    }
+}
+
+@Composable
+private fun ShipSwitcherDrawer(
+    ships: List<String>,
+    activeShip: String?,
+    onPick: (String) -> Unit,
+    onAdd: () -> Unit,
+) {
+    androidx.compose.material3.ModalDrawerSheet {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Text(
+                "Ships",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(bottom = 6.dp),
+            )
+            for (ship in ships) {
+                val selected = ship == activeShip
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(
+                            if (selected) MaterialTheme.colorScheme.primaryContainer
+                            else androidx.compose.ui.graphics.Color.Transparent,
+                        )
+                        .clickable { onPick(ship) }
+                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(
+                        painter = painterResource(
+                            id = io.nisfeb.talon.R.mipmap.ic_launcher_monochrome,
+                        ),
+                        contentDescription = null,
+                        tint = if (selected) MaterialTheme.colorScheme.primary
+                        else MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(20.dp),
+                    )
+                    Spacer(Modifier.size(12.dp))
+                    Text(
+                        ship,
+                        style = MaterialTheme.typography.bodyLarge.copy(
+                            fontWeight = if (selected) FontWeight.SemiBold
+                            else FontWeight.Normal,
+                        ),
+                    )
+                }
+            }
+            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(10.dp))
+                    .clickable { onAdd() }
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.Add,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(20.dp),
+                )
+                Spacer(Modifier.size(12.dp))
+                Text(
+                    "Add ship",
+                    style = MaterialTheme.typography.bodyLarge.copy(
+                        fontWeight = FontWeight.Medium,
+                    ),
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
+        }
     }
 }
 
@@ -1438,6 +1557,23 @@ fun homeSnapshotZeroUnread(whom: String) {
     HomeListSnapshot.rows = HomeListSnapshot.rows.map { (m, unread) ->
         if (m.whom == whom && unread > 0) m to 0 else m to unread
     }
+}
+
+/**
+ * Drop the process-wide home-list cache. Call this when the active
+ * ship changes so a ship swap doesn't briefly flash the prior ship's
+ * rows before the new ship's Room flows resolve.
+ */
+fun resetHomeListSnapshot() {
+    HomeListSnapshot.rows = emptyList()
+    HomeListSnapshot.contactMap = ContactMap.EMPTY
+    HomeListSnapshot.expandedGroups = emptySet()
+    HomeListSnapshot.groupOrders = emptyList()
+    HomeListSnapshot.folders = emptyList()
+    HomeListSnapshot.members = emptyList()
+    HomeListSnapshot.selectedFolderId = null
+    HomeListSnapshot.selectedSpecial = SpecialTab.All
+    HomeListSnapshot.initialTabApplied = false
 }
 
 private object HomeListSnapshot {

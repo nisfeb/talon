@@ -61,24 +61,32 @@ class UrbitSession(
                     baseUrl = url
                     shipName = ship
                     store.save(
-                        SessionStore.Saved(
+                        SavedSession(
                             shipUrl = url.toString().trimEnd('/'),
                             ship = ship,
                             cookieName = cookie.name,
                             cookieValue = cookie.value,
                             cookieDomain = url.host,
-                        )
+                        ),
                     )
                     ship
                 }
             }
         }
 
+    /**
+     * Sign out the currently active ship. Removes just its entry from
+     * the session list — other saved ships stay. If a different ship
+     * remains, the caller can switch to it via
+     * [TalonApplication.switchShip]; if the list is empty, the UI
+     * returns to the login screen.
+     */
     fun logout() {
+        val s = shipName
         baseUrl = null
         shipName = null
         cookieJar.clear()
-        store.clear()
+        if (s != null) store.remove(s) else store.clearAll()
     }
 
     /**
@@ -88,8 +96,17 @@ class UrbitSession(
      * the cookie with the server — call a cheap scry after if you need
      * that.
      */
-    fun tryRestore(): String? {
-        val saved = store.load() ?: return null
+    /**
+     * Restore the currently-active saved session, if any. Returns the
+     * ship patp on success. For multi-ship builds, the active ship is
+     * whichever one the user last switched to (falling back to the
+     * only ship if there's just one).
+     */
+    fun tryRestore(ship: String? = null): String? {
+        val saved = if (ship != null) {
+            store.all().firstOrNull { it.ship == ship }
+        } else store.active()
+        if (saved == null) return null
         val url = runCatching { saved.shipUrl.toHttpUrl() }.getOrNull() ?: return null
         val cookie = Cookie.Builder()
             .name(saved.cookieName)
@@ -97,9 +114,13 @@ class UrbitSession(
             .domain(saved.cookieDomain)
             .path("/")
             .build()
+        // Fresh jar for this restore so no stale cookies from a prior
+        // ship's session bleed into the new host's requests.
+        cookieJar.clear()
         cookieJar.saveFromResponse(url, listOf(cookie))
         baseUrl = url
         shipName = saved.ship
+        store.setActive(saved.ship)
         return saved.ship
     }
 

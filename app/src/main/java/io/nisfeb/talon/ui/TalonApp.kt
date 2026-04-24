@@ -87,7 +87,16 @@ fun TalonApp(
     val app = LocalContext.current.applicationContext as TalonApplication
     val context = LocalContext.current
     val appScope = rememberCoroutineScope()
+    // Follow TalonApplication's active-ship flow so switch / logout /
+    // add-ship events reshape the UI without each callback having to
+    // update local state.
+    val activeShip by app.activeShipFlow.collectAsState()
+    val allShips by app.allShipsFlow.collectAsState()
     var loggedInShip by remember { mutableStateOf<String?>(null) }
+    var addingAnotherShip by remember { mutableStateOf(false) }
+    androidx.compose.runtime.LaunchedEffect(activeShip) {
+        loggedInShip = activeShip
+    }
     var openWhom by remember { mutableStateOf<String?>(initialOpenWhom) }
     // Scroll target is consumed once the chat screen actually uses it,
     // so navigating back and reopening doesn't re-snap to the same msg.
@@ -103,13 +112,10 @@ fun TalonApp(
     var settingsOpen by remember { mutableStateOf(false) }
     var profileSheetShip by remember { mutableStateOf<String?>(null) }
 
-    // Auto-restore any persisted session so a fresh process launch lands
-    // straight in the DM list instead of the login form.
-    LaunchedEffect(Unit) {
-        if (loggedInShip == null) {
-            app.session.tryRestore()?.let { loggedInShip = it }
-        }
-    }
+    // TalonApplication.onCreate restores the previously-active ship
+    // into the ship-scoped fields (db, repo, session) and seeds
+    // activeShipFlow — our collector above syncs that into
+    // loggedInShip, so no extra restore pass is needed here.
 
     LaunchedEffect(loggedInShip) {
         if (loggedInShip != null) {
@@ -212,10 +218,23 @@ fun TalonApp(
         BackHandler(enabled = openThread != null) { openThread = null }
         BackHandler(enabled = openThread == null && openWhom != null) { openWhom = null }
 
+        // Key the logged-in tree on the active ship so switching
+        // resets every remember / collectAsState. Otherwise consumers
+        // still hold flows from the previous ship's DB and show its
+        // data even after `app.db` has been rebuilt.
+        androidx.compose.runtime.key(loggedInShip) {
         when {
+            addingAnotherShip -> LoginScreen(
+                session = app.session,
+                onLoggedIn = { ship ->
+                    addingAnotherShip = false
+                    app.onShipLoggedIn(ship)
+                },
+            )
+
             loggedInShip == null -> LoginScreen(
                 session = app.session,
-                onLoggedIn = { loggedInShip = it },
+                onLoggedIn = { ship -> app.onShipLoggedIn(ship) },
             )
 
             viewerImageUrl != null -> ImageViewerScreen(
@@ -399,16 +418,25 @@ fun TalonApp(
                 onOpenActivity = { activityOpen = true },
                 onOpenSettings = { settingsOpen = true },
                 onSignOut = {
-                    app.repo.stop()
-                    app.shortcuts.stop()
-                    app.session.logout()
+                    app.signOutActive()
                     TalonSyncService.stop(context)
-                    loggedInShip = null
                     openWhom = null
                     openThread = null
                     searchOpen = false
                     newDmOpen = false
                 },
+                allShips = allShips,
+                activeShip = loggedInShip,
+                onSwitchShip = { ship ->
+                    if (ship != loggedInShip) {
+                        openWhom = null
+                        openThread = null
+                        searchOpen = false
+                        newDmOpen = false
+                        app.switchShip(ship)
+                    }
+                },
+                onAddShip = { addingAnotherShip = true },
                 modifier = mod,
             )
         }
@@ -432,5 +460,6 @@ fun TalonApp(
                 onDismiss = { profileSheetShip = null },
             )
         }
+        } // key(loggedInShip)
     }
 }

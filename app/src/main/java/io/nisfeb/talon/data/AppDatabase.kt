@@ -57,14 +57,47 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
-        fun build(context: Context): AppDatabase =
-            Room.databaseBuilder(
+        /**
+         * Open the Room database for a specific ship. Each ship's
+         * data lives in its own file so switching ships is a clean
+         * cut — no cross-ship rows, no filter predicates. The legacy
+         * single-ship file (`talon.db`) is auto-adopted as the first
+         * ship's DB so one-ship users don't lose anything.
+         */
+        fun build(context: Context, ship: String): AppDatabase {
+            val filename = shipDbFilename(context, ship)
+            return Room.databaseBuilder(
                 context.applicationContext,
                 AppDatabase::class.java,
-                "talon.db"
+                filename,
             )
                 .addMigrations(MIGRATION_17_18, MIGRATION_18_19)
                 .fallbackToDestructiveMigration()
                 .build()
+        }
+
+        /**
+         * Pick the DB filename for [ship]. If the user has the legacy
+         * single-file `talon.db` sitting around, the very first ship
+         * we see after upgrade adopts it — otherwise we'd orphan it.
+         */
+        private fun shipDbFilename(context: Context, ship: String): String {
+            val safe = ship.removePrefix("~").replace(Regex("[^a-z0-9-]"), "_")
+            val legacy = context.getDatabasePath("talon.db")
+            val perShip = "talon-$safe.db"
+            if (legacy.exists() && !context.getDatabasePath(perShip).exists()) {
+                // Rename so the first ship gets its existing data.
+                val dest = context.getDatabasePath(perShip)
+                runCatching { legacy.renameTo(dest) }
+                // Rename the WAL / journal siblings too.
+                for (suffix in listOf("-wal", "-shm", "-journal")) {
+                    val src = context.getDatabasePath("talon.db$suffix")
+                    if (src.exists()) {
+                        runCatching { src.renameTo(context.getDatabasePath("$perShip$suffix")) }
+                    }
+                }
+            }
+            return perShip
+        }
     }
 }
