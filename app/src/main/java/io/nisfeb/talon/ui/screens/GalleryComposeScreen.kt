@@ -150,12 +150,16 @@ fun GalleryComposeScreen(
                             })
                         }
                         GalleryTab.Link -> buildJsonArray {
-                            // Tlon posts a plain URL as an inline; the
-                            // server embeds the link preview block
-                            // in-place once it's fetched metadata.
+                            // Tlon's LinkInput posts a link block so the
+                            // server-side previewer replaces it with an
+                            // enriched meta bag. Plain URLs in inline
+                            // arrays only render as literal text.
                             add(buildJsonObject {
-                                put("inline", buildJsonArray {
-                                    add(JsonPrimitive(linkUrl.trim()))
+                                put("block", buildJsonObject {
+                                    put("link", buildJsonObject {
+                                        put("url", linkUrl.trim())
+                                        put("meta", buildJsonObject { })
+                                    })
                                 })
                             })
                         }

@@ -218,16 +218,15 @@ fun GroupAdminScreen(
                     val snapshot = group ?: return@AdminBody
                     group = snapshot.copy(bannedShips = snapshot.bannedShips - ship)
                     scope.launch {
-                        runCatching {
-                            repo.unbanFromGroup(flag, ship, "")
-                        }.onSuccess {
-                            kotlinx.coroutines.delay(500)
-                            refresh()
-                        }
-                        .onFailure {
-                            error = it.message ?: it::class.simpleName
-                            refresh()
-                        }
+                        runCatching { repo.unbanFromGroup(flag, ship) }
+                            .onSuccess {
+                                kotlinx.coroutines.delay(500)
+                                refresh()
+                            }
+                            .onFailure {
+                                error = it.message ?: it::class.simpleName
+                                refresh()
+                            }
                     }
                 },
                 onMemberLongPress = { memberActionTarget = it },

@@ -34,17 +34,23 @@ object MarkdownBlocks {
             when {
                 line.isBlank() -> { flushParagraph(); i++ }
                 line.startsWith("```") -> {
-                    flushParagraph()
-                    val lang = line.removePrefix("```").trim()
-                    val body = StringBuilder()
-                    i++
-                    while (i < lines.size && !lines[i].startsWith("```")) {
-                        if (body.isNotEmpty()) body.append('\n')
-                        body.append(lines[i])
+                    // Scan ahead for the closing fence. If there isn't
+                    // one, don't eat the rest of the body — treat this
+                    // `` ``` `` like a plain paragraph so the author's
+                    // later text still renders.
+                    val close = (i + 1 until lines.size)
+                        .firstOrNull { lines[it].startsWith("```") }
+                    if (close == null) {
+                        if (buf.isNotEmpty()) buf.append('\n')
+                        buf.append(line)
                         i++
+                    } else {
+                        flushParagraph()
+                        val lang = line.removePrefix("```").trim()
+                        val body = lines.subList(i + 1, close).joinToString("\n")
+                        add(codeBlock(body, lang))
+                        i = close + 1
                     }
-                    if (i < lines.size) i++  // eat the closing fence
-                    add(codeBlock(body.toString(), lang))
                 }
                 line.startsWith("### ") -> {
                     flushParagraph()

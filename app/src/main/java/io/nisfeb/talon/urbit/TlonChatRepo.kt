@@ -824,7 +824,7 @@ class TlonChatRepo(
     }
 
     /** Remove a ship from the ban list. */
-    suspend fun unbanFromGroup(flag: String, ship: String, cordonKind: String): Boolean {
+    suspend fun unbanFromGroup(flag: String, ship: String): Boolean {
         val p = if (!ship.startsWith("~")) "~$ship" else ship
         pokeAGroup(flag, buildJsonObject {
             put("entry", buildJsonObject {
@@ -1571,12 +1571,14 @@ class TlonChatRepo(
                 app = "chat", mark = "chat-club-action-2",
                 payload = clubAction(whom, postId, delta),
             )
-            whom.startsWith("chat/") -> ch.poke(
+            whom.startsWith("chat/") ||
+                whom.startsWith("diary/") ||
+                whom.startsWith("heap/") -> ch.poke(
                 app = "channels", mark = "channel-action-2",
                 payload = channelAction(whom, buildJsonObject {
                     put("post", buildJsonObject {
                         put("add-react", buildJsonObject {
-                            put("id", postId)
+                            put("id", dotAtom(postId))
                             put("author", ourPatp)
                             put("react", emoji)
                         })
@@ -1602,12 +1604,14 @@ class TlonChatRepo(
                 app = "chat", mark = "chat-club-action-2",
                 payload = clubAction(whom, postId, delta),
             )
-            whom.startsWith("chat/") -> ch.poke(
+            whom.startsWith("chat/") ||
+                whom.startsWith("diary/") ||
+                whom.startsWith("heap/") -> ch.poke(
                 app = "channels", mark = "channel-action-2",
                 payload = channelAction(whom, buildJsonObject {
                     put("post", buildJsonObject {
                         put("del-react", buildJsonObject {
-                            put("id", postId)
+                            put("id", dotAtom(postId))
                             put("author", ourPatp)
                         })
                     })
@@ -1659,24 +1663,24 @@ class TlonChatRepo(
             whom.startsWith("chat/") ||
                 whom.startsWith("diary/") ||
                 whom.startsWith("heap/") -> {
+                // Channel-action-2 `id` / `del` fields dejs through
+                // `slav %ud`, which requires dot-grouped decimals.
                 val inner = if (isReply) {
-                    // channel-action-2 reply-delete mirrors reply-add:
-                    // nests under post.reply.{id, action.del}.
                     buildJsonObject {
                         put("post", buildJsonObject {
                             put("reply", buildJsonObject {
-                                put("id", parentId!!)
+                                put("id", dotAtom(parentId!!))
                                 put("action", buildJsonObject {
-                                    put("del", JsonPrimitive(postId))
+                                    put("del", JsonPrimitive(dotAtom(postId)))
                                 })
                             })
                         })
                     }
                 } else {
+                    // tlon-apps deletePost for channels: {post: {del: postId}}.
                     buildJsonObject {
                         put("post", buildJsonObject {
-                            put("id", JsonPrimitive(postId))
-                            put("u-post", buildJsonObject { put("set", JsonNull) })
+                            put("del", JsonPrimitive(dotAtom(postId)))
                         })
                     }
                 }
@@ -1697,7 +1701,6 @@ class TlonChatRepo(
         val ch = channel ?: error("not connected")
         val sent = System.currentTimeMillis()
         val da = UrbitTime.unixMsToDa(sent)
-        Log.d(TAG, "reply whom=$whom parent=$parentId text.len=${text.length}")
         // Same local-sentinel id rule as postContent — %channels assigns
         // unpredictable post ids so we can't pre-compute them.
         val replyId = if (
@@ -1735,17 +1738,19 @@ class TlonChatRepo(
                 whom.startsWith("diary/") ||
                 whom.startsWith("heap/") -> {
                 // channels c-reply shape nests under action:, not c-reply:
+                // Channel-action-2's `reply.id` dejs is `(se %ud)`; the
+                // agent runs `slav %ud` which demands dot-grouped
+                // decimals for values ≥ 1000.
                 val payload = channelAction(whom, buildJsonObject {
                     put("post", buildJsonObject {
                         put("reply", buildJsonObject {
-                            put("id", parentId)
+                            put("id", dotAtom(parentId))
                             put("action", buildJsonObject {
                                 put("add", replyEssay)
                             })
                         })
                     })
                 })
-                Log.d(TAG, "reply payload: ${payload.toString().take(400)}")
                 ch.poke(app = "channels", mark = "channel-action-2", payload = payload)
                 db.messages().upsert(
                     toReplyEntity(whom, parentId, replyId, replyEssay)
@@ -2003,10 +2008,21 @@ class TlonChatRepo(
             return
         }
         (response["post"] as? JsonObject)?.let { wrap ->
-            val id = wrap["id"]?.jsonPrimitive?.contentIfString() ?: return@let
+            // Server may echo ids in dot-grouped form (`170.141.184…`).
+            // Our DB stores them raw, so normalize by stripping dots.
+            val rawId = wrap["id"]?.jsonPrimitive?.contentIfString() ?: return@let
+            val id = rawId.replace(".", "")
             val rPost = wrap["r-post"] as? JsonObject ?: return@let
 
             (rPost["set"] as? JsonObject)?.let { post ->
+                // A tombstone object means the post was deleted:
+                // {type: "tombstone", author, id, deleted-at, seq}.
+                // No essay / seal — route to soft-delete.
+                if (post["type"]?.jsonPrimitive?.contentIfString() == "tombstone") {
+                    db.messages().softDelete(nest, id)
+                    db.reactions().clearForPost(nest, id)
+                    return
+                }
                 val msgs = mutableListOf<MessageEntity>()
                 val rx = mutableListOf<ReactionEntity>()
                 ingestPost(nest, post, msgs, rx)
@@ -2028,6 +2044,7 @@ class TlonChatRepo(
                 return
             }
             if (rPost["set"] is JsonNull) {
+                // Legacy shape — older agent versions. Keep for safety.
                 db.messages().softDelete(nest, id)
                 db.reactions().clearForPost(nest, id)
                 return
@@ -2059,13 +2076,25 @@ class TlonChatRepo(
         parentId: String,
         reply: JsonObject,
     ) {
-        val replyId = reply["id"]?.jsonPrimitive?.contentIfString() ?: return
+        val rawReplyId = reply["id"]?.jsonPrimitive?.contentIfString() ?: return
+        val replyId = rawReplyId.replace(".", "")
         val rReply = reply["r-reply"] as? JsonObject ?: return
 
         (rReply["set"] as? JsonObject)?.let { full ->
+            if (full["type"]?.jsonPrimitive?.contentIfString() == "tombstone") {
+                db.messages().softDelete(whom, replyId)
+                db.reactions().clearForPost(whom, replyId)
+                return
+            }
             val essay = full["reply-essay"] as? JsonObject ?: return@let
             val entity = toReplyEntity(whom, parentId, replyId, essay)
             db.messages().upsert(entity)
+            // Reap any optimistic `local_<da>` twin so our own replies
+            // don't show up twice — mirrors the top-level-post reap in
+            // applyChannelDelta.
+            if (entity.author == ourPatp) {
+                db.messages().reapLocalTwin(whom, ourPatp, entity.sentMs)
+            }
             if (entity.author != ourPatp) {
                 val parent = db.messages().getOne(whom, parentId)
                 val replyToUs = parent?.author == ourPatp
@@ -2473,15 +2502,26 @@ class TlonChatRepo(
      * lists. The seal carries reactions on the parent, and a `replies` map
      * whose values are Reply shapes with their own seal + reply-essay.
      */
-    private fun ingestPost(
+    private suspend fun ingestPost(
         whom: String,
         post: JsonElement,
         messagesOut: MutableList<MessageEntity>,
         reactionsOut: MutableList<ReactionEntity>,
     ) {
         val obj = post as? JsonObject ?: return
+        // Tombstones returned by paginate/bootstrap: {type: "tombstone",
+        // id, author, deleted-at, seq}. No seal/essay. Soft-delete so
+        // the stale row disappears on re-scry.
+        if (obj["type"]?.jsonPrimitive?.contentIfString() == "tombstone") {
+            val tombId = obj["id"]?.jsonPrimitive?.contentIfString()
+                ?.replace(".", "") ?: return
+            db.messages().softDelete(whom, tombId)
+            return
+        }
         val seal = obj["seal"] as? JsonObject ?: return
-        val id = seal["id"]?.jsonPrimitive?.contentIfString() ?: return
+        // Server may give ids as raw digits or dot-grouped; normalize
+        // to raw so DB lookups match regardless of source path.
+        val id = seal["id"]?.jsonPrimitive?.contentIfString()?.replace(".", "") ?: return
         val essay = obj["essay"] as? JsonObject ?: return
         messagesOut.add(toEntity(whom, id, essay))
 
@@ -2493,7 +2533,8 @@ class TlonChatRepo(
         (seal["replies"] as? JsonObject)?.forEach { (_, replyEl) ->
             val reply = replyEl as? JsonObject ?: return@forEach
             val replySeal = reply["seal"] as? JsonObject ?: return@forEach
-            val replyId = replySeal["id"]?.jsonPrimitive?.contentIfString() ?: return@forEach
+            val replyId = replySeal["id"]?.jsonPrimitive?.contentIfString()
+                ?.replace(".", "") ?: return@forEach
             val replyEssay = reply["reply-essay"] as? JsonObject ?: return@forEach
             messagesOut.add(toReplyEntity(whom, id, replyId, replyEssay))
             (replySeal["reacts"] as? JsonObject)?.forEach { (author, emoji) ->
