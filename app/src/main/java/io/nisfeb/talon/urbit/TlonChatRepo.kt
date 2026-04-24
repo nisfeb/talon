@@ -38,7 +38,6 @@ import kotlinx.serialization.json.JsonUnquotedLiteral
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
 import okhttp3.MediaType.Companion.toMediaType
@@ -829,10 +828,10 @@ class TlonChatRepo(
                 .mapNotNull { it as? JsonObject }
                 .firstOrNull { (it["valid"] as? JsonPrimitive)?.content == "true" }
                 ?: continue
-            val inviter = firstValid["ship"]?.jsonPrimitive?.contentIfString()
+            val inviter = firstValid["ship"].asStr()
             val preview = f["preview"] as? JsonObject
             val meta = preview?.get("meta") as? JsonObject
-            fun metaStr(k: String) = meta?.get(k)?.jsonPrimitive?.contentIfString()
+            fun metaStr(k: String) = meta?.get(k).asStr()
                 ?.takeIf { it.isNotBlank() }
             out += InviteSummary(
                 flag = flag,
@@ -996,7 +995,7 @@ class TlonChatRepo(
         val items = mutableListOf<ActivityFeedItem>()
         for (bundleEl in all) {
             val bundle = bundleEl as? JsonObject ?: continue
-            val sourceKey = bundle["source-key"]?.jsonPrimitive?.contentIfString()
+            val sourceKey = bundle["source-key"].asStr()
             val sourceWhom = sourceKey?.let { sourceKeyToWhom(it) }
             val title = when {
                 sourceWhom == null -> sourceKey ?: "activity"
@@ -1021,12 +1020,12 @@ class TlonChatRepo(
                     "group-invite" -> "Invited you to a group"
                     else -> tag
                 }
-                val author = eventObj["mention-author"]?.jsonPrimitive?.contentIfString()
-                    ?: eventObj["author"]?.jsonPrimitive?.contentIfString()
-                    ?: (eventObj["key"] as? JsonObject)?.get("id")?.jsonPrimitive
-                        ?.contentIfString()?.substringBefore('/')
+                val author = eventObj["mention-author"].asStr()
+                    ?: eventObj["author"].asStr()
+                    ?: (eventObj["key"] as? JsonObject)?.get("id").asStr()
+                        ?.substringBefore('/')
                 val content = eventObj["content"]?.let { it.toString() }
-                val timeStr = wrap["time"]?.jsonPrimitive?.contentIfString() ?: ""
+                val timeStr = wrap["time"].asStr() ?: ""
                 val sentMs = parseEventTimeMs(timeStr, eventObj)
 
                 items.add(
@@ -1048,8 +1047,7 @@ class TlonChatRepo(
     private fun parseEventTimeMs(timeStr: String, eventObj: JsonObject): Long {
         // Events sometimes carry a `key.time` or just `time` as a dotted
         // urbit numeric. Fall back to 0 so the sort at least doesn't crash.
-        val keyTime = (eventObj["key"] as? JsonObject)?.get("time")?.jsonPrimitive
-            ?.contentIfString()
+        val keyTime = (eventObj["key"] as? JsonObject)?.get("time").asStr()
         val raw = keyTime ?: timeStr
         return runCatching {
             val digits = raw.replace(".", "")
@@ -1067,14 +1065,14 @@ class TlonChatRepo(
         val body = runCatching { ch.scry("channels", "/v5/$nest/posts/post/$postDa") }
             .getOrNull() as? JsonObject ?: return null
         val seal = body["seal"] as? JsonObject ?: return null
-        val id = seal["id"]?.jsonPrimitive?.contentIfString() ?: return null
+        val id = seal["id"].asStr() ?: return null
         val essay = body["essay"] as? JsonObject ?: return null
         val entity = toEntity(nest, id, essay)
         db.messages().upsert(entity)
         (seal["reacts"] as? JsonObject)?.let { reacts ->
             db.reactions().clearForPost(nest, id)
             val rx = reacts.entries.mapNotNull { (author, emoji) ->
-                val e = emoji.jsonPrimitive.contentIfString() ?: return@mapNotNull null
+                val e = emoji.asStr() ?: return@mapNotNull null
                 ReactionEntity(nest, id, author, e)
             }
             if (rx.isNotEmpty()) db.reactions().upsertAll(rx)
@@ -1092,9 +1090,9 @@ class TlonChatRepo(
         val body = runCatching { ch.scry("channels", path) }
             .getOrNull() as? JsonObject ?: return null
         val seal = body["seal"] as? JsonObject ?: return null
-        val id = seal["id"]?.jsonPrimitive?.contentIfString() ?: return null
-        val parentId = seal["parent-id"]?.jsonPrimitive?.contentIfString()
-            ?: seal["parent"]?.jsonPrimitive?.contentIfString()
+        val id = seal["id"].asStr() ?: return null
+        val parentId = seal["parent-id"].asStr()
+            ?: seal["parent"].asStr()
             ?: return null
         val essay = body["reply-essay"] as? JsonObject ?: return null
         val entity = toReplyEntity(nest, parentId, id, essay)
@@ -1329,8 +1327,7 @@ class TlonChatRepo(
         fileName: String,
     ): String {
         val tokenElement = ch.scry("genuine", "/secret")
-        val token = (tokenElement as? JsonPrimitive)?.contentIfString()
-            ?: error("no memex token")
+        val token = tokenElement.asStr() ?: error("no memex token")
 
         val bareShip = ourPatp.removePrefix("~")
         val memexBody = buildJsonObject {
@@ -1349,9 +1346,9 @@ class TlonChatRepo(
             if (!resp.isSuccessful) error("memex upload-url failed: HTTP ${resp.code}")
             val body = resp.body?.string() ?: error("empty memex response")
             val obj = Json.parseToJsonElement(body).jsonObject
-            val hosted = obj["hostedUrl"]?.jsonPrimitive?.contentIfString()
+            val hosted = obj["hostedUrl"].asStr()
                 ?: error("no hostedUrl in memex response")
-            val upload = obj["uploadUrl"]?.jsonPrimitive?.contentIfString()
+            val upload = obj["uploadUrl"].asStr()
                 ?: error("no uploadUrl in memex response")
             hosted to upload
         }
@@ -1431,12 +1428,12 @@ class TlonChatRepo(
         val inner = (obj["storage-update"] as? JsonObject)?.get("credentials") as? JsonObject
             ?: (obj["credentials"] as? JsonObject)
             ?: obj
-        val endpoint = inner["endpoint"]?.jsonPrimitive?.contentIfString() ?: ""
-        val accessKeyId = inner["access-key-id"]?.jsonPrimitive?.contentIfString()
-            ?: inner["accessKeyId"]?.jsonPrimitive?.contentIfString()
+        val endpoint = inner["endpoint"].asStr() ?: ""
+        val accessKeyId = inner["access-key-id"].asStr()
+            ?: inner["accessKeyId"].asStr()
             ?: ""
-        val secretAccessKey = inner["secret-access-key"]?.jsonPrimitive?.contentIfString()
-            ?: inner["secretAccessKey"]?.jsonPrimitive?.contentIfString()
+        val secretAccessKey = inner["secret-access-key"].asStr()
+            ?: inner["secretAccessKey"].asStr()
             ?: ""
         return StorageCreds(endpoint, accessKeyId, secretAccessKey)
     }
@@ -1446,13 +1443,13 @@ class TlonChatRepo(
         val inner = (obj["storage-update"] as? JsonObject)?.get("configuration") as? JsonObject
             ?: (obj["configuration"] as? JsonObject)
             ?: obj
-        val bucket = inner["current-bucket"]?.jsonPrimitive?.contentIfString()
-            ?: inner["currentBucket"]?.jsonPrimitive?.contentIfString()
+        val bucket = inner["current-bucket"].asStr()
+            ?: inner["currentBucket"].asStr()
             ?: ""
-        val region = inner["region"]?.jsonPrimitive?.contentIfString() ?: ""
-        val publicUrlBase = inner["public-url-base"]?.jsonPrimitive?.contentIfString()
-            ?: inner["publicUrlBase"]?.jsonPrimitive?.contentIfString()
-        val service = inner["service"]?.jsonPrimitive?.contentIfString()
+        val region = inner["region"].asStr() ?: ""
+        val publicUrlBase = inner["public-url-base"].asStr()
+            ?: inner["publicUrlBase"].asStr()
+        val service = inner["service"].asStr()
         return StorageConfig(bucket, region, publicUrlBase, service)
     }
 
@@ -1782,7 +1779,7 @@ class TlonChatRepo(
         // subscribe-replies have no json and can be skipped — but
         // surface poke NACKs (and watch rejections) so silent server
         // rejections are debuggable.
-        val response = outer["response"]?.jsonPrimitive?.contentIfString()
+        val response = outer["response"].asStr()
         if (response == "poke" || response == "subscribe") {
             val err = outer["err"]
             if (err != null && err !is JsonNull) {
@@ -1794,8 +1791,8 @@ class TlonChatRepo(
         val payload = outer["json"] as? JsonObject ?: return
 
         // %chat writ-response-4: { whom, id, response }
-        val whom = payload["whom"]?.jsonPrimitive?.contentIfString()
-        val directId = payload["id"]?.jsonPrimitive?.contentIfString()
+        val whom = payload["whom"].asStr()
+        val directId = payload["id"].asStr()
         if (whom != null && directId != null) {
             // %chat echoes post ids with dot-grouping in the envelope
             // but our DB stores raw undotted ids everywhere else.
@@ -1811,7 +1808,7 @@ class TlonChatRepo(
         }
 
         // %channels r-channels-5: { nest, response }
-        val nest = payload["nest"]?.jsonPrimitive?.contentIfString()
+        val nest = payload["nest"].asStr()
         val channelResponse = payload["response"] as? JsonObject
         if (nest != null && channelResponse != null) {
             applyChannelDelta(nest, channelResponse)
@@ -1927,12 +1924,12 @@ class TlonChatRepo(
             return
         }
         (response["add-react"] as? JsonObject)?.let { ar ->
-            val author = ar["author"]?.jsonPrimitive?.contentIfString() ?: return@let
-            val react = ar["react"]?.jsonPrimitive?.contentIfString() ?: return@let
+            val author = ar["author"].asStr() ?: return@let
+            val react = ar["react"].asStr() ?: return@let
             db.reactions().upsert(ReactionEntity(whom, id, author, react))
             return
         }
-        response["del-react"]?.jsonPrimitive?.contentIfString()?.let { author ->
+        response["del-react"].asStr()?.let { author ->
             db.reactions().delete(whom, id, author)
             return
         }
@@ -1949,7 +1946,7 @@ class TlonChatRepo(
     ) {
         // Same normalization as applyChatDelta — reply ids also arrive
         // dotted in the %chat SSE envelope.
-        val replyId = reply["id"]?.jsonPrimitive?.contentIfString()
+        val replyId = reply["id"].asStr()
             ?.let(::undotAtom) ?: return
         val delta = reply["delta"] as? JsonObject ?: return
 
@@ -1970,12 +1967,12 @@ class TlonChatRepo(
             return
         }
         (delta["add-react"] as? JsonObject)?.let { ar ->
-            val author = ar["author"]?.jsonPrimitive?.contentIfString() ?: return@let
-            val react = ar["react"]?.jsonPrimitive?.contentIfString() ?: return@let
+            val author = ar["author"].asStr() ?: return@let
+            val react = ar["react"].asStr() ?: return@let
             db.reactions().upsert(ReactionEntity(whom, replyId, author, react))
             return
         }
-        delta["del-react"]?.jsonPrimitive?.contentIfString()?.let { author ->
+        delta["del-react"].asStr()?.let { author ->
             db.reactions().delete(whom, replyId, author)
         }
     }
@@ -2021,7 +2018,7 @@ class TlonChatRepo(
             is ChannelDeltaIntent.PostReactions -> {
                 db.reactions().clearForPost(nest, intent.id)
                 val rx = intent.reacts.entries.mapNotNull { (author, emoji) ->
-                    val e = emoji.jsonPrimitive.contentIfString() ?: return@mapNotNull null
+                    val e = emoji.asStr() ?: return@mapNotNull null
                     ReactionEntity(nest, intent.id, author, e)
                 }
                 if (rx.isNotEmpty()) db.reactions().upsertAll(rx)
@@ -2063,7 +2060,7 @@ class TlonChatRepo(
             is ReplyIntent.Reactions -> {
                 db.reactions().clearForPost(whom, replyId)
                 val rx = inner.reacts.entries.mapNotNull { (author, emoji) ->
-                    val e = emoji.jsonPrimitive.contentIfString() ?: return@mapNotNull null
+                    val e = emoji.asStr() ?: return@mapNotNull null
                     ReactionEntity(whom, replyId, author, e)
                 }
                 if (rx.isNotEmpty()) db.reactions().upsertAll(rx)
@@ -2211,7 +2208,7 @@ class TlonChatRepo(
      */
     private suspend fun applyContactsNews(event: JsonObject) {
         (event["page"] as? JsonObject)?.let { page ->
-            val kip = page["kip"]?.jsonPrimitive?.contentIfString() ?: return
+            val kip = page["kip"].asStr() ?: return
             if (!kip.startsWith("~")) return
             val contact = page["contact"] as? JsonObject ?: return
             // Prefer the server-provided mod-at. Fall back to our own
@@ -2222,7 +2219,7 @@ class TlonChatRepo(
             return
         }
         (event["peer"] as? JsonObject)?.let { peer ->
-            val who = peer["who"]?.jsonPrimitive?.contentIfString() ?: return
+            val who = peer["who"].asStr() ?: return
             if (!who.startsWith("~")) return
             val contact = peer["contact"] as? JsonObject ?: return
             val modAt = parseContactModAt(peer) ?: System.currentTimeMillis()
@@ -2260,14 +2257,14 @@ class TlonChatRepo(
     ): ContactEntity {
         fun textField(name: String): String? {
             val field = fields[name] as? JsonObject ?: return null
-            if (field["type"]?.jsonPrimitive?.contentIfString() != "text") return null
-            return field["value"]?.jsonPrimitive?.contentIfString()?.takeIf { it.isNotBlank() }
+            if (field["type"].asStr() != "text") return null
+            return field["value"].asStr()?.takeIf { it.isNotBlank() }
         }
         // Colors may arrive as either a plain text field ("#ff5050") or a
         // typed "color" field whose value is Urbit @ux hex ("0xff.5050").
         fun colorField(name: String): String? {
             val field = fields[name] as? JsonObject ?: return null
-            val raw = field["value"]?.jsonPrimitive?.contentIfString()
+            val raw = field["value"].asStr()
                 ?: return null
             return normalizeHexColor(raw)
         }
@@ -2292,7 +2289,7 @@ class TlonChatRepo(
      * accept values that look like a sensible recent ms timestamp.
      */
     private fun parseContactModAt(envelope: JsonObject?): Long? {
-        val raw = envelope?.get("mod-at")?.jsonPrimitive?.contentIfString()
+        val raw = envelope?.get("mod-at").asStr()
             ?: return null
         val digits = raw.replace(".", "")
         if (digits.isEmpty() || !digits.all { it.isDigit() }) return null
@@ -2341,9 +2338,9 @@ class TlonChatRepo(
             val meta = groupObj["meta"] as? JsonObject
             groups += GroupEntity(
                 flag = flag,
-                title = meta?.get("title")?.jsonPrimitive?.contentIfString()
+                title = meta?.get("title").asStr()
                     ?.takeIf { it.isNotBlank() },
-                image = meta?.get("image")?.jsonPrimitive?.contentIfString()
+                image = meta?.get("image").asStr()
                     ?.takeIf { it.isNotBlank() },
             )
             val channels = groupObj["channels"] as? JsonObject ?: continue
@@ -2351,7 +2348,7 @@ class TlonChatRepo(
                 val channelObj = channel as? JsonObject
                 val channelMeta = channelObj?.get("meta") as? JsonObject
                 val channelTitle = channelMeta?.get("title")
-                    ?.jsonPrimitive?.contentIfString()
+                    .asStr()
                     ?.takeIf { it.isNotBlank() }
                 channelGroups += ChannelGroupEntity(
                     nest = nest,
@@ -2377,7 +2374,7 @@ class TlonChatRepo(
         val rows = obj.mapNotNull { (id, club) ->
             val clubObj = club as? JsonObject ?: return@mapNotNull null
             val meta = clubObj["meta"] as? JsonObject
-            val title = meta?.get("title")?.jsonPrimitive?.contentIfString()
+            val title = meta?.get("title").asStr()
                 ?.takeIf { it.isNotBlank() }
             ClubEntity(id = id, title = title)
         }
@@ -2465,6 +2462,4 @@ class TlonChatRepo(
         return entity
     }
 
-    private fun JsonPrimitive.contentIfString(): String? =
-        if (isString) content else content
 }

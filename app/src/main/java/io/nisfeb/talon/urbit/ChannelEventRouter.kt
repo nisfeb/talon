@@ -2,8 +2,6 @@ package io.nisfeb.talon.urbit
 
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.jsonPrimitive
 
 /**
  * Pure classifier for a single %channels SSE delta payload. Takes the
@@ -71,14 +69,14 @@ internal fun classifyChannelDelta(response: JsonObject): ChannelDeltaIntent {
     val wrap = response["post"] as? JsonObject
         ?: return ChannelDeltaIntent.Unknown(response.keys)
 
-    val rawId = wrap["id"]?.jsonPrimitive?.contentIfStr()
+    val rawId = wrap["id"].asStr()
         ?: return ChannelDeltaIntent.Unknown(setOf("post"))
     val id = rawId.replace(".", "")
     val rPost = wrap["r-post"] as? JsonObject
         ?: return ChannelDeltaIntent.Unknown(wrap.keys)
 
     (rPost["set"] as? JsonObject)?.let { set ->
-        if (set["type"]?.jsonPrimitive?.contentIfStr() == "tombstone") {
+        if (set["type"].asStr() == "tombstone") {
             return ChannelDeltaIntent.PostTombstone(id)
         }
         return ChannelDeltaIntent.PostSet(id, set)
@@ -99,7 +97,7 @@ internal fun classifyChannelDelta(response: JsonObject): ChannelDeltaIntent {
 }
 
 private fun classifyReply(parentId: String, reply: JsonObject): ChannelDeltaIntent {
-    val rawReplyId = reply["id"]?.jsonPrimitive?.contentIfStr()
+    val rawReplyId = reply["id"].asStr()
         ?: return ChannelDeltaIntent.Unknown(reply.keys)
     val replyId = rawReplyId.replace(".", "")
     val rReply = reply["r-reply"] as? JsonObject
@@ -113,7 +111,7 @@ private fun classifyReply(parentId: String, reply: JsonObject): ChannelDeltaInte
         rReply["set"] is JsonNull -> ReplyIntent.Deleted
         rReply["set"] is JsonObject -> {
             val set = rReply["set"] as JsonObject
-            if (set["type"]?.jsonPrimitive?.contentIfStr() == "tombstone") {
+            if (set["type"].asStr() == "tombstone") {
                 ReplyIntent.Tombstone
             } else {
                 // Reply essays are nested under reply-essay in the set
@@ -129,6 +127,3 @@ private fun classifyReply(parentId: String, reply: JsonObject): ChannelDeltaInte
     }
     return ChannelDeltaIntent.Reply(parentId, replyId, inner)
 }
-
-private fun kotlinx.serialization.json.JsonPrimitive.contentIfStr(): String? =
-    if (isString) content else null

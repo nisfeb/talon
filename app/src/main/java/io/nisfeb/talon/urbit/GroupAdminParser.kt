@@ -2,8 +2,6 @@ package io.nisfeb.talon.urbit
 
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.jsonPrimitive
 
 /**
  * Parse a single group JSON object (as returned by the `groups`
@@ -14,7 +12,7 @@ import kotlinx.serialization.json.jsonPrimitive
  */
 internal fun parseAdminGroup(flag: String, obj: JsonObject): TlonChatRepo.AdminGroup {
     val meta = obj["meta"] as? JsonObject
-    fun metaStr(key: String) = meta?.get(key)?.jsonPrimitive?.contentIfStr()
+    fun metaStr(key: String) = meta?.get(key).asStr()
         ?.takeIf { it.isNotBlank() }
 
     val host = flag.substringBefore('/')
@@ -22,7 +20,7 @@ internal fun parseAdminGroup(flag: String, obj: JsonObject): TlonChatRepo.AdminG
     // `cordon` → `admissions`, `sects` → `roles`. Keep fallbacks
     // to the older names for ships still on the legacy agent.
     val adminArr = (obj["admins"] ?: obj["bloc"]) as? JsonArray
-    val adminSects = adminArr?.mapNotNull { it.jsonPrimitive.contentIfStr() }
+    val adminSects = adminArr?.mapNotNull { it.asStr() }
         ?.toSet() ?: emptySet()
 
     val members = (obj["seats"] ?: obj["fleet"]) as? JsonObject
@@ -30,9 +28,7 @@ internal fun parseAdminGroup(flag: String, obj: JsonObject): TlonChatRepo.AdminG
         val entryObj = entry as? JsonObject ?: return@mapNotNull null
         val rolesArr = (entryObj["roles"] ?: entryObj["sects"]) as? JsonArray
             ?: JsonArray(emptyList())
-        val sects = rolesArr.mapNotNull {
-            it.jsonPrimitive.contentIfStr()
-        }.toSet()
+        val sects = rolesArr.mapNotNull { it.asStr() }.toSet()
         TlonChatRepo.AdminMember(
             ship = ship,
             sects = sects,
@@ -46,7 +42,7 @@ internal fun parseAdminGroup(flag: String, obj: JsonObject): TlonChatRepo.AdminG
     // privacy, tokens, requests — no tagged union. Privacy drives
     // whether we treat the group as open (public) or shut
     // (private/secret) for back-compat with legacy pokes.
-    val privacy = admissions?.get("privacy")?.jsonPrimitive?.contentIfStr()
+    val privacy = admissions?.get("privacy").asStr()
     val cordonKind = when {
         privacy == "public" -> "open"
         privacy != null -> "shut"
@@ -57,14 +53,14 @@ internal fun parseAdminGroup(flag: String, obj: JsonObject): TlonChatRepo.AdminG
     val bannedSet = ((admissions?.get("banned") as? JsonObject)
         ?.get("ships") as? JsonArray)
         ?: ((admissions?.get("open") as? JsonObject)?.get("ships") as? JsonArray)
-    val bannedShips = bannedSet?.mapNotNull { it.jsonPrimitive.contentIfStr() }
+    val bannedShips = bannedSet?.mapNotNull { it.asStr() }
         ?.toSet() ?: emptySet()
     val seatKeys = (obj["seats"] as? JsonObject)?.keys ?: emptySet()
     val invitedMap = (admissions?.get("invited") as? JsonObject)
         ?.mapNotNull { (ship, v) ->
             if (ship in seatKeys) return@mapNotNull null
-            val token = (v as? JsonObject)?.get("token")
-                ?.jsonPrimitive?.contentIfStr() ?: return@mapNotNull null
+            val token = (v as? JsonObject)?.get("token").asStr()
+                ?: return@mapNotNull null
             ship to token
         }?.toMap() ?: emptyMap()
     val directInvitedShips = (admissions?.get("pending") as? JsonObject)
@@ -88,7 +84,3 @@ internal fun parseAdminGroup(flag: String, obj: JsonObject): TlonChatRepo.AdminG
         adminSects = adminSects,
     )
 }
-
-/** String content if this primitive is a string, otherwise null. */
-private fun JsonPrimitive.contentIfStr(): String? =
-    if (isString) content else null

@@ -9,8 +9,6 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.jsonPrimitive
-import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
 
 /**
@@ -39,13 +37,11 @@ internal data class IngestedPost(
 internal fun ingestedPost(whom: String, post: JsonElement): IngestedPost {
     val obj = post as? JsonObject ?: return empty
     if (obj.isTombstone()) {
-        val id = obj["id"]?.jsonPrimitive?.contentOrNull()?.let(::undotAtom)
-            ?: return empty
+        val id = obj["id"].asText()?.let(::undotAtom) ?: return empty
         return IngestedPost(emptyList(), emptyList(), listOf(id))
     }
     val seal = obj["seal"] as? JsonObject ?: return empty
-    val id = seal["id"]?.jsonPrimitive?.contentOrNull()?.let(::undotAtom)
-        ?: return empty
+    val id = seal["id"].asText()?.let(::undotAtom) ?: return empty
     val essay = obj["essay"] as? JsonObject ?: return empty
 
     val msgs = mutableListOf(pureEntity(whom, id, essay))
@@ -53,7 +49,7 @@ internal fun ingestedPost(whom: String, post: JsonElement): IngestedPost {
     val tombs = mutableListOf<String>()
 
     (seal["reacts"] as? JsonObject)?.forEach { (author, emoji) ->
-        val e = (emoji as? JsonPrimitive)?.contentOrNull() ?: return@forEach
+        val e = emoji.asText() ?: return@forEach
         rx += ReactionEntity(whom, id, author, e)
     }
 
@@ -61,17 +57,15 @@ internal fun ingestedPost(whom: String, post: JsonElement): IngestedPost {
         val reply = replyEl as? JsonObject ?: return@forEach
         // Replies can be tombstones too — same shape check.
         if (reply.isTombstone()) {
-            reply["id"]?.jsonPrimitive?.contentOrNull()?.let(::undotAtom)
-                ?.let { tombs += it }
+            reply["id"].asText()?.let(::undotAtom)?.let { tombs += it }
             return@forEach
         }
         val rSeal = reply["seal"] as? JsonObject ?: return@forEach
-        val rid = rSeal["id"]?.jsonPrimitive?.contentOrNull()?.let(::undotAtom)
-            ?: return@forEach
+        val rid = rSeal["id"].asText()?.let(::undotAtom) ?: return@forEach
         val rEssay = reply["reply-essay"] as? JsonObject ?: return@forEach
         msgs += pureReplyEntity(whom, id, rid, rEssay)
         (rSeal["reacts"] as? JsonObject)?.forEach { (author, emoji) ->
-            val e = (emoji as? JsonPrimitive)?.contentOrNull() ?: return@forEach
+            val e = emoji.asText() ?: return@forEach
             rx += ReactionEntity(whom, rid, author, e)
         }
     }
@@ -80,20 +74,18 @@ internal fun ingestedPost(whom: String, post: JsonElement): IngestedPost {
 
 /** A JSON object is a server-side tombstone marker when it has `type: "tombstone"`. */
 internal fun JsonObject.isTombstone(): Boolean =
-    this["type"]?.jsonPrimitive?.contentOrNull() == "tombstone"
+    this["type"].asText() == "tombstone"
 
 /** Pure essay → MessageEntity (top-level post). */
 internal fun pureEntity(whom: String, id: String, essay: JsonObject): MessageEntity {
-    val author = essay["author"]?.jsonPrimitive?.contentOrNull() ?: ""
-    val sent = essay["sent"]?.jsonPrimitive?.longOrNull ?: 0L
-    val kind = essay["kind"]?.jsonPrimitive?.contentOrNull() ?: "/chat"
+    val author = essay["author"].asText() ?: ""
+    val sent = essay["sent"].asLong() ?: 0L
+    val kind = essay["kind"].asText() ?: "/chat"
     val content = essay["content"] ?: JsonArray(emptyList())
     val merged = mergeBlobIntoContent(content, essay["blob"])
     val meta = essay["meta"] as? JsonObject
-    val title = meta?.get("title")?.jsonPrimitive?.contentOrNull()
-        ?.takeIf { it.isNotBlank() }
-    val image = meta?.get("image")?.jsonPrimitive?.contentOrNull()
-        ?.takeIf { it.isNotBlank() }
+    val title = meta?.get("title").asText()?.takeIf { it.isNotBlank() }
+    val image = meta?.get("image").asText()?.takeIf { it.isNotBlank() }
     return MessageEntity(
         whom = whom,
         id = id,
@@ -113,8 +105,8 @@ internal fun pureReplyEntity(
     replyId: String,
     replyEssay: JsonObject,
 ): MessageEntity {
-    val author = replyEssay["author"]?.jsonPrimitive?.contentOrNull() ?: ""
-    val sent = replyEssay["sent"]?.jsonPrimitive?.longOrNull ?: 0L
+    val author = replyEssay["author"].asText() ?: ""
+    val sent = replyEssay["sent"].asLong() ?: 0L
     val content = replyEssay["content"] ?: JsonArray(emptyList())
     val merged = mergeBlobIntoContent(content, replyEssay["blob"])
     return MessageEntity(
@@ -139,7 +131,7 @@ internal fun mergeBlobIntoContent(
     content: JsonElement,
     blob: JsonElement?,
 ): JsonElement {
-    val blobStr = (blob as? JsonPrimitive)?.contentOrNull() ?: return content
+    val blobStr = blob.asText() ?: return content
     if (blobStr.isBlank()) return content
     val parsed = runCatching { Json.parseToJsonElement(blobStr) }.getOrNull()
         ?: return content
@@ -148,20 +140,15 @@ internal fun mergeBlobIntoContent(
     val synthetic = buildJsonArray {
         for (entry in arr) {
             val o = entry as? JsonObject ?: continue
-            if (o["type"]?.jsonPrimitive?.contentOrNull() != "file") continue
-            val uri = o["fileUri"]?.jsonPrimitive?.contentOrNull()
-                ?: o["url"]?.jsonPrimitive?.contentOrNull()
-                ?: continue
+            if (o["type"].asText() != "file") continue
+            val uri = o["fileUri"].asText() ?: o["url"].asText() ?: continue
             add(buildJsonObject {
                 put("block", buildJsonObject {
                     put("file", buildJsonObject {
                         put("url", uri)
-                        o["name"]?.jsonPrimitive?.contentOrNull()
-                            ?.let { put("name", it) }
-                        o["size"]?.jsonPrimitive?.longOrNull
-                            ?.let { put("size", it) }
-                        o["mimeType"]?.jsonPrimitive?.contentOrNull()
-                            ?.let { put("mime", it) }
+                        o["name"].asText()?.let { put("name", it) }
+                        o["size"].asLong()?.let { put("size", it) }
+                        o["mimeType"].asText()?.let { put("mime", it) }
                     })
                 })
             })
@@ -175,6 +162,3 @@ internal fun mergeBlobIntoContent(
 }
 
 private val empty = IngestedPost(emptyList(), emptyList(), emptyList())
-
-private fun JsonPrimitive.contentOrNull(): String? =
-    if (isString) content else null

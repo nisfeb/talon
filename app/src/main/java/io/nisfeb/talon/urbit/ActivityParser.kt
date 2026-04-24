@@ -2,10 +2,7 @@ package io.nisfeb.talon.urbit
 
 import io.nisfeb.talon.data.UnreadEntity
 import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.jsonPrimitive
-import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
 
 /**
@@ -36,11 +33,11 @@ internal fun sourceKeyToWhom(key: String): String? = when {
  */
 internal fun sourceToWhom(source: JsonObject): String? {
     (source["dm"] as? JsonObject)?.let { dm ->
-        dm["ship"]?.jsonPrimitive?.contentOrNull()?.let { return it }
-        dm["club"]?.jsonPrimitive?.contentOrNull()?.let { return it }
+        dm["ship"].asStr()?.let { return it }
+        dm["club"].asStr()?.let { return it }
     }
     (source["channel"] as? JsonObject)?.let { ch ->
-        ch["nest"]?.jsonPrimitive?.contentOrNull()?.let { return it }
+        ch["nest"].asStr()?.let { return it }
     }
     return null
 }
@@ -63,9 +60,9 @@ internal fun toUnread(
     val whom = overrideWhom
         ?: sourceKeyToWhom(sourceKey ?: return null)
         ?: return null
-    val count = summary["count"]?.jsonPrimitive?.longOrNull?.toInt() ?: 0
-    val notifyCount = summary["notify-count"]?.jsonPrimitive?.longOrNull?.toInt() ?: 0
-    val recency = summary["recency"]?.jsonPrimitive?.longOrNull ?: 0L
+    val count = summary["count"].asInt() ?: 0
+    val notifyCount = summary["notify-count"].asInt() ?: 0
+    val recency = summary["recency"].asLong() ?: 0L
     return UnreadEntity(
         whom = whom,
         count = count,
@@ -119,6 +116,3 @@ internal fun activityReadAction(source: JsonObject): JsonObject =
             })
         })
     }
-
-private fun JsonPrimitive.contentOrNull(): String? =
-    if (isString) content else null

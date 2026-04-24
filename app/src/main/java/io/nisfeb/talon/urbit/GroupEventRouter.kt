@@ -1,9 +1,6 @@
 package io.nisfeb.talon.urbit
 
 import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.jsonPrimitive
 
 /**
  * Pure classifier for %groups `/v1/groups` SSE payloads. Returns a
@@ -67,7 +64,7 @@ internal sealed interface GroupEventIntent {
  * is malformed (missing flag or r-group).
  */
 internal fun classifyGroupEvent(event: JsonObject): GroupEventIntent? {
-    val flag = event["flag"]?.jsonPrimitive?.contentIfStr() ?: return null
+    val flag = event["flag"].asStr() ?: return null
     val r = event["r-group"] as? JsonObject ?: return null
 
     (r["create"] as? JsonObject)?.let { created ->
@@ -75,12 +72,12 @@ internal fun classifyGroupEvent(event: JsonObject): GroupEventIntent? {
         val channels = (created["channels"] as? JsonObject).orEmpty()
         return GroupEventIntent.CreateGroup(
             flag = flag,
-            title = meta?.get("title")?.jsonPrimitive?.contentIfStr()?.takeIf { it.isNotBlank() },
-            image = meta?.get("image")?.jsonPrimitive?.contentIfStr()?.takeIf { it.isNotBlank() },
+            title = meta?.get("title").asStr()?.takeIf { it.isNotBlank() },
+            image = meta?.get("image").asStr()?.takeIf { it.isNotBlank() },
             channels = channels.mapValues { (_, ch) ->
                 val chObj = ch as? JsonObject
                 val chMeta = chObj?.get("meta") as? JsonObject
-                chMeta?.get("title")?.jsonPrimitive?.contentIfStr()?.takeIf { it.isNotBlank() }
+                chMeta?.get("title").asStr()?.takeIf { it.isNotBlank() }
             },
         )
     }
@@ -93,13 +90,13 @@ internal fun classifyGroupEvent(event: JsonObject): GroupEventIntent? {
     (r["meta"] as? JsonObject)?.let { meta ->
         return GroupEventIntent.EditGroupMeta(
             flag = flag,
-            title = meta["title"]?.jsonPrimitive?.contentIfStr()?.takeIf { it.isNotBlank() },
-            image = meta["image"]?.jsonPrimitive?.contentIfStr()?.takeIf { it.isNotBlank() },
+            title = meta["title"].asStr()?.takeIf { it.isNotBlank() },
+            image = meta["image"].asStr()?.takeIf { it.isNotBlank() },
         )
     }
 
     (r["channel"] as? JsonObject)?.let { channel ->
-        val nest = channel["nest"]?.jsonPrimitive?.contentIfStr()
+        val nest = channel["nest"].asStr()
             ?: return GroupEventIntent.Unknown(flag, channel.keys)
         val rChannel = channel["r-channel"] as? JsonObject
             ?: return GroupEventIntent.Unknown(flag, channel.keys)
@@ -108,8 +105,7 @@ internal fun classifyGroupEvent(event: JsonObject): GroupEventIntent? {
             return GroupEventIntent.AddChannel(
                 flag = flag,
                 nest = nest,
-                title = chMeta?.get("title")?.jsonPrimitive?.contentIfStr()
-                    ?.takeIf { it.isNotBlank() },
+                title = chMeta?.get("title").asStr()?.takeIf { it.isNotBlank() },
             )
         }
         (rChannel["edit"] as? JsonObject)?.let { edited ->
@@ -117,8 +113,7 @@ internal fun classifyGroupEvent(event: JsonObject): GroupEventIntent? {
             return GroupEventIntent.EditChannel(
                 flag = flag,
                 nest = nest,
-                title = chMeta?.get("title")?.jsonPrimitive?.contentIfStr()
-                    ?.takeIf { it.isNotBlank() },
+                title = chMeta?.get("title").asStr()?.takeIf { it.isNotBlank() },
             )
         }
         if (rChannel.containsKey("del")) {
@@ -132,6 +127,3 @@ internal fun classifyGroupEvent(event: JsonObject): GroupEventIntent? {
 }
 
 private fun JsonObject?.orEmpty(): JsonObject = this ?: JsonObject(emptyMap())
-
-private fun JsonPrimitive.contentIfStr(): String? =
-    if (isString) content else null

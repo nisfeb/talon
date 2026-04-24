@@ -13,8 +13,6 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.jsonPrimitive
-import kotlinx.serialization.json.longOrNull
 
 /**
  * Structured representation of a Tlon `story` (Verse[]) for rendering.
@@ -271,7 +269,7 @@ object Story {
         val obj = runCatching { element.jsonObject }.getOrNull() ?: return
 
         obj["break"]?.let { out.append('\n'); return }
-        obj["ship"]?.jsonPrimitive?.let { prim ->
+        (obj["ship"] as? JsonPrimitive)?.let { prim ->
             val patp = if (prim.isString) prim.content else prim.content
             out.pushStringAnnotation(MENTION_TAG, patp)
             out.withSpan(SpanStyle(color = MENTION_COLOR, fontWeight = FontWeight.Medium)) {
@@ -280,9 +278,9 @@ object Story {
             out.pop()
             return
         }
-        obj["link"]?.jsonObject?.let { link ->
-            val href = link["href"]?.jsonPrimitive?.contentOrNullSafe()
-            val content = link["content"]?.jsonPrimitive?.contentOrNullSafe()
+        (obj["link"] as? JsonObject)?.let { link ->
+            val href = link["href"].asStr()
+            val content = link["content"].asStr()
             val label = content ?: href ?: "[link]"
             if (href != null) out.pushStringAnnotation(URL_TAG, href)
             out.withSpan(SpanStyle(color = LINK_COLOR, textDecoration = TextDecoration.Underline)) {
@@ -305,7 +303,7 @@ object Story {
         }
         // Tlon emits both `code` (older) and `inline-code` (newer) for
         // monospace spans — treat them identically.
-        (obj["code"] ?: obj["inline-code"])?.jsonPrimitive?.let {
+        ((obj["code"] ?: obj["inline-code"]) as? JsonPrimitive)?.let {
             out.withSpan(MONO_SPAN) { append(if (it.isString) it.content else it.content) }
             return
         }
@@ -324,8 +322,8 @@ object Story {
             }
             return
         }
-        obj["task"]?.jsonObject?.let { task ->
-            val checked = task["checked"]?.jsonPrimitive?.content == "true"
+        (obj["task"] as? JsonObject)?.let { task ->
+            val checked = task["checked"].asText() == "true"
             out.append(if (checked) "[x] " else "[ ] ")
             task["content"]?.let { renderInlineArray(it, out) }
             return
@@ -369,7 +367,7 @@ object Story {
         out: androidx.compose.ui.text.AnnotatedString.Builder,
         depth: Int,
     ) {
-        val ordered = list["type"]?.jsonPrimitive?.contentOrNullSafe() == "ordered"
+        val ordered = list["type"].asStr() == "ordered"
         val contents = list["contents"] as? JsonArray
         val items = list["items"] as? JsonArray ?: return
 
@@ -402,24 +400,24 @@ object Story {
 
     private fun renderBlock(block: JsonObject): StoryPart? {
         (block["image"] as? JsonObject)?.let { image ->
-            val src = image["src"]?.jsonPrimitive?.contentOrNullSafe() ?: return null
-            val width = image["width"]?.jsonPrimitive?.longOrNull?.toInt()
-            val height = image["height"]?.jsonPrimitive?.longOrNull?.toInt()
-            val alt = image["alt"]?.jsonPrimitive?.contentOrNullSafe()
+            val src = image["src"].asStr() ?: return null
+            val width = image["width"].asLong()?.toInt()
+            val height = image["height"].asLong()?.toInt()
+            val alt = image["alt"].asStr()
             return StoryPart.Image(src = src, width = width, height = height, alt = alt)
         }
         (block["code"] as? JsonObject)?.let { code ->
-            val body = code["code"]?.jsonPrimitive?.contentOrNullSafe() ?: ""
+            val body = code["code"].asStr() ?: ""
             return StoryPart.Code(body)
         }
         (block["link"] as? JsonObject)?.let { link ->
             // Tlon's server-enriched URL preview. `meta` is a flat string
             // bag — accept both kebab-case and camelCase keys defensively.
-            val url = link["url"]?.jsonPrimitive?.contentOrNullSafe() ?: return null
+            val url = link["url"].asStr() ?: return null
             val meta = link["meta"] as? JsonObject ?: JsonObject(emptyMap())
             fun metaText(vararg keys: String): String? {
                 for (k in keys) {
-                    val v = meta[k]?.jsonPrimitive?.contentOrNullSafe()
+                    val v = meta[k].asStr()
                     if (!v.isNullOrBlank()) return v
                 }
                 return null
@@ -435,7 +433,7 @@ object Story {
         (block["cite"] as? JsonObject)?.let { cite ->
             return renderCite(cite)
         }
-        block["header"]?.jsonObject?.let { header ->
+        (block["header"] as? JsonObject)?.let { header ->
             val text = buildAnnotatedString {
                 withSpan(SpanStyle(fontWeight = FontWeight.Bold)) {
                     renderInlineArray(header["content"] ?: JsonArray(emptyList()), this)
@@ -481,15 +479,15 @@ object Story {
         val tag = block.keys.firstOrNull() ?: "?"
         val inner = block[tag] as? JsonObject
         if (inner != null) {
-            val url = inner["url"]?.jsonPrimitive?.contentOrNullSafe()
-                ?: inner["href"]?.jsonPrimitive?.contentOrNullSafe()
-                ?: inner["src"]?.jsonPrimitive?.contentOrNullSafe()
+            val url = inner["url"].asStr()
+                ?: inner["href"].asStr()
+                ?: inner["src"].asStr()
             if (!url.isNullOrBlank()) {
-                val baseName = inner["title"]?.jsonPrimitive?.contentOrNullSafe()
-                    ?: inner["name"]?.jsonPrimitive?.contentOrNullSafe()
-                    ?: inner["alt"]?.jsonPrimitive?.contentOrNullSafe()
+                val baseName = inner["title"].asStr()
+                    ?: inner["name"].asStr()
+                    ?: inner["alt"].asStr()
                     ?: url.substringAfterLast('/').substringBefore('?').ifBlank { url }
-                val size = inner["size"]?.jsonPrimitive?.longOrNull
+                val size = inner["size"].asLong()
                 val title = if (size != null) {
                     "$baseName • ${humanFileSize(size)}"
                 } else baseName
@@ -500,7 +498,7 @@ object Story {
                 return StoryPart.LinkPreview(
                     url = url,
                     title = title,
-                    description = inner["mime"]?.jsonPrimitive?.contentOrNullSafe(),
+                    description = inner["mime"].asStr(),
                     imageUrl = null,
                     siteName = siteLabel,
                 )
@@ -557,9 +555,6 @@ object Story {
         if (mb < 1024) return "%.1f MB".format(mb)
         return "%.2f GB".format(mb / 1024.0)
     }
-
-    private fun JsonPrimitive.contentOrNullSafe(): String? =
-        if (isString) content else null
 
     // ───────── style constants ─────────
 

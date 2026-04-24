@@ -2,8 +2,6 @@ package io.nisfeb.talon.urbit
 
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.jsonPrimitive
-import kotlinx.serialization.json.longOrNull
 
 /**
  * Pure classifier for Tlon's `cite` blocks. Returns a lightweight
@@ -40,8 +38,8 @@ internal data class CiteParse(
 internal fun parseCite(cite: JsonObject): CiteParse {
     // ChanCite: {chan: {nest, where}}
     (cite["chan"] as? JsonObject)?.let { chan ->
-        val nest = chan["nest"]?.jsonPrimitive?.contentIfStr()
-        val where = chan["where"]?.jsonPrimitive?.contentIfStr().orEmpty()
+        val nest = chan["nest"].asStr()
+        val where = chan["where"].asStr().orEmpty()
         val parsed = parseChanCiteWhere(where)
         val label = if (nest != null) {
             "Post in #" + nest.substringAfterLast('/')
@@ -63,15 +61,16 @@ internal fun parseCite(cite: JsonObject): CiteParse {
     // GroupCite: spec shape is `{group: "<flag>"}` per tlon-apps, but
     // we've also seen `{group: {flag: "…"}}` wrapped variants. Accept
     // both.
-    (cite["group"] as? JsonPrimitive)?.contentIfStr()?.let { flag ->
-        return CiteParse(
-            label = "Group $flag",
-            target = CiteTarget.Group(flag),
-        )
+    (cite["group"] as? JsonPrimitive)?.let { p ->
+        if (p.isString) {
+            return CiteParse(
+                label = "Group ${p.content}",
+                target = CiteTarget.Group(p.content),
+            )
+        }
     }
     (cite["group"] as? JsonObject)?.let { g ->
-        val flag = g["flag"]?.jsonPrimitive?.contentIfStr()
-            ?: g["id"]?.jsonPrimitive?.contentIfStr()
+        val flag = g["flag"].asStr() ?: g["id"].asStr()
         if (flag != null) {
             return CiteParse(
                 label = "Group $flag",
@@ -82,7 +81,7 @@ internal fun parseCite(cite: JsonObject): CiteParse {
 
     // DeskCite: {desk: {flag, where}}
     (cite["desk"] as? JsonObject)?.let { desk ->
-        val flag = desk["flag"]?.jsonPrimitive?.contentIfStr()
+        val flag = desk["flag"].asStr()
         return CiteParse(
             label = if (flag != null) "App $flag" else "App reference",
             target = null,
@@ -93,14 +92,13 @@ internal fun parseCite(cite: JsonObject): CiteParse {
     // url field, or a top-level url on the cite itself.
     for (key in listOf("file", "bait", "upload", "url")) {
         val inner = cite[key] as? JsonObject ?: continue
-        val url = inner["url"]?.jsonPrimitive?.contentIfStr()
-            ?: inner["href"]?.jsonPrimitive?.contentIfStr()
-            ?: inner["src"]?.jsonPrimitive?.contentIfStr()
-        val name = inner["name"]?.jsonPrimitive?.contentIfStr()
-            ?: inner["title"]?.jsonPrimitive?.contentIfStr()
+        val url = inner["url"].asStr()
+            ?: inner["href"].asStr()
+            ?: inner["src"].asStr()
+        val name = inner["name"].asStr()
+            ?: inner["title"].asStr()
             ?: url?.substringAfterLast('/')?.substringBefore('?')
-        val sizeText = inner["size"]?.jsonPrimitive?.longOrNull
-            ?.let { humanFileSize(it) }
+        val sizeText = inner["size"].asLong()?.let { humanFileSize(it) }
         if (url != null || name != null) {
             val label = buildString {
                 append(name ?: "File upload")
@@ -114,10 +112,9 @@ internal fun parseCite(cite: JsonObject): CiteParse {
         }
     }
 
-    val directUrl = cite["url"]?.jsonPrimitive?.contentIfStr()
-        ?: cite["href"]?.jsonPrimitive?.contentIfStr()
+    val directUrl = cite["url"].asStr() ?: cite["href"].asStr()
     if (directUrl != null) {
-        val title = cite["title"]?.jsonPrimitive?.contentIfStr()
+        val title = cite["title"].asStr()
             ?: directUrl.substringAfterLast('/').substringBefore('?')
         return CiteParse(
             label = title,
@@ -140,6 +137,3 @@ private fun humanFileSize(bytes: Long): String {
     val gb = mb / 1024.0
     return "%.1f GB".format(gb)
 }
-
-private fun JsonPrimitive.contentIfStr(): String? =
-    if (isString) content else null

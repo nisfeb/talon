@@ -9,7 +9,6 @@ import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 
 /** A saved session for one ship. */
@@ -115,8 +114,7 @@ class SessionStore(context: Context) {
     }
 
     private fun parseSession(obj: JsonObject): SavedSession? {
-        fun str(key: String): String? =
-            obj[key]?.jsonPrimitive?.let { if (it.isString) it.content else null }
+        fun str(key: String): String? = obj[key].asStr()
         return SavedSession(
             shipUrl = str("shipUrl") ?: return null,
             ship = str("ship") ?: return null,

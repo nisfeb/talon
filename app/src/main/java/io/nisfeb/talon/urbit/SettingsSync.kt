@@ -15,10 +15,7 @@ import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.jsonPrimitive
-import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
 
 /**
@@ -369,14 +366,14 @@ class SettingsSync(
     }
 
     private fun applyAiEntry(obj: JsonObject) {
-        val providerStr = obj["provider"]?.jsonPrimitive?.contentIfStr() ?: return
+        val providerStr = obj["provider"].asStr() ?: return
         val provider = runCatching { AiSettings.Provider.valueOf(providerStr) }
             .getOrNull() ?: return
-        val apiKey = obj["apiKey"]?.jsonPrimitive?.contentIfStr().orEmpty()
-        val model = obj["model"]?.jsonPrimitive?.contentIfStr()
-        val baseUrl = obj["baseUrl"]?.jsonPrimitive?.contentIfStr()
+        val apiKey = obj["apiKey"].asStr().orEmpty()
+        val model = obj["model"].asStr()
+        val baseUrl = obj["baseUrl"].asStr()
         fun bool(key: String, default: Boolean) =
-            obj[key]?.jsonPrimitive?.content?.toBooleanStrictOrNull() ?: default
+            obj[key].asText()?.toBooleanStrictOrNull() ?: default
         aiSettings.applyRemote(
             provider = provider,
             apiKey = apiKey,
@@ -433,7 +430,7 @@ class SettingsSync(
             BUCKET_GROUP_ORDERS -> {
                 val list = entries.orEmpty().mapNotNull { (k, v) ->
                     val ordinal = (unwrap(v) as? JsonObject)?.get("ordinal")
-                        ?.jsonPrimitive?.intOrNull ?: return@mapNotNull null
+                        .asInt() ?: return@mapNotNull null
                     GroupOrderEntity(flag = k, ordinal = ordinal)
                 }
                 db.groupOrders().replaceAll(list)
@@ -442,8 +439,8 @@ class SettingsSync(
                 val list = entries.orEmpty().mapNotNull { (k, v) ->
                     val id = k.toLongOrNull() ?: return@mapNotNull null
                     val obj = unwrap(v) as? JsonObject ?: return@mapNotNull null
-                    val name = obj["name"]?.jsonPrimitive?.contentIfStr() ?: return@mapNotNull null
-                    val sortOrder = obj["sortOrder"]?.jsonPrimitive?.intOrNull ?: 0
+                    val name = obj["name"].asStr() ?: return@mapNotNull null
+                    val sortOrder = obj["sortOrder"].asInt() ?: 0
                     FolderEntity(id = id, name = name, sortOrder = sortOrder)
                 }
                 db.folders().replaceAll(list)
@@ -452,8 +449,8 @@ class SettingsSync(
                 val list = entries.orEmpty().mapNotNull { (k, v) ->
                     val (folderId, whom) = parseFolderMemberKey(k) ?: return@mapNotNull null
                     val obj = unwrap(v) as? JsonObject
-                    val ordinal = obj?.get("ordinal")?.jsonPrimitive?.intOrNull ?: 0
-                    val kind = obj?.get("kind")?.jsonPrimitive?.contentIfStr()
+                    val ordinal = obj?.get("ordinal").asInt() ?: 0
+                    val kind = obj?.get("kind").asStr()
                         ?: FolderMemberEntity.KIND_WHOM
                     FolderMemberEntity(
                         folderId = folderId,
@@ -467,7 +464,7 @@ class SettingsSync(
             BUCKET_NOTIFY_PREFS -> {
                 val list = entries.orEmpty().mapNotNull { (k, v) ->
                     val level = (unwrap(v) as? JsonObject)?.get("level")
-                        ?.jsonPrimitive?.contentIfStr() ?: return@mapNotNull null
+                        .asStr() ?: return@mapNotNull null
                     NotifyPreferenceEntity(whom = k, level = level)
                 }
                 db.notifyPrefs().replaceAll(list)
@@ -476,7 +473,7 @@ class SettingsSync(
                 val list = entries.orEmpty().mapNotNull { (k, v) ->
                     val (whom, postId) = parseBookmarkKey(k) ?: return@mapNotNull null
                     val ts = (unwrap(v) as? JsonObject)?.get("ts")
-                        ?.jsonPrimitive?.longOrNull ?: 0L
+                        .asLong() ?: 0L
                     BookmarkEntity(whom = whom, postId = postId, bookmarkedMs = ts)
                 }
                 db.bookmarks().replaceAll(list)
@@ -493,33 +490,33 @@ class SettingsSync(
         when (bucket) {
             BUCKET_GROUP_ORDERS -> {
                 val ordinal = (unwrapped as? JsonObject)?.get("ordinal")
-                    ?.jsonPrimitive?.intOrNull ?: return
+                    .asInt() ?: return
                 db.groupOrders().upsertRaw(entry, ordinal)
             }
             BUCKET_FOLDERS -> {
                 val id = entry.toLongOrNull() ?: return
                 val obj = unwrapped as? JsonObject ?: return
-                val name = obj["name"]?.jsonPrimitive?.contentIfStr() ?: return
-                val sortOrder = obj["sortOrder"]?.jsonPrimitive?.intOrNull ?: 0
+                val name = obj["name"].asStr() ?: return
+                val sortOrder = obj["sortOrder"].asInt() ?: 0
                 db.folders().upsert(FolderEntity(id, name, sortOrder))
             }
             BUCKET_FOLDER_MEMBERS -> {
                 val (folderId, whom) = parseFolderMemberKey(entry) ?: return
                 val obj = unwrapped as? JsonObject
-                val ordinal = obj?.get("ordinal")?.jsonPrimitive?.intOrNull ?: 0
-                val kind = obj?.get("kind")?.jsonPrimitive?.contentIfStr()
+                val ordinal = obj?.get("ordinal").asInt() ?: 0
+                val kind = obj?.get("kind").asStr()
                     ?: FolderMemberEntity.KIND_WHOM
                 db.folders().addMemberRaw(folderId, whom, ordinal, kind)
             }
             BUCKET_NOTIFY_PREFS -> {
                 val level = (unwrapped as? JsonObject)?.get("level")
-                    ?.jsonPrimitive?.contentIfStr() ?: return
+                    .asStr() ?: return
                 db.notifyPrefs().upsert(NotifyPreferenceEntity(entry, level))
             }
             BUCKET_BOOKMARKS -> {
                 val (whom, postId) = parseBookmarkKey(entry) ?: return
                 val ts = (unwrapped as? JsonObject)?.get("ts")
-                    ?.jsonPrimitive?.longOrNull ?: 0L
+                    .asLong() ?: 0L
                 db.bookmarks().upsert(BookmarkEntity(whom, postId, ts))
             }
             BUCKET_AI_SETTINGS -> {
@@ -647,12 +644,9 @@ class SettingsSync(
     }
 
     private fun JsonObject.desk(): String? =
-        this["desk"]?.jsonPrimitive?.contentIfStr()
+        this["desk"].asStr()
     private fun JsonObject.bucketKey(): String? =
-        this["bucket-key"]?.jsonPrimitive?.contentIfStr()
+        this["bucket-key"].asStr()
     private fun JsonObject.entryKey(): String? =
-        this["entry-key"]?.jsonPrimitive?.contentIfStr()
-
-    private fun JsonPrimitive.contentIfStr(): String? =
-        if (isString) content else null
+        this["entry-key"].asStr()
 }
