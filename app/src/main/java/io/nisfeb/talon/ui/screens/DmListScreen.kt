@@ -109,11 +109,19 @@ fun DmListScreen(
      *  list has more than one entry. */
     allShips: List<String> = emptyList(),
     activeShip: String? = null,
+    /** Per-ship nickname cache, keyed by patp. Used for the header
+     *  badge + the switcher drawer rows. Empty by default. */
+    shipNicknames: Map<String, String> = emptyMap(),
     onSwitchShip: (String) -> Unit = {},
     onAddShip: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val scope = rememberCoroutineScope()
+    // Per-ship snapshot holder. Binding here swaps the singleton
+    // `active` reference so helpers (homeSnapshotZeroUnread) write to
+    // the right ship's cache. Stable across recompositions — if the
+    // user switches ships the tree re-keys and we get a fresh snap.
+    val snap = remember(activeShip) { HomeListSnapshot.bind(activeShip) }
 
     val rows by remember {
         combine(
@@ -127,10 +135,10 @@ fun DmListScreen(
             val result = messages
                 .distinctBy { it.whom }
                 .map { m -> m to (unreadMap[m.whom] ?: 0) }
-            HomeListSnapshot.rows = result
+            snap.rows = result
             result
         }
-    }.collectAsState(initial = HomeListSnapshot.rows)
+    }.collectAsState(initial = snap.rows)
 
     // Mention (notify-count) map, keyed by whom. Built off the same
     // %activity summaries — `notifyCount` is the count of events that
@@ -147,21 +155,21 @@ fun DmListScreen(
             db.clubs().stream(),
             db.groups().streamGroups(),
             db.groups().streamChannelGroups(),
-        ).onEach { HomeListSnapshot.contactMap = it }
-    }.collectAsState(initial = HomeListSnapshot.contactMap)
+        ).onEach { snap.contactMap = it }
+    }.collectAsState(initial = snap.contactMap)
 
     val app = (LocalContext.current.applicationContext as TalonApplication)
     val drafts by app.drafts.state.collectAsState()
 
     val folders by remember {
-        db.folders().streamFolders().onEach { HomeListSnapshot.folders = it }
-    }.collectAsState(initial = HomeListSnapshot.folders)
+        db.folders().streamFolders().onEach { snap.folders = it }
+    }.collectAsState(initial = snap.folders)
     val members by remember {
-        db.folders().streamMembers().onEach { HomeListSnapshot.members = it }
-    }.collectAsState(initial = HomeListSnapshot.members)
+        db.folders().streamMembers().onEach { snap.members = it }
+    }.collectAsState(initial = snap.members)
     val groupOrders by remember {
-        db.groupOrders().stream().onEach { HomeListSnapshot.groupOrders = it }
-    }.collectAsState(initial = HomeListSnapshot.groupOrders)
+        db.groupOrders().stream().onEach { snap.groupOrders = it }
+    }.collectAsState(initial = snap.groupOrders)
 
     // Tab selection state. Either a custom folder is selected, or one
     // of the three derived "special" tabs (All, Unread, Mentions).
@@ -169,13 +177,13 @@ fun DmListScreen(
     // returns the user to whatever tab they were on, not the
     // fresh-launch auto-landed folder.
     var selectedFolderId by remember {
-        mutableStateOf(HomeListSnapshot.selectedFolderId)
+        mutableStateOf(snap.selectedFolderId)
     }
     var selectedSpecial by remember {
-        mutableStateOf(HomeListSnapshot.selectedSpecial)
+        mutableStateOf(snap.selectedSpecial)
     }
     var initialTabApplied by remember {
-        mutableStateOf(HomeListSnapshot.initialTabApplied)
+        mutableStateOf(snap.initialTabApplied)
     }
     LaunchedEffect(folders) {
         if (!initialTabApplied) {
@@ -188,9 +196,9 @@ fun DmListScreen(
     // Mirror every selection change back into the snapshot so the
     // next mount picks up where this one left off.
     LaunchedEffect(selectedFolderId, selectedSpecial, initialTabApplied) {
-        HomeListSnapshot.selectedFolderId = selectedFolderId
-        HomeListSnapshot.selectedSpecial = selectedSpecial
-        HomeListSnapshot.initialTabApplied = initialTabApplied
+        snap.selectedFolderId = selectedFolderId
+        snap.selectedSpecial = selectedSpecial
+        snap.initialTabApplied = initialTabApplied
     }
     var folderSheetWhom by remember { mutableStateOf<String?>(null) }
     // Separate state for group-kind folder assignment — different write path.
@@ -231,11 +239,11 @@ fun DmListScreen(
     // process death; can be persisted later if folks ask for it.
     // Persist expanded-group set across navigations so groups stay open
     // when the user returns from a chat.
-    var expandedGroups by remember { mutableStateOf(HomeListSnapshot.expandedGroups) }
+    var expandedGroups by remember { mutableStateOf(snap.expandedGroups) }
     // Mirror every change back into the snapshot so the next mount
     // starts from the user's latest expansion state.
     androidx.compose.runtime.LaunchedEffect(expandedGroups) {
-        HomeListSnapshot.expandedGroups = expandedGroups
+        snap.expandedGroups = expandedGroups
     }
 
     // For the "All" tab we render a structured home list (Groups →
@@ -285,7 +293,7 @@ fun DmListScreen(
 
     // Reuse a singleton LazyListState so the user's scroll position in
     // the home list survives navigating into a chat and back out.
-    val listState = HomeListSnapshot.listState
+    val listState = snap.listState
     // Tracks what was touched during a drag so onDragStopped knows what
     // to push to %settings. Null means "nothing pending".
     var pendingPushFolderId by remember { mutableStateOf<Long?>(null) }
@@ -355,6 +363,7 @@ fun DmListScreen(
             ShipSwitcherDrawer(
                 ships = allShips,
                 activeShip = activeShip,
+                nicknames = shipNicknames,
                 onPick = { ship ->
                     scope.launch { drawerState.close() }
                     onSwitchShip(ship)
@@ -389,8 +398,15 @@ fun DmListScreen(
                     .padding(start = 8.dp, top = 8.dp, bottom = 8.dp),
             )
             if (allShips.size > 1 && activeShip != null) {
+                // Prefer nickname, but collapse to patp when more than
+                // one logged-in ship shares the same nickname so the
+                // label actually disambiguates.
+                val activeNick = shipNicknames[activeShip]
+                val collision = activeNick != null &&
+                    allShips.count { shipNicknames[it] == activeNick } > 1
+                val label = if (activeNick != null && !collision) activeNick else activeShip
                 Text(
-                    activeShip,
+                    label,
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(start = 6.dp),
@@ -855,6 +871,7 @@ fun DmListScreen(
 private fun ShipSwitcherDrawer(
     ships: List<String>,
     activeShip: String?,
+    nicknames: Map<String, String>,
     onPick: (String) -> Unit,
     onAdd: () -> Unit,
 ) {
@@ -873,6 +890,7 @@ private fun ShipSwitcherDrawer(
             )
             for (ship in ships) {
                 val selected = ship == activeShip
+                val nickname = nicknames[ship]
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -895,13 +913,30 @@ private fun ShipSwitcherDrawer(
                         modifier = Modifier.size(20.dp),
                     )
                     Spacer(Modifier.size(12.dp))
-                    Text(
-                        ship,
-                        style = MaterialTheme.typography.bodyLarge.copy(
-                            fontWeight = if (selected) FontWeight.SemiBold
-                            else FontWeight.Normal,
-                        ),
-                    )
+                    Column {
+                        if (!nickname.isNullOrBlank()) {
+                            Text(
+                                nickname,
+                                style = MaterialTheme.typography.bodyLarge.copy(
+                                    fontWeight = if (selected) FontWeight.SemiBold
+                                    else FontWeight.Medium,
+                                ),
+                            )
+                            Text(
+                                ship,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        } else {
+                            Text(
+                                ship,
+                                style = MaterialTheme.typography.bodyLarge.copy(
+                                    fontWeight = if (selected) FontWeight.SemiBold
+                                    else FontWeight.Normal,
+                                ),
+                            )
+                        }
+                    }
                 }
             }
             HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
@@ -1246,7 +1281,7 @@ private fun formatRelative(ms: Long): String {
 }
 
 /** Derived "special" tabs that aren't user-created folders. */
-private enum class SpecialTab { All, Unread, Mentions }
+internal enum class SpecialTab { All, Unread, Mentions }
 
 @Composable
 private fun SpecialEmpty(text: String) {
@@ -1554,41 +1589,49 @@ private fun UnreadChip(
  * a second before the Flow catches up.
  */
 fun homeSnapshotZeroUnread(whom: String) {
-    HomeListSnapshot.rows = HomeListSnapshot.rows.map { (m, unread) ->
-        if (m.whom == whom && unread > 0) m to 0 else m to unread
+    HomeListSnapshot.active?.let { snap ->
+        snap.rows = snap.rows.map { (m, unread) ->
+            if (m.whom == whom && unread > 0) m to 0 else m to unread
+        }
     }
 }
 
 /**
- * Drop the process-wide home-list cache. Call this when the active
- * ship changes so a ship swap doesn't briefly flash the prior ship's
- * rows before the new ship's Room flows resolve.
+ * Deprecated / unused — we now keep a per-ship snapshot so switching
+ * between ships preserves each ship's cached rows, previews, and
+ * unread counts until the new ship's Room flows emit fresh data.
  */
-fun resetHomeListSnapshot() {
-    HomeListSnapshot.rows = emptyList()
-    HomeListSnapshot.contactMap = ContactMap.EMPTY
-    HomeListSnapshot.expandedGroups = emptySet()
-    HomeListSnapshot.groupOrders = emptyList()
-    HomeListSnapshot.folders = emptyList()
-    HomeListSnapshot.members = emptyList()
-    HomeListSnapshot.selectedFolderId = null
-    HomeListSnapshot.selectedSpecial = SpecialTab.All
-    HomeListSnapshot.initialTabApplied = false
+fun resetHomeListSnapshot() { /* no-op; per-ship snapshots replace this */ }
+
+/**
+ * Per-ship home-list cache. Keyed on the active ship so switching
+ * between accounts keeps each one's cached rows (and unread counts)
+ * until the new ship's Room query round-trips. Without this, a fresh
+ * switch paints the chat list empty-of-unreads for a beat while Room
+ * catches up behind whatever repo.start is doing on IO.
+ */
+private object HomeListSnapshot {
+    private val perShip = java.util.concurrent.ConcurrentHashMap<String, ShipSnapshot>()
+
+    @Volatile var active: ShipSnapshot? = null
+
+    fun bind(ship: String?): ShipSnapshot {
+        val s = if (ship == null) ShipSnapshot() else perShip.getOrPut(ship) { ShipSnapshot() }
+        active = s
+        return s
+    }
 }
 
-private object HomeListSnapshot {
+internal class ShipSnapshot {
     @Volatile var rows: List<Pair<MessageEntity, Int>> = emptyList()
     @Volatile var contactMap: ContactMap = ContactMap.EMPTY
     @Volatile var expandedGroups: Set<String> = emptySet()
     @Volatile var groupOrders: List<io.nisfeb.talon.data.GroupOrderEntity> = emptyList()
     @Volatile var folders: List<FolderEntity> = emptyList()
     @Volatile var members: List<FolderMemberEntity> = emptyList()
-    // Tab selection survives back-navigation from a chat so the user
-    // lands where they left off, not on the auto-landed folder.
     @Volatile var selectedFolderId: Long? = null
     @Volatile var selectedSpecial: SpecialTab = SpecialTab.All
     @Volatile var initialTabApplied: Boolean = false
-    // Shared LazyListState so scroll position persists across mounts.
     val listState: androidx.compose.foundation.lazy.LazyListState =
         androidx.compose.foundation.lazy.LazyListState()
 }

@@ -6,6 +6,7 @@ import io.nisfeb.talon.ai.AiFeatures
 import io.nisfeb.talon.ai.AiSettings
 import io.nisfeb.talon.data.AppDatabase
 import io.nisfeb.talon.ui.DraftStore
+import io.nisfeb.talon.ui.ShipProfileStore
 import io.nisfeb.talon.ui.UiSettings
 import io.nisfeb.talon.urbit.SessionStore
 import io.nisfeb.talon.urbit.TlonChatRepo
@@ -29,6 +30,8 @@ class TalonApplication : Application() {
     lateinit var aiSettings: AiSettings
         private set
     lateinit var uiSettings: UiSettings
+        private set
+    lateinit var shipProfiles: ShipProfileStore
         private set
     lateinit var aiClient: AiClient
         private set
@@ -71,6 +74,7 @@ class TalonApplication : Application() {
         sessionStore = SessionStore(this)
         aiSettings = AiSettings(this)
         uiSettings = UiSettings(this)
+        shipProfiles = ShipProfileStore(this)
         aiClient = AiClient(settingsProvider = { aiSettings.state.value })
         ai = AiFeatures(aiClient)
         Notifications.ensureChannel(this)

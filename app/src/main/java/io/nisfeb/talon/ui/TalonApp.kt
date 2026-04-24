@@ -136,6 +136,16 @@ fun TalonApp(
         )
     }.let { flow -> flow.collectAsState(initial = ContactMap.EMPTY) }
 
+    // Keep the shared ship-profile cache in sync with the active
+    // ship's self-contact nickname. Fires whenever %contacts pushes a
+    // new value through the contactMap flow.
+    val me = loggedInShip
+    androidx.compose.runtime.LaunchedEffect(me, contactMap) {
+        if (me != null) {
+            app.shipProfiles.setNickname(me, contactMap.nickname(me))
+        }
+    }
+
     // Register a single message listener with the repo for the lifetime
     // of the composition. Each new non-self message fires a notification
     // unless the user is currently viewing that exact conversation in the
@@ -427,6 +437,7 @@ fun TalonApp(
                 },
                 allShips = allShips,
                 activeShip = loggedInShip,
+                shipNicknames = app.shipProfiles.nicknames.collectAsState().value,
                 onSwitchShip = { ship ->
                     if (ship != loggedInShip) {
                         openWhom = null
