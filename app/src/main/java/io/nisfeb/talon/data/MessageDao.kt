@@ -84,6 +84,19 @@ interface MessageDao {
     suspend fun purgeStaleLocalIds(whom: String)
 
     /**
+     * Find every (whom, id) whose id contains a dot. Used by the
+     * one-shot dotted-id dedupe migration on startup. Returns the
+     * rows themselves so callers can re-insert them under their
+     * normalized id.
+     */
+    @Query("SELECT * FROM messages WHERE id LIKE '%.%'")
+    suspend fun findDottedIdRows(): List<MessageEntity>
+
+    /** Hard-delete one specific (whom, id) — used during dedupe. */
+    @Query("DELETE FROM messages WHERE whom = :whom AND id = :id")
+    suspend fun hardDelete(whom: String, id: String)
+
+    /**
      * Reap our own `local_*` optimistic-insert twin for a post that the
      * server just echoed back under its own id. Scoped to (whom,
      * author, sentMs) so it only targets the exact matching twin.

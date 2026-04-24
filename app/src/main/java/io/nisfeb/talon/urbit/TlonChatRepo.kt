@@ -125,7 +125,66 @@ class TlonChatRepo(
         started = true
         ourPatp = session.ourPatp
         http = session.http
-        scope.launch { runSessionLoop(session) }
+        scope.launch {
+            // One-shot cleanup for anyone whose DM history was doubled
+            // by the applyChatDelta dotted-id bug. Idempotent: on a
+            // clean DB it's a no-op.
+            runCatching { dedupeDottedIds() }
+                .onFailure { Log.w(TAG, "dotted-id dedupe failed", it) }
+            runSessionLoop(session)
+        }
+    }
+
+    /**
+     * Walk every row whose id / postId is dot-grouped and collapse it
+     * onto its undotted twin (or rename in place if none exists). See
+     * [DottedIdDedupe] for the planner. Cheap — runs once per boot,
+     * the `LIKE '%.%'` scan is indexed by the primary key path and
+     * skips the common undotted case entirely.
+     */
+    private suspend fun dedupeDottedIds() {
+        val msgRows = db.messages().findDottedIdRows()
+        if (msgRows.isNotEmpty()) {
+            // Pre-resolve which undotted twins already exist so the
+            // pure planner can run without suspend callbacks.
+            val existing = mutableSetOf<Pair<String, String>>()
+            for (row in msgRows) {
+                val cleanId = undotAtom(row.id)
+                if (cleanId == row.id) continue
+                if (db.messages().getOne(row.whom, cleanId) != null) {
+                    existing += row.whom to cleanId
+                }
+            }
+            val ops = planMessageDedupe(msgRows, existing)
+            var renamed = 0
+            var dropped = 0
+            for (op in ops) when (op) {
+                is DedupeOp.Rename -> {
+                    db.messages().upsert(op.to)
+                    db.messages().hardDelete(op.from.whom, op.from.id)
+                    renamed++
+                }
+                is DedupeOp.Drop -> {
+                    db.messages().hardDelete(op.whom, op.dottedId)
+                    dropped++
+                }
+            }
+            Log.i(TAG, "dedupe messages: $renamed renamed, $dropped dropped")
+        }
+        // Reactions are keyed on (whom, postId, author); @Upsert
+        // handles the merge case atomically, so we don't need the
+        // rename/drop planner. For each dotted row, upsert the
+        // undotted twin (overwrites if it exists) and drop the dotted.
+        val rxRows = db.reactions().findDottedPostIdRows()
+        for (row in rxRows) {
+            val cleanId = undotAtom(row.postId)
+            if (cleanId == row.postId) continue
+            db.reactions().upsert(row.copy(postId = cleanId))
+            db.reactions().deleteOne(row.whom, row.postId, row.author)
+        }
+        if (rxRows.isNotEmpty()) {
+            Log.i(TAG, "dedupe reactions: ${rxRows.size} dotted rows merged")
+        }
     }
 
     /**
@@ -1738,7 +1797,16 @@ class TlonChatRepo(
         val whom = payload["whom"]?.jsonPrimitive?.contentIfString()
         val directId = payload["id"]?.jsonPrimitive?.contentIfString()
         if (whom != null && directId != null) {
-            applyChatDelta(whom, directId, payload["response"] as? JsonObject ?: return)
+            // %chat echoes post ids with dot-grouping in the envelope
+            // but our DB stores raw undotted ids everywhere else.
+            // Stripping here fixes a nasty dup where live SSE events
+            // wrote dotted rows and paginate/bootstrap wrote undotted
+            // rows for the same underlying message.
+            applyChatDelta(
+                whom,
+                undotAtom(directId),
+                payload["response"] as? JsonObject ?: return,
+            )
             return
         }
 
@@ -1879,7 +1947,10 @@ class TlonChatRepo(
         parentId: String,
         reply: JsonObject,
     ) {
-        val replyId = reply["id"]?.jsonPrimitive?.contentIfString() ?: return
+        // Same normalization as applyChatDelta — reply ids also arrive
+        // dotted in the %chat SSE envelope.
+        val replyId = reply["id"]?.jsonPrimitive?.contentIfString()
+            ?.let(::undotAtom) ?: return
         val delta = reply["delta"] as? JsonObject ?: return
 
         (delta["add"] as? JsonObject)?.let { add ->

@@ -22,4 +22,13 @@ interface ReactionDao {
     /** All reactions for one conversation, cheap to join into messages in-memory. */
     @Query("SELECT * FROM reactions WHERE whom = :whom")
     fun stream(whom: String): Flow<List<ReactionEntity>>
+
+    @Query("SELECT * FROM reactions WHERE postId LIKE '%.%'")
+    suspend fun findDottedPostIdRows(): List<ReactionEntity>
+
+    @Query("""
+        DELETE FROM reactions
+        WHERE whom = :whom AND postId = :postId AND author = :author
+    """)
+    suspend fun deleteOne(whom: String, postId: String, author: String)
 }
