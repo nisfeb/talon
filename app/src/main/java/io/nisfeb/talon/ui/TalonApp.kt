@@ -339,6 +339,7 @@ fun TalonApp(
 
             bookmarksOpen -> BookmarksScreen(
                 db = app.db,
+                repo = app.repo,
                 onOpenConversation = { whom ->
                     bookmarksOpen = false
                     openWhom = whom
@@ -569,9 +570,23 @@ fun TalonApp(
 
             searchOpen -> SearchScreen(
                 db = app.db,
+                // searchOpen stays true under the chat/thread so back
+                // pops back to the highlights/results list instead of
+                // home. The when-block ordering hides SearchScreen
+                // while a conversation is open.
                 onOpenConversation = { whom ->
-                    searchOpen = false
                     openWhom = whom
+                },
+                onOpenMessage = { whom, postId, parentId ->
+                    openWhom = whom
+                    if (parentId != null) {
+                        // Reply: anchor the thread on this reply.
+                        pendingThreadAnchor = postId
+                        openThread = parentId
+                    } else {
+                        // Top-level: anchor the chat on the message.
+                        pendingScrollMessageId = postId
+                    }
                 },
                 onBack = { searchOpen = false },
                 modifier = mod,

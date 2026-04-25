@@ -4,6 +4,9 @@ import android.graphics.BitmapFactory
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -52,6 +55,7 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -83,6 +87,7 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import android.content.Intent
 import android.net.Uri
@@ -176,6 +181,41 @@ fun DmChatScreen(
         }
     }.collectAsState(initial = emptyList())
 
+    // Pre-entry unread count for this conversation. Captured BEFORE
+    // setOpenChat fires the mark-read so the "New" line + catch-me-up
+    // both have a stable snapshot. Filled in by a LaunchedEffect lower
+    // down; the displayRows derivation below sees null until then.
+    var unreadSnapshot by remember(whom) { mutableStateOf<Int?>(null) }
+
+    // Splice an UnreadDivider into the row list at the position derived
+    // from the snapshot. Inserting just above the first unread message
+    // (oldest unread) so visually it sits right above the boundary —
+    // older/read above the line, newer/unread below.
+    val displayRows = remember(rows, unreadSnapshot) {
+        val n = unreadSnapshot ?: 0
+        if (n <= 0 || rows.isEmpty()) rows
+        else {
+            var remaining = n
+            var insertAt = rows.size
+            for (i in rows.indices.reversed()) {
+                if (rows[i] is ChatListItem.Message) {
+                    if (remaining == 0) break
+                    remaining--
+                }
+                insertAt = i
+                if (remaining == 0) break
+            }
+            if (insertAt >= rows.size) rows
+            else {
+                ArrayList<ChatListItem>(rows.size + 1).apply {
+                    addAll(rows.subList(0, insertAt))
+                    add(ChatListItem.UnreadDivider)
+                    addAll(rows.subList(insertAt, rows.size))
+                }
+            }
+        }
+    }
+
     val contactMap by remember {
         contactMapFlow(
             db.contacts().stream(),
@@ -211,15 +251,19 @@ fun DmChatScreen(
     // Notification deep-link: jump to the specified message. With
     // reversed data the target's reversed index = (lastIndex - originalIndex).
     var hasAnchored by remember(whom) { mutableStateOf(false) }
-    LaunchedEffect(rows.size, initialScrollMessageId) {
-        if (rows.isEmpty()) return@LaunchedEffect
+    // Briefly amber-flash the anchored row so the user can see which
+    // message we landed on. Cleared after 5s so re-mounts don't replay.
+    var flashMessageId by remember(whom) { mutableStateOf<String?>(null) }
+    LaunchedEffect(displayRows.size, initialScrollMessageId) {
+        if (displayRows.isEmpty()) return@LaunchedEffect
         if (!hasAnchored && initialScrollMessageId != null) {
-            val originalIdx = rows.indexOfFirst { item ->
+            val originalIdx = displayRows.indexOfFirst { item ->
                 item is ChatListItem.Message && item.row.m.id == initialScrollMessageId
             }
             if (originalIdx >= 0) {
-                listState.scrollToItem(rows.lastIndex - originalIdx)
+                listState.scrollToItem(displayRows.lastIndex - originalIdx)
                 hasAnchored = true
+                flashMessageId = initialScrollMessageId
                 onScrollConsumed()
                 return@LaunchedEffect
             }
@@ -227,6 +271,12 @@ fun DmChatScreen(
             // reverseLayout land us at the newest (bottom).
         }
         hasAnchored = true
+    }
+    LaunchedEffect(flashMessageId) {
+        if (flashMessageId != null) {
+            kotlinx.coroutines.delay(5_500)
+            flashMessageId = null
+        }
     }
 
     // Send-triggered: snap to the newest. With reverseLayout this is
@@ -453,7 +503,6 @@ fun DmChatScreen(
     // (which fires immediately) doesn't hide the banner mid-render.
     val talonApp = (context.applicationContext as TalonApplication)
     val aiConfigured by talonApp.aiSettings.state.collectAsState()
-    var unreadSnapshot by remember(whom) { mutableStateOf<Int?>(null) }
     // Capture the pre-entry unread count BEFORE telling the repo this
     // chat is focused. setOpenChat launches markRead, which writes
     // count=0 to the unreads table — if the unread flow's first
@@ -654,11 +703,11 @@ fun DmChatScreen(
                 db = db,
                 contactMap = contactMap,
                 onTap = {
-                    val idx = rows.indexOfFirst {
+                    val idx = displayRows.indexOfFirst {
                         it is ChatListItem.Message && it.row.m.id == pinId
                     }
                     if (idx >= 0) {
-                        val reverseIdx = rows.size - 1 - idx
+                        val reverseIdx = displayRows.size - 1 - idx
                         scope.launch { listState.animateScrollToItem(reverseIdx) }
                     }
                 },
@@ -671,12 +720,13 @@ fun DmChatScreen(
             reverseLayout = true,
         ) {
             items(
-                items = rows.asReversed(),
+                items = displayRows.asReversed(),
                 key = { it.key },
                 contentType = { it.contentType },
             ) { item ->
                 when (item) {
                     is ChatListItem.DateDivider -> DateDividerRow(item.label)
+                    is ChatListItem.UnreadDivider -> UnreadDividerRow()
                     is ChatListItem.Message -> MessageRow(
                         row = item.row,
                         ourPatp = ourPatp,
@@ -691,6 +741,7 @@ fun DmChatScreen(
                         onAvatarTap = onAvatarTap,
                         onCitationTap = onCitationTap,
                         entityActionsEnabled = aiConfigured.entityActionsEnabled,
+                        flashAmber = item.row.m.id == flashMessageId,
                     )
                 }
             }
@@ -1017,11 +1068,11 @@ fun DmChatScreen(
                     // specific reply the user tapped (not the newest).
                     onOpenThreadAt(parentId, msgId)
                 } else {
-                    val idx = rows.indexOfFirst {
+                    val idx = displayRows.indexOfFirst {
                         it is ChatListItem.Message && it.row.m.id == msgId
                     }
                     if (idx >= 0) {
-                        val reverseIdx = rows.size - 1 - idx
+                        val reverseIdx = displayRows.size - 1 - idx
                         scope.launch { listState.animateScrollToItem(reverseIdx) }
                     }
                 }
@@ -1242,6 +1293,7 @@ private fun MessageRow(
     onAvatarTap: (String) -> Unit,
     onCitationTap: (String) -> Unit,
     entityActionsEnabled: Boolean,
+    flashAmber: Boolean = false,
 ) {
     val haptic = LocalHapticFeedback.current
     val m = row.m
@@ -1263,9 +1315,21 @@ private fun MessageRow(
     // flight vs confirmed.
     val isPending = remember(m.id) { m.id.startsWith("local_") }
 
+    // Amber wash when this row is the search/highlight anchor target.
+    // Snaps in, fades out over ~5s.
+    val flashAlpha = remember(m.id) { Animatable(0f) }
+    LaunchedEffect(flashAmber) {
+        if (flashAmber) {
+            flashAlpha.snapTo(1f)
+            flashAlpha.animateTo(0f, tween(5_000, easing = LinearEasing))
+        }
+    }
+    val flashColor = Color(0xFFFFC107).copy(alpha = 0.30f * flashAlpha.value)
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .background(flashColor)
             .combinedClickable(onClick = {}, onLongClick = { onLongPress(m) })
             .graphicsLayer {
                 translationX = offsetX.value
@@ -1644,6 +1708,12 @@ private sealed interface ChatListItem {
         override val key: String get() = row.m.id
         override val contentType: String get() = "message"
     }
+
+    @androidx.compose.runtime.Immutable
+    data object UnreadDivider : ChatListItem {
+        override val key: String get() = "__unread_line"
+        override val contentType: String get() = "unread"
+    }
 }
 
 private fun buildChatListItems(
@@ -1725,6 +1795,25 @@ private fun DateDividerRow(label: String) {
             modifier = Modifier.padding(horizontal = 12.dp),
         )
         HorizontalDivider(modifier = Modifier.weight(1f))
+    }
+}
+
+@Composable
+private fun UnreadDividerRow() {
+    val amber = Color(0xFFFFB74D)
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.Center,
+    ) {
+        HorizontalDivider(modifier = Modifier.weight(1f), color = amber)
+        Text(
+            "New",
+            style = MaterialTheme.typography.labelSmall,
+            color = amber,
+            modifier = Modifier.padding(horizontal = 10.dp),
+        )
+        HorizontalDivider(modifier = Modifier.weight(1f), color = amber)
     }
 }
 
@@ -1927,7 +2016,18 @@ private fun CatchMeUpBanner(
  * Returns nothing while the embedding pass is loading or when the
  * archive doesn't have enough indexed messages to cluster meaningfully.
  */
-@OptIn(ExperimentalMaterial3Api::class)
+/**
+ * Time windows for the topic-cluster panel. Default is [Month] —
+ * "what's been going on lately" rotates with the chat instead of
+ * the same all-time top-5 every time.
+ */
+private enum class TopicWindow(val label: String, val ms: Long?) {
+    Week("Week", 7L * 24 * 3600_000L),
+    Month("Month", 30L * 24 * 3600_000L),
+    All("All", null),
+}
+
+@OptIn(ExperimentalMaterial3Api::class, androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 private fun TopicsSheet(
     whom: String,
@@ -1939,14 +2039,21 @@ private fun TopicsSheet(
     onTapMessage: (id: String, parentId: String?) -> Unit,
 ) {
     val sheetState = rememberModalBottomSheetState()
+    var window by remember(whom) { mutableStateOf(TopicWindow.Month) }
     var loading by remember(whom) { mutableStateOf(true) }
-    var clusters by remember(whom) { mutableStateOf<List<TopicClusterRow>>(emptyList()) }
+    var result by remember(whom) {
+        mutableStateOf(TopicsResult(emptyList(), fellBackToAllTime = false))
+    }
 
-    LaunchedEffect(whom) {
+    LaunchedEffect(whom, window) {
         loading = true
-        clusters = withContext(Dispatchers.Default) { buildTopicClusters(whom, db) }
+        result = withContext(Dispatchers.Default) {
+            buildTopicClusters(whom, db, window.ms)
+        }
         loading = false
     }
+
+    val clusters = result.clusters
 
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
         Column(
@@ -1956,7 +2063,22 @@ private fun TopicsSheet(
                 .windowInsetsPadding(WindowInsets.navigationBars),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Text("Topics in this chat", style = MaterialTheme.typography.titleMedium)
+            val headerText = when {
+                result.fellBackToAllTime ->
+                    "Topics in this chat (all time — recent window was too thin)"
+                window == TopicWindow.All -> "Topics in this chat"
+                else -> "Topics in the last ${window.label.lowercase()}"
+            }
+            Text(headerText, style = MaterialTheme.typography.titleMedium)
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                TopicWindow.values().forEach { w ->
+                    FilterChip(
+                        selected = w == window,
+                        onClick = { window = w },
+                        label = { Text(w.label) },
+                    )
+                }
+            }
             when {
                 loading -> Row(
                     verticalAlignment = Alignment.CenterVertically,
@@ -2016,27 +2138,52 @@ private data class TopicClusterRow(
     val count: Int,
 )
 
+private data class TopicsResult(
+    val clusters: List<TopicClusterRow>,
+    /** True when the requested time window had too few rows to
+     *  cluster meaningfully and we fell back to all-time so the
+     *  panel still shows something. UI surfaces this in the header. */
+    val fellBackToAllTime: Boolean,
+)
+
 /**
- * Worker for [TopicsSheet]: read embeddings + their messages, drop
- * one-word filler ("hmmm", "ok", "lol"), run k-means, return the
- * per-cluster representative + count, sorted largest-first.
+ * Worker for [TopicsSheet]: cluster the chat's embedded messages
+ * within an optional time [windowMs] (null = all time), drop one-
+ * word filler, return per-cluster representative + count.
  *
- * Two changes from the original "closest-to-centroid" version that
- * fix the "top topic is 'hmmm'" failure mode:
+ * Two anti-staleness measures live here:
  *   1. Pre-filter: messages under 20 chars or 4 words don't enter
  *      clustering at all. Acknowledgments don't deserve a topic.
  *   2. Per-cluster representative is the LONGEST message in that
- *      cluster, not the centroid-closest one. The centroid of a
- *      mostly-generic cluster is itself generic, so closest-to-
- *      centroid picks the most generic message; longest carries
- *      the most information and gives a recognizable snippet.
+ *      cluster, not the centroid-closest. Centroid of a generic
+ *      cluster is itself generic, so closest-to-centroid picks
+ *      "hmmm". Longest carries the most information.
+ *
+ * Falls back to all-time if the requested window has too few
+ * messages, so a chat that was quiet last month still shows
+ * something useful instead of a blank panel.
  */
 private suspend fun buildTopicClusters(
     whom: String,
     db: AppDatabase,
+    windowMs: Long?,
+): TopicsResult {
+    val initial = clusterTopicsWithin(whom, db, windowMs)
+    if (initial.isNotEmpty() || windowMs == null) {
+        return TopicsResult(initial, fellBackToAllTime = false)
+    }
+    val fallback = clusterTopicsWithin(whom, db, windowMs = null)
+    return TopicsResult(fallback, fellBackToAllTime = fallback.isNotEmpty())
+}
+
+private suspend fun clusterTopicsWithin(
+    whom: String,
+    db: AppDatabase,
+    windowMs: Long?,
 ): List<TopicClusterRow> {
     val embeddings = db.embeddings().forWhom(whom)
     if (embeddings.size < 6) return emptyList()
+    val cutoffMs = windowMs?.let { System.currentTimeMillis() - it }
     data class Row(
         val embedding: io.nisfeb.talon.data.MessageEmbeddingEntity,
         val message: io.nisfeb.talon.data.MessageEntity,
@@ -2045,6 +2192,7 @@ private suspend fun buildTopicClusters(
     val rows = embeddings.mapNotNull { e ->
         val msg = db.messages().getOne(e.whom, e.id) ?: return@mapNotNull null
         if (msg.isDeleted) return@mapNotNull null
+        if (cutoffMs != null && msg.sentMs < cutoffMs) return@mapNotNull null
         val text = io.nisfeb.talon.urbit.StoryCache
             .textFor(msg.id, msg.contentJson)
             .replace('\n', ' ')

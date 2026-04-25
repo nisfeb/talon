@@ -17,12 +17,39 @@ import kotlinx.serialization.json.put
  * breakage; snapshotting these shapes is how we catch regressions.
  */
 
+/**
+ * True if [whom] is a DM or club — both rely on `chat-dm-action-2` /
+ * `chat-club-action-2` whose delete echo isn't reliable enough to
+ * drive local UI state (the SSE round-trip can drop quietly across
+ * mark / version skews). Channels go through `channel-action-2`
+ * which we trust for the echo. Tests for this rule live in
+ * `ChatWireShapesTest`.
+ */
+internal fun whomNeedsOptimisticDelete(whom: String): Boolean =
+    whom.startsWith("~") || whom.startsWith("0v")
+
+/**
+ * Dot-group the @da inside an `~author/<da>` writ id for the wire.
+ * DB stores undotted (cheaper to compare, fixes the SSE-vs-paginate
+ * double-store bug). The %chat agent's poke dejs parses the @da
+ * through `slav %ud` → `dem:ag`, which only accepts dot-grouped
+ * decimals. Egress-only conversion: SSE echo back is dotted, gets
+ * undotted on ingest, DB still ends up consistent — no dup risk.
+ */
+internal fun redotWritId(writId: String): String {
+    val slash = writId.lastIndexOf('/')
+    if (slash < 0) return dotAtom(writId)
+    val author = writId.substring(0, slash)
+    val da = writId.substring(slash + 1)
+    return "$author/${dotAtom(da)}"
+}
+
 /** %chat chat-dm-action-2 envelope. */
 internal fun dmAction(peer: String, postId: String, delta: JsonObject): JsonObject =
     buildJsonObject {
         put("ship", peer)
         put("diff", buildJsonObject {
-            put("id", postId)
+            put("id", redotWritId(postId))
             put("delta", delta)
         })
     }
@@ -38,7 +65,7 @@ internal fun clubAction(clubId: String, postId: String, delta: JsonObject): Json
             put("uid", "0v4")
             put("delta", buildJsonObject {
                 put("writ", buildJsonObject {
-                    put("id", postId)
+                    put("id", redotWritId(postId))
                     put("delta", delta)
                 })
             })
@@ -67,11 +94,13 @@ internal fun channelOrderAction(postIds: List<String>): JsonObject =
         })
     }
 
-/** Writs reply-add delta (DM / club). */
+/** Writs reply-add delta (DM / club). Same egress dot rule as
+ *  dmAction / clubAction — the inner reply id has to be dotted or
+ *  the writ-action-2 dejs silently NACKs. */
 internal fun replyDelta(replyId: String, replyEssay: JsonObject): JsonObject =
     buildJsonObject {
         put("reply", buildJsonObject {
-            put("id", replyId)
+            put("id", redotWritId(replyId))
             put("meta", JsonNull)
             put("delta", buildJsonObject {
                 put("add", buildJsonObject {

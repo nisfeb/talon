@@ -48,6 +48,7 @@ import java.util.Locale
 fun SearchScreen(
     db: AppDatabase,
     onOpenConversation: (whom: String) -> Unit,
+    onOpenMessage: (whom: String, postId: String, parentId: String?) -> Unit,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -183,7 +184,9 @@ fun SearchScreen(
                     key = { "hl:${it.whom}:${it.id}" },
                     contentType = { "hl" },
                 ) { m ->
-                    ResultRow(m, contactMap) { onOpenConversation(m.whom) }
+                    ResultRow(m, contactMap) {
+                        onOpenMessage(m.whom, m.id, m.parentId)
+                    }
                     HorizontalDivider()
                 }
             }
@@ -228,7 +231,9 @@ fun SearchScreen(
                         key = { "${it.whom}:${it.id}" },
                         contentType = { "hit" },
                     ) { m ->
-                        ResultRow(m, contactMap) { onOpenConversation(m.whom) }
+                        ResultRow(m, contactMap) {
+                            onOpenMessage(m.whom, m.id, m.parentId)
+                        }
                         HorizontalDivider()
                     }
                 }

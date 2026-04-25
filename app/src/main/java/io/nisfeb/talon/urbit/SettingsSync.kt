@@ -4,6 +4,8 @@ import android.util.Log
 import io.nisfeb.talon.ai.AiSettings
 import io.nisfeb.talon.data.AppDatabase
 import io.nisfeb.talon.data.BookmarkEntity
+import io.nisfeb.talon.data.BookmarkFolderEntity
+import io.nisfeb.talon.data.BookmarkFolderMemberEntity
 import io.nisfeb.talon.data.FolderEntity
 import io.nisfeb.talon.data.FolderMemberEntity
 import io.nisfeb.talon.data.GroupOrderEntity
@@ -41,6 +43,8 @@ class SettingsSync(
         const val BUCKET_FOLDER_MEMBERS = "folder-members"
         const val BUCKET_NOTIFY_PREFS = "notify-prefs"
         const val BUCKET_BOOKMARKS = "bookmarks"
+        const val BUCKET_BOOKMARK_FOLDERS = "bookmark-folders"
+        const val BUCKET_BOOKMARK_FOLDER_MEMBERS = "bookmark-folder-members"
         const val BUCKET_AI_SETTINGS = "ai-settings"
         private const val AI_ENTRY = "config"
     }
@@ -84,6 +88,8 @@ class SettingsSync(
             applyBucket(BUCKET_FOLDER_MEMBERS, deskMap[BUCKET_FOLDER_MEMBERS] as? JsonObject)
             applyBucket(BUCKET_NOTIFY_PREFS, deskMap[BUCKET_NOTIFY_PREFS] as? JsonObject)
             applyBucket(BUCKET_BOOKMARKS, deskMap[BUCKET_BOOKMARKS] as? JsonObject)
+            applyBucket(BUCKET_BOOKMARK_FOLDERS, deskMap[BUCKET_BOOKMARK_FOLDERS] as? JsonObject)
+            applyBucket(BUCKET_BOOKMARK_FOLDER_MEMBERS, deskMap[BUCKET_BOOKMARK_FOLDER_MEMBERS] as? JsonObject)
             // AI settings: only applied if the local device has opted
             // into sync — otherwise we respect the device's local key.
             if (aiSettings.state.value.syncEnabled) {
@@ -152,6 +158,35 @@ class SettingsSync(
                             put(bookmarkKey(b.whom, b.postId), buildJsonObject {
                                 put("ts", b.bookmarkedMs)
                             })
+                        }
+                    },
+                )
+            }
+        // Bookmark folders
+        db.bookmarkFolders().streamFolders().first()
+            .takeIf { it.isNotEmpty() }?.let { folders ->
+                pokePutBucket(
+                    BUCKET_BOOKMARK_FOLDERS,
+                    buildJsonObject {
+                        folders.forEach { f ->
+                            put(f.id.toString(), buildJsonObject {
+                                put("name", f.name)
+                                put("sortOrder", f.sortOrder)
+                            })
+                        }
+                    },
+                )
+            }
+        db.bookmarkFolders().streamMembers().first()
+            .takeIf { it.isNotEmpty() }?.let { members ->
+                pokePutBucket(
+                    BUCKET_BOOKMARK_FOLDER_MEMBERS,
+                    buildJsonObject {
+                        members.forEach { m ->
+                            put(
+                                bookmarkFolderMemberKey(m.folderId, m.whom, m.postId),
+                                buildJsonObject { put("ordinal", m.ordinal) },
+                            )
                         }
                     },
                 )
@@ -405,6 +440,83 @@ class SettingsSync(
         pokeDelEntry(BUCKET_BOOKMARKS, bookmarkKey(whom, postId))
     }
 
+    // ───────── bookmark folder CRUD ───────────────────────────
+
+    /** Create a new bookmark folder; returns its newly assigned id. */
+    suspend fun createBookmarkFolder(name: String, sortOrder: Int = 0): Long {
+        val id = db.bookmarkFolders().createFolder(
+            BookmarkFolderEntity(name = name, sortOrder = sortOrder),
+        )
+        pokePutEntry(
+            BUCKET_BOOKMARK_FOLDERS, id.toString(),
+            buildJsonObject {
+                put("name", name)
+                put("sortOrder", sortOrder)
+            },
+        )
+        return id
+    }
+
+    suspend fun renameBookmarkFolder(id: Long, name: String) {
+        val current = db.bookmarkFolders().get(id) ?: return
+        db.bookmarkFolders().rename(id, name)
+        pokePutEntry(
+            BUCKET_BOOKMARK_FOLDERS, id.toString(),
+            buildJsonObject {
+                put("name", name)
+                put("sortOrder", current.sortOrder)
+            },
+        )
+    }
+
+    suspend fun deleteBookmarkFolder(id: Long) {
+        db.bookmarkFolders().deleteMembersOf(id)
+        db.bookmarkFolders().delete(id)
+        pokeDelEntry(BUCKET_BOOKMARK_FOLDERS, id.toString())
+    }
+
+    suspend fun addBookmarkToFolder(folderId: Long, whom: String, postId: String) {
+        db.bookmarkFolders().addMember(folderId, whom, postId)
+        // The DAO transaction picks the next ordinal; mirror that to
+        // the ship by re-reading.
+        val ordinal = db.bookmarkFolders().maxOrdinalIn(folderId)
+        pokePutEntry(
+            BUCKET_BOOKMARK_FOLDER_MEMBERS,
+            bookmarkFolderMemberKey(folderId, whom, postId),
+            buildJsonObject { put("ordinal", ordinal) },
+        )
+    }
+
+    suspend fun removeBookmarkFromFolder(folderId: Long, whom: String, postId: String) {
+        db.bookmarkFolders().removeMember(folderId, whom, postId)
+        pokeDelEntry(
+            BUCKET_BOOKMARK_FOLDER_MEMBERS,
+            bookmarkFolderMemberKey(folderId, whom, postId),
+        )
+    }
+
+    /** Local-only: rewrite a folder's ordering. Caller pushes the
+     *  resulting ordinals to %settings via [pushBookmarkFolderOrder]
+     *  on drag-stop, mirroring the conversation-folder pattern. */
+    suspend fun reorderBookmarkFolderMembersLocal(
+        folderId: Long,
+        items: List<Pair<String, String>>,
+    ) {
+        db.bookmarkFolders().reorderMembers(folderId, items)
+    }
+
+    suspend fun pushBookmarkFolderOrder(folderId: Long) {
+        val members = db.bookmarkFolders().streamMembers().first()
+            .filter { it.folderId == folderId }
+        members.forEach { m ->
+            pokePutEntry(
+                BUCKET_BOOKMARK_FOLDER_MEMBERS,
+                bookmarkFolderMemberKey(folderId, m.whom, m.postId),
+                buildJsonObject { put("ordinal", m.ordinal) },
+            )
+        }
+    }
+
     suspend fun setNotifyLevel(whom: String, level: String) {
         db.notifyPrefs().upsert(NotifyPreferenceEntity(whom, level))
         pokePutEntry(
@@ -486,6 +598,30 @@ class SettingsSync(
                 }
                 db.bookmarks().replaceAll(list)
             }
+            BUCKET_BOOKMARK_FOLDERS -> {
+                val list = entries.orEmpty().mapNotNull { (k, v) ->
+                    val id = k.toLongOrNull() ?: return@mapNotNull null
+                    val obj = unwrap(v) as? JsonObject ?: return@mapNotNull null
+                    val name = obj["name"].asStr() ?: return@mapNotNull null
+                    val sortOrder = obj["sortOrder"].asInt() ?: 0
+                    BookmarkFolderEntity(id = id, name = name, sortOrder = sortOrder)
+                }
+                db.bookmarkFolders().replaceAll(list)
+            }
+            BUCKET_BOOKMARK_FOLDER_MEMBERS -> {
+                val list = entries.orEmpty().mapNotNull { (k, v) ->
+                    val (folderId, whom, postId) =
+                        parseBookmarkFolderMemberKey(k) ?: return@mapNotNull null
+                    val ordinal = (unwrap(v) as? JsonObject)?.get("ordinal").asInt() ?: 0
+                    BookmarkFolderMemberEntity(
+                        folderId = folderId,
+                        whom = whom,
+                        postId = postId,
+                        ordinal = ordinal,
+                    )
+                }
+                db.bookmarkFolders().replaceAllMembers(list)
+            }
             BUCKET_AI_SETTINGS -> {
                 val entry = unwrap(entries?.get(AI_ENTRY)) as? JsonObject ?: return
                 applyAiEntry(entry)
@@ -527,6 +663,19 @@ class SettingsSync(
                     .asLong() ?: 0L
                 db.bookmarks().upsert(BookmarkEntity(whom, postId, ts))
             }
+            BUCKET_BOOKMARK_FOLDERS -> {
+                val id = entry.toLongOrNull() ?: return
+                val obj = unwrapped as? JsonObject ?: return
+                val name = obj["name"].asStr() ?: return
+                val sortOrder = obj["sortOrder"].asInt() ?: 0
+                db.bookmarkFolders().upsert(BookmarkFolderEntity(id, name, sortOrder))
+            }
+            BUCKET_BOOKMARK_FOLDER_MEMBERS -> {
+                val (folderId, whom, postId) =
+                    parseBookmarkFolderMemberKey(entry) ?: return
+                val ordinal = (unwrapped as? JsonObject)?.get("ordinal").asInt() ?: 0
+                db.bookmarkFolders().addMemberRaw(folderId, whom, postId, ordinal)
+            }
             BUCKET_AI_SETTINGS -> {
                 if (entry == AI_ENTRY) {
                     (unwrapped as? JsonObject)?.let(::applyAiEntry)
@@ -552,6 +701,16 @@ class SettingsSync(
                 val (whom, postId) = parseBookmarkKey(entry) ?: return
                 db.bookmarks().remove(whom, postId)
             }
+            BUCKET_BOOKMARK_FOLDERS -> {
+                val id = entry.toLongOrNull() ?: return
+                db.bookmarkFolders().deleteMembersOf(id)
+                db.bookmarkFolders().delete(id)
+            }
+            BUCKET_BOOKMARK_FOLDER_MEMBERS -> {
+                val (folderId, whom, postId) =
+                    parseBookmarkFolderMemberKey(entry) ?: return
+                db.bookmarkFolders().removeMember(folderId, whom, postId)
+            }
             BUCKET_AI_SETTINGS -> {
                 // Ship removed config — clear local AI settings
                 // (only if local is in sync mode so we don't wipe a
@@ -568,6 +727,8 @@ class SettingsSync(
             BUCKET_FOLDER_MEMBERS -> db.folders().replaceAllMembers(emptyList())
             BUCKET_NOTIFY_PREFS -> db.notifyPrefs().replaceAll(emptyList())
             BUCKET_BOOKMARKS -> db.bookmarks().replaceAll(emptyList())
+            BUCKET_BOOKMARK_FOLDERS -> db.bookmarkFolders().replaceAll(emptyList())
+            BUCKET_BOOKMARK_FOLDER_MEMBERS -> db.bookmarkFolders().replaceAllMembers(emptyList())
         }
     }
 
@@ -651,10 +812,34 @@ class SettingsSync(
         return key.substring(0, pipe) to key.substring(pipe + 1)
     }
 
+    // Bookmark-folder-member key: `<folderId>|<whom>|<postId>`. Same
+    // `|` separator since none of the components can carry a pipe.
+    // Folder id is a positive Long.
+    private fun bookmarkFolderMemberKey(folderId: Long, whom: String, postId: String) =
+        "$folderId|$whom|$postId"
+
     private fun JsonObject.desk(): String? =
         this["desk"].asStr()
     private fun JsonObject.bucketKey(): String? =
         this["bucket-key"].asStr()
     private fun JsonObject.entryKey(): String? =
         this["entry-key"].asStr()
+
+    private fun parseBookmarkFolderMemberKey(key: String): Triple<Long, String, String>? =
+        io.nisfeb.talon.urbit.parseBookmarkFolderMemberKey(key)
+}
+
+/**
+ * Parse `<folderId>|<whom>|<postId>` — pure helper exposed at file
+ * scope so tests can lock the encoding without instantiating
+ * SettingsSync. Returns null when the key isn't well-formed; callers
+ * silently drop bad rows on inbound %settings sync rather than
+ * crash.
+ */
+internal fun parseBookmarkFolderMemberKey(key: String): Triple<Long, String, String>? {
+    val parts = key.split("|", limit = 3)
+    if (parts.size != 3) return null
+    val folderId = parts[0].toLongOrNull() ?: return null
+    if (parts[1].isEmpty() || parts[2].isEmpty()) return null
+    return Triple(folderId, parts[1], parts[2])
 }

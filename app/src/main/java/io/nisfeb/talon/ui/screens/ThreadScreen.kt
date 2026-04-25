@@ -1,5 +1,8 @@
 package io.nisfeb.talon.ui.screens
 
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -41,6 +44,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.TextFieldValue
@@ -143,6 +147,7 @@ fun ThreadScreen(
     }
 
     var hasAnchored by remember(parentId) { mutableStateOf(false) }
+    var flashReplyId by remember(parentId) { mutableStateOf<String?>(null) }
     LaunchedEffect(rows.second.size, initialScrollReplyId) {
         val total = rows.second.size + (if (parent != null) 2 else 0)
         if (total <= 0) return@LaunchedEffect
@@ -155,6 +160,7 @@ fun ThreadScreen(
                 val parentOffset = if (parent != null) 2 else 0
                 listState.scrollToItem(index = idx + parentOffset)
                 hasAnchored = true
+                flashReplyId = initialScrollReplyId
                 onScrollConsumed()
                 return@LaunchedEffect
             }
@@ -166,6 +172,12 @@ fun ThreadScreen(
         if (!hasAnchored || isPinnedToBottom) {
             listState.scrollToItem(index = total - 1, scrollOffset = Int.MAX_VALUE)
             hasAnchored = true
+        }
+    }
+    LaunchedEffect(flashReplyId) {
+        if (flashReplyId != null) {
+            kotlinx.coroutines.delay(5_500)
+            flashReplyId = null
         }
     }
 
@@ -263,6 +275,7 @@ fun ThreadScreen(
                         onPollVote = onPollVoteHandler,
                         showHeader = true,
                         highlighted = true,
+                        flashAmber = false,
                     )
                 }
                 item(key = "__parent_divider") { HorizontalDivider() }
@@ -285,6 +298,7 @@ fun ThreadScreen(
                     onPollVote = onPollVoteHandler,
                     showHeader = row.showHeader,
                     highlighted = false,
+                    flashAmber = row.m.id == flashReplyId,
                 )
             }
         }
@@ -421,6 +435,7 @@ private fun ThreadMessage(
     onPollVote: (MessageEntity, List<ReactionEntity>, String) -> Unit,
     showHeader: Boolean,
     highlighted: Boolean,
+    flashAmber: Boolean = false,
 ) {
     val parts = remember(m.id, m.contentJson) { StoryCache.partsFor(m.id, m.contentJson) }
     val stamp = remember(m.sentMs) { TIME_FORMAT.format(Date(m.sentMs)) }
@@ -429,14 +444,22 @@ private fun ThreadMessage(
         reactions.groupBy { it.emoji }
             .map { (emoji, rs) -> Triple(emoji, rs.size, rs.any { it.author == ourPatp }) }
     }
+    val flashAlpha = remember(m.id) { Animatable(0f) }
+    LaunchedEffect(flashAmber) {
+        if (flashAmber) {
+            flashAlpha.snapTo(1f)
+            flashAlpha.animateTo(0f, tween(5_000, easing = LinearEasing))
+        }
+    }
+    val baseColor = if (highlighted) MaterialTheme.colorScheme.surfaceVariant
+        else MaterialTheme.colorScheme.surface
+    val flashOverlay = Color(0xFFFFC107).copy(alpha = 0.30f * flashAlpha.value)
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .combinedClickable(onClick = {}, onLongClick = { onLongPress(m) })
-            .background(
-                if (highlighted) MaterialTheme.colorScheme.surfaceVariant
-                else MaterialTheme.colorScheme.surface
-            )
+            .background(baseColor)
+            .background(flashOverlay)
             .padding(top = if (showHeader) 10.dp else 2.dp, bottom = 2.dp),
         verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {

@@ -23,8 +23,10 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         GroupOrderEntity::class,
         ReactionUsageEntity::class,
         MessageEmbeddingEntity::class,
+        BookmarkFolderEntity::class,
+        BookmarkFolderMemberEntity::class,
     ],
-    version = 22,
+    version = 23,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -40,6 +42,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun groupOrders(): GroupOrderDao
     abstract fun reactionUsage(): ReactionUsageDao
     abstract fun embeddings(): EmbeddingDao
+    abstract fun bookmarkFolders(): BookmarkFolderDao
 
     companion object {
         private val MIGRATION_17_18 = object : Migration(17, 18) {
@@ -97,6 +100,39 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        private val MIGRATION_22_23 = object : Migration(22, 23) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // Bookmark organization — folders + a join table
+                // mirroring the conversation-folders pattern. Both
+                // tables sync to %settings buckets `bookmark-folders`
+                // / `bookmark-folder-members`.
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS bookmark_folders (
+                        id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+                        name TEXT NOT NULL,
+                        sortOrder INTEGER NOT NULL DEFAULT 0
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS bookmark_folder_members (
+                        folderId INTEGER NOT NULL,
+                        whom TEXT NOT NULL,
+                        postId TEXT NOT NULL,
+                        ordinal INTEGER NOT NULL DEFAULT 0,
+                        PRIMARY KEY (folderId, whom, postId)
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS index_bookmark_folder_members_whom_postId " +
+                        "ON bookmark_folder_members (whom, postId)"
+                )
+            }
+        }
+
         /**
          * Open the Room database for a specific ship. Each ship's
          * data lives in its own file so switching ships is a clean
@@ -113,7 +149,7 @@ abstract class AppDatabase : RoomDatabase() {
             )
                 .addMigrations(
                     MIGRATION_17_18, MIGRATION_18_19, MIGRATION_19_20,
-                    MIGRATION_20_21, MIGRATION_21_22,
+                    MIGRATION_20_21, MIGRATION_21_22, MIGRATION_22_23,
                 )
                 .fallbackToDestructiveMigration()
                 .build()

@@ -1603,12 +1603,21 @@ class TlonChatRepo(
     suspend fun delete(whom: String, postId: String, parentId: String? = null) {
         val ch = channel ?: error("not connected")
         val isReply = parentId != null
+        if (whomNeedsOptimisticDelete(whom)) {
+            // Mirror what react/unreact do — apply the local change
+            // immediately so the message disappears regardless of
+            // whether the SSE echo arrives. The DM/club `del`
+            // round-trip has been unreliable across mark drift and
+            // we'd previously regressed by trusting it.
+            db.messages().softDelete(whom, postId)
+            db.reactions().clearForPost(whom, postId)
+        }
         when {
             whom.startsWith("~") -> {
                 val payload = if (isReply) {
                     dmAction(whom, parentId!!, buildJsonObject {
                         put("reply", buildJsonObject {
-                            put("id", postId)
+                            put("id", redotWritId(postId))
                             put("delta", buildJsonObject { put("del", JsonNull) })
                         })
                     })
@@ -1621,7 +1630,7 @@ class TlonChatRepo(
                 val payload = if (isReply) {
                     clubAction(whom, parentId!!, buildJsonObject {
                         put("reply", buildJsonObject {
-                            put("id", postId)
+                            put("id", redotWritId(postId))
                             put("delta", buildJsonObject { put("del", JsonNull) })
                         })
                     })
