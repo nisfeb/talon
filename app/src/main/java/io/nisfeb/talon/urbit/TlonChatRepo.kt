@@ -1042,6 +1042,10 @@ class TlonChatRepo(
                 // drift surfaces in tests.
                 val target = parseActivityEventTarget(tag, eventObj)
 
+                // Normalize ids to the format our DB uses for the
+                // resolved whom — channel tables key on bare `<da>`,
+                // DMs/clubs on `~author/<da>`. Without this, channel
+                // thread deep-links can never find the parent locally.
                 items.add(
                     ActivityFeedItem(
                         kind = label,
@@ -1050,8 +1054,8 @@ class TlonChatRepo(
                         contentJson = content,
                         sentMs = sentMs,
                         title = title,
-                        postId = target.postId,
-                        parentPostId = target.parentPostId,
+                        postId = canonicalPostIdForWhom(sourceWhom, target.postId),
+                        parentPostId = canonicalPostIdForWhom(sourceWhom, target.parentPostId),
                     )
                 )
             }
@@ -1094,6 +1098,56 @@ class TlonChatRepo(
             if (rx.isNotEmpty()) db.reactions().upsertAll(rx)
         }
         return entity
+    }
+
+    /**
+     * Scry a thread's parent post (which Tlon returns with its full
+     * `seal.replies` map embedded), ingest it + every reply into the
+     * local DB. Used when the user navigates into a thread we
+     * haven't mirrored yet — typically via an activity-feed deep-
+     * link or a notification tap on a reply we got pinged on
+     * without ever scrolling near the parent.
+     */
+    suspend fun fetchThread(whom: String, parentId: String) {
+        val ch = channel ?: return
+        val (agent, paths) = when {
+            whom.startsWith("chat/") ||
+                whom.startsWith("diary/") ||
+                whom.startsWith("heap/") -> {
+                // Channel post id is the raw @ud — needs dotting.
+                val dotted = dotAtom(parentId)
+                "channels" to listOf("/v5/$whom/posts/post/$dotted")
+            }
+            whom.startsWith("~") -> {
+                // DM writ id is `~author/<dotted-da>` already.
+                "chat" to listOf(
+                    "/v4/dm/$whom/writs/writ/id/$parentId",
+                    "/v3/dm/$whom/writs/writ/id/$parentId",
+                )
+            }
+            whom.startsWith("0v") -> "chat" to listOf(
+                "/v4/club/$whom/writs/writ/id/$parentId",
+                "/v3/club/$whom/writs/writ/id/$parentId",
+            )
+            else -> return
+        }
+        var post: JsonElement? = null
+        for (path in paths) {
+            val body = runCatching { ch.scry(agent, path) }.getOrNull() ?: continue
+            if (body is JsonObject && body.containsKey("seal")) {
+                post = body
+                break
+            }
+        }
+        if (post == null) {
+            Log.w(TAG, "fetchThread($whom, $parentId): no post returned from any path")
+            return
+        }
+        val messages = mutableListOf<MessageEntity>()
+        val reactions = mutableListOf<ReactionEntity>()
+        ingestPost(whom, post, messages, reactions)
+        if (messages.isNotEmpty()) db.messages().upsertAll(messages)
+        if (reactions.isNotEmpty()) db.reactions().upsertAll(reactions)
     }
 
     /**

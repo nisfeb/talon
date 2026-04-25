@@ -335,4 +335,77 @@ class ActivityParserTest {
         assertEquals(null, sourceKeyToWhom("group/~host/group-name"))
         assertEquals(null, sourceKeyToWhom("contact/~sampel"))
     }
+
+    // ─── canonicalPostIdForWhom — DB-form normalization ─────────
+
+    @Test
+    fun `channel whom strips author-prefixed id back to bare da`() {
+        // Activity events always emit `~author/<da>` (the message-key
+        // shape) but channel tables in our DB key on bare `<da>`.
+        // Deep-link lookups would miss without this stripping.
+        assertEquals(
+            "170141184507932790143209384169177088000",
+            canonicalPostIdForWhom(
+                "chat/~minder-folden/v3imqe1v",
+                "~ricsul-bilwyt-dozzod-nisfeb/170141184507932790143209384169177088000",
+            ),
+        )
+    }
+
+    @Test
+    fun `channel whom is a no-op on already-bare id`() {
+        // A wire id that already came without the author prefix
+        // shouldn't get further mangled.
+        assertEquals(
+            "170141184507932790143209384169177088000",
+            canonicalPostIdForWhom(
+                "chat/~h/s",
+                "170141184507932790143209384169177088000",
+            ),
+        )
+    }
+
+    @Test
+    fun `dm whom keeps the author-prefixed id intact`() {
+        // DM writs are stored as `~author/<da>`. Stripping would
+        // break lookups in the other direction.
+        assertEquals(
+            "~ricsul-bilwyt-dozzod-nisfeb/170141",
+            canonicalPostIdForWhom(
+                "~sampel-palnet",
+                "~ricsul-bilwyt-dozzod-nisfeb/170141",
+            ),
+        )
+    }
+
+    @Test
+    fun `club whom keeps the author-prefixed id intact`() {
+        assertEquals(
+            "~author/170141",
+            canonicalPostIdForWhom("0v4.abcde", "~author/170141"),
+        )
+    }
+
+    @Test
+    fun `diary and heap channels normalize like chat`() {
+        assertEquals("170141", canonicalPostIdForWhom("diary/~h/s", "~a/170141"))
+        assertEquals("170141", canonicalPostIdForWhom("heap/~h/s", "~a/170141"))
+    }
+
+    @Test
+    fun `null inputs short-circuit to null`() {
+        assertEquals(null, canonicalPostIdForWhom("chat/~h/s", null))
+        assertEquals(null, canonicalPostIdForWhom(null, null))
+    }
+
+    @Test
+    fun `null whom passes the id through unchanged`() {
+        // Defensive — if we ever route via something that doesn't
+        // know its whom, leave the wire form alone rather than
+        // silently mangling.
+        assertEquals(
+            "~author/170141",
+            canonicalPostIdForWhom(null, "~author/170141"),
+        )
+    }
 }

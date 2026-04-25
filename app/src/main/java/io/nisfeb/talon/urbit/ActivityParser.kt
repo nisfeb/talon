@@ -114,6 +114,26 @@ internal data class ActivityEventTarget(
     val parentPostId: String?,
 )
 
+/**
+ * Normalize a wire-form post id to the form Talon's DB stores for the
+ * given conversation. Activity events emit `~author/<da>` everywhere
+ * (the `message-key = [author=ship time=da]` shape); our channel
+ * tables key on the bare `<da>`, while DM and club tables key on the
+ * full `~author/<da>`. Without this normalization, deep-link lookups
+ * for channel threads miss the parent and the thread renders blank.
+ *
+ * Returns null when [rawId] is null. Also handles unprefixed input —
+ * if the wire id arrived without the author segment it's already in
+ * channel form.
+ */
+internal fun canonicalPostIdForWhom(whom: String?, rawId: String?): String? {
+    if (rawId == null) return null
+    val isChannel = whom?.let {
+        it.startsWith("chat/") || it.startsWith("diary/") || it.startsWith("heap/")
+    } == true
+    return if (isChannel) rawId.substringAfterLast('/') else rawId
+}
+
 internal fun parseActivityEventTarget(tag: String, eventObj: JsonObject): ActivityEventTarget {
     val keyId = (eventObj["key"] as? JsonObject)?.get("id").asStr()
         ?: eventObj["id"].asStr()

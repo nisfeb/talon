@@ -133,6 +133,15 @@ fun ThreadScreen(
                 (lastVisible.offset + lastVisible.size) <= info.viewportEndOffset
         }
     }
+    // If we're entering a thread we've never mirrored locally (deep-
+    // link from notification tap or activity feed), the streams above
+    // emit empty. Best-effort scry to populate the parent + replies;
+    // the streams will pick up the upserts and re-render automatically.
+    LaunchedEffect(whom, parentId) {
+        runCatching { repo.fetchThread(whom, parentId) }
+            .onFailure { android.util.Log.w("ThreadScreen", "fetchThread failed", it) }
+    }
+
     var hasAnchored by remember(parentId) { mutableStateOf(false) }
     LaunchedEffect(rows.second.size, initialScrollReplyId) {
         val total = rows.second.size + (if (parent != null) 2 else 0)
