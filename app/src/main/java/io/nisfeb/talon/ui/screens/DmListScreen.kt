@@ -749,9 +749,13 @@ fun DmListScreen(
                 .padding(16.dp),
         ) { Icon(Icons.Filled.Add, contentDescription = "New message") }
 
-        // Subtle off-screen unread indicators. Only visible in the
-        // structured (All-tab) view; the folder view is usually short.
-        if (selectedFolderId == null) {
+        // Subtle off-screen unread indicators. Only valid for the All
+        // tab — the Unread / Mentions tabs render a different flat
+        // list, so unreadIndices (built from homeRows) wouldn't line
+        // up with listState's visibleItemsInfo and we'd flash a stale
+        // "scroll for more" chip on top of an already-fully-visible
+        // list. Folder views are short enough not to need the hint.
+        if (selectedFolderId == null && selectedSpecial == SpecialTab.All) {
             UnreadOffscreenIndicators(
                 homeRows = homeRows,
                 listState = listState,

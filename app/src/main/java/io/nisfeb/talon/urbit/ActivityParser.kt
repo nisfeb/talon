@@ -184,8 +184,16 @@ internal fun activityReadAction(source: JsonObject): JsonObject =
             put("source", source)
             put("action", buildJsonObject {
                 put("all", buildJsonObject {
+                    // deep=true recurses into child sources. For a
+                    // channel that means the per-post `thread/<nest>/<msg>`
+                    // sources spawned by diary comments / heap reactions;
+                    // for a DM that means `dm-thread/<whom>/<msg>`. These
+                    // child sources collapse onto the same `whom` in our
+                    // unreads table, so without recursion the badge
+                    // refuses to clear on diary / heap channels (and on
+                    // any chat with reply traffic).
                     put("time", kotlinx.serialization.json.JsonNull)
-                    put("deep", false)
+                    put("deep", true)
                 })
             })
         })

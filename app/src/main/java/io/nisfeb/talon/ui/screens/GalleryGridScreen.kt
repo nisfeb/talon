@@ -27,6 +27,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -80,9 +81,18 @@ fun GalleryGridScreen(
     }.collectAsState(initial = emptyList())
 
     var loading by remember { mutableStateOf(true) }
+    // Clear the badge instantly: zero out the home-snapshot row (so a
+    // back-nav paints a fresh state immediately) and tell the repo the
+    // chat is focused. setOpenChat fires markRead off-thread so the
+    // refresh below doesn't gate it. Mirrors DmChatScreen — without
+    // this, the badge lingered for the duration of the refresh scry.
+    DisposableEffect(whom) {
+        homeSnapshotZeroUnread(whom)
+        repo.setOpenChat(whom)
+        onDispose { repo.setOpenChat(null) }
+    }
     LaunchedEffect(whom) {
         runCatching { repo.refreshConversation(whom, count = 30) }
-        runCatching { repo.markRead(whom) }
         loading = false
     }
 

@@ -330,6 +330,8 @@ fun TalonApp(
 
             statusFeedOpen -> StatusFeedScreen(
                 db = app.db,
+                repo = app.repo,
+                ourPatp = loggedInShip ?: "",
                 onOpenContact = { ship ->
                     profileSheetShip = ship
                 },

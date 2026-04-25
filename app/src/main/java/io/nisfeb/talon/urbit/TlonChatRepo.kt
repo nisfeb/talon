@@ -943,14 +943,12 @@ class TlonChatRepo(
             color?.let { add(buildJsonObject { put("color", toUrbitHexColor(it)) }) }
         }
         if (edits.isEmpty()) return
-        ch.poke(
-            app = "contacts",
-            mark = "contact-action",
-            payload = buildJsonObject { put("edit", edits) },
-        )
-        // Optimistic local update. Merge with any existing row so fields
-        // the caller didn't supply stay intact. Stamp statusUpdatedMs
-        // when the status actually changes so the feed reorders.
+        // Optimistic local update FIRST so the UI reflects the edit
+        // before the poke round-trips. Merge with any existing row so
+        // fields the caller didn't supply stay intact. Stamp
+        // statusUpdatedMs when the status actually changes so the feed
+        // reorders. (Sequencing the poke after the upsert was making
+        // the status feed feel laggy on slow links.)
         val current = db.contacts().get(ourPatp)
         val newStatus = status?.takeIf { it.isNotBlank() } ?: current?.status
         val statusChanged = status != null && status != current?.status.orEmpty()
@@ -965,6 +963,11 @@ class TlonChatRepo(
                     else current?.statusUpdatedMs,
                 color = color?.takeIf { it.isNotBlank() } ?: current?.color,
             )
+        )
+        ch.poke(
+            app = "contacts",
+            mark = "contact-action",
+            payload = buildJsonObject { put("edit", edits) },
         )
     }
 

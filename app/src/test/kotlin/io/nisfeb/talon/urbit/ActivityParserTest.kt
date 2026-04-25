@@ -184,14 +184,18 @@ class ActivityParserTest {
     }
 
     @Test
-    fun `activityReadAction wraps source under read all time null deep false`() {
+    fun `activityReadAction wraps source under read all time null deep true`() {
+        // deep=true is load-bearing: diary / heap channels carry
+        // per-post `thread/<nest>/<msg>` child sources that collapse
+        // onto the same whom in our unreads table. Without recursion
+        // the badge re-appears on the next /v4/activity push.
         val src = activityReadSource("~sampel")!!
         val body = activityReadAction(src)
         val read = body["read"]!!.jsonObject
         assertTrue(read["source"] is JsonObject)
         val all = read["action"]!!.jsonObject["all"]!!.jsonObject
         assertEquals(JsonNull, all["time"])
-        assertEquals(false, all["deep"]!!.jsonPrimitive.content.toBoolean())
+        assertEquals(true, all["deep"]!!.jsonPrimitive.content.toBoolean())
     }
 
     // ─── parseActivityEventTarget — deep-link extraction ────────
