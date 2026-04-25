@@ -22,6 +22,14 @@ interface GroupDao {
     @Query("SELECT * FROM channel_groups WHERE nest = :nest LIMIT 1")
     suspend fun channelGroupFor(nest: String): ChannelGroupEntity?
 
+    /** Snapshot of every known group. Used by bootstrap reconciliation. */
+    @Query("SELECT * FROM groups")
+    suspend fun allGroups(): List<GroupEntity>
+
+    /** Snapshot of every known channel→group mapping. Used by bootstrap reconciliation. */
+    @Query("SELECT * FROM channel_groups")
+    suspend fun allChannelGroups(): List<ChannelGroupEntity>
+
     @Query("SELECT * FROM groups WHERE flag = :flag LIMIT 1")
     suspend fun getGroup(flag: String): GroupEntity?
 

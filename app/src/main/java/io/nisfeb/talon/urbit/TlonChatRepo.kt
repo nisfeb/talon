@@ -2410,6 +2410,23 @@ class TlonChatRepo(
                 )
             }
         }
+        // Reconcile: drop local rows the ship no longer reports.
+        // Without this, groups the user left / hosts deleted while
+        // Talon was offline linger in the home list forever.
+        val plan = planGroupReconcile(
+            existingGroups = db.groups().allGroups(),
+            existingChannels = db.groups().allChannelGroups(),
+            liveGroupFlags = obj.keys,
+            liveChannelNests = channelGroups.map { it.nest }.toSet(),
+        )
+        for (flag in plan.deletedGroupFlags) {
+            db.groups().deleteChannelsForGroup(flag)
+            db.groups().deleteGroup(flag)
+        }
+        for (nest in plan.deletedChannelNests) {
+            db.groups().deleteChannelGroup(nest)
+        }
+
         if (groups.isNotEmpty()) db.groups().upsertGroups(groups)
         if (channelGroups.isNotEmpty()) db.groups().upsertChannelGroups(channelGroups)
     }
