@@ -1569,7 +1569,10 @@ private fun androidx.compose.foundation.layout.BoxScope.UnreadOffscreenIndicator
             onClick = { onScrollTo(above.max()) },
             modifier = Modifier
                 .align(Alignment.TopCenter)
-                .padding(top = 72.dp),
+                // Clears the title row + tab strip above the LazyColumn
+                // (~56 + ~52 + status-bar inset on most devices). 72dp
+                // overlapped the tab chips on tall-status-bar phones.
+                .padding(top = 140.dp),
         )
     }
     if (below.isNotEmpty()) {
