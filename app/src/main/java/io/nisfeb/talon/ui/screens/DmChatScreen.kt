@@ -253,14 +253,12 @@ fun DmChatScreen(
         }
     }
 
-    // Tell the repo which chat is focused so unread-badge bumps for
-    // this whom are suppressed while the user is looking at it. The
-    // repo fires markRead on enter and exit automatically.
+    // Flatten the home list's cached unread snapshot for this whom so
+    // back-out re-mount paints with 0 instantly rather than flashing the
+    // stale pre-entry count. Cleanup of the open-chat ref happens here
+    // too; the actual setOpenChat (which fires mark-read) is staged in
+    // the LaunchedEffect below — see the comment there.
     DisposableEffect(whom) {
-        repo.setOpenChat(whom)
-        // Also flatten the home list's cached unread snapshot for this
-        // whom so the back-out re-mount paints with 0 instantly rather
-        // than flashing the stale pre-entry count.
         homeSnapshotZeroUnread(whom)
         onDispose { repo.setOpenChat(null) }
     }
@@ -446,14 +444,18 @@ fun DmChatScreen(
     // (which fires immediately) doesn't hide the banner mid-render.
     val talonApp = (context.applicationContext as TalonApplication)
     val aiConfigured by talonApp.aiSettings.state.collectAsState()
-    val unreadEntity by remember(whom) {
-        db.unreads().streamFor(whom)
-    }.collectAsState(initial = null)
     var unreadSnapshot by remember(whom) { mutableStateOf<Int?>(null) }
-    androidx.compose.runtime.LaunchedEffect(whom, unreadEntity) {
-        if (unreadSnapshot == null && unreadEntity != null) {
-            unreadSnapshot = unreadEntity?.count ?: 0
+    // Capture the pre-entry unread count BEFORE telling the repo this
+    // chat is focused. setOpenChat launches markRead, which writes
+    // count=0 to the unreads table — if the unread flow's first
+    // emission lost the race against that write, the catch-me-up
+    // banner would silently never appear. Sequencing both in the same
+    // coroutine pins the order: read → snapshot → mark.
+    androidx.compose.runtime.LaunchedEffect(whom) {
+        if (unreadSnapshot == null) {
+            unreadSnapshot = db.unreads().getOne(whom)?.count ?: 0
         }
+        repo.setOpenChat(whom)
     }
     var catchUpSummary by remember(whom) { mutableStateOf<String?>(null) }
     var catchingUp by remember(whom) { mutableStateOf(false) }

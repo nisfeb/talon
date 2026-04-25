@@ -24,4 +24,9 @@ interface UnreadDao {
 
     @Query("SELECT * FROM unreads WHERE whom = :whom LIMIT 1")
     fun streamFor(whom: String): Flow<UnreadEntity?>
+
+    /** One-shot lookup. Used to capture pre-entry unread count before
+     *  mark-read races to zero it. */
+    @Query("SELECT * FROM unreads WHERE whom = :whom LIMIT 1")
+    suspend fun getOne(whom: String): UnreadEntity?
 }
