@@ -44,6 +44,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.NotificationsOff
+import androidx.compose.material.icons.filled.Topic
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.PushPin
@@ -110,6 +111,7 @@ import io.nisfeb.talon.ui.ContactMap
 import io.nisfeb.talon.ui.CommandResult
 import io.nisfeb.talon.ui.EmojiCatalog
 import io.nisfeb.talon.ui.EmojiPickerDropdown
+import io.nisfeb.talon.ui.EntityActionChips
 import io.nisfeb.talon.ui.MentionPicker
 import io.nisfeb.talon.ui.ReactionPalette
 import io.nisfeb.talon.ui.SlashPicker
@@ -126,8 +128,10 @@ import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import io.nisfeb.talon.urbit.StoryCache
 import io.nisfeb.talon.urbit.TlonChatRepo
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -147,6 +151,10 @@ fun DmChatScreen(
     onScrollConsumed: () -> Unit = {},
     onBack: () -> Unit,
     onOpenThread: (parentId: String) -> Unit,
+    /** Open the thread for [parentId] and anchor the initial scroll on
+     *  [replyAnchor]. Used by the topics-sheet deep-link when the
+     *  cluster's representative is itself a reply. */
+    onOpenThreadAt: (parentId: String, replyAnchor: String) -> Unit = { p, _ -> onOpenThread(p) },
     onOpenConversation: (whom: String) -> Unit,
     onOpenImage: (url: String) -> Unit,
     onOpenSelfProfile: () -> Unit,
@@ -416,6 +424,7 @@ fun DmChatScreen(
     }
 
     var actionTarget by remember { mutableStateOf<MessageEntity?>(null) }
+    var topicsSheetOpen by remember(whom) { mutableStateOf(false) }
     var editing by remember { mutableStateOf<MessageEntity?>(null) }
     var confirmingDelete by remember { mutableStateOf<MessageEntity?>(null) }
     var profileSheetShip by remember { mutableStateOf<String?>(null) }
@@ -552,6 +561,15 @@ fun DmChatScreen(
                 style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
                 modifier = Modifier.weight(1f).padding(start = 4.dp),
             )
+            // Topics sheet trigger — opens the k-means clusters
+            // panel below. State hoisted at top of DmChatScreen so
+            // the sheet rendering at the bottom of the file can
+            // observe it.
+            if (aiConfigured.topicClustersEnabled) {
+                IconButton(onClick = { topicsSheetOpen = true }) {
+                    Icon(Icons.Filled.Topic, contentDescription = "Topics in this chat")
+                }
+            }
             var notifyMenuOpen by remember { mutableStateOf(false) }
             Box {
                 IconButton(onClick = { notifyMenuOpen = true }) {
@@ -672,6 +690,7 @@ fun DmChatScreen(
                         onImageTap = onImageTap,
                         onAvatarTap = onAvatarTap,
                         onCitationTap = onCitationTap,
+                        entityActionsEnabled = aiConfigured.entityActionsEnabled,
                     )
                 }
             }
@@ -986,6 +1005,30 @@ fun DmChatScreen(
         }
     }
 
+    if (topicsSheetOpen) {
+        TopicsSheet(
+            whom = whom,
+            db = db,
+            onDismiss = { topicsSheetOpen = false },
+            onTapMessage = { msgId, parentId ->
+                topicsSheetOpen = false
+                if (parentId != null) {
+                    // Reply — open its thread anchored on the
+                    // specific reply the user tapped (not the newest).
+                    onOpenThreadAt(parentId, msgId)
+                } else {
+                    val idx = rows.indexOfFirst {
+                        it is ChatListItem.Message && it.row.m.id == msgId
+                    }
+                    if (idx >= 0) {
+                        val reverseIdx = rows.size - 1 - idx
+                        scope.launch { listState.animateScrollToItem(reverseIdx) }
+                    }
+                }
+            },
+        )
+    }
+
     actionTarget?.let { target ->
         val isBookmarked by remember(target.whom, target.id) {
             db.bookmarks().isBookmarked(target.whom, target.id)
@@ -1198,6 +1241,7 @@ private fun MessageRow(
     onImageTap: (String) -> Unit,
     onAvatarTap: (String) -> Unit,
     onCitationTap: (String) -> Unit,
+    entityActionsEnabled: Boolean,
 ) {
     val haptic = LocalHapticFeedback.current
     val m = row.m
@@ -1296,6 +1340,20 @@ private fun MessageRow(
                     url = firstLink,
                     onOpen = onLinkTap,
                     modifier = Modifier.padding(top = 6.dp),
+                )
+            }
+            // On-device entity-action chips: dates → calendar,
+            // addresses → maps, phones → dialer, emails → mail.
+            // Pulls the message's plain text from StoryCache so it
+            // sees the same string the user sees, sans markdown.
+            // Gated on the user opting in (off by default).
+            if (entityActionsEnabled) {
+                val plainText = remember(m.id, m.contentJson) {
+                    StoryCache.textFor(m.id, m.contentJson)
+                }
+                EntityActionChips(
+                    text = plainText,
+                    modifier = Modifier.padding(top = 4.dp),
                 )
             }
             if (grouped.isNotEmpty() || row.replyCount > 0) {
@@ -1858,6 +1916,167 @@ private fun CatchMeUpBanner(
             )
         }
     }
+}
+
+/**
+ * Topics-in-this-chat panel. Reads the cached embeddings for [whom],
+ * runs k-means clustering, and renders each cluster as a row with the
+ * representative message + cluster size. Tap a row to scroll the
+ * chat to that message.
+ *
+ * Returns nothing while the embedding pass is loading or when the
+ * archive doesn't have enough indexed messages to cluster meaningfully.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun TopicsSheet(
+    whom: String,
+    db: AppDatabase,
+    onDismiss: () -> Unit,
+    /** Called with (messageId, parentId-or-null) when the user taps a
+     *  cluster row. Caller routes top-level posts to a chat scroll and
+     *  reply messages to a thread deep-link. */
+    onTapMessage: (id: String, parentId: String?) -> Unit,
+) {
+    val sheetState = rememberModalBottomSheetState()
+    var loading by remember(whom) { mutableStateOf(true) }
+    var clusters by remember(whom) { mutableStateOf<List<TopicClusterRow>>(emptyList()) }
+
+    LaunchedEffect(whom) {
+        loading = true
+        clusters = withContext(Dispatchers.Default) { buildTopicClusters(whom, db) }
+        loading = false
+    }
+
+    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp)
+                .windowInsetsPadding(WindowInsets.navigationBars),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text("Topics in this chat", style = MaterialTheme.typography.titleMedium)
+            when {
+                loading -> Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    CircularProgressIndicator(
+                        strokeWidth = 2.dp,
+                        modifier = Modifier.size(16.dp),
+                    )
+                    Text("Clustering…", style = MaterialTheme.typography.bodyMedium)
+                }
+                clusters.isEmpty() -> Text(
+                    "Not enough messages indexed for this chat yet. " +
+                        "Open Search and let smart search index your archive first.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                else -> clusters.forEach { c ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable { onTapMessage(c.representativeId, c.representativeParentId) }
+                            .padding(vertical = 8.dp, horizontal = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Text(
+                            "${c.count}",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(50))
+                                .background(MaterialTheme.colorScheme.primaryContainer)
+                                .padding(horizontal = 10.dp, vertical = 4.dp),
+                        )
+                        Text(
+                            c.representativeText,
+                            style = MaterialTheme.typography.bodyMedium,
+                            maxLines = 2,
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+private data class TopicClusterRow(
+    val representativeId: String,
+    /** Non-null when the representative is a reply — caller should
+     *  open the thread keyed by this parent rather than scrolling
+     *  the main chat. */
+    val representativeParentId: String?,
+    val representativeText: String,
+    val count: Int,
+)
+
+/**
+ * Worker for [TopicsSheet]: read embeddings + their messages, drop
+ * one-word filler ("hmmm", "ok", "lol"), run k-means, return the
+ * per-cluster representative + count, sorted largest-first.
+ *
+ * Two changes from the original "closest-to-centroid" version that
+ * fix the "top topic is 'hmmm'" failure mode:
+ *   1. Pre-filter: messages under 20 chars or 4 words don't enter
+ *      clustering at all. Acknowledgments don't deserve a topic.
+ *   2. Per-cluster representative is the LONGEST message in that
+ *      cluster, not the centroid-closest one. The centroid of a
+ *      mostly-generic cluster is itself generic, so closest-to-
+ *      centroid picks the most generic message; longest carries
+ *      the most information and gives a recognizable snippet.
+ */
+private suspend fun buildTopicClusters(
+    whom: String,
+    db: AppDatabase,
+): List<TopicClusterRow> {
+    val embeddings = db.embeddings().forWhom(whom)
+    if (embeddings.size < 6) return emptyList()
+    data class Row(
+        val embedding: io.nisfeb.talon.data.MessageEmbeddingEntity,
+        val message: io.nisfeb.talon.data.MessageEntity,
+        val text: String,
+    )
+    val rows = embeddings.mapNotNull { e ->
+        val msg = db.messages().getOne(e.whom, e.id) ?: return@mapNotNull null
+        if (msg.isDeleted) return@mapNotNull null
+        val text = io.nisfeb.talon.urbit.StoryCache
+            .textFor(msg.id, msg.contentJson)
+            .replace('\n', ' ')
+            .trim()
+        val wordCount = text.split(Regex("\\s+")).count { it.isNotBlank() }
+        if (text.length < 20 || wordCount < 4) return@mapNotNull null
+        Row(e, msg, text)
+    }
+    if (rows.size < 6) return emptyList()
+
+    val vectors = rows.map {
+        io.nisfeb.talon.ai.Embedder.unpack(it.embedding.vector, it.embedding.dim)
+    }
+    val k = (rows.size / 8).coerceIn(3, 6)
+    val assignment = io.nisfeb.talon.ai.kMeansAssign(vectors, k)
+
+    val out = mutableListOf<TopicClusterRow>()
+    for (c in 0 until k) {
+        val members = rows.indices.filter { assignment[it] == c }
+        // Singleton clusters aren't a "topic" — skip them so the
+        // panel doesn't show one-off messages alongside real groups.
+        if (members.size < 2) continue
+        val longest = members.maxByOrNull { rows[it].text.length } ?: continue
+        val pick = rows[longest]
+        out += TopicClusterRow(
+            representativeId = pick.message.id,
+            representativeParentId = pick.message.parentId,
+            representativeText = pick.text.take(160),
+            count = members.size,
+        )
+    }
+    return out.sortedByDescending { it.count }
 }
 
 /**

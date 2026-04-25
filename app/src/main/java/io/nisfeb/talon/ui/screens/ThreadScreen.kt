@@ -51,8 +51,11 @@ import io.nisfeb.talon.data.ReactionEntity
 import io.nisfeb.talon.ui.ContactMap
 import io.nisfeb.talon.ui.EmojiCatalog
 import io.nisfeb.talon.ui.EmojiPickerDropdown
+import io.nisfeb.talon.ui.MentionPicker
 import io.nisfeb.talon.ui.ReactionPalette
 import io.nisfeb.talon.ui.detectEmojiQuery
+import io.nisfeb.talon.ui.detectMentionQuery
+import io.nisfeb.talon.ui.suggestionsFor
 import io.nisfeb.talon.ui.StoryRenderer
 import io.nisfeb.talon.ui.contactMapFlow
 import io.nisfeb.talon.urbit.StoryCache
@@ -74,6 +77,11 @@ fun ThreadScreen(
     onBack: () -> Unit,
     onOpenConversation: (whom: String) -> Unit,
     onOpenImage: (url: String) -> Unit,
+    /** When non-null, the screen anchors its initial scroll on this
+     *  reply id rather than the default "newest" position. Consumed
+     *  once, so re-entering the thread later goes back to default. */
+    initialScrollReplyId: String? = null,
+    onScrollConsumed: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val parent by remember(whom, parentId) {
@@ -126,9 +134,26 @@ fun ThreadScreen(
         }
     }
     var hasAnchored by remember(parentId) { mutableStateOf(false) }
-    LaunchedEffect(rows.second.size) {
+    LaunchedEffect(rows.second.size, initialScrollReplyId) {
         val total = rows.second.size + (if (parent != null) 2 else 0)
         if (total <= 0) return@LaunchedEffect
+        if (!hasAnchored && initialScrollReplyId != null) {
+            // Deep-link from the topics sheet (or anywhere else): try
+            // to land on the requested reply. Replies live after the
+            // parent + divider items, so add the offset back in.
+            val idx = rows.second.indexOfFirst { it.m.id == initialScrollReplyId }
+            if (idx >= 0) {
+                val parentOffset = if (parent != null) 2 else 0
+                listState.scrollToItem(index = idx + parentOffset)
+                hasAnchored = true
+                onScrollConsumed()
+                return@LaunchedEffect
+            }
+            // Reply not loaded yet — fall through to default once
+            // it arrives, but consume the anchor so we don't keep
+            // hijacking the scroll forever.
+            if (rows.second.isNotEmpty()) onScrollConsumed()
+        }
         if (!hasAnchored || isPinnedToBottom) {
             listState.scrollToItem(index = total - 1, scrollOffset = Int.MAX_VALUE)
             hasAnchored = true
@@ -142,6 +167,23 @@ fun ThreadScreen(
     val emojiQuery = detectEmojiQuery(draft.text, draft.selection.start)
     val emojiSuggestions = remember(emojiQuery) {
         emojiQuery?.let { (q, _) -> EmojiCatalog.search(q, limit = 6) } ?: emptyList()
+    }
+
+    // @mention picker plumbing — mirrors DmChatScreen. Pool comes
+    // from the parent author + reply authors + every known contact.
+    val contactList by remember {
+        db.contacts().stream()
+    }.collectAsState(initial = emptyList())
+    val allShips = remember(parent, rows.second, contactList) {
+        val set = linkedSetOf<String>()
+        parent?.author?.let { set.add(it) }
+        rows.second.forEach { set.add(it.m.author) }
+        contactList.forEach { set.add(it.ship) }
+        set.toList()
+    }
+    val mention = detectMentionQuery(draft.text, draft.selection.start)
+    val mentionSuggestions = remember(mention, allShips, contactMap) {
+        mention?.let { (q, _) -> suggestionsFor(q, contactMap, allShips) } ?: emptyList()
     }
     var pendingDelete by remember(parentId) { mutableStateOf<MessageEntity?>(null) }
 
@@ -247,6 +289,25 @@ fun ThreadScreen(
                     val before = draft.text.substring(0, colonIdx)
                     val after = draft.text.substring(caret)
                     val inserted = "${entry.glyph} "
+                    val newText = before + inserted + after
+                    val newCaret = before.length + inserted.length
+                    draft = TextFieldValue(
+                        text = newText,
+                        selection = TextRange(newCaret),
+                    )
+                },
+                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+            )
+        }
+        if (mentionSuggestions.isNotEmpty() && mention != null) {
+            MentionPicker(
+                suggestions = mentionSuggestions,
+                onPick = { ship ->
+                    val (_, atIdx) = mention
+                    val caret = draft.selection.start
+                    val before = draft.text.substring(0, atIdx)
+                    val after = draft.text.substring(caret)
+                    val inserted = "$ship "
                     val newText = before + inserted + after
                     val newCaret = before.length + inserted.length
                     draft = TextFieldValue(

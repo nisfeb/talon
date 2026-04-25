@@ -19,6 +19,7 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:enableOnBackInvokedCallback="true"
+        android:allowBackup="false"
         android:theme="@style/Theme.Talon">
 
         <activity

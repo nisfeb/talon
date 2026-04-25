@@ -23,6 +23,13 @@ object Notifications {
     const val CHANNEL_SYNC = "sync"
     const val EXTRA_OPEN_WHOM = "open_whom"
     const val EXTRA_SCROLL_TO_MESSAGE = "scroll_to_message"
+    /** When the notification is for a reply, the parent post id —
+     *  TalonApp uses it to route into ThreadScreen rather than the
+     *  main chat list. */
+    const val EXTRA_OPEN_THREAD = "open_thread"
+    /** When EXTRA_OPEN_THREAD is set, the specific reply id to anchor
+     *  the thread's initial scroll on. */
+    const val EXTRA_THREAD_ANCHOR = "thread_anchor"
 
     fun ensureChannel(context: Context) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
@@ -58,6 +65,10 @@ object Notifications {
         context: Context,
         whom: String,
         postId: String?,
+        /** Non-null when this notification is for a reply — the
+         *  parent's id. Tap routes into ThreadScreen anchored on
+         *  [postId] (the reply itself). */
+        parentId: String? = null,
         title: String,
         body: String,
         sentMs: Long,
@@ -68,7 +79,12 @@ object Notifications {
         val tapIntent = Intent(context, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
             putExtra(EXTRA_OPEN_WHOM, whom)
-            if (postId != null) putExtra(EXTRA_SCROLL_TO_MESSAGE, postId)
+            if (parentId != null) {
+                putExtra(EXTRA_OPEN_THREAD, parentId)
+                if (postId != null) putExtra(EXTRA_THREAD_ANCHOR, postId)
+            } else if (postId != null) {
+                putExtra(EXTRA_SCROLL_TO_MESSAGE, postId)
+            }
         }
         val pending = PendingIntent.getActivity(
             context,

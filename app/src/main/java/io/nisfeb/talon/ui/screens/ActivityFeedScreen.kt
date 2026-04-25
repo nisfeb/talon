@@ -48,6 +48,10 @@ fun ActivityFeedScreen(
     db: AppDatabase,
     repo: TlonChatRepo,
     onOpenConversation: (String) -> Unit,
+    /** Open [whom] and route into the thread for [parentId], anchored
+     *  on [replyId]. Used for reply / mention-in-reply rows so taps
+     *  land on the exact reply rather than just the chat. */
+    onOpenReply: (whom: String, parentId: String, replyId: String) -> Unit = { w, _, _ -> onOpenConversation(w) },
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -119,7 +123,14 @@ fun ActivityFeedScreen(
                     key = { i, it -> "$i:${it.whom}:${it.sentMs}:${it.kind}" },
                 ) { _, item ->
                     ActivityRow(item, contactMap) {
-                        item.whom?.let { onOpenConversation(it) }
+                        val w = item.whom ?: return@ActivityRow
+                        val parent = item.parentPostId
+                        val post = item.postId
+                        if (parent != null && post != null) {
+                            onOpenReply(w, parent, post)
+                        } else {
+                            onOpenConversation(w)
+                        }
                     }
                     HorizontalDivider()
                 }

@@ -36,11 +36,18 @@ class AiSettings(context: Context) {
         // Only used when provider = Custom. User-supplied OpenAI-
         // compatible base URL (e.g. "https://api.example.com/v1").
         val baseUrl: String? = null,
-        // Per-feature toggles. Default on once a key is configured — if
-        // the user set up AI, they probably want the features. Each can
-        // be flipped off individually in Settings.
+        // Cloud-AI features — default on once a key is configured (if
+        // the user set up cloud AI, they probably want them). Each
+        // can be flipped off individually.
         val catchMeUpEnabled: Boolean = true,
         val emojiReactEnabled: Boolean = true,
+        // On-device-AI features — all default OFF so users opt in
+        // explicitly. None require an API key. Toggles + state mirror
+        // to %settings when syncEnabled is true.
+        val entityActionsEnabled: Boolean = false,
+        val semanticSearchEnabled: Boolean = false,
+        val topicClustersEnabled: Boolean = false,
+        val importantMessagesEnabled: Boolean = false,
         // Opt-in: mirror provider/model/key/toggles into %settings so
         // they follow across devices. Off by default because it stores
         // the API key on the ship.
@@ -97,6 +104,10 @@ class AiSettings(context: Context) {
         _state.value = when (feature) {
             Feature.CatchMeUp -> _state.value.copy(catchMeUpEnabled = enabled)
             Feature.EmojiReact -> _state.value.copy(emojiReactEnabled = enabled)
+            Feature.EntityActions -> _state.value.copy(entityActionsEnabled = enabled)
+            Feature.SemanticSearch -> _state.value.copy(semanticSearchEnabled = enabled)
+            Feature.TopicClusters -> _state.value.copy(topicClustersEnabled = enabled)
+            Feature.ImportantMessages -> _state.value.copy(importantMessagesEnabled = enabled)
         }
         onStateChange?.invoke(_state.value, false)
     }
@@ -120,6 +131,10 @@ class AiSettings(context: Context) {
         baseUrl: String?,
         catchMeUpEnabled: Boolean,
         emojiReactEnabled: Boolean,
+        entityActionsEnabled: Boolean,
+        semanticSearchEnabled: Boolean,
+        topicClustersEnabled: Boolean,
+        importantMessagesEnabled: Boolean,
     ) {
         prefs.edit()
             .putString(KEY_PROVIDER, provider.name)
@@ -128,6 +143,10 @@ class AiSettings(context: Context) {
             .putString(KEY_BASE_URL, baseUrl?.takeIf { it.isNotBlank() })
             .putBoolean(Feature.CatchMeUp.key, catchMeUpEnabled)
             .putBoolean(Feature.EmojiReact.key, emojiReactEnabled)
+            .putBoolean(Feature.EntityActions.key, entityActionsEnabled)
+            .putBoolean(Feature.SemanticSearch.key, semanticSearchEnabled)
+            .putBoolean(Feature.TopicClusters.key, topicClustersEnabled)
+            .putBoolean(Feature.ImportantMessages.key, importantMessagesEnabled)
             .putBoolean(KEY_SYNC, true)
             .apply()
         _state.value = Config(
@@ -137,6 +156,10 @@ class AiSettings(context: Context) {
             baseUrl = baseUrl?.takeIf { it.isNotBlank() },
             catchMeUpEnabled = catchMeUpEnabled,
             emojiReactEnabled = emojiReactEnabled,
+            entityActionsEnabled = entityActionsEnabled,
+            semanticSearchEnabled = semanticSearchEnabled,
+            topicClustersEnabled = topicClustersEnabled,
+            importantMessagesEnabled = importantMessagesEnabled,
             syncEnabled = true,
         )
     }
@@ -156,8 +179,22 @@ class AiSettings(context: Context) {
     }
 
     private fun read(): Config {
-        val provider = prefs.getString(KEY_PROVIDER, null)
-            ?.let { runCatching { Provider.valueOf(it) }.getOrNull() }
+        val savedName = prefs.getString(KEY_PROVIDER, null)
+        val provider = savedName
+            ?.let {
+                runCatching { Provider.valueOf(it) }
+                    .onFailure { e ->
+                        // Don't silently mis-route the user's API key to
+                        // a different provider. Log it loud so any
+                        // future R8/keep-rule regression is noticed.
+                        android.util.Log.w(
+                            "AiSettings",
+                            "couldn't resolve saved provider '$it'; " +
+                                "falling back to Anthropic. ${e.message}",
+                        )
+                    }
+                    .getOrNull()
+            }
             ?: Provider.Anthropic
         val key = prefs.getString(KEY_API_KEY, "").orEmpty()
         val model = prefs.getString(KEY_MODEL, null)?.takeIf { it.isNotBlank() }
@@ -169,20 +206,61 @@ class AiSettings(context: Context) {
             baseUrl = baseUrl,
             catchMeUpEnabled = prefs.getBoolean(Feature.CatchMeUp.key, true),
             emojiReactEnabled = prefs.getBoolean(Feature.EmojiReact.key, true),
+            entityActionsEnabled = prefs.getBoolean(Feature.EntityActions.key, false),
+            semanticSearchEnabled = prefs.getBoolean(Feature.SemanticSearch.key, false),
+            topicClustersEnabled = prefs.getBoolean(Feature.TopicClusters.key, false),
+            importantMessagesEnabled = prefs.getBoolean(Feature.ImportantMessages.key, false),
             syncEnabled = prefs.getBoolean(KEY_SYNC, false),
         )
     }
 
-    enum class Feature(val key: String, val label: String, val description: String) {
+    /**
+     * `requiresCloudKey` distinguishes features that hit a configured
+     * AI provider (need an API key) from on-device features that
+     * stand alone. The Settings UI groups them so on-device toggles
+     * show even when no key is configured.
+     */
+    enum class Feature(
+        val key: String,
+        val label: String,
+        val description: String,
+        val requiresCloudKey: Boolean,
+    ) {
         CatchMeUp(
             "feat_catch_me_up",
             "Catch me up",
             "When you open a chat with unread messages, offer a summary.",
+            requiresCloudKey = true,
         ),
         EmojiReact(
             "feat_emoji_react",
             "AI emoji react",
             "Long-press a message → AI emoji picks a reaction for you.",
+            requiresCloudKey = true,
+        ),
+        EntityActions(
+            "feat_entity_actions",
+            "Action chips on messages",
+            "Detect dates, addresses, phone numbers, and email addresses in chat messages and surface tap-through chips. On-device.",
+            requiresCloudKey = false,
+        ),
+        SemanticSearch(
+            "feat_semantic_search",
+            "Smart search",
+            "Search messages by meaning, not just keywords. Embeds your local chat history on-device for the index.",
+            requiresCloudKey = false,
+        ),
+        TopicClusters(
+            "feat_topic_clusters",
+            "Topic clusters per chat",
+            "Group a chat's messages by topic so you can scan what's been discussed. On-device.",
+            requiresCloudKey = false,
+        ),
+        ImportantMessages(
+            "feat_important_messages",
+            "Highlight important messages",
+            "Flag incoming messages that look similar to ones you've bookmarked. On-device, needs at least 5 bookmarks.",
+            requiresCloudKey = false,
         ),
     }
 

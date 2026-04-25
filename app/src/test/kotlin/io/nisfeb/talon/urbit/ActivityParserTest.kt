@@ -37,10 +37,12 @@ class ActivityParserTest {
     }
 
     @Test
-    fun `group thread and base source keys yield null`() {
-        // We don't surface these kinds in the home list.
+    fun `group and base source keys yield null`() {
+        // We don't surface these kinds in the home list. (Thread
+        // variants used to fall here too — see the dedicated section
+        // below for the deep-link routing of `thread/` and
+        // `dm-thread/`.)
         assertNull(sourceKeyToWhom("group/~sampel/my-group"))
-        assertNull(sourceKeyToWhom("thread/chat/~x/y"))
         assertNull(sourceKeyToWhom("base"))
     }
 
@@ -190,5 +192,147 @@ class ActivityParserTest {
         val all = read["action"]!!.jsonObject["all"]!!.jsonObject
         assertEquals(JsonNull, all["time"])
         assertEquals(false, all["deep"]!!.jsonPrimitive.content.toBoolean())
+    }
+
+    // ─── parseActivityEventTarget — deep-link extraction ────────
+
+    private fun obj(raw: String) = json.parseToJsonElement(raw).jsonObject
+
+    @Test
+    fun `post-mention extracts the post id and no parent`() {
+        // Top-level mention — tap should scroll to this post in the
+        // chat, no thread routing.
+        val ev = obj("""{"key":{"id":"~author/170.141.184.507.933.044.937.549.665.940.933.705.728"}}""")
+        val t = parseActivityEventTarget("post-mention", ev)
+        assertEquals("~author/170141184507933044937549665940933705728", t.postId)
+        assertEquals(null, t.parentPostId)
+    }
+
+    @Test
+    fun `reply event with parent extracts both ids`() {
+        // Reply that mentions you — tap should open the thread for
+        // parent and anchor on this reply.
+        val ev = obj(
+            """
+            {"key":{"id":"~r/9.999"},
+             "parent":{"id":"~p/1.000"}}
+            """.trimIndent()
+        )
+        val t = parseActivityEventTarget("reply", ev)
+        assertEquals("~r/9999", t.postId)
+        assertEquals("~p/1000", t.parentPostId)
+    }
+
+    @Test
+    fun `dm-reply-mention also handled`() {
+        // Same shape but the wire tag has the dm- prefix; the parser
+        // gates on `tag.contains("reply")` so both tag families work.
+        val ev = obj(
+            """
+            {"key":{"id":"~r/2"},
+             "parent":{"id":"~p/1"}}
+            """.trimIndent()
+        )
+        val t = parseActivityEventTarget("dm-reply-mention", ev)
+        assertEquals("~r/2", t.postId)
+        assertEquals("~p/1", t.parentPostId)
+    }
+
+    @Test
+    fun `reply-mention falls back to top when parent is missing`() {
+        // Some shapes carry the parent under `top` instead of `parent`.
+        val ev = obj(
+            """
+            {"key":{"id":"~r/2.000"},
+             "top":{"id":"~p/1.000"}}
+            """.trimIndent()
+        )
+        val t = parseActivityEventTarget("reply-mention", ev)
+        assertEquals("~r/2000", t.postId)
+        assertEquals("~p/1000", t.parentPostId)
+    }
+
+    @Test
+    fun `reply tag with no parent treats keyId as the parent`() {
+        // Defensive: a reply event missing `parent`/`top` is malformed
+        // but observed on certain ships. Best-effort routes the user
+        // into the conversation; the keyId we have is the only id and
+        // it's the parent in the reply context.
+        val ev = obj("""{"key":{"id":"~p/1"}}""")
+        val t = parseActivityEventTarget("reply", ev)
+        assertEquals(null, t.postId)
+        assertEquals("~p/1", t.parentPostId)
+    }
+
+    @Test
+    fun `event with no key falls back to top-level id field`() {
+        // Older / shorter event shapes carry `id` directly without
+        // wrapping in `key`. Keeps deep-linking working on legacy
+        // ships that haven't moved to the wrapped form.
+        val ev = obj("""{"id":"~author/1.234"}""")
+        val t = parseActivityEventTarget("post-mention", ev)
+        assertEquals("~author/1234", t.postId)
+        assertEquals(null, t.parentPostId)
+    }
+
+    @Test
+    fun `unknown tag treats event as top-level`() {
+        val ev = obj("""{"key":{"id":"~author/1"}}""")
+        val t = parseActivityEventTarget("group-invite", ev)
+        assertEquals("~author/1", t.postId)
+        assertEquals(null, t.parentPostId)
+    }
+
+    @Test
+    fun `empty event returns nulls`() {
+        val t = parseActivityEventTarget("post-mention", obj("{}"))
+        assertEquals(null, t.postId)
+        assertEquals(null, t.parentPostId)
+    }
+
+    // ─── sourceKeyToWhom — thread variants ──────────────────────
+
+    @Test
+    fun `thread source-key resolves to underlying channel nest`() {
+        // `thread/<nest>/<msg-id>` — strip the trailing msg-id back
+        // off to get the channel's nest.
+        assertEquals(
+            "chat/~host/slug",
+            sourceKeyToWhom("thread/chat/~host/slug/170.141.184.507"),
+        )
+    }
+
+    @Test
+    fun `thread source-key with author-prefixed msg-id still resolves`() {
+        // Some shapes carry the msg-id as `~author/<da>` (two extra
+        // path segments). The nest is always exactly 3 segments, so
+        // we always slice the first 3.
+        assertEquals(
+            "chat/~host/slug",
+            sourceKeyToWhom("thread/chat/~host/slug/~author/170.141.184.507"),
+        )
+    }
+
+    @Test
+    fun `dm-thread source-key resolves to ship`() {
+        assertEquals(
+            "~sampel-palnet",
+            sourceKeyToWhom("dm-thread/~sampel-palnet/~author/170.141"),
+        )
+    }
+
+    @Test
+    fun `dm-thread source-key resolves to club`() {
+        assertEquals(
+            "0v4.abcde",
+            sourceKeyToWhom("dm-thread/0v4.abcde/~author/170.141"),
+        )
+    }
+
+    @Test
+    fun `unknown source-key kind still returns null`() {
+        assertEquals(null, sourceKeyToWhom("base"))
+        assertEquals(null, sourceKeyToWhom("group/~host/group-name"))
+        assertEquals(null, sourceKeyToWhom("contact/~sampel"))
     }
 }

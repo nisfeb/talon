@@ -19,6 +19,8 @@ class MainActivity : ComponentActivity() {
 
     private val deepLinkWhom = mutableStateOf<String?>(null)
     private val deepLinkMessageId = mutableStateOf<String?>(null)
+    private val deepLinkThreadParent = mutableStateOf<String?>(null)
+    private val deepLinkThreadAnchor = mutableStateOf<String?>(null)
     private val pendingShare = mutableStateOf<ShareIntent?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -37,11 +39,15 @@ class MainActivity : ComponentActivity() {
         setContent {
             val whom by deepLinkWhom
             val messageId by deepLinkMessageId
+            val threadParent by deepLinkThreadParent
+            val threadAnchor by deepLinkThreadAnchor
             val share by pendingShare
             TalonTheme {
                 TalonApp(
                     initialOpenWhom = whom,
                     initialScrollMessageId = messageId,
+                    initialOpenThread = threadParent,
+                    initialThreadAnchor = threadAnchor,
                     pendingShare = share,
                     onShareConsumed = { pendingShare.value = null },
                 )
@@ -62,6 +68,12 @@ class MainActivity : ComponentActivity() {
         }
         intent.getStringExtra(Notifications.EXTRA_SCROLL_TO_MESSAGE)?.let {
             deepLinkMessageId.value = it
+        }
+        intent.getStringExtra(Notifications.EXTRA_OPEN_THREAD)?.let {
+            deepLinkThreadParent.value = it
+        }
+        intent.getStringExtra(Notifications.EXTRA_THREAD_ANCHOR)?.let {
+            deepLinkThreadAnchor.value = it
         }
         ShareIntent.from(intent)?.let { pendingShare.value = it }
     }

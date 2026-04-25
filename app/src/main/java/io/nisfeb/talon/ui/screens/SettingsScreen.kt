@@ -238,24 +238,61 @@ fun SettingsScreen(
                 HorizontalDivider()
                 Spacer(Modifier.height(8.dp))
                 Text(
-                    "Features",
+                    "Cloud features",
                     style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
                 )
-                AiSettings.Feature.values().forEach { feature ->
+                AiSettings.Feature.values()
+                    .filter { it.requiresCloudKey }
+                    .forEach { feature ->
+                        FeatureToggleRow(
+                            label = feature.label,
+                            description = feature.description,
+                            enabled = aiFeatureEnabled(aiState, feature),
+                            onChange = { app.aiSettings.setFeature(feature, it) },
+                        )
+                    }
+            }
+
+            // On-device features: always shown, no API key required.
+            // Default OFF — every entry in here is opt-in.
+            Spacer(Modifier.height(8.dp))
+            HorizontalDivider()
+            Spacer(Modifier.height(8.dp))
+            Text(
+                "On-device features",
+                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
+            )
+            Text(
+                "Run entirely on your phone — no API key, no data sent off device.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            AiSettings.Feature.values()
+                .filter { !it.requiresCloudKey }
+                .forEach { feature ->
                     FeatureToggleRow(
                         label = feature.label,
                         description = feature.description,
-                        enabled = when (feature) {
-                            AiSettings.Feature.CatchMeUp -> aiState.catchMeUpEnabled
-                            AiSettings.Feature.EmojiReact -> aiState.emojiReactEnabled
-                        },
+                        enabled = aiFeatureEnabled(aiState, feature),
                         onChange = { app.aiSettings.setFeature(feature, it) },
                     )
                 }
-            }
         }
     }
 }
+
+/** Single source of truth for "is this feature toggle on?" — keeps the
+ *  Settings UI's toggle state in lockstep with the gates wired across
+ *  the rest of the app. */
+internal fun aiFeatureEnabled(state: AiSettings.Config, feature: AiSettings.Feature): Boolean =
+    when (feature) {
+        AiSettings.Feature.CatchMeUp -> state.catchMeUpEnabled
+        AiSettings.Feature.EmojiReact -> state.emojiReactEnabled
+        AiSettings.Feature.EntityActions -> state.entityActionsEnabled
+        AiSettings.Feature.SemanticSearch -> state.semanticSearchEnabled
+        AiSettings.Feature.TopicClusters -> state.topicClustersEnabled
+        AiSettings.Feature.ImportantMessages -> state.importantMessagesEnabled
+    }
 
 @Composable
 private fun FeatureToggleRow(
@@ -267,6 +304,7 @@ private fun FeatureToggleRow(
     Row(
         modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Column(modifier = Modifier.weight(1f)) {
             Text(label, style = MaterialTheme.typography.bodyLarge)

@@ -15,6 +15,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -50,13 +51,38 @@ fun SearchScreen(
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val app = context.applicationContext as io.nisfeb.talon.TalonApplication
+    val aiState by app.aiSettings.state.collectAsState()
+    val semanticEnabled = aiState.semanticSearchEnabled
     var query by remember { mutableStateOf("") }
+    var smartMode by remember(semanticEnabled) { mutableStateOf(false) }
     val trimmed = query.trim()
 
-    val results by remember(trimmed) {
-        if (trimmed.length < 2) flowOf(emptyList())
+    val substringResults by remember(trimmed, smartMode) {
+        if (smartMode || trimmed.length < 2) flowOf(emptyList())
         else db.messages().search(trimmed)
     }.collectAsState(initial = emptyList<MessageEntity>())
+
+    val semanticResults = remember { mutableStateOf<List<MessageEntity>>(emptyList()) }
+    var semanticBusy by remember { mutableStateOf(false) }
+    androidx.compose.runtime.LaunchedEffect(trimmed, smartMode) {
+        if (!smartMode || trimmed.length < 2) {
+            semanticResults.value = emptyList()
+            return@LaunchedEffect
+        }
+        semanticBusy = true
+        semanticResults.value = runCatching {
+            val vec = app.embedder.embed(trimmed) ?: return@runCatching emptyList()
+            val hits = io.nisfeb.talon.ai.semanticSearch(vec, db.embeddings())
+            // Hits are (whom, id, score); fetch the underlying messages
+            // and preserve hit-order (cosine-sim descending).
+            hits.mapNotNull { db.messages().getOne(it.whom, it.id) }
+        }.getOrElse { emptyList() }
+        semanticBusy = false
+    }
+
+    val results = if (smartMode) semanticResults.value else substringResults
 
     val people by remember(trimmed) {
         if (trimmed.length < 2) flowOf(emptyList())
@@ -72,6 +98,29 @@ fun SearchScreen(
         )
     }.collectAsState(initial = ContactMap.EMPTY)
 
+    val indexProgress by app.embeddingIndexer.progress.collectAsState()
+
+    // Important-messages highlights: scored against the centroid of
+    // the user's bookmarks. Recomputed when bookmarks change or when
+    // the indexer adds new rows. Hidden unless the user enabled the
+    // feature in Settings.
+    val highlightsEnabled = aiState.importantMessagesEnabled
+    val highlights = remember { mutableStateOf<List<MessageEntity>>(emptyList()) }
+    androidx.compose.runtime.LaunchedEffect(highlightsEnabled, indexProgress.indexed) {
+        highlights.value = if (!highlightsEnabled) emptyList()
+        else io.nisfeb.talon.ai.computeHighlights(db)
+    }
+
+    // Catch the index up to whatever new messages have landed since
+    // last indexer pass. start() is a no-op if already running, and
+    // skips already-embedded rows on the cheap. Cheaper than
+    // embedding every SSE message inline (which would compete with
+    // the messaging hot path on a reconnect flurry). Gated on the
+    // user enabling smart search.
+    androidx.compose.runtime.LaunchedEffect(semanticEnabled) {
+        if (semanticEnabled) app.embeddingIndexer.start()
+    }
+
     Column(modifier = modifier.windowInsetsPadding(WindowInsets.safeDrawing)) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
@@ -83,13 +132,62 @@ fun SearchScreen(
             OutlinedTextField(
                 value = query,
                 onValueChange = { query = it },
-                placeholder = { Text("Search messages") },
+                placeholder = {
+                    Text(if (smartMode) "Search by meaning" else "Search messages")
+                },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth().padding(start = 4.dp),
             )
         }
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            if (semanticEnabled) {
+                FilterChip(
+                    selected = smartMode,
+                    onClick = { smartMode = !smartMode },
+                    label = { Text(if (smartMode) "✨ Smart on" else "✨ Smart") },
+                )
+            }
+            if (semanticEnabled && smartMode) {
+                val p = indexProgress
+                val status = when {
+                    semanticBusy -> "embedding query…"
+                    p.running && p.total > 0 -> "indexing ${p.indexed}/${p.total}…"
+                    p.running -> "scanning local archive…"
+                    p.total == 0 -> "no messages indexed yet"
+                    else -> "${p.indexed} messages indexed"
+                }
+                Text(
+                    status,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
         HorizontalDivider()
-        if (trimmed.length < 2) {
+        if (trimmed.length < 2 && highlightsEnabled && highlights.value.isNotEmpty()) {
+            // No query yet, but the user has highlights — show them
+            // as the empty state. Same row component as a search hit.
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(vertical = 8.dp),
+            ) {
+                item(key = "__highlights_header", contentType = "header") {
+                    SectionHeader("Highlights")
+                }
+                items(
+                    items = highlights.value,
+                    key = { "hl:${it.whom}:${it.id}" },
+                    contentType = { "hl" },
+                ) { m ->
+                    ResultRow(m, contactMap) { onOpenConversation(m.whom) }
+                    HorizontalDivider()
+                }
+            }
+        } else if (trimmed.length < 2) {
             Text(
                 "Type at least two characters.",
                 style = MaterialTheme.typography.bodyMedium,

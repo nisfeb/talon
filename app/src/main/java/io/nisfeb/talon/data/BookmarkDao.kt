@@ -21,6 +21,10 @@ interface BookmarkDao {
     @Query("SELECT * FROM bookmarks")
     fun streamAll(): Flow<List<BookmarkEntity>>
 
+    /** Snapshot used by the highlight-scorer's centroid build. */
+    @Query("SELECT * FROM bookmarks")
+    suspend fun all(): List<BookmarkEntity>
+
     /**
      * Joined view used by the bookmarks screen. Deleted messages are
      * filtered out so tombstones don't show up — if the underlying post

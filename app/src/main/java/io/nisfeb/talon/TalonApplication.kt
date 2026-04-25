@@ -37,6 +37,8 @@ class TalonApplication : Application() {
         private set
     lateinit var ai: AiFeatures
         private set
+    lateinit var embedder: io.nisfeb.talon.ai.Embedder
+        private set
 
     // Ship-scoped — rebuilt on ship switch. lateinit so the first
     // access after startup is valid (initialized in onCreate for the
@@ -50,6 +52,8 @@ class TalonApplication : Application() {
     lateinit var drafts: DraftStore
         private set
     lateinit var shortcuts: ShortcutsPublisher
+        private set
+    lateinit var embeddingIndexer: io.nisfeb.talon.ai.EmbeddingIndexer
         private set
 
     private val _activeShip = MutableStateFlow<String?>(null)
@@ -77,7 +81,14 @@ class TalonApplication : Application() {
         shipProfiles = ShipProfileStore(this)
         aiClient = AiClient(settingsProvider = { aiSettings.state.value })
         ai = AiFeatures(aiClient)
+        embedder = io.nisfeb.talon.ai.Embedder(this)
         Notifications.ensureChannel(this)
+
+        // Pre-warm the ML Kit Entity Extraction model so the first
+        // chat to render isn't blocked on a one-off ~12MB download.
+        // Best-effort; failures (no Play Services, etc.) just mean
+        // chips don't appear until the model lands later.
+        runCatching { io.nisfeb.talon.ai.EntityActions.warmup() }
 
         // Pick the ship to open with — the most-recently-active one,
         // or the single saved ship if exactly one exists, or the
@@ -122,6 +133,7 @@ class TalonApplication : Application() {
         repo = TlonChatRepo(db, aiSettings)
         drafts = DraftStore(this, ship)
         shortcuts = ShortcutsPublisher(this, db)
+        embeddingIndexer = io.nisfeb.talon.ai.EmbeddingIndexer(db, embedder, appScope)
     }
 
     /**

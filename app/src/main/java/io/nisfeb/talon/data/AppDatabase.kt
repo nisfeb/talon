@@ -22,8 +22,9 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         NotifyPreferenceEntity::class,
         GroupOrderEntity::class,
         ReactionUsageEntity::class,
+        MessageEmbeddingEntity::class,
     ],
-    version = 21,
+    version = 22,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -38,6 +39,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun notifyPrefs(): NotifyPreferenceDao
     abstract fun groupOrders(): GroupOrderDao
     abstract fun reactionUsage(): ReactionUsageDao
+    abstract fun embeddings(): EmbeddingDao
 
     companion object {
         private val MIGRATION_17_18 = object : Migration(17, 18) {
@@ -76,6 +78,25 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        private val MIGRATION_21_22 = object : Migration(21, 22) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // Per-message sentence embeddings powering semantic
+                // search. Composite PK matches `messages` (whom, id).
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS message_embeddings (
+                        whom TEXT NOT NULL,
+                        id TEXT NOT NULL,
+                        vector BLOB NOT NULL,
+                        dim INTEGER NOT NULL,
+                        textHash INTEGER NOT NULL,
+                        PRIMARY KEY (whom, id)
+                    )
+                    """.trimIndent()
+                )
+            }
+        }
+
         /**
          * Open the Room database for a specific ship. Each ship's
          * data lives in its own file so switching ships is a clean
@@ -92,7 +113,7 @@ abstract class AppDatabase : RoomDatabase() {
             )
                 .addMigrations(
                     MIGRATION_17_18, MIGRATION_18_19, MIGRATION_19_20,
-                    MIGRATION_20_21,
+                    MIGRATION_20_21, MIGRATION_21_22,
                 )
                 .fallbackToDestructiveMigration()
                 .build()

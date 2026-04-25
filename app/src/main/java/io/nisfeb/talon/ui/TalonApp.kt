@@ -91,6 +91,11 @@ private fun resolveFileName(
 fun TalonApp(
     initialOpenWhom: String? = null,
     initialScrollMessageId: String? = null,
+    /** Set when a notification's tap-intent points at a thread reply
+     *  — TalonApp routes into ThreadScreen anchored on
+     *  [initialThreadAnchor] rather than just the chat. */
+    initialOpenThread: String? = null,
+    initialThreadAnchor: String? = null,
     pendingShare: ShareIntent? = null,
     onShareConsumed: () -> Unit = {},
 ) {
@@ -111,7 +116,11 @@ fun TalonApp(
     // Scroll target is consumed once the chat screen actually uses it,
     // so navigating back and reopening doesn't re-snap to the same msg.
     var pendingScrollMessageId by remember { mutableStateOf(initialScrollMessageId) }
-    var openThread by remember { mutableStateOf<String?>(null) }
+    var openThread by remember { mutableStateOf<String?>(initialOpenThread) }
+    /** When non-null, ThreadScreen anchors its initial scroll to this
+     *  reply id rather than the newest one. Consumed-once after the
+     *  thread screen reads it. */
+    var pendingThreadAnchor by remember { mutableStateOf<String?>(initialThreadAnchor) }
     var searchOpen by remember { mutableStateOf(false) }
     var newDmOpen by remember { mutableStateOf(false) }
     var viewerImageUrl by remember { mutableStateOf<String?>(null) }
@@ -162,6 +171,13 @@ fun TalonApp(
             app.repo.start(app.session)
             app.shortcuts.start()
             TalonSyncService.start(context)
+            // Backfill semantic-search embeddings only when the user
+            // has opted in. Indexer is idempotent so it's safe to call
+            // every launch — but if the feature is off we skip the
+            // model download + CPU entirely.
+            if (app.aiSettings.state.value.semanticSearchEnabled) {
+                app.embeddingIndexer.start()
+            }
         }
     }
 
@@ -217,6 +233,7 @@ fun TalonApp(
                         context = context,
                         whom = m.whom,
                         postId = m.id,
+                        parentId = m.parentId,
                         title = title,
                         body = if (m.whom.startsWith("~")) preview else "$authorLabel: $preview",
                         sentMs = m.sentMs,
@@ -337,6 +354,12 @@ fun TalonApp(
                     activityOpen = false
                     openWhom = whom
                 },
+                onOpenReply = { whom, parent, replyId ->
+                    activityOpen = false
+                    openWhom = whom
+                    pendingThreadAnchor = replyId
+                    openThread = parent
+                },
                 onBack = { activityOpen = false },
                 modifier = mod,
             )
@@ -453,6 +476,8 @@ fun TalonApp(
                 ourPatp = loggedInShip ?: "",
                 whom = openWhom!!,
                 parentId = openThread!!,
+                initialScrollReplyId = pendingThreadAnchor,
+                onScrollConsumed = { pendingThreadAnchor = null },
                 onBack = { openThread = null },
                 onOpenConversation = openConversation,
                 onOpenImage = { viewerImageUrl = it },
@@ -532,6 +557,10 @@ fun TalonApp(
                 onScrollConsumed = { pendingScrollMessageId = null },
                 onBack = { openWhom = null },
                 onOpenThread = { openThread = it },
+                onOpenThreadAt = { parent, anchor ->
+                    pendingThreadAnchor = anchor
+                    openThread = parent
+                },
                 onOpenConversation = openConversation,
                 onOpenImage = { viewerImageUrl = it },
                 onOpenSelfProfile = { editingProfile = true },

@@ -16,13 +16,33 @@ import kotlinx.serialization.json.put
 
 /**
  * Split `"<kind>/<rest>"` source keys into a `whom` we can look up
- * locally. Kinds we don't surface (`thread/`, `group/`, `base`) return
- * null so the caller can skip them.
+ * locally. Tlon's source-key encoding (see `desk/lib/activity-json.hoon
+ * string-source`) supports six shapes; we map them all back to a
+ * `whom` that points at the parent conversation:
+ *  - `ship/<patp>`            → the ship          (1:1 DM)
+ *  - `club/<id>`              → the club          (group DM)
+ *  - `channel/<nest>`         → the channel       (group channel)
+ *  - `thread/<nest>/<msg>`    → the channel       (top-level chat)
+ *  - `dm-thread/<whom>/<msg>` → the ship/club     (top-level DM)
+ *  - anything else (`group/`, `base`, `contact/`) → null (we don't
+ *    surface those events in the per-conversation home list).
  */
 internal fun sourceKeyToWhom(key: String): String? = when {
     key.startsWith("ship/") -> key.removePrefix("ship/")
     key.startsWith("club/") -> key.removePrefix("club/")
     key.startsWith("channel/") -> key.removePrefix("channel/")
+    key.startsWith("thread/") -> {
+        // `thread/<nest>/<msg-id>`. The nest is itself
+        // `<kind>/~host/<slug>` (3 parts). Tail is the msg id.
+        val parts = key.removePrefix("thread/").split("/")
+        if (parts.size >= 3) parts.subList(0, 3).joinToString("/") else null
+    }
+    key.startsWith("dm-thread/") -> {
+        // `dm-thread/<whom>/<msg-id>`. The whom is one path segment —
+        // either `~ship` or `0vclub` — and the msg-id has its own
+        // slashes that we don't need.
+        key.removePrefix("dm-thread/").substringBefore('/').takeIf { it.isNotEmpty() }
+    }
     else -> null
 }
 
@@ -76,6 +96,40 @@ internal fun toUnread(
  * Returns null when [whom] is a channel but we don't know its group
  * (caller must resolve the group flag first).
  */
+/**
+ * Pull the post id + parent post id out of a single %activity event
+ * object. Tlon's events use a few overlapping shapes:
+ *  - `key.id` is the message id of the event (post or reply)
+ *  - `parent.id` is the parent post id when the event is about a reply
+ *  - some shapes use `top` for the parent (e.g. dm-reply-mention)
+ *  - older / shorter shapes carry `id` directly without a `key` wrap
+ *
+ * The tag tells us whether to interpret the event as a reply
+ * ("reply", "dm-reply", "reply-mention", "dm-reply-mention") — for
+ * those, we re-target so callers can deep-link into the right thread
+ * + reply. Returns ids in their canonical undotted form.
+ */
+internal data class ActivityEventTarget(
+    val postId: String?,
+    val parentPostId: String?,
+)
+
+internal fun parseActivityEventTarget(tag: String, eventObj: JsonObject): ActivityEventTarget {
+    val keyId = (eventObj["key"] as? JsonObject)?.get("id").asStr()
+        ?: eventObj["id"].asStr()
+    val parentId = (eventObj["parent"] as? JsonObject)?.get("id").asStr()
+        ?: (eventObj["top"] as? JsonObject)?.get("id").asStr()
+    val isReplyTag = tag.contains("reply")
+    return when {
+        isReplyTag && parentId != null ->
+            ActivityEventTarget(keyId?.let(::undotAtom), parentId.let(::undotAtom))
+        isReplyTag && parentId == null ->
+            ActivityEventTarget(null, keyId?.let(::undotAtom))
+        else ->
+            ActivityEventTarget(keyId?.let(::undotAtom), null)
+    }
+}
+
 internal fun activityReadSource(whom: String, groupFlag: String? = null): JsonObject? {
     return when {
         whom.startsWith("~") -> buildJsonObject {

@@ -987,6 +987,12 @@ class TlonChatRepo(
         val contentJson: String?,  // story JSON for preview rendering
         val sentMs: Long,          // event time for sorting + display
         val title: String,         // human label for the source convo
+        /** Post id of the message the event is about — used for chat
+         *  scroll-to or thread anchoring on tap. */
+        val postId: String? = null,
+        /** When the event is about a reply, the parent post id.
+         *  Tap routes into ThreadScreen anchored on [postId]. */
+        val parentPostId: String? = null,
     )
 
     suspend fun fetchActivityFeed(): List<ActivityFeedItem> {
@@ -1030,6 +1036,12 @@ class TlonChatRepo(
                 val timeStr = wrap["time"].asStr() ?: ""
                 val sentMs = parseEventTimeMs(timeStr, eventObj)
 
+                // Post + parent ids power tap-to-deep-link into the
+                // exact reply / chat scroll-to. Pulled out into the
+                // pure parseActivityEventTarget helper so wire-shape
+                // drift surfaces in tests.
+                val target = parseActivityEventTarget(tag, eventObj)
+
                 items.add(
                     ActivityFeedItem(
                         kind = label,
@@ -1038,6 +1050,8 @@ class TlonChatRepo(
                         contentJson = content,
                         sentMs = sentMs,
                         title = title,
+                        postId = target.postId,
+                        parentPostId = target.parentPostId,
                     )
                 )
             }

@@ -112,6 +112,12 @@ abstract class MessageDao {
     @Query("DELETE FROM messages WHERE whom = :whom AND id = :id")
     abstract suspend fun hardDelete(whom: String, id: String)
 
+    /** Stable pagination across the entire messages table — used by
+     *  the embedding indexer's backfill pass. Includes soft-deleted
+     *  rows so the indexer can mark them seen and skip on re-runs. */
+    @Query("SELECT * FROM messages ORDER BY whom, id LIMIT :limit OFFSET :offset")
+    abstract suspend fun pageAll(offset: Int, limit: Int): List<MessageEntity>
+
     /**
      * Reap our own `local_*` optimistic-insert twin for a post that the
      * server just echoed back under its own id. Scoped to (whom,

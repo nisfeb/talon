@@ -13,9 +13,12 @@ android {
     defaultConfig {
         applicationId = "io.nisfeb.talon"
         minSdk = 26
-        targetSdk = 34
-        versionCode = 1
-        versionName = "0.1.0"
+        // Play Store requires new apps to target "latest API - 1". 35
+        // matches what RELEASE.md already documents and opts us into
+        // Android 15 behavior changes (16 KB page sizes, edge-to-edge).
+        targetSdk = 35
+        versionCode = 3
+        versionName = "0.2.1"
     }
 
     buildTypes {
@@ -90,6 +93,8 @@ dependencies {
 
     implementation(libs.reorderable)
     implementation(libs.androidx.security.crypto)
+    implementation(libs.mlkit.entity.extraction)
+    implementation(libs.mediapipe.tasks.text)
 
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
