@@ -50,6 +50,7 @@ import io.nisfeb.talon.ui.screens.NotebookPostScreen
 import io.nisfeb.talon.ui.screens.BookmarksScreen
 import io.nisfeb.talon.ui.screens.StatusFeedScreen
 import io.nisfeb.talon.ui.screens.ThreadScreen
+import io.nisfeb.talon.ui.screens.WatchwordsScreen
 import kotlinx.coroutines.launch
 
 /** Cheap substring test — Story mention spans serialize as {"ship":"~patp"}. */
@@ -138,6 +139,7 @@ fun TalonApp(
     var statusFeedOpen by remember { mutableStateOf(false) }
     var bookmarksOpen by remember { mutableStateOf(false) }
     var activityOpen by remember { mutableStateOf(false) }
+    var watchwordsOpen by remember { mutableStateOf(false) }
     var settingsOpen by remember { mutableStateOf(false) }
     var adminListOpen by remember { mutableStateOf(false) }
     var adminGroupFlag by remember { mutableStateOf<String?>(null) }
@@ -392,6 +394,7 @@ fun TalonApp(
         BackHandler(enabled = statusFeedOpen) { statusFeedOpen = false }
         BackHandler(enabled = bookmarksOpen) { bookmarksOpen = false }
         BackHandler(enabled = activityOpen) { activityOpen = false }
+        BackHandler(enabled = watchwordsOpen) { watchwordsOpen = false }
         BackHandler(enabled = settingsOpen) { settingsOpen = false }
         BackHandler(enabled = adminGroupFlag != null) { adminGroupFlag = null }
         BackHandler(enabled = adminListOpen && adminGroupFlag == null) {
@@ -421,6 +424,7 @@ fun TalonApp(
             statusFeedOpen -> "StatusFeed"
             bookmarksOpen -> "Bookmarks"
             activityOpen -> "Activity"
+            watchwordsOpen -> "Watchwords"
             adminGroupFlag != null -> "GroupAdmin($adminGroupFlag)"
             adminListOpen -> "AdminList"
             invitesOpen -> "Invites"
@@ -508,6 +512,17 @@ fun TalonApp(
                     openThread = parent
                 },
                 onBack = { activityOpen = false },
+                modifier = mod,
+            )
+
+            watchwordsOpen -> WatchwordsScreen(
+                db = app.db,
+                onBack = { watchwordsOpen = false },
+                onOpenConversation = { whom, postId ->
+                    openWhom = whom
+                    pendingScrollMessageId = postId
+                    watchwordsOpen = false
+                },
                 modifier = mod,
             )
 
@@ -698,6 +713,7 @@ fun TalonApp(
                 onOpenStatusFeed = { statusFeedOpen = true },
                 onOpenBookmarks = { bookmarksOpen = true },
                 onOpenActivity = { activityOpen = true },
+                onOpenWatchwords = { watchwordsOpen = true },
                 onOpenAdministration = { adminListOpen = true },
                 onOpenInvites = { invitesOpen = true },
                 onOpenSettings = { settingsOpen = true },
