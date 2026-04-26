@@ -678,6 +678,8 @@ fun DmChatScreen(
         db.notifyPrefs().stream(whom)
     }.collectAsState(initial = null)
     val notifyLevel = notifyPref?.level ?: NotifyLevel.DEFAULT
+    val excludedFromWatchwords by talonApp.watchwords.excludes.collectAsState()
+    val isExcludedFromWatchwords = whom in excludedFromWatchwords
 
     Column(
         modifier = modifier
@@ -743,6 +745,21 @@ fun DmChatScreen(
                             notifyMenuOpen = false
                             scope.launch {
                                 repo.settingsSync.setNotifyLevel(whom, NotifyLevel.NONE)
+                            }
+                        },
+                    )
+                    androidx.compose.material3.HorizontalDivider()
+                    DropdownMenuItem(
+                        text = {
+                            Text(
+                                if (isExcludedFromWatchwords) "Include in watchwords"
+                                else "Exclude from watchwords"
+                            )
+                        },
+                        onClick = {
+                            notifyMenuOpen = false
+                            scope.launch {
+                                talonApp.watchwords.excludeChat(whom, !isExcludedFromWatchwords)
                             }
                         },
                     )
