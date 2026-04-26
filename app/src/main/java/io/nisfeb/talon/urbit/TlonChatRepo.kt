@@ -1631,6 +1631,7 @@ class TlonChatRepo(
             // we'd previously regressed by trusting it.
             db.messages().softDelete(whom, postId)
             db.reactions().clearForPost(whom, postId)
+            db.watchwords().clearHitsForPost(whom, postId)
         }
         when {
             whom.startsWith("~") -> {
@@ -2050,6 +2051,7 @@ class TlonChatRepo(
         response["del"]?.let {
             db.messages().softDelete(whom, id)
             db.reactions().clearForPost(whom, id)
+            db.watchwords().clearHitsForPost(whom, id)
             return
         }
         (response["add-react"] as? JsonObject)?.let { ar ->
@@ -2093,6 +2095,7 @@ class TlonChatRepo(
         delta["del"]?.let {
             db.messages().softDelete(whom, replyId)
             db.reactions().clearForPost(whom, replyId)
+            db.watchwords().clearHitsForPost(whom, replyId)
             return
         }
         (delta["add-react"] as? JsonObject)?.let { ar ->
@@ -2143,6 +2146,7 @@ class TlonChatRepo(
                 }
                 db.messages().softDelete(nest, id)
                 db.reactions().clearForPost(nest, id)
+                db.watchwords().clearHitsForPost(nest, id)
             }
             is ChannelDeltaIntent.PostReactions -> {
                 db.reactions().clearForPost(nest, intent.id)
@@ -2187,6 +2191,7 @@ class TlonChatRepo(
             is ReplyIntent.Tombstone, is ReplyIntent.Deleted -> {
                 db.messages().softDelete(whom, replyId)
                 db.reactions().clearForPost(whom, replyId)
+                db.watchwords().clearHitsForPost(whom, replyId)
             }
             is ReplyIntent.Reactions -> {
                 db.reactions().clearForPost(whom, replyId)
@@ -2604,6 +2609,7 @@ class TlonChatRepo(
         result.tombstones.forEach { id ->
             db.messages().softDelete(whom, id)
             db.reactions().clearForPost(whom, id)
+            db.watchwords().clearHitsForPost(whom, id)
         }
     }
 

@@ -80,6 +80,16 @@ interface WatchwordsDao {
     suspend fun clearHitsForTerm(term: String)
 
     /**
+     * Drop every hit (across all terms) that points at one specific
+     * message. Called from the soft-delete path so when a sender
+     * tombstones a message, any watchword hits that captured it are
+     * removed from the feed too — otherwise the hit row outlives its
+     * message and tapping it lands on a deleted post.
+     */
+    @Query("DELETE FROM watchword_hits WHERE whom = :whom AND postId = :postId")
+    suspend fun clearHitsForPost(whom: String, postId: String)
+
+    /**
      * Trim a term's hit rows down to the newest [keep] entries by sentMs.
      * Uses the (term, sentMs) index so the subquery is bounded.
      *
