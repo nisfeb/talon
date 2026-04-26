@@ -425,7 +425,7 @@ class WatchwordMatcherTest {
 
 Run: `cd /home/sneagan/software/personal/talon && JAVA_HOME=/home/sneagan/jdk-install/jdk-17.0.12+7 ./gradlew :app:testDebugUnitTest --tests 'io.nisfeb.talon.ai.WatchwordMatcherTest' 2>&1 | tail -20`
 
-Expected: 14 failures (all assertions returning the wrong answer because `matchesWordBoundary` always returns `false`).
+Expected: 9 failures (the 9 `assertTrue` test methods fail; the 6 `assertFalse` tests trivially pass against the always-false stub).
 
 - [ ] **Step 4: Implement `matchesWordBoundary`.**
 
