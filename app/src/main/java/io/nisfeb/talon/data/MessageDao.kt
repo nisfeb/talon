@@ -178,6 +178,22 @@ abstract class MessageDao {
         LIMIT 100
     """)
     abstract fun search(needle: String): Flow<List<MessageEntity>>
+
+    /**
+     * Backfill candidates for [Watchwords.runBackfill]. The LIKE
+     * pre-filter on contentJson narrows candidates without parsing
+     * JSON; callers verify each survivor against the rendered plain
+     * text in memory. Returns a List so the consumer can iterate and
+     * break once the per-term hit cap is reached.
+     */
+    @Query("""
+        SELECT * FROM messages
+        WHERE isDeleted = 0
+          AND author != :exceptAuthor
+          AND contentJson LIKE '%' || :term || '%' COLLATE NOCASE
+        ORDER BY sentMs DESC
+    """)
+    abstract suspend fun candidatesForBackfill(term: String, exceptAuthor: String): List<MessageEntity>
 }
 
 data class ReplyCount(val postId: String, val count: Int)

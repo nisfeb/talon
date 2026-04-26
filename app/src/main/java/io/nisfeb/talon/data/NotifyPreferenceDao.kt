@@ -16,6 +16,12 @@ interface NotifyPreferenceDao {
     @Query("SELECT level FROM notify_preferences WHERE whom = :whom LIMIT 1")
     suspend fun levelFor(whom: String): String?
 
+    /** Set of every chat the user has muted (level = "none"). Used by
+     *  Watchwords to exclude muted chats from both notifications and
+     *  the hits feed. */
+    @Query("SELECT whom FROM notify_preferences WHERE level = 'none'")
+    suspend fun mutedWhoms(): List<String>
+
     @Query("SELECT * FROM notify_preferences WHERE whom = :whom LIMIT 1")
     fun stream(whom: String): Flow<NotifyPreferenceEntity?>
 
