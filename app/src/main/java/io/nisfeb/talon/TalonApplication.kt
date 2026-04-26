@@ -59,14 +59,19 @@ class TalonApplication : Application() {
     lateinit var watchwords: io.nisfeb.talon.ai.Watchwords
         private set
 
+    // Both lazy so neither touches Context until after attachBaseContext()
+    // / onCreate() — eager property initializers run during the
+    // Application constructor, before Context is wired up, and
+    // getSharedPreferences would NPE.
     private val watchwordsPrefs by lazy {
         getSharedPreferences("talon_watchwords", MODE_PRIVATE)
     }
 
-    private val _watchwordsSyncEnabled = MutableStateFlow(
-        watchwordsPrefs.getBoolean(KEY_WATCHWORDS_SYNC, false)
-    )
-    val watchwordsSyncEnabled: StateFlow<Boolean> = _watchwordsSyncEnabled.asStateFlow()
+    private val _watchwordsSyncEnabled by lazy {
+        MutableStateFlow(watchwordsPrefs.getBoolean(KEY_WATCHWORDS_SYNC, false))
+    }
+    val watchwordsSyncEnabled: StateFlow<Boolean>
+        get() = _watchwordsSyncEnabled.asStateFlow()
 
     fun setWatchwordsSyncEnabled(enabled: Boolean) {
         if (_watchwordsSyncEnabled.value == enabled) return
