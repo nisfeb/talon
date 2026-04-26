@@ -42,6 +42,7 @@ import androidx.compose.ui.unit.dp
 import io.nisfeb.talon.TalonApplication
 import io.nisfeb.talon.data.ChannelGroupEntity
 import io.nisfeb.talon.ui.Avatar
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 
 /**
@@ -66,10 +67,12 @@ fun GroupHomeScreen(
     val app = ctx.applicationContext as TalonApplication
     val scope = rememberCoroutineScope()
 
-    val group by remember(flag) { app.db.groups().streamGroup(flag) }
-        .collectAsState(initial = null)
-    val channels by remember(flag) { app.db.groups().streamChannelsForGroup(flag) }
-        .collectAsState(initial = emptyList())
+    val group by remember(flag) {
+        app.db.groups().streamGroup(flag).distinctUntilChanged()
+    }.collectAsState(initial = null)
+    val channels by remember(flag) {
+        app.db.groups().streamChannelsForGroup(flag).distinctUntilChanged()
+    }.collectAsState(initial = emptyList())
 
     var joining by remember { mutableStateOf(false) }
     var joinError by remember { mutableStateOf<String?>(null) }

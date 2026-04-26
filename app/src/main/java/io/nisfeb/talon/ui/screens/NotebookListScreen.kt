@@ -91,11 +91,10 @@ fun NotebookListScreen(
             .flowOn(Dispatchers.Default)
     }.collectAsState(initial = emptyList())
 
-    var refreshing by remember(whom) { mutableStateOf(false) }
-    // Loading state controls only the *first-paint* spinner shown when
-    // there's nothing cached yet. Once cached posts arrive, the
-    // refreshing flag drives a thin progress strip instead so the
-    // grid stays interactive.
+    // First-paint spinner shown only when there's nothing cached yet.
+    // Once cached posts arrive the LazyColumn just renders them — a
+    // background refresh that fails (wedged network ⇒ 6s OkHttp cap)
+    // shouldn't leave a spinner running on top of content.
     var loading by remember { mutableStateOf(true) }
     // Clear the badge instantly: zero out the home-snapshot row (so a
     // back-nav paints a fresh state immediately) and tell the repo the
@@ -113,50 +112,8 @@ fun NotebookListScreen(
         // Always scry newest on mount so we catch up on anything the
         // SSE stream missed (and so first-open isn't empty). The
         // subscription keeps us live after.
-        val mountMs = android.os.SystemClock.elapsedRealtime()
-        android.util.Log.i("NotebookList", "mount whom=$whom posts=${posts.size}")
-        refreshing = true
-        val started = android.os.SystemClock.elapsedRealtime()
         runCatching { repo.refreshConversation(whom, count = 30) }
-            .onSuccess {
-                android.util.Log.i(
-                    "NotebookList",
-                    "refresh $whom done in ${android.os.SystemClock.elapsedRealtime() - started}ms posts=${posts.size}",
-                )
-            }
-            .onFailure {
-                android.util.Log.w(
-                    "NotebookList",
-                    "refresh $whom failed after ${android.os.SystemClock.elapsedRealtime() - started}ms: ${it.message}",
-                )
-            }
         loading = false
-        refreshing = false
-        android.util.Log.i(
-            "NotebookList",
-            "post-refresh whom=$whom posts=${posts.size} elapsed=${android.os.SystemClock.elapsedRealtime() - mountMs}ms",
-        )
-    }
-
-    // Trace each fresh emission of the post list to confirm Room is
-    // actually delivering cached rows on essays-open.
-    LaunchedEffect(whom) {
-        val mountMs = android.os.SystemClock.elapsedRealtime()
-        var firstEmit = true
-        androidx.compose.runtime.snapshotFlow { posts.size }.collect { n ->
-            if (firstEmit) {
-                android.util.Log.i(
-                    "NotebookList",
-                    "first posts emit whom=$whom size=$n elapsed=${android.os.SystemClock.elapsedRealtime() - mountMs}ms",
-                )
-                firstEmit = false
-            } else {
-                android.util.Log.v(
-                    "NotebookList",
-                    "posts update whom=$whom size=$n elapsed=${android.os.SystemClock.elapsedRealtime() - mountMs}ms",
-                )
-            }
-        }
     }
 
     val title = remember(contactMap, whom) { contactMap.conversationLabel(whom) }
@@ -180,17 +137,6 @@ fun NotebookListScreen(
             }
         }
         HorizontalDivider()
-        // Subtle network-activity strip while a refresh scry is in
-        // flight, but only once we already have cached posts to show
-        // — the "no posts yet" first-open path uses the centered
-        // CircularProgressIndicator instead.
-        if (refreshing && posts.isNotEmpty()) {
-            androidx.compose.material3.LinearProgressIndicator(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(2.dp),
-            )
-        }
         when {
             loading && posts.isEmpty() -> Row(
                 modifier = Modifier.fillMaxWidth().padding(24.dp),

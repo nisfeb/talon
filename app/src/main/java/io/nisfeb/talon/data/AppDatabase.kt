@@ -26,7 +26,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         BookmarkFolderEntity::class,
         BookmarkFolderMemberEntity::class,
     ],
-    version = 24,
+    version = 25,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -100,6 +100,19 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        private val MIGRATION_24_25 = object : Migration(24, 25) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // streamChannelsForGroup(flag) was scanning the entire
+                // channel_groups table on every GroupHomeScreen open
+                // and on every channel_groups invalidation propagating
+                // through contactMapFlow.
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS index_channel_groups_groupFlag " +
+                        "ON channel_groups (groupFlag)"
+                )
+            }
+        }
+
         private val MIGRATION_23_24 = object : Migration(23, 24) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 // Chat-open was scanning whom's slice and sorting by
@@ -164,7 +177,7 @@ abstract class AppDatabase : RoomDatabase() {
                 .addMigrations(
                     MIGRATION_17_18, MIGRATION_18_19, MIGRATION_19_20,
                     MIGRATION_20_21, MIGRATION_21_22, MIGRATION_22_23,
-                    MIGRATION_23_24,
+                    MIGRATION_23_24, MIGRATION_24_25,
                 )
                 .fallbackToDestructiveMigration()
                 .build()

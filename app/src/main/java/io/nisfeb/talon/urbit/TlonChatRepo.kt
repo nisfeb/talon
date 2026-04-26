@@ -15,10 +15,13 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -296,11 +299,27 @@ class TlonChatRepo(
      * Immediately tear down the current SSE stream. The session loop
      * will observe the collect job completing and reconnect with fresh
      * subscribes + bootstrap scries. Safe to call from any thread.
+     *
+     * Debounced — Android's `ON_START` lifecycle event sometimes fires
+     * twice in rapid succession (briefly-backgrounded activities, dialog
+     * dismissals), and chaining two reconnects within the same second
+     * produced a "Job was cancelled" cascade where the freshly-opened
+     * channel's bootstrap scries were torn down by the second
+     * reconnect before they completed. Coalesce repeats inside a
+     * 3-second window — well under the 90s watchdog interval, so
+     * legitimate doze-recovery reconnects still go through.
      */
     fun forceReconnect() {
+        val now = System.currentTimeMillis()
+        if (now - lastReconnectMs < FORCE_RECONNECT_DEBOUNCE_MS) {
+            Log.i(TAG, "forceReconnect skipped (recent)")
+            return
+        }
+        lastReconnectMs = now
         Log.i(TAG, "forceReconnect requested")
         sessionJob?.cancel()
     }
+    @Volatile private var lastReconnectMs: Long = 0L
 
     /**
      * Re-scry init-posts + activity without reopening the channel. Cheap
@@ -610,33 +629,48 @@ class TlonChatRepo(
         // The `/v2/groups` scry can return a lightweight listing where
         // `fleet`/`bloc` are absent. Re-scry each flag individually via
         // `/v2/groups/<flag>` to get the full group state every time.
-        val out = mutableListOf<AdminGroup>()
-        for ((flag, _) in body) {
-            val full = runCatching {
-                ch.scry("groups", "/v2/groups/$flag") as? JsonObject
-            }.getOrNull()
-            if (full == null) {
-                Log.w(TAG, "  $flag: full scry returned null, skipping")
-                continue
-            }
-            if (flag == body.keys.first()) {
-                Log.d(TAG, "  sample keys for $flag: ${full.keys}")
-                Log.d(TAG, "  sample admins for $flag: ${full["admins"]}")
-                val seats = full["seats"] as? JsonObject
-                val firstSeat = seats?.entries?.firstOrNull()
-                Log.d(TAG, "  sample seat for $flag: " +
-                    "${firstSeat?.key} -> ${firstSeat?.value?.toString()?.take(500)}")
-                Log.d(TAG, "  total seats: ${seats?.size}")
-            }
+        //
+        // Fan the per-flag scries out concurrently — sequential
+        // `for (flag in body) { scry … }` was a sentinel-bug for the
+        // Administration screen: a user in N groups paid N round-trips
+        // back-to-back (3-15s of pure wait for an active member).
+        // Semaphore caps in-flight requests at 8 so we don't blow past
+        // OkHttp's per-host pool while still getting near-linear
+        // speedup. coroutineScope { } means a single failure cancels
+        // the rest cleanly; the per-flag runCatching keeps one
+        // returned-null group from torpedoing the whole list.
+        val flags = body.keys.toList()
+        val gate = Semaphore(permits = 8)
+        val parsed = coroutineScope {
+            flags.map { flag ->
+                async {
+                    gate.acquire()
+                    try {
+                        val full = runCatching {
+                            ch.scry("groups", "/v2/groups/$flag") as? JsonObject
+                        }.getOrNull()
+                        if (full == null) {
+                            Log.w(TAG, "  $flag: full scry returned null, skipping")
+                            null
+                        } else {
+                            flag to full
+                        }
+                    } finally {
+                        gate.release()
+                    }
+                }
+            }.awaitAll()
+        }.filterNotNull()
+
+        val out = ArrayList<AdminGroup>(parsed.size)
+        for ((flag, full) in parsed) {
             val g = parseAdminGroup(flag, full)
             val host = flag.substringBefore('/')
             val isHost = host == me
             val memberSects = g.members.firstOrNull { it.ship == me }?.sects.orEmpty()
             val amAdmin = isHost || g.adminSects.any { it in memberSects } ||
                 "admin" in memberSects
-            Log.d(TAG, "  $flag host=$host members=${g.members.size} " +
-                "admin=$amAdmin sects=$memberSects bloc=${g.adminSects}")
-            if (amAdmin) out += g
+            if (amAdmin) out.add(g)
         }
         return out.sortedBy { (it.title ?: it.flag).lowercase() }
     }
@@ -1238,23 +1272,8 @@ class TlonChatRepo(
             }
         }
 
-        var body: JsonElement? = null
-        var lastErr: Throwable? = null
-        var winningPath: String? = null
-        for (path in paths) {
-            val attempt = runCatching { ch.scry(app, path) }
-            if (attempt.isSuccess) {
-                body = attempt.getOrNull()
-                winningPath = path
-                break
-            } else {
-                lastErr = attempt.exceptionOrNull()
-            }
-        }
-        if (body == null) {
-            Log.w(TAG, "refreshConversation($whom) all ${paths.size} probes failed; last err: ${lastErr?.message}")
-            return
-        }
+        val probe = scryFirstMatching(ch, app, paths, label = "refreshConversation($whom)")
+        val body: JsonElement = probe ?: return
         val obj = body as? JsonObject
         if (obj == null) {
             Log.w(TAG, "refreshConversation($whom): scry body not object: ${body::class.simpleName}")
@@ -1332,21 +1351,8 @@ class TlonChatRepo(
             else -> return false
         }
 
-        var body: JsonObject? = null
-        var lastErr: Throwable? = null
-        for (p in paths) {
-            val attempt = runCatching { ch.scry(app, p) }
-            if (attempt.isSuccess) {
-                body = attempt.getOrNull() as? JsonObject
-                break
-            } else {
-                lastErr = attempt.exceptionOrNull()
-            }
-        }
-        if (body == null) {
-            Log.w(TAG, "loadOlder $whom all versions failed; last err: ${lastErr?.message}")
-            return false
-        }
+        val body = scryFirstMatching(ch, app, paths, label = "loadOlder $whom") as? JsonObject
+            ?: return false
 
         val posts = body[postsKey] as? JsonObject
         if (posts != null) {
@@ -2580,9 +2586,19 @@ class TlonChatRepo(
         val result = ingestedPost(whom, post)
         messagesOut.addAll(result.messages)
         reactionsOut.addAll(result.reactions)
-        // Pre-warm StoryCache so first-paint of a LazyColumn row is a
-        // cache hit instead of a JSON→AnnotatedString parse.
-        result.messages.forEach { StoryCache.partsFor(it.id, it.contentJson) }
+        // Deliberately *not* pre-warming StoryCache here. Bulk callers
+        // (refreshConversation, loadOlder, applyChannelDelta r-post.set)
+        // run ingestPost in a tight loop over hundreds of rows; warming
+        // every one of them ran Story.parse + buildAnnotatedString
+        // hundreds of times, allocating tens of MB of garbage that
+        // immediately competed for GC right when the chat was painting.
+        // Visible rows lazy-parse on first composition (≈1ms × ~15-20
+        // visible rows = one frame on first open) and that cost is well
+        // hidden behind the network round-trip the user is already
+        // waiting on. Single-message ingests (toEntity, toReplyEntity,
+        // applyChatDelta) still pre-warm — those are individual events
+        // where the cost is bounded and prevents render-time jank when
+        // an SSE delta lands while the user is staring at the chat.
         // Process tombstones inline — soft-delete so stale rows from
         // earlier scries disappear on re-ingest.
         result.tombstones.forEach { id ->
@@ -2622,12 +2638,83 @@ class TlonChatRepo(
         put("blob", JsonNull)
     }
 
+    /**
+     * Try `paths` in order until one returns a 2xx body, then return
+     * that body. Bounded by three stop conditions:
+     *
+     *  1. **Per-probe OkHttp timeout** ([SCRY_PROBE_PER_CALL_SECS]).
+     *     Each `ch.scry` attempt asks OkHttp to cap the call at this
+     *     duration. The chat-screen path-fallback list has up to 20
+     *     entries; the default 30s per-call cap meant a wedged ship
+     *     wedged the loading indicator for the same 30s. A
+     *     coroutine-level `withTimeout` looks tempting but doesn't
+     *     work — `OkHttp.execute()` is blocking, so cancellation
+     *     can't preempt an in-flight request without going through
+     *     `call.cancel()`, which is what the per-call timeout
+     *     triggers internally.
+     *  2. **Wall-clock budget** ([SCRY_PROBE_BUDGET_MS]). Caps the
+     *     total iteration time across all probes so a chain of
+     *     "wrong shape" 404s plus one slow timeout can't exceed it.
+     *  3. **Fast-fail on socket timeout.** A timed-out probe means
+     *     the network is wedged — the next probes will time out the
+     *     same way. HTTP errors (404, 5xx) still fall through
+     *     because those mean "wrong shape, try the next one."
+     *
+     * Returns null on no successful probe.
+     */
+    private suspend fun scryFirstMatching(
+        ch: UrbitChannel,
+        app: String,
+        paths: List<String>,
+        label: String,
+    ): JsonElement? {
+        val deadline = System.currentTimeMillis() + SCRY_PROBE_BUDGET_MS
+        var lastErr: Throwable? = null
+        for (path in paths) {
+            if (System.currentTimeMillis() >= deadline) {
+                Log.w(TAG, "$label: ${SCRY_PROBE_BUDGET_MS}ms budget exhausted, giving up; last err: ${lastErr?.message}")
+                return null
+            }
+            val attempt = runCatching { ch.scry(app, path, SCRY_PROBE_PER_CALL_SECS) }
+            if (attempt.isSuccess) return attempt.getOrNull()
+            val err = attempt.exceptionOrNull()
+            lastErr = err
+            if (err is java.io.InterruptedIOException ||
+                err?.cause is java.io.InterruptedIOException ||
+                err is java.net.SocketException ||
+                err?.cause is java.net.SocketException
+            ) {
+                Log.w(TAG, "$label: network timeout, giving up; err: ${err.message}")
+                return null
+            }
+        }
+        Log.w(TAG, "$label: all ${paths.size} probes failed; last err: ${lastErr?.message}")
+        return null
+    }
+
     companion object {
         private const val TAG = "TlonChatRepo"
         private val JSON_MEDIA_TYPE = "application/json".toMediaType()
         // 5 minutes — refresh on screen entry if older, instant paint
         // from cache within the window.
         private const val ADMIN_CACHE_TTL_MS = 5L * 60_000L
+        // Coalesce rapid forceReconnect requests within this window so
+        // a doubled lifecycle ON_START doesn't tear down the channel
+        // mid-bootstrap. See [forceReconnect].
+        private const val FORCE_RECONNECT_DEBOUNCE_MS = 3_000L
+        // Wall-clock budget for the shape-fallback scry probes in
+        // [scryFirstMatching]. Caps the total iteration time across
+        // all paths so chained "wrong shape" 404s plus one slow
+        // timeout can't blow past it.
+        private const val SCRY_PROBE_BUDGET_MS = 12_000L
+        // OkHttp per-call timeout (in seconds) passed to `ch.scry`
+        // from inside scryFirstMatching. 6s is plenty for a healthy
+        // ship (typical scry < 500ms) and short enough that a wedged
+        // network bails the spinner before the user gives up. The
+        // shared client's 30s default still applies to non-probe
+        // scry/poke paths (bootstrap, sends) where slower responses
+        // are tolerable.
+        private const val SCRY_PROBE_PER_CALL_SECS = 6L
     }
 
     // dmAction / clubAction / channelAction / replyDelta extracted to WireShapes.kt.

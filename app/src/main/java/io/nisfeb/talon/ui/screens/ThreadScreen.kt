@@ -64,7 +64,10 @@ import io.nisfeb.talon.ui.StoryRenderer
 import io.nisfeb.talon.ui.contactMapFlow
 import io.nisfeb.talon.urbit.StoryCache
 import io.nisfeb.talon.urbit.TlonChatRepo
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -88,33 +91,40 @@ fun ThreadScreen(
     onScrollConsumed: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
+    // distinctUntilChanged on every Room source so unrelated table
+    // writes don't re-collect the parent / replies / reactions while
+    // the thread is open. flowOn(Default) keeps the reply-grouping
+    // pass off the main thread for long threads.
     val parent by remember(whom, parentId) {
-        db.messages().streamOne(whom, parentId)
+        db.messages().streamOne(whom, parentId).distinctUntilChanged()
     }.collectAsState(initial = null)
 
     val rows by remember(whom, parentId) {
         combine(
-            db.messages().streamReplies(whom, parentId),
-            db.reactions().stream(whom),
+            db.messages().streamReplies(whom, parentId).distinctUntilChanged(),
+            db.reactions().stream(whom).distinctUntilChanged(),
         ) { replies, reactions ->
             val byPost = reactions.groupBy { it.postId }
             val parentReacts = byPost[parentId].orEmpty()
             // Collapse same-author replies within 5 min into a single
             // visual block, exactly like the chat screen.
             var prev: MessageEntity? = null
-            val replyRows = replies.map { m ->
+            val replyRows = ArrayList<ReplyRow>(replies.size)
+            for (m in replies) {
                 val showHeader = prev == null ||
                     prev!!.author != m.author ||
                     (m.sentMs - prev!!.sentMs) > THREAD_GROUP_GAP_MS
                 prev = m
-                ReplyRow(
-                    m = m,
-                    reactions = byPost[m.id].orEmpty(),
-                    showHeader = showHeader,
+                replyRows.add(
+                    ReplyRow(
+                        m = m,
+                        reactions = byPost[m.id].orEmpty(),
+                        showHeader = showHeader,
+                    )
                 )
             }
-            parentReacts to replyRows
-        }
+            parentReacts to (replyRows as List<ReplyRow>)
+        }.flowOn(Dispatchers.Default)
     }.collectAsState(initial = emptyList<ReactionEntity>() to emptyList<ReplyRow>())
 
     val contactMap by remember {

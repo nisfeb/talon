@@ -84,7 +84,10 @@ import io.nisfeb.talon.ui.ContactMap
 import io.nisfeb.talon.ui.FolderAssignmentSheet
 import io.nisfeb.talon.ui.contactMapFlow
 import io.nisfeb.talon.urbit.StoryCache
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
@@ -128,30 +131,45 @@ fun DmListScreen(
     // user switches ships the tree re-keys and we get a fresh snap.
     val snap = remember(activeShip) { HomeListSnapshot.bind(activeShip) }
 
+    // Single unreads subscription, derived twice (rows + mentionCounts).
+    // Previously the table was collected separately for each, doubling
+    // the per-write work. distinctUntilChanged on each Room source
+    // suppresses Room's spurious re-emissions on unrelated table
+    // writes; the row-build runs on Default so it never lands on Main.
     val rows by remember {
         combine(
-            db.messages().conversationLatest(),
-            db.unreads().stream(),
+            db.messages().conversationLatest().distinctUntilChanged(),
+            db.unreads().stream().distinctUntilChanged(),
         ) { messages, unreads ->
-            val unreadMap = unreads.associate { it.whom to it.count }
+            val unreadMap = HashMap<String, Int>(unreads.size)
+            for (u in unreads) unreadMap[u.whom] = u.count
             // Defensive: guarantee one row per whom. The DAO query already
             // enforces this, but any future change must not be allowed to
             // reach LazyColumn's duplicate-key crash.
-            val result = messages
-                .distinctBy { it.whom }
-                .map { m -> m to (unreadMap[m.whom] ?: 0) }
+            val seen = HashSet<String>(messages.size)
+            val result = ArrayList<Pair<MessageEntity, Int>>(messages.size)
+            for (m in messages) {
+                if (seen.add(m.whom)) {
+                    result.add(m to (unreadMap[m.whom] ?: 0))
+                }
+            }
             snap.rows = result
             result
-        }
+        }.flowOn(Dispatchers.Default)
     }.collectAsState(initial = snap.rows)
 
     // Mention (notify-count) map, keyed by whom. Built off the same
     // %activity summaries — `notifyCount` is the count of events that
     // should actually ping you (@-mentions, replies to your posts, etc.).
     val mentionCounts by remember {
-        db.unreads().stream().map { list ->
-            list.associate { it.whom to it.notifyCount }
-        }
+        db.unreads().stream()
+            .distinctUntilChanged()
+            .map { list ->
+                val out = HashMap<String, Int>(list.size)
+                for (u in list) out[u.whom] = u.notifyCount
+                out
+            }
+            .flowOn(Dispatchers.Default)
     }.collectAsState(initial = emptyMap())
 
     val contactMap by remember {
@@ -166,14 +184,25 @@ fun DmListScreen(
     val app = (LocalContext.current.applicationContext as TalonApplication)
     val drafts by app.drafts.state.collectAsState()
 
+    // distinctUntilChanged on the folder/member/order streams: same
+    // Room invalidation-tracker concern as the row flow above. Without
+    // it, every messages write was re-emitting the folders membership
+    // (which doesn't depend on the messages table) and triggering the
+    // membersByWhom / folderRows / homeRows derivations to recompute.
     val folders by remember {
-        db.folders().streamFolders().onEach { snap.folders = it }
+        db.folders().streamFolders()
+            .distinctUntilChanged()
+            .onEach { snap.folders = it }
     }.collectAsState(initial = snap.folders)
     val members by remember {
-        db.folders().streamMembers().onEach { snap.members = it }
+        db.folders().streamMembers()
+            .distinctUntilChanged()
+            .onEach { snap.members = it }
     }.collectAsState(initial = snap.members)
     val groupOrders by remember {
-        db.groupOrders().stream().onEach { snap.groupOrders = it }
+        db.groupOrders().stream()
+            .distinctUntilChanged()
+            .onEach { snap.groupOrders = it }
     }.collectAsState(initial = snap.groupOrders)
 
     // Tab selection state. Either a custom folder is selected, or one

@@ -14,6 +14,7 @@ import io.nisfeb.talon.urbit.UrbitSession
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -122,8 +123,22 @@ class TalonApplication : Application() {
     /**
      * Build the ship-scoped instances against [ship] and install them.
      * Does not start the repo — callers do that explicitly.
+     *
+     * If a previous ship's instances are alive, hand them to
+     * [scheduleShipScopedTeardown] for delayed close. We can't close
+     * the old AppDatabase synchronously here because the UI is still
+     * collecting Flows from `app.db` until `_activeShip.value` flips
+     * and `key(loggedInShip) { … }` re-keys the tree — closing the
+     * pool out from under live collectors throws SQLiteException
+     * spam. The deferred close gives the recomposition a frame or two
+     * to drop the old subscribers, then reclaims the pool — fixing
+     * the `SQLiteConnectionPool: connection was leaked` warning that
+     * fired on every ship-switch.
      */
     private fun buildShipScoped(ship: String) {
+        val priorDb = if (::db.isInitialized) db else null
+        val priorIndexer = if (::embeddingIndexer.isInitialized) embeddingIndexer else null
+
         db = AppDatabase.build(this, ship)
         session = UrbitSession(http, sessionStore)
         // Re-hydrate the cookie jar + baseUrl from the stored session
@@ -134,6 +149,28 @@ class TalonApplication : Application() {
         drafts = DraftStore(this, ship)
         shortcuts = ShortcutsPublisher(this, db)
         embeddingIndexer = io.nisfeb.talon.ai.EmbeddingIndexer(db, embedder, appScope)
+
+        if (priorDb != null || priorIndexer != null) {
+            scheduleShipScopedTeardown(priorDb, priorIndexer)
+        }
+    }
+
+    /**
+     * Wait for the UI to drop the prior ship's collectors, then close
+     * the prior `AppDatabase` and stop the prior embedding indexer. A
+     * 2s delay covers the typical re-keying frame plus any in-flight
+     * suspend Room call returning. Running on appScope (IO supervisor)
+     * means the cleanup survives the ship-switch caller returning.
+     */
+    private fun scheduleShipScopedTeardown(
+        priorDb: AppDatabase?,
+        priorIndexer: io.nisfeb.talon.ai.EmbeddingIndexer?,
+    ) {
+        appScope.launch {
+            delay(2_000)
+            runCatching { priorIndexer?.stop() }
+            runCatching { priorDb?.close() }
+        }
     }
 
     /**

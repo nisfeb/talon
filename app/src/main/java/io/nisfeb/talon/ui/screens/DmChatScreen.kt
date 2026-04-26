@@ -136,6 +136,7 @@ import io.nisfeb.talon.urbit.TlonChatRepo
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -210,8 +211,10 @@ fun DmChatScreen(
                 prevByMsgId = nextMap
                 items
             }
-        }.flowOn(Dispatchers.Default)
-    }.collectAsState(initial = emptyList())
+        }
+            .onEach { ChatRowsSnapshot.put(whom, it) }
+            .flowOn(Dispatchers.Default)
+    }.collectAsState(initial = ChatRowsSnapshot.get(whom))
 
     // Pre-entry unread count for this conversation. Captured BEFORE
     // setOpenChat fires the mark-read so the "New" line + catch-me-up
@@ -730,11 +733,14 @@ fun DmChatScreen(
             }
         }
         HorizontalDivider()
-        // Subtle network-activity strip. Only renders while a refresh
-        // scry is in flight; the chat itself stays interactive
-        // underneath. Uses the divider's slot so layout doesn't jump
-        // when the strip appears.
-        if (refreshing) {
+        // Network-activity strip — only when there's nothing cached
+        // yet. Once the Room flow has delivered any rows, the chat is
+        // showing content and an additional "loading" affordance is
+        // misleading: a refresh that fails (e.g. wedged network ⇒ 6s
+        // OkHttp cap) would otherwise leave the bar running for the
+        // full 6s while the user already has content on screen and
+        // no longer cares about the background scry.
+        if (refreshing && rows.isEmpty()) {
             androidx.compose.material3.LinearProgressIndicator(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -1931,6 +1937,26 @@ private data class DisplayRow(
     val replyCount: Int,
     val showHeader: Boolean,
 )
+
+/**
+ * Process-wide cache of the last-known row list per `whom`, used to
+ * hydrate `collectAsState` instantly on chat re-mount. Without this,
+ * a user backing out of a chat and re-opening it within a few seconds
+ * sees a black panel + loading bar for as long as Room takes to
+ * re-deliver its three flows (messages / reactions / replyCounts) to
+ * the freshly-subscribed `combine`. Pull-of-cached-rows can run
+ * several seconds when the DB is busy, even though the data itself
+ * is locally cached.
+ *
+ * The snapshot is fed by an `onEach` on the upstream flow so it stays
+ * fresh whether the user is sitting in the chat or visiting it
+ * briefly. Lookups are O(1); on cache miss we return [emptyList].
+ */
+private object ChatRowsSnapshot {
+    private val byWhom = java.util.concurrent.ConcurrentHashMap<String, List<ChatListItem>>()
+    fun get(whom: String): List<ChatListItem> = byWhom[whom].orEmpty()
+    fun put(whom: String, rows: List<ChatListItem>) { byWhom[whom] = rows }
+}
 
 /**
  * Best-effort display name for a content:// URI. Returns null when the

@@ -1,6 +1,7 @@
 package io.nisfeb.talon.data
 
 import androidx.room.Entity
+import androidx.room.Index
 import androidx.room.PrimaryKey
 
 /**
@@ -19,8 +20,16 @@ data class GroupEntity(
  * Mapping from channel nest (`chat/~host/name`) to its enclosing
  * group's flag. Populated from the %groups scry's channels map so
  * UI code can resolve a channel's group image/title in O(1).
+ *
+ * Index on `groupFlag` — `streamChannelsForGroup` and
+ * `deleteChannelsForGroup` both filter by it, and without the index
+ * each call scanned the whole channel_groups table (hundreds of rows
+ * for an active user).
  */
-@Entity(tableName = "channel_groups")
+@Entity(
+    tableName = "channel_groups",
+    indices = [Index(value = ["groupFlag"])],
+)
 data class ChannelGroupEntity(
     @PrimaryKey val nest: String,
     val groupFlag: String,

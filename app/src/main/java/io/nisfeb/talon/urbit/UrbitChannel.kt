@@ -171,14 +171,30 @@ class UrbitChannel internal constructor(
         }
     }
 
-    /** Synchronous scry — reads a noun path without subscribing. */
-    suspend fun scry(app: String, path: String): JsonElement =
+    /**
+     * Synchronous scry — reads a noun path without subscribing.
+     *
+     * [timeoutSecs] caps the *OkHttp* call duration. Defaults to
+     * [RPC_TIMEOUT_SECS] for the bootstrap / poke paths that can
+     * legitimately take a few seconds on a slow ship; chat-refresh
+     * probes pass a tighter value because they iterate up to 20
+     * shape-fallback paths and any single one being slow blocks the
+     * loading indicator. A coroutine-level [withTimeout] doesn't help
+     * here — OkHttp's `execute()` is blocking and only `call.cancel()`
+     * (which the per-call timeout triggers internally) actually
+     * unwinds an in-flight request.
+     */
+    suspend fun scry(
+        app: String,
+        path: String,
+        timeoutSecs: Long = RPC_TIMEOUT_SECS,
+    ): JsonElement =
         withContext(Dispatchers.IO) {
             val url = baseUrl.newBuilder()
                 .addPathSegments("~/scry/$app$path.json")
                 .build()
             val request = Request.Builder().url(url).get().build()
-            http.newCall(request).withRpcTimeout().execute().use { resp ->
+            http.newCall(request).withRpcTimeout(timeoutSecs).execute().use { resp ->
                 if (!resp.isSuccessful) error("scry $app$path: HTTP ${resp.code}")
                 val body = resp.body?.string() ?: error("empty scry body")
                 json.parseToJsonElement(body)
@@ -197,13 +213,15 @@ class UrbitChannel internal constructor(
     }
 
     /**
-     * Cap one RPC call at [RPC_TIMEOUT_SECS]. The shared OkHttpClient
-     * uses readTimeout=0 so the SSE channel can stay open indefinitely;
+     * Cap one RPC call at [timeoutSecs]. The shared OkHttpClient uses
+     * readTimeout=0 so the SSE channel can stay open indefinitely;
      * without a per-call cap, a hung scry or poke would wait forever
      * (e.g. when the ship returns intermittent 504s on overload).
      */
-    private fun okhttp3.Call.withRpcTimeout(): okhttp3.Call = apply {
-        timeout().timeout(RPC_TIMEOUT_SECS, java.util.concurrent.TimeUnit.SECONDS)
+    private fun okhttp3.Call.withRpcTimeout(
+        timeoutSecs: Long = RPC_TIMEOUT_SECS,
+    ): okhttp3.Call = apply {
+        timeout().timeout(timeoutSecs, java.util.concurrent.TimeUnit.SECONDS)
     }
 
     companion object {
