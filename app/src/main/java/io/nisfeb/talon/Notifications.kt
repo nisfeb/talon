@@ -21,6 +21,7 @@ object Notifications {
 
     const val CHANNEL_MESSAGES = "messages"
     const val CHANNEL_SYNC = "sync"
+    const val CHANNEL_WATCHWORDS = "watchwords"
     const val EXTRA_OPEN_WHOM = "open_whom"
     const val EXTRA_SCROLL_TO_MESSAGE = "scroll_to_message"
     /** When the notification is for a reply, the parent post id —
@@ -56,6 +57,19 @@ object Notifications {
                 ).apply {
                     description = "Keeps Talon connected so new messages arrive instantly"
                     setShowBadge(false)
+                }
+            )
+        }
+        if (mgr.getNotificationChannel(CHANNEL_WATCHWORDS) == null) {
+            mgr.createNotificationChannel(
+                NotificationChannel(
+                    CHANNEL_WATCHWORDS,
+                    "Watchwords",
+                    NotificationManager.IMPORTANCE_HIGH,
+                ).apply {
+                    description = "Hits on user-defined watchword terms"
+                    enableLights(true)
+                    enableVibration(true)
                 }
             )
         }
@@ -109,6 +123,62 @@ object Notifications {
         // Tag = whom so new messages from the same conversation replace
         // the previous notification rather than stacking.
         mgr.notify(whom, NOTIFICATION_ID, notification)
+    }
+
+    /**
+     * Watchword-hit notification. Same tap intent shape as [showMessage]
+     * but on a separate channel and tag namespace so it can be tuned
+     * independently and never collides with regular chat notifications.
+     */
+    fun showWatchwordHit(
+        context: Context,
+        whom: String,
+        postId: String?,
+        parentId: String? = null,
+        terms: List<String>,
+        label: String,
+        body: String,
+        sentMs: Long,
+    ) {
+        val mgr = ContextCompat.getSystemService(context, NotificationManager::class.java)
+            ?: return
+
+        val tapIntent = Intent(context, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            putExtra(EXTRA_OPEN_WHOM, whom)
+            if (parentId != null) {
+                putExtra(EXTRA_OPEN_THREAD, parentId)
+                if (postId != null) putExtra(EXTRA_THREAD_ANCHOR, postId)
+            } else if (postId != null) {
+                putExtra(EXTRA_SCROLL_TO_MESSAGE, postId)
+            }
+        }
+        val pending = PendingIntent.getActivity(
+            context,
+            ("watchword:$whom").hashCode(),
+            tapIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+
+        val title = "${terms.joinToString(", ")} in $label"
+
+        val notification = NotificationCompat.Builder(context, CHANNEL_WATCHWORDS)
+            .setSmallIcon(android.R.drawable.ic_dialog_email)
+            .setContentTitle(title)
+            .setContentText(body)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(body))
+            .setContentIntent(pending)
+            .setAutoCancel(true)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setCategory(NotificationCompat.CATEGORY_MESSAGE)
+            .setWhen(sentMs)
+            .setShowWhen(true)
+            .build()
+
+        // Tag = "watchword:<whom>" so repeated hits in the same chat
+        // collapse into one row, but never collide with showMessage's
+        // <whom>-tagged notification for the same chat.
+        mgr.notify("watchword:$whom", NOTIFICATION_ID, notification)
     }
 
     fun clear(context: Context, whom: String) {
