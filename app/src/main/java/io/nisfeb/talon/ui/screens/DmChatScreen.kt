@@ -212,7 +212,24 @@ fun DmChatScreen(
                 items
             }
         }
-            .onEach { ChatRowsSnapshot.put(whom, it) }
+            .onEach { items ->
+                // Pre-warm StoryCache for the newest rows — those are
+                // what the reverse-layout LazyColumn lays out first.
+                // Without this, the LazyColumn's initial measure pass
+                // ran Story.parse + buildAnnotatedString synchronously
+                // per visible row on the compose thread, producing a
+                // perceptible "items arranging themselves" flash on
+                // first paint of a cold chat. Running in the upstream
+                // (already on Dispatchers.Default thanks to flowOn
+                // below) means the parses finish before the row list
+                // ever lands on Main.
+                items.takeLast(STORY_WARM_TAIL).forEach { item ->
+                    if (item is ChatListItem.Message) {
+                        StoryCache.partsFor(item.row.m.id, item.row.m.contentJson)
+                    }
+                }
+                ChatRowsSnapshot.put(whom, items)
+            }
             .flowOn(Dispatchers.Default)
     }.collectAsState(initial = ChatRowsSnapshot.get(whom))
 
@@ -1770,6 +1787,14 @@ private val TIME_FORMAT = SimpleDateFormat("MMM d HH:mm", Locale.getDefault())
 
 private val AVATAR_SIZE = 36.dp
 private const val GROUP_GAP_MS = 5L * 60_000L
+
+/**
+ * How many of the newest rows to pre-parse into StoryCache from the
+ * upstream flow. Sized to comfortably cover a tall phone's visible
+ * window plus the first scroll-back screen, so the LazyColumn's
+ * initial measure pass and a quick scroll up both hit the cache.
+ */
+private const val STORY_WARM_TAIL = 30
 
 /**
  * Mixed row type for the LazyColumn. Date dividers are stable across
