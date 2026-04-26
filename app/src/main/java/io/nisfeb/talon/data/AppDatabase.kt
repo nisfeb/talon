@@ -25,8 +25,11 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         MessageEmbeddingEntity::class,
         BookmarkFolderEntity::class,
         BookmarkFolderMemberEntity::class,
+        WatchwordEntity::class,
+        WatchwordHitEntity::class,
+        WatchwordChatExcludeEntity::class,
     ],
-    version = 25,
+    version = 26,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -43,6 +46,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun reactionUsage(): ReactionUsageDao
     abstract fun embeddings(): EmbeddingDao
     abstract fun bookmarkFolders(): BookmarkFolderDao
+    abstract fun watchwords(): WatchwordsDao
 
     companion object {
         private val MIGRATION_17_18 = object : Migration(17, 18) {
@@ -113,6 +117,54 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        private val MIGRATION_25_26 = object : Migration(25, 26) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS watchwords (
+                        id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+                        term TEXT NOT NULL,
+                        notify INTEGER NOT NULL,
+                        createdMs INTEGER NOT NULL
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS index_watchwords_term " +
+                        "ON watchwords (term)"
+                )
+
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS watchword_hits (
+                        term TEXT NOT NULL,
+                        whom TEXT NOT NULL,
+                        postId TEXT NOT NULL,
+                        sentMs INTEGER NOT NULL,
+                        snippet TEXT NOT NULL,
+                        PRIMARY KEY (term, whom, postId)
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS index_watchword_hits_term_sentMs " +
+                        "ON watchword_hits (term, sentMs)"
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS index_watchword_hits_sentMs " +
+                        "ON watchword_hits (sentMs)"
+                )
+
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS watchword_chat_excludes (
+                        whom TEXT NOT NULL PRIMARY KEY
+                    )
+                    """.trimIndent()
+                )
+            }
+        }
+
         private val MIGRATION_23_24 = object : Migration(23, 24) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 // Chat-open was scanning whom's slice and sorting by
@@ -177,7 +229,7 @@ abstract class AppDatabase : RoomDatabase() {
                 .addMigrations(
                     MIGRATION_17_18, MIGRATION_18_19, MIGRATION_19_20,
                     MIGRATION_20_21, MIGRATION_21_22, MIGRATION_22_23,
-                    MIGRATION_23_24, MIGRATION_24_25,
+                    MIGRATION_23_24, MIGRATION_24_25, MIGRATION_25_26,
                 )
                 .fallbackToDestructiveMigration()
                 .build()
