@@ -134,7 +134,9 @@ import androidx.compose.ui.text.input.TextFieldValue
 import io.nisfeb.talon.urbit.StoryCache
 import io.nisfeb.talon.urbit.TlonChatRepo
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
@@ -165,20 +167,50 @@ fun DmChatScreen(
     onOpenSelfProfile: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    // Build the chat row list in flow-space and off the main thread.
+    // The main message stream drives first paint; reactions and
+    // reply-counts are pre-seeded with empty emissions so combine
+    // doesn't block waiting for their first DB read. With the row
+    // build on Dispatchers.Default the LazyColumn never has to do
+    // O(messages) work in a recomposition — that was what was
+    // jank-bombing the loading-strip animation on big channels.
+    // distinctUntilChanged on each Room source: the invalidation
+    // tracker fires on any write to the underlying table, even when the
+    // *queried* slice didn't change. Without this, every reaction
+    // anywhere in the app re-emitted whom's stream and rebuilt 500+
+    // ChatListItems for nothing — the GC churn from those wasted lists
+    // was the periodic main-thread hitch.
+    //
+    // The captured `prevByMsgId` map keeps the prior emission's
+    // DisplayRow instances around so unchanged messages reuse them
+    // verbatim. Result: N-row emissions allocate close to zero rows
+    // (only the wrapping ArrayList) AND Compose's state-value
+    // structural-equality check turns into pointer comparisons for
+    // every unchanged row, so a single new SSE message no longer
+    // re-decorates the whole visible window.
     val rows by remember(whom) {
-        combine(
-            db.messages().stream(whom),
-            db.reactions().stream(whom),
-            db.messages().streamReplyCounts(whom),
+        var prevByMsgId: Map<String, DisplayRow> = emptyMap()
+        kotlinx.coroutines.flow.combine(
+            db.messages().stream(whom).distinctUntilChanged(),
+            db.reactions().stream(whom).distinctUntilChanged()
+                .onStart { emit(emptyList()) },
+            db.messages().streamReplyCounts(whom).distinctUntilChanged()
+                .onStart { emit(emptyList()) },
         ) { messages, reactions, replyCounts ->
-            val reactsByPost = reactions.groupBy { it.postId }
-            val countsByPost = replyCounts.associateBy(ReplyCount::postId)
-            buildChatListItems(
-                messages = messages,
-                reactsByPost = reactsByPost,
-                countsByPost = countsByPost,
-            )
-        }
+            if (messages.isEmpty()) {
+                prevByMsgId = emptyMap()
+                emptyList()
+            } else {
+                val (items, nextMap) = buildChatListItemsReusing(
+                    messages = messages,
+                    reactsByPost = reactions.groupBy { it.postId },
+                    countsByPost = replyCounts.associateBy(ReplyCount::postId),
+                    prev = prevByMsgId,
+                )
+                prevByMsgId = nextMap
+                items
+            }
+        }.flowOn(Dispatchers.Default)
     }.collectAsState(initial = emptyList())
 
     // Pre-entry unread count for this conversation. Captured BEFORE
@@ -324,9 +356,43 @@ fun DmChatScreen(
     // Backfill any messages that slipped through SSE (e.g. via bursts
     // that overflowed the old bounded channel buffer). Cheap scry,
     // idempotent upsert — no dupes, fills holes. Grab a wide window so
-    // historical gaps are covered even on busy channels.
+    // historical gaps are covered even on busy channels. The
+    // `refreshing` flag drives the thin progress strip below the title
+    // bar so the user can see network activity without the whole chat
+    // appearing unresponsive.
+    var refreshing by remember(whom) { mutableStateOf(false) }
     LaunchedEffect(whom) {
+        val mountMs = android.os.SystemClock.elapsedRealtime()
+        android.util.Log.i("DmChatScreen", "mount whom=$whom rows=${rows.size}")
+        refreshing = true
+        val started = android.os.SystemClock.elapsedRealtime()
         runCatching { repo.refreshConversation(whom, count = 500) }
+            .onSuccess {
+                android.util.Log.i(
+                    "DmChatScreen",
+                    "refresh $whom done in ${android.os.SystemClock.elapsedRealtime() - started}ms rows=${rows.size}",
+                )
+            }
+            .onFailure {
+                android.util.Log.w(
+                    "DmChatScreen",
+                    "refresh $whom failed after ${android.os.SystemClock.elapsedRealtime() - started}ms: ${it.message}",
+                )
+            }
+        refreshing = false
+    }
+    LaunchedEffect(whom) {
+        val mountMs = android.os.SystemClock.elapsedRealtime()
+        var firstEmit = true
+        snapshotFlow { rows.size }.collect { n ->
+            if (firstEmit) {
+                android.util.Log.i(
+                    "DmChatScreen",
+                    "first rows emit whom=$whom size=$n elapsed=${android.os.SystemClock.elapsedRealtime() - mountMs}ms",
+                )
+                firstEmit = false
+            }
+        }
     }
 
     // Scroll-back: when the user scrolls visually upward toward the
@@ -664,6 +730,17 @@ fun DmChatScreen(
             }
         }
         HorizontalDivider()
+        // Subtle network-activity strip. Only renders while a refresh
+        // scry is in flight; the chat itself stays interactive
+        // underneath. Uses the divider's slot so layout doesn't jump
+        // when the strip appears.
+        if (refreshing) {
+            androidx.compose.material3.LinearProgressIndicator(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(2.dp),
+            )
+        }
 
         // Catch-me-up banner. Shown only when AI is configured + enabled
         // for this feature + chat has unreads we haven't summarized yet.
@@ -1716,41 +1793,61 @@ private sealed interface ChatListItem {
     }
 }
 
-private fun buildChatListItems(
+/**
+ * Builds the row list while reusing DisplayRow instances from the
+ * previous emission whenever a message's full state is unchanged.
+ *
+ * Returns `(rows, nextByMsgId)` so the caller can store the new id-map
+ * for the next emission. Reusing instances has two compounding wins:
+ *
+ *  - allocation: a steady-state emission (e.g. SSE delta with one new
+ *    message) keeps the existing N-1 DisplayRow instances and only
+ *    allocates one new row plus the wrapping ArrayList.
+ *  - skippability: Compose's State.value setter compares old vs new
+ *    list structurally; with reused refs that comparison becomes
+ *    O(N) reference-equality checks instead of O(N) field-by-field
+ *    DisplayRow comparisons, and once a row is reference-equal to
+ *    its prior copy MessageRow's own equality check skips outright.
+ */
+private fun buildChatListItemsReusing(
     messages: List<MessageEntity>,
     reactsByPost: Map<String, List<ReactionEntity>>,
     countsByPost: Map<String, ReplyCount>,
-): List<ChatListItem> {
-    if (messages.isEmpty()) return emptyList()
+    prev: Map<String, DisplayRow>,
+): Pair<List<ChatListItem>, Map<String, DisplayRow>> {
     val out = ArrayList<ChatListItem>(messages.size + 8)
+    val nextMap = HashMap<String, DisplayRow>(messages.size)
     val cal = java.util.Calendar.getInstance()
     var lastDayKey: String? = null
-    var prev: MessageEntity? = null
+    var prevMsg: MessageEntity? = null
     for (m in messages) {
         val dayKey = dayKeyFor(cal, m.sentMs)
         if (dayKey != lastDayKey) {
             out.add(ChatListItem.DateDivider(label = dividerLabel(m.sentMs), dayKey = dayKey))
             lastDayKey = dayKey
-            // A new day forces a fresh author header even if the prior
+            // New day forces a fresh author header even if the prior
             // message was from the same author within the gap window.
-            prev = null
+            prevMsg = null
         }
-        val showHeader = prev == null ||
-            prev!!.author != m.author ||
-            (m.sentMs - prev!!.sentMs) > GROUP_GAP_MS
-        prev = m
-        out.add(
-            ChatListItem.Message(
-                DisplayRow(
-                    m = m,
-                    reactions = reactsByPost[m.id].orEmpty(),
-                    replyCount = countsByPost[m.id]?.count ?: 0,
-                    showHeader = showHeader,
-                )
-            )
-        )
+        val showHeader = prevMsg == null ||
+            prevMsg.author != m.author ||
+            (m.sentMs - prevMsg.sentMs) > GROUP_GAP_MS
+        prevMsg = m
+        val reactions = reactsByPost[m.id].orEmpty()
+        val replyCount = countsByPost[m.id]?.count ?: 0
+        val cached = prev[m.id]
+        val row = if (
+            cached != null &&
+            cached.m == m &&
+            cached.reactions == reactions &&
+            cached.replyCount == replyCount &&
+            cached.showHeader == showHeader
+        ) cached
+        else DisplayRow(m = m, reactions = reactions, replyCount = replyCount, showHeader = showHeader)
+        nextMap[m.id] = row
+        out.add(ChatListItem.Message(row))
     }
-    return out
+    return out to nextMap
 }
 
 private fun dayKeyFor(cal: java.util.Calendar, ms: Long): String {

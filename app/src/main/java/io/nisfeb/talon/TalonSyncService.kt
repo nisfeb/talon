@@ -26,14 +26,22 @@ class TalonSyncService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val notification = buildOngoing()
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(
+        when {
+            // Android 14+ (API 34+): SPECIAL_USE has no timeout. dataSync
+            // is hard-capped at 6h/day on Android 15+ which kills the
+            // sync mid-day with a ForegroundServiceDidNotStopInTime
+            // crash — wrong fit for a chat client that can't use FCM.
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE -> startForeground(
+                NOTIFICATION_ID,
+                notification,
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE,
+            )
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q -> startForeground(
                 NOTIFICATION_ID,
                 notification,
                 ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC,
             )
-        } else {
-            startForeground(NOTIFICATION_ID, notification)
+            else -> startForeground(NOTIFICATION_ID, notification)
         }
         return START_STICKY
     }

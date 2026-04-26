@@ -26,7 +26,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         BookmarkFolderEntity::class,
         BookmarkFolderMemberEntity::class,
     ],
-    version = 23,
+    version = 24,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -100,6 +100,20 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        private val MIGRATION_23_24 = object : Migration(23, 24) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // Chat-open was scanning whom's slice and sorting by
+                // sentMs every time — fine for warm reads but seconds
+                // of stall during heavy refresh upserts. The composite
+                // covers stream(whom), streamReplies, streamReplyCounts,
+                // and the cursor lookups in one shot.
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS index_messages_whom_parentId_sentMs " +
+                        "ON messages (whom, parentId, sentMs)"
+                )
+            }
+        }
+
         private val MIGRATION_22_23 = object : Migration(22, 23) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 // Bookmark organization — folders + a join table
@@ -150,6 +164,7 @@ abstract class AppDatabase : RoomDatabase() {
                 .addMigrations(
                     MIGRATION_17_18, MIGRATION_18_19, MIGRATION_19_20,
                     MIGRATION_20_21, MIGRATION_21_22, MIGRATION_22_23,
+                    MIGRATION_23_24,
                 )
                 .fallbackToDestructiveMigration()
                 .build()

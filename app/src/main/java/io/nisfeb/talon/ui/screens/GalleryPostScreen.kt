@@ -48,6 +48,7 @@ import io.nisfeb.talon.ui.ContactMap
 import io.nisfeb.talon.ui.StoryRenderer
 import io.nisfeb.talon.ui.contactMapFlow
 import io.nisfeb.talon.urbit.StoryCache
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -70,12 +71,15 @@ fun GalleryPostScreen(
     val repo = app.repo
     val scope = rememberCoroutineScope()
 
+    // Suppress Room's invalidation-tracker re-emissions on unrelated
+    // messages-table writes — without this the post body and replies
+    // re-collect every time any other channel's SSE event lands.
     val post by remember(whom, postId) {
-        db.messages().streamOne(whom, postId)
+        db.messages().streamOne(whom, postId).distinctUntilChanged()
     }.collectAsState(initial = null)
 
     val replies by remember(whom, postId) {
-        db.messages().streamReplies(whom, postId)
+        db.messages().streamReplies(whom, postId).distinctUntilChanged()
     }.collectAsState(initial = emptyList())
 
     val contactMap by remember {

@@ -178,7 +178,7 @@ class UrbitChannel internal constructor(
                 .addPathSegments("~/scry/$app$path.json")
                 .build()
             val request = Request.Builder().url(url).get().build()
-            http.newCall(request).execute().use { resp ->
+            http.newCall(request).withRpcTimeout().execute().use { resp ->
                 if (!resp.isSuccessful) error("scry $app$path: HTTP ${resp.code}")
                 val body = resp.body?.string() ?: error("empty scry body")
                 json.parseToJsonElement(body)
@@ -191,13 +191,24 @@ class UrbitChannel internal constructor(
             .url(channelUrl)
             .put(messages.toString().toRequestBody(JSON_MEDIA_TYPE))
             .build()
-        http.newCall(request).execute().use { resp ->
+        http.newCall(request).withRpcTimeout().execute().use { resp ->
             if (!resp.isSuccessful) error("channel PUT: HTTP ${resp.code}")
         }
     }
 
+    /**
+     * Cap one RPC call at [RPC_TIMEOUT_SECS]. The shared OkHttpClient
+     * uses readTimeout=0 so the SSE channel can stay open indefinitely;
+     * without a per-call cap, a hung scry or poke would wait forever
+     * (e.g. when the ship returns intermittent 504s on overload).
+     */
+    private fun okhttp3.Call.withRpcTimeout(): okhttp3.Call = apply {
+        timeout().timeout(RPC_TIMEOUT_SECS, java.util.concurrent.TimeUnit.SECONDS)
+    }
+
     companion object {
         private val JSON_MEDIA_TYPE = "application/json".toMediaType()
+        private const val RPC_TIMEOUT_SECS = 30L
     }
 }
 

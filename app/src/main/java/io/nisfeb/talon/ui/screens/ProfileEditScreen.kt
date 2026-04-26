@@ -215,12 +215,18 @@ fun ProfileEditScreen(
                     error = null
                     scope.launch {
                         runCatching {
+                            // updateProfile treats null as "leave this
+                            // field alone" and any non-null string —
+                            // including empty — as a write. We must
+                            // not coerce a never-set avatar/color into
+                            // "" or the server stores the empty value
+                            // and wipes whatever was there before.
                             repo.updateProfile(
                                 nickname = nickname,
                                 bio = bio,
-                                avatarUrl = avatarUrl ?: "",
+                                avatarUrl = avatarUrl,
                                 status = status,
-                                color = color ?: "",
+                                color = color,
                             )
                         }.onFailure { e ->
                             error = "save failed: ${e.message ?: e::class.simpleName}"

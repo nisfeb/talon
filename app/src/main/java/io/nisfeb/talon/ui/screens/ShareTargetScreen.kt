@@ -19,11 +19,14 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -64,6 +67,20 @@ fun ShareTargetScreen(
         )
     }.collectAsState(initial = ContactMap.EMPTY)
 
+    var query by remember { mutableStateOf("") }
+    val filtered = remember(dedupedConversations, contactMap, query) {
+        val q = query.trim()
+        if (q.isEmpty()) dedupedConversations
+        else dedupedConversations.filter { m ->
+            val label = contactMap.conversationLabel(m.whom)
+            // Match on the displayed "Group · #Channel" label so a
+            // search for either side hits, plus the raw whom so power
+            // users can paste a patp / nest.
+            label.contains(q, ignoreCase = true) ||
+                m.whom.contains(q, ignoreCase = true)
+        }
+    }
+
     Column(modifier = modifier.windowInsetsPadding(WindowInsets.safeDrawing)) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
@@ -102,21 +119,40 @@ fun ShareTargetScreen(
         }
         HorizontalDivider()
 
-        LazyColumn(
-            modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(vertical = 4.dp),
-        ) {
-            items(
-                items = dedupedConversations,
-                key = { it.whom },
-                contentType = { "conv" },
-            ) { m ->
-                ShareRow(
-                    whom = m.whom,
-                    contactMap = contactMap,
-                    onClick = { onPick(m.whom) },
-                )
-                HorizontalDivider()
+        OutlinedTextField(
+            value = query,
+            onValueChange = { query = it },
+            placeholder = { Text("Search by group or channel name") },
+            singleLine = true,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+        )
+
+        if (filtered.isEmpty() && query.isNotBlank()) {
+            Text(
+                "No matches.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(16.dp),
+            )
+        } else {
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(vertical = 4.dp),
+            ) {
+                items(
+                    items = filtered,
+                    key = { it.whom },
+                    contentType = { "conv" },
+                ) { m ->
+                    ShareRow(
+                        whom = m.whom,
+                        contactMap = contactMap,
+                        onClick = { onPick(m.whom) },
+                    )
+                    HorizontalDivider()
+                }
             }
         }
     }

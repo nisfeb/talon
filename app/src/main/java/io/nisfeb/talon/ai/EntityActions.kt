@@ -10,7 +10,9 @@ import com.google.mlkit.nl.entityextraction.EntityExtractorOptions
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withContext
 
 /**
  * On-device detection of actionable entities in message text — dates,
@@ -33,12 +35,21 @@ object EntityActions {
     private val cache = ConcurrentHashMap<String, List<DetectedAction>>()
 
     /**
-     * Trigger the model download if it hasn't happened yet. Cheap to
-     * call repeatedly; the SDK no-ops once the model is on disk. Best
-     * fired during app warmup so the first chat to render isn't
-     * blocked on a download.
+     * Trigger the model download AND a throwaway annotate so the
+     * TF-Lite runtime, XNNPACK delegate, and annotator model are all
+     * fully initialized by the time the first chat opens. Without this
+     * second pass, downloadModelIfNeeded only landed the file and the
+     * native init happened lazily on the first real annotate — a
+     * ~half-second hitch hitting the user precisely when they expected
+     * the chat to paint smoothly. Best-effort; any failure leaves the
+     * library in its previous state, so chips just appear later.
      */
     fun warmup(): Task<Void> = extractor.downloadModelIfNeeded()
+        .addOnSuccessListener { runCatching { extractor.annotate(WARMUP_TEXT) } }
+        // Return value still surfaces just the download outcome to
+        // callers — the annotate is fire-and-forget.
+
+    private const val WARMUP_TEXT = "warmup 123-456-7890 at 3pm"
 
     /**
      * Annotate [text] and return the actionable entities Talon
@@ -46,32 +57,42 @@ object EntityActions {
      * suspends on the on-device annotator.
      *
      * Empty / very-short input short-circuits to an empty list — there's
-     * nothing actionable in "ok" or "lol".
+     * nothing actionable in "ok" or "lol". Same for text with no digit
+     * and no `@`: every kind we surface (date, time, phone, email,
+     * street address) requires one or the other, so running ML Kit on
+     * pure prose is wasted CPU plus an avoidable GC tail.
+     *
+     * The post-await processing runs on Dispatchers.Default so neither
+     * the URL regex pass nor the cache write lands on the main thread
+     * — important on chats where many rows resolve their annotations
+     * back-to-back during a fling-scroll.
      */
     suspend fun forText(text: String): List<DetectedAction> {
         if (text.length < 4) return emptyList()
         cache[text]?.let { return it }
-
-        val annotations = runCatching { extractor.annotate(text).await() }
-            .getOrElse { return emptyList() }
-
-        val urlRanges = URL_REGEX.findAll(text).map { it.range }.toList()
-        val filtered = annotations.filterNot { ann ->
-            // Drop the entity if its start index sits inside any
-            // detected URL substring (covers `https://.../12345.jpg`
-            // matching as a phone, etc).
-            urlRanges.any { ann.start in it }
+        if (text.none { it.isDigit() } && '@' !in text) {
+            cache[text] = emptyList()
+            return emptyList()
         }
-        val actions = filtered.flatMap { it.toActions(text) }.distinct()
-        if (annotations.isNotEmpty()) {
-            android.util.Log.i(
-                "EntityActions",
-                "text=${text.take(120)} annotations=${annotations.size} " +
-                    "urlRanges=${urlRanges.size} kept=${actions.size}",
-            )
+
+        return withContext(Dispatchers.Default) {
+            val annotations = runCatching { extractor.annotate(text).await() }
+                .getOrElse {
+                    cache[text] = emptyList()
+                    return@withContext emptyList()
+                }
+
+            val urlRanges = URL_REGEX.findAll(text).map { it.range }.toList()
+            val filtered = annotations.filterNot { ann ->
+                // Drop the entity if its start index sits inside any
+                // detected URL substring (covers `https://.../12345.jpg`
+                // matching as a phone, etc).
+                urlRanges.any { ann.start in it }
+            }
+            val actions = filtered.flatMap { it.toActions(text) }.distinct()
+            cache[text] = actions
+            actions
         }
-        cache[text] = actions
-        return actions
     }
 
     /**

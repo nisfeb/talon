@@ -137,19 +137,34 @@ class UrbitSession(
     val ourPatp: String get() = shipName ?: error("not logged in")
 }
 
-/** Minimal in-memory cookie jar — no persistence, wiped on logout. */
+/**
+ * Minimal in-memory cookie jar — no persistence, wiped on logout.
+ *
+ * The per-host list must be guarded: with concurrent HTTP calls
+ * (parallel scries, uploads, pokes) two threads can hit the same host
+ * at the same time, both call saveFromResponse, and corrupt the
+ * ArrayList's size field — yielding ArrayIndexOutOfBoundsException
+ * with negative dstPos out of arraycopy. Synchronizing on the inner
+ * list serializes the read-modify-write and snapshotting on read keeps
+ * loadForRequest off the lock's hot path.
+ */
 private class InMemoryCookieJar : CookieJar {
     private val store = ConcurrentHashMap<String, MutableList<Cookie>>()
 
     override fun saveFromResponse(url: HttpUrl, cookies: List<Cookie>) {
-        store.getOrPut(url.host) { mutableListOf() }.apply {
-            removeAll { existing -> cookies.any { it.name == existing.name } }
-            addAll(cookies)
+        val list = store.getOrPut(url.host) { mutableListOf() }
+        synchronized(list) {
+            list.removeAll { existing -> cookies.any { it.name == existing.name } }
+            list.addAll(cookies)
         }
     }
 
-    override fun loadForRequest(url: HttpUrl): List<Cookie> =
-        store[url.host]?.filter { it.matches(url) } ?: emptyList()
+    override fun loadForRequest(url: HttpUrl): List<Cookie> {
+        val list = store[url.host] ?: return emptyList()
+        // Snapshot under the lock so the filter walks a stable list.
+        val snapshot = synchronized(list) { list.toList() }
+        return snapshot.filter { it.matches(url) }
+    }
 
     fun clear() = store.clear()
 }

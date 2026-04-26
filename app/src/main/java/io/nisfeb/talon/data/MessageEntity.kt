@@ -1,6 +1,7 @@
 package io.nisfeb.talon.data
 
 import androidx.room.Entity
+import androidx.room.Index
 
 /**
  * One Urbit post. Keyed by (whom, id) so a single author's post across
@@ -14,8 +15,18 @@ import androidx.room.Entity
  * kind        "/chat", "/chat/notice", "/diary" (notebook), or "/heap" (gallery)
  * title       populated for notebook posts; null for chat/gallery
  * image       populated for notebook posts (cover image URL); null otherwise
+ *
+ * The `(whom, parentId, sentMs)` index is what makes chat-open fast:
+ * the primary key only covers `whom` + `id`, so without this every
+ * `stream(whom)` open had to scan-and-sort the whole conversation
+ * slice. Queries it covers — chat stream, replies, reply counts,
+ * latestFor, oldestIdFor, newestIdFor — all read in index order.
  */
-@Entity(tableName = "messages", primaryKeys = ["whom", "id"])
+@Entity(
+    tableName = "messages",
+    primaryKeys = ["whom", "id"],
+    indices = [Index(value = ["whom", "parentId", "sentMs"])],
+)
 data class MessageEntity(
     val whom: String,
     val id: String,

@@ -5,8 +5,11 @@ import io.nisfeb.talon.data.ChannelGroupEntity
 import io.nisfeb.talon.data.ClubEntity
 import io.nisfeb.talon.data.ContactEntity
 import io.nisfeb.talon.data.GroupEntity
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flowOn
 
 /**
  * Synchronous directory built from snapshots of the contacts, clubs,
@@ -128,15 +131,24 @@ data class ContactMap(
     }
 }
 
-/** Combine every directory DAO flow into one ContactMap flow. */
+/**
+ * Combine every directory DAO flow into one ContactMap flow.
+ *
+ * Each upstream is `distinctUntilChanged` first because Room's
+ * invalidation tracker re-emits on any table write, even when the
+ * queried slice is unchanged — without this, an irrelevant reaction
+ * upsert would still rebuild the five lookup maps. The combine itself
+ * runs on Dispatchers.Default so the map construction never lands on
+ * the main thread.
+ */
 fun contactMapFlow(
     contactsFlow: Flow<List<ContactEntity>>,
     clubsFlow: Flow<List<ClubEntity>>,
     groupsFlow: Flow<List<GroupEntity>>,
     channelGroupsFlow: Flow<List<ChannelGroupEntity>>,
 ): Flow<ContactMap> = combine(
-    contactsFlow,
-    clubsFlow,
-    groupsFlow,
-    channelGroupsFlow,
-) { c, cl, g, cg -> ContactMap(c, cl, g, cg) }
+    contactsFlow.distinctUntilChanged(),
+    clubsFlow.distinctUntilChanged(),
+    groupsFlow.distinctUntilChanged(),
+    channelGroupsFlow.distinctUntilChanged(),
+) { c, cl, g, cg -> ContactMap(c, cl, g, cg) }.flowOn(Dispatchers.Default)

@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.windowInsetsPadding
@@ -47,6 +48,9 @@ import io.nisfeb.talon.ui.ContactMap
 import io.nisfeb.talon.ui.contactMapFlow
 import io.nisfeb.talon.urbit.StoryCache
 import io.nisfeb.talon.urbit.StoryPart
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 
 /**
@@ -76,10 +80,19 @@ fun GalleryGridScreen(
         )
     }.collectAsState(initial = ContactMap.EMPTY)
 
+    // distinctUntilChanged on the upstream so unrelated messages-table
+    // writes don't re-emit; flowOn(Default) keeps the reverse off main.
     val posts by remember(whom) {
-        db.messages().stream(whom).map { it.asReversed() }
+        db.messages().stream(whom)
+            .distinctUntilChanged()
+            .map { it.asReversed() }
+            .flowOn(Dispatchers.Default)
     }.collectAsState(initial = emptyList())
 
+    var refreshing by remember(whom) { mutableStateOf(false) }
+    // First-paint spinner only shown when there's nothing cached. Once
+    // cached posts arrive, the refreshing flag drives a thin progress
+    // strip so the grid stays interactive while the scry catches up.
     var loading by remember { mutableStateOf(true) }
     // Clear the badge instantly: zero out the home-snapshot row (so a
     // back-nav paints a fresh state immediately) and tell the repo the
@@ -92,8 +105,10 @@ fun GalleryGridScreen(
         onDispose { repo.setOpenChat(null) }
     }
     LaunchedEffect(whom) {
+        refreshing = true
         runCatching { repo.refreshConversation(whom, count = 30) }
         loading = false
+        refreshing = false
     }
 
     val title = remember(contactMap, whom) { contactMap.conversationLabel(whom) }
@@ -117,6 +132,16 @@ fun GalleryGridScreen(
             }
         }
         HorizontalDivider()
+        // Network-activity strip while a refresh scry is in flight,
+        // but only once we already have cached posts to show — the
+        // first-open path keeps using the centered spinner.
+        if (refreshing && posts.isNotEmpty()) {
+            androidx.compose.material3.LinearProgressIndicator(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(2.dp),
+            )
+        }
         when {
             loading && posts.isEmpty() -> Row(
                 modifier = Modifier.fillMaxWidth().padding(24.dp),

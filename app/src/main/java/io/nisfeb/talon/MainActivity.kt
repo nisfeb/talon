@@ -22,6 +22,12 @@ class MainActivity : ComponentActivity() {
     private val deepLinkThreadParent = mutableStateOf<String?>(null)
     private val deepLinkThreadAnchor = mutableStateOf<String?>(null)
     private val pendingShare = mutableStateOf<ShareIntent?>(null)
+    /** When the system share sheet routes through a published Sharing
+     *  Shortcut (one of the per-channel shortcuts ShortcutsPublisher
+     *  emits), Android adds [Intent.EXTRA_SHORTCUT_ID] alongside
+     *  ACTION_SEND. The id is the channel's `whom`, so we use it to
+     *  bypass the picker and deliver the share directly. */
+    private val pendingShareTarget = mutableStateOf<String?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -42,6 +48,7 @@ class MainActivity : ComponentActivity() {
             val threadParent by deepLinkThreadParent
             val threadAnchor by deepLinkThreadAnchor
             val share by pendingShare
+            val shareTarget by pendingShareTarget
             TalonTheme {
                 TalonApp(
                     initialOpenWhom = whom,
@@ -49,7 +56,11 @@ class MainActivity : ComponentActivity() {
                     initialOpenThread = threadParent,
                     initialThreadAnchor = threadAnchor,
                     pendingShare = share,
-                    onShareConsumed = { pendingShare.value = null },
+                    pendingShareTarget = shareTarget,
+                    onShareConsumed = {
+                        pendingShare.value = null
+                        pendingShareTarget.value = null
+                    },
                 )
             }
         }
@@ -75,7 +86,17 @@ class MainActivity : ComponentActivity() {
         intent.getStringExtra(Notifications.EXTRA_THREAD_ANCHOR)?.let {
             deepLinkThreadAnchor.value = it
         }
-        ShareIntent.from(intent)?.let { pendingShare.value = it }
+        ShareIntent.from(intent)?.let {
+            pendingShare.value = it
+            // Sharing Shortcut routing: Android attaches the picked
+            // shortcut id to the ACTION_SEND intent. We publish one
+            // per channel keyed on `whom`, so this is the conversation
+            // the user already chose in the system share sheet — skip
+            // the in-app picker and deliver straight there.
+            intent.getStringExtra(Intent.EXTRA_SHORTCUT_ID)?.let { id ->
+                pendingShareTarget.value = id
+            }
+        }
     }
 
     private val requestNotificationsPermission = registerForActivityResult(

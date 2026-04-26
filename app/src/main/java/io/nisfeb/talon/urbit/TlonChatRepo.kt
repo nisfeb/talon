@@ -1415,26 +1415,37 @@ class TlonChatRepo(
             .put(memexBody.toRequestBody(JSON_MEDIA_TYPE))
             .build()
 
-        val (hostedUrl, uploadUrl) = client.newCall(memexReq).execute().use { resp ->
-            if (!resp.isSuccessful) error("memex upload-url failed: HTTP ${resp.code}")
-            val body = resp.body?.string() ?: error("empty memex response")
-            val obj = Json.parseToJsonElement(body).jsonObject
-            val hosted = obj["hostedUrl"].asStr()
-                ?: error("no hostedUrl in memex response")
-            val upload = obj["uploadUrl"].asStr()
-                ?: error("no uploadUrl in memex response")
-            hosted to upload
-        }
+        val (hostedUrl, uploadUrl) = client.newCall(memexReq).withUploadTimeout()
+            .execute().use { resp ->
+                if (!resp.isSuccessful) error("memex upload-url failed: HTTP ${resp.code}")
+                val body = resp.body?.string() ?: error("empty memex response")
+                val obj = Json.parseToJsonElement(body).jsonObject
+                val hosted = obj["hostedUrl"].asStr()
+                    ?: error("no hostedUrl in memex response")
+                val upload = obj["uploadUrl"].asStr()
+                    ?: error("no uploadUrl in memex response")
+                hosted to upload
+            }
 
         val uploadReq = Request.Builder()
             .url(uploadUrl)
             .put(bytes.toRequestBody(contentType.toMediaType()))
             .header("Cache-Control", "public, max-age=3600")
             .build()
-        client.newCall(uploadReq).execute().use { resp ->
+        client.newCall(uploadReq).withUploadTimeout().execute().use { resp ->
             if (!resp.isSuccessful) error("memex PUT failed: HTTP ${resp.code}")
         }
         return hostedUrl
+    }
+
+    /**
+     * Cap any single image-upload HTTP call at 60s. The shared OkHttp
+     * client uses readTimeout=0 to keep the SSE channel alive forever,
+     * so without an explicit per-call cap an unresponsive memex / S3
+     * endpoint would freeze the whole save flow indefinitely.
+     */
+    private fun okhttp3.Call.withUploadTimeout(): okhttp3.Call = apply {
+        timeout().timeout(60, java.util.concurrent.TimeUnit.SECONDS)
     }
 
     private suspend fun uploadViaStorage(
@@ -2274,7 +2285,21 @@ class TlonChatRepo(
                 mark = "activity-action",
                 payload = activityReadAction(source),
             )
-        }.onFailure { Log.w(TAG, "markRead poke failed for $whom", it) }
+        }.onFailure { err ->
+            // Distinguish transient socket-closed timeouts (channel cycled
+            // mid-poke; the next focus will mark-read again anyway) from
+            // genuine server errors. The former is expected during
+            // backgrounding / reconnect, so log it lightly without the
+            // 80-line stack and at info level.
+            val transient = err is java.io.InterruptedIOException ||
+                err is java.net.SocketException ||
+                err.cause is java.net.SocketException
+            if (transient) {
+                Log.i(TAG, "markRead $whom skipped (channel cycling): ${err.message}")
+            } else {
+                Log.w(TAG, "markRead poke failed for $whom", err)
+            }
+        }
     }
 
     // ───────── contacts ─────────
@@ -2369,9 +2394,16 @@ class TlonChatRepo(
         fields: JsonObject,
         modAtMs: Long? = null,
     ): ContactEntity {
-        fun textField(name: String): String? {
+        // Tlon's contacts /v1 wire shape wraps each field as
+        //   {type: <tag>, value: <payload>}
+        // where <tag> is the value-type tag from sur/contacts.hoon —
+        // %text for nickname/bio/status, %look for avatar/cover, %tint
+        // for color. Earlier versions of this parser only matched
+        // %text, which silently dropped every avatar. See
+        // tlon-apps/desk/lib/contacts/json-1.hoon:23-37.
+        fun typedValue(name: String, type: String): String? {
             val field = fields[name] as? JsonObject ?: return null
-            if (field["type"].asStr() != "text") return null
+            if (field["type"].asStr() != type) return null
             return field["value"].asStr()?.takeIf { it.isNotBlank() }
         }
         // Colors may arrive as either a plain text field ("#ff5050") or a
@@ -2382,12 +2414,12 @@ class TlonChatRepo(
                 ?: return null
             return normalizeHexColor(raw)
         }
-        val status = textField("status")
+        val status = typedValue("status", "text")
         return ContactEntity(
             ship = ship,
-            nickname = textField("nickname"),
-            bio = textField("bio"),
-            avatarUrl = textField("avatar"),
+            nickname = typedValue("nickname", "text"),
+            bio = typedValue("bio", "text"),
+            avatarUrl = typedValue("avatar", "look"),
             status = status,
             // Only carry a server-provided timestamp here. `mergeContact`
             // decides whether to stamp "now" for live observations.

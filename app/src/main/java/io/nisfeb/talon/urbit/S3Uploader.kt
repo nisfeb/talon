@@ -105,12 +105,17 @@ object S3Uploader {
         headers.forEach { (k, v) -> if (k != "host") requestBuilder.header(k, v) }
         requestBuilder.header("Authorization", authorization)
 
-        http.newCall(requestBuilder.build()).execute().use { resp ->
-            if (!resp.isSuccessful) {
-                val body = resp.body?.string().orEmpty()
-                error("S3 PUT failed: HTTP ${resp.code}${if (body.isNotBlank()) " — $body" else ""}")
+        // Cap the PUT at 60s — the shared client uses readTimeout=0 to
+        // hold the SSE channel open, so without an explicit cap an
+        // unresponsive S3 endpoint freezes the upload indefinitely.
+        http.newCall(requestBuilder.build())
+            .apply { timeout().timeout(60, java.util.concurrent.TimeUnit.SECONDS) }
+            .execute().use { resp ->
+                if (!resp.isSuccessful) {
+                    val body = resp.body?.string().orEmpty()
+                    error("S3 PUT failed: HTTP ${resp.code}${if (body.isNotBlank()) " — $body" else ""}")
+                }
             }
-        }
 
         return publicUrl(config, endpoint, key)
     }

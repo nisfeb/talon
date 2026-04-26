@@ -97,6 +97,10 @@ fun TalonApp(
     initialOpenThread: String? = null,
     initialThreadAnchor: String? = null,
     pendingShare: ShareIntent? = null,
+    /** When non-null, the user already picked the share target in
+     *  the system share sheet (Sharing Shortcut). Skip the in-app
+     *  picker and dispatch [pendingShare] straight to this whom. */
+    pendingShareTarget: String? = null,
     onShareConsumed: () -> Unit = {},
 ) {
     val app = LocalContext.current.applicationContext as TalonApplication
@@ -105,13 +109,19 @@ fun TalonApp(
     // Follow TalonApplication's active-ship flow so switch / logout /
     // add-ship events reshape the UI without each callback having to
     // update local state.
+    // Read the active ship straight from the StateFlow rather than
+    // funnelling it through a remember-backed mirror. Earlier versions
+    // pumped `activeShip` into a local `loggedInShip` via a
+    // LaunchedEffect — at first composition `loggedInShip` was always
+    // null while `activeShip` already held the right value, producing
+    // a one-frame LoginScreen flash plus a key(loggedInShip) reset
+    // that remounted the entire subtree as the LaunchedEffect caught
+    // up. That looked like a black/empty home on quick app opens and
+    // share-sheet entries.
     val activeShip by app.activeShipFlow.collectAsState()
     val allShips by app.allShipsFlow.collectAsState()
-    var loggedInShip by remember { mutableStateOf<String?>(null) }
+    val loggedInShip = activeShip
     var addingAnotherShip by remember { mutableStateOf(false) }
-    androidx.compose.runtime.LaunchedEffect(activeShip) {
-        loggedInShip = activeShip
-    }
     var openWhom by remember { mutableStateOf<String?>(initialOpenWhom) }
     // Scroll target is consumed once the chat screen actually uses it,
     // so navigating back and reopening doesn't re-snap to the same msg.
@@ -158,6 +168,75 @@ fun TalonApp(
             openThread = null
         } else {
             openWhom = target
+        }
+    }
+
+    // Pure dispatcher for a share into a chosen conversation. Same
+    // logic the picker's onPick uses, hoisted so the
+    // `pendingShareTarget` auto-dispatch path (Sharing Shortcut)
+    // doesn't have to duplicate it. Caller is responsible for
+    // toggling openWhom and calling onShareConsumed afterward.
+    val dispatchShare: (ShareIntent, String) -> Unit = { share, whom ->
+        when (share) {
+            is ShareIntent.Text -> {
+                val existing = app.drafts.load(whom)
+                val merged = if (existing.isBlank()) share.text
+                    else "${existing.trimEnd()}\n\n${share.text}"
+                app.drafts.save(whom, merged)
+            }
+            is ShareIntent.Image -> {
+                appScope.launch {
+                    runCatching {
+                        val resolver = context.contentResolver
+                        val name = resolveFileName(resolver, share.uri, default = "image")
+                        val bytes = resolver.openInputStream(share.uri)
+                            ?.use { it.readBytes() }
+                            ?: error("cannot read shared image bytes")
+                        val hostedUrl = app.repo.uploadImage(
+                            bytes = bytes,
+                            contentType = share.mimeType,
+                            fileName = name,
+                        )
+                        app.repo.sendImage(
+                            whom = whom,
+                            src = hostedUrl,
+                            width = 0,
+                            height = 0,
+                            alt = name,
+                        )
+                    }
+                }
+            }
+            is ShareIntent.File -> {
+                appScope.launch {
+                    runCatching {
+                        val resolver = context.contentResolver
+                        val name = resolveFileName(resolver, share.uri, default = "file")
+                        val bytes = resolver.openInputStream(share.uri)
+                            ?.use { it.readBytes() }
+                            ?: error("cannot read shared file bytes")
+                        val hostedUrl = app.repo.uploadImage(
+                            bytes = bytes,
+                            contentType = share.mimeType,
+                            fileName = name,
+                        )
+                        app.repo.send(whom, "[📎 $name]($hostedUrl)")
+                    }
+                }
+            }
+        }
+    }
+
+    // Sharing Shortcut path: the user already chose the channel in
+    // the system share sheet, so dispatch the share immediately and
+    // open that conversation without rendering the in-app picker.
+    LaunchedEffect(pendingShare, pendingShareTarget) {
+        val share = pendingShare
+        val target = pendingShareTarget
+        if (share != null && !target.isNullOrBlank()) {
+            dispatchShare(share, target)
+            openWhom = target
+            onShareConsumed()
         }
     }
 
@@ -246,14 +325,20 @@ fun TalonApp(
 
     // Foreground catch-up: when the app returns to the front, force a
     // fresh SSE reconnect (the channel may have been quietly killed by
-    // doze while we were away). The reconnect path re-scries
-    // init-posts + activity, so any messages that landed while we were
-    // gone show up immediately.
+    // doze while we were away). forceReconnect cancels the current
+    // session; the loop in runSessionLoop opens a new channel and
+    // calls bootstrap + bootstrapActivity, so any messages that
+    // landed while we were gone show up immediately.
+    //
+    // We used to also call catchUp() alongside this, but it raced
+    // against the new session's bootstrap — same scries, same channel
+    // host — and reliably lost to the 30s RPC timeout, polluting
+    // logcat with `catchUp bootstrap failed: IOException: Canceled`
+    // on every foreground entry. forceReconnect alone covers the gap.
     DisposableEffect(Unit) {
         val lifecycle = ProcessLifecycleOwner.get().lifecycle
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_START) {
-                app.repo.catchUp()
                 app.repo.forceReconnect()
             }
         }
@@ -294,6 +379,36 @@ fun TalonApp(
         BackHandler(enabled = newDmOpen) { newDmOpen = false }
         BackHandler(enabled = openThread != null) { openThread = null }
         BackHandler(enabled = openThread == null && openWhom != null) { openWhom = null }
+
+        // Trace every screen swap so we can correlate logcat with
+        // visual artifacts. Names the branch the when-block will
+        // pick this composition; TODO drop after the
+        // overlap/black-screen bug is reproduced.
+        val screenTag = when {
+            addingAnotherShip -> "AddShipLogin"
+            loggedInShip == null -> "Login"
+            viewerImageUrl != null -> "ImageViewer"
+            editingProfile -> "ProfileEdit"
+            statusFeedOpen -> "StatusFeed"
+            bookmarksOpen -> "Bookmarks"
+            activityOpen -> "Activity"
+            adminGroupFlag != null -> "GroupAdmin($adminGroupFlag)"
+            adminListOpen -> "AdminList"
+            invitesOpen -> "Invites"
+            openGroupFlag != null -> "GroupHome($openGroupFlag)"
+            settingsOpen -> "Settings"
+            pendingShare != null -> "ShareTarget"
+            openThread != null && openWhom != null -> "Thread($openWhom/$openThread)"
+            openWhom != null && openWhom!!.startsWith("diary/") -> "Diary($openWhom)"
+            openWhom != null && openWhom!!.startsWith("heap/") -> "Gallery($openWhom)"
+            openWhom != null -> "DmChat($openWhom)"
+            searchOpen -> "Search"
+            newDmOpen -> "NewDm"
+            else -> "DmList"
+        }
+        androidx.compose.runtime.LaunchedEffect(screenTag) {
+            android.util.Log.i("TalonNav", "render → $screenTag")
+        }
 
         // Key the logged-in tree on the active ship so switching
         // resets every remember / collectAsState. Otherwise consumers
@@ -406,66 +521,7 @@ fun TalonApp(
                 db = app.db,
                 share = pendingShare,
                 onPick = { whom ->
-                    when (pendingShare) {
-                        is ShareIntent.Text -> {
-                            // Append to any existing draft so nothing is lost.
-                            val existing = app.drafts.load(whom)
-                            val merged = if (existing.isBlank()) pendingShare.text
-                                else "${existing.trimEnd()}\n\n${pendingShare.text}"
-                            app.drafts.save(whom, merged)
-                        }
-                        is ShareIntent.Image -> {
-                            appScope.launch {
-                                runCatching {
-                                    val resolver = context.contentResolver
-                                    val name = resolveFileName(
-                                        resolver,
-                                        pendingShare.uri,
-                                        default = "image",
-                                    )
-                                    val bytes = resolver.openInputStream(pendingShare.uri)
-                                        ?.use { it.readBytes() }
-                                        ?: error("cannot read shared image bytes")
-                                    val hostedUrl = app.repo.uploadImage(
-                                        bytes = bytes,
-                                        contentType = pendingShare.mimeType,
-                                        fileName = name,
-                                    )
-                                    app.repo.sendImage(
-                                        whom = whom,
-                                        src = hostedUrl,
-                                        width = 0,
-                                        height = 0,
-                                        alt = name,
-                                    )
-                                }
-                            }
-                        }
-                        is ShareIntent.File -> {
-                            appScope.launch {
-                                runCatching {
-                                    val resolver = context.contentResolver
-                                    val name = resolveFileName(
-                                        resolver,
-                                        pendingShare.uri,
-                                        default = "file",
-                                    )
-                                    val bytes = resolver.openInputStream(pendingShare.uri)
-                                        ?.use { it.readBytes() }
-                                        ?: error("cannot read shared file bytes")
-                                    val hostedUrl = app.repo.uploadImage(
-                                        bytes = bytes,
-                                        contentType = pendingShare.mimeType,
-                                        fileName = name,
-                                    )
-                                    // Link block: markdown parses into an
-                                    // inline link span that renders as a
-                                    // tappable attachment on every client.
-                                    app.repo.send(whom, "[📎 $name]($hostedUrl)")
-                                }
-                            }
-                        }
-                    }
+                    dispatchShare(pendingShare, whom)
                     openWhom = whom
                     onShareConsumed()
                 },
