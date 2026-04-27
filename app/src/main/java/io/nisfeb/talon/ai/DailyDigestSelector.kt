@@ -27,17 +27,31 @@ object DailyDigestSelector {
      *  text (caller uses StoryCache.textFor). Extracted at the facade
      *  level because StoryCache is not pure.
      * @param watchwordHits in-window watchword hits.
+     * @param watchwordAuthorByKey optional lookup from (whom, postId) →
+     *  author patp. Hits don't carry author, so the facade may join with
+     *  `messages` to populate this. Defaults to empty; missing keys produce
+     *  empty author strings, which the formatter handles gracefully.
      * @param unreadCandidates per-chat newest messages in the window
      *  (already excluded muted / watchword-excluded chats by the caller).
-     * @param unreadCounts per-chat unread count from `unreads` table.
+     *  This map's iteration order determines which chats fill the bucket
+     *  when the cap is hit — pass an insertion-ordered map.
+     * @param unreadCounts per-chat unread count from `unreads` table. Used
+     *  ONLY to bound how many of each chat's candidates to surface. A chat
+     *  must appear in BOTH unreadCandidates AND unreadCounts to be selected.
+     * @param unreadPlainText map from postId → plain text (StoryCache.textFor).
+     *  The unread bucket uses this for the digest snippet; falls back to
+     *  raw `contentJson` if a key is missing (defensive — shouldn't happen
+     *  in practice).
      */
     fun assemble(
         ourPatp: String,
         mentionCandidates: List<MessageEntity>,
         mentionPlainText: Map<String, String>,
         watchwordHits: List<WatchwordHitEntity>,
+        watchwordAuthorByKey: Map<Pair<String, String>, String> = emptyMap(),
         unreadCandidates: Map<String, List<MessageEntity>>,
         unreadCounts: Map<String, Int>,
+        unreadPlainText: Map<String, String>,
     ): List<DigestItem> {
         val out = LinkedHashMap<Pair<String, String>, DigestItem>()
 
@@ -70,7 +84,7 @@ object DailyDigestSelector {
             out[key] = DigestItem(
                 whom = h.whom,
                 postId = h.postId,
-                authorPatp = "",                     // unknown from hits table
+                authorPatp = watchwordAuthorByKey[key] ?: "",
                 sentMs = h.sentMs,
                 bucket = Bucket.WATCHWORD,
                 snippet = h.snippet,
@@ -97,7 +111,7 @@ object DailyDigestSelector {
                     authorPatp = m.author,
                     sentMs = m.sentMs,
                     bucket = Bucket.UNREAD,
-                    snippet = m.contentJson.take(SNIPPET_MAX),
+                    snippet = (unreadPlainText[m.id] ?: m.contentJson).take(SNIPPET_MAX),
                 )
                 uAdded++
             }

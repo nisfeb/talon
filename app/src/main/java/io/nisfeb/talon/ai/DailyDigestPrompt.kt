@@ -30,7 +30,10 @@ object DailyDigestPrompt {
             for (r in rows) {
                 val name = displayName(r.authorPatp)
                 val snippet = r.snippet.replace('\n', ' ').take(SNIPPET_MAX)
-                sb.append(name).append(": ").append(snippet).append('\n')
+                if (name.isNotBlank()) {
+                    sb.append(name).append(": ")
+                }
+                sb.append(snippet).append('\n')
             }
         }
         return sb.toString().trimEnd('\n')
