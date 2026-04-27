@@ -133,6 +133,19 @@ class TalonApplication : Application() {
         buildShipScoped(shipForInit)
         _activeShip.value = initialShip
 
+        dailyDigest = io.nisfeb.talon.ai.DailyDigest(
+            context = this,
+            sessionStore = sessionStore,
+            activeShipFlow = activeShipFlow,
+            getDb = { db },
+            aiSettings = aiSettings,
+            aiClient = aiClient,
+            settings = dailyDigestSettings,
+            http = http,
+            scope = appScope,
+            receiverClass = io.nisfeb.talon.DigestAlarmReceiver::class.java,
+        )
+
         // Wire AI settings changes to %settings sync. Fires on every
         // AiSettings mutation; SettingsSync checks syncEnabled and
         // routes to the right behavior (push, no-op, or clear).
@@ -170,6 +183,24 @@ class TalonApplication : Application() {
                 }
             }
         }
+
+        dailyDigestSettings.onChange = { evt, transitionedOffSync ->
+            appScope.launch {
+                runCatching {
+                    when {
+                        transitionedOffSync -> repo.settingsSync.clearDailyDigestOnShip()
+                        else -> repo.settingsSync.pushDailyDigest(dailyDigestSettings.state.value)
+                    }
+                }
+                // Re-arm on toggle / time change.
+                runCatching { dailyDigest.scheduleNext() }
+            }
+        }
+
+        // Arm the alarm if the user has enabled it (and re-arm on every
+        // app start — belt-and-suspenders against the receiver being killed
+        // before it finished re-arming yesterday).
+        runCatching { dailyDigest.scheduleNext() }
     }
 
     /**
