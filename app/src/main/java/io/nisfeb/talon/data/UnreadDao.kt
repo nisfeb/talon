@@ -29,4 +29,11 @@ interface UnreadDao {
      *  mark-read races to zero it. */
     @Query("SELECT * FROM unreads WHERE whom = :whom LIMIT 1")
     suspend fun getOne(whom: String): UnreadEntity?
+
+    /** Daily digest: snapshot of every unread row. Caller filters
+     *  out muted / watchword-excluded chats before assembling buckets.
+     *  Ordered by recency DESC so the digest's "last 24h" framing
+     *  surfaces the freshest activity first when the cap is hit. */
+    @Query("SELECT * FROM unreads ORDER BY recencyMs DESC")
+    suspend fun getAll(): List<UnreadEntity>
 }

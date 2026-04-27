@@ -30,6 +30,8 @@ class TalonApplication : Application() {
         private set
     lateinit var aiSettings: AiSettings
         private set
+    lateinit var dailyDigestSettings: io.nisfeb.talon.ai.DailyDigestSettings
+        private set
     lateinit var uiSettings: UiSettings
         private set
     lateinit var shipProfiles: ShipProfileStore
@@ -39,6 +41,8 @@ class TalonApplication : Application() {
     lateinit var ai: AiFeatures
         private set
     lateinit var embedder: io.nisfeb.talon.ai.Embedder
+        private set
+    lateinit var dailyDigest: io.nisfeb.talon.ai.DailyDigest
         private set
 
     // Ship-scoped — rebuilt on ship switch. lateinit so the first
@@ -101,6 +105,7 @@ class TalonApplication : Application() {
             .build()
         sessionStore = SessionStore(this)
         aiSettings = AiSettings(this)
+        dailyDigestSettings = io.nisfeb.talon.ai.DailyDigestSettings(this)
         uiSettings = UiSettings(this)
         shipProfiles = ShipProfileStore(this)
         aiClient = AiClient(settingsProvider = { aiSettings.state.value })
@@ -127,6 +132,19 @@ class TalonApplication : Application() {
         val shipForInit = initialShip ?: "none"
         buildShipScoped(shipForInit)
         _activeShip.value = initialShip
+
+        dailyDigest = io.nisfeb.talon.ai.DailyDigest(
+            context = this,
+            sessionStore = sessionStore,
+            activeShipFlow = activeShipFlow,
+            getDb = { db },
+            aiSettings = aiSettings,
+            aiClient = aiClient,
+            settings = dailyDigestSettings,
+            http = http,
+            scope = appScope,
+            receiverClass = io.nisfeb.talon.DigestAlarmReceiver::class.java,
+        )
 
         // Wire AI settings changes to %settings sync. Fires on every
         // AiSettings mutation; SettingsSync checks syncEnabled and
@@ -165,6 +183,24 @@ class TalonApplication : Application() {
                 }
             }
         }
+
+        dailyDigestSettings.onChange = { evt, transitionedOffSync ->
+            appScope.launch {
+                runCatching {
+                    when {
+                        transitionedOffSync -> repo.settingsSync.clearDailyDigestOnShip()
+                        else -> repo.settingsSync.pushDailyDigest(dailyDigestSettings.state.value)
+                    }
+                }
+                // Re-arm on toggle / time change.
+                runCatching { dailyDigest.scheduleNext() }
+            }
+        }
+
+        // Arm the alarm if the user has enabled it (and re-arm on every
+        // app start — belt-and-suspenders against the receiver being killed
+        // before it finished re-arming yesterday).
+        runCatching { dailyDigest.scheduleNext() }
     }
 
     /**
@@ -192,7 +228,12 @@ class TalonApplication : Application() {
         // for this ship (if any). Skips silently for the placeholder
         // "none" ship used pre-login.
         if (ship != "none") runCatching { session.tryRestore(ship) }
-        repo = TlonChatRepo(db, aiSettings)
+        repo = TlonChatRepo(db, aiSettings, dailyDigestSettings, rearmDailyDigest = {
+            // `dailyDigest` is lateinit and built later in onCreate; this
+            // lambda only fires from inbound %settings events long after
+            // initialization, so the runtime guard is sufficient.
+            runCatching { dailyDigest.scheduleNext() }
+        })
         watchwords = io.nisfeb.talon.ai.Watchwords(
             db = db,
             ourPatpProvider = { ship.takeIf { it != "none" } ?: "" },

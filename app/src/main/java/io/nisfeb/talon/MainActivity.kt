@@ -21,6 +21,12 @@ class MainActivity : ComponentActivity() {
     private val deepLinkMessageId = mutableStateOf<String?>(null)
     private val deepLinkThreadParent = mutableStateOf<String?>(null)
     private val deepLinkThreadAnchor = mutableStateOf<String?>(null)
+    /** Holds the ship from a Daily Digest notification tap; non-null
+     *  asks TalonApp to navigate straight to DailyDigestScreen on next
+     *  composition. The value is the ship the digest belongs to —
+     *  stashed for completeness even though the screen reads the
+     *  active ship's digest itself. */
+    private val deepLinkOpenDigest = mutableStateOf<String?>(null)
     private val pendingShare = mutableStateOf<ShareIntent?>(null)
     /** When the system share sheet routes through a published Sharing
      *  Shortcut (one of the per-channel shortcuts ShortcutsPublisher
@@ -47,6 +53,7 @@ class MainActivity : ComponentActivity() {
             val messageId by deepLinkMessageId
             val threadParent by deepLinkThreadParent
             val threadAnchor by deepLinkThreadAnchor
+            val openDigest by deepLinkOpenDigest
             val share by pendingShare
             val shareTarget by pendingShareTarget
             TalonTheme {
@@ -55,6 +62,7 @@ class MainActivity : ComponentActivity() {
                     initialScrollMessageId = messageId,
                     initialOpenThread = threadParent,
                     initialThreadAnchor = threadAnchor,
+                    initialOpenDigest = openDigest,
                     pendingShare = share,
                     pendingShareTarget = shareTarget,
                     onShareConsumed = {
@@ -85,6 +93,9 @@ class MainActivity : ComponentActivity() {
         }
         intent.getStringExtra(Notifications.EXTRA_THREAD_ANCHOR)?.let {
             deepLinkThreadAnchor.value = it
+        }
+        intent.getStringExtra(Notifications.EXTRA_OPEN_DIGEST)?.let {
+            deepLinkOpenDigest.value = it
         }
         ShareIntent.from(intent)?.let {
             pendingShare.value = it

@@ -22,6 +22,7 @@ object Notifications {
     const val CHANNEL_MESSAGES = "messages"
     const val CHANNEL_SYNC = "sync"
     const val CHANNEL_WATCHWORDS = "watchwords"
+    const val CHANNEL_DAILY_DIGEST = "daily-digest"
     const val EXTRA_OPEN_WHOM = "open_whom"
     const val EXTRA_SCROLL_TO_MESSAGE = "scroll_to_message"
     /** When the notification is for a reply, the parent post id —
@@ -31,6 +32,8 @@ object Notifications {
     /** When EXTRA_OPEN_THREAD is set, the specific reply id to anchor
      *  the thread's initial scroll on. */
     const val EXTRA_THREAD_ANCHOR = "thread_anchor"
+    const val EXTRA_OPEN_DIGEST = "open_digest"
+    const val EXTRA_DIGEST_DATE = "digest_date"
 
     fun ensureChannel(context: Context) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
@@ -70,6 +73,18 @@ object Notifications {
                     description = "Hits on user-defined watchword terms"
                     enableLights(true)
                     enableVibration(true)
+                }
+            )
+        }
+        if (mgr.getNotificationChannel(CHANNEL_DAILY_DIGEST) == null) {
+            mgr.createNotificationChannel(
+                NotificationChannel(
+                    CHANNEL_DAILY_DIGEST,
+                    "Daily digest",
+                    NotificationManager.IMPORTANCE_DEFAULT,
+                ).apply {
+                    description = "Morning brief — fires once a day"
+                    enableLights(true)
                 }
             )
         }
@@ -179,6 +194,54 @@ object Notifications {
         // collapse into one row, but never collide with showMessage's
         // <whom>-tagged notification for the same chat.
         mgr.notify("watchword:$whom", NOTIFICATION_ID, notification)
+    }
+
+    /**
+     * Daily digest notification. Tap routes into MainActivity with
+     * EXTRA_OPEN_DIGEST set; TalonApp picks it up and navigates to
+     * DailyDigestScreen for [ship] / [dateLocal].
+     *
+     * Tag = "digest:<ship>:<dateLocal>" so re-firing the same day
+     * replaces. The notification ID is shared with the chat-message
+     * notifications because Android dedupes per (tag, id).
+     */
+    fun showDailyDigest(
+        context: Context,
+        ship: String,
+        dateLocal: String,
+        title: String,
+        body: String,
+        generatedAtMs: Long,
+    ) {
+        val mgr = ContextCompat.getSystemService(context, NotificationManager::class.java)
+            ?: return
+
+        val tapIntent = Intent(context, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            putExtra(EXTRA_OPEN_DIGEST, ship)
+            putExtra(EXTRA_DIGEST_DATE, dateLocal)
+        }
+        val pending = PendingIntent.getActivity(
+            context,
+            ("digest:$ship:$dateLocal").hashCode(),
+            tapIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+
+        val notification = NotificationCompat.Builder(context, CHANNEL_DAILY_DIGEST)
+            .setSmallIcon(android.R.drawable.ic_dialog_email)
+            .setContentTitle(title)
+            .setContentText(body)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(body))
+            .setContentIntent(pending)
+            .setAutoCancel(true)
+            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            .setCategory(NotificationCompat.CATEGORY_REMINDER)
+            .setWhen(generatedAtMs)
+            .setShowWhen(true)
+            .build()
+
+        mgr.notify("digest:$ship:$dateLocal", NOTIFICATION_ID, notification)
     }
 
     fun clear(context: Context, whom: String) {

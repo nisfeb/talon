@@ -2,6 +2,7 @@ package io.nisfeb.talon.urbit
 
 import android.util.Log
 import io.nisfeb.talon.ai.AiSettings
+import io.nisfeb.talon.ai.DailyDigestSettings
 import io.nisfeb.talon.data.AppDatabase
 import io.nisfeb.talon.data.BookmarkEntity
 import io.nisfeb.talon.data.BookmarkFolderEntity
@@ -13,6 +14,7 @@ import io.nisfeb.talon.data.NotifyPreferenceEntity
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
@@ -36,6 +38,12 @@ import kotlinx.serialization.json.put
 class SettingsSync(
     private val db: AppDatabase,
     private val aiSettings: AiSettings,
+    private val dailyDigestSettings: DailyDigestSettings,
+    /** Re-arm the digest alarm after a remote-applied change to the
+     *  daily-digest bucket. We bypass `dailyDigestSettings.onChange` to
+     *  avoid bouncing the change back to the ship (pingpong), but that
+     *  also skips the local re-arm — this callback restores it. */
+    private val rearmDailyDigest: () -> Unit = {},
 ) {
 
     companion object {
@@ -51,6 +59,7 @@ class SettingsSync(
         const val BUCKET_AI_SETTINGS = "ai-settings"
         const val BUCKET_WATCHWORDS = "watchwords"
         const val BUCKET_WATCHWORD_EXCLUDES = "watchword-excludes"
+        const val BUCKET_DAILY_DIGEST = "daily-digest"
         private const val AI_ENTRY = "config"
     }
 
@@ -100,6 +109,7 @@ class SettingsSync(
             if (aiSettings.state.value.syncEnabled) {
                 applyBucket(BUCKET_AI_SETTINGS, deskMap[BUCKET_AI_SETTINGS] as? JsonObject)
             }
+            applyBucket(BUCKET_DAILY_DIGEST, deskMap[BUCKET_DAILY_DIGEST] as? JsonObject)
         }
 
         // Subscribe for live updates from other devices.
@@ -388,6 +398,7 @@ class SettingsSync(
                 cfg.baseUrl?.let { put("baseUrl", it) }
                 put("catchMeUpEnabled", cfg.catchMeUpEnabled)
                 put("emojiReactEnabled", cfg.emojiReactEnabled)
+                put("dailyDigestEnabled", cfg.dailyDigestEnabled)
                 put("entityActionsEnabled", cfg.entityActionsEnabled)
                 put("semanticSearchEnabled", cfg.semanticSearchEnabled)
                 put("topicClustersEnabled", cfg.topicClustersEnabled)
@@ -425,6 +436,7 @@ class SettingsSync(
             baseUrl = baseUrl,
             catchMeUpEnabled = bool("catchMeUpEnabled", true),
             emojiReactEnabled = bool("emojiReactEnabled", true),
+            dailyDigestEnabled = bool("dailyDigestEnabled", true),
             entityActionsEnabled = bool("entityActionsEnabled", false),
             semanticSearchEnabled = bool("semanticSearchEnabled", false),
             topicClustersEnabled = bool("topicClustersEnabled", false),
@@ -617,6 +629,29 @@ class SettingsSync(
         }.onFailure { Log.w(TAG, "clearWatchwordsOnShip failed", it) }
     }
 
+    /**
+     * Push the entire DailyDigest state to %settings. Three entries:
+     * enabled, hourOfDay, minuteOfDay.
+     */
+    suspend fun pushDailyDigest(state: io.nisfeb.talon.ai.DailyDigestSettings.State) {
+        pokePutEntry(BUCKET_DAILY_DIGEST, "enabled", JsonPrimitive(state.enabled))
+        pokePutEntry(BUCKET_DAILY_DIGEST, "hourOfDay", JsonPrimitive(state.hourOfDay))
+        pokePutEntry(BUCKET_DAILY_DIGEST, "minuteOfDay", JsonPrimitive(state.minuteOfDay))
+    }
+
+    /** Nuke the daily-digest bucket on the ship (sync just turned off). */
+    suspend fun clearDailyDigestOnShip() {
+        val ch = channel ?: return
+        runCatching {
+            ch.poke("settings", "settings-event", buildJsonObject {
+                put("del-bucket", buildJsonObject {
+                    put("desk", DESK)
+                    put("bucket-key", BUCKET_DAILY_DIGEST)
+                })
+            })
+        }.onFailure { Log.w(TAG, "clearDailyDigestOnShip failed", it) }
+    }
+
     // ───────── inbound appliers ─────────
 
     /**
@@ -763,6 +798,17 @@ class SettingsSync(
                     )
                 }
             }
+            BUCKET_DAILY_DIGEST -> {
+                val obj = entries ?: return
+                val enabled = (unwrap(obj["enabled"]) as? JsonPrimitive)?.booleanOrNull
+                    ?: false
+                val hourOfDay = (unwrap(obj["hourOfDay"]) as? JsonPrimitive)?.intOrNull
+                    ?: 6
+                val minuteOfDay = (unwrap(obj["minuteOfDay"]) as? JsonPrimitive)?.intOrNull
+                    ?: 0
+                dailyDigestSettings.applyRemote(enabled, hourOfDay, minuteOfDay)
+                rearmDailyDigest()
+            }
         }
     }
 
@@ -819,7 +865,7 @@ class SettingsSync(
                 }
             }
             BUCKET_WATCHWORDS -> {
-                val obj = value as? JsonObject ?: return
+                val obj = unwrapped as? JsonObject ?: return
                 val termText = obj["term"].asStr() ?: return
                 val notify = (obj["notify"] as? JsonPrimitive)?.booleanOrNull ?: true
                 val createdMs = (obj["createdMs"] as? JsonPrimitive)?.longOrNull
@@ -845,6 +891,28 @@ class SettingsSync(
                 db.watchwords().upsertExclude(
                     io.nisfeb.talon.data.WatchwordChatExcludeEntity(entry)
                 )
+            }
+            BUCKET_DAILY_DIGEST -> {
+                // Each entry is a single setting; collapse the bucket back into
+                // a State by reading current state then overwriting the changed key.
+                val current = dailyDigestSettings.state.value
+                when (entry) {
+                    "enabled" -> {
+                        val v = (unwrapped as? JsonPrimitive)?.booleanOrNull ?: return
+                        dailyDigestSettings.applyRemote(v, current.hourOfDay, current.minuteOfDay)
+                    }
+                    "hourOfDay" -> {
+                        val v = (unwrapped as? JsonPrimitive)?.intOrNull ?: return
+                        if (v !in 0..23) return
+                        dailyDigestSettings.applyRemote(current.enabled, v, current.minuteOfDay)
+                    }
+                    "minuteOfDay" -> {
+                        val v = (unwrapped as? JsonPrimitive)?.intOrNull ?: return
+                        if (v !in 0..59) return
+                        dailyDigestSettings.applyRemote(current.enabled, current.hourOfDay, v)
+                    }
+                }
+                rearmDailyDigest()
             }
         }
     }
@@ -892,6 +960,16 @@ class SettingsSync(
             BUCKET_WATCHWORD_EXCLUDES -> {
                 db.watchwords().deleteExclude(entry)
             }
+            BUCKET_DAILY_DIGEST -> {
+                // Removing an individual key falls back to its default.
+                val current = dailyDigestSettings.state.value
+                when (entry) {
+                    "enabled" -> dailyDigestSettings.applyRemote(false, current.hourOfDay, current.minuteOfDay)
+                    "hourOfDay" -> dailyDigestSettings.applyRemote(current.enabled, 6, current.minuteOfDay)
+                    "minuteOfDay" -> dailyDigestSettings.applyRemote(current.enabled, current.hourOfDay, 0)
+                }
+                rearmDailyDigest()
+            }
         }
     }
 
@@ -912,6 +990,11 @@ class SettingsSync(
                 db.watchwords().excludesAsList().forEach {
                     db.watchwords().deleteExclude(it)
                 }
+            }
+            BUCKET_DAILY_DIGEST -> {
+                // del-bucket from ship: revert to defaults locally.
+                dailyDigestSettings.applyRemote(enabled = false, hourOfDay = 6, minuteOfDay = 0)
+                rearmDailyDigest()
             }
         }
     }
