@@ -892,16 +892,16 @@ class SettingsSync(
                 val current = dailyDigestSettings.state.value
                 when (entry) {
                     "enabled" -> {
-                        val v = (value as? JsonPrimitive)?.booleanOrNull ?: return
+                        val v = (unwrapped as? JsonPrimitive)?.booleanOrNull ?: return
                         dailyDigestSettings.applyRemote(v, current.hourOfDay, current.minuteOfDay)
                     }
                     "hourOfDay" -> {
-                        val v = (value as? JsonPrimitive)?.intOrNull ?: return
+                        val v = (unwrapped as? JsonPrimitive)?.intOrNull ?: return
                         if (v !in 0..23) return
                         dailyDigestSettings.applyRemote(current.enabled, v, current.minuteOfDay)
                     }
                     "minuteOfDay" -> {
-                        val v = (value as? JsonPrimitive)?.intOrNull ?: return
+                        val v = (unwrapped as? JsonPrimitive)?.intOrNull ?: return
                         if (v !in 0..59) return
                         dailyDigestSettings.applyRemote(current.enabled, current.hourOfDay, v)
                     }
