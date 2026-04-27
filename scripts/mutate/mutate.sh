@@ -46,6 +46,10 @@ DEFAULT_TARGETS=(
     "app/src/main/java/io/nisfeb/talon/urbit/DottedIdDedupe.kt"
     "app/src/main/java/io/nisfeb/talon/urbit/WireShapes.kt"
     "app/src/main/java/io/nisfeb/talon/ai/Watchwords.kt"
+    "app/src/main/java/io/nisfeb/talon/ai/DailyDigestSchedule.kt"
+    "app/src/main/java/io/nisfeb/talon/ai/DailyDigestMentionMatcher.kt"
+    "app/src/main/java/io/nisfeb/talon/ai/DailyDigestPrompt.kt"
+    "app/src/main/java/io/nisfeb/talon/ai/DailyDigestSelector.kt"
 )
 
 TARGETS=("${@:-${DEFAULT_TARGETS[@]}}")
