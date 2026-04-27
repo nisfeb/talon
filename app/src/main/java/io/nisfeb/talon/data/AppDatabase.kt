@@ -28,8 +28,9 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         WatchwordEntity::class,
         WatchwordHitEntity::class,
         WatchwordChatExcludeEntity::class,
+        DailyDigestEntity::class,
     ],
-    version = 26,
+    version = 27,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -47,6 +48,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun embeddings(): EmbeddingDao
     abstract fun bookmarkFolders(): BookmarkFolderDao
     abstract fun watchwords(): WatchwordsDao
+    abstract fun dailyDigests(): DailyDigestDao
 
     companion object {
         private val MIGRATION_17_18 = object : Migration(17, 18) {
@@ -212,6 +214,24 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        private val MIGRATION_26_27 = object : Migration(26, 27) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS daily_digests (
+                        ship TEXT NOT NULL,
+                        dateLocal TEXT NOT NULL,
+                        generatedAtMs INTEGER NOT NULL,
+                        summaryText TEXT,
+                        itemsJson TEXT NOT NULL,
+                        weatherJson TEXT,
+                        PRIMARY KEY (ship, dateLocal)
+                    )
+                    """.trimIndent()
+                )
+            }
+        }
+
         /**
          * Open the Room database for a specific ship. Each ship's
          * data lives in its own file so switching ships is a clean
@@ -230,6 +250,7 @@ abstract class AppDatabase : RoomDatabase() {
                     MIGRATION_17_18, MIGRATION_18_19, MIGRATION_19_20,
                     MIGRATION_20_21, MIGRATION_21_22, MIGRATION_22_23,
                     MIGRATION_23_24, MIGRATION_24_25, MIGRATION_25_26,
+                    MIGRATION_26_27,
                 )
                 .fallbackToDestructiveMigration()
                 .build()
