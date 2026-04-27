@@ -48,6 +48,7 @@ import io.nisfeb.talon.ui.screens.NotebookComposeScreen
 import io.nisfeb.talon.ui.screens.NotebookListScreen
 import io.nisfeb.talon.ui.screens.NotebookPostScreen
 import io.nisfeb.talon.ui.screens.BookmarksScreen
+import io.nisfeb.talon.ui.screens.DailyDigestScreen
 import io.nisfeb.talon.ui.screens.StatusFeedScreen
 import io.nisfeb.talon.ui.screens.ThreadScreen
 import io.nisfeb.talon.ui.screens.WatchwordsScreen
@@ -97,6 +98,12 @@ fun TalonApp(
      *  [initialThreadAnchor] rather than just the chat. */
     initialOpenThread: String? = null,
     initialThreadAnchor: String? = null,
+    /** Set when a Daily Digest notification's tap-intent points at
+     *  the brief — TalonApp opens DailyDigestScreen on first
+     *  composition. The value is the ship the digest belongs to;
+     *  unused for routing today (the screen reads the active ship's
+     *  digest itself) but stashed for future per-ship routing. */
+    initialOpenDigest: String? = null,
     pendingShare: ShareIntent? = null,
     /** When non-null, the user already picked the share target in
      *  the system share sheet (Sharing Shortcut). Skip the in-app
@@ -140,6 +147,9 @@ fun TalonApp(
     var bookmarksOpen by remember { mutableStateOf(false) }
     var activityOpen by remember { mutableStateOf(false) }
     var watchwordsOpen by remember { mutableStateOf(false) }
+    // Daily Digest screen — initialOpenDigest non-null means we
+    // arrived from a notification tap, so route straight there.
+    var digestOpen by remember { mutableStateOf(initialOpenDigest != null) }
     var settingsOpen by remember { mutableStateOf(false) }
     var adminListOpen by remember { mutableStateOf(false) }
     var adminGroupFlag by remember { mutableStateOf<String?>(null) }
@@ -395,6 +405,7 @@ fun TalonApp(
         BackHandler(enabled = bookmarksOpen) { bookmarksOpen = false }
         BackHandler(enabled = activityOpen) { activityOpen = false }
         BackHandler(enabled = watchwordsOpen) { watchwordsOpen = false }
+        BackHandler(enabled = digestOpen) { digestOpen = false }
         BackHandler(enabled = settingsOpen) { settingsOpen = false }
         BackHandler(enabled = adminGroupFlag != null) { adminGroupFlag = null }
         BackHandler(enabled = adminListOpen && adminGroupFlag == null) {
@@ -425,6 +436,7 @@ fun TalonApp(
             bookmarksOpen -> "Bookmarks"
             activityOpen -> "Activity"
             watchwordsOpen -> "Watchwords"
+            digestOpen -> "Today's brief"
             adminGroupFlag != null -> "GroupAdmin($adminGroupFlag)"
             adminListOpen -> "AdminList"
             invitesOpen -> "Invites"
@@ -524,6 +536,16 @@ fun TalonApp(
                     watchwordsOpen = false
                 },
                 modifier = mod,
+            )
+
+            digestOpen -> DailyDigestScreen(
+                app = app,
+                onBack = { digestOpen = false },
+                onOpenMessage = { whom, postId ->
+                    openWhom = whom
+                    pendingScrollMessageId = postId
+                    digestOpen = false
+                },
             )
 
             adminGroupFlag != null -> GroupAdminScreen(
@@ -714,6 +736,7 @@ fun TalonApp(
                 onOpenBookmarks = { bookmarksOpen = true },
                 onOpenActivity = { activityOpen = true },
                 onOpenWatchwords = { watchwordsOpen = true },
+                onOpenDigest = { digestOpen = true },
                 onOpenAdministration = { adminListOpen = true },
                 onOpenInvites = { invitesOpen = true },
                 onOpenSettings = { settingsOpen = true },

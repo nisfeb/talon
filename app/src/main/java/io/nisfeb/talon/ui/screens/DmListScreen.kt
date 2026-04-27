@@ -110,6 +110,7 @@ fun DmListScreen(
     onOpenBookmarks: () -> Unit,
     onOpenActivity: () -> Unit,
     onOpenWatchwords: () -> Unit = {},
+    onOpenDigest: () -> Unit = {},
     onOpenAdministration: () -> Unit = {},
     onOpenInvites: () -> Unit = {},
     onOpenSettings: () -> Unit,
@@ -537,6 +538,13 @@ fun DmListScreen(
                         onClick = {
                             menuOpen = false
                             onOpenWatchwords()
+                        },
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Today's brief") },
+                        onClick = {
+                            menuOpen = false
+                            onOpenDigest()
                         },
                     )
                     DropdownMenuItem(
