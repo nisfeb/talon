@@ -99,16 +99,27 @@ class DailyDigest(
     }
 
     /**
-     * Run the full pipeline: fetch buckets, weather, AI summary; persist
-     * and notify. Safe to call from receiver context (uses scope.launch
-     * internally for the suspending work).
+     * Fire-and-forget pipeline run — for the "Test now" UI button where
+     * the caller doesn't await completion. Errors are swallowed (apart
+     * from structured-concurrency cancellation, which is rethrown).
      *
      * [reason] is logged for diagnostics ("alarm" | "test-now" | "boot").
      */
-    fun generateAndNotify(reason: String) {
+    fun generateAndNotifyAsync(reason: String) {
         scope.launch(Dispatchers.IO) {
-            runCatching { runPipeline(reason) }
+            runCatching { runPipelineInternal(reason) }
+                .onFailure { if (it is kotlinx.coroutines.CancellationException) throw it }
         }
+    }
+
+    /**
+     * Suspend variant — used by the alarm receiver so it can await the
+     * pipeline before releasing the wake lock and finishing goAsync().
+     * Caller is expected to be on a Dispatchers.IO scope; we don't
+     * switch because the receiver's CoroutineScope already runs IO.
+     */
+    suspend fun generateAndNotifyNow(reason: String) {
+        runPipelineInternal(reason)
     }
 
     private data class Bundle(
@@ -120,7 +131,7 @@ class DailyDigest(
         val unreadPlain: Map<String, String>,
     )
 
-    private suspend fun runPipeline(@Suppress("UNUSED_PARAMETER") reason: String) {
+    private suspend fun runPipelineInternal(@Suppress("UNUSED_PARAMETER") reason: String) {
         val zone = ZoneId.systemDefault()
         val nowMs = System.currentTimeMillis()
         val windowEnd = nowMs

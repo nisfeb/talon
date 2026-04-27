@@ -27,7 +27,7 @@ class DigestAlarmReceiver : BroadcastReceiver() {
         val wakeLock = app.dailyDigest.acquireWakeLock("digest-fire")
         CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
             try {
-                app.dailyDigest.generateAndNotify("alarm")
+                app.dailyDigest.generateAndNotifyNow("alarm")
             } finally {
                 runCatching { app.dailyDigest.scheduleNext() }
                 runCatching { wakeLock.release() }
