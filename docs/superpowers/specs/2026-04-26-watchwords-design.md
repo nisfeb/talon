@@ -245,11 +245,11 @@ suspend fun backfill(termId: Long) = withContext(Dispatchers.Default) {
     val ourPatp = repoOurPatp()
     val hits = ArrayList<WatchwordHitEntity>(64)
 
-    db.messages().candidatesForBackfill(term.term, ourPatp).collect { m ->
-        if (hits.size >= MAX_HITS_PER_TERM) return@collect
-        if (m.whom in excludes || m.whom in mutedWhoms) return@collect
+    for (m in db.messages().candidatesForBackfill(term.term, ourPatp)) {
+        if (hits.size >= MAX_HITS_PER_TERM) break
+        if (m.whom in excludes || m.whom in mutedWhoms) continue
         val plainText = StoryCache.textFor(m.id, m.contentJson)
-        if (!matchesWordBoundary(plainText, term.term)) return@collect
+        if (!matchesWordBoundary(plainText, term.term)) continue
         hits.add(WatchwordHitEntity(
             term = term.term,
             whom = m.whom,
@@ -270,10 +270,10 @@ suspend fun backfill(termId: Long) = withContext(Dispatchers.Default) {
       AND contentJson LIKE '%' || :term || '%' COLLATE NOCASE
     ORDER BY sentMs DESC
 """)
-abstract fun candidatesForBackfill(term: String, exceptAuthor: String): Flow<MessageEntity>
+abstract suspend fun candidatesForBackfill(term: String, exceptAuthor: String): List<MessageEntity>
 ```
 
-Two-stage filter — SQL `LIKE` over `contentJson` narrows candidates without parsing JSON; in-memory `matchesWordBoundary` over the rendered plain text rejects false positives caused by JSON keys (e.g. a search for `"block"` would otherwise hit every message). The `Flow` + early-break-at-cap streams: a stop-word-ish term that LIKE-matches half the table still terminates in seconds with bounded memory.
+Two-stage filter — SQL `LIKE` over `contentJson` narrows candidates without parsing JSON; in-memory `matchesWordBoundary` over the rendered plain text rejects false positives caused by JSON keys (e.g. a search for `"block"` would otherwise hit every message). The one-shot `List` + early-break-at-cap loop: a stop-word-ish term that LIKE-matches half the table still terminates in seconds once the hit cap is reached.
 
 **Notifications do not fire during backfill.** Historical hits land silently in the feed.
 
@@ -416,7 +416,7 @@ Backed by Room flows with `distinctUntilChanged()` and `stateIn(SharingStarted.E
 The 1000-hits-per-term cap is enforced *only* when `countForTerm` exceeds 1100, not on every insert. This means pruning runs ~1% as often as it would naively. A quiet term never triggers prune; a noisy term triggers it ~once every 100 hits.
 
 ### Backfill is bounded
-`candidatesForBackfill` returns a `Flow`; the consumer early-breaks on the 1000-hit cap and never holds the full candidate set in memory. A stop-word-ish accidental term that LIKE-matches half the table still terminates in seconds with bounded memory.
+`candidatesForBackfill` returns a `List`; the consumer iterates and `break`s on the 1000-hit cap. A stop-word-ish accidental term that LIKE-matches half the table still terminates in seconds once the hit cap is reached.
 
 ### Feed flow uses standard patterns
 `streamHits(filterTerm)` is wrapped with `distinctUntilChanged()` + `flowOn(Dispatchers.Default)` — same pattern applied across the rest of the app's screens, keeping any list rebuild off Main even during high-traffic bursts.

@@ -425,7 +425,7 @@ class WatchwordMatcherTest {
 
 Run: `cd /home/sneagan/software/personal/talon && JAVA_HOME=/home/sneagan/jdk-install/jdk-17.0.12+7 ./gradlew :app:testDebugUnitTest --tests 'io.nisfeb.talon.ai.WatchwordMatcherTest' 2>&1 | tail -20`
 
-Expected: 14 failures (all assertions returning the wrong answer because `matchesWordBoundary` always returns `false`).
+Expected: 9 failures (the 9 `assertTrue` test methods fail; the 6 `assertFalse` tests trivially pass against the always-false stub).
 
 - [ ] **Step 4: Implement `matchesWordBoundary`.**
 
@@ -743,12 +743,12 @@ class Watchwords(
         val muted = db.notifyPrefs().mutedWhoms().toHashSet()
         val ourPatp = ourPatpProvider()
         val hits = ArrayList<WatchwordHitEntity>(64)
-        db.messages().candidatesForBackfill(term.term, ourPatp).collect { m ->
-            if (hits.size >= MAX_HITS_PER_TERM) return@collect
-            if (m.whom in excludesSet) return@collect
-            if (m.whom in muted) return@collect
+        for (m in db.messages().candidatesForBackfill(term.term, ourPatp)) {
+            if (hits.size >= MAX_HITS_PER_TERM) break
+            if (m.whom in excludesSet) continue
+            if (m.whom in muted) continue
             val plainText = StoryCache.textFor(m.id, m.contentJson)
-            if (!matchesWordBoundary(plainText, term.term)) return@collect
+            if (!matchesWordBoundary(plainText, term.term)) continue
             hits.add(
                 WatchwordHitEntity(
                     term = term.term,
@@ -809,11 +809,11 @@ In `MessageDao.kt`, append to the abstract class (next to the existing `search(.
 
 ```kotlin
     /**
-     * Backfill candidate stream for [Watchwords.runBackfill]. The LIKE
+     * Backfill candidates for [Watchwords.runBackfill]. The LIKE
      * pre-filter on contentJson narrows candidates without parsing
      * JSON; callers verify each survivor against the rendered plain
-     * text in memory. Returns a Flow so the consumer can early-break
-     * once the per-term hit cap is reached.
+     * text in memory. Returns a List so the consumer can iterate and
+     * break once the per-term hit cap is reached.
      */
     @Query("""
         SELECT * FROM messages
@@ -822,7 +822,7 @@ In `MessageDao.kt`, append to the abstract class (next to the existing `search(.
           AND contentJson LIKE '%' || :term || '%' COLLATE NOCASE
         ORDER BY sentMs DESC
     """)
-    abstract fun candidatesForBackfill(term: String, exceptAuthor: String): Flow<MessageEntity>
+    abstract suspend fun candidatesForBackfill(term: String, exceptAuthor: String): List<MessageEntity>
 ```
 
 - [ ] **Step 2: Verify the project compiles.**

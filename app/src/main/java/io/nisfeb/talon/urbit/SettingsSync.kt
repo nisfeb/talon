@@ -11,6 +11,9 @@ import io.nisfeb.talon.data.FolderMemberEntity
 import io.nisfeb.talon.data.GroupOrderEntity
 import io.nisfeb.talon.data.NotifyPreferenceEntity
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.firstOrNull
+import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
@@ -46,6 +49,8 @@ class SettingsSync(
         const val BUCKET_BOOKMARK_FOLDERS = "bookmark-folders"
         const val BUCKET_BOOKMARK_FOLDER_MEMBERS = "bookmark-folder-members"
         const val BUCKET_AI_SETTINGS = "ai-settings"
+        const val BUCKET_WATCHWORDS = "watchwords"
+        const val BUCKET_WATCHWORD_EXCLUDES = "watchword-excludes"
         private const val AI_ENTRY = "config"
     }
 
@@ -525,6 +530,93 @@ class SettingsSync(
         )
     }
 
+    /** Mirror one watchword term to the ship's settings. */
+    suspend fun pushWatchwordEntry(term: io.nisfeb.talon.data.WatchwordEntity) {
+        val ch = channel ?: return
+        val key = io.nisfeb.talon.ai.sanitizeTerm(term.term)
+        if (key.isEmpty()) return
+        val payload = buildJsonObject {
+            put("put-entry", buildJsonObject {
+                put("desk", DESK)
+                put("bucket-key", BUCKET_WATCHWORDS)
+                put("entry-key", key)
+                put("value", buildJsonObject {
+                    put("term", term.term)
+                    put("notify", term.notify)
+                    put("createdMs", term.createdMs)
+                })
+            })
+        }
+        runCatching { ch.poke("settings", "settings-event", payload) }
+            .onFailure { Log.w(TAG, "pushWatchwordEntry failed", it) }
+    }
+
+    suspend fun deleteWatchwordEntry(termText: String) {
+        val ch = channel ?: return
+        val key = io.nisfeb.talon.ai.sanitizeTerm(termText)
+        if (key.isEmpty()) return
+        val payload = buildJsonObject {
+            put("del-entry", buildJsonObject {
+                put("desk", DESK)
+                put("bucket-key", BUCKET_WATCHWORDS)
+                put("entry-key", key)
+            })
+        }
+        runCatching { ch.poke("settings", "settings-event", payload) }
+            .onFailure { Log.w(TAG, "deleteWatchwordEntry failed", it) }
+    }
+
+    suspend fun pushWatchwordExclude(whom: String) {
+        val ch = channel ?: return
+        val payload = buildJsonObject {
+            put("put-entry", buildJsonObject {
+                put("desk", DESK)
+                put("bucket-key", BUCKET_WATCHWORD_EXCLUDES)
+                put("entry-key", whom)
+                put("value", JsonPrimitive(true))
+            })
+        }
+        runCatching { ch.poke("settings", "settings-event", payload) }
+            .onFailure { Log.w(TAG, "pushWatchwordExclude failed", it) }
+    }
+
+    suspend fun deleteWatchwordExclude(whom: String) {
+        val ch = channel ?: return
+        val payload = buildJsonObject {
+            put("del-entry", buildJsonObject {
+                put("desk", DESK)
+                put("bucket-key", BUCKET_WATCHWORD_EXCLUDES)
+                put("entry-key", whom)
+            })
+        }
+        runCatching { ch.poke("settings", "settings-event", payload) }
+            .onFailure { Log.w(TAG, "deleteWatchwordExclude failed", it) }
+    }
+
+    /** One-shot full flush of watchwords + excludes when sync is enabled. */
+    suspend fun pushAllWatchwords() {
+        db.watchwords().streamTerms().firstOrNull()?.forEach { pushWatchwordEntry(it) }
+        db.watchwords().excludesAsList().forEach { pushWatchwordExclude(it) }
+    }
+
+    suspend fun clearWatchwordsOnShip() {
+        val ch = channel ?: return
+        runCatching {
+            ch.poke("settings", "settings-event", buildJsonObject {
+                put("del-bucket", buildJsonObject {
+                    put("desk", DESK)
+                    put("bucket-key", BUCKET_WATCHWORDS)
+                })
+            })
+            ch.poke("settings", "settings-event", buildJsonObject {
+                put("del-bucket", buildJsonObject {
+                    put("desk", DESK)
+                    put("bucket-key", BUCKET_WATCHWORD_EXCLUDES)
+                })
+            })
+        }.onFailure { Log.w(TAG, "clearWatchwordsOnShip failed", it) }
+    }
+
     // ───────── inbound appliers ─────────
 
     /**
@@ -626,6 +718,51 @@ class SettingsSync(
                 val entry = unwrap(entries?.get(AI_ENTRY)) as? JsonObject ?: return
                 applyAiEntry(entry)
             }
+            BUCKET_WATCHWORDS -> {
+                // Apply each entry; we don't have a "deleteAllTerms" since
+                // the local watchwords table also feeds the live runtime.
+                // Per-entry upsert + drop-if-not-in-bucket.
+                val incoming = entries?.entries?.mapNotNull { (key, value) ->
+                    val obj = value as? JsonObject ?: return@mapNotNull null
+                    val termText = obj["term"].asStr() ?: return@mapNotNull null
+                    val notify = (obj["notify"] as? JsonPrimitive)?.booleanOrNull ?: true
+                    val createdMs = (obj["createdMs"] as? JsonPrimitive)?.longOrNull
+                        ?: System.currentTimeMillis()
+                    Triple(key, termText, notify to createdMs)
+                }.orEmpty()
+                val incomingTermTexts = incoming.map { it.second }.toHashSet()
+                val existing = db.watchwords().streamTerms().firstOrNull().orEmpty()
+                // Drop locals that aren't present in the remote bucket
+                existing.filter { it.term !in incomingTermTexts }.forEach {
+                    db.watchwords().deleteTermById(it.id)
+                }
+                // Upsert remotes
+                incoming.forEach { (_, termText, meta) ->
+                    val (notify, createdMs) = meta
+                    val match = db.watchwords().getTermByText(termText)
+                    if (match == null) {
+                        db.watchwords().upsertTerm(
+                            io.nisfeb.talon.data.WatchwordEntity(
+                                term = termText,
+                                notify = notify,
+                                createdMs = createdMs,
+                            )
+                        )
+                    } else if (match.notify != notify) {
+                        db.watchwords().setNotify(match.id, notify)
+                    }
+                }
+            }
+            BUCKET_WATCHWORD_EXCLUDES -> {
+                val incomingWhoms = entries?.keys?.toHashSet().orEmpty()
+                val existing = db.watchwords().excludesAsList().toHashSet()
+                (existing - incomingWhoms).forEach { db.watchwords().deleteExclude(it) }
+                (incomingWhoms - existing).forEach {
+                    db.watchwords().upsertExclude(
+                        io.nisfeb.talon.data.WatchwordChatExcludeEntity(it)
+                    )
+                }
+            }
         }
     }
 
@@ -681,6 +818,34 @@ class SettingsSync(
                     (unwrapped as? JsonObject)?.let(::applyAiEntry)
                 }
             }
+            BUCKET_WATCHWORDS -> {
+                val obj = value as? JsonObject ?: return
+                val termText = obj["term"].asStr() ?: return
+                val notify = (obj["notify"] as? JsonPrimitive)?.booleanOrNull ?: true
+                val createdMs = (obj["createdMs"] as? JsonPrimitive)?.longOrNull
+                    ?: System.currentTimeMillis()
+                // Upsert via term-text uniqueness — preserves local id.
+                val existing = db.watchwords().getTermByText(termText)
+                if (existing == null) {
+                    db.watchwords().upsertTerm(
+                        io.nisfeb.talon.data.WatchwordEntity(
+                            term = termText,
+                            notify = notify,
+                            createdMs = createdMs,
+                        )
+                    )
+                    // No backfill on remote-applied terms — the originating
+                    // device already populated its own hits feed; this
+                    // device picks up future matches from the live listener.
+                } else if (existing.notify != notify) {
+                    db.watchwords().setNotify(existing.id, notify)
+                }
+            }
+            BUCKET_WATCHWORD_EXCLUDES -> {
+                db.watchwords().upsertExclude(
+                    io.nisfeb.talon.data.WatchwordChatExcludeEntity(entry)
+                )
+            }
         }
     }
 
@@ -717,6 +882,16 @@ class SettingsSync(
                 // device that didn't opt in).
                 if (aiSettings.state.value.syncEnabled) aiSettings.clear()
             }
+            BUCKET_WATCHWORDS -> {
+                // entry-key is sanitized form; delete by matching sanitization.
+                val terms = db.watchwords().streamTerms().firstOrNull().orEmpty()
+                terms.firstOrNull {
+                    io.nisfeb.talon.ai.sanitizeTerm(it.term) == entry
+                }?.let { db.watchwords().deleteTermById(it.id) }
+            }
+            BUCKET_WATCHWORD_EXCLUDES -> {
+                db.watchwords().deleteExclude(entry)
+            }
         }
     }
 
@@ -729,6 +904,15 @@ class SettingsSync(
             BUCKET_BOOKMARKS -> db.bookmarks().replaceAll(emptyList())
             BUCKET_BOOKMARK_FOLDERS -> db.bookmarkFolders().replaceAll(emptyList())
             BUCKET_BOOKMARK_FOLDER_MEMBERS -> db.bookmarkFolders().replaceAllMembers(emptyList())
+            BUCKET_WATCHWORDS -> {
+                val existing = db.watchwords().streamTerms().firstOrNull().orEmpty()
+                existing.forEach { db.watchwords().deleteTermById(it.id) }
+            }
+            BUCKET_WATCHWORD_EXCLUDES -> {
+                db.watchwords().excludesAsList().forEach {
+                    db.watchwords().deleteExclude(it)
+                }
+            }
         }
     }
 

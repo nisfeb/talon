@@ -109,6 +109,7 @@ fun DmListScreen(
     onOpenStatusFeed: () -> Unit,
     onOpenBookmarks: () -> Unit,
     onOpenActivity: () -> Unit,
+    onOpenWatchwords: () -> Unit = {},
     onOpenAdministration: () -> Unit = {},
     onOpenInvites: () -> Unit = {},
     onOpenSettings: () -> Unit,
@@ -529,6 +530,13 @@ fun DmListScreen(
                         onClick = {
                             menuOpen = false
                             onOpenActivity()
+                        },
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Watchwords") },
+                        onClick = {
+                            menuOpen = false
+                            onOpenWatchwords()
                         },
                     )
                     DropdownMenuItem(

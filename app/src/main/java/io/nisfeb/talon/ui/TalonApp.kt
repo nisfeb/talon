@@ -50,6 +50,7 @@ import io.nisfeb.talon.ui.screens.NotebookPostScreen
 import io.nisfeb.talon.ui.screens.BookmarksScreen
 import io.nisfeb.talon.ui.screens.StatusFeedScreen
 import io.nisfeb.talon.ui.screens.ThreadScreen
+import io.nisfeb.talon.ui.screens.WatchwordsScreen
 import kotlinx.coroutines.launch
 
 /** Cheap substring test — Story mention spans serialize as {"ship":"~patp"}. */
@@ -138,6 +139,7 @@ fun TalonApp(
     var statusFeedOpen by remember { mutableStateOf(false) }
     var bookmarksOpen by remember { mutableStateOf(false) }
     var activityOpen by remember { mutableStateOf(false) }
+    var watchwordsOpen by remember { mutableStateOf(false) }
     var settingsOpen by remember { mutableStateOf(false) }
     var adminListOpen by remember { mutableStateOf(false) }
     var adminGroupFlag by remember { mutableStateOf<String?>(null) }
@@ -296,25 +298,54 @@ fun TalonApp(
                 // repo's event pump.
                 appScope.launch {
                     val level = app.db.notifyPrefs().levelFor(m.whom) ?: NotifyLevel.DEFAULT
-                    val shouldFire = when (level) {
-                        NotifyLevel.NONE -> false
+                    val muted = level == NotifyLevel.NONE
+
+                    // ── existing notification path ─────────────────────
+                    val shouldFire = !muted && when (level) {
                         NotifyLevel.MENTIONS ->
                             replyToUs || isMentioned(m.contentJson, loggedInShip ?: "")
                         else -> true
                     }
-                    if (!shouldFire) return@launch
-                    val title = contactMap.conversationLabel(m.whom)
-                    val authorLabel = contactMap.displayName(m.author)
-                    val preview = StoryCache.textFor(m.id, m.contentJson)
-                        .replace('\n', ' ')
-                        .take(160)
-                    Notifications.showMessage(
+                    if (shouldFire) {
+                        val title = contactMap.conversationLabel(m.whom)
+                        val authorLabel = contactMap.displayName(m.author)
+                        val preview = StoryCache.textFor(m.id, m.contentJson)
+                            .replace('\n', ' ')
+                            .take(160)
+                        Notifications.showMessage(
+                            context = context,
+                            whom = m.whom,
+                            postId = m.id,
+                            parentId = m.parentId,
+                            title = title,
+                            body = if (m.whom.startsWith("~")) preview else "$authorLabel: $preview",
+                            sentMs = m.sentMs,
+                        )
+                    }
+
+                    // ── watchword path (NEW) ───────────────────────────
+                    val ourPatp = loggedInShip ?: ""
+                    if (m.author == ourPatp) return@launch
+                    if (muted) return@launch
+                    if (m.whom in app.watchwords.excludes.value) return@launch
+                    val terms = app.watchwords.terms.value
+                    if (terms.isEmpty()) return@launch
+
+                    val plainText = StoryCache.textFor(m.id, m.contentJson)
+                    val matches = app.watchwords.evaluateLive(m, plainText)
+                    if (matches.isEmpty()) return@launch
+                    val notifiable = matches.filter { it.term.notify }
+                    if (notifiable.isEmpty()) return@launch
+
+                    val convoLabel = contactMap.conversationLabel(m.whom)
+                    Notifications.showWatchwordHit(
                         context = context,
                         whom = m.whom,
                         postId = m.id,
                         parentId = m.parentId,
-                        title = title,
-                        body = if (m.whom.startsWith("~")) preview else "$authorLabel: $preview",
+                        terms = notifiable.map { it.term.term },
+                        label = convoLabel,
+                        body = plainText.take(160).replace('\n', ' '),
                         sentMs = m.sentMs,
                     )
                 }
@@ -363,6 +394,7 @@ fun TalonApp(
         BackHandler(enabled = statusFeedOpen) { statusFeedOpen = false }
         BackHandler(enabled = bookmarksOpen) { bookmarksOpen = false }
         BackHandler(enabled = activityOpen) { activityOpen = false }
+        BackHandler(enabled = watchwordsOpen) { watchwordsOpen = false }
         BackHandler(enabled = settingsOpen) { settingsOpen = false }
         BackHandler(enabled = adminGroupFlag != null) { adminGroupFlag = null }
         BackHandler(enabled = adminListOpen && adminGroupFlag == null) {
@@ -392,6 +424,7 @@ fun TalonApp(
             statusFeedOpen -> "StatusFeed"
             bookmarksOpen -> "Bookmarks"
             activityOpen -> "Activity"
+            watchwordsOpen -> "Watchwords"
             adminGroupFlag != null -> "GroupAdmin($adminGroupFlag)"
             adminListOpen -> "AdminList"
             invitesOpen -> "Invites"
@@ -479,6 +512,17 @@ fun TalonApp(
                     openThread = parent
                 },
                 onBack = { activityOpen = false },
+                modifier = mod,
+            )
+
+            watchwordsOpen -> WatchwordsScreen(
+                db = app.db,
+                onBack = { watchwordsOpen = false },
+                onOpenConversation = { whom, postId ->
+                    openWhom = whom
+                    pendingScrollMessageId = postId
+                    watchwordsOpen = false
+                },
                 modifier = mod,
             )
 
@@ -669,6 +713,7 @@ fun TalonApp(
                 onOpenStatusFeed = { statusFeedOpen = true },
                 onOpenBookmarks = { bookmarksOpen = true },
                 onOpenActivity = { activityOpen = true },
+                onOpenWatchwords = { watchwordsOpen = true },
                 onOpenAdministration = { adminListOpen = true },
                 onOpenInvites = { invitesOpen = true },
                 onOpenSettings = { settingsOpen = true },

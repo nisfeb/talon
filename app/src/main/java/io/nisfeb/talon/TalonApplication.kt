@@ -56,6 +56,29 @@ class TalonApplication : Application() {
         private set
     lateinit var embeddingIndexer: io.nisfeb.talon.ai.EmbeddingIndexer
         private set
+    lateinit var watchwords: io.nisfeb.talon.ai.Watchwords
+        private set
+
+    // Both lazy so neither touches Context until after attachBaseContext()
+    // / onCreate() — eager property initializers run during the
+    // Application constructor, before Context is wired up, and
+    // getSharedPreferences would NPE.
+    private val watchwordsPrefs by lazy {
+        getSharedPreferences("talon_watchwords", MODE_PRIVATE)
+    }
+
+    private val _watchwordsSyncEnabled by lazy {
+        MutableStateFlow(watchwordsPrefs.getBoolean(KEY_WATCHWORDS_SYNC, false))
+    }
+    val watchwordsSyncEnabled: StateFlow<Boolean>
+        get() = _watchwordsSyncEnabled.asStateFlow()
+
+    fun setWatchwordsSyncEnabled(enabled: Boolean) {
+        if (_watchwordsSyncEnabled.value == enabled) return
+        watchwordsPrefs.edit().putBoolean(KEY_WATCHWORDS_SYNC, enabled).apply()
+        _watchwordsSyncEnabled.value = enabled
+        watchwords.emitSyncToggled()
+    }
 
     private val _activeShip = MutableStateFlow<String?>(null)
     /** Active ship patp, or null if none logged in. Changes on switch
@@ -118,6 +141,30 @@ class TalonApplication : Application() {
                 }
             }
         }
+
+        watchwords.onChange = { evt, transitionedOffSync ->
+            appScope.launch {
+                runCatching {
+                    when {
+                        transitionedOffSync ->
+                            repo.settingsSync.clearWatchwordsOnShip()
+                        _watchwordsSyncEnabled.value -> when (evt) {
+                            is io.nisfeb.talon.ai.WatchwordChange.Upsert ->
+                                repo.settingsSync.pushWatchwordEntry(evt.term)
+                            is io.nisfeb.talon.ai.WatchwordChange.Remove ->
+                                repo.settingsSync.deleteWatchwordEntry(evt.termText)
+                            is io.nisfeb.talon.ai.WatchwordChange.Exclude ->
+                                repo.settingsSync.pushWatchwordExclude(evt.whom)
+                            is io.nisfeb.talon.ai.WatchwordChange.Unexclude ->
+                                repo.settingsSync.deleteWatchwordExclude(evt.whom)
+                            is io.nisfeb.talon.ai.WatchwordChange.SyncToggled ->
+                                repo.settingsSync.pushAllWatchwords()
+                        }
+                        else -> Unit
+                    }
+                }
+            }
+        }
     }
 
     /**
@@ -146,6 +193,12 @@ class TalonApplication : Application() {
         // "none" ship used pre-login.
         if (ship != "none") runCatching { session.tryRestore(ship) }
         repo = TlonChatRepo(db, aiSettings)
+        watchwords = io.nisfeb.talon.ai.Watchwords(
+            db = db,
+            ourPatpProvider = { ship.takeIf { it != "none" } ?: "" },
+            scope = appScope,
+            syncEnabledProvider = { _watchwordsSyncEnabled.value },
+        )
         drafts = DraftStore(this, ship)
         shortcuts = ShortcutsPublisher(this, db)
         embeddingIndexer = io.nisfeb.talon.ai.EmbeddingIndexer(db, embedder, appScope)
@@ -239,5 +292,9 @@ class TalonApplication : Application() {
 
     private fun refreshAllShips() {
         _allShips.value = sessionStore.all().map { it.ship }
+    }
+
+    private companion object {
+        private const val KEY_WATCHWORDS_SYNC = "sync_enabled"
     }
 }

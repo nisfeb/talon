@@ -45,6 +45,7 @@ DEFAULT_TARGETS=(
     "app/src/main/java/io/nisfeb/talon/urbit/PostIngest.kt"
     "app/src/main/java/io/nisfeb/talon/urbit/DottedIdDedupe.kt"
     "app/src/main/java/io/nisfeb/talon/urbit/WireShapes.kt"
+    "app/src/main/java/io/nisfeb/talon/ai/Watchwords.kt"
 )
 
 TARGETS=("${@:-${DEFAULT_TARGETS[@]}}")
