@@ -21,8 +21,8 @@ class WeatherClientParseTest {
 
     @Test fun `parses open-meteo daily payload`() {
         val w = WeatherClient.parseToday(SAMPLE)!!
-        assertEquals(18.3, w.highC, 0.01)
-        assertEquals(9.4, w.lowC, 0.01)
+        assertEquals(18.3, w.highF, 0.01)
+        assertEquals(9.4, w.lowF, 0.01)
         assertEquals(3, w.conditionCode)
         // WMO 3 = "Overcast" per open-meteo docs.
         assertEquals("Overcast", w.conditionLabel)

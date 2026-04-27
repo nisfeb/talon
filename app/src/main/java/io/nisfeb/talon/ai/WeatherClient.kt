@@ -28,6 +28,7 @@ class WeatherClient(private val http: OkHttpClient) {
             .addQueryParameter("latitude", lat.toString())
             .addQueryParameter("longitude", lon.toString())
             .addQueryParameter("daily", "temperature_2m_max,temperature_2m_min,weather_code")
+            .addQueryParameter("temperature_unit", "fahrenheit")
             .addQueryParameter("forecast_days", "1")
             .addQueryParameter("timezone", "auto")
             .build()
@@ -51,7 +52,7 @@ class WeatherClient(private val http: OkHttpClient) {
             val code = daily["weather_code"]?.jsonArray?.firstOrNull()
                 ?.jsonPrimitive?.intOrNull ?: return@runCatching null
             val (label, emoji) = wmoLookup(code)
-            WeatherToday(highC = high, lowC = low, conditionCode = code,
+            WeatherToday(highF = high, lowF = low, conditionCode = code,
                 conditionLabel = label, emoji = emoji)
         }.getOrNull()
 

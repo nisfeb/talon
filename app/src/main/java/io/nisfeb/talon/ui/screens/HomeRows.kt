@@ -88,16 +88,17 @@ fun buildHomeRows(
                 totalUnread = totalUnread,
                 expanded = expanded,
             )
-            if (expanded) {
-                for (whom in sortedChannels) {
-                    val row = byWhom[whom]
-                    out += HomeRow.GroupChild(
-                        whom = whom,
-                        m = row?.first,
-                        unread = allUnreads[whom] ?: 0,
-                        groupFlag = g.flag,
-                    )
-                }
+            // Always emit children so AnimatedVisibility in the
+            // renderer has stable content for both enter and exit
+            // animations. The renderer hides them when collapsed.
+            for (whom in sortedChannels) {
+                val row = byWhom[whom]
+                out += HomeRow.GroupChild(
+                    whom = whom,
+                    m = row?.first,
+                    unread = allUnreads[whom] ?: 0,
+                    groupFlag = g.flag,
+                )
             }
         }
     }
@@ -169,16 +170,15 @@ fun buildFolderRows(
                     totalUnread = totalUnread,
                     expanded = expanded,
                 )
-                if (expanded) {
-                    for (whom in sortedChannels) {
-                        val row = byWhom[whom]
-                        out += HomeRow.GroupChild(
-                            whom = whom,
-                            m = row?.first,
-                            unread = allUnreads[whom] ?: 0,
-                            groupFlag = flag,
-                        )
-                    }
+                // Always emit children — see buildHomeRows note.
+                for (whom in sortedChannels) {
+                    val row = byWhom[whom]
+                    out += HomeRow.GroupChild(
+                        whom = whom,
+                        m = row?.first,
+                        unread = allUnreads[whom] ?: 0,
+                        groupFlag = flag,
+                    )
                 }
             }
             else -> {

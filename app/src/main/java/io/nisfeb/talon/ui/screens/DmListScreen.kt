@@ -21,8 +21,13 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.CircleShape
@@ -665,50 +670,192 @@ fun DmListScreen(
             } else if (selectedFolderId != null) {
                 // Folder view — user's curated mix of group heads (with
                 // collapsible children) and loose conversation rows.
-                items(
-                    items = folderRows,
-                    key = { it.key },
-                    contentType = { it::class.simpleName.orEmpty() },
-                ) { row ->
+                // GroupHead + its consecutive GroupChild rows are
+                // bundled into a single lazy item with an
+                // AnimatedVisibility wrapping the children, so
+                // expansion clips the children to the animated height
+                // and the next item below relayouts smoothly without
+                // a placement-animation lag (which caused visible
+                // overlap during expansion).
+                var i = 0
+                while (i < folderRows.size) {
+                    val row = folderRows[i]
                     when (row) {
-                        is HomeRow.Header -> SectionHeader(row.label)
-                        is HomeRow.GroupHead -> {
-                            ReorderableItem(reorderState, key = row.key) { _ ->
-                                GroupHeaderRow(
-                                    flag = row.flag,
-                                    title = row.title,
-                                    avatarUrl = row.image,
-                                    childCount = row.childCount,
-                                    totalUnread = row.totalUnread,
-                                    expanded = row.expanded,
-                                    onToggle = onGroupHeadToggle,
-                                    onLongClick = if (editMode) null else onGroupHeadLongPress,
-                                    editMode = editMode,
-                                    dragHandleModifier = Modifier.longPressDraggableHandle(
-                                        onDragStarted = {
-                                            hapticRoot.performHapticFeedback(HapticFeedbackType.LongPress)
-                                            expandedGroups = expandedGroups - row.flag
-                                        },
-                                        onDragStopped = { onDragStopped() },
-                                    ),
-                                )
-                                HorizontalDivider()
+                        is HomeRow.Header -> {
+                            item(key = row.key, contentType = "Header") {
+                                SectionHeader(row.label)
                             }
+                            i++
+                        }
+                        is HomeRow.GroupHead -> {
+                            val children = mutableListOf<HomeRow.GroupChild>()
+                            var j = i + 1
+                            while (j < folderRows.size) {
+                                val next = folderRows[j]
+                                if (next is HomeRow.GroupChild && next.groupFlag == row.flag) {
+                                    children += next
+                                    j++
+                                } else break
+                            }
+                            val childrenSnapshot = children.toList()
+                            item(key = row.key, contentType = "GroupHead") {
+                                ReorderableItem(reorderState, key = row.key) { _ ->
+                                    Column {
+                                        GroupHeaderRow(
+                                            flag = row.flag,
+                                            title = row.title,
+                                            avatarUrl = row.image,
+                                            childCount = row.childCount,
+                                            totalUnread = row.totalUnread,
+                                            expanded = row.expanded,
+                                            onToggle = onGroupHeadToggle,
+                                            onLongClick = if (editMode) null else onGroupHeadLongPress,
+                                            editMode = editMode,
+                                            dragHandleModifier = Modifier.longPressDraggableHandle(
+                                                onDragStarted = {
+                                                    hapticRoot.performHapticFeedback(HapticFeedbackType.LongPress)
+                                                    expandedGroups = expandedGroups - row.flag
+                                                },
+                                                onDragStopped = { onDragStopped() },
+                                            ),
+                                        )
+                                        HorizontalDivider()
+                                        AnimatedVisibility(
+                                            visible = row.expanded,
+                                            enter = expandVertically() + fadeIn(),
+                                            exit = shrinkVertically() + fadeOut(),
+                                        ) {
+                                            Column {
+                                                childrenSnapshot.forEach { child ->
+                                                    GroupChannelRow(
+                                                        whom = child.whom,
+                                                        m = child.m,
+                                                        unread = child.unread,
+                                                        contactMap = contactMap,
+                                                        draft = drafts[child.whom],
+                                                        onClick = onRowOpen,
+                                                        onLongClick = onRowLongPress,
+                                                    )
+                                                    HorizontalDivider(modifier = Modifier.padding(start = 56.dp))
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            i = j
                         }
                         is HomeRow.GroupChild -> {
-                            GroupChannelRow(
-                                whom = row.whom,
-                                m = row.m,
-                                unread = row.unread,
-                                contactMap = contactMap,
-                                draft = drafts[row.whom],
-                                onClick = onRowOpen,
-                                onLongClick = onRowLongPress,
-                            )
-                            HorizontalDivider(modifier = Modifier.padding(start = 56.dp))
+                            // Consumed by the preceding GroupHead above.
+                            i++
                         }
                         is HomeRow.Flat -> {
-                            ReorderableItem(reorderState, key = row.key) { _ ->
+                            item(key = row.key, contentType = "Flat") {
+                                ReorderableItem(reorderState, key = row.key) { _ ->
+                                    ConversationRow(
+                                        m = row.m,
+                                        unread = row.unread,
+                                        contactMap = contactMap,
+                                        draft = drafts[row.m.whom],
+                                        onClick = onRowOpen,
+                                        onLongClick = onRowLongPress,
+                                        editMode = editMode,
+                                        dragHandleModifier = Modifier.longPressDraggableHandle(
+                                            onDragStarted = {
+                                                hapticRoot.performHapticFeedback(HapticFeedbackType.LongPress)
+                                            },
+                                            onDragStopped = { onDragStopped() },
+                                        ),
+                                    )
+                                    HorizontalDivider()
+                                }
+                            }
+                            i++
+                        }
+                    }
+                }
+            } else {
+                // All view — structured home list. See folder-view
+                // branch above for why GroupHead bundles its children
+                // into a single lazy item with AnimatedVisibility.
+                var i = 0
+                while (i < homeRows.size) {
+                    val row = homeRows[i]
+                    when (row) {
+                        is HomeRow.Header -> {
+                            item(key = row.key, contentType = "Header") {
+                                SectionHeader(row.label)
+                            }
+                            i++
+                        }
+                        is HomeRow.GroupHead -> {
+                            val children = mutableListOf<HomeRow.GroupChild>()
+                            var j = i + 1
+                            while (j < homeRows.size) {
+                                val next = homeRows[j]
+                                if (next is HomeRow.GroupChild && next.groupFlag == row.flag) {
+                                    children += next
+                                    j++
+                                } else break
+                            }
+                            val childrenSnapshot = children.toList()
+                            item(key = row.key, contentType = "GroupHead") {
+                                ReorderableItem(reorderState, key = row.key) { _ ->
+                                    Column {
+                                        GroupHeaderRow(
+                                            flag = row.flag,
+                                            title = row.title,
+                                            avatarUrl = row.image,
+                                            childCount = row.childCount,
+                                            totalUnread = row.totalUnread,
+                                            expanded = row.expanded,
+                                            onToggle = onGroupHeadToggle,
+                                            onLongClick = if (editMode) null else onGroupHeadLongPress,
+                                            editMode = editMode,
+                                            dragHandleModifier = Modifier.longPressDraggableHandle(
+                                                onDragStarted = {
+                                                    hapticRoot.performHapticFeedback(
+                                                        HapticFeedbackType.LongPress,
+                                                    )
+                                                    // Collapse while dragging so children
+                                                    // don't get in the way of swap targets.
+                                                    expandedGroups = expandedGroups - row.flag
+                                                },
+                                                onDragStopped = { onDragStopped() },
+                                            ),
+                                        )
+                                        HorizontalDivider()
+                                        AnimatedVisibility(
+                                            visible = row.expanded,
+                                            enter = expandVertically() + fadeIn(),
+                                            exit = shrinkVertically() + fadeOut(),
+                                        ) {
+                                            Column {
+                                                childrenSnapshot.forEach { child ->
+                                                    GroupChannelRow(
+                                                        whom = child.whom,
+                                                        m = child.m,
+                                                        unread = child.unread,
+                                                        contactMap = contactMap,
+                                                        draft = drafts[child.whom],
+                                                        onClick = onRowOpen,
+                                                        onLongClick = onRowLongPress,
+                                                    )
+                                                    HorizontalDivider(modifier = Modifier.padding(start = 56.dp))
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            i = j
+                        }
+                        is HomeRow.GroupChild -> {
+                            // Consumed by the preceding GroupHead above.
+                            i++
+                        }
+                        is HomeRow.Flat -> {
+                            item(key = row.key, contentType = "Flat") {
                                 ConversationRow(
                                     m = row.m,
                                     unread = row.unread,
@@ -716,77 +863,10 @@ fun DmListScreen(
                                     draft = drafts[row.m.whom],
                                     onClick = onRowOpen,
                                     onLongClick = onRowLongPress,
-                                    editMode = editMode,
-                                    dragHandleModifier = Modifier.longPressDraggableHandle(
-                                        onDragStarted = {
-                                            hapticRoot.performHapticFeedback(HapticFeedbackType.LongPress)
-                                        },
-                                        onDragStopped = { onDragStopped() },
-                                    ),
                                 )
                                 HorizontalDivider()
                             }
-                        }
-                    }
-                }
-            } else {
-                // All view — structured home list.
-                items(
-                    items = homeRows,
-                    key = { it.key },
-                    contentType = { it::class.simpleName.orEmpty() },
-                ) { row ->
-                    when (row) {
-                        is HomeRow.Header -> SectionHeader(row.label)
-                        is HomeRow.GroupHead -> {
-                            ReorderableItem(reorderState, key = row.key) { _ ->
-                                GroupHeaderRow(
-                                    flag = row.flag,
-                                    title = row.title,
-                                    avatarUrl = row.image,
-                                    childCount = row.childCount,
-                                    totalUnread = row.totalUnread,
-                                    expanded = row.expanded,
-                                    onToggle = onGroupHeadToggle,
-                                    onLongClick = if (editMode) null else onGroupHeadLongPress,
-                                    editMode = editMode,
-                                    dragHandleModifier = Modifier.longPressDraggableHandle(
-                                        onDragStarted = {
-                                            hapticRoot.performHapticFeedback(
-                                                HapticFeedbackType.LongPress,
-                                            )
-                                            // Collapse while dragging so children
-                                            // don't get in the way of swap targets.
-                                            expandedGroups = expandedGroups - row.flag
-                                        },
-                                        onDragStopped = { onDragStopped() },
-                                    ),
-                                )
-                                HorizontalDivider()
-                            }
-                        }
-                        is HomeRow.GroupChild -> {
-                            GroupChannelRow(
-                                whom = row.whom,
-                                m = row.m,
-                                unread = row.unread,
-                                contactMap = contactMap,
-                                draft = drafts[row.whom],
-                                onClick = onRowOpen,
-                                onLongClick = onRowLongPress,
-                            )
-                            HorizontalDivider(modifier = Modifier.padding(start = 56.dp))
-                        }
-                        is HomeRow.Flat -> {
-                            ConversationRow(
-                                m = row.m,
-                                unread = row.unread,
-                                contactMap = contactMap,
-                                draft = drafts[row.m.whom],
-                                onClick = onRowOpen,
-                                onLongClick = onRowLongPress,
-                            )
-                            HorizontalDivider()
+                            i++
                         }
                     }
                 }
@@ -1579,21 +1659,36 @@ private fun androidx.compose.foundation.layout.BoxScope.UnreadOffscreenIndicator
 ) {
     // Indices that count as "unread" for our purposes. Exclude group
     // headers when expanded — their children already carry the unread
-    // flag and would double-report.
+    // flag and would double-report. Indices are LazyColumn item
+    // indices; GroupChild rows share their parent GroupHead's lazy
+    // index since the head + its children render as one bundled item.
     val unreadIndices = remember(homeRows) {
         val expandedFlags = homeRows.asSequence()
             .filterIsInstance<HomeRow.GroupHead>()
             .filter { it.expanded }
             .map { it.flag }
             .toSet()
+        val rowToLazy = IntArray(homeRows.size)
+        var lazyIdx = -1
+        homeRows.forEachIndexed { i, row ->
+            if (row is HomeRow.GroupChild) {
+                rowToLazy[i] = lazyIdx
+            } else {
+                lazyIdx++
+                rowToLazy[i] = lazyIdx
+            }
+        }
         homeRows.mapIndexedNotNull { i, row ->
             val hasUnread = when (row) {
                 is HomeRow.Flat -> row.unread > 0
-                is HomeRow.GroupChild -> row.unread > 0
+                // Children of collapsed groups are hidden in the
+                // renderer; the head's totalUnread already covers
+                // them, so don't double-count here.
+                is HomeRow.GroupChild -> row.unread > 0 && row.groupFlag in expandedFlags
                 is HomeRow.GroupHead -> row.totalUnread > 0 && row.flag !in expandedFlags
                 is HomeRow.Header -> false
             }
-            if (hasUnread) i else null
+            if (hasUnread) rowToLazy[i] else null
         }
     }
 

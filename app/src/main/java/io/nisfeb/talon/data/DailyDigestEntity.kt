@@ -38,8 +38,8 @@ enum class Bucket { MENTION, WATCHWORD, UNREAD }
 
 @Serializable
 data class WeatherToday(
-    val highC: Double,
-    val lowC: Double,
+    val highF: Double,
+    val lowF: Double,
     val conditionCode: Int,       // open-meteo WMO code
     val conditionLabel: String,
     val emoji: String,

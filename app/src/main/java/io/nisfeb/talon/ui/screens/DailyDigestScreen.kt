@@ -145,7 +145,7 @@ private fun WeatherCard(w: WeatherToday) {
             Text(w.emoji, style = MaterialTheme.typography.headlineSmall)
             Spacer(Modifier.width(12.dp))
             Text(
-                "${w.conditionLabel} · ${w.highC.toInt()}° / ${w.lowC.toInt()}°",
+                "${w.conditionLabel} · ${w.highF.toInt()}° / ${w.lowF.toInt()}°",
                 style = MaterialTheme.typography.bodyLarge,
             )
         }
