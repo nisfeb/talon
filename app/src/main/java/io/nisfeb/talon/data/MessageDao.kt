@@ -205,6 +205,7 @@ abstract class MessageDao {
         WHERE sentMs >= :windowStartMs
           AND sentMs < :windowEndMs
           AND author != :ourPatp
+          AND isDeleted = 0
         ORDER BY sentMs DESC
         LIMIT :limit
     """)
@@ -227,6 +228,7 @@ abstract class MessageDao {
           AND sentMs >= :windowStartMs
           AND sentMs < :windowEndMs
           AND author != :ourPatp
+          AND isDeleted = 0
         ORDER BY sentMs DESC
         LIMIT :limit
     """)
