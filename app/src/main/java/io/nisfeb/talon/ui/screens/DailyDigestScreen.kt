@@ -57,7 +57,10 @@ fun DailyDigestScreen(
     onBack: () -> Unit,
     onOpenMessage: (whom: String, postId: String) -> Unit,
 ) {
-    val digest by app.dailyDigest.streamLatestForActiveShip().collectAsState(initial = null)
+    // remember the upstream Flow so recompositions don't re-subscribe
+    // (which would re-run the flatMapLatest pipeline every frame).
+    val digestFlow = remember(app) { app.dailyDigest.streamLatestForActiveShip() }
+    val digest by digestFlow.collectAsState(initial = null)
 
     Scaffold(
         topBar = {

@@ -39,6 +39,11 @@ class SettingsSync(
     private val db: AppDatabase,
     private val aiSettings: AiSettings,
     private val dailyDigestSettings: DailyDigestSettings,
+    /** Re-arm the digest alarm after a remote-applied change to the
+     *  daily-digest bucket. We bypass `dailyDigestSettings.onChange` to
+     *  avoid bouncing the change back to the ship (pingpong), but that
+     *  also skips the local re-arm — this callback restores it. */
+    private val rearmDailyDigest: () -> Unit = {},
 ) {
 
     companion object {
@@ -802,6 +807,7 @@ class SettingsSync(
                 val minuteOfDay = (unwrap(obj["minuteOfDay"]) as? JsonPrimitive)?.intOrNull
                     ?: 0
                 dailyDigestSettings.applyRemote(enabled, hourOfDay, minuteOfDay)
+                rearmDailyDigest()
             }
         }
     }
@@ -859,7 +865,7 @@ class SettingsSync(
                 }
             }
             BUCKET_WATCHWORDS -> {
-                val obj = value as? JsonObject ?: return
+                val obj = unwrapped as? JsonObject ?: return
                 val termText = obj["term"].asStr() ?: return
                 val notify = (obj["notify"] as? JsonPrimitive)?.booleanOrNull ?: true
                 val createdMs = (obj["createdMs"] as? JsonPrimitive)?.longOrNull
@@ -906,6 +912,7 @@ class SettingsSync(
                         dailyDigestSettings.applyRemote(current.enabled, current.hourOfDay, v)
                     }
                 }
+                rearmDailyDigest()
             }
         }
     }
@@ -961,6 +968,7 @@ class SettingsSync(
                     "hourOfDay" -> dailyDigestSettings.applyRemote(current.enabled, 6, current.minuteOfDay)
                     "minuteOfDay" -> dailyDigestSettings.applyRemote(current.enabled, current.hourOfDay, 0)
                 }
+                rearmDailyDigest()
             }
         }
     }
@@ -986,6 +994,7 @@ class SettingsSync(
             BUCKET_DAILY_DIGEST -> {
                 // del-bucket from ship: revert to defaults locally.
                 dailyDigestSettings.applyRemote(enabled = false, hourOfDay = 6, minuteOfDay = 0)
+                rearmDailyDigest()
             }
         }
     }

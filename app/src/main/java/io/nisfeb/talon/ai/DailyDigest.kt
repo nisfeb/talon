@@ -139,7 +139,13 @@ class DailyDigest(
         val dateLocal = LocalDate.now(zone).toString()
 
         val ship = sessionStore.activeShip() ?: return
+        // `MessageEntity.author` is stored in Tlon wire form (with leading `~`),
+        // so SQL `WHERE author != :ourPatp` filters need the `~`-prefixed value.
+        // The mention matcher and Selector internals prepend `~` themselves, so
+        // they want the bare form — passing `ship` would yield `~~patp` and
+        // never match.
         val ourPatp = ship
+        val ourPatpBare = ship.removePrefix("~")
         val db = getDb()
 
         // 1. Build buckets in parallel
@@ -192,11 +198,20 @@ class DailyDigest(
             Bundle(mentionMsgs, mentionPlain, hits, uCands, uCounts, uPlain)
         }
 
+        // Hits don't carry author; do a per-key getOne lookup so the digest
+        // item has a non-empty authorPatp. Cap matches the selector's
+        // WATCHWORD_CAP so we don't pay for entries that won't survive.
+        val watchwordAuthors = bundle.hits.take(50).mapNotNull { h ->
+            val msg = db.messages().getOne(h.whom, h.postId)
+            if (msg != null) (h.whom to h.postId) to msg.author else null
+        }.toMap()
+
         val items = DailyDigestSelector.assemble(
-            ourPatp = ourPatp,
+            ourPatp = ourPatpBare,
             mentionCandidates = bundle.mentionMsgs,
             mentionPlainText = bundle.mentionPlain,
             watchwordHits = bundle.hits,
+            watchwordAuthorByKey = watchwordAuthors,
             unreadCandidates = bundle.uCands,
             unreadCounts = bundle.uCounts,
             unreadPlainText = bundle.unreadPlain,
@@ -223,8 +238,12 @@ class DailyDigest(
                     watchword hits as the user's priorities. Do not invent
                     information. Use only the transcript provided.
                 """.trimIndent()
-                aiClient.complete(sys, "Today's transcript:\n\n$transcript",
-                    maxOutputTokens = 512)
+                // Cap at 20s so we stay inside the BroadcastReceiver's
+                // ~30s goAsync budget — AiClient itself uses 60s.
+                withTimeoutOrNull(20_000) {
+                    aiClient.complete(sys, "Today's transcript:\n\n$transcript",
+                        maxOutputTokens = 512)
+                }
             }.onFailure {
                 // Don't swallow structured concurrency cancellations.
                 if (it is kotlinx.coroutines.CancellationException) throw it

@@ -228,7 +228,12 @@ class TalonApplication : Application() {
         // for this ship (if any). Skips silently for the placeholder
         // "none" ship used pre-login.
         if (ship != "none") runCatching { session.tryRestore(ship) }
-        repo = TlonChatRepo(db, aiSettings, dailyDigestSettings)
+        repo = TlonChatRepo(db, aiSettings, dailyDigestSettings, rearmDailyDigest = {
+            // `dailyDigest` is lateinit and built later in onCreate; this
+            // lambda only fires from inbound %settings events long after
+            // initialization, so the runtime guard is sufficient.
+            runCatching { dailyDigest.scheduleNext() }
+        })
         watchwords = io.nisfeb.talon.ai.Watchwords(
             db = db,
             ourPatpProvider = { ship.takeIf { it != "none" } ?: "" },
