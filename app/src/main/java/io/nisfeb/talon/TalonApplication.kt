@@ -42,6 +42,8 @@ class TalonApplication : Application() {
         private set
     lateinit var embedder: io.nisfeb.talon.ai.Embedder
         private set
+    lateinit var dailyDigest: io.nisfeb.talon.ai.DailyDigest
+        private set
 
     // Ship-scoped — rebuilt on ship switch. lateinit so the first
     // access after startup is valid (initialized in onCreate for the
