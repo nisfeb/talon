@@ -30,6 +30,8 @@ class TalonApplication : Application() {
         private set
     lateinit var aiSettings: AiSettings
         private set
+    lateinit var dailyDigestSettings: io.nisfeb.talon.ai.DailyDigestSettings
+        private set
     lateinit var uiSettings: UiSettings
         private set
     lateinit var shipProfiles: ShipProfileStore
@@ -101,6 +103,7 @@ class TalonApplication : Application() {
             .build()
         sessionStore = SessionStore(this)
         aiSettings = AiSettings(this)
+        dailyDigestSettings = io.nisfeb.talon.ai.DailyDigestSettings(this)
         uiSettings = UiSettings(this)
         shipProfiles = ShipProfileStore(this)
         aiClient = AiClient(settingsProvider = { aiSettings.state.value })
@@ -192,7 +195,7 @@ class TalonApplication : Application() {
         // for this ship (if any). Skips silently for the placeholder
         // "none" ship used pre-login.
         if (ship != "none") runCatching { session.tryRestore(ship) }
-        repo = TlonChatRepo(db, aiSettings)
+        repo = TlonChatRepo(db, aiSettings, dailyDigestSettings)
         watchwords = io.nisfeb.talon.ai.Watchwords(
             db = db,
             ourPatpProvider = { ship.takeIf { it != "none" } ?: "" },

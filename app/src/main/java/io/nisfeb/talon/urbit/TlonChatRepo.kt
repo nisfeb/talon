@@ -63,6 +63,7 @@ import okhttp3.RequestBody.Companion.toRequestBody
 class TlonChatRepo(
     private val db: AppDatabase,
     private val aiSettings: io.nisfeb.talon.ai.AiSettings,
+    private val dailyDigestSettings: io.nisfeb.talon.ai.DailyDigestSettings,
 ) {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -110,7 +111,7 @@ class TlonChatRepo(
      * reinstall and syncs across devices. Exposed so UI layers can
      * call the sync-aware mutations instead of the raw DAOs.
      */
-    val settingsSync: SettingsSync = SettingsSync(db, aiSettings)
+    val settingsSync: SettingsSync = SettingsSync(db, aiSettings, dailyDigestSettings)
 
     /**
      * Called once per incoming message delta from another author, after
