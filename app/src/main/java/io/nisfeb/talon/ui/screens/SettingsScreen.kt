@@ -277,6 +277,11 @@ fun SettingsScreen(
                         onChange = { app.aiSettings.setFeature(feature, it) },
                     )
                 }
+
+            Spacer(Modifier.height(16.dp))
+            HorizontalDivider()
+            Spacer(Modifier.height(8.dp))
+            DailyDigestSection(app = app)
         }
     }
 }
@@ -317,4 +322,122 @@ private fun FeatureToggleRow(
         }
         Switch(checked = enabled, onCheckedChange = onChange)
     }
+}
+
+@Composable
+private fun DailyDigestSection(app: TalonApplication) {
+    val ddState = app.dailyDigestSettings.state.collectAsState().value
+    var showTimePicker by remember { mutableStateOf(false) }
+
+    Text(
+        "Daily digest",
+        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
+    )
+    Text(
+        "A morning brief at your chosen time: unread, watchword hits, and @mentions. The AI summary toggle is in Cloud features above; this section just controls the alarm.",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+
+    Spacer(Modifier.height(8.dp))
+
+    // Enable toggle
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text("Enabled", style = MaterialTheme.typography.bodyLarge)
+            if (ddState.enabled) {
+                Text(
+                    "Next: ${formatNextFire(ddState.hourOfDay, ddState.minuteOfDay)}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            } else {
+                Text(
+                    "Off",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        Switch(
+            checked = ddState.enabled,
+            onCheckedChange = { app.dailyDigestSettings.setEnabled(it) },
+        )
+    }
+
+    if (ddState.enabled) {
+        // Time picker row
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text("Fire time", Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
+            TextButton(onClick = { showTimePicker = true }) {
+                Text("%02d:%02d".format(ddState.hourOfDay, ddState.minuteOfDay))
+            }
+        }
+
+        Spacer(Modifier.height(8.dp))
+
+        OutlinedButton(
+            onClick = { app.dailyDigest.generateAndNotifyAsync("test-now") },
+        ) {
+            Text("Test now")
+        }
+    }
+
+    if (showTimePicker) {
+        DailyDigestTimePicker(
+            initialHour = ddState.hourOfDay,
+            initialMinute = ddState.minuteOfDay,
+            onDismiss = { showTimePicker = false },
+            onConfirm = { hour, minute ->
+                app.dailyDigestSettings.setTime(hour, minute)
+                showTimePicker = false
+            },
+        )
+    }
+}
+
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@Composable
+private fun DailyDigestTimePicker(
+    initialHour: Int,
+    initialMinute: Int,
+    onDismiss: () -> Unit,
+    onConfirm: (hour: Int, minute: Int) -> Unit,
+) {
+    val state = androidx.compose.material3.rememberTimePickerState(
+        initialHour = initialHour,
+        initialMinute = initialMinute,
+        is24Hour = false,
+    )
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = {
+            TextButton(onClick = { onConfirm(state.hour, state.minute) }) {
+                Text("OK")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        },
+        title = { Text("Digest time") },
+        text = {
+            androidx.compose.material3.TimePicker(state = state)
+        },
+    )
+}
+
+/** Format the configured fire time as "today HH:MM" / "tomorrow HH:MM"
+ *  depending on whether it has passed already. Pure helper. */
+private fun formatNextFire(hourOfDay: Int, minuteOfDay: Int): String {
+    val now = java.time.LocalTime.now()
+    val target = java.time.LocalTime.of(hourOfDay, minuteOfDay)
+    val tomorrow = !now.isBefore(target)
+    val prefix = if (tomorrow) "tomorrow" else "today"
+    return "%s %02d:%02d".format(prefix, hourOfDay, minuteOfDay)
 }
