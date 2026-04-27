@@ -194,6 +194,49 @@ abstract class MessageDao {
         ORDER BY sentMs DESC
     """)
     abstract suspend fun candidatesForBackfill(term: String, exceptAuthor: String): List<MessageEntity>
+
+    /**
+     * Daily digest: scan recent messages for @-mention detection. Caller
+     * does the patp-boundary substring check on `contentJson`-derived
+     * plaintext. Bounded by the 24h window so the scan stays small.
+     */
+    @Query("""
+        SELECT * FROM messages
+        WHERE sentMs >= :windowStartMs
+          AND sentMs < :windowEndMs
+          AND author != :ourPatp
+        ORDER BY sentMs DESC
+        LIMIT :limit
+    """)
+    abstract suspend fun candidatesForMentionScan(
+        ourPatp: String,
+        windowStartMs: Long,
+        windowEndMs: Long,
+        limit: Int,
+    ): List<MessageEntity>
+
+    /**
+     * Daily digest: newest messages from one chat in the window, excluding
+     * self. Used to assemble the unread bucket — caller knows from the
+     * `unreads` table how many messages this chat has unread, takes
+     * min(count, returnedSize) of these.
+     */
+    @Query("""
+        SELECT * FROM messages
+        WHERE whom = :whom
+          AND sentMs >= :windowStartMs
+          AND sentMs < :windowEndMs
+          AND author != :ourPatp
+        ORDER BY sentMs DESC
+        LIMIT :limit
+    """)
+    abstract suspend fun newestInChatForWindow(
+        whom: String,
+        ourPatp: String,
+        windowStartMs: Long,
+        windowEndMs: Long,
+        limit: Int,
+    ): List<MessageEntity>
 }
 
 data class ReplyCount(val postId: String, val count: Int)
