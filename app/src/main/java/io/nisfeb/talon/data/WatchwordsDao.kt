@@ -65,6 +65,19 @@ interface WatchwordsDao {
     """)
     fun streamHitsForTerm(term: String, limit: Int = 500): Flow<List<WatchwordHitEntity>>
 
+    /** Daily digest: hits in the [windowStartMs, windowEndMs) window. */
+    @Query("""
+        SELECT * FROM watchword_hits
+        WHERE sentMs >= :windowStartMs AND sentMs < :windowEndMs
+        ORDER BY sentMs DESC
+        LIMIT :limit
+    """)
+    suspend fun hitsInWindow(
+        windowStartMs: Long,
+        windowEndMs: Long,
+        limit: Int = 500,
+    ): List<WatchwordHitEntity>
+
     @Query("SELECT COUNT(*) FROM watchword_hits WHERE term = :term")
     suspend fun countForTerm(term: String): Int
 
