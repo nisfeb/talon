@@ -214,6 +214,9 @@ class DailyDigest(
                 """.trimIndent()
                 aiClient.complete(sys, "Today's transcript:\n\n$transcript",
                     maxOutputTokens = 512)
+            }.onFailure {
+                // Don't swallow structured concurrency cancellations.
+                if (it is kotlinx.coroutines.CancellationException) throw it
             }.getOrNull()
         } else null
 
@@ -249,11 +252,15 @@ class DailyDigest(
         val mentions = byBucket[Bucket.MENTION]?.size ?: 0
         val hits = byBucket[Bucket.WATCHWORD]?.size ?: 0
         val unread = byBucket[Bucket.UNREAD]?.size ?: 0
+        fun pluralize(n: Int, singular: String, plural: String) =
+            "$n ${if (n == 1) singular else plural}"
         return listOf(
-            unread to "unread",
-            mentions to "mentions",
-            hits to "hits",
-        ).filter { it.first > 0 }.joinToString(", ") { "${it.first} ${it.second}" }
+            mentions to ("mention" to "mentions"),
+            hits to ("hit" to "hits"),
+            unread to ("unread" to "unread"),
+        ).filter { it.first > 0 }.joinToString(", ") { (n, words) ->
+            pluralize(n, words.first, words.second)
+        }
     }
 
     private fun buildPendingIntent(): PendingIntent {
