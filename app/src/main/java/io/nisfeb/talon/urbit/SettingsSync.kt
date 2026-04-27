@@ -388,6 +388,7 @@ class SettingsSync(
                 cfg.baseUrl?.let { put("baseUrl", it) }
                 put("catchMeUpEnabled", cfg.catchMeUpEnabled)
                 put("emojiReactEnabled", cfg.emojiReactEnabled)
+                put("dailyDigestEnabled", cfg.dailyDigestEnabled)
                 put("entityActionsEnabled", cfg.entityActionsEnabled)
                 put("semanticSearchEnabled", cfg.semanticSearchEnabled)
                 put("topicClustersEnabled", cfg.topicClustersEnabled)
@@ -425,6 +426,7 @@ class SettingsSync(
             baseUrl = baseUrl,
             catchMeUpEnabled = bool("catchMeUpEnabled", true),
             emojiReactEnabled = bool("emojiReactEnabled", true),
+            dailyDigestEnabled = bool("dailyDigestEnabled", true),
             entityActionsEnabled = bool("entityActionsEnabled", false),
             semanticSearchEnabled = bool("semanticSearchEnabled", false),
             topicClustersEnabled = bool("topicClustersEnabled", false),

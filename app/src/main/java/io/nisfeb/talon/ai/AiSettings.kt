@@ -41,6 +41,7 @@ class AiSettings(context: Context) {
         // can be flipped off individually.
         val catchMeUpEnabled: Boolean = true,
         val emojiReactEnabled: Boolean = true,
+        val dailyDigestEnabled: Boolean = true,
         // On-device-AI features — all default OFF so users opt in
         // explicitly. None require an API key. Toggles + state mirror
         // to %settings when syncEnabled is true.
@@ -104,6 +105,7 @@ class AiSettings(context: Context) {
         _state.value = when (feature) {
             Feature.CatchMeUp -> _state.value.copy(catchMeUpEnabled = enabled)
             Feature.EmojiReact -> _state.value.copy(emojiReactEnabled = enabled)
+            Feature.DailyDigest -> _state.value.copy(dailyDigestEnabled = enabled)
             Feature.EntityActions -> _state.value.copy(entityActionsEnabled = enabled)
             Feature.SemanticSearch -> _state.value.copy(semanticSearchEnabled = enabled)
             Feature.TopicClusters -> _state.value.copy(topicClustersEnabled = enabled)
@@ -131,6 +133,7 @@ class AiSettings(context: Context) {
         baseUrl: String?,
         catchMeUpEnabled: Boolean,
         emojiReactEnabled: Boolean,
+        dailyDigestEnabled: Boolean,
         entityActionsEnabled: Boolean,
         semanticSearchEnabled: Boolean,
         topicClustersEnabled: Boolean,
@@ -143,6 +146,7 @@ class AiSettings(context: Context) {
             .putString(KEY_BASE_URL, baseUrl?.takeIf { it.isNotBlank() })
             .putBoolean(Feature.CatchMeUp.key, catchMeUpEnabled)
             .putBoolean(Feature.EmojiReact.key, emojiReactEnabled)
+            .putBoolean(Feature.DailyDigest.key, dailyDigestEnabled)
             .putBoolean(Feature.EntityActions.key, entityActionsEnabled)
             .putBoolean(Feature.SemanticSearch.key, semanticSearchEnabled)
             .putBoolean(Feature.TopicClusters.key, topicClustersEnabled)
@@ -156,6 +160,7 @@ class AiSettings(context: Context) {
             baseUrl = baseUrl?.takeIf { it.isNotBlank() },
             catchMeUpEnabled = catchMeUpEnabled,
             emojiReactEnabled = emojiReactEnabled,
+            dailyDigestEnabled = dailyDigestEnabled,
             entityActionsEnabled = entityActionsEnabled,
             semanticSearchEnabled = semanticSearchEnabled,
             topicClustersEnabled = topicClustersEnabled,
@@ -172,6 +177,7 @@ class AiSettings(context: Context) {
             .remove(KEY_BASE_URL)
             .remove(Feature.CatchMeUp.key)
             .remove(Feature.EmojiReact.key)
+            .remove(Feature.DailyDigest.key)
             .remove(KEY_SYNC)
             .apply()
         _state.value = Config(Provider.Anthropic, "", null)
@@ -206,6 +212,7 @@ class AiSettings(context: Context) {
             baseUrl = baseUrl,
             catchMeUpEnabled = prefs.getBoolean(Feature.CatchMeUp.key, true),
             emojiReactEnabled = prefs.getBoolean(Feature.EmojiReact.key, true),
+            dailyDigestEnabled = prefs.getBoolean(Feature.DailyDigest.key, true),
             entityActionsEnabled = prefs.getBoolean(Feature.EntityActions.key, false),
             semanticSearchEnabled = prefs.getBoolean(Feature.SemanticSearch.key, false),
             topicClustersEnabled = prefs.getBoolean(Feature.TopicClusters.key, false),
@@ -236,6 +243,12 @@ class AiSettings(context: Context) {
             "feat_emoji_react",
             "AI emoji react",
             "Long-press a message → AI emoji picks a reaction for you.",
+            requiresCloudKey = true,
+        ),
+        DailyDigest(
+            "feat_daily_digest",
+            "AI digest summary",
+            "Add an AI-written summary to the daily digest. The digest itself is enabled separately under \"Daily digest.\"",
             requiresCloudKey = true,
         ),
         EntityActions(

@@ -288,6 +288,7 @@ internal fun aiFeatureEnabled(state: AiSettings.Config, feature: AiSettings.Feat
     when (feature) {
         AiSettings.Feature.CatchMeUp -> state.catchMeUpEnabled
         AiSettings.Feature.EmojiReact -> state.emojiReactEnabled
+        AiSettings.Feature.DailyDigest -> state.dailyDigestEnabled
         AiSettings.Feature.EntityActions -> state.entityActionsEnabled
         AiSettings.Feature.SemanticSearch -> state.semanticSearchEnabled
         AiSettings.Feature.TopicClusters -> state.topicClustersEnabled
