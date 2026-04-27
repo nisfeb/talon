@@ -398,8 +398,12 @@ fun TalonApp(
     Scaffold(contentWindowInsets = WindowInsets(0, 0, 0, 0)) { _ ->
         val mod = Modifier.fillMaxSize()
 
-        // Android back: unwind the nav stack. Furthest leaf first.
-        BackHandler(enabled = viewerImageUrl != null) { viewerImageUrl = null }
+        // Android back: unwind the nav stack. OnBackPressedDispatcher
+        // dispatches in REVERSE registration order — last-registered
+        // wins — so deeper leaves go LATER below. The image viewer
+        // overlays everything else (you can open it from a chat, which
+        // means both `viewerImageUrl` and `openWhom` are non-null at
+        // the same time), so its handler is registered last.
         BackHandler(enabled = editingProfile) { editingProfile = false }
         BackHandler(enabled = statusFeedOpen) { statusFeedOpen = false }
         BackHandler(enabled = bookmarksOpen) { bookmarksOpen = false }
@@ -422,6 +426,9 @@ fun TalonApp(
         BackHandler(enabled = newDmOpen) { newDmOpen = false }
         BackHandler(enabled = openThread != null) { openThread = null }
         BackHandler(enabled = openThread == null && openWhom != null) { openWhom = null }
+        // Registered last so it wins over the chat handler when an
+        // image is opened from inside a chat.
+        BackHandler(enabled = viewerImageUrl != null) { viewerImageUrl = null }
 
         // Trace every screen swap so we can correlate logcat with
         // visual artifacts. Names the branch the when-block will
