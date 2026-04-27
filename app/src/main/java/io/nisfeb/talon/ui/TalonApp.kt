@@ -737,6 +737,7 @@ fun TalonApp(
                 onOpenActivity = { activityOpen = true },
                 onOpenWatchwords = { watchwordsOpen = true },
                 onOpenDigest = { digestOpen = true },
+                digestEnabled = app.dailyDigestSettings.state.collectAsState().value.enabled,
                 onOpenAdministration = { adminListOpen = true },
                 onOpenInvites = { invitesOpen = true },
                 onOpenSettings = { settingsOpen = true },

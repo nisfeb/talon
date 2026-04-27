@@ -111,6 +111,10 @@ fun DmListScreen(
     onOpenActivity: () -> Unit,
     onOpenWatchwords: () -> Unit = {},
     onOpenDigest: () -> Unit = {},
+    /** Hide the "Today's brief" menu entry when the digest alarm is
+     *  disabled in settings — no point routing into a screen the user
+     *  hasn't opted into yet. */
+    digestEnabled: Boolean = false,
     onOpenAdministration: () -> Unit = {},
     onOpenInvites: () -> Unit = {},
     onOpenSettings: () -> Unit,
@@ -540,13 +544,15 @@ fun DmListScreen(
                             onOpenWatchwords()
                         },
                     )
-                    DropdownMenuItem(
-                        text = { Text("Today's brief") },
-                        onClick = {
-                            menuOpen = false
-                            onOpenDigest()
-                        },
-                    )
+                    if (digestEnabled) {
+                        DropdownMenuItem(
+                            text = { Text("Today's brief") },
+                            onClick = {
+                                menuOpen = false
+                                onOpenDigest()
+                            },
+                        )
+                    }
                     DropdownMenuItem(
                         text = { Text("Administration") },
                         onClick = {
