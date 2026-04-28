@@ -12,9 +12,10 @@ interface UpdateChecker {
 /**
  * Surface state for the banner. Idle when nothing to show. Available
  * holds the manifest waiting for user action. Downloading carries
- * progress 0..100. Ready means the APK is on disk and verified.
- * Failed flips when a download or hash check broke; the banner shows
- * the message and lets the user retry.
+ * progress 0..99 — the 100 mark is reserved for the transition to
+ * Ready, which means the APK is on disk and verified. Failed flips
+ * when a download or hash check broke; the banner shows the message
+ * and lets the user retry.
  */
 sealed interface UpdateStatus {
     data object Idle : UpdateStatus

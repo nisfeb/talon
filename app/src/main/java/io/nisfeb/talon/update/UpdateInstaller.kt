@@ -56,7 +56,13 @@ class UpdateInstaller(private val context: Context) {
                 val status = c.getInt(statusIdx)
                 when (status) {
                     DownloadManager.STATUS_SUCCESSFUL -> {
-                        val ok = verifySha256(target, manifest.sha256)
+                        val ok = try {
+                            verifySha256(target, manifest.sha256)
+                        } catch (e: java.io.IOException) {
+                            target.delete()
+                            onFailure("SHA-256 check failed: ${e.message ?: e::class.simpleName}")
+                            return
+                        }
                         if (!ok) {
                             target.delete()
                             onFailure("downloaded APK failed SHA-256 check")

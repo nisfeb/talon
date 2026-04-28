@@ -1,6 +1,7 @@
 package io.nisfeb.talon.update
 
 import android.content.Context
+import android.os.Build
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -31,6 +32,11 @@ class UpdateState(
     fun onManifest(manifest: UpdateManifest) {
         val installed = installedVersionCode()
         if (manifest.versionCode <= installed) return
+        // Skip manifests whose minSdk we can't satisfy. Without this,
+        // the device downloads the APK and PackageInstaller rejects
+        // it at install time with a generic "app not installed"
+        // error. Fail-fast here keeps the banner honest.
+        if (manifest.minSdk > Build.VERSION.SDK_INT) return
         // Don't clobber an in-flight download. If the user already
         // tapped to update, leave them alone.
         when (val cur = _status.value) {
@@ -73,8 +79,15 @@ class UpdateState(
     }
 
     fun dismiss() {
-        if (_status.value is UpdateStatus.Available) {
-            _status.value = UpdateStatus.Idle
+        // Allow dismissal of Available (user not interested in this
+        // version yet) and Failed (let the user banish the error
+        // banner). Don't allow dismissing in-flight Downloading or
+        // Ready — those states represent active work the user
+        // already authorized.
+        when (_status.value) {
+            is UpdateStatus.Available, is UpdateStatus.Failed ->
+                _status.value = UpdateStatus.Idle
+            else -> Unit
         }
     }
 
