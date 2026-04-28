@@ -60,6 +60,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -341,7 +342,7 @@ fun DmChatScreen(
     // ── message action sheet state ──
     var actionTarget by remember { mutableStateOf<MessageEntity?>(null) }
     var editing by remember { mutableStateOf<MessageEntity?>(null) }              // TODO(port-d5-followup): wire edit composer
-    var confirmingDelete by remember { mutableStateOf<MessageEntity?>(null) }    // TODO(port-d5-followup): wire delete confirmation dialog
+    var confirmingDelete by remember { mutableStateOf<MessageEntity?>(null) }
     var pendingQuote by remember(whom) { mutableStateOf<MessageEntity?>(null) }  // TODO(port-d5-followup): wire quote into composer
 
     val canSend = remember(whom) {
@@ -700,7 +701,6 @@ fun DmChatScreen(
                 onDelete = {
                     actionTarget = null
                     confirmingDelete = target
-                    // TODO(port-d5-followup): wire delete confirmation dialog
                 },
                 onTogglePin = {
                     val wasPinned = pinnedPostId == target.id
@@ -717,6 +717,33 @@ fun DmChatScreen(
                 canPin = whom.startsWith("chat/") && target.parentId == null,
             )
         }
+    }
+
+    confirmingDelete?.let { target ->
+        AlertDialog(
+            onDismissRequest = { confirmingDelete = null },
+            title = { Text("Delete message?") },
+            text = {
+                Text(
+                    "This will remove the message for everyone in the chat. " +
+                        "Channel admins can delete other users' messages; otherwise " +
+                        "the server only allows deleting your own.",
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    val toDelete = target
+                    confirmingDelete = null
+                    scope.launch {
+                        runCatching { repo.delete(whom, toDelete.id, toDelete.parentId) }
+                            .onFailure { sendError = "delete failed: ${it.message ?: it::class.simpleName}" }
+                    }
+                }) { Text("Delete") }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmingDelete = null }) { Text("Cancel") }
+            },
+        )
     }
 }
 
