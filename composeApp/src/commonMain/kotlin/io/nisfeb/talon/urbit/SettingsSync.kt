@@ -41,6 +41,14 @@ interface SettingsSync {
     suspend fun reorderFolderMembersLocal(folderId: Long, whoms: List<String>) {}
     suspend fun pushFolderMembersOrder(folderId: Long) {}
 
+    // ───────── bookmark mutations ─────────
+    // Adds / removes a bookmark entry on the ship's %settings agent.
+    // On desktop / null-settingsSync builds the action sheet hides the
+    // button entirely, so these are never called in that path.
+
+    suspend fun addBookmark(whom: String, postId: String, ts: Long) {}
+    suspend fun removeBookmark(whom: String, postId: String) {}
+
     // ───────── folder mutations ─────────
 
     suspend fun createFolder(name: String, sortOrder: Int): Long = -1L

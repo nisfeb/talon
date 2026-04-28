@@ -46,6 +46,7 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
@@ -58,14 +59,22 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -96,6 +105,7 @@ import androidx.compose.ui.unit.dp
 import io.nisfeb.talon.data.AppDatabase
 import io.nisfeb.talon.data.MessageEntity
 import io.nisfeb.talon.data.ReactionEntity
+import io.nisfeb.talon.data.ReactionUsageEntity
 import io.nisfeb.talon.data.ReplyCount
 import io.nisfeb.talon.ui.Avatar
 import io.nisfeb.talon.ui.CiteResolver
@@ -222,6 +232,13 @@ fun DmChatScreen(
         )
     }.collectAsState(initial = ContactMap.EMPTY)
 
+    // Current pinned-post id for this channel (chat channels only);
+    // null for DMs / clubs / non-chat channels.
+    val pinnedPostId by remember(whom) {
+        if (whom.startsWith("chat/")) db.groups().streamPinnedPostId(whom)
+        else kotlinx.coroutines.flow.flowOf(null)
+    }.collectAsState(initial = null)
+
     val listState = rememberLazyListState()
 
     val isPinnedToBottom by remember {
@@ -320,6 +337,13 @@ fun DmChatScreen(
         drafts.save(whom, draft.text)
     }
     var sendError by remember(whom) { mutableStateOf<String?>(null) }
+
+    // ── message action sheet state ──
+    var actionTarget by remember { mutableStateOf<MessageEntity?>(null) }
+    var editing by remember { mutableStateOf<MessageEntity?>(null) }              // TODO(port-d5-followup): wire edit composer
+    var confirmingDelete by remember { mutableStateOf<MessageEntity?>(null) }    // TODO(port-d5-followup): wire delete confirmation dialog
+    var pendingQuote by remember(whom) { mutableStateOf<MessageEntity?>(null) }  // TODO(port-d5-followup): wire quote into composer
+
     val canSend = remember(whom) {
         whom.startsWith("~") || whom.startsWith("0v") || whom.startsWith("chat/")
     }
@@ -367,12 +391,7 @@ fun DmChatScreen(
     val currentOnOpenConversation by rememberUpdatedState(onOpenConversation)
     val currentOnOpenImage by rememberUpdatedState(onOpenImage)
 
-    val onLongPressMessage: (MessageEntity) -> Unit = remember {
-        // TODO(port-d5-followup): wire MessageActionSheet (production
-        // shows a ModalBottomSheet with reactions, copy, bookmark,
-        // reply, quote, edit, delete, AI emoji, pin/unpin).
-        { _ -> }
-    }
+    val onLongPressMessage: (MessageEntity) -> Unit = { m -> actionTarget = m }
     val onOpenThreadForMessage: (MessageEntity) -> Unit = remember {
         { m -> currentOnOpenThread(m.id) }
     }
@@ -617,6 +636,85 @@ fun DmChatScreen(
                     onOpenSelfProfile()
                 },
                 onDismiss = { profileSheetShip = null },
+            )
+        }
+
+        actionTarget?.let { target ->
+            val isBookmarked by remember(target.whom, target.id) {
+                db.bookmarks().isBookmarked(target.whom, target.id)
+            }.collectAsState(initial = false)
+
+            val clipboardManager = LocalClipboardManager.current
+            val canBookmark = repo.settingsSync != null
+
+            MessageActionSheet(
+                db = db,
+                message = target,
+                ourPatp = ourPatp,
+                isChannel = whom.startsWith("chat/"),
+                isBookmarked = isBookmarked,
+                isPinned = pinnedPostId == target.id,
+                canBookmark = canBookmark,
+                onDismiss = { actionTarget = null },
+                onPickReaction = { emoji ->
+                    actionTarget = null
+                    scope.launch {
+                        runCatching { repo.react(whom, target.id, emoji) }
+                            .onFailure { sendError = "react failed: ${it.message ?: it::class.simpleName}" }
+                    }
+                },
+                onReply = {
+                    actionTarget = null
+                    onOpenThread(target.id)
+                },
+                onQuote = {
+                    actionTarget = null
+                    pendingQuote = target
+                },
+                canQuote = whom.startsWith("chat/") && target.parentId == null,
+                onCopy = {
+                    actionTarget = null
+                    val text = StoryCache.textFor(target.id, target.contentJson)
+                    clipboardManager.setText(AnnotatedString(text))
+                },
+                onToggleBookmark = {
+                    actionTarget = null
+                    // Only reached when canBookmark == true; settingsSync is non-null.
+                    scope.launch {
+                        if (isBookmarked) {
+                            repo.settingsSync?.removeBookmark(target.whom, target.id)
+                        } else {
+                            repo.settingsSync?.addBookmark(
+                                target.whom,
+                                target.id,
+                                System.currentTimeMillis(),
+                            )
+                        }
+                    }
+                },
+                onEdit = {
+                    actionTarget = null
+                    editing = target
+                    // TODO(port-d5-followup): wire edit composer
+                },
+                onDelete = {
+                    actionTarget = null
+                    confirmingDelete = target
+                    // TODO(port-d5-followup): wire delete confirmation dialog
+                },
+                onTogglePin = {
+                    val wasPinned = pinnedPostId == target.id
+                    actionTarget = null
+                    scope.launch {
+                        runCatching {
+                            if (wasPinned) repo.unpinPost(whom)
+                            else repo.pinPost(whom, target.id)
+                        }.onFailure {
+                            sendError = "pin failed: ${it.message ?: it::class.simpleName}"
+                        }
+                    }
+                },
+                canPin = whom.startsWith("chat/") && target.parentId == null,
             )
         }
     }
@@ -942,4 +1040,172 @@ private fun dividerLabel(ms: Long): String {
     if (wasYesterday) return "Yesterday"
     return if (sameYear) DIVIDER_DATE_FMT.format(Date(ms))
     else DIVIDER_DATE_FMT_OLD.format(Date(ms))
+}
+
+// ── MessageActionSheet ────────────────────────────────────────────────────────
+//
+// Ported from production app/src/main/java/io/nisfeb/talon/ui/screens/
+// DmChatScreen.kt lines 1630–1792.
+//
+// Adaptations from production:
+//  - `db` parameter replaces `LocalContext → TalonApplication.db` usage.
+//  - `canBookmark` parameter gates the bookmark row (Option B from spec):
+//    show only when repo.settingsSync != null.  Hides on desktop.
+//  - `canPin` parameter gates pin/unpin.  Pin calls repo.pinPost /
+//    unpinPost which live in commonMain TlonChatRepo.
+//  - AI emoji picker removed (aiConfigured / TalonApplication AI stack
+//    is Android-only; TODO(port-d5-followup) when AI bridge is ported).
+//  - windowInsetsPadding(WindowInsets.navigationBars) kept — no-ops on
+//    desktop but harmless.
+
+@OptIn(ExperimentalMaterial3Api::class, androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+private fun MessageActionSheet(
+    db: AppDatabase,
+    message: MessageEntity,
+    ourPatp: String,
+    isChannel: Boolean,
+    isBookmarked: Boolean,
+    isPinned: Boolean,
+    canBookmark: Boolean,
+    canPin: Boolean,
+    onDismiss: () -> Unit,
+    onPickReaction: (String) -> Unit,
+    onReply: () -> Unit,
+    onQuote: () -> Unit,
+    canQuote: Boolean,
+    onCopy: () -> Unit,
+    onToggleBookmark: () -> Unit,
+    onEdit: () -> Unit,
+    onDelete: () -> Unit,
+    onTogglePin: () -> Unit,
+) {
+    val sheetState = rememberModalBottomSheetState()
+    val isMine = message.author == ourPatp
+    val canReply = message.parentId == null
+    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp)
+                .windowInsetsPadding(WindowInsets.navigationBars),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            val topUsage by remember {
+                db.reactionUsage().streamTop(8)
+            }.collectAsState(initial = emptyList())
+            var searchOpen by remember { mutableStateOf(false) }
+            var searchQuery by remember { mutableStateOf("") }
+
+            // Merge usage-ranked codes with the default palette so the
+            // row is always 8 wide even before the user has reacted much.
+            val suggested = remember(topUsage) {
+                val used = topUsage.map { it.shortcode }
+                val fallback = ReactionPalette.picker.map { it.first }
+                (used + fallback.filter { it !in used }).take(8)
+            }
+
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    "React",
+                    style = MaterialTheme.typography.labelLarge,
+                    modifier = Modifier.weight(1f),
+                )
+                IconButton(onClick = {
+                    searchOpen = !searchOpen
+                    if (!searchOpen) searchQuery = ""
+                }) {
+                    Icon(Icons.Filled.Search, contentDescription = "Search emojis")
+                }
+                // TODO(port-d5-followup): AI emoji picker — requires
+                // AiSettings / EntityActions from the Android AI stack.
+                // Add `showAiEmoji` + `onAiEmoji` params when ported.
+            }
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                suggested.forEach { code ->
+                    val glyph = ReactionPalette.display(code)
+                    Text(
+                        glyph,
+                        style = MaterialTheme.typography.headlineSmall,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable { onPickReaction(code) }
+                            .padding(horizontal = 8.dp, vertical = 4.dp),
+                    )
+                }
+            }
+            if (searchOpen) {
+                OutlinedTextField(
+                    value = searchQuery,
+                    onValueChange = { searchQuery = it },
+                    placeholder = { Text("Search emojis") },
+                    singleLine = true,
+                    leadingIcon = {
+                        Icon(Icons.Filled.Search, contentDescription = null)
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 4.dp),
+                )
+                val results = remember(searchQuery) {
+                    if (searchQuery.isBlank()) emptyList()
+                    else EmojiCatalog.search(searchQuery, limit = 60)
+                }
+                if (results.isNotEmpty()) {
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        modifier = Modifier.padding(top = 6.dp),
+                    ) {
+                        results.forEach { e ->
+                            Text(
+                                e.glyph,
+                                style = MaterialTheme.typography.headlineSmall,
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .clickable { onPickReaction(e.shortcode) }
+                                    .padding(horizontal = 6.dp, vertical = 4.dp),
+                            )
+                        }
+                    }
+                }
+            }
+            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+            TextButton(onClick = onCopy) { Text("Copy text") }
+            if (canBookmark) {
+                TextButton(onClick = onToggleBookmark) {
+                    Text(if (isBookmarked) "Remove bookmark" else "Bookmark")
+                }
+            }
+            if (canReply) {
+                TextButton(onClick = onReply) { Text("Reply in thread") }
+            }
+            if (canQuote) {
+                TextButton(onClick = onQuote) { Text("Quote") }
+            }
+            // Edit is only supported on top-level channel messages that
+            // the user authored. %chat (DMs + clubs) silently ignores
+            // edit pokes, and reply-edit isn't in either agent's mold.
+            if (isMine && isChannel && message.parentId == null) {
+                TextButton(onClick = onEdit) { Text("Edit") }
+            }
+            // Pin / Unpin — chat channels only, top-level posts only.
+            if (canPin) {
+                TextButton(onClick = onTogglePin) {
+                    Text(if (isPinned) "Unpin" else "Pin (admin)")
+                }
+            }
+            // Delete: always allowed on your own messages. On channels
+            // we also show it for others' messages — the server
+            // enforces admin-only deletion and rejects if the user
+            // isn't authorized, leaving the row in place.
+            if (isMine || isChannel) {
+                TextButton(onClick = onDelete) {
+                    Text(
+                        if (isMine) "Delete" else "Delete (admin)",
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+            }
+        }
+    }
 }
