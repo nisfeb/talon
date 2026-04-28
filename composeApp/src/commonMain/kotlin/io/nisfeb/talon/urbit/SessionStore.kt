@@ -1,6 +1,9 @@
 package io.nisfeb.talon.urbit
 
+import kotlinx.serialization.Serializable
+
 /** A saved session for one ship. */
+@Serializable
 data class SavedSession(
     val shipUrl: String,
     val ship: String,       // "~patp"
