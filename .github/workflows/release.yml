@@ -13,6 +13,8 @@ jobs:
       # release. Modern repos default GITHUB_TOKEN.contents to read,
       # which would 403 on any release-creation API call.
       contents: write
+    outputs:
+      version_name: ${{ steps.tagcheck.outputs.version_name }}
     steps:
       - uses: actions/checkout@v4
 
@@ -80,12 +82,81 @@ jobs:
               release/manifest-template.json > latest.json
           echo "apk=$OUT_APK" >> $GITHUB_OUTPUT
 
+      - name: Upload Android APK + manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: android
+          path: |
+            ${{ steps.stage.outputs.apk }}
+            latest.json
+
+  # Desktop matrix runs jpackage on each host OS so the per-platform
+  # installer toolchains are present (dpkg + fakeroot on Linux,
+  # hdiutil on macOS, WiX on Windows). Each job uploads its installer
+  # as a workflow artifact; the `release` job below collects all four
+  # and publishes them as a single GitHub Release.
+  build-desktop:
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: packageReleaseDeb
+            artifact_glob: composeApp/build/compose/binaries/main-release/deb/*.deb
+            artifact_name: linux-deb
+          - os: macos-latest
+            target: packageReleaseDmg
+            artifact_glob: composeApp/build/compose/binaries/main-release/dmg/*.dmg
+            artifact_name: macos-dmg
+          - os: windows-latest
+            target: packageReleaseMsi
+            artifact_glob: composeApp/build/compose/binaries/main-release/msi/*.msi
+            artifact_name: windows-msi
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+      - name: Build native package (${{ matrix.target }})
+        run: ./gradlew :composeApp:${{ matrix.target }}
+        shell: bash
+      - name: Upload installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: ${{ matrix.artifact_glob }}
+          if-no-files-found: error
+
+  release:
+    needs: [build, build-desktop]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Flatten artifact tree
+        run: |
+          mkdir -p release-files
+          find artifacts -type f \( \
+            -name '*.apk' -o \
+            -name '*.deb' -o \
+            -name '*.dmg' -o \
+            -name '*.msi' -o \
+            -name 'latest.json' \
+          \) -exec cp {} release-files/ \;
+          ls -la release-files/
+
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: |
-            ${{ steps.stage.outputs.apk }}
-            latest.json
+          files: release-files/*
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
