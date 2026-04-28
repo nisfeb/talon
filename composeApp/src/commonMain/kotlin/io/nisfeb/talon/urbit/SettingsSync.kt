@@ -49,6 +49,13 @@ interface SettingsSync {
     suspend fun addBookmark(whom: String, postId: String, ts: Long) {}
     suspend fun removeBookmark(whom: String, postId: String) {}
 
+    // ───────── notify level mutation ─────────
+    // Persists the per-conversation notification volume locally and
+    // pushes to the ship's %settings agent. `level` is one of the
+    // string constants in [io.nisfeb.talon.data.NotifyLevel].
+
+    suspend fun setNotifyLevel(whom: String, level: String) {}
+
     // ───────── folder mutations ─────────
 
     suspend fun createFolder(name: String, sortOrder: Int): Long = -1L

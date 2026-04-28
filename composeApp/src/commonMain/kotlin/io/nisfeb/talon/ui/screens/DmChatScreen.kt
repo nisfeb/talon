@@ -26,10 +26,6 @@
 //   - topic clusters sheet (k-means)
 //   - entity action chips (commonMain expect/actual already no-ops)
 //   - link preview card on each row
-//   - bookmarks DB stream wiring (settingsSync addBookmark/removeBookmark
-//     interface methods exist; needs the BookmarkDao stream wired into
-//     the action sheet's isBookmarked observation — currently passes
-//     false as a placeholder)
 //   - notification level dropdown
 //
 // Keep in sync with production until app/ is removed in Stage F.
@@ -44,6 +40,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
@@ -67,9 +64,13 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.NotificationsOff
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -113,6 +114,7 @@ import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import io.nisfeb.talon.data.AppDatabase
 import io.nisfeb.talon.data.MessageEntity
+import io.nisfeb.talon.data.NotifyLevel
 import io.nisfeb.talon.data.ReactionEntity
 import io.nisfeb.talon.data.ReactionUsageEntity
 import io.nisfeb.talon.data.ReplyCount
@@ -251,6 +253,10 @@ fun DmChatScreen(
         if (whom.startsWith("chat/")) db.groups().streamPinnedPostId(whom)
         else kotlinx.coroutines.flow.flowOf(null)
     }.collectAsState(initial = null)
+
+    val notifyPref by remember(whom) { db.notifyPrefs().stream(whom) }
+        .collectAsState(initial = null)
+    val notifyLevel = notifyPref?.level ?: NotifyLevel.DEFAULT
 
     val listState = rememberLazyListState()
 
@@ -479,9 +485,18 @@ fun DmChatScreen(
                     style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
                     modifier = Modifier.weight(1f).padding(start = 4.dp),
                 )
-                // TODO(port-d5-followup): notification level dropdown,
-                // topics sheet trigger, watchwords menu — all need
-                // additional ctor params and the production AI/notify/
+                NotifyLevelDropdown(
+                    level = notifyLevel,
+                    enabled = repo.settingsSync != null,
+                    onSelect = { level ->
+                        scope.launch {
+                            runCatching { repo.settingsSync?.setNotifyLevel(whom, level) }
+                                .onFailure { sendError = "notify failed: ${it.message ?: it::class.simpleName}" }
+                        }
+                    },
+                )
+                // TODO(port-d5-followup): topics sheet trigger and
+                // watchwords menu — both need the production AI/
                 // watchwords subsystems threaded through.
             }
             HorizontalDivider()
@@ -1159,6 +1174,43 @@ private fun dividerLabel(ms: Long): String {
 //    is Android-only; TODO(port-d5-followup) when AI bridge is ported).
 //  - windowInsetsPadding(WindowInsets.navigationBars) kept — no-ops on
 //    desktop but harmless.
+
+// IconButton + DropdownMenu for the per-conversation notify level.
+// Disabled (icon stays inert) when the host hasn't supplied a
+// SettingsSync — desktop falls into that path until the %settings
+// bridge is wired.
+@Composable
+private fun NotifyLevelDropdown(
+    level: String,
+    enabled: Boolean,
+    onSelect: (String) -> Unit,
+) {
+    var open by remember { mutableStateOf(false) }
+    Box {
+        IconButton(onClick = { if (enabled) open = true }, enabled = enabled) {
+            Icon(
+                imageVector = if (level == NotifyLevel.NONE)
+                    Icons.Filled.NotificationsOff
+                else Icons.Filled.Notifications,
+                contentDescription = "Notifications",
+            )
+        }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            DropdownMenuItem(
+                text = { Text(if (level == NotifyLevel.ALL) "✓ All messages" else "All messages") },
+                onClick = { open = false; onSelect(NotifyLevel.ALL) },
+            )
+            DropdownMenuItem(
+                text = { Text(if (level == NotifyLevel.MENTIONS) "✓ Mentions only" else "Mentions only") },
+                onClick = { open = false; onSelect(NotifyLevel.MENTIONS) },
+            )
+            DropdownMenuItem(
+                text = { Text(if (level == NotifyLevel.NONE) "✓ Mute" else "Mute") },
+                onClick = { open = false; onSelect(NotifyLevel.NONE) },
+            )
+        }
+    }
+}
 
 // AlertDialog with a single OutlinedTextField bound to the message
 // body. Mirrors production exactly — there's no rich composer here
