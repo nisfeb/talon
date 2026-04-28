@@ -46,11 +46,15 @@ class DesktopNotifications : Notifications {
         whom: String,
         term: String,
         postId: String,
+        parentId: String?,
         title: String,
         body: String,
         sentMs: Long,
     ) {
-        trayIcon?.displayMessage(title, body, TrayIcon.MessageType.INFO)
+        // Compose the user-facing title here since desktop's
+        // displayMessage doesn't have the "$terms in $label" template
+        // the Android side uses.
+        trayIcon?.displayMessage("$term in $title", body, TrayIcon.MessageType.INFO)
     }
 
     override fun showDailyDigest(title: String, body: String) {

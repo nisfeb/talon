@@ -24,21 +24,21 @@ class AndroidNotifications(private val ctx: Context) : Notifications {
         whom: String,
         term: String,
         postId: String,
+        parentId: String?,
         title: String,
         body: String,
         sentMs: Long,
     ) {
-        // The production object takes terms: List<String> and label: String.
-        // The interface exposes a simpler shape: a single term string and
-        // a pre-formatted title. Adapt by wrapping term in a list and
-        // using title as the label (the production builds its own title
-        // from label + terms, so passing term as both is a reasonable v1
-        // approximation).
+        // The production object takes `terms: List<String>` and a raw
+        // `label: String` (which it composes into the user-facing title
+        // as "$terms in $label"). Our interface exposes a single `term`
+        // and a `title` that's documented as the raw label. Wrap term
+        // in a list; pass title straight through as label.
         ProductionNotifications.showWatchwordHit(
             context = ctx,
             whom = whom,
             postId = postId,
-            parentId = null,
+            parentId = parentId,
             terms = listOf(term),
             label = title,
             body = body,

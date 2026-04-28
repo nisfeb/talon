@@ -33,12 +33,19 @@ interface Notifications {
     )
 
     /**
-     * Notification for a watchword hit.
+     * Notification for a watchword hit. [title] should be a raw
+     * conversation label (e.g. the channel name or sender patp) —
+     * the Android implementation builds its own composed title in
+     * the form `"$term in $title"`, so callers must NOT pre-format.
+     *
+     * [parentId] is non-null when [postId] is a reply, so the tap
+     * intent can route into the thread instead of the chat list.
      */
     fun showWatchwordHit(
         whom: String,
         term: String,
         postId: String,
+        parentId: String? = null,
         title: String,
         body: String,
         sentMs: Long,
