@@ -46,6 +46,17 @@ kotlin {
             // binary at runtime — Android uses the platform's
             // built-in SQLite via the Room Android compiler.
             implementation(libs.androidx.sqlite.bundled)
+            // Coil 3 ships a multiplatform compose artifact that
+            // commonMain Avatar.kt consumes via AsyncImage. The
+            // okhttp-network artifact wires Coil's image loader to
+            // the same OkHttp client we use elsewhere.
+            implementation(libs.coil.compose)
+            implementation(libs.coil.network.okhttp)
+            // sh.calvin.reorderable supplies the
+            // rememberReorderableLazyListState + ReorderableItem APIs
+            // DmListScreen uses for drag-to-reorder folders/groups.
+            // The library is multiplatform.
+            implementation(libs.reorderable)
         }
         androidMain.dependencies {
             implementation(libs.androidx.activity.compose)

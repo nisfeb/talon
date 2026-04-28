@@ -31,6 +31,26 @@ interface SettingsSync {
     suspend fun bootstrap()
     suspend fun applySettingsEvent(payload: JsonObject)
 
+    // ───────── home-list reorder hooks ─────────
+    // Called from DmListScreen drag callbacks. The Android impl writes
+    // through to Room and (for the push variants) sends pokes to
+    // %settings on the ship; the desktop default is a no-op.
+
+    suspend fun reorderGroupOrdersLocal(flags: List<String>) {}
+    suspend fun pushGroupOrders() {}
+    suspend fun reorderFolderMembersLocal(folderId: Long, whoms: List<String>) {}
+    suspend fun pushFolderMembersOrder(folderId: Long) {}
+
+    // ───────── folder mutations ─────────
+
+    suspend fun createFolder(name: String, sortOrder: Int): Long = -1L
+    suspend fun renameFolder(id: Long, name: String) {}
+    suspend fun deleteFolder(id: Long) {}
+    suspend fun addFolderMember(folderId: Long, whom: String) {}
+    suspend fun addGroupToFolder(folderId: Long, groupFlag: String) {}
+    suspend fun removeFolderMember(folderId: Long, whom: String) {}
+    suspend fun removeGroupFromFolder(folderId: Long, groupFlag: String) {}
+
     companion object {
         const val DESK = "talon"
     }
