@@ -112,6 +112,7 @@ import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
+import io.nisfeb.talon.ai.AiSettingsRepository
 import io.nisfeb.talon.data.AppDatabase
 import io.nisfeb.talon.data.MessageEntity
 import io.nisfeb.talon.data.NotifyLevel
@@ -126,6 +127,7 @@ import io.nisfeb.talon.ui.ContactProfileSheet
 import io.nisfeb.talon.ui.DraftStore
 import io.nisfeb.talon.ui.EmojiCatalog
 import io.nisfeb.talon.ui.EmojiPickerDropdown
+import io.nisfeb.talon.ui.EntityActionChips
 import io.nisfeb.talon.ui.LinkPreviewCard
 import io.nisfeb.talon.ui.LocalCiteResolver
 import io.nisfeb.talon.ui.firstLinkUrl
@@ -166,6 +168,7 @@ fun DmChatScreen(
     repo: TlonChatRepo,
     drafts: DraftStore,
     http: OkHttpClient,
+    aiSettings: AiSettingsRepository,
     ourPatp: String,
     whom: String,
     initialScrollMessageId: String? = null,
@@ -177,6 +180,7 @@ fun DmChatScreen(
     onOpenSelfProfile: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val aiConfigured by aiSettings.state.collectAsState()
     val rows by remember(whom) {
         var prevByMsgId: Map<String, DisplayRow> = emptyMap()
         kotlinx.coroutines.flow.combine(
@@ -534,6 +538,7 @@ fun DmChatScreen(
                             onImageTap = currentOnOpenImage,
                             onAvatarTap = onAvatarTap,
                             onCitationTap = onCitationTap,
+                            entityActionsEnabled = aiConfigured.entityActionsEnabled,
                             flashAmber = item.row.m.id == flashMessageId,
                         )
                     }
@@ -845,6 +850,7 @@ private fun MessageRow(
     onImageTap: (String) -> Unit,
     onAvatarTap: (String) -> Unit,
     onCitationTap: (String) -> Unit,
+    entityActionsEnabled: Boolean,
     flashAmber: Boolean = false,
 ) {
     val m = row.m
@@ -940,9 +946,18 @@ private fun MessageRow(
                     modifier = Modifier.padding(top = 6.dp),
                 )
             }
-            // TODO(port-d5-followup): EntityActionChips per row (ML Kit
-            // entity extraction is Android-only; the commonMain expect
-            // is a no-op stub that needs the gated wiring here too).
+            // ML Kit entity extraction is Android-only; the desktop
+            // actual is a no-op so this composable is safe to call from
+            // commonMain. Toggle gated on the user's AI settings.
+            if (entityActionsEnabled) {
+                val plainText = remember(m.id, m.contentJson) {
+                    StoryCache.textFor(m.id, m.contentJson)
+                }
+                EntityActionChips(
+                    text = plainText,
+                    modifier = Modifier.padding(top = 4.dp),
+                )
+            }
             if (grouped.isNotEmpty() || row.replyCount > 0) {
                 FlowRow(
                     modifier = Modifier.padding(top = 4.dp),

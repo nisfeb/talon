@@ -96,6 +96,7 @@ fun App(
                     repo = repo,
                     drafts = drafts,
                     http = session.http,
+                    aiSettings = aiSettings,
                     ourPatp = ship,
                     whom = openChat!!,
                     onBack = { openChat = null },
