@@ -13,6 +13,7 @@ import io.nisfeb.talon.data.AppDatabase
 import io.nisfeb.talon.ui.DraftStore
 import io.nisfeb.talon.ui.screens.DmChatScreen
 import io.nisfeb.talon.ui.screens.DmListScreen
+import io.nisfeb.talon.ui.screens.ImageViewerScreen
 import io.nisfeb.talon.ui.screens.LoginScreen
 import io.nisfeb.talon.ui.screens.SettingsScreen
 import io.nisfeb.talon.ui.theme.TalonTheme
@@ -44,6 +45,9 @@ fun App(
     // D5: when non-null, the chat screen for [openChat] takes over. The
     // back button in the chat sets this to null to return to the list.
     var openChat by remember { mutableStateOf<String?>(null) }
+    // When non-null, ImageViewerScreen overlays everything. Closing
+    // returns the user to whichever screen was below.
+    var viewerImageUrl by remember { mutableStateOf<String?>(null) }
 
     TalonTheme {
         Surface(modifier = Modifier.fillMaxSize()) {
@@ -57,6 +61,10 @@ fun App(
                     aiSettings = aiSettings,
                     onBack = { showSettings = false },
                 )
+                viewerImageUrl != null -> ImageViewerScreen(
+                    url = viewerImageUrl!!,
+                    onClose = { viewerImageUrl = null },
+                )
                 openChat != null -> DmChatScreen(
                     db = db,
                     repo = repo,
@@ -69,9 +77,7 @@ fun App(
                         // TODO(port-d5-followup): wire DmThreadScreen.
                     },
                     onOpenConversation = { other -> openChat = other },
-                    onOpenImage = { _ ->
-                        // TODO(port-d5-followup): wire image viewer.
-                    },
+                    onOpenImage = { url -> viewerImageUrl = url },
                     onOpenSelfProfile = {
                         // TODO(port-d5-followup): wire self-profile screen.
                     },
