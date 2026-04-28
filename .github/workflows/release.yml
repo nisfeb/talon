@@ -1,0 +1,71 @@
+name: release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Decode keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
+        run: |
+          mkdir -p ~/.config/talon
+          echo "$KEYSTORE_BASE64" | base64 -d > ~/.config/talon/release.keystore
+          cat > ~/.config/talon/keystore.properties <<EOF
+          storeFile=$HOME/.config/talon/release.keystore
+          storePassword=${{ secrets.RELEASE_STORE_PASSWORD }}
+          keyAlias=${{ secrets.RELEASE_KEY_ALIAS }}
+          keyPassword=${{ secrets.RELEASE_KEY_PASSWORD }}
+          EOF
+          chmod 600 ~/.config/talon/keystore.properties
+
+      - name: Build release APK
+        env:
+          RELEASE_KEYSTORE_PROPS: /home/runner/.config/talon/keystore.properties
+        run: ./gradlew :app:assembleRelease
+
+      - name: Resolve version metadata
+        id: meta
+        run: |
+          TAG="${GITHUB_REF#refs/tags/v}"
+          VERSION_CODE=$(grep 'versionCode = ' app/build.gradle.kts | head -1 | grep -oE '[0-9]+')
+          VERSION_NAME=$(grep 'versionName = ' app/build.gradle.kts | head -1 | grep -oE '"[^"]+"' | tr -d '"')
+          if [ "$TAG" != "$VERSION_NAME" ]; then
+            echo "Tag ($TAG) does not match versionName ($VERSION_NAME) in build.gradle.kts"
+            exit 1
+          fi
+          APK=app/build/outputs/apk/release/app-release.apk
+          OUT_APK="talon-$VERSION_NAME.apk"
+          cp "$APK" "$OUT_APK"
+          SHA=$(sha256sum "$OUT_APK" | awk '{print $1}')
+          CHANGELOG="$(git log -1 --pretty=%B | tr '\n' ' ' | sed 's/"/\\"/g')"
+          sed -e "s/__VERSION_CODE__/$VERSION_CODE/" \
+              -e "s/__VERSION_NAME__/$VERSION_NAME/" \
+              -e "s/__SHA256__/$SHA/" \
+              -e "s/__CHANGELOG__/$CHANGELOG/" \
+              -e "s/__MANDATORY__/false/" \
+              release/manifest-template.json > latest.json
+          echo "apk=$OUT_APK" >> $GITHUB_OUTPUT
+          echo "version_name=$VERSION_NAME" >> $GITHUB_OUTPUT
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            ${{ steps.meta.outputs.apk }}
+            latest.json
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
