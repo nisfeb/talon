@@ -126,7 +126,9 @@ import io.nisfeb.talon.ui.ContactProfileSheet
 import io.nisfeb.talon.ui.DraftStore
 import io.nisfeb.talon.ui.EmojiCatalog
 import io.nisfeb.talon.ui.EmojiPickerDropdown
+import io.nisfeb.talon.ui.LinkPreviewCard
 import io.nisfeb.talon.ui.LocalCiteResolver
+import io.nisfeb.talon.ui.firstLinkUrl
 import io.nisfeb.talon.ui.MentionPicker
 import io.nisfeb.talon.ui.ReactionPalette
 import io.nisfeb.talon.ui.SlashPicker
@@ -510,6 +512,7 @@ fun DmChatScreen(
                             row = item.row,
                             ourPatp = ourPatp,
                             contactMap = contactMap,
+                            http = http,
                             onLongPress = onLongPressMessage,
                             onOpenThread = onOpenThreadForMessage,
                             onReactionTap = onReactionForMessage,
@@ -807,6 +810,7 @@ private fun MessageRow(
     row: DisplayRow,
     ourPatp: String,
     contactMap: ContactMap,
+    http: OkHttpClient,
     onLongPress: (MessageEntity) -> Unit,
     onOpenThread: (MessageEntity) -> Unit,
     onReactionTap: (MessageEntity, List<ReactionEntity>, String) -> Unit,
@@ -901,9 +905,18 @@ private fun MessageRow(
                 ourPatp = ourPatp,
                 onPollVote = { emoji -> onReactionTap(m, row.reactions, emoji) },
             )
-            // TODO(port-d5-followup): production renders LinkPreviewCard
-            // for the first link in each row + EntityActionChips for ML
-            // Kit-detected entities. Both need wiring through ctor here.
+            val firstLink = remember(parts) { firstLinkUrl(parts) }
+            if (firstLink != null) {
+                LinkPreviewCard(
+                    url = firstLink,
+                    http = http,
+                    onOpen = onLinkTap,
+                    modifier = Modifier.padding(top = 6.dp),
+                )
+            }
+            // TODO(port-d5-followup): EntityActionChips per row (ML Kit
+            // entity extraction is Android-only; the commonMain expect
+            // is a no-op stub that needs the gated wiring here too).
             if (grouped.isNotEmpty() || row.replyCount > 0) {
                 FlowRow(
                     modifier = Modifier.padding(top = 4.dp),
