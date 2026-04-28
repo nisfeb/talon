@@ -107,6 +107,8 @@ import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
+import io.nisfeb.talon.ai.AiClient
+import io.nisfeb.talon.ai.AiFeatures
 import io.nisfeb.talon.ai.AiSettingsRepository
 import io.nisfeb.talon.data.AppDatabase
 import io.nisfeb.talon.data.MessageEntity
@@ -178,6 +180,12 @@ fun DmChatScreen(
 ) {
     val aiConfigured by aiSettings.state.collectAsState()
     val locationProvider = rememberLocationProvider()
+    val aiFeatures = remember(aiSettings) {
+        AiFeatures(AiClient { aiSettings.state.value })
+    }
+    var catchUpSummary by remember(whom) { mutableStateOf<String?>(null) }
+    var catchingUp by remember(whom) { mutableStateOf(false) }
+    var catchUpError by remember(whom) { mutableStateOf<String?>(null) }
     val rows by remember(whom) {
         var prevByMsgId: Map<String, DisplayRow> = emptyMap()
         kotlinx.coroutines.flow.combine(
@@ -524,6 +532,33 @@ fun DmChatScreen(
                         .height(2.dp),
                 )
             }
+            val showCatchUp = aiConfigured.hasKey() &&
+                aiConfigured.catchMeUpEnabled &&
+                (unreadSnapshot ?: 0) >= CATCH_UP_MIN_UNREAD &&
+                catchUpSummary == null
+            if (showCatchUp) {
+                CatchMeUpBanner(
+                    count = unreadSnapshot ?: 0,
+                    loading = catchingUp,
+                    onClick = {
+                        if (catchingUp) return@CatchMeUpBanner
+                        catchingUp = true
+                        catchUpError = null
+                        scope.launch {
+                            runCatching {
+                                val count = (unreadSnapshot ?: 0).coerceIn(1, 60)
+                                val latest = db.messages().latestFor(whom, count)
+                                val ordered = latest.asReversed()
+                                aiFeatures.catchMeUp(ordered) { patp ->
+                                    contactMap.displayName(patp)
+                                }
+                            }.onSuccess { catchUpSummary = it }
+                                .onFailure { catchUpError = it.message ?: it::class.simpleName }
+                            catchingUp = false
+                        }
+                    },
+                )
+            }
             LazyColumn(
                 state = listState,
                 modifier = Modifier.weight(1f).fillMaxSize(),
@@ -817,6 +852,28 @@ fun DmChatScreen(
         )
     }
 
+    catchUpSummary?.let { summary ->
+        AlertDialog(
+            onDismissRequest = { catchUpSummary = null },
+            title = { Text("Catch me up") },
+            text = { Text(summary, style = MaterialTheme.typography.bodyMedium) },
+            confirmButton = {
+                TextButton(onClick = { catchUpSummary = null }) { Text("Got it") }
+            },
+        )
+    }
+
+    catchUpError?.let { err ->
+        AlertDialog(
+            onDismissRequest = { catchUpError = null },
+            title = { Text("Catch me up failed") },
+            text = { Text(err) },
+            confirmButton = {
+                TextButton(onClick = { catchUpError = null }) { Text("OK") }
+            },
+        )
+    }
+
     confirmingDelete?.let { target ->
         AlertDialog(
             onDismissRequest = { confirmingDelete = null },
@@ -1081,6 +1138,12 @@ private const val GROUP_GAP_MS = 5L * 60_000L
 
 private const val STORY_WARM_TAIL = 30
 
+/**
+ * Minimum unread count before the catch-me-up banner appears. Below
+ * this, scrolling is faster than reading a summary.
+ */
+private const val CATCH_UP_MIN_UNREAD = 20
+
 private const val SWIPE_REPLY_THRESHOLD_PX = 180f
 private const val SWIPE_REPLY_MAX_PX = 320f
 
@@ -1202,6 +1265,38 @@ private fun dividerLabel(ms: Long): String {
 //    is Android-only; TODO(port-d5-followup) when AI bridge is ported).
 //  - windowInsetsPadding(WindowInsets.navigationBars) kept — no-ops on
 //    desktop but harmless.
+
+@Composable
+private fun CatchMeUpBanner(
+    count: Int,
+    loading: Boolean,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.primaryContainer)
+            .clickable(enabled = !loading, onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Text("🤖", style = MaterialTheme.typography.bodyLarge)
+        Text(
+            if (loading) "Summarizing $count unread messages…"
+            else "Catch me up on $count unread messages",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onPrimaryContainer,
+            modifier = Modifier.weight(1f),
+        )
+        if (loading) {
+            CircularProgressIndicator(
+                strokeWidth = 2.dp,
+                modifier = Modifier.size(16.dp),
+            )
+        }
+    }
+}
 
 // IconButton + DropdownMenu for the per-conversation notify level.
 // Disabled (icon stays inert) when the host hasn't supplied a
