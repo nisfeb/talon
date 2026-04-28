@@ -16,7 +16,9 @@ class UpdateInstaller(private val context: Context) {
 
     /**
      * Download the APK to external-files/updates, verify its SHA-256,
-     * call onReady with the absolute path. onProgress receives 0..100.
+     * call onReady with the absolute path. onProgress receives 0..99
+     * (100 is reserved for the transition to Ready, signalled by the
+     * onReady callback rather than a final progress tick).
      * onFailure receives a human message.
      */
     suspend fun download(
