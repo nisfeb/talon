@@ -33,7 +33,7 @@ import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import coil.compose.AsyncImage
+import coil3.compose.AsyncImage
 import io.nisfeb.talon.urbit.MENTION_TAG
 import io.nisfeb.talon.urbit.StoryPart
 import io.nisfeb.talon.urbit.URL_TAG

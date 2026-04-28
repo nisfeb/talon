@@ -103,6 +103,14 @@ class TalonApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        // Cookie-jar-bearing client used by UrbitSession + S3Uploader.
+        // Coil does NOT use this — coil-network-okhttp registers its
+        // own default OkHttpClient via ServiceLoader. That's fine
+        // today because every image URL Talon loads (Tlon avatars,
+        // OG previews, S3 attachments) is public, no urbauth cookie
+        // required. If anyone ever adds a Coil callsite for a
+        // resource behind the ship's cookie wall, that callsite will
+        // need its own ImageLoader configured with this client.
         http = OkHttpClient.Builder()
             .connectTimeout(15, TimeUnit.SECONDS)
             .readTimeout(0, TimeUnit.SECONDS) // long-lived SSE

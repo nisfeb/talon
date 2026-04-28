@@ -212,6 +212,7 @@ git commit -m "deps: bump Coil 2.7.0 → coil3 3.x for KMP support"
 
 **Files:**
 - Modify: `build.gradle.kts` (root)
+- Modify: `gradle/libs.versions.toml` (add `composeMultiplatform` version + three plugin aliases — port branch is forked from master, doesn't inherit the spike's catalog additions)
 
 - [ ] **Step 1: Read the current root build file**
 
@@ -231,7 +232,17 @@ Add these lines inside the `plugins { ... }` block:
     alias(libs.plugins.compose.multiplatform) apply false
 ```
 
-(`kotlin-multiplatform`, `android-library`, and `compose-multiplatform` aliases were added to the catalog by the spike — already there.)
+Add the matching catalog entries to `gradle/libs.versions.toml` if not already present:
+
+```toml
+# [versions]
+composeMultiplatform = "1.7.3"
+
+# [plugins]
+kotlin-multiplatform = { id = "org.jetbrains.kotlin.multiplatform", version.ref = "kotlin" }
+android-library = { id = "com.android.library", version.ref = "agp" }
+compose-multiplatform = { id = "org.jetbrains.compose", version.ref = "composeMultiplatform" }
+```
 
 - [ ] **Step 3: Verify subprojects can resolve via alias**
 
@@ -248,7 +259,7 @@ Expected: BUILD SUCCESSFUL.
 - [ ] **Step 4: Commit**
 
 ```bash
-git add build.gradle.kts
+git add build.gradle.kts gradle/libs.versions.toml
 git commit -m "build: declare KMP plugins at root for subproject alias use"
 ```
 
@@ -258,16 +269,23 @@ git commit -m "build: declare KMP plugins at root for subproject alias use"
 
 The old shape: `app/` is the production Android module; `composeApp/` is a parallel scaffold. The new shape: `composeApp/` is the production module that emits an Android APK + a desktop binary; `app/` is deleted.
 
-### Task B1: Migrate composeApp from `com.android.library` to `com.android.application`
+### Task B1: Scaffold + configure composeApp as the Android application module
 
-The spike's `composeApp` declared `id("com.android.library")` because it didn't need to produce an APK. Now it does.
+The port branch is forked from master, which doesn't have the spike's scaffold. So this task creates `composeApp/` from scratch as a `com.android.application` module (skipping the spike's intermediate `com.android.library` state). The spike's scaffold is on `spike/cmp-desktop` for reference but isn't cherry-picked here — re-doing it cleanly with A3's catalog aliases is faster than wrangling a merge.
 
 **Files:**
-- Modify: `composeApp/build.gradle.kts`
+- Create: `composeApp/build.gradle.kts`
+- Create: `composeApp/src/androidMain/kotlin/io/nisfeb/talon/MainActivity.kt` (placeholder)
+- Create: `composeApp/src/desktopMain/kotlin/io/nisfeb/talon/Main.kt` (Hello World — desktop placeholder)
+- Modify: `settings.gradle.kts` (add `include(":composeApp")`)
 
-- [ ] **Step 1: Change the plugin**
+- [ ] **Step 1: Add the module to settings**
 
-Replace `id("com.android.library")` with `alias(libs.plugins.android.application)` (the alias is already in the catalog — used by `app/`).
+Append to `settings.gradle.kts`:
+
+```kotlin
+include(":composeApp")
+```
 
 - [ ] **Step 2: Add the application config**
 
@@ -1100,7 +1118,7 @@ Already in the spike's build file:
 ```kotlin
 compose.desktop {
     application {
-        mainClass = "io.nisfeb.talon.MainKt"
+        mainClass = "io.nisfeb.talon.compose.MainKt"
         nativeDistributions {
             targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Deb)
             packageName = "Talon"

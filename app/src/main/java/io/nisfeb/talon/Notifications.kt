@@ -250,5 +250,15 @@ object Notifications {
         mgr.cancel(whom, NOTIFICATION_ID)
     }
 
+    /** Cancel all notifications associated with a chat — called when the
+     *  user opens the conversation. Also cancels the watchword tag for the
+     *  same chat so both notification rows disappear together. */
+    fun cancelAllForChat(context: Context, whom: String) {
+        val mgr = ContextCompat.getSystemService(context, NotificationManager::class.java)
+            ?: return
+        mgr.cancel(whom, NOTIFICATION_ID)
+        mgr.cancel("watchword:$whom", NOTIFICATION_ID)
+    }
+
     private const val NOTIFICATION_ID = 1001
 }
