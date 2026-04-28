@@ -252,7 +252,12 @@ abstract class AppDatabase : RoomDatabase() {
                     MIGRATION_23_24, MIGRATION_24_25, MIGRATION_25_26,
                     MIGRATION_26_27,
                 )
-                .fallbackToDestructiveMigration()
+                // dropAllTables = true preserves the pre-2.7 behavior:
+                // when Room can't find a migration path, drop everything
+                // and rebuild. Last-resort safety net for users on
+                // versions older than 17 (the oldest explicit migration
+                // start above).
+                .fallbackToDestructiveMigration(dropAllTables = true)
                 .build()
         }
 
