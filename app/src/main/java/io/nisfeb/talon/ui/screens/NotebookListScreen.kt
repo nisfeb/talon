@@ -42,7 +42,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import coil.compose.AsyncImage
+import coil3.compose.AsyncImage
 import io.nisfeb.talon.TalonApplication
 import io.nisfeb.talon.data.MessageEntity
 import io.nisfeb.talon.ui.ContactMap
