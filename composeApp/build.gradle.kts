@@ -64,13 +64,12 @@ android {
 
     buildTypes {
         release {
-            // Mirror app/'s env-var-driven signing fallback. With no
-            // RELEASE_KEYSTORE_PROPS set, debug-signed release builds
-            // still work for local testing.
-            val hasReleaseKeys = System.getenv("RELEASE_KEYSTORE_PROPS") != null
-            signingConfig = signingConfigs.getByName(
-                if (hasReleaseKeys) "release" else "debug"
-            )
+            // Debug-signed for now — composeApp produces a side-by-side
+            // placeholder APK during the port. Stage F adds the proper
+            // env-var-driven release signing config (mirroring
+            // app/build.gradle.kts) once composeApp takes over as the
+            // production module.
+            signingConfig = signingConfigs.getByName("debug")
             isMinifyEnabled = false  // composeApp doesn't have proguard rules yet
         }
     }
