@@ -128,13 +128,44 @@ android {
 compose.desktop {
     application {
         mainClass = "io.nisfeb.talon.compose.MainKt"
+
+        // ProGuard chokes on OkHttp's optional Android / Conscrypt /
+        // BouncyCastle integrations (classes referenced from platform-
+        // detection branches that never run on desktop). Disabling
+        // shrinking is the cleanest fix — desktop executables aren't
+        // download-size constrained the way an APK is, so the savings
+        // wouldn't justify maintaining `-dontwarn` rules. Stage F can
+        // revisit if startup matters more.
+        buildTypes.release.proguard {
+            isEnabled.set(false)
+        }
+
         nativeDistributions {
             targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Deb)
             packageName = "Talon"
-            // Compose Desktop requires MAJOR > 0 for jpackage.
-            // TODO Stage F: align packageVersion with versionName
-            // in defaultConfig once composeApp takes over as prod.
+            // jpackage requires MAJOR > 0; the Android-side versionName
+            // follows its own scheme. Stage F can align these once
+            // composeApp takes over as the production module.
             packageVersion = "1.0.0"
+            description = "Native chat client for Urbit"
+            copyright = "© 2026 ~nisfeb"
+            vendor = "nisfeb"
+
+            // java.naming = JNDI for OkHttp DNS, java.sql = JDBC stubs
+            // pulled in by androidx.sqlite-bundled. Without these the
+            // jpackage runtime image can't open a connection at all.
+            modules("java.naming", "java.sql")
+
+            linux {
+                iconFile.set(project.file("src/desktopMain/resources/icon.png"))
+            }
+            windows {
+                iconFile.set(project.file("src/desktopMain/resources/icon.ico"))
+            }
+            // macOS .icns intentionally omitted — generating a real
+            // ICNS needs `iconutil` (macOS) or `png2icns`. Mac builds
+            // fall back to jpackage's default icon until a real
+            // src/desktopMain/resources/icon.icns is dropped in.
         }
     }
 }
