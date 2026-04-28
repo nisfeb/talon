@@ -8,21 +8,30 @@
 // clipboard, or the Android-only sensor stack. Each stub carries a
 // TODO(port-d5-followup) marker explaining what's missing.
 //
-// Stubbed in this port (each gated by a `// TODO(port-d5-followup):`):
-//   - image / file pickers (rememberLauncherForActivityResult)
+// Implemented since the initial D5 port:
+//   - image picker (rememberImagePicker via Compose-bound
+//     PickVisualMedia on Android, JFileChooser on desktop)
+//   - clipboard "Copy text" (LocalClipboardManager)
+//   - message action sheet (long-press menu) — react/reply/quote/
+//     copy/bookmark/edit/delete/pin
+//   - delete confirmation dialog (AlertDialog → repo.delete)
+//
+// Still stubbed (each gated by a `// TODO(port-d5-followup):`):
+//   - non-image file picker (GetContent equivalent for desktop)
 //   - voice recording (VoiceRecordButton, VoiceRecorder, ExoPlayer
 //     preview row)
 //   - location permission + /loc handler
-//   - clipboard "Copy text"
 //   - AI catch-me-up banner + AI emoji picker
 //   - watchwords exclude/include menu entry
 //   - topic clusters sheet (k-means)
 //   - entity action chips (commonMain expect/actual already no-ops)
-//   - link preview card on each row (no http client routed through yet
-//     to the per-row position; the screen-level `runCommand` does take
-//     one)
-//   - bookmarks / pinned-post DB streams
-//   - message action sheet (long-press menu) and edit/delete dialogs
+//   - link preview card on each row
+//   - bookmarks DB stream wiring (settingsSync addBookmark/removeBookmark
+//     interface methods exist; needs the BookmarkDao stream wired into
+//     the action sheet's isBookmarked observation — currently passes
+//     false as a placeholder)
+//   - edit composer (editing state is set on tap, but the composer
+//     doesn't yet flip into edit mode)
 //   - notification level dropdown
 //
 // Keep in sync with production until app/ is removed in Stage F.
