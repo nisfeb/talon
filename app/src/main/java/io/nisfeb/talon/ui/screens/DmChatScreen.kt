@@ -319,8 +319,19 @@ fun DmChatScreen(
                 onScrollConsumed()
                 return@LaunchedEffect
             }
-            // Target not in the loaded window — fall through and let
-            // reverseLayout land us at the newest (bottom).
+            // Target not in the loaded window — fall through and snap
+            // to the newest below.
+        }
+        if (!hasAnchored) {
+            // Fresh open without a deep link. Explicitly snap to the
+            // newest message instead of trusting listState's default
+            // resting position — when ChatRowsSnapshot warms with a
+            // stale cache and SSE then inserts a backlog of newer
+            // messages at index 0, the LazyColumn keeps the previously
+            // anchored item in view, shifting firstVisibleItemIndex
+            // forward and leaving the unreads + "New" divider below
+            // the fold. Snap on first data arrival to avoid that.
+            listState.scrollToItem(0)
         }
         hasAnchored = true
     }
@@ -342,10 +353,14 @@ fun DmChatScreen(
 
     // Auto-follow new incoming messages when the user is near the bottom.
     // With reverseLayout, "near the bottom" means firstVisibleItemIndex
-    // close to 0. We tolerate up to 2 items of scroll so a tiny finger
-    // wiggle doesn't strand the user off-feed.
+    // close to 0. The tolerance has to cover insertion-shifts: when a
+    // backlog of N newer messages arrives at index 0, the LazyColumn
+    // keeps the previously-anchored item in view and firstVisibleItemIndex
+    // jumps forward by N. A tight tolerance (e.g. 2) leaves the user
+    // stranded above the new arrivals after any non-trivial backlog,
+    // which is the "unreads below the fold" symptom.
     LaunchedEffect(rows.size) {
-        if (rows.isNotEmpty() && listState.firstVisibleItemIndex <= 2) {
+        if (rows.isNotEmpty() && listState.firstVisibleItemIndex <= 12) {
             listState.scrollToItem(0)
         }
     }
@@ -783,10 +798,12 @@ fun DmChatScreen(
         }
 
         // Catch-me-up banner. Shown only when AI is configured + enabled
-        // for this feature + chat has unreads we haven't summarized yet.
+        // for this feature + chat has enough unreads to be worth
+        // summarizing (a tiny backlog reads faster than a summary
+        // does) and we haven't summarized this visit yet.
         val showCatchUp = aiConfigured.hasKey() &&
             aiConfigured.catchMeUpEnabled &&
-            (unreadSnapshot ?: 0) > 0 &&
+            (unreadSnapshot ?: 0) >= CATCH_UP_MIN_UNREAD &&
             catchUpSummary == null
         if (showCatchUp) {
             CatchMeUpBanner(
@@ -1812,6 +1829,12 @@ private const val GROUP_GAP_MS = 5L * 60_000L
  * initial measure pass and a quick scroll up both hit the cache.
  */
 private const val STORY_WARM_TAIL = 30
+
+/**
+ * Minimum unread count before the catch-me-up banner appears. Below
+ * this, scrolling is faster than reading a summary.
+ */
+private const val CATCH_UP_MIN_UNREAD = 20
 
 /**
  * Mixed row type for the LazyColumn. Date dividers are stable across
