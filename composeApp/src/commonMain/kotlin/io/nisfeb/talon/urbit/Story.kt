@@ -7,6 +7,7 @@ import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
+import io.nisfeb.talon.util.Log
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
@@ -497,7 +498,7 @@ object Story {
             )
             null -> {
                 if (parsed.label == "Reference") {
-                    println("WARN [StoryCite] unhandled cite shape: keys=${cite.keys} preview=${cite.toString().take(400)}")
+                    Log.w("StoryCite", "unhandled cite shape: keys=${cite.keys} preview=${cite.toString().take(400)}")
                 }
                 StoryPart.Citation(
                     label = parsed.label,
