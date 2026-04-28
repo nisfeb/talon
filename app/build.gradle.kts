@@ -1,3 +1,6 @@
+import java.io.FileInputStream
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -17,15 +20,36 @@ android {
         // matches what RELEASE.md already documents and opts us into
         // Android 15 behavior changes (16 KB page sizes, edge-to-edge).
         targetSdk = 35
-        versionCode = 17
-        versionName = "0.4.0"
+        versionCode = 19
+        versionName = "0.4.2"
+    }
+
+    signingConfigs {
+        create("release") {
+            // Keystore lives outside the repo. Path comes from the
+            // RELEASE_KEYSTORE_PROPS env var (file containing
+            // storeFile / storePassword / keyAlias / keyPassword).
+            // Falls back to debug signing when the env var is unset
+            // so unsigned local debug builds still work.
+            val propsPath = System.getenv("RELEASE_KEYSTORE_PROPS")
+            if (propsPath != null) {
+                val props = Properties().apply {
+                    FileInputStream(propsPath).use { load(it) }
+                }
+                storeFile = file(props.getProperty("storeFile"))
+                storePassword = props.getProperty("storePassword")
+                keyAlias = props.getProperty("keyAlias")
+                keyPassword = props.getProperty("keyPassword")
+            }
+        }
     }
 
     buildTypes {
         release {
-            // Signed with the debug keystore so installable via `adb install`.
-            // Not for Play Store — generate a real key before any public release.
-            signingConfig = signingConfigs.getByName("debug")
+            val hasReleaseKeys = System.getenv("RELEASE_KEYSTORE_PROPS") != null
+            signingConfig = signingConfigs.getByName(
+                if (hasReleaseKeys) "release" else "debug"
+            )
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(

@@ -49,3 +49,8 @@ scripts/fakezod/.tlon-apps/
 pier/
 .urbit/
 .tlon-apps/
+
+# Local-only release signing — keystore lives outside the repo at
+# ~/.config/talon/release.keystore; the path is read from
+# RELEASE_KEYSTORE_PROPS env var.
+release/keystore.properties
