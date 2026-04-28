@@ -1,5 +1,7 @@
 package io.nisfeb.talon
 
+// TEMPORARY DUPLICATE of app/src/main/java/io/nisfeb/talon/Notifications.kt — remove on Stage B3
+
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -105,22 +107,31 @@ object Notifications {
         val mgr = ContextCompat.getSystemService(context, NotificationManager::class.java)
             ?: return
 
-        val tapIntent = Intent(context, MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
-            putExtra(EXTRA_OPEN_WHOM, whom)
-            if (parentId != null) {
-                putExtra(EXTRA_OPEN_THREAD, parentId)
-                if (postId != null) putExtra(EXTRA_THREAD_ANCHOR, postId)
-            } else if (postId != null) {
-                putExtra(EXTRA_SCROLL_TO_MESSAGE, postId)
+        // TODO(Stage D): Deep-linking from notifications is broken in composeApp v1 — the
+        // production MainActivity is at io.nisfeb.talon.MainActivity (app/ module) which isn't
+        // reachable from composeApp. Stage D's MainActivity port resolves this. Notification
+        // still fires; tap just doesn't route anywhere meaningful until then.
+        val activityClass = runCatching {
+            Class.forName("io.nisfeb.talon.MainActivity")
+        }.getOrNull()
+        val pending = if (activityClass != null) {
+            val tapIntent = Intent(context, activityClass).apply {
+                flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                putExtra(EXTRA_OPEN_WHOM, whom)
+                if (parentId != null) {
+                    putExtra(EXTRA_OPEN_THREAD, parentId)
+                    if (postId != null) putExtra(EXTRA_THREAD_ANCHOR, postId)
+                } else if (postId != null) {
+                    putExtra(EXTRA_SCROLL_TO_MESSAGE, postId)
+                }
             }
-        }
-        val pending = PendingIntent.getActivity(
-            context,
-            whom.hashCode(),
-            tapIntent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-        )
+            PendingIntent.getActivity(
+                context,
+                whom.hashCode(),
+                tapIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+            )
+        } else null
 
         val notification = NotificationCompat.Builder(context, CHANNEL_MESSAGES)
             .setSmallIcon(android.R.drawable.ic_dialog_email)
@@ -158,22 +169,29 @@ object Notifications {
         val mgr = ContextCompat.getSystemService(context, NotificationManager::class.java)
             ?: return
 
-        val tapIntent = Intent(context, MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
-            putExtra(EXTRA_OPEN_WHOM, whom)
-            if (parentId != null) {
-                putExtra(EXTRA_OPEN_THREAD, parentId)
-                if (postId != null) putExtra(EXTRA_THREAD_ANCHOR, postId)
-            } else if (postId != null) {
-                putExtra(EXTRA_SCROLL_TO_MESSAGE, postId)
+        // TODO(Stage D): Deep-linking from notifications is broken in composeApp v1 — see
+        // showMessage for full explanation.
+        val activityClass = runCatching {
+            Class.forName("io.nisfeb.talon.MainActivity")
+        }.getOrNull()
+        val pending = if (activityClass != null) {
+            val tapIntent = Intent(context, activityClass).apply {
+                flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                putExtra(EXTRA_OPEN_WHOM, whom)
+                if (parentId != null) {
+                    putExtra(EXTRA_OPEN_THREAD, parentId)
+                    if (postId != null) putExtra(EXTRA_THREAD_ANCHOR, postId)
+                } else if (postId != null) {
+                    putExtra(EXTRA_SCROLL_TO_MESSAGE, postId)
+                }
             }
-        }
-        val pending = PendingIntent.getActivity(
-            context,
-            ("watchword:$whom").hashCode(),
-            tapIntent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-        )
+            PendingIntent.getActivity(
+                context,
+                ("watchword:$whom").hashCode(),
+                tapIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+            )
+        } else null
 
         val title = "${terms.joinToString(", ")} in $label"
 
@@ -216,17 +234,24 @@ object Notifications {
         val mgr = ContextCompat.getSystemService(context, NotificationManager::class.java)
             ?: return
 
-        val tapIntent = Intent(context, MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
-            putExtra(EXTRA_OPEN_DIGEST, ship)
-            putExtra(EXTRA_DIGEST_DATE, dateLocal)
-        }
-        val pending = PendingIntent.getActivity(
-            context,
-            ("digest:$ship:$dateLocal").hashCode(),
-            tapIntent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-        )
+        // TODO(Stage D): Deep-linking from notifications is broken in composeApp v1 — see
+        // showMessage for full explanation.
+        val activityClass = runCatching {
+            Class.forName("io.nisfeb.talon.MainActivity")
+        }.getOrNull()
+        val pending = if (activityClass != null) {
+            val tapIntent = Intent(context, activityClass).apply {
+                flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                putExtra(EXTRA_OPEN_DIGEST, ship)
+                putExtra(EXTRA_DIGEST_DATE, dateLocal)
+            }
+            PendingIntent.getActivity(
+                context,
+                ("digest:$ship:$dateLocal").hashCode(),
+                tapIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+            )
+        } else null
 
         val notification = NotificationCompat.Builder(context, CHANNEL_DAILY_DIGEST)
             .setSmallIcon(android.R.drawable.ic_dialog_email)
