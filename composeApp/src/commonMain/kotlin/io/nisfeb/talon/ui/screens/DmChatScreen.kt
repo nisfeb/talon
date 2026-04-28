@@ -18,10 +18,8 @@
 //
 // Still stubbed (each gated by a `// TODO(port-d5-followup):`):
 //   - non-image file picker (GetContent equivalent for desktop)
-//   - voice recording (VoiceRecordButton, VoiceRecorder, ExoPlayer
-//     preview row)
-//   - AI catch-me-up banner + AI emoji picker
-//   - topic clusters sheet (k-means)
+//   - voice preview playback (production uses ExoPlayer; commonMain
+//     ships without inline playback for now — Send/Cancel only)
 //
 // Keep in sync with production until app/ is removed in Stage F.
 package io.nisfeb.talon.ui.screens
@@ -58,6 +56,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.NotificationsOff
@@ -130,6 +129,8 @@ import io.nisfeb.talon.ui.EmojiCatalog
 import io.nisfeb.talon.ui.EmojiPickerDropdown
 import io.nisfeb.talon.ui.EntityActionChips
 import io.nisfeb.talon.ui.LinkPreviewCard
+import io.nisfeb.talon.ui.VoiceRecordButton
+import io.nisfeb.talon.ui.isVoiceMessagesSupported
 import io.nisfeb.talon.ui.rememberLocationProvider
 import io.nisfeb.talon.ui.LocalCiteResolver
 import io.nisfeb.talon.ui.firstLinkUrl
@@ -194,6 +195,13 @@ fun DmChatScreen(
     var catchUpError by remember(whom) { mutableStateOf<String?>(null) }
     var aiEmojiWorking by remember { mutableStateOf(false) }
     var topicsSheetOpen by remember(whom) { mutableStateOf(false) }
+    var pendingVoice by remember(whom) { mutableStateOf<PendingVoice?>(null) }
+    DisposableEffect(whom) {
+        onDispose {
+            pendingVoice?.let { java.io.File(it.path).delete() }
+            pendingVoice = null
+        }
+    }
     val rows by remember(whom) {
         var prevByMsgId: Map<String, DisplayRow> = emptyMap()
         kotlinx.coroutines.flow.combine(
@@ -699,6 +707,42 @@ fun DmChatScreen(
                     true
                 }
             }
+            val pv = pendingVoice
+            if (pv != null) {
+                VoicePreviewRow(
+                    pending = pv,
+                    sending = uploading,
+                    onCancel = {
+                        java.io.File(pv.path).delete()
+                        pendingVoice = null
+                    },
+                    onSend = {
+                        uploading = true
+                        sendError = null
+                        pendingVoice = null
+                        scope.launch {
+                            runCatching {
+                                val file = java.io.File(pv.path)
+                                val bytes = file.readBytes()
+                                val hostedUrl = repo.uploadImage(
+                                    bytes = bytes,
+                                    contentType = "audio/mp4",
+                                    fileName = file.name,
+                                )
+                                val seconds = (pv.durationMs / 1000L).coerceAtLeast(1L)
+                                val label = "🎙 Voice ${seconds}s"
+                                repo.send(whom, "[$label]($hostedUrl)")
+                                file.delete()
+                            }.onFailure { err ->
+                                Log.e("DmChatScreen", "voice send failed", err)
+                                sendError = "voice send failed: ${err.message ?: err::class.simpleName}"
+                            }
+                            uploading = false
+                        }
+                    },
+                )
+                return@Column
+            }
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -720,6 +764,14 @@ fun DmChatScreen(
                             modifier = Modifier.size(22.dp),
                         )
                     }
+                }
+                if (isVoiceMessagesSupported) {
+                    VoiceRecordButton(
+                        enabled = canSend && !uploading,
+                        onRecorded = { path, durationMs ->
+                            pendingVoice = PendingVoice(path, durationMs)
+                        },
+                    )
                 }
                 OutlinedTextField(
                     value = draft,
@@ -1323,6 +1375,69 @@ private fun dividerLabel(ms: Long): String {
 //    is Android-only; TODO(port-d5-followup) when AI bridge is ported).
 //  - windowInsetsPadding(WindowInsets.navigationBars) kept — no-ops on
 //    desktop but harmless.
+
+/** Recorded-but-unsent voice clip, waiting on user review. */
+private data class PendingVoice(val path: String, val durationMs: Long)
+
+// Minimal review row that replaces the composer while a recording
+// is staged. Diverges from production: production uses ExoPlayer
+// for inline playback; commonMain skips that step and only offers
+// Cancel / Send. A future Stage F follow-up can layer in a
+// platform-actual audio playback shim if users want it back.
+@Composable
+private fun VoicePreviewRow(
+    pending: PendingVoice,
+    sending: Boolean,
+    onCancel: () -> Unit,
+    onSend: () -> Unit,
+) {
+    val seconds = (pending.durationMs / 1000L).coerceAtLeast(1L)
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 4.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Text(
+            "🎙 ${seconds}s recorded — preview not available, tap send when ready",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier
+                .weight(1f)
+                .padding(horizontal = 8.dp),
+        )
+        IconButton(
+            onClick = onCancel,
+            enabled = !sending,
+            modifier = Modifier.size(36.dp),
+        ) {
+            Icon(
+                Icons.Filled.Close,
+                contentDescription = "Discard recording",
+                modifier = Modifier.size(22.dp),
+            )
+        }
+        IconButton(
+            onClick = onSend,
+            enabled = !sending,
+            modifier = Modifier.size(36.dp),
+        ) {
+            if (sending) {
+                CircularProgressIndicator(
+                    strokeWidth = 2.dp,
+                    modifier = Modifier.size(20.dp),
+                )
+            } else {
+                Icon(
+                    Icons.AutoMirrored.Filled.Send,
+                    contentDescription = "Send recording",
+                    modifier = Modifier.size(22.dp),
+                )
+            }
+        }
+    }
+}
 
 @Composable
 private fun CatchMeUpBanner(
