@@ -8,6 +8,8 @@ import io.nisfeb.talon.data.AppDatabase
 import io.nisfeb.talon.ui.DraftStore
 import io.nisfeb.talon.ui.ShipProfileStore
 import io.nisfeb.talon.ui.UiSettings
+import io.nisfeb.talon.update.UpdateInstaller
+import io.nisfeb.talon.update.UpdateState
 import io.nisfeb.talon.urbit.SessionStore
 import io.nisfeb.talon.urbit.TlonChatRepo
 import io.nisfeb.talon.urbit.UrbitSession
@@ -43,6 +45,8 @@ class TalonApplication : Application() {
     lateinit var embedder: io.nisfeb.talon.ai.Embedder
         private set
     lateinit var dailyDigest: io.nisfeb.talon.ai.DailyDigest
+        private set
+    lateinit var updateState: UpdateState
         private set
 
     // Ship-scoped — rebuilt on ship switch. lateinit so the first
@@ -112,6 +116,11 @@ class TalonApplication : Application() {
         ai = AiFeatures(aiClient)
         embedder = io.nisfeb.talon.ai.Embedder(this)
         Notifications.ensureChannel(this)
+        updateState = UpdateState(
+            context = this,
+            scope = appScope,
+            installer = UpdateInstaller(this),
+        )
 
         // Pre-warm the ML Kit Entity Extraction model so the first
         // chat to render isn't blocked on a one-off ~12MB download.

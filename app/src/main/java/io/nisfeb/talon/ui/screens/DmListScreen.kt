@@ -87,7 +87,9 @@ import io.nisfeb.talon.ui.Avatar
 import io.nisfeb.talon.ui.BatteryExemptionBanner
 import io.nisfeb.talon.ui.ContactMap
 import io.nisfeb.talon.ui.FolderAssignmentSheet
+import io.nisfeb.talon.ui.UpdateBanner
 import io.nisfeb.talon.ui.contactMapFlow
+import io.nisfeb.talon.update.UpdateStatus
 import io.nisfeb.talon.urbit.StoryCache
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.combine
@@ -611,6 +613,24 @@ fun DmListScreen(
             onCreateNew = { creatingFolder = true },
         )
         HorizontalDivider()
+        val updateStatus by app.updateState.status.collectAsState()
+        UpdateBanner(
+            status = updateStatus,
+            onTap = {
+                when (val s = updateStatus) {
+                    is UpdateStatus.Available ->
+                        app.updateState.startDownload(s.manifest)
+                    is UpdateStatus.Ready ->
+                        app.updateState.launchInstaller(s.apkPath)
+                    is UpdateStatus.Failed -> {
+                        val m = s.manifest ?: return@UpdateBanner
+                        app.updateState.startDownload(m)
+                    }
+                    else -> Unit
+                }
+            },
+            onDismiss = { app.updateState.dismiss() },
+        )
         LazyColumn(
             state = listState,
             contentPadding = PaddingValues(vertical = 8.dp),
