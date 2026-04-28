@@ -123,4 +123,5 @@ dependencies {
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
     testImplementation(libs.kotlinx.serialization.json)
+    testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
 }

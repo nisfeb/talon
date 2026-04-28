@@ -8,6 +8,7 @@ import io.nisfeb.talon.data.AppDatabase
 import io.nisfeb.talon.ui.DraftStore
 import io.nisfeb.talon.ui.ShipProfileStore
 import io.nisfeb.talon.ui.UiSettings
+import io.nisfeb.talon.update.HttpUpdateChecker
 import io.nisfeb.talon.update.UpdateInstaller
 import io.nisfeb.talon.update.UpdateState
 import io.nisfeb.talon.urbit.SessionStore
@@ -121,6 +122,19 @@ class TalonApplication : Application() {
             scope = appScope,
             installer = UpdateInstaller(this),
         )
+        val updatePrefs = getSharedPreferences("update_state", MODE_PRIVATE)
+        val httpChecker = HttpUpdateChecker(
+            http = http,
+            url = "https://github.com/sneagan/talon/releases/latest/download/latest.json",
+            now = { System.currentTimeMillis() },
+            lastCheckedAtMs = { updatePrefs.getLong("last_http_check_ms", 0L) },
+            recordCheckedAt = { updatePrefs.edit().putLong("last_http_check_ms", it).apply() },
+            minIntervalMs = 12L * 60L * 60L * 1000L,
+        )
+        appScope.launch {
+            val m = httpChecker.check()
+            if (m != null) updateState.onManifest(m)
+        }
 
         // Pre-warm the ML Kit Entity Extraction model so the first
         // chat to render isn't blocked on a one-off ~12MB download.
