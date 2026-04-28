@@ -57,4 +57,55 @@ class UpdateManifestTest {
         assertNull(UpdateManifest.parse("not json"))
         assertNull(UpdateManifest.parse(""))
     }
+
+    @Test fun `rejects manifest missing a required field`() {
+        // Drop versionCode — required.
+        val noVersionCode = sample.replace("\"versionCode\": 21,", "")
+        assertNull(UpdateManifest.parse(noVersionCode))
+        // Drop versionName — required.
+        val noVersionName = sample.replace("\"versionName\": \"0.5.0\",", "")
+        assertNull(UpdateManifest.parse(noVersionName))
+        // Drop url — required.
+        val noUrl = sample.replace(
+            "\"url\": \"https://github.com/sneagan/talon/releases/download/v0.5.0/talon-0.5.0.apk\",",
+            "",
+        )
+        assertNull(UpdateManifest.parse(noUrl))
+        // Drop sha256 — required.
+        val noSha = sample.replace(
+            "\"sha256\": \"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\",",
+            "",
+        )
+        assertNull(UpdateManifest.parse(noSha))
+    }
+
+    @Test fun `lowercases sha256 on parse`() {
+        val upper = sample.replace(
+            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF",
+        )
+        val m = UpdateManifest.parse(upper)!!
+        assertEquals(
+            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            m.sha256,
+        )
+    }
+
+    @Test fun `defaults minSdk and changelog when missing`() {
+        val stripped = sample
+            .replace("\"minSdk\": 26,\n  ", "")
+            .replace(
+                "\"changelog\": \"Polls fixed; daily digest weather is now Fahrenheit.\",\n  ",
+                "",
+            )
+        val m = UpdateManifest.parse(stripped)!!
+        assertEquals(26, m.minSdk)
+        assertEquals("", m.changelog)
+    }
+
+    @Test fun `rejects valid JSON that isn't an object`() {
+        assertNull(UpdateManifest.parse("[]"))
+        assertNull(UpdateManifest.parse("\"just a string\""))
+        assertNull(UpdateManifest.parse("42"))
+    }
 }

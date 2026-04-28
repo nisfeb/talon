@@ -26,7 +26,7 @@ data class UpdateManifest(
     val mandatory: Boolean,
 ) {
     companion object {
-        private val JSON = Json { ignoreUnknownKeys = true; isLenient = true }
+        private val JSON = Json { ignoreUnknownKeys = true }
         private val SHA256_RE = Regex("^[0-9a-fA-F]{64}$")
 
         fun parse(raw: String): UpdateManifest? = runCatching {
