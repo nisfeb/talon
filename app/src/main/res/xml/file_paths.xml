@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths xmlns:android="http://schemas.android.com/apk/res/android">
+    <!--
+      Where UpdateInstaller drops the downloaded APK before handing
+      it to PackageInstaller. external-files-path resolves to
+      Context.getExternalFilesDir(null).
+    -->
+    <external-files-path
+        name="updates"
+        path="updates" />
+</paths>
