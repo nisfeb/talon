@@ -11,6 +11,7 @@ import androidx.compose.runtime.setValue
 import io.nisfeb.talon.ai.AiSettingsRepository
 import io.nisfeb.talon.data.AppDatabase
 import io.nisfeb.talon.ui.DraftStore
+import io.nisfeb.talon.ui.screens.DmChatScreen
 import io.nisfeb.talon.ui.screens.DmListScreen
 import io.nisfeb.talon.ui.screens.LoginScreen
 import io.nisfeb.talon.ui.screens.SettingsScreen
@@ -40,6 +41,9 @@ fun App(
 ) {
     var loggedInShip by remember { mutableStateOf(sessionStore.activeShip()) }
     var showSettings by remember { mutableStateOf(false) }
+    // D5: when non-null, the chat screen for [openChat] takes over. The
+    // back button in the chat sets this to null to return to the list.
+    var openChat by remember { mutableStateOf<String?>(null) }
 
     TalonTheme {
         Surface(modifier = Modifier.fillMaxSize()) {
@@ -53,15 +57,31 @@ fun App(
                     aiSettings = aiSettings,
                     onBack = { showSettings = false },
                 )
+                openChat != null -> DmChatScreen(
+                    db = db,
+                    repo = repo,
+                    drafts = drafts,
+                    http = session.http,
+                    ourPatp = ship,
+                    whom = openChat!!,
+                    onBack = { openChat = null },
+                    onOpenThread = { _ ->
+                        // TODO(port-d5-followup): wire DmThreadScreen.
+                    },
+                    onOpenConversation = { other -> openChat = other },
+                    onOpenImage = { _ ->
+                        // TODO(port-d5-followup): wire image viewer.
+                    },
+                    onOpenSelfProfile = {
+                        // TODO(port-d5-followup): wire self-profile screen.
+                    },
+                )
                 else -> DmListScreen(
                     db = db,
                     repo = repo,
                     drafts = drafts,
                     updateState = updateState,
-                    onOpenConversation = { whom ->
-                        // TODO(port-d5): show DmChatScreen for whom
-                        println("TODO: open chat $whom")
-                    },
+                    onOpenConversation = { whom -> openChat = whom },
                     onOpenSearch = {
                         // TODO(port-d4-followup): wire search screen
                         println("TODO: open search")
