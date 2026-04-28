@@ -262,6 +262,13 @@ fun DmChatScreen(
         .collectAsState(initial = null)
     val notifyLevel = notifyPref?.level ?: NotifyLevel.DEFAULT
 
+    val excludedWhoms by remember {
+        db.watchwords().streamExcludes()
+    }.collectAsState(initial = emptyList())
+    val isExcludedFromWatchwords = remember(excludedWhoms, whom) {
+        excludedWhoms.any { it.whom == whom }
+    }
+
     val listState = rememberLazyListState()
 
     val isPinnedToBottom by remember {
@@ -492,16 +499,25 @@ fun DmChatScreen(
                 NotifyLevelDropdown(
                     level = notifyLevel,
                     enabled = repo.settingsSync != null,
+                    isExcludedFromWatchwords = isExcludedFromWatchwords,
                     onSelect = { level ->
                         scope.launch {
                             runCatching { repo.settingsSync?.setNotifyLevel(whom, level) }
                                 .onFailure { sendError = "notify failed: ${it.message ?: it::class.simpleName}" }
                         }
                     },
+                    onToggleWatchwordExclude = {
+                        scope.launch {
+                            runCatching {
+                                repo.settingsSync?.setWatchwordExclude(whom, !isExcludedFromWatchwords)
+                            }.onFailure {
+                                sendError = "watchword toggle failed: ${it.message ?: it::class.simpleName}"
+                            }
+                        }
+                    },
                 )
-                // TODO(port-d5-followup): topics sheet trigger and
-                // watchwords menu — both need the production AI/
-                // watchwords subsystems threaded through.
+                // TODO(port-d5-followup): topics sheet trigger needs the
+                // AI clusterer threaded through.
             }
             HorizontalDivider()
             if (refreshing && rows.isEmpty()) {
@@ -1198,7 +1214,9 @@ private fun dividerLabel(ms: Long): String {
 private fun NotifyLevelDropdown(
     level: String,
     enabled: Boolean,
+    isExcludedFromWatchwords: Boolean,
     onSelect: (String) -> Unit,
+    onToggleWatchwordExclude: () -> Unit,
 ) {
     var open by remember { mutableStateOf(false) }
     Box {
@@ -1222,6 +1240,16 @@ private fun NotifyLevelDropdown(
             DropdownMenuItem(
                 text = { Text(if (level == NotifyLevel.NONE) "✓ Mute" else "Mute") },
                 onClick = { open = false; onSelect(NotifyLevel.NONE) },
+            )
+            HorizontalDivider()
+            DropdownMenuItem(
+                text = {
+                    Text(
+                        if (isExcludedFromWatchwords) "Include in watchwords"
+                        else "Exclude from watchwords"
+                    )
+                },
+                onClick = { open = false; onToggleWatchwordExclude() },
             )
         }
     }

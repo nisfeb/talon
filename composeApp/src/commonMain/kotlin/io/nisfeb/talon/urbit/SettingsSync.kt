@@ -56,6 +56,13 @@ interface SettingsSync {
 
     suspend fun setNotifyLevel(whom: String, level: String) {}
 
+    // ───────── watchwords mutations ─────────
+    // Toggles whether a chat is excluded from watchword scanning. The
+    // Android impl routes through Watchwords.excludeChat so backfill /
+    // %settings push fire correctly; desktop default is a no-op.
+
+    suspend fun setWatchwordExclude(whom: String, excluded: Boolean) {}
+
     // ───────── folder mutations ─────────
 
     suspend fun createFolder(name: String, sortOrder: Int): Long = -1L
