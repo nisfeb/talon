@@ -59,6 +59,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
@@ -131,6 +132,8 @@ import io.nisfeb.talon.ui.suggestionsFor
 import io.nisfeb.talon.urbit.StoryCache
 import io.nisfeb.talon.urbit.TlonChatRepo
 import io.nisfeb.talon.util.Log
+import io.nisfeb.talon.util.decodeImageDimensions
+import io.nisfeb.talon.util.rememberImagePicker
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flowOn
@@ -338,6 +341,30 @@ fun DmChatScreen(
         drafts.save(whom, draft.text)
     }
     var sendError by remember(whom) { mutableStateOf<String?>(null) }
+    var uploading by remember { mutableStateOf(false) }
+
+    val pickImage = rememberImagePicker()
+    val onPickAndSendImage: () -> Unit = {
+        scope.launch {
+            val picked = pickImage() ?: return@launch
+            uploading = true
+            sendError = null
+            runCatching {
+                val dims = decodeImageDimensions(picked.bytes)
+                val hostedUrl = repo.uploadImage(picked.bytes, picked.mimeType, picked.displayName)
+                repo.sendImage(
+                    whom = whom,
+                    src = hostedUrl,
+                    width = dims?.first ?: 0,
+                    height = dims?.second ?: 0,
+                    alt = picked.displayName,
+                )
+            }.onFailure { err ->
+                sendError = "image failed: ${err.message ?: err::class.simpleName}"
+            }
+            uploading = false
+        }
+    }
 
     // ── message action sheet state ──
     var actionTarget by remember { mutableStateOf<MessageEntity?>(null) }
@@ -590,6 +617,21 @@ fun DmChatScreen(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(2.dp),
             ) {
+                IconButton(
+                    onClick = onPickAndSendImage,
+                    enabled = canSend && !uploading,
+                    modifier = Modifier.size(36.dp),
+                ) {
+                    if (uploading) {
+                        CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                    } else {
+                        Icon(
+                            Icons.Filled.Image,
+                            contentDescription = "Attach image",
+                            modifier = Modifier.size(22.dp),
+                        )
+                    }
+                }
                 OutlinedTextField(
                     value = draft,
                     onValueChange = { draft = it },
