@@ -92,9 +92,15 @@ private fun BannerSurface(
                 color = MaterialTheme.colorScheme.onPrimaryContainer,
             )
             if (progress != null) {
+                // Default Material3 colors are primary-on-surfaceVariant,
+                // which on a primaryContainer background give a near-
+                // invisible track + low-contrast bar. Force the
+                // banner-friendly pair instead.
                 LinearProgressIndicator(
                     progress = { progress / 100f },
                     modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
+                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                    trackColor = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.24f),
                 )
             }
         }
