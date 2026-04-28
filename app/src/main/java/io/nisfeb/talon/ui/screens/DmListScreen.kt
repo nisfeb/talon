@@ -196,6 +196,7 @@ fun DmListScreen(
 
     val app = (LocalContext.current.applicationContext as TalonApplication)
     val drafts by app.drafts.state.collectAsState()
+    val updateStatus by app.updateState.status.collectAsState()
 
     // distinctUntilChanged on the folder/member/order streams: same
     // Room invalidation-tracker concern as the row flow above. Without
@@ -613,7 +614,6 @@ fun DmListScreen(
             onCreateNew = { creatingFolder = true },
         )
         HorizontalDivider()
-        val updateStatus by app.updateState.status.collectAsState()
         UpdateBanner(
             status = updateStatus,
             onTap = {
