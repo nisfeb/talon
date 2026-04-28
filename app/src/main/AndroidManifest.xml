@@ -13,6 +13,15 @@
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!--
+      Sideload distribution only — required by UpdateInstaller to
+      hand a downloaded APK to PackageInstaller. Google Play's
+      Device and Network Abuse policy + the restricted-permissions
+      review process effectively disqualify Talon from Play with
+      this permission declared. Any Play Store flavor must strip
+      this line, the FileProvider below, and the io.nisfeb.talon.update
+      package. See docs/release-channels.md for the flavor split plan.
+    -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
     <application
@@ -71,6 +80,14 @@
             </intent-filter>
         </receiver>
 
+        <!--
+          Sideload distribution only — pairs with the
+          REQUEST_INSTALL_PACKAGES permission above. UpdateInstaller
+          uses this provider to mint a content:// URI for the
+          downloaded APK before handing it to PackageInstaller. Any
+          Play Store flavor must strip this provider along with the
+          permission. See docs/release-channels.md.
+        -->
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.updates.fileprovider"

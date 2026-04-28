@@ -12,6 +12,17 @@ import java.io.File
 import java.io.FileInputStream
 import java.security.MessageDigest
 
+/**
+ * **Sideload distribution only.** Downloads a signed APK from a
+ * trusted URL and hands it to Android's PackageInstaller. Google
+ * Play's Device and Network Abuse policy prohibits this exact
+ * mechanism — apps distributed through Play cannot fetch executable
+ * code from outside Play. This whole class (and the
+ * REQUEST_INSTALL_PACKAGES permission + FileProvider it depends on)
+ * must be excluded from any future Play Store flavor. See
+ * [docs/release-channels.md](../../../../../../../docs/release-channels.md)
+ * for the flavor-split plan.
+ */
 class UpdateInstaller(private val context: Context) {
 
     /**
