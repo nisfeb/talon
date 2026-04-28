@@ -1575,7 +1575,13 @@ class TlonChatRepo(
                     put("post", buildJsonObject {
                         put("add-react", buildJsonObject {
                             put("id", dotAtom(postId))
-                            put("author", ourPatp)
+                            // %channels c-react expects `ship`, not
+                            // `author` — sending `author` produces a
+                            // poke-as cast fail on the server and the
+                            // reaction is silently dropped (only the
+                            // local optimistic upsert sticks, and
+                            // other devices never see the vote).
+                            put("ship", ourPatp)
                             put("react", emoji)
                         })
                     })
@@ -1608,7 +1614,9 @@ class TlonChatRepo(
                     put("post", buildJsonObject {
                         put("del-react", buildJsonObject {
                             put("id", dotAtom(postId))
-                            put("author", ourPatp)
+                            // See note on add-react above — same
+                            // schema mismatch on del-react.
+                            put("ship", ourPatp)
                         })
                     })
                 }),
