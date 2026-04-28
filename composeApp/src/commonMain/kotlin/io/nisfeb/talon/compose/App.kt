@@ -15,6 +15,7 @@ import io.nisfeb.talon.ui.screens.DmChatScreen
 import io.nisfeb.talon.ui.screens.DmListScreen
 import io.nisfeb.talon.ui.screens.ImageViewerScreen
 import io.nisfeb.talon.ui.screens.LoginScreen
+import io.nisfeb.talon.ui.screens.ProfileEditScreen
 import io.nisfeb.talon.ui.screens.SettingsScreen
 import io.nisfeb.talon.ui.screens.ThreadScreen
 import io.nisfeb.talon.ui.theme.TalonTheme
@@ -53,6 +54,7 @@ fun App(
     // openChat and openThreadParent are set together; back from the
     // thread clears just openThreadParent.
     var openThreadParent by remember { mutableStateOf<String?>(null) }
+    var showSelfProfile by remember { mutableStateOf(false) }
 
     TalonTheme {
         Surface(modifier = Modifier.fillMaxSize()) {
@@ -65,6 +67,12 @@ fun App(
                 showSettings -> SettingsScreen(
                     aiSettings = aiSettings,
                     onBack = { showSettings = false },
+                )
+                showSelfProfile -> ProfileEditScreen(
+                    db = db,
+                    repo = repo,
+                    ourPatp = ship,
+                    onBack = { showSelfProfile = false },
                 )
                 viewerImageUrl != null -> ImageViewerScreen(
                     url = viewerImageUrl!!,
@@ -94,9 +102,7 @@ fun App(
                     onOpenThread = { parentId -> openThreadParent = parentId },
                     onOpenConversation = { other -> openChat = other },
                     onOpenImage = { url -> viewerImageUrl = url },
-                    onOpenSelfProfile = {
-                        // TODO(port-d5-followup): wire self-profile screen.
-                    },
+                    onOpenSelfProfile = { showSelfProfile = true },
                 )
                 else -> DmListScreen(
                     db = db,
@@ -116,10 +122,7 @@ fun App(
                         sessionStore.clearAll()
                         loggedInShip = null
                     },
-                    onOpenSelfProfile = {
-                        // TODO(port-d4-followup): wire self-profile screen
-                        println("TODO: open self profile")
-                    },
+                    onOpenSelfProfile = { showSelfProfile = true },
                     onOpenStatusFeed = {
                         // TODO(port-d4-followup): wire status feed screen
                         println("TODO: open status feed")
