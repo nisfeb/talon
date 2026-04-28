@@ -6,6 +6,7 @@ plugins {
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.compose.multiplatform)
     alias(libs.plugins.kotlin.serialization)
+    alias(libs.plugins.ksp)
 }
 
 kotlin {
@@ -35,6 +36,16 @@ kotlin {
             // libraries (Ktor for HTTP).
             implementation(libs.okhttp)
             implementation(libs.okhttp.sse)
+            // Room 2.7 ships KMP-aware artifacts so the entities,
+            // DAOs, and the @Database-annotated expect class can all
+            // live in commonMain. Each leaf target (androidMain /
+            // desktopMain) provides its own actual + driver wiring.
+            implementation(libs.androidx.room.runtime)
+            // sqlite-bundled exposes the SQLiteDriver API surface to
+            // commonMain. Only desktop loads the bundled native
+            // binary at runtime — Android uses the platform's
+            // built-in SQLite via the Room Android compiler.
+            implementation(libs.androidx.sqlite.bundled)
         }
         androidMain.dependencies {
             implementation(libs.androidx.activity.compose)
@@ -115,4 +126,22 @@ compose.desktop {
             packageVersion = "1.0.0"
         }
     }
+}
+
+// Room 2.7 KMP generates per-target. We attach the room-compiler
+// KSP processor to each leaf target individually so the generated
+// DAO impls + AppDatabase_Impl land in the right source set. The
+// kotlin.sourceSets DSL doesn't expose ksp(...) helpers in this
+// shape (yet), so the per-target configurations are referenced by
+// name via the top-level dependencies block.
+dependencies {
+    add("kspAndroid", libs.androidx.room.compiler)
+    add("kspDesktop", libs.androidx.room.compiler)
+}
+
+ksp {
+    // Export schemas so we can audit migrations. Desktop and
+    // Android both write here; Room namespaces the JSON output by
+    // database name + version, so the two targets coexist.
+    arg("room.schemaLocation", "$projectDir/schemas")
 }
