@@ -1,0 +1,481 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Talon — chat for Urbit</title>
+    <meta name="description" content="Fast native Android client for Urbit chat. Direct messages, group channels, reactions, threads. Bring your own ship.">
+    <meta property="og:title" content="Talon — chat for Urbit">
+    <meta property="og:description" content="Fast native Android client for Urbit chat. Direct messages, group channels, reactions, threads. Bring your own ship.">
+    <meta property="og:image" content="../branding/play_store_icon_512.png">
+    <meta name="theme-color" content="#0F0D1A">
+    <link rel="icon" href="../branding/play_store_icon_512.png" type="image/png">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            /* Dark-mode brand palette — same hexes as Theme.kt darkColorScheme. */
+            --amber-400: #FBBF24;
+            --amber-500: #F59E0B;
+            --indigo-700: #4338CA;
+            --indigo-950: #1E1B4B;
+            --emerald-600: #059669;
+            --red-600:    #DC2626;
+
+            --bg:           #0F0D1A; /* darkColorScheme.background */
+            --surface:      #1A1625; /* darkColorScheme.surface */
+            --surface-var:  #27232F; /* darkColorScheme.surfaceVariant */
+            --on-bg:        #FAFAF9;
+            --on-surface:   #F5F5F4;
+            --on-surf-var:  #A8A29E;
+            --outline:      #44403C;
+            --outline-var:  #292524;
+
+            --display: 'Space Grotesk', system-ui, -apple-system, sans-serif;
+            --body:    'Inter', system-ui, -apple-system, sans-serif;
+            --mono:    'JetBrains Mono', ui-monospace, monospace;
+        }
+
+        * { box-sizing: border-box; }
+
+        html, body {
+            margin: 0;
+            padding: 0;
+            background: var(--bg);
+            color: var(--on-bg);
+            font-family: var(--body);
+            font-size: 16px;
+            line-height: 1.55;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+        }
+
+        a {
+            color: var(--amber-400);
+            text-decoration: underline;
+            text-underline-offset: 2px;
+            text-decoration-thickness: 1px;
+        }
+        a:hover { color: var(--amber-500); }
+
+        code, .mono {
+            font-family: var(--mono);
+            font-size: 0.92em;
+        }
+
+        /* Layout shell */
+        .wrap {
+            max-width: 720px;
+            margin: 0 auto;
+            padding: 0 24px;
+        }
+
+        /* ─── Hero ─── */
+        header.hero {
+            position: relative;
+            padding: 88px 0 64px;
+            background:
+                radial-gradient(ellipse at 30% 20%, rgba(67, 56, 202, 0.45) 0%, transparent 60%),
+                radial-gradient(ellipse at 80% 90%, rgba(245, 158, 11, 0.18) 0%, transparent 55%),
+                var(--indigo-950);
+            border-bottom: 1px solid var(--outline);
+            overflow: hidden;
+        }
+
+        .hero-inner {
+            display: flex;
+            flex-direction: column;
+            gap: 28px;
+        }
+
+        .icon-wordmark {
+            display: flex;
+            align-items: center;
+            gap: 18px;
+        }
+        .icon-wordmark img {
+            width: 64px;
+            height: 64px;
+            border-radius: 14px;
+            display: block;
+        }
+        .wordmark {
+            font-family: var(--display);
+            font-weight: 700;
+            font-size: 36px;
+            letter-spacing: -0.01em;
+            line-height: 1;
+        }
+
+        h1 {
+            font-family: var(--display);
+            font-weight: 700;
+            font-size: clamp(36px, 6vw, 56px);
+            line-height: 1.05;
+            letter-spacing: -0.02em;
+            margin: 0;
+        }
+        h1 .accent { color: var(--amber-400); }
+
+        .lede {
+            font-size: 19px;
+            color: var(--on-surf-var);
+            max-width: 56ch;
+            margin: 0;
+        }
+
+        .ctas {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+            margin-top: 8px;
+        }
+
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            font-family: var(--body);
+            font-weight: 600;
+            font-size: 15px;
+            padding: 12px 20px;
+            border-radius: 8px;
+            text-decoration: none;
+            border: 1px solid transparent;
+            transition: transform 0.05s ease;
+        }
+        .btn:active { transform: translateY(1px); }
+        .btn-primary {
+            background: var(--amber-500);
+            color: #1C1917;
+            border-color: var(--amber-500);
+        }
+        .btn-primary:hover {
+            background: var(--amber-400);
+            border-color: var(--amber-400);
+            color: #1C1917;
+        }
+        .btn-secondary {
+            background: transparent;
+            color: var(--on-bg);
+            border-color: var(--outline);
+        }
+        .btn-secondary:hover {
+            border-color: var(--on-surf-var);
+            color: var(--on-bg);
+        }
+
+        .meta-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 16px 24px;
+            margin-top: 4px;
+            color: var(--on-surf-var);
+            font-size: 13px;
+        }
+        .meta-row strong { color: var(--on-surface); font-weight: 500; }
+
+        /* ─── Sections ─── */
+        section {
+            padding: 64px 0;
+            border-bottom: 1px solid var(--outline-var);
+        }
+        section:last-of-type { border-bottom: none; }
+
+        h2 {
+            font-family: var(--display);
+            font-weight: 700;
+            font-size: 28px;
+            line-height: 1.2;
+            letter-spacing: -0.01em;
+            margin: 0 0 24px;
+        }
+
+        h3 {
+            font-family: var(--body);
+            font-weight: 600;
+            font-size: 16px;
+            margin: 24px 0 8px;
+            color: var(--on-surface);
+        }
+
+        p { margin: 0 0 16px; }
+        p:last-child { margin-bottom: 0; }
+
+        /* Feature list — sharp, brutalist, one-line-per-feature */
+        ul.features {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+            display: grid;
+            gap: 0;
+        }
+        ul.features li {
+            padding: 14px 0;
+            border-top: 1px solid var(--outline-var);
+            display: grid;
+            grid-template-columns: minmax(160px, 1fr) 2.5fr;
+            gap: 16px;
+            align-items: baseline;
+        }
+        ul.features li:last-child { border-bottom: 1px solid var(--outline-var); }
+        ul.features .name {
+            font-weight: 600;
+            color: var(--on-surface);
+        }
+        ul.features .desc { color: var(--on-surf-var); }
+
+        @media (max-width: 540px) {
+            ul.features li {
+                grid-template-columns: 1fr;
+                gap: 4px;
+            }
+        }
+
+        /* "What it isn't" — same shape, dimmer accent */
+        ul.disclaimers {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+        ul.disclaimers li {
+            padding: 8px 0 8px 18px;
+            color: var(--on-surf-var);
+            position: relative;
+        }
+        ul.disclaimers li::before {
+            content: "—";
+            position: absolute;
+            left: 0;
+            color: var(--outline);
+        }
+
+        /* Privacy callout */
+        .privacy-card {
+            border: 1px solid var(--outline);
+            border-left: 3px solid var(--amber-500);
+            background: var(--surface);
+            padding: 20px 24px;
+            border-radius: 4px;
+        }
+        .privacy-card h3 { margin-top: 0; }
+
+        /* Tech facts row */
+        .tech-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 16px;
+            margin-top: 24px;
+        }
+        .tech-grid .cell {
+            background: var(--surface);
+            border: 1px solid var(--outline-var);
+            padding: 14px 16px;
+            border-radius: 4px;
+        }
+        .tech-grid .cell .k {
+            font-family: var(--mono);
+            font-size: 12px;
+            color: var(--on-surf-var);
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+        }
+        .tech-grid .cell .v {
+            font-weight: 500;
+            color: var(--on-surface);
+            margin-top: 4px;
+            font-size: 15px;
+        }
+
+        /* Footer */
+        footer {
+            padding: 32px 0 56px;
+            color: var(--on-surf-var);
+            font-size: 13px;
+        }
+        footer .footer-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px 20px;
+            justify-content: space-between;
+            align-items: center;
+        }
+        footer .patp {
+            font-family: var(--mono);
+            color: var(--on-surf-var);
+        }
+
+        /* Subtle scan-line accent on hero — pure decoration, slightly brutalist */
+        header.hero::after {
+            content: "";
+            position: absolute;
+            inset: 0;
+            background-image: linear-gradient(
+                to bottom,
+                transparent 0,
+                transparent calc(100% - 1px),
+                rgba(255, 255, 255, 0.03) calc(100% - 1px)
+            );
+            background-size: 100% 4px;
+            pointer-events: none;
+            mix-blend-mode: overlay;
+        }
+    </style>
+</head>
+<body>
+
+<header class="hero">
+    <div class="wrap hero-inner">
+        <div class="icon-wordmark">
+            <img src="../branding/play_store_icon_512.png" alt="Talon icon">
+            <span class="wordmark">Talon</span>
+        </div>
+
+        <h1>Native Android chat <br>for <span class="accent">Urbit</span>.</h1>
+
+        <p class="lede">
+            Talon is a fast Android client for the parts of Urbit chat you actually use day-to-day —
+            DMs, group channels, reactions, threads. Bring your own ship.
+        </p>
+
+        <div class="ctas">
+            <a class="btn btn-primary" href="https://github.com/sneagan/talon/releases/latest">
+                Download&nbsp;APK
+            </a>
+            <a class="btn btn-secondary" href="https://github.com/sneagan/talon">
+                Source&nbsp;on&nbsp;GitHub
+            </a>
+        </div>
+
+        <div class="meta-row">
+            <span><strong>Android 8+</strong></span>
+            <span><strong>Open source</strong> · MIT</span>
+            <span><strong>No analytics</strong></span>
+        </div>
+    </div>
+</header>
+
+<section>
+    <div class="wrap">
+        <h2>What it does</h2>
+        <ul class="features">
+            <li>
+                <span class="name">DMs &amp; clubs</span>
+                <span class="desc">1:1 messages and group DMs. Same wire as the rest of the network — your existing chats appear immediately.</span>
+            </li>
+            <li>
+                <span class="name">Group channels</span>
+                <span class="desc">Read and post in any chat channel of any group your ship belongs to. Pinned posts, drag-reorder, custom folders.</span>
+            </li>
+            <li>
+                <span class="name">Reactions &amp; threads</span>
+                <span class="desc">Full emoji set. Long-press for actions. Replies live in inline threads, not separate views.</span>
+            </li>
+            <li>
+                <span class="name">Polls</span>
+                <span class="desc"><span class="mono">/poll question | a | b | c</span> — votes ride on the existing reactions wire, no new agent state.</span>
+            </li>
+            <li>
+                <span class="name">Daily digest</span>
+                <span class="desc">Optional morning brief: who pinged you, what watchwords matched, the chats you missed. Local AI summary, plus today's weather.</span>
+            </li>
+            <li>
+                <span class="name">Watchwords</span>
+                <span class="desc">Cross-channel keyword alerts. Tracks any term you care about across every chat your ship sees, foreground or background.</span>
+            </li>
+            <li>
+                <span class="name">AI features</span>
+                <span class="desc">Catch-me-up summaries and emoji-react suggestions, using your own OpenAI / Anthropic / compatible API key. Off by default. Key encrypted on-device.</span>
+            </li>
+            <li>
+                <span class="name">Voice messages</span>
+                <span class="desc">Record, send, and play back voice notes inline. On-device transcription on devices that support it.</span>
+            </li>
+        </ul>
+    </div>
+</section>
+
+<section>
+    <div class="wrap">
+        <h2>What it isn't</h2>
+        <ul class="disclaimers">
+            <li>Not a host. Bring your own ship — yours, or one a friend hosts for you, or one of the hosting services.</li>
+            <li>Not Tlon. Talon talks to the same agents but is an independent client. If you already use a Tlon-hosted ship, Talon sees your full history immediately.</li>
+            <li>No notebooks or galleries — yet. The scope is chat, done well.</li>
+            <li>Not on the Play Store today. Sideload from GitHub Releases; the in-app updater handles future versions.</li>
+        </ul>
+    </div>
+</section>
+
+<section>
+    <div class="wrap">
+        <h2>Privacy</h2>
+        <div class="privacy-card">
+            <h3>The only servers Talon talks to are yours.</h3>
+            <p>
+                There's no analytics, no third-party SDKs, no telemetry. The app speaks to the
+                Urbit ship you point it at, and — if you turn on AI features — the AI provider
+                whose key you've entered. That's the entire network surface.
+            </p>
+            <p>
+                API keys are stored encrypted on-device via AndroidX Security and only
+                transmitted to the provider you select. They never reach the Talon developer.
+            </p>
+        </div>
+    </div>
+</section>
+
+<section>
+    <div class="wrap">
+        <h2>Under the hood</h2>
+        <p>
+            Native Kotlin + Jetpack Compose. Room for local storage, OkHttp for the SSE
+            channel, kotlinx.serialization for everything on the wire. Mutation-tested at
+            ~93% on the parsers and wire helpers; ~180 unit tests across the JVM-only test
+            suite.
+        </p>
+        <div class="tech-grid">
+            <div class="cell"><div class="k">min sdk</div><div class="v">Android 8.0 (API 26)</div></div>
+            <div class="cell"><div class="k">target sdk</div><div class="v">Android 15 (API 35)</div></div>
+            <div class="cell"><div class="k">backend</div><div class="v">Your Urbit ship</div></div>
+            <div class="cell"><div class="k">license</div><div class="v">MIT</div></div>
+        </div>
+    </div>
+</section>
+
+<section>
+    <div class="wrap">
+        <h2>Get it</h2>
+        <p>
+            <a href="https://github.com/sneagan/talon/releases/latest">Latest release on GitHub</a>
+            — download the APK, allow installs from the source you used (browser or file manager),
+            tap to install. Future updates land via the in-app banner once you're on a build that
+            supports it.
+        </p>
+        <p>
+            New to Urbit?
+            <a href="https://urbit.org/getting-started">urbit.org/getting-started</a>
+            walks you through booting a ship. Once you have the ship's HTTP URL and the
+            <span class="mono">+code</span> output, log in inside Talon and you're done.
+        </p>
+        <div class="ctas" style="margin-top:24px;">
+            <a class="btn btn-primary" href="https://github.com/sneagan/talon/releases/latest">
+                Download&nbsp;APK
+            </a>
+            <a class="btn btn-secondary" href="https://github.com/sneagan/talon">
+                Source&nbsp;&amp;&nbsp;issues
+            </a>
+        </div>
+    </div>
+</section>
+
+<footer>
+    <div class="wrap footer-row">
+        <span>© Talon — built by <span class="patp">~nisfeb</span>. MIT licensed.</span>
+        <span><a href="https://github.com/sneagan/talon">github.com/sneagan/talon</a></span>
+    </div>
+</footer>
+
+</body>
+</html>
