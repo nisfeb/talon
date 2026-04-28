@@ -20,13 +20,8 @@
 //   - non-image file picker (GetContent equivalent for desktop)
 //   - voice recording (VoiceRecordButton, VoiceRecorder, ExoPlayer
 //     preview row)
-//   - location permission + /loc handler
 //   - AI catch-me-up banner + AI emoji picker
-//   - watchwords exclude/include menu entry
 //   - topic clusters sheet (k-means)
-//   - entity action chips (commonMain expect/actual already no-ops)
-//   - link preview card on each row
-//   - notification level dropdown
 //
 // Keep in sync with production until app/ is removed in Stage F.
 package io.nisfeb.talon.ui.screens
@@ -129,6 +124,7 @@ import io.nisfeb.talon.ui.EmojiCatalog
 import io.nisfeb.talon.ui.EmojiPickerDropdown
 import io.nisfeb.talon.ui.EntityActionChips
 import io.nisfeb.talon.ui.LinkPreviewCard
+import io.nisfeb.talon.ui.rememberLocationProvider
 import io.nisfeb.talon.ui.LocalCiteResolver
 import io.nisfeb.talon.ui.firstLinkUrl
 import io.nisfeb.talon.ui.MentionPicker
@@ -181,6 +177,7 @@ fun DmChatScreen(
     modifier: Modifier = Modifier,
 ) {
     val aiConfigured by aiSettings.state.collectAsState()
+    val locationProvider = rememberLocationProvider()
     val rows by remember(whom) {
         var prevByMsgId: Map<String, DisplayRow> = emptyMap()
         kotlinx.coroutines.flow.combine(
@@ -639,7 +636,7 @@ fun DmChatScreen(
                                 rawText = body,
                                 repo = repo,
                                 http = http,
-                                locationProvider = null,
+                                locationProvider = locationProvider,
                                 toast = { msg -> sendError = msg },
                             )
                             when (cmd) {
