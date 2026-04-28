@@ -91,4 +91,19 @@ class HttpUpdateCheckerTest {
         checker.check()
         assertEquals(12_345L, recorded)
     }
+
+    @Test fun `returns null on 200 with non-JSON body`() = runBlocking {
+        // Simulates GitHub's HTML 404 page being served while the
+        // release workflow hasn't run yet (and similar misconfig).
+        server.enqueue(MockResponse().setBody("<html>not found</html>"))
+        val checker = HttpUpdateChecker(
+            http = OkHttpClient(),
+            url = server.url("/latest.json").toString(),
+            now = { 0L },
+            lastCheckedAtMs = { 0L },
+            recordCheckedAt = {},
+            minIntervalMs = 0,
+        )
+        assertNull(checker.check())
+    }
 }
