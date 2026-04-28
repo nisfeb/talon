@@ -22,3 +22,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "talon"
 include(":app")
+include(":composeApp")
