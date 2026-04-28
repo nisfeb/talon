@@ -13,6 +13,10 @@ import kotlinx.serialization.json.put
 /**
  * SharedPreferences-backed [SessionStore] for Android.
  *
+ * **TEMPORARY DUPLICATE** of `app/src/main/java/io/nisfeb/talon/urbit/SessionStore.kt`.
+ * Any production fix to the production class needs to land here too
+ * until Stage B3 deletes the app/ module entirely.
+ *
  * Persists the login state for every ship the user has authenticated
  * against and tracks which one is active. The previous (single-ship)
  * schema is auto-migrated into the new list on first load.

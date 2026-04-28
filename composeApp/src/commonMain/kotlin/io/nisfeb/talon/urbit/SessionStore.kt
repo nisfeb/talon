@@ -42,7 +42,11 @@ interface SessionStore {
     /** Switch the active pointer. Silently no-ops if [ship] isn't stored. */
     fun setActive(ship: String)
 
-    /** Remove a ship's session. */
+    /**
+     * Remove a ship's session. If [ship] was the active ship and at
+     * least one other ship is saved, the first remaining ship becomes
+     * active. If no ships remain, [activeShip] is cleared.
+     */
     fun remove(ship: String)
 
     /** Wipe all saved sessions. */

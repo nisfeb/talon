@@ -57,10 +57,15 @@ class DesktopSessionStore : SessionStore {
 
     override fun remove(ship: String) {
         val cur = load()
-        persist(cur.copy(
-            sessions = cur.sessions.filter { it.ship != ship },
-            activeShip = if (cur.activeShip == ship) null else cur.activeShip,
-        ))
+        val remaining = cur.sessions.filter { it.ship != ship }
+        // Match AndroidSessionStore: when the active ship is removed,
+        // promote the first remaining ship rather than leaving the
+        // user logged out entirely. See SessionStore interface KDoc.
+        val newActive = when {
+            cur.activeShip != ship -> cur.activeShip
+            else -> remaining.firstOrNull()?.ship
+        }
+        persist(cur.copy(sessions = remaining, activeShip = newActive))
     }
 
     override fun clearAll() {
