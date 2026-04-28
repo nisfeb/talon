@@ -186,6 +186,7 @@ fun DmChatScreen(
     var catchUpSummary by remember(whom) { mutableStateOf<String?>(null) }
     var catchingUp by remember(whom) { mutableStateOf(false) }
     var catchUpError by remember(whom) { mutableStateOf<String?>(null) }
+    var aiEmojiWorking by remember { mutableStateOf(false) }
     val rows by remember(whom) {
         var prevByMsgId: Map<String, DisplayRow> = emptyMap()
         kotlinx.coroutines.flow.combine(
@@ -834,6 +835,31 @@ fun DmChatScreen(
                     }
                 },
                 canPin = whom.startsWith("chat/") && target.parentId == null,
+                showAiEmoji = aiConfigured.hasKey() && aiConfigured.emojiReactEnabled,
+                aiEmojiWorking = aiEmojiWorking,
+                onAiEmoji = {
+                    if (aiEmojiWorking) return@MessageActionSheet
+                    aiEmojiWorking = true
+                    scope.launch {
+                        runCatching {
+                            val text = StoryCache.textFor(target.id, target.contentJson)
+                            aiFeatures.suggestEmojiReact(text)
+                        }.onSuccess { code ->
+                            if (code != null) {
+                                runCatching { repo.react(whom, target.id, code) }
+                                    .onFailure {
+                                        sendError = "react failed: ${it.message ?: it::class.simpleName}"
+                                    }
+                            } else {
+                                sendError = "AI didn't return a known reaction"
+                            }
+                        }.onFailure {
+                            sendError = "AI react failed: ${it.message ?: it::class.simpleName}"
+                        }
+                        aiEmojiWorking = false
+                        actionTarget = null
+                    }
+                },
             )
         }
     }
@@ -1397,6 +1423,9 @@ private fun MessageActionSheet(
     onEdit: () -> Unit,
     onDelete: () -> Unit,
     onTogglePin: () -> Unit,
+    showAiEmoji: Boolean,
+    aiEmojiWorking: Boolean,
+    onAiEmoji: () -> Unit,
 ) {
     val sheetState = rememberModalBottomSheetState()
     val isMine = message.author == ourPatp
@@ -1435,9 +1464,18 @@ private fun MessageActionSheet(
                 }) {
                     Icon(Icons.Filled.Search, contentDescription = "Search emojis")
                 }
-                // TODO(port-d5-followup): AI emoji picker — requires
-                // AiSettings / EntityActions from the Android AI stack.
-                // Add `showAiEmoji` + `onAiEmoji` params when ported.
+                if (showAiEmoji) {
+                    TextButton(onClick = onAiEmoji, enabled = !aiEmojiWorking) {
+                        if (aiEmojiWorking) {
+                            CircularProgressIndicator(
+                                strokeWidth = 2.dp,
+                                modifier = Modifier.size(14.dp),
+                            )
+                            Spacer(Modifier.width(6.dp))
+                        }
+                        Text("🤖 AI pick")
+                    }
+                }
             }
             FlowRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 suggested.forEach { code ->
