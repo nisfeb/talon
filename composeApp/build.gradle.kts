@@ -31,12 +31,19 @@ kotlin {
             implementation(libs.androidx.core.ktx)
             implementation(libs.kotlinx.coroutines.android)
             implementation(libs.okhttp)
+            // okhttp-sse is needed by UrbitChannel (moves into
+            // commonMain in B2). okhttp-sse is pure JVM so it works
+            // on both targets — declared here on android/desktop
+            // rather than commonMain so the Android build doesn't
+            // pull in a JVM-only artifact at the wrong layer.
+            implementation(libs.okhttp.sse)
         }
         val desktopMain by getting
         desktopMain.dependencies {
             implementation(compose.desktop.currentOs)
             implementation(libs.kotlinx.coroutines.swing)
             implementation(libs.okhttp)
+            implementation(libs.okhttp.sse)
         }
     }
 }
@@ -73,6 +80,25 @@ android {
             isMinifyEnabled = false  // composeApp doesn't have proguard rules yet
         }
     }
+
+    packaging {
+        // Match app/'s exclude — Kotlin stdlib, OkHttp, and a few
+        // others bundle these license files; without the exclude,
+        // resource merging emits a duplicate-file error once the
+        // dep tree fully lands in B2.
+        resources {
+            excludes += "/META-INF/{AL2.0,LGPL2.1}"
+        }
+    }
+
+    lint {
+        // Mirror app/'s lint disable — the
+        // NonNullableMutableLiveDataDetector crashes on this
+        // Kotlin/Compose combo during release builds. Once
+        // screens move into composeApp in B2 the same crash risk
+        // applies.
+        checkReleaseBuilds = false
+    }
 }
 
 compose.desktop {
@@ -82,6 +108,8 @@ compose.desktop {
             targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Deb)
             packageName = "Talon"
             // Compose Desktop requires MAJOR > 0 for jpackage.
+            // TODO Stage F: align packageVersion with versionName
+            // in defaultConfig once composeApp takes over as prod.
             packageVersion = "1.0.0"
         }
     }

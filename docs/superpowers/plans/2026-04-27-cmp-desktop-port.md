@@ -1118,7 +1118,7 @@ Already in the spike's build file:
 ```kotlin
 compose.desktop {
     application {
-        mainClass = "io.nisfeb.talon.MainKt"
+        mainClass = "io.nisfeb.talon.compose.MainKt"
         nativeDistributions {
             targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Deb)
             packageName = "Talon"
