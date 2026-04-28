@@ -30,8 +30,6 @@
 //     interface methods exist; needs the BookmarkDao stream wired into
 //     the action sheet's isBookmarked observation — currently passes
 //     false as a placeholder)
-//   - edit composer (editing state is set on tap, but the composer
-//     doesn't yet flip into edit mode)
 //   - notification level dropdown
 //
 // Keep in sync with production until app/ is removed in Stage F.
@@ -379,7 +377,7 @@ fun DmChatScreen(
 
     // ── message action sheet state ──
     var actionTarget by remember { mutableStateOf<MessageEntity?>(null) }
-    var editing by remember { mutableStateOf<MessageEntity?>(null) }              // TODO(port-d5-followup): wire edit composer
+    var editing by remember { mutableStateOf<MessageEntity?>(null) }
     var confirmingDelete by remember { mutableStateOf<MessageEntity?>(null) }
     var pendingQuote by remember(whom) { mutableStateOf<MessageEntity?>(null) }  // TODO(port-d5-followup): wire quote into composer
 
@@ -750,7 +748,6 @@ fun DmChatScreen(
                 onEdit = {
                     actionTarget = null
                     editing = target
-                    // TODO(port-d5-followup): wire edit composer
                 },
                 onDelete = {
                     actionTarget = null
@@ -771,6 +768,20 @@ fun DmChatScreen(
                 canPin = whom.startsWith("chat/") && target.parentId == null,
             )
         }
+    }
+
+    editing?.let { target ->
+        EditMessageDialog(
+            initial = StoryCache.textFor(target.id, target.contentJson),
+            onDismiss = { editing = null },
+            onSave = { newText ->
+                editing = null
+                scope.launch {
+                    runCatching { repo.edit(whom, target.id, newText, target.sentMs) }
+                        .onFailure { sendError = "edit failed: ${it.message ?: it::class.simpleName}" }
+                }
+            },
+        )
     }
 
     confirmingDelete?.let { target ->
@@ -1148,6 +1159,35 @@ private fun dividerLabel(ms: Long): String {
 //    is Android-only; TODO(port-d5-followup) when AI bridge is ported).
 //  - windowInsetsPadding(WindowInsets.navigationBars) kept — no-ops on
 //    desktop but harmless.
+
+// AlertDialog with a single OutlinedTextField bound to the message
+// body. Mirrors production exactly — there's no rich composer here
+// because messages with images/quotes/polls aren't editable.
+@Composable
+private fun EditMessageDialog(
+    initial: String,
+    onDismiss: () -> Unit,
+    onSave: (String) -> Unit,
+) {
+    var text by remember { mutableStateOf(initial) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Edit message") },
+        text = {
+            OutlinedTextField(
+                value = text,
+                onValueChange = { text = it },
+                modifier = Modifier.fillMaxWidth(),
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = { onSave(text.trim()) }, enabled = text.isNotBlank()) {
+                Text("Save")
+            }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}
 
 @OptIn(ExperimentalMaterial3Api::class, androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
