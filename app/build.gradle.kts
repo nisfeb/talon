@@ -20,8 +20,8 @@ android {
         // matches what RELEASE.md already documents and opts us into
         // Android 15 behavior changes (16 KB page sizes, edge-to-edge).
         targetSdk = 35
-        versionCode = 19
-        versionName = "0.4.2"
+        versionCode = 20
+        versionName = "0.5.0"
     }
 
     signingConfigs {
