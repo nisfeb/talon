@@ -16,6 +16,7 @@ reorderable = "2.5.0"
 securityCrypto = "1.1.0-alpha06"
 mlkitEntityExtraction = "16.0.0-beta5"
 mediapipeTasksText = "0.10.21"
+composeMultiplatform = "1.7.3"
 junit = "4.13.2"
 
 [libraries]
@@ -61,3 +62,6 @@ kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
 kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
 kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }
 ksp = { id = "com.google.devtools.ksp", version.ref = "ksp" }
+kotlin-multiplatform = { id = "org.jetbrains.kotlin.multiplatform", version.ref = "kotlin" }
+android-library = { id = "com.android.library", version.ref = "agp" }
+compose-multiplatform = { id = "org.jetbrains.compose", version.ref = "composeMultiplatform" }
