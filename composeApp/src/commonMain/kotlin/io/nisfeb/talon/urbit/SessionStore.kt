@@ -27,8 +27,14 @@ interface SessionStore {
     /** The currently-active ship's session, or null if none. */
     fun active(): SavedSession?
 
-    /** Persist or update a ship's session. */
-    fun save(entry: SavedSession)
+    /** The active ship's @p, or null if no session is selected. */
+    fun activeShip(): String?
+
+    /**
+     * Persist or update a ship's session. When [makeActive] is true
+     * (the default), the saved entry also becomes the active ship.
+     */
+    fun save(entry: SavedSession, makeActive: Boolean = true)
 
     /** Switch the active pointer. Silently no-ops if [ship] isn't stored. */
     fun setActive(ship: String)

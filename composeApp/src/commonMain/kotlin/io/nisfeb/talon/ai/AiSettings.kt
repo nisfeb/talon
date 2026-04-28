@@ -35,4 +35,59 @@ object AiSettings {
     ) {
         fun hasKey(): Boolean = apiKey.isNotBlank()
     }
+
+    /**
+     * Per-feature toggles. SettingsScreen iterates this enum to render
+     * the AI features section. Field-for-field copy of the production
+     * enum at app/src/main/java/io/nisfeb/talon/ai/AiSettings.kt.
+     */
+    enum class Feature(
+        val key: String,
+        val label: String,
+        val description: String,
+        val requiresCloudKey: Boolean,
+    ) {
+        CatchMeUp(
+            "feat_catch_me_up",
+            "Catch me up",
+            "When you open a chat with unread messages, offer a summary.",
+            requiresCloudKey = true,
+        ),
+        EmojiReact(
+            "feat_emoji_react",
+            "AI emoji react",
+            "Long-press a message → AI emoji picks a reaction for you.",
+            requiresCloudKey = true,
+        ),
+        DailyDigest(
+            "feat_daily_digest",
+            "AI digest summary",
+            "Add an AI-written summary to the daily digest. The digest itself is enabled separately under \"Daily digest.\"",
+            requiresCloudKey = true,
+        ),
+        EntityActions(
+            "feat_entity_actions",
+            "Action chips on messages",
+            "Detect dates, addresses, phone numbers, and email addresses in chat messages and surface tap-through chips. On-device.",
+            requiresCloudKey = false,
+        ),
+        SemanticSearch(
+            "feat_semantic_search",
+            "Smart search",
+            "Search messages by meaning, not just keywords. Embeds your local chat history on-device for the index.",
+            requiresCloudKey = false,
+        ),
+        TopicClusters(
+            "feat_topic_clusters",
+            "Topic clusters per chat",
+            "Group a chat's messages by topic so you can scan what's been discussed. On-device.",
+            requiresCloudKey = false,
+        ),
+        ImportantMessages(
+            "feat_important_messages",
+            "Highlight important messages",
+            "Flag incoming messages that look similar to ones you've bookmarked. On-device, needs at least 5 bookmarks.",
+            requiresCloudKey = false,
+        ),
+    }
 }

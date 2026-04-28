@@ -25,25 +25,26 @@ kotlin {
             implementation(compose.components.resources)
             implementation(libs.kotlinx.coroutines.core)
             implementation(libs.kotlinx.serialization.json)
+            // OkHttp + okhttp-sse are pure JVM but both Android and
+            // desktop targets are JVM-backed, so declaring them in
+            // commonMain is correct here. UrbitChannel + UrbitSession
+            // + S3Uploader + AiClient + LinkPreviewCache all consume
+            // them. If a non-JVM target (iOS, Wasm) is ever added,
+            // these need to move out of commonMain and the file-by-
+            // file deps need expect/actual splits or replacement
+            // libraries (Ktor for HTTP).
+            implementation(libs.okhttp)
+            implementation(libs.okhttp.sse)
         }
         androidMain.dependencies {
             implementation(libs.androidx.activity.compose)
             implementation(libs.androidx.core.ktx)
             implementation(libs.kotlinx.coroutines.android)
-            implementation(libs.okhttp)
-            // okhttp-sse is needed by UrbitChannel (moves into
-            // commonMain in B2). okhttp-sse is pure JVM so it works
-            // on both targets — declared here on android/desktop
-            // rather than commonMain so the Android build doesn't
-            // pull in a JVM-only artifact at the wrong layer.
-            implementation(libs.okhttp.sse)
         }
         val desktopMain by getting
         desktopMain.dependencies {
             implementation(compose.desktop.currentOs)
             implementation(libs.kotlinx.coroutines.swing)
-            implementation(libs.okhttp)
-            implementation(libs.okhttp.sse)
         }
     }
 }

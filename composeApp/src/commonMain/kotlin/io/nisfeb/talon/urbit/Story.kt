@@ -497,7 +497,7 @@ object Story {
             )
             null -> {
                 if (parsed.label == "Reference") {
-                    println("W [StoryCite] unhandled cite shape: keys=${cite.keys} preview=${cite.toString().take(400)}")
+                    println("WARN [StoryCite] unhandled cite shape: keys=${cite.keys} preview=${cite.toString().take(400)}")
                 }
                 StoryPart.Citation(
                     label = parsed.label,

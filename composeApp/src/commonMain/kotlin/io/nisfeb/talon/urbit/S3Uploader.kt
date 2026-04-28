@@ -20,6 +20,13 @@ import javax.crypto.spec.SecretKeySpec
  *
  * Tlon's client uses path-style URLs (`https://endpoint/bucket/key`) —
  * we do the same so unusual endpoints with custom DNS don't break.
+ *
+ * TODO(port/ios): this file uses java.security.MessageDigest,
+ * javax.crypto.{Mac, SecretKeySpec}, java.text.SimpleDateFormat, and
+ * java.util.TimeZone — none of which exist on Kotlin/Native (iOS).
+ * When iOS is added as a target, the SigV4 signing path needs an
+ * expect/actual split (or a multiplatform crypto library substitution
+ * like the kotlinx-crypto project).
  */
 object S3Uploader {
 
