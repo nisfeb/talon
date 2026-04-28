@@ -16,6 +16,7 @@ import io.nisfeb.talon.ui.screens.DmListScreen
 import io.nisfeb.talon.ui.screens.ImageViewerScreen
 import io.nisfeb.talon.ui.screens.LoginScreen
 import io.nisfeb.talon.ui.screens.SettingsScreen
+import io.nisfeb.talon.ui.screens.ThreadScreen
 import io.nisfeb.talon.ui.theme.TalonTheme
 import io.nisfeb.talon.update.UpdateState
 import io.nisfeb.talon.urbit.SessionStore
@@ -48,6 +49,10 @@ fun App(
     // When non-null, ImageViewerScreen overlays everything. Closing
     // returns the user to whichever screen was below.
     var viewerImageUrl by remember { mutableStateOf<String?>(null) }
+    // When non-null, ThreadScreen takes over for the current chat. Both
+    // openChat and openThreadParent are set together; back from the
+    // thread clears just openThreadParent.
+    var openThreadParent by remember { mutableStateOf<String?>(null) }
 
     TalonTheme {
         Surface(modifier = Modifier.fillMaxSize()) {
@@ -65,6 +70,19 @@ fun App(
                     url = viewerImageUrl!!,
                     onClose = { viewerImageUrl = null },
                 )
+                openChat != null && openThreadParent != null -> ThreadScreen(
+                    db = db,
+                    repo = repo,
+                    ourPatp = ship,
+                    whom = openChat!!,
+                    parentId = openThreadParent!!,
+                    onBack = { openThreadParent = null },
+                    onOpenConversation = { other ->
+                        openThreadParent = null
+                        openChat = other
+                    },
+                    onOpenImage = { url -> viewerImageUrl = url },
+                )
                 openChat != null -> DmChatScreen(
                     db = db,
                     repo = repo,
@@ -73,9 +91,7 @@ fun App(
                     ourPatp = ship,
                     whom = openChat!!,
                     onBack = { openChat = null },
-                    onOpenThread = { _ ->
-                        // TODO(port-d5-followup): wire DmThreadScreen.
-                    },
+                    onOpenThread = { parentId -> openThreadParent = parentId },
                     onOpenConversation = { other -> openChat = other },
                     onOpenImage = { url -> viewerImageUrl = url },
                     onOpenSelfProfile = {
