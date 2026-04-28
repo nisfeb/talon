@@ -1,5 +1,7 @@
 package io.nisfeb.talon.ai
 
+import kotlinx.serialization.Serializable
+
 /**
  * Portable data types for AI provider configuration.
  *
@@ -19,6 +21,7 @@ object AiSettings {
         Custom("Custom (OpenAI endpoint)"),
     }
 
+    @Serializable
     data class Config(
         val provider: Provider,
         val apiKey: String,

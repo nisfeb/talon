@@ -3,6 +3,7 @@ package io.nisfeb.talon.compose
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import io.nisfeb.talon.ai.createAiSettings
 import io.nisfeb.talon.urbit.UrbitSession
 import io.nisfeb.talon.urbit.createSessionStore
 import okhttp3.OkHttpClient
@@ -18,8 +19,9 @@ class MainActivity : ComponentActivity() {
             .build()
         val sessionStore = createSessionStore(applicationContext)
         val session = UrbitSession(http, sessionStore)
+        val aiSettings = createAiSettings(applicationContext)
         setContent {
-            App(session = session, sessionStore = sessionStore)
+            App(session = session, sessionStore = sessionStore, aiSettings = aiSettings)
         }
     }
 }
