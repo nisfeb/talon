@@ -54,6 +54,7 @@ fun App(
     // openChat and openThreadParent are set together; back from the
     // thread clears just openThreadParent.
     var openThreadParent by remember { mutableStateOf<String?>(null) }
+    var openThreadReplyAnchor by remember { mutableStateOf<String?>(null) }
     var showSelfProfile by remember { mutableStateOf(false) }
 
     TalonTheme {
@@ -84,9 +85,15 @@ fun App(
                     ourPatp = ship,
                     whom = openChat!!,
                     parentId = openThreadParent!!,
-                    onBack = { openThreadParent = null },
+                    initialScrollReplyId = openThreadReplyAnchor,
+                    onScrollConsumed = { openThreadReplyAnchor = null },
+                    onBack = {
+                        openThreadParent = null
+                        openThreadReplyAnchor = null
+                    },
                     onOpenConversation = { other ->
                         openThreadParent = null
+                        openThreadReplyAnchor = null
                         openChat = other
                     },
                     onOpenImage = { url -> viewerImageUrl = url },
@@ -100,7 +107,14 @@ fun App(
                     ourPatp = ship,
                     whom = openChat!!,
                     onBack = { openChat = null },
-                    onOpenThread = { parentId -> openThreadParent = parentId },
+                    onOpenThread = { parentId ->
+                        openThreadReplyAnchor = null
+                        openThreadParent = parentId
+                    },
+                    onOpenThreadAt = { parentId, replyAnchor ->
+                        openThreadReplyAnchor = replyAnchor
+                        openThreadParent = parentId
+                    },
                     onOpenConversation = { other -> openChat = other },
                     onOpenImage = { url -> viewerImageUrl = url },
                     onOpenSelfProfile = { showSelfProfile = true },

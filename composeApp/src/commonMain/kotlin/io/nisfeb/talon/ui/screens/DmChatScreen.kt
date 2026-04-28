@@ -62,11 +62,13 @@ import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.NotificationsOff
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Topic
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -110,6 +112,8 @@ import androidx.compose.ui.unit.dp
 import io.nisfeb.talon.ai.AiClient
 import io.nisfeb.talon.ai.AiFeatures
 import io.nisfeb.talon.ai.AiSettingsRepository
+import io.nisfeb.talon.ai.kMeansAssign
+import io.nisfeb.talon.ai.unpackEmbedding
 import io.nisfeb.talon.data.AppDatabase
 import io.nisfeb.talon.data.MessageEntity
 import io.nisfeb.talon.data.NotifyLevel
@@ -146,6 +150,7 @@ import io.nisfeb.talon.util.Log
 import io.nisfeb.talon.util.decodeImageDimensions
 import io.nisfeb.talon.util.rememberImagePicker
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.onEach
@@ -173,6 +178,7 @@ fun DmChatScreen(
     onScrollConsumed: () -> Unit = {},
     onBack: () -> Unit,
     onOpenThread: (parentId: String) -> Unit,
+    onOpenThreadAt: (parentId: String, replyAnchor: String) -> Unit = { p, _ -> onOpenThread(p) },
     onOpenConversation: (whom: String) -> Unit,
     onOpenImage: (url: String) -> Unit,
     onOpenSelfProfile: () -> Unit,
@@ -187,6 +193,7 @@ fun DmChatScreen(
     var catchingUp by remember(whom) { mutableStateOf(false) }
     var catchUpError by remember(whom) { mutableStateOf<String?>(null) }
     var aiEmojiWorking by remember { mutableStateOf(false) }
+    var topicsSheetOpen by remember(whom) { mutableStateOf(false) }
     val rows by remember(whom) {
         var prevByMsgId: Map<String, DisplayRow> = emptyMap()
         kotlinx.coroutines.flow.combine(
@@ -502,6 +509,11 @@ fun DmChatScreen(
                     style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
                     modifier = Modifier.weight(1f).padding(start = 4.dp),
                 )
+                if (aiConfigured.topicClustersEnabled) {
+                    IconButton(onClick = { topicsSheetOpen = true }) {
+                        Icon(Icons.Filled.Topic, contentDescription = "Topics in this chat")
+                    }
+                }
                 NotifyLevelDropdown(
                     level = notifyLevel,
                     enabled = repo.settingsSync != null,
@@ -522,8 +534,6 @@ fun DmChatScreen(
                         }
                     },
                 )
-                // TODO(port-d5-followup): topics sheet trigger needs the
-                // AI clusterer threaded through.
             }
             HorizontalDivider()
             if (refreshing && rows.isEmpty()) {
@@ -923,6 +933,28 @@ fun DmChatScreen(
             },
             dismissButton = {
                 TextButton(onClick = { confirmingDelete = null }) { Text("Cancel") }
+            },
+        )
+    }
+
+    if (topicsSheetOpen) {
+        TopicsSheet(
+            whom = whom,
+            db = db,
+            onDismiss = { topicsSheetOpen = false },
+            onTapMessage = { msgId, parentId ->
+                topicsSheetOpen = false
+                if (parentId != null) onOpenThreadAt(parentId, msgId)
+                else {
+                    val idx = displayRows.indexOfFirst {
+                        it is ChatListItem.Message && it.row.m.id == msgId
+                    }
+                    if (idx >= 0) {
+                        val reverseIdx = displayRows.size - 1 - idx
+                        scope.launch { listState.scrollToItem(reverseIdx) }
+                        flashMessageId = msgId
+                    }
+                }
             },
         )
     }
@@ -1564,4 +1596,180 @@ private fun MessageActionSheet(
             }
         }
     }
+}
+
+private enum class TopicWindow(val label: String, val ms: Long?) {
+    Week("Week", 7L * 24 * 3600_000L),
+    Month("Month", 30L * 24 * 3600_000L),
+    All("All", null),
+}
+
+private data class TopicClusterRow(
+    val representativeId: String,
+    val representativeParentId: String?,
+    val representativeText: String,
+    val count: Int,
+)
+
+private data class TopicsResult(
+    val clusters: List<TopicClusterRow>,
+    val fellBackToAllTime: Boolean,
+)
+
+@OptIn(ExperimentalMaterial3Api::class, androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+private fun TopicsSheet(
+    whom: String,
+    db: AppDatabase,
+    onDismiss: () -> Unit,
+    onTapMessage: (id: String, parentId: String?) -> Unit,
+) {
+    val sheetState = rememberModalBottomSheetState()
+    var window by remember(whom) { mutableStateOf(TopicWindow.Month) }
+    var loading by remember(whom) { mutableStateOf(true) }
+    var result by remember(whom) {
+        mutableStateOf(TopicsResult(emptyList(), fellBackToAllTime = false))
+    }
+
+    LaunchedEffect(whom, window) {
+        loading = true
+        result = withContext(Dispatchers.Default) {
+            buildTopicClusters(whom, db, window.ms)
+        }
+        loading = false
+    }
+
+    val clusters = result.clusters
+
+    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp)
+                .windowInsetsPadding(WindowInsets.navigationBars),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            val headerText = when {
+                result.fellBackToAllTime ->
+                    "Topics in this chat (all time — recent window was too thin)"
+                window == TopicWindow.All -> "Topics in this chat"
+                else -> "Topics in the last ${window.label.lowercase()}"
+            }
+            Text(headerText, style = MaterialTheme.typography.titleMedium)
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                TopicWindow.values().forEach { w ->
+                    FilterChip(
+                        selected = w == window,
+                        onClick = { window = w },
+                        label = { Text(w.label) },
+                    )
+                }
+            }
+            when {
+                loading -> Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    CircularProgressIndicator(
+                        strokeWidth = 2.dp,
+                        modifier = Modifier.size(16.dp),
+                    )
+                    Text("Clustering…", style = MaterialTheme.typography.bodyMedium)
+                }
+                clusters.isEmpty() -> Text(
+                    "Not enough messages indexed for this chat yet. " +
+                        "Open Search and let smart search index your archive first.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                else -> clusters.forEach { c ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable { onTapMessage(c.representativeId, c.representativeParentId) }
+                            .padding(vertical = 8.dp, horizontal = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Text(
+                            "${c.count}",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(50))
+                                .background(MaterialTheme.colorScheme.primaryContainer)
+                                .padding(horizontal = 10.dp, vertical = 4.dp),
+                        )
+                        Text(
+                            c.representativeText,
+                            style = MaterialTheme.typography.bodyMedium,
+                            maxLines = 2,
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+private suspend fun buildTopicClusters(
+    whom: String,
+    db: AppDatabase,
+    windowMs: Long?,
+): TopicsResult {
+    val initial = clusterTopicsWithin(whom, db, windowMs)
+    if (initial.isNotEmpty() || windowMs == null) {
+        return TopicsResult(initial, fellBackToAllTime = false)
+    }
+    val fallback = clusterTopicsWithin(whom, db, windowMs = null)
+    return TopicsResult(fallback, fellBackToAllTime = fallback.isNotEmpty())
+}
+
+private suspend fun clusterTopicsWithin(
+    whom: String,
+    db: AppDatabase,
+    windowMs: Long?,
+): List<TopicClusterRow> {
+    val embeddings = db.embeddings().forWhom(whom)
+    if (embeddings.size < 6) return emptyList()
+    val cutoffMs = windowMs?.let { System.currentTimeMillis() - it }
+    data class Row(
+        val embedding: io.nisfeb.talon.data.MessageEmbeddingEntity,
+        val message: io.nisfeb.talon.data.MessageEntity,
+        val text: String,
+    )
+    val rows = embeddings.mapNotNull { e ->
+        val msg = db.messages().getOne(e.whom, e.id) ?: return@mapNotNull null
+        if (msg.isDeleted) return@mapNotNull null
+        if (cutoffMs != null && msg.sentMs < cutoffMs) return@mapNotNull null
+        val text = io.nisfeb.talon.urbit.StoryCache
+            .textFor(msg.id, msg.contentJson)
+            .replace('\n', ' ')
+            .trim()
+        val wordCount = text.split(Regex("\\s+")).count { it.isNotBlank() }
+        if (text.length < 20 || wordCount < 4) return@mapNotNull null
+        Row(e, msg, text)
+    }
+    if (rows.size < 6) return emptyList()
+
+    val vectors = rows.map { unpackEmbedding(it.embedding.vector, it.embedding.dim) }
+    val k = (rows.size / 8).coerceIn(3, 6)
+    val assignment = kMeansAssign(vectors, k)
+
+    val out = mutableListOf<TopicClusterRow>()
+    for (c in 0 until k) {
+        val members = rows.indices.filter { assignment[it] == c }
+        if (members.size < 2) continue
+        val longest = members.maxByOrNull { rows[it].text.length } ?: continue
+        val pick = rows[longest]
+        out += TopicClusterRow(
+            representativeId = pick.message.id,
+            representativeParentId = pick.message.parentId,
+            representativeText = pick.text.take(160),
+            count = members.size,
+        )
+    }
+    return out.sortedByDescending { it.count }
 }
