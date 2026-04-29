@@ -60,6 +60,14 @@ class UrbitSession(
                     val ship = cookie.name.removePrefix("urbauth-")
                     baseUrl = url
                     shipName = ship
+                    // makeActive=true is load-bearing: composeApp's
+                    // App() composable rebuilds session+repo on
+                    // ship change via key(loggedInShip) and the new
+                    // session calls tryRestore() which reads
+                    // store.active(). If save() ever defaults
+                    // makeActive=false, the post-login re-key would
+                    // not find the just-saved entry and repo.start
+                    // would crash on a half-initialized session.
                     store.save(
                         SavedSession(
                             shipUrl = url.toString().trimEnd('/'),
@@ -68,6 +76,7 @@ class UrbitSession(
                             cookieValue = cookie.value,
                             cookieDomain = url.host,
                         ),
+                        makeActive = true,
                     )
                     ship
                 }
