@@ -2,7 +2,13 @@ import org.jetbrains.compose.desktop.application.dsl.TargetFormat
 
 plugins {
     alias(libs.plugins.kotlin.multiplatform)
-    alias(libs.plugins.android.application)
+    // Library, not application, during Stage F. Phase 1 + 2 move
+    // the Android-only code from app/ into composeApp/androidMain/
+    // and need app/ to consume composeApp as a project dependency —
+    // an `application` module can't depend on another `application`
+    // module. Phase 3 flips back to `android.application` + the
+    // production applicationId once app/ goes away.
+    alias(libs.plugins.android.library)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.compose.multiplatform)
     alias(libs.plugins.kotlin.serialization)
@@ -96,32 +102,16 @@ android {
     compileSdk = 35
 
     defaultConfig {
-        // Different applicationId from the production app/ module so
-        // both APKs can be installed on the same device during the
-        // port without overwriting each other. After Stage B3 deletes
-        // app/, this will be flipped to "io.nisfeb.talon".
-        applicationId = "io.nisfeb.talon.compose"
+        // Library doesn't carry an applicationId or version. Phase 3
+        // flips this module back to `android.application` and adds
+        // applicationId = "io.nisfeb.talon" + the version-source-of-
+        // truth. Until then, app/ supplies those for the shipped APK.
         minSdk = 26
-        targetSdk = 35
-        versionCode = 1
-        versionName = "0.0.1-port"
     }
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
-    }
-
-    buildTypes {
-        release {
-            // Debug-signed for now — composeApp produces a side-by-side
-            // placeholder APK during the port. Stage F adds the proper
-            // env-var-driven release signing config (mirroring
-            // app/build.gradle.kts) once composeApp takes over as the
-            // production module.
-            signingConfig = signingConfigs.getByName("debug")
-            isMinifyEnabled = false  // composeApp doesn't have proguard rules yet
-        }
     }
 
     packaging {

@@ -1,41 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <!-- INTERNET is required for OkHttp; without it the very first
-         session.login() call throws SecurityException and the user
-         is stranded on the login screen. ACCESS_NETWORK_STATE is
-         used by OkHttp's connection-pool keepalive heuristics.
-         POST_NOTIFICATIONS is needed for runtime notif consent on
-         Android 13+; without it incoming-message banners no-op
-         silently.
-
-         Production app/ ships 13 permissions including the
-         foreground-service variants needed for TalonSyncService.
-         composeApp/ doesn't run that service yet (Gap 2 in the
-         followups doc), so only the bare networking + notif set
-         is wired here. -->
+    <!-- Library manifest. Permissions declared here merge into the
+         consuming module's manifest at build time. The consuming
+         module (currently app/) carries the <application> entry,
+         theme, launcher activity, services, receivers, etc.
+         Phase 3 of Stage F flips composeApp back to an
+         android.application module and absorbs those declarations. -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
-    <application
-        android:name=".TalonComposeApp"
-        android:label="Talon (port)"
-        android:icon="@mipmap/ic_launcher"
-        android:roundIcon="@mipmap/ic_launcher_round"
-        android:supportsRtl="true"
-        android:theme="@android:style/Theme.Material.NoActionBar">
-        <activity
-            android:name=".MainActivity"
-            android:exported="true"
-            android:enableOnBackInvokedCallback="true">
-            <!-- enableOnBackInvokedCallback opts the activity into
-                 Android 13+ predictive-back. Without it the OS
-                 silently no-ops BackHandler callbacks on API 33+. -->
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
-        </activity>
-    </application>
 </manifest>
