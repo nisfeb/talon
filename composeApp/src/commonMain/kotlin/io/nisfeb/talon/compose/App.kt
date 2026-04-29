@@ -14,6 +14,7 @@ import io.nisfeb.talon.data.AppDatabase
 import io.nisfeb.talon.ui.DraftStore
 import io.nisfeb.talon.ui.screens.DmChatScreen
 import io.nisfeb.talon.ui.screens.DmListScreen
+import io.nisfeb.talon.ui.PlatformBackHandler
 import io.nisfeb.talon.ui.screens.ImageViewerScreen
 import io.nisfeb.talon.ui.screens.LoginScreen
 import io.nisfeb.talon.ui.screens.ProfileEditScreen
@@ -65,6 +66,28 @@ fun App(
     // loggedInShip so re-login (different ship) restarts the loop.
     LaunchedEffect(loggedInShip) {
         if (loggedInShip != null) repo.start(session)
+    }
+
+    // System Back navigates up through the state machine on Android;
+    // no-op on desktop. Order from innermost to outermost so the
+    // first matching enabled handler wins (Compose registers them
+    // LIFO via OnBackPressedDispatcher, so declaration order = stack
+    // order). Image viewer overlays everything → handle it first.
+    PlatformBackHandler(enabled = viewerImageUrl != null) {
+        viewerImageUrl = null
+    }
+    PlatformBackHandler(enabled = openThreadParent != null) {
+        openThreadParent = null
+        openThreadReplyAnchor = null
+    }
+    PlatformBackHandler(enabled = openChat != null && openThreadParent == null) {
+        openChat = null
+    }
+    PlatformBackHandler(enabled = showSelfProfile) {
+        showSelfProfile = false
+    }
+    PlatformBackHandler(enabled = showSettings) {
+        showSettings = false
     }
 
     TalonTheme {
