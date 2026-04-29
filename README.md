@@ -45,3 +45,18 @@ Tag `vX.Y.Z` (matching `versionName` in `app/build.gradle.kts`) and
 push. CI builds all platform artifacts and publishes a GitHub Release.
 Configure the four `RELEASE_KEYSTORE_*` repo secrets to enable APK
 signing — without them, desktop artifacts still ship.
+
+## Pre-commit hook
+
+After cloning, enable the in-repo hook that scans staged changes for
+personal info and secret patterns (private keys, AWS / Anthropic /
+OpenAI / GitHub tokens, personal emails, machine-specific paths,
+etc.):
+
+```bash
+git config core.hooksPath scripts/hooks
+```
+
+See [scripts/hooks/pre-commit](scripts/hooks/pre-commit) for the
+ruleset. Bypass with `git commit --no-verify` when you need to (e.g.
+adding a test fixture that intentionally contains a real patp).

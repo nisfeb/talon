@@ -1,0 +1,101 @@
+#!/usr/bin/env bash
+#
+# Pre-commit guard against committing personal info, secrets, and
+# machine-specific paths. Scans staged additions only (lines starting
+# with `+` in `git diff --cached`), so existing matches in unchanged
+# code don't keep blocking new commits.
+#
+# To bypass for a specific commit (e.g. you're intentionally adding a
+# test fixture that contains a real patp):
+#   git commit --no-verify
+#
+# To install once after cloning:
+#   git config core.hooksPath scripts/hooks
+#
+# Each rule is `pattern | description | path_exemption_regex`.
+# Lines added to a file matching the exemption regex don't trigger
+# that rule. Use `^$` (matches nothing) to disable exemption.
+
+set -uo pipefail
+
+# Each entry: PATTERN<TAB>DESCRIPTION<TAB>PATH_EXEMPT_REGEX
+# - PATTERN is a basic-regex (used with grep -E)
+# - PATH_EXEMPT_REGEX is matched against the file path; lines added
+#   to a matching file don't trigger this rule. ^$ = no exemption.
+RULES=(
+$'/home/sneagan/\tmachine-specific home path\t^$'
+$'github\\.com/sneagan/\twrong github user (sneagan → nisfeb)\t^$'
+$'nisfeb\\.com\tpersonal infra hostname\t^$'
+$'45\\.33\\.75\\.69\tpersonal IP address\t^$'
+$'@fastmail\\.com\tpersonal email address\t^$'
+$'~mister-botter-dozzod-nisfeb\tpersonal patp\t(/test/|/fixtures/|^docs/superpowers/)'
+$'~ricsul-bilwyt-dozzod-nisfeb\tpersonal patp\t(/test/|/fixtures/)'
+$'\\bsk-ant-[A-Za-z0-9_-]{20,}\tAnthropic API key\t^$'
+$'\\bsk-[A-Za-z0-9]{40,}\tOpenAI-style API key\t^$'
+$'\\bghp_[A-Za-z0-9]{36}\\b\tGitHub personal access token\t^$'
+$'\\bAKIA[0-9A-Z]{16}\\b\tAWS access key id\t^$'
+$'-----BEGIN [A-Z ]*PRIVATE KEY-----\tprivate key\t^$'
+$'urbauth-~[a-zA-Z0-9-]+\turbit auth cookie name (hint: sessions.json leak)\t^$'
+)
+
+red()  { printf '\033[31m%s\033[0m' "$1"; }
+bold() { printf '\033[1m%s\033[0m' "$1"; }
+
+violations=0
+report() {
+    if [ "$violations" -eq 0 ]; then
+        printf '\n%s\n' "$(bold "$(red "Pre-commit blocked: personal info / secrets in staged changes")")"
+    fi
+    violations=$((violations + 1))
+    printf '  %s\n' "$1"
+}
+
+# List of files with staged additions (Added or Modified). Renames and
+# deletions can't introduce new content.
+mapfile -t FILES < <(git diff --cached --name-only --diff-filter=AM)
+[ "${#FILES[@]}" -eq 0 ] && exit 0
+
+for file in "${FILES[@]}"; do
+    # The hook script itself contains the literal patterns it scans
+    # for — skip it so editing the ruleset doesn't trip the hook.
+    if [ "$file" = "scripts/hooks/pre-commit" ]; then
+        continue
+    fi
+    # Per-file diff, only added lines (start with "+", excluding "+++" header).
+    added=$(git diff --cached --no-color -U0 -- "$file" \
+        | sed -n '/^+++ /!{ /^+/p; }' \
+        | sed 's/^+//')
+    [ -z "$added" ] && continue
+
+    for rule in "${RULES[@]}"; do
+        IFS=$'\t' read -r pattern desc exempt <<< "$rule"
+        # Skip if file path is exempt for this rule.
+        if [ "$exempt" != '^$' ] && printf '%s' "$file" | grep -qE -e "$exempt"; then
+            continue
+        fi
+        # Find offending lines. -n on the printf-piped grep gives line
+        # numbers within the added-only stream, not the file — useful
+        # but not authoritative. We just print the matching line.
+        # `-e <pattern>` so patterns starting with `-` (private key
+        # marker) aren't mistaken for grep flags.
+        matches=$(printf '%s\n' "$added" | grep -nE -e "$pattern" || true)
+        [ -z "$matches" ] && continue
+        report "$(bold "$file"): $desc"
+        # Show up to 3 matching lines for context.
+        printf '%s\n' "$matches" | head -3 | sed 's/^/      /'
+    done
+done
+
+if [ "$violations" -gt 0 ]; then
+    cat <<EOF
+
+Found $violations rule violation(s). If a match is intentional (e.g. an
+exemption rule needs broadening, or you genuinely meant to commit this
+content), bypass with:
+
+  git commit --no-verify
+
+Or edit scripts/hooks/pre-commit to add a path-exemption regex.
+EOF
+    exit 1
+fi
