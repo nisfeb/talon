@@ -1,7 +1,10 @@
 package io.nisfeb.talon.compose
 
+import androidx.compose.ui.graphics.painter.BitmapPainter
+import androidx.compose.ui.graphics.toComposeImageBitmap
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.application
+import org.jetbrains.skia.Image as SkiaImage
 import io.nisfeb.talon.ai.AiSettingsRepository
 import io.nisfeb.talon.ai.DailyDigestSettings
 import io.nisfeb.talon.ai.DesktopDailyDigestSettings
@@ -160,6 +163,16 @@ fun main() {
         )
         kotlin.system.exitProcess(3)
     }
+    // Load the window/taskbar icon from the bundled resources. The
+    // PNG lives at composeApp/src/desktopMain/resources/icon.png and
+    // gets packaged onto the classpath at /icon.png. Skia decodes
+    // and we hand a Painter to Window. Best-effort: if loading
+    // fails for any reason the window just gets the JVM default.
+    val iconPainter = runCatching {
+        val bytes = ClassLoader.getSystemResourceAsStream("icon.png")?.use { it.readBytes() }
+        bytes?.let { BitmapPainter(SkiaImage.makeFromEncoded(it).toComposeImageBitmap()) }
+    }.getOrNull()
+
     application {
         Window(
             // onCloseRequest runs on the AWT EDT. We can't graph.shutdown()
@@ -179,6 +192,7 @@ fun main() {
                 exitApplication()
             },
             title = "Talon",
+            icon = iconPainter,
         ) {
             App(
                 http = graph.http,
