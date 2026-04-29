@@ -170,11 +170,16 @@ abstract class MessageDao {
      * JSON text — inline text spans come through directly; structural
      * JSON keys (like "inline", "block") would also match but don't come
      * up as realistic queries.
+     *
+     * Callers MUST pre-escape the needle via [escapeLikeNeedle] — without
+     * it, queries containing `%` or `_` produce wrong results (search
+     * for "100%" returns every message). The ESCAPE clause below tells
+     * SQLite that `\` is a literal-prefix marker.
      */
     @Query("""
         SELECT * FROM messages
         WHERE isDeleted = 0
-          AND contentJson LIKE '%' || :needle || '%' COLLATE NOCASE
+          AND contentJson LIKE '%' || :needle || '%' ESCAPE '\' COLLATE NOCASE
         ORDER BY sentMs DESC
         LIMIT 100
     """)
@@ -186,12 +191,15 @@ abstract class MessageDao {
      * JSON; callers verify each survivor against the rendered plain
      * text in memory. Returns a List so the consumer can iterate and
      * break once the per-term hit cap is reached.
+     *
+     * Callers MUST pre-escape the term via [escapeLikeNeedle] — same
+     * reason as [search] above.
      */
     @Query("""
         SELECT * FROM messages
         WHERE isDeleted = 0
           AND author != :exceptAuthor
-          AND contentJson LIKE '%' || :term || '%' COLLATE NOCASE
+          AND contentJson LIKE '%' || :term || '%' ESCAPE '\' COLLATE NOCASE
         ORDER BY sentMs DESC
     """)
     abstract suspend fun candidatesForBackfill(term: String, exceptAuthor: String): List<MessageEntity>
@@ -258,3 +266,15 @@ internal fun MessageEntity.normalized(): MessageEntity {
         parentId = rawParent?.replace(".", ""),
     )
 }
+
+/**
+ * Escape SQL LIKE wildcards in a user-supplied needle. Pairs with
+ * the `ESCAPE '\'` clause on the LIKE queries in [MessageDao].
+ * Without this, a search for "100%" matches every message because
+ * `%` is a wildcard. Order matters — backslash first, otherwise
+ * we double-escape the escapes we're inserting.
+ */
+fun escapeLikeNeedle(s: String): String =
+    s.replace("\\", "\\\\")
+        .replace("%", "\\%")
+        .replace("_", "\\_")
