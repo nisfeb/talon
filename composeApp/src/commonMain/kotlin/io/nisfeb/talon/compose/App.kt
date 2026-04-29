@@ -27,6 +27,7 @@ import io.nisfeb.talon.update.UpdateState
 import io.nisfeb.talon.urbit.SessionStore
 import io.nisfeb.talon.urbit.TlonChatRepo
 import io.nisfeb.talon.urbit.UrbitSession
+import io.nisfeb.talon.util.Log
 import okhttp3.OkHttpClient
 
 /**
@@ -96,7 +97,20 @@ fun App(
         // this fresh UrbitSession on first composition. After login,
         // sessionStore has the new entry; the next re-key picks it up.
         val session = remember {
-            UrbitSession(http, sessionStore).also { it.tryRestore() }
+            UrbitSession(http, sessionStore).also { s ->
+                val restored = s.tryRestore()
+                if (restored == null && sessionStore.activeShip() != null) {
+                    // The active pointer says a ship is signed in, but
+                    // tryRestore couldn't hydrate the session — corrupt
+                    // shipUrl, missing entry, etc. Surface it for the
+                    // support thread before the LaunchedEffect below
+                    // routes us back to login.
+                    Log.w(
+                        "App",
+                        "tryRestore null for active=${sessionStore.activeShip()}",
+                    )
+                }
+            }
         }
         val repo = remember { TlonChatRepo(db = db) }
 
@@ -104,11 +118,22 @@ fun App(
             onDispose { runCatching { repo.stop() } }
         }
 
-        // Belt-and-suspenders: also gate on session.shipName.
-        // tryRestore() failure modes (malformed shipUrl, missing
-        // entry) leave shipName null even when activeShip() said
-        // a ship was active. Without this guard, repo.start reads
-        // session.ourPatp which throws on a half-initialized session.
+        // tryRestore-failure recovery. If loggedInShip says a ship
+        // is signed in but the session couldn't actually restore
+        // (shipName stayed null), there's no path to either run the
+        // app (repo.start would crash on session.ourPatp) or sign
+        // out (DmListScreen renders without a usable repo). Reset
+        // loggedInShip → re-key → LoginScreen.
+        LaunchedEffect(Unit) {
+            if (loggedInShip != null && session.shipName == null) {
+                loggedInShip = null
+            }
+        }
+
+        // Belt-and-suspenders: also gate repo.start on shipName.
+        // The recovery LaunchedEffect above will fire on the same
+        // composition pass; this guard prevents the start from
+        // racing the recovery.
         if (loggedInShip != null && session.shipName != null) {
             LaunchedEffect(Unit) { repo.start(session) }
         }
