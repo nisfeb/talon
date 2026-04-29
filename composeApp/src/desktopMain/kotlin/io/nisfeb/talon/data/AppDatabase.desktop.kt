@@ -59,6 +59,7 @@ actual abstract class AppDatabase : RoomDatabase() {
  */
 fun createAppDatabase(): AppDatabase {
     val dbFile = File(io.nisfeb.talon.util.AppDirs.userData, "talon-port.db")
+    sweepOldOrphans(dbFile.parentFile)
     return try {
         buildAndPing(dbFile)
     } catch (timeout: DatabaseOpenTimeoutException) {
@@ -147,6 +148,23 @@ private fun wipeDb(dbFile: File) {
                     "next open may inherit corruption",
             )
         }
+    }
+}
+
+/**
+ * Delete `*.corrupt-*` files in the data dir older than 7 days.
+ * The wipe-and-retry path on Windows can leave renamed orphans
+ * behind (when delete keeps failing); without this sweep they
+ * accumulate forever in userData. 7 days is enough for postmortem
+ * if needed and short enough to keep the dir tidy.
+ */
+private fun sweepOldOrphans(dir: File?) {
+    if (dir == null || !dir.isDirectory) return
+    val cutoff = System.currentTimeMillis() - 7L * 24 * 3600_000L
+    runCatching {
+        dir.listFiles { f -> f.name.contains(".corrupt-") }
+            ?.filter { it.lastModified() in 1..cutoff }
+            ?.forEach { runCatching { it.delete() } }
     }
 }
 
