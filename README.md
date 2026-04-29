@@ -48,15 +48,16 @@ signing — without them, desktop artifacts still ship.
 
 ## Pre-commit hook
 
-After cloning, enable the in-repo hook that scans staged changes for
-personal info and secret patterns (private keys, AWS / Anthropic /
-OpenAI / GitHub tokens, personal emails, machine-specific paths,
-etc.):
+After cloning, install the in-repo hooks once:
 
 ```bash
-git config core.hooksPath scripts/hooks
+./scripts/install-hooks.sh
 ```
 
-See [scripts/hooks/pre-commit](scripts/hooks/pre-commit) for the
-ruleset. Bypass with `git commit --no-verify` when you need to (e.g.
-adding a test fixture that intentionally contains a real patp).
+That sets `core.hooksPath` to `scripts/hooks/`, where the versioned
+`pre-commit` lives. The hook scans staged changes for personal info
+and secret patterns (private keys, AWS / Anthropic / OpenAI / GitHub
+tokens, personal emails, machine-specific paths, etc.) — see
+[scripts/hooks/pre-commit](scripts/hooks/pre-commit) for the ruleset.
+Bypass for one commit with `git commit --no-verify` when you need to
+(e.g. adding a test fixture that intentionally contains a real patp).
