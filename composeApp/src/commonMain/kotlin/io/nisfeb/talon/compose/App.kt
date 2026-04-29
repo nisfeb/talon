@@ -120,27 +120,34 @@ fun App(
 
         // tryRestore-failure recovery. If loggedInShip says a ship
         // is signed in but the session couldn't actually restore
-        // (shipName stayed null), there's no path to either run the
-        // app (repo.start would crash on session.ourPatp) or sign
-        // out (DmListScreen renders without a usable repo). Reset
-        // loggedInShip → re-key → LoginScreen.
+        // (shipName stayed null), wipe the bad sessionStore entry
+        // — without this, every cold start would loop through the
+        // same recovery path because the corrupt entry persists —
+        // and reset loggedInShip so the next re-key lands on
+        // LoginScreen.
         LaunchedEffect(Unit) {
             if (loggedInShip != null && session.shipName == null) {
+                runCatching {
+                    sessionStore.activeShip()?.let { sessionStore.remove(it) }
+                }
                 loggedInShip = null
             }
         }
 
-        // Belt-and-suspenders: also gate repo.start on shipName.
-        // The recovery LaunchedEffect above will fire on the same
-        // composition pass; this guard prevents the start from
-        // racing the recovery.
         if (loggedInShip != null && session.shipName != null) {
             LaunchedEffect(Unit) { repo.start(session) }
         }
 
         TalonTheme {
             Surface(modifier = Modifier.fillMaxSize()) {
-                val ship = loggedInShip
+                // Effective ship: the session's actual restored state.
+                // Using session.shipName instead of loggedInShip avoids
+                // the one-frame flash of a stale DmListScreen during
+                // tryRestore-failure recovery — without this gate, the
+                // composition where loggedInShip != null but
+                // session.shipName == null would render DmListScreen
+                // briefly before the recovery LaunchedEffect fires.
+                val ship = if (session.shipName != null) loggedInShip else null
                 when {
                     ship == null -> LoginScreen(
                         session = session,
