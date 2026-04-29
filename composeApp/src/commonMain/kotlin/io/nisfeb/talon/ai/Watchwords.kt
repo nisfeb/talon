@@ -1,9 +1,6 @@
-// TEMPORARY DUPLICATE of the pure-string-helpers section of
-// app/src/main/java/io/nisfeb/talon/ai/Watchwords.kt. The full
-// Watchwords class (Embedder + EmbeddingIndexer + ML Kit
-// integration) stays Android-only; commonMain only needs the
-// sanitizeTerm helper that SettingsSyncImpl uses to namespace
-// %settings entries by canonical-form term.
+// Pure-string watchword helpers consumed by SettingsSyncImpl. The
+// runtime Watchwords runner (Embedder + EmbeddingIndexer + ML Kit)
+// stays in androidMain — commonMain only needs the sanitizer.
 package io.nisfeb.talon.ai
 
 /**

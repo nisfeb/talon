@@ -1,12 +1,3 @@
-// TEMPORARY DUPLICATE of app/src/main/java/io/nisfeb/talon/ui/StoryRenderer.kt
-// Diverges from production in controlled ways so it compiles in commonMain:
-//  1. InlineCitation no longer pulls TalonApplication via LocalContext.
-//     A new LocalCiteResolver CompositionLocal handles cite lookup so any
-//     consumer (DmChatScreen) wires its own resolver.
-//  2. LocWidgetBlock and CalWidgetBlock's Android Intent launches are
-//     stubbed: TODO(port-d5-followup) — desktop will need its own URL
-//     opener.
-// Keep in sync with production until app/ is removed in Stage F.
 package io.nisfeb.talon.ui
 
 import androidx.compose.foundation.background
