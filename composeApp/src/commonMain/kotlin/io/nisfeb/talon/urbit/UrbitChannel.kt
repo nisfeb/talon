@@ -87,6 +87,17 @@ class UrbitChannel internal constructor(
             close()
         }
         awaitClose {
+            // es.cancel() stops new events at the SSE source.
+            // inbox.close() terminates the forwarder's for-loop.
+            // forwarder.cancel() is belt-and-suspenders: if the
+            // forwarder is mid-send when the collector vanishes,
+            // channelFlow's send() throws CancellationException
+            // anyway and the loop unwinds naturally. The explicit
+            // cancel here covers the narrow race where send was
+            // about to be invoked. A double-deliver of one event
+            // is theoretically possible, but every Urbit event we
+            // ingest is idempotent (Room upserts on primary key),
+            // so harmless in practice.
             es.cancel()
             inbox.close()
             forwarder.cancel()
