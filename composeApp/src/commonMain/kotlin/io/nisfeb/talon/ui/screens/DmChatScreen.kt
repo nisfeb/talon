@@ -131,11 +131,7 @@ import io.nisfeb.talon.ui.ContactProfileSheet
 import io.nisfeb.talon.ui.DraftStore
 import io.nisfeb.talon.ui.EmojiCatalog
 import io.nisfeb.talon.ui.EmojiPickerDropdown
-import io.nisfeb.talon.ui.EntityActionChips
 import io.nisfeb.talon.ui.LinkPreviewCard
-import io.nisfeb.talon.ui.VoiceRecordButton
-import io.nisfeb.talon.ui.isVoiceMessagesSupported
-import io.nisfeb.talon.ui.rememberLocationProvider
 import io.nisfeb.talon.ui.LocalCiteResolver
 import io.nisfeb.talon.ui.firstLinkUrl
 import io.nisfeb.talon.ui.MentionPicker
@@ -188,11 +184,22 @@ fun DmChatScreen(
     onOpenConversation: (whom: String) -> Unit,
     onOpenImage: (url: String) -> Unit,
     onOpenSelfProfile: () -> Unit,
+    /** Optional Android-only platform widget slots. Each replaces a
+     *  former expect/actual shim; desktop and tests pass null and the
+     *  surface degrades gracefully (no chips, no voice button, no GPS
+     *  for /loc). The platform entry point that creates App() supplies
+     *  these — Main.kt stays null, the future MainActivity will pass
+     *  real Composables. */
+    entityChips: (@Composable (text: String, modifier: Modifier) -> Unit)? = null,
+    voiceComposer: (@Composable (
+        enabled: Boolean,
+        onRecorded: (path: String, durationMs: Long) -> Unit,
+    ) -> Unit)? = null,
+    locationProvider: io.nisfeb.talon.ui.LocationProvider? = null,
     modifier: Modifier = Modifier,
 ) {
     val aiConfigured by aiSettings.state.collectAsState()
     val hideComposerButtons by uiSettings.hideComposerButtons.collectAsState()
-    val locationProvider = rememberLocationProvider()
     val aiFeatures = remember(aiSettings) {
         AiFeatures(AiClient { aiSettings.state.value })
     }
@@ -653,6 +660,7 @@ fun DmChatScreen(
                             onAvatarTap = onAvatarTap,
                             onCitationTap = onCitationTap,
                             entityActionsEnabled = aiConfigured.entityActionsEnabled,
+                            entityChips = entityChips,
                             flashAmber = item.row.m.id == flashMessageId,
                         )
                     }
@@ -846,10 +854,10 @@ fun DmChatScreen(
                             modifier = Modifier.size(22.dp),
                         )
                     }
-                    if (isVoiceMessagesSupported) {
-                        VoiceRecordButton(
-                            enabled = canSend && !uploading,
-                            onRecorded = { path, durationMs ->
+                    if (voiceComposer != null) {
+                        voiceComposer(
+                            canSend && !uploading,
+                            { path, durationMs ->
                                 pendingVoice = PendingVoice(path, durationMs)
                             },
                         )
@@ -1113,6 +1121,7 @@ private fun MessageRow(
     onAvatarTap: (String) -> Unit,
     onCitationTap: (String) -> Unit,
     entityActionsEnabled: Boolean,
+    entityChips: (@Composable (text: String, modifier: Modifier) -> Unit)? = null,
     flashAmber: Boolean = false,
 ) {
     val m = row.m
@@ -1215,10 +1224,7 @@ private fun MessageRow(
                 val plainText = remember(m.id, m.contentJson) {
                     StoryCache.textFor(m.id, m.contentJson)
                 }
-                EntityActionChips(
-                    text = plainText,
-                    modifier = Modifier.padding(top = 4.dp),
-                )
+                entityChips?.invoke(plainText, Modifier.padding(top = 4.dp))
             }
             if (grouped.isNotEmpty() || row.replyCount > 0) {
                 FlowRow(

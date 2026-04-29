@@ -1,7 +1,3 @@
-// TEMPORARY DUPLICATE: actual for the commonMain
-// `BatteryExemptionBanner` expect Composable. Tracks the production
-// banner in app/src/main/java/io/nisfeb/talon/ui/BatteryBanner.kt
-// during the CMP port; keep in lockstep until Stage F deletes app/.
 package io.nisfeb.talon.ui
 
 import android.content.Context
@@ -31,7 +27,7 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.edit
 
 @Composable
-actual fun BatteryExemptionBanner(modifier: Modifier) {
+fun BatteryExemptionBanner(modifier: Modifier = Modifier) {
     val context = LocalContext.current
     val prefs = remember { context.getSharedPreferences("talon.prefs", Context.MODE_PRIVATE) }
 

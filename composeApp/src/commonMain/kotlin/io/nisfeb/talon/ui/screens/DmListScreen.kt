@@ -92,7 +92,6 @@ import io.nisfeb.talon.data.FolderEntity
 import io.nisfeb.talon.data.FolderMemberEntity
 import io.nisfeb.talon.data.MessageEntity
 import io.nisfeb.talon.ui.Avatar
-import io.nisfeb.talon.ui.BatteryExemptionBanner
 import io.nisfeb.talon.ui.ContactMap
 import io.nisfeb.talon.ui.FolderAssignmentSheet
 import io.nisfeb.talon.ui.UpdateBanner
@@ -146,6 +145,11 @@ fun DmListScreen(
     shipNicknames: Map<String, String> = emptyMap(),
     onSwitchShip: (String) -> Unit = {},
     onAddShip: () -> Unit = {},
+    /** Optional slot for the platform-specific battery-exemption nudge
+     *  banner. Android wires it to a real Composable; desktop (and
+     *  tests) leave it null. Replaces the previous expect/actual
+     *  shim that put a no-op on every non-Android target. */
+    batteryBanner: (@Composable () -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val scope = rememberCoroutineScope()
@@ -605,7 +609,7 @@ fun DmListScreen(
             }
         }
         HorizontalDivider()
-        BatteryExemptionBanner()
+        batteryBanner?.invoke()
         val totalUnread = remember(unreadRows) { unreadRows.sumOf { it.second } }
         val totalMentions = remember(mentionCounts) { mentionCounts.values.sum() }
         FolderTabs(

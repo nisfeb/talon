@@ -113,7 +113,7 @@ private class AndroidVoiceRecorder(private val context: Context) {
 }
 
 @Composable
-actual fun VoiceRecordButton(
+fun VoiceRecordButton(
     enabled: Boolean,
     onRecorded: (path: String, durationMs: Long) -> Unit,
     modifier: Modifier,

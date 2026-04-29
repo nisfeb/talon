@@ -11,7 +11,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 
 @Composable
-actual fun EntityActionChips(text: String, modifier: Modifier) {
+fun EntityActionChips(text: String, modifier: Modifier) {
     // TODO(port-d5-followup): port EntityActions/ActionKind/DetectedAction
     // into composeApp/androidMain (ML Kit) and reinstate the real chip
     // rendering matching app/ui/EntityActionChips.kt.

@@ -16,7 +16,7 @@ import kotlin.coroutines.resumeWithException
 import kotlinx.coroutines.suspendCancellableCoroutine
 
 @Composable
-actual fun rememberLocationProvider(): LocationProvider? {
+fun rememberLocationProvider(): LocationProvider? {
     val context = LocalContext.current
     val launcher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
