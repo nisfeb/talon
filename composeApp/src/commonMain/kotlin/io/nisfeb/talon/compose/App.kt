@@ -69,6 +69,11 @@ fun App(
     drafts: DraftStore,
     updateState: UpdateState,
     settingsSync: SettingsSync? = null,
+    /** Per-process daily-digest config. Null on platforms without a
+     *  digest impl wired (Android composeApp today). When non-null,
+     *  DmListScreen reveals the "Today's brief" drawer entry only
+     *  if the user enabled the alarm. */
+    dailyDigestSettings: io.nisfeb.talon.ai.DailyDigestSettings? = null,
 ) {
     // Derive the initial logged-in ship from sessionStore.active()
     // (the joined SavedSession) rather than activeShip() (just the
@@ -509,6 +514,15 @@ fun App(
                         onOpenInvites = { showInvites = true },
                         onOpenBookmarks = { showBookmarks = true },
                         onOpenActivity = { showActivity = true },
+                        onOpenWatchwords = { showWatchwords = true },
+                        onOpenDigest = { showDailyDigest = true },
+                        digestEnabled = dailyDigestSettings
+                            ?.state
+                            ?.collectAsState()
+                            ?.value
+                            ?.enabled
+                            ?: false,
+                        onOpenAdministration = { showGroupAdminList = true },
                         onOpenSettings = { showSettings = true },
                         activeShip = ship,
                     )

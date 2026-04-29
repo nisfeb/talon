@@ -202,6 +202,7 @@ fun main() {
                 drafts = graph.drafts,
                 updateState = graph.updateState,
                 settingsSync = graph.settingsSync,
+                dailyDigestSettings = graph.dailyDigestSettings,
             )
         }
     }
