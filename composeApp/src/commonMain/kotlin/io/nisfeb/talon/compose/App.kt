@@ -178,8 +178,13 @@ fun App(
                             println("TODO: new message")
                         },
                         onSignOut = {
+                            // session.logout() already removes just
+                            // the active ship's entry (UrbitSession.kt
+                            // line 89). Adding sessionStore.clearAll()
+                            // would wipe every other saved ship too,
+                            // which is wrong for multi-ship setups
+                            // and only worked under Path A by accident.
                             session.logout()
-                            sessionStore.clearAll()
                             // Reset every navigation-state var so the
                             // next sign-in lands on DmList instead of
                             // a stale chat from the prior ship.
