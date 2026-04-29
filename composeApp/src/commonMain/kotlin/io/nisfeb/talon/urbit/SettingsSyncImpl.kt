@@ -695,7 +695,11 @@ class SettingsSyncImpl(
         return v
     }
 
-    private suspend fun applyBucket(bucket: String, entries: JsonObject?) {
+    // `internal` so the desktopTest source set can drive applyBucket
+    // directly without the full bootstrap+UrbitChannel scaffolding.
+    // Kept in lockstep with production app/'s SettingsSync.kt — when
+    // that copy is retired in Stage F the visibility can stay internal.
+    internal suspend fun applyBucket(bucket: String, entries: JsonObject?) {
         // Replace-on-apply: any local row not in the incoming bucket
         // will be wiped. For bucket reorders this is the right call.
         when (bucket) {
