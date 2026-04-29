@@ -31,6 +31,7 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import io.nisfeb.talon.ui.combinedClickableWithSecondary
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -1082,7 +1083,7 @@ private fun MessageRow(
         modifier = Modifier
             .fillMaxWidth()
             .background(flashColor)
-            .combinedClickable(onClick = {}, onLongClick = { onLongPress(m) })
+            .combinedClickableWithSecondary(onClick = {}, onLongClick = { onLongPress(m) })
             .graphicsLayer {
                 translationX = offsetX.value
                 alpha = if (isPending) 0.55f else 1f

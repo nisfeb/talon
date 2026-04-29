@@ -19,6 +19,7 @@ package io.nisfeb.talon.ui.screens
 
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
+import io.nisfeb.talon.ui.combinedClickableWithSecondary
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -757,7 +758,7 @@ private fun MemberRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .combinedClickable(onClick = {}, onLongClick = onLongPress)
+            .combinedClickableWithSecondary(onClick = {}, onLongClick = onLongPress)
             .padding(vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),

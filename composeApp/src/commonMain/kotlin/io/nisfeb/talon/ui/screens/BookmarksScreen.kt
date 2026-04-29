@@ -6,6 +6,7 @@ package io.nisfeb.talon.ui.screens
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import io.nisfeb.talon.ui.combinedClickableWithSecondary
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -324,7 +325,7 @@ private fun FolderChipWithMenu(
     // combinedClickable Modifier on a Row that visually mimics the chip
     // selection state via the underlying FilterChip.
     Row(
-        modifier = Modifier.combinedClickable(
+        modifier = Modifier.combinedClickableWithSecondary(
             onClick = onClick,
             onLongClick = onLongPress,
         ),
@@ -457,7 +458,7 @@ private fun BookmarkRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .combinedClickable(onClick = onClick, onLongClick = onLongClick)
+            .combinedClickableWithSecondary(onClick = onClick, onLongClick = onLongClick)
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.Top,
         horizontalArrangement = Arrangement.spacedBy(12.dp),

@@ -10,6 +10,7 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import io.nisfeb.talon.ui.combinedClickableWithSecondary
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -1229,7 +1230,7 @@ private fun TabChip(
         modifier = Modifier
             .clip(RoundedCornerShape(16.dp))
             .background(bg)
-            .combinedClickable(
+            .combinedClickableWithSecondary(
                 onClick = onClick,
                 onLongClick = onLongClick,
             )
@@ -1368,7 +1369,7 @@ private fun ConversationRow(
     val rowClickModifier = if (editMode && dragHandleModifier != null) {
         Modifier.clickable { onClick(m.whom) }.then(dragHandleModifier)
     } else {
-        Modifier.combinedClickable(
+        Modifier.combinedClickableWithSecondary(
             onClick = { onClick(m.whom) },
             onLongClick = { onLongClick(m.whom) },
         )
@@ -1534,7 +1535,7 @@ private fun GroupHeaderRow(
     val rowClickModifier = if (editMode) {
         Modifier.clickable { onToggle(flag) }.then(dragHandleModifier)
     } else {
-        Modifier.combinedClickable(
+        Modifier.combinedClickableWithSecondary(
             onClick = { onToggle(flag) },
             onLongClick = onLongClick?.let { { it(flag) } },
         )
@@ -1627,7 +1628,7 @@ private fun GroupChannelRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .combinedClickable(
+            .combinedClickableWithSecondary(
                 onClick = { onClick(whom) },
                 onLongClick = { onLongClick(whom) },
             )

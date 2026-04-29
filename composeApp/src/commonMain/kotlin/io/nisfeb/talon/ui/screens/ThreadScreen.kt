@@ -13,6 +13,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
+import io.nisfeb.talon.ui.combinedClickableWithSecondary
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -451,7 +452,7 @@ private fun ThreadMessage(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .combinedClickable(onClick = {}, onLongClick = { onLongPress(m) })
+            .combinedClickableWithSecondary(onClick = {}, onLongClick = { onLongPress(m) })
             .background(baseColor)
             .background(flashOverlay)
             .padding(top = if (showHeader) 10.dp else 2.dp, bottom = 2.dp),
