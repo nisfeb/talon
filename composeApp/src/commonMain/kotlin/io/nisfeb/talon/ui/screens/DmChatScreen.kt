@@ -57,6 +57,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Notifications
@@ -414,6 +417,7 @@ fun DmChatScreen(
     var uploading by remember { mutableStateOf(false) }
 
     val pickImage = rememberImagePicker()
+    val pickAnyFile = io.nisfeb.talon.util.rememberAnyFilePicker()
     val onPickAndSendImage: () -> Unit = {
         scope.launch {
             val picked = pickImage() ?: return@launch
@@ -435,12 +439,31 @@ fun DmChatScreen(
             uploading = false
         }
     }
+    // Non-image file attach. Uploads via the same memex/storage path
+    // used by images and posts the resulting URL as a plain message —
+    // Tlon clients render a bare URL as a link preview, so the
+    // recipient gets a clickable card. Keeps us out of needing a
+    // dedicated file-message JSON shape.
+    val onPickAndSendFile: () -> Unit = {
+        scope.launch {
+            val picked = pickAnyFile() ?: return@launch
+            uploading = true
+            sendError = null
+            runCatching {
+                val hostedUrl = repo.uploadImage(picked.bytes, picked.mimeType, picked.displayName)
+                repo.send(whom, hostedUrl)
+            }.onFailure { err ->
+                sendError = "file failed: ${err.message ?: err::class.simpleName}"
+            }
+            uploading = false
+        }
+    }
 
     // ── message action sheet state ──
     var actionTarget by remember { mutableStateOf<MessageEntity?>(null) }
     var editing by remember { mutableStateOf<MessageEntity?>(null) }
     var confirmingDelete by remember { mutableStateOf<MessageEntity?>(null) }
-    var pendingQuote by remember(whom) { mutableStateOf<MessageEntity?>(null) }  // TODO(port-d5-followup): wire quote into composer
+    var pendingQuote by remember(whom) { mutableStateOf<MessageEntity?>(null) }
 
     val canSend = remember(whom) {
         whom.startsWith("~") || whom.startsWith("0v") || whom.startsWith("chat/")
@@ -499,10 +522,9 @@ fun DmChatScreen(
     val onAvatarTap: (String) -> Unit = remember {
         { patp -> profileSheetShip = patp }
     }
-    val onLinkTap: (String) -> Unit = remember {
-        // TODO(port-d5-followup): wire a platform URL opener; on Android
-        // production launches Intent.ACTION_VIEW.
-        { _ -> }
+    val uriHandler = androidx.compose.ui.platform.LocalUriHandler.current
+    val onLinkTap: (String) -> Unit = remember(uriHandler) {
+        { url -> runCatching { uriHandler.openUri(url) } }
     }
     val onCitationTap: (String) -> Unit = remember {
         { target -> currentOnOpenConversation(target) }
@@ -699,7 +721,10 @@ fun DmChatScreen(
             // composer here covers plain-text + slash + mention + emoji.
             val doSend: () -> Boolean = {
                 val body = draft.text.trim()
-                val canEmit = body.isNotEmpty() && canSend
+                val quote = pendingQuote
+                // Allow a bare quote with no body so users can react to a
+                // message by quoting it without adding text.
+                val canEmit = (body.isNotEmpty() || quote != null) && canSend
                 if (!canEmit) {
                     false
                 } else {
@@ -707,20 +732,32 @@ fun DmChatScreen(
                     drafts.clear(whom)
                     sendError = null
                     forceBottomTick += 1
+                    pendingQuote = null
                     scope.launch {
                         runCatching {
-                            val cmd = runCommand(
-                                rawText = body,
-                                repo = repo,
-                                http = http,
-                                locationProvider = locationProvider,
-                                toast = { msg -> sendError = msg },
-                            )
+                            // Slash commands are bypassed when quoting — a
+                            // quote is a structured payload, not text the
+                            // command runner is meant to interpret.
+                            val cmd = if (quote == null) {
+                                runCommand(
+                                    rawText = body,
+                                    repo = repo,
+                                    http = http,
+                                    locationProvider = locationProvider,
+                                    toast = { msg -> sendError = msg },
+                                )
+                            } else CommandResult.NotACommand
                             when (cmd) {
                                 is CommandResult.Send -> repo.send(whom, cmd.body)
                                 is CommandResult.Handled -> {}
                                 is CommandResult.Error -> sendError = cmd.message
-                                is CommandResult.NotACommand -> repo.send(whom, body)
+                                is CommandResult.NotACommand -> {
+                                    if (quote != null) {
+                                        repo.sendQuote(whom, body, quote.whom, quote.id)
+                                    } else {
+                                        repo.send(whom, body)
+                                    }
+                                }
                             }
                         }.onFailure { err ->
                             Log.e("DmChatScreen", "send failed", err)
@@ -729,6 +766,13 @@ fun DmChatScreen(
                     }
                     true
                 }
+            }
+            pendingQuote?.let { q ->
+                QuotePreviewRow(
+                    target = q,
+                    contactMap = contactMap,
+                    onDismiss = { pendingQuote = null },
+                )
             }
             val pv = pendingVoice
             if (pv != null) {
@@ -787,6 +831,17 @@ fun DmChatScreen(
                             modifier = Modifier.size(22.dp),
                         )
                     }
+                }
+                IconButton(
+                    onClick = onPickAndSendFile,
+                    enabled = canSend && !uploading,
+                    modifier = Modifier.size(36.dp),
+                ) {
+                    Icon(
+                        Icons.Filled.AttachFile,
+                        contentDescription = "Attach file",
+                        modifier = Modifier.size(22.dp),
+                    )
                 }
                 if (isVoiceMessagesSupported) {
                     VoiceRecordButton(
@@ -1407,6 +1462,56 @@ private data class PendingVoice(val path: String, val durationMs: Long)
 // for inline playback; commonMain skips that step and only offers
 // Cancel / Send. A future Stage F follow-up can layer in a
 // platform-actual audio playback shim if users want it back.
+@Composable
+private fun QuotePreviewRow(
+    target: MessageEntity,
+    contactMap: ContactMap,
+    onDismiss: () -> Unit,
+) {
+    val author = remember(target.author, contactMap) { contactMap.displayName(target.author) }
+    val preview = remember(target.id, target.contentJson) {
+        StoryCache.textFor(target.id, target.contentJson)
+            .replace('\n', ' ')
+            .take(160)
+    }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(IntrinsicSize.Min)
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Box(
+            modifier = Modifier
+                .width(3.dp)
+                .fillMaxHeight()
+                .background(MaterialTheme.colorScheme.primary),
+        )
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                "Quoting $author",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.primary,
+            )
+            Text(
+                preview.ifBlank { "(attachment)" },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 2,
+            )
+        }
+        IconButton(onClick = onDismiss, modifier = Modifier.size(28.dp)) {
+            Icon(
+                imageVector = Icons.Filled.Close,
+                contentDescription = "Cancel quote",
+                modifier = Modifier.size(18.dp),
+            )
+        }
+    }
+}
+
 @Composable
 private fun VoicePreviewRow(
     pending: PendingVoice,

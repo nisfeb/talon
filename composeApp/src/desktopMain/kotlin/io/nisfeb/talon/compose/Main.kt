@@ -1,9 +1,14 @@
 package io.nisfeb.talon.compose
 
+import androidx.compose.runtime.remember
 import androidx.compose.ui.graphics.painter.BitmapPainter
 import androidx.compose.ui.graphics.toComposeImageBitmap
+import androidx.compose.ui.window.Notification
+import androidx.compose.ui.window.Tray
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.application
+import androidx.compose.ui.window.rememberTrayState
+import io.nisfeb.talon.notify.Notifier
 import org.jetbrains.skia.Image as SkiaImage
 import io.nisfeb.talon.ai.AiSettingsRepository
 import io.nisfeb.talon.ai.DailyDigestSettings
@@ -204,6 +209,29 @@ fun main() {
     }.getOrNull()
 
     application {
+        val trayState = rememberTrayState()
+        // Tray icon for OS notifications. iconPainter may be null when
+        // the bundled resource fails to load — Tray requires non-null,
+        // so fall back to a tiny transparent painter to keep the tray
+        // entry visible. The notifier still works either way.
+        val trayIconPainter = iconPainter
+            ?: androidx.compose.ui.graphics.painter.ColorPainter(
+                androidx.compose.ui.graphics.Color.Transparent,
+            )
+        Tray(
+            icon = trayIconPainter,
+            state = trayState,
+            tooltip = "Talon",
+        )
+        val notifier: Notifier = remember(trayState) {
+            object : Notifier {
+                override fun notify(title: String, body: String) {
+                    trayState.sendNotification(
+                        Notification(title = title, message = body),
+                    )
+                }
+            }
+        }
         Window(
             // onCloseRequest runs on the AWT EDT. We can't graph.shutdown()
             // here because shutdown's awaitTermination(2s) would freeze
@@ -235,6 +263,7 @@ fun main() {
                 dailyDigestSettings = graph.dailyDigestSettings,
                 watchwordsSync = graph.watchwordsSync,
                 themePreference = graph.themePreference,
+                notifier = notifier,
             )
         }
     }

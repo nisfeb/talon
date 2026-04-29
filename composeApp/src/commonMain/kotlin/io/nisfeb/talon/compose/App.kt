@@ -16,6 +16,8 @@ import androidx.compose.runtime.setValue
 import io.nisfeb.talon.ai.AiSettingsRepository
 import io.nisfeb.talon.ai.InMemoryWatchwordsSyncSettings
 import io.nisfeb.talon.ai.WatchwordsSyncSettings
+import io.nisfeb.talon.notify.NoopNotifier
+import io.nisfeb.talon.notify.Notifier
 import io.nisfeb.talon.data.AppDatabase
 import io.nisfeb.talon.ui.DraftStore
 import io.nisfeb.talon.ui.PlatformBackHandler
@@ -92,6 +94,10 @@ fun App(
      *  default; desktop passes a JSON-backed impl so the choice
      *  survives restart. */
     themePreference: ThemePreference = InMemoryThemePreference(),
+    /** OS-level notifier. Desktop wires a tray-balloon impl; other
+     *  platforms (Android composeApp) get the no-op default until
+     *  their notification stories port. */
+    notifier: Notifier = NoopNotifier,
 ) {
     // Derive the initial logged-in ship from sessionStore.active()
     // (the joined SavedSession) rather than activeShip() (just the
@@ -271,6 +277,39 @@ fun App(
 
         if (loggedInShip != null && session.shipName != null) {
             LaunchedEffect(Unit) { repo.start(session) }
+
+            // OS notifications for incoming messages. Watches the
+            // per-conversation latest-message flow and fires a balloon
+            // when a whom's latest id changes to something authored by
+            // someone other than us, AND the chat isn't currently open.
+            // The first emission seeds the baseline so we don't notify
+            // for every existing chat at app startup.
+            LaunchedEffect(notifier, loggedInShip) {
+                val lastSeenIds = mutableMapOf<String, String>()
+                var seeded = false
+                db.messages().conversationLatest()
+                    .collect { rows ->
+                        if (!seeded) {
+                            for (row in rows) lastSeenIds[row.whom] = row.id
+                            seeded = true
+                            return@collect
+                        }
+                        for (row in rows) {
+                            val prior = lastSeenIds[row.whom]
+                            lastSeenIds[row.whom] = row.id
+                            if (prior == row.id) continue
+                            if (row.author == loggedInShip) continue
+                            if (row.whom == openChat) continue
+                            val title = row.author
+                            val body = io.nisfeb.talon.urbit.StoryCache
+                                .textFor(row.id, row.contentJson)
+                                .replace('\n', ' ')
+                                .take(200)
+                                .ifBlank { "(attachment)" }
+                            runCatching { notifier.notify(title, body) }
+                        }
+                    }
+            }
         }
 
         val themeMode by themePreference.mode.collectAsState()

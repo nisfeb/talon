@@ -277,20 +277,23 @@ fun StoryRenderer(
     }
 }
 
-// TODO(port-d5-followup): port InlineAudioPlayer/InlineVideoPlayer
-// (currently in app/ui/MediaPlayerInline.kt) using AndroidView+ExoPlayer
-// on Android and a desktop equivalent (JavaFX MediaPlayer or VLCJ).
-// For now both stubs render as a tappable URL pill so users still see
-// the link.
+// Inline media is currently a tappable pill that hands off to the OS
+// default media app (browser → media player). True inline playback
+// requires AndroidView+ExoPlayer on Android and a JavaFX MediaPlayer
+// or VLCJ wrapper on desktop — neither has landed yet, but the
+// hand-off keeps the feature usable in the meantime.
 @Composable
 private fun InlineAudioPlayer(url: String) {
+    val uriHandler = androidx.compose.ui.platform.LocalUriHandler.current
     Surface(
         shape = RoundedCornerShape(10.dp),
         color = MaterialTheme.colorScheme.surfaceVariant,
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { runCatching { uriHandler.openUri(url) } },
     ) {
         Text(
-            "🔊 $url",
+            "🔊 Play $url",
             style = MaterialTheme.typography.bodySmall,
             modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
         )
@@ -299,13 +302,16 @@ private fun InlineAudioPlayer(url: String) {
 
 @Composable
 private fun InlineVideoPlayer(url: String) {
+    val uriHandler = androidx.compose.ui.platform.LocalUriHandler.current
     Surface(
         shape = RoundedCornerShape(10.dp),
         color = MaterialTheme.colorScheme.surfaceVariant,
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { runCatching { uriHandler.openUri(url) } },
     ) {
         Text(
-            "🎬 $url",
+            "🎬 Play $url",
             style = MaterialTheme.typography.bodySmall,
             modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
         )
@@ -571,12 +577,9 @@ private fun LocWidgetBlock(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
+            val uriHandlerLoc = androidx.compose.ui.platform.LocalUriHandler.current
             androidx.compose.material3.TextButton(onClick = {
-                // TODO(port-d5-followup): wire a platform URL opener so
-                // desktop can hand off to the OS map app or browser. For
-                // now this is a no-op on commonMain; the production app/
-                // version still launches geo:/OSM intents on Android.
-                @Suppress("UNUSED_EXPRESSION") osmViewerUrl(lat, lng)
+                runCatching { uriHandlerLoc.openUri(osmViewerUrl(lat, lng)) }
             }) { Text("Open") }
         }
     }
@@ -620,13 +623,16 @@ private fun CalWidgetBlock(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
+            val uriHandlerCal = androidx.compose.ui.platform.LocalUriHandler.current
             androidx.compose.material3.TextButton(onClick = {
-                // TODO(port-d5-followup): wire an OS calendar handoff for
-                // desktop. Production Android still launches the
-                // CalendarContract Intent.ACTION_INSERT path.
-                @Suppress("UNUSED_EXPRESSION") startEpochMs
-                @Suppress("UNUSED_EXPRESSION") endEpochMs
-                @Suppress("UNUSED_EXPRESSION") title
+                runCatching {
+                    val ics = buildIcs(startEpochMs, endEpochMs, title)
+                    val tmp = java.io.File.createTempFile("talon-event-", ".ics").apply {
+                        deleteOnExit()
+                        writeText(ics, Charsets.UTF_8)
+                    }
+                    uriHandlerCal.openUri(tmp.toURI().toString())
+                }
             }) { Text("Add") }
         }
     }
@@ -695,5 +701,29 @@ private fun TzWidgetBlock(
                 }
             }
         }
+    }
+}
+
+private fun buildIcs(startEpochMs: Long, endEpochMs: Long, title: String): String {
+    val tz = java.util.TimeZone.getTimeZone("UTC")
+    val fmt = java.text.SimpleDateFormat("yyyyMMdd'T'HHmmss'Z'").apply { timeZone = tz }
+    val dtStamp = fmt.format(java.util.Date())
+    val dtStart = fmt.format(java.util.Date(startEpochMs))
+    val dtEnd = fmt.format(java.util.Date(endEpochMs))
+    val uid = "talon-${startEpochMs}-${title.hashCode()}@talon"
+    val safeTitle = title.replace("\\", "\\\\").replace(",", "\\,")
+        .replace(";", "\\;").replace("\n", "\\n")
+    return buildString {
+        append("BEGIN:VCALENDAR\r\n")
+        append("VERSION:2.0\r\n")
+        append("PRODID:-//Talon//EN\r\n")
+        append("BEGIN:VEVENT\r\n")
+        append("UID:").append(uid).append("\r\n")
+        append("DTSTAMP:").append(dtStamp).append("\r\n")
+        append("DTSTART:").append(dtStart).append("\r\n")
+        append("DTEND:").append(dtEnd).append("\r\n")
+        append("SUMMARY:").append(safeTitle).append("\r\n")
+        append("END:VEVENT\r\n")
+        append("END:VCALENDAR\r\n")
     }
 }

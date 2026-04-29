@@ -13,6 +13,14 @@ actual fun rememberImagePicker(): suspend () -> PickedImage? {
     }
 }
 
+@Composable
+actual fun rememberAnyFilePicker(): suspend () -> PickedImage? {
+    val picker = remember { DesktopFilePicker() }
+    return remember(picker) {
+        suspend { picker.pickAnyFile() }
+    }
+}
+
 /**
  * Header-only width/height. Avoids ImageIO.read's full-bitmap decode
  * — for a 20MB photo that's a multi-second hitch and a ~100MB heap

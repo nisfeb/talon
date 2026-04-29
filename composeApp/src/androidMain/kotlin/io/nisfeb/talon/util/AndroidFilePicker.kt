@@ -19,4 +19,11 @@ class AndroidFilePicker : FilePicker {
                 "PickVisualMedia from inside the Composable that needs it."
         )
     }
+
+    override suspend fun pickAnyFile(): PickedImage? {
+        throw NotImplementedError(
+            "AndroidFilePicker is a stub. Use rememberAnyFilePicker() " +
+                "from inside a Composable instead."
+        )
+    }
 }

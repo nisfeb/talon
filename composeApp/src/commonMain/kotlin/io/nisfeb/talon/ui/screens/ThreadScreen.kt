@@ -214,11 +214,9 @@ fun ThreadScreen(
     val onMentionTap: (String) -> Unit = remember(onOpenConversation) {
         { patp -> onOpenConversation(patp) }
     }
-    val onLinkTap: (String) -> Unit = remember {
-        // TODO(port-d5-followup): wire a platform URL opener; on Android
-        // production launches Intent.ACTION_VIEW. Desktop will use
-        // java.awt.Desktop.getDesktop().browse(URI(...)).
-        { _ -> }
+    val uriHandler = androidx.compose.ui.platform.LocalUriHandler.current
+    val onLinkTap: (String) -> Unit = remember(uriHandler) {
+        { url -> runCatching { uriHandler.openUri(url) } }
     }
     val onImageTap: (String) -> Unit = remember(onOpenImage) {
         { url -> onOpenImage(url) }

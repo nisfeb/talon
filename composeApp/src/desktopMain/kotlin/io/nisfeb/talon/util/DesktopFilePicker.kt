@@ -51,6 +51,30 @@ class DesktopFilePicker : FilePicker {
         }
     }
 
+    override suspend fun pickAnyFile(): PickedImage? = mutex.withLock {
+        val file = withContext(Dispatchers.Swing) {
+            val chooser = JFileChooser().apply {
+                dialogTitle = "Pick a file"
+                isAcceptAllFileFilterUsed = true
+            }
+            if (chooser.showOpenDialog(null) != JFileChooser.APPROVE_OPTION) null
+            else chooser.selectedFile
+        } ?: return null
+        return withContext(Dispatchers.IO) {
+            runCatching {
+                val probedMime = runCatching {
+                    java.nio.file.Files.probeContentType(file.toPath())
+                }.getOrNull()
+                PickedImage(
+                    bytes = file.readBytes(),
+                    mimeType = probedMime
+                        ?: mimeFromExtension(file.extension.lowercase()),
+                    displayName = file.name,
+                )
+            }.getOrNull()
+        }
+    }
+
     private fun mimeFromExtension(ext: String): String = when (ext) {
         "jpg", "jpeg" -> "image/jpeg"
         "png" -> "image/png"

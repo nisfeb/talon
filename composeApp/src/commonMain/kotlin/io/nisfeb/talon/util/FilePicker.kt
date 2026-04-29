@@ -16,6 +16,14 @@ interface FilePicker {
      * sites can fall through to "user dismissed".
      */
     suspend fun pickImage(): PickedImage?
+
+    /**
+     * Like [pickImage] but with no extension filter — suitable for
+     * sending arbitrary attachments (PDFs, archives, etc.). The
+     * returned [PickedImage]'s mime type comes from the OS where
+     * available, otherwise application/octet-stream.
+     */
+    suspend fun pickAnyFile(): PickedImage?
 }
 
 /**

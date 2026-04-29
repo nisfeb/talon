@@ -43,6 +43,38 @@ actual fun rememberImagePicker(): suspend () -> PickedImage? {
     }
 }
 
+@Composable
+actual fun rememberAnyFilePicker(): suspend () -> PickedImage? {
+    val context = LocalContext.current
+    val pending = remember { mutableListOf<CompletableDeferred<PickedImage?>>() }
+    val launcher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent(),
+    ) { uri ->
+        val deferred = pending.removeFirstOrNull() ?: return@rememberLauncherForActivityResult
+        if (uri == null) {
+            deferred.complete(null)
+            return@rememberLauncherForActivityResult
+        }
+        runCatching {
+            val resolver = context.contentResolver
+            val mime = resolver.getType(uri) ?: "application/octet-stream"
+            val name = uri.lastPathSegment?.substringAfterLast('/') ?: "file"
+            val bytes = resolver.openInputStream(uri)?.use { it.readBytes() }
+                ?: error("cannot read file bytes")
+            PickedImage(bytes, mime, name)
+        }.onSuccess { deferred.complete(it) }
+            .onFailure { deferred.complete(null) }
+    }
+    return remember(launcher) {
+        suspend {
+            val deferred = CompletableDeferred<PickedImage?>()
+            pending += deferred
+            launcher.launch("*/*")
+            deferred.await()
+        }
+    }
+}
+
 actual fun decodeImageDimensions(bytes: ByteArray): Pair<Int, Int>? = runCatching {
     val opts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
     BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts)
