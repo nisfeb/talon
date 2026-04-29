@@ -1578,7 +1578,11 @@ private fun GroupHeaderRow(
             )
         }
         Icon(
-            imageVector = if (expanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
+            // Always the down chevron; rotation alone communicates state
+            // (0° expanded = points down, -90° collapsed = points right).
+            // Swapping the icon AND rotating produced an up-pointing arrow
+            // when expanded.
+            imageVector = Icons.Filled.ExpandMore,
             contentDescription = if (expanded) "Collapse" else "Expand",
             tint = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier
