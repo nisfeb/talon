@@ -82,6 +82,14 @@ import okhttp3.RequestBody.Companion.toRequestBody
  *
  * Also exposes imperative send/react/delete/edit methods that poke the
  * appropriate agent and optimistically update Room.
+ *
+ * **Single-use** — stop() calls scope.cancel(), which permanently
+ * deactivates the SupervisorJob. A start() after stop() flips the
+ * `started` flag back to true but `scope.launch { … }` no-ops on
+ * a cancelled scope, leaving you with a silent dead repo. Callers
+ * (composeApp's App() key-block, production's TalonApplication)
+ * MUST construct a fresh instance per ship session, not reuse the
+ * stopped one.
  */
 class TlonChatRepo(
     private val db: AppDatabase,
