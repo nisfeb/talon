@@ -6,6 +6,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
@@ -17,10 +18,14 @@ import io.nisfeb.talon.ui.DraftStore
 import io.nisfeb.talon.ui.PlatformBackHandler
 import io.nisfeb.talon.ui.screens.DmChatScreen
 import io.nisfeb.talon.ui.screens.DmListScreen
+import io.nisfeb.talon.ui.screens.ActivityFeedScreen
+import io.nisfeb.talon.ui.screens.BookmarksScreen
 import io.nisfeb.talon.ui.screens.GroupInvitesScreen
 import io.nisfeb.talon.ui.screens.ImageViewerScreen
 import io.nisfeb.talon.ui.screens.LoginScreen
+import io.nisfeb.talon.ui.screens.NewDmScreen
 import io.nisfeb.talon.ui.screens.ProfileEditScreen
+import io.nisfeb.talon.ui.screens.SearchScreen
 import io.nisfeb.talon.ui.screens.SettingsScreen
 import io.nisfeb.talon.ui.screens.StatusFeedScreen
 import io.nisfeb.talon.ui.screens.ThreadScreen
@@ -68,6 +73,11 @@ fun App(
     var showSelfProfile by remember { mutableStateOf(false) }
     var showStatusFeed by remember { mutableStateOf(false) }
     var showInvites by remember { mutableStateOf(false) }
+    var showBookmarks by remember { mutableStateOf(false) }
+    var showActivity by remember { mutableStateOf(false) }
+    var showSearch by remember { mutableStateOf(false) }
+    var showNewDm by remember { mutableStateOf(false) }
+    var profileSheetShip by remember { mutableStateOf<String?>(null) }
     // Hoisted at App level (not inside the key block) so it survives
     // the re-key triggered by tryRestore-failure recovery. Cleared
     // automatically once the user successfully signs back in.
@@ -99,6 +109,13 @@ fun App(
     PlatformBackHandler(enabled = showInvites) {
         showInvites = false
     }
+    PlatformBackHandler(enabled = profileSheetShip != null) {
+        profileSheetShip = null
+    }
+    PlatformBackHandler(enabled = showBookmarks) { showBookmarks = false }
+    PlatformBackHandler(enabled = showActivity) { showActivity = false }
+    PlatformBackHandler(enabled = showSearch) { showSearch = false }
+    PlatformBackHandler(enabled = showNewDm) { showNewDm = false }
     PlatformBackHandler(enabled = showSettings) {
         showSettings = false
     }
@@ -190,14 +207,58 @@ fun App(
                         repo = repo,
                         ourPatp = ship,
                         onBack = { showStatusFeed = false },
-                        onOpenContact = { _ ->
-                            // TODO(port-d4-followup): wire ContactProfileSheet
-                            // for now, dismiss back to the feed
-                        },
+                        onOpenContact = { other -> profileSheetShip = other },
                     )
                     showInvites -> GroupInvitesScreen(
                         repo = repo,
                         onBack = { showInvites = false },
+                    )
+                    showBookmarks -> BookmarksScreen(
+                        db = db,
+                        repo = repo,
+                        onBack = { showBookmarks = false },
+                        onOpenConversation = { other ->
+                            showBookmarks = false
+                            openChat = other
+                        },
+                    )
+                    showActivity -> ActivityFeedScreen(
+                        db = db,
+                        repo = repo,
+                        onBack = { showActivity = false },
+                        onOpenConversation = { other ->
+                            showActivity = false
+                            openChat = other
+                        },
+                        onOpenReply = { whomTarget, parentId, replyId ->
+                            showActivity = false
+                            openChat = whomTarget
+                            openThreadParent = parentId
+                            openThreadReplyAnchor = replyId
+                        },
+                    )
+                    showSearch -> SearchScreen(
+                        db = db,
+                        onBack = { showSearch = false },
+                        onOpenConversation = { other ->
+                            showSearch = false
+                            openChat = other
+                        },
+                        onOpenMessage = { whomTarget, _, parentId ->
+                            showSearch = false
+                            openChat = whomTarget
+                            if (parentId != null) {
+                                openThreadParent = parentId
+                            }
+                        },
+                    )
+                    showNewDm -> NewDmScreen(
+                        db = db,
+                        onBack = { showNewDm = false },
+                        onPickPeer = { peer ->
+                            showNewDm = false
+                            openChat = peer
+                        },
                     )
                     viewerImageUrl != null -> ImageViewerScreen(
                         url = viewerImageUrl!!,
@@ -249,14 +310,8 @@ fun App(
                         drafts = drafts,
                         updateState = updateState,
                         onOpenConversation = { whom -> openChat = whom },
-                        onOpenSearch = {
-                            // TODO(port-d4-followup): wire search screen
-                            println("TODO: open search")
-                        },
-                        onNewMessage = {
-                            // TODO(port-d4-followup): wire new-message screen
-                            println("TODO: new message")
-                        },
+                        onOpenSearch = { showSearch = true },
+                        onNewMessage = { showNewDm = true },
                         onSignOut = {
                             // session.logout() already removes just
                             // the active ship's entry (UrbitSession.kt
@@ -279,16 +334,33 @@ fun App(
                         onOpenSelfProfile = { showSelfProfile = true },
                         onOpenStatusFeed = { showStatusFeed = true },
                         onOpenInvites = { showInvites = true },
-                        onOpenBookmarks = {
-                            // TODO(port-d4-followup): wire bookmarks screen
-                            println("TODO: open bookmarks")
-                        },
-                        onOpenActivity = {
-                            // TODO(port-d4-followup): wire activity screen
-                            println("TODO: open activity")
-                        },
+                        onOpenBookmarks = { showBookmarks = true },
+                        onOpenActivity = { showActivity = true },
                         onOpenSettings = { showSettings = true },
                         activeShip = ship,
+                    )
+                }
+
+                // ContactProfileSheet rendered as an overlay so it
+                // floats above any of the rendered screens. Only
+                // active when a ship is requested via profileSheetShip.
+                profileSheetShip?.let { peer ->
+                    val contact by remember(peer) {
+                        db.contacts().streamOne(peer)
+                    }.collectAsState(initial = null)
+                    io.nisfeb.talon.ui.ContactProfileSheet(
+                        ship = peer,
+                        self = peer == loggedInShip,
+                        contact = contact,
+                        onMessage = {
+                            profileSheetShip = null
+                            openChat = peer
+                        },
+                        onEditSelf = {
+                            profileSheetShip = null
+                            showSelfProfile = true
+                        },
+                        onDismiss = { profileSheetShip = null },
                     )
                 }
             }

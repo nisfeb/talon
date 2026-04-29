@@ -73,6 +73,16 @@ interface SettingsSync {
     suspend fun removeFolderMember(folderId: Long, whom: String) {}
     suspend fun removeGroupFromFolder(folderId: Long, groupFlag: String) {}
 
+    // ───────── bookmark folder mutations ─────────
+    // BookmarksScreen uses these to organize saved messages into
+    // user-named buckets. Returns the new folder id from create.
+
+    suspend fun createBookmarkFolder(name: String, sortOrder: Int = 0): Long = -1L
+    suspend fun renameBookmarkFolder(id: Long, name: String) {}
+    suspend fun deleteBookmarkFolder(id: Long) {}
+    suspend fun addBookmarkToFolder(folderId: Long, whom: String, postId: String) {}
+    suspend fun removeBookmarkFromFolder(folderId: Long, whom: String, postId: String) {}
+
     companion object {
         const val DESK = "talon"
     }
