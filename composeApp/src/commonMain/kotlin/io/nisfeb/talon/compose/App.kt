@@ -65,10 +65,15 @@ fun App(
     http: OkHttpClient,
     sessionStore: SessionStore,
     aiSettings: AiSettingsRepository,
-    db: AppDatabase,
+    /** Builds a per-ship AppDatabase. Called inside `key(shipKey)` so each
+     *  ship's data lives in its own SQLite file — without this the DM
+     *  list and unread counts cross-pollinate when the user switches. */
+    createDb: (shipKey: String) -> AppDatabase,
     drafts: DraftStore,
     updateState: UpdateState,
-    settingsSync: SettingsSync? = null,
+    /** Builds a SettingsSync bound to the per-ship db. Null on platforms
+     *  without %settings sync wired. */
+    createSettingsSync: ((AppDatabase) -> SettingsSync)? = null,
     /** Per-process daily-digest config. Null on platforms without a
      *  digest impl wired (Android composeApp today). When non-null,
      *  DmListScreen reveals the "Today's brief" drawer entry only
@@ -187,6 +192,12 @@ fun App(
     // repo's scope (see KDoc above).
     val shipKey = loggedInShip ?: "__loggedout__"
     key(shipKey) {
+        // Per-ship db + settingsSync. Built inside the key block so a
+        // ship switch tears the prior pair down and constructs fresh
+        // ones bound to the new ship's SQLite file. Without this the
+        // home list keeps showing the prior ship's DMs after switch.
+        val db = remember { createDb(shipKey) }
+        val settingsSync = remember { createSettingsSync?.invoke(db) }
         // tryRestore() pulls the saved ship's cookie + baseUrl into
         // this fresh UrbitSession on first composition. After login,
         // sessionStore has the new entry; the next re-key picks it up.
@@ -209,7 +220,19 @@ fun App(
         val repo = remember { TlonChatRepo(db = db, settingsSync = settingsSync) }
 
         DisposableEffect(Unit) {
-            onDispose { runCatching { repo.stop() } }
+            onDispose {
+                runCatching { repo.stop() }
+                // Defer db.close by 2s so any in-flight Flow collectors
+                // from the prior key composition unwind cleanly. Closing
+                // the pool synchronously here would surface as
+                // SQLiteException spam in the brief overlap window.
+                // Matches production's TalonApplication.scheduleShipScopedTeardown.
+                val dying = db
+                Thread {
+                    try { Thread.sleep(2_000) } catch (_: InterruptedException) {}
+                    runCatching { dying.close() }
+                }.apply { isDaemon = true; name = "Talon-db-close-$shipKey" }.start()
+            }
         }
 
         // tryRestore-failure recovery. If loggedInShip says a ship

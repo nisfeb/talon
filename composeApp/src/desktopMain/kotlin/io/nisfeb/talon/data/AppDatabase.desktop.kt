@@ -43,10 +43,11 @@ actual abstract class AppDatabase : RoomDatabase() {
 }
 
 /**
- * Open the desktop AppDatabase. The file lives in the platform-
- * standard user-data dir (see [io.nisfeb.talon.util.AppDirs]) and is
- * named `talon-port.db` so it doesn't collide with production
- * Android's `talon.db`. The directory is created on demand.
+ * Open the desktop AppDatabase for [shipKey]. Per-ship file (matching
+ * production Android's `talon-${ship}.db` convention) so DM lists,
+ * unread counts, etc. don't bleed across ships when the user switches.
+ * `shipKey` is the patp (e.g. `~zod`) when signed in, or
+ * `__loggedout__` for the pre-login graph.
  *
  * Corruption recovery: Room's build() is lazy, so a corrupt SQLite
  * file doesn't surface until the first DAO query fires inside
@@ -57,8 +58,11 @@ actual abstract class AppDatabase : RoomDatabase() {
  * once. If the second build also fails, throw — at startup the
  * crash is loud and easy to debug, vs the silent backoff loop.
  */
-fun createAppDatabase(): AppDatabase {
-    val dbFile = File(io.nisfeb.talon.util.AppDirs.userData, "talon-port.db")
+fun createAppDatabase(shipKey: String): AppDatabase {
+    val dbFile = File(
+        io.nisfeb.talon.util.AppDirs.userData,
+        "talon-port-${sanitizeShipKey(shipKey)}.db",
+    )
     sweepOldOrphans(dbFile.parentFile)
     return try {
         buildAndPing(dbFile)
@@ -73,6 +77,14 @@ fun createAppDatabase(): AppDatabase {
         buildAndPing(dbFile)
     }
 }
+
+// Patps are filesystem-safe on Linux/macOS but the leading `~` is
+// awkward enough to strip; replace anything outside [a-zA-Z0-9_-]
+// to be conservative across platforms.
+private fun sanitizeShipKey(shipKey: String): String =
+    shipKey.map { c ->
+        if (c.isLetterOrDigit() || c == '-' || c == '_') c else '_'
+    }.joinToString("")
 
 /**
  * Thrown when the SQLite open exceeds [SMOKE_TEST_TIMEOUT_MS]. Distinct

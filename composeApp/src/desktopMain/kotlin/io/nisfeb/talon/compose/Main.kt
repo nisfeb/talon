@@ -52,17 +52,38 @@ private class DesktopAppGraph {
     val sessionStore: SessionStore = createSessionStore()
     val aiSettings: AiSettingsRepository = createAiSettings()
     val dailyDigestSettings: DailyDigestSettings = DesktopDailyDigestSettings()
-    val db: AppDatabase = createAppDatabase()
     val drafts: DraftStore = InMemoryDraftStore()
-    val settingsSync: SettingsSync = SettingsSyncImpl(
-        db = db,
-        aiSettings = aiSettings,
-        dailyDigestSettings = dailyDigestSettings,
-        // Desktop has no AlarmManager equivalent wired, so the
-        // digest doesn't actually fire here. The callback's a no-op
-        // until that subsystem ports.
-        rearmDailyDigest = {},
-    )
+
+    init {
+        // Eager smoke-test open against the ship we'll first land on,
+        // closed immediately. Surfaces DatabaseOpenTimeoutException to
+        // main()'s catch arms (so the friendly "data dir unavailable"
+        // dialog still fires when a home-dir mount is wedged) before
+        // the App composition mounts. The App's key(shipKey) block
+        // reopens the same file moments later.
+        val probe = createAppDatabase(sessionStore.activeShip() ?: "__loggedout__")
+        runCatching { probe.close() }
+    }
+
+    // Tracks the currently-mounted db so window-close shutdown can
+    // synchronously flush WAL — the daemon-thread close in App's
+    // DisposableEffect runs on a 2s delay and may not finish before
+    // exitProcess fires.
+    @Volatile var currentDb: AppDatabase? = null
+    val createDb: (String) -> AppDatabase = { shipKey ->
+        createAppDatabase(shipKey).also { currentDb = it }
+    }
+    val createSettingsSync: (AppDatabase) -> SettingsSync = { db ->
+        SettingsSyncImpl(
+            db = db,
+            aiSettings = aiSettings,
+            dailyDigestSettings = dailyDigestSettings,
+            // Desktop has no AlarmManager equivalent wired, so the
+            // digest doesn't actually fire here. The callback's a no-op
+            // until that subsystem ports.
+            rearmDailyDigest = {},
+        )
+    }
 
     private val updateScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     val updateState: UpdateState = UpdateState(
@@ -89,6 +110,9 @@ private class DesktopAppGraph {
         //     wrapped exitProcess in Main.kt force-kill.
         //  4. Evict the connection pool.
         //  5. Close Room — synchronous WAL flush, must complete.
+        //     The current ship's db is captured by `currentDb` from
+        //     the App composition; closing here ensures WAL flush even
+        //     if the App's deferred-close daemon hasn't fired yet.
         runCatching { updateScope.cancel() }
         runCatching { http.dispatcher.cancelAll() }
         runCatching {
@@ -97,7 +121,7 @@ private class DesktopAppGraph {
             exec.awaitTermination(2, TimeUnit.SECONDS)
         }
         runCatching { http.connectionPool.evictAll() }
-        runCatching { db.close() }
+        runCatching { currentDb?.close() }
     }
 }
 
@@ -198,10 +222,10 @@ fun main() {
                 http = graph.http,
                 sessionStore = graph.sessionStore,
                 aiSettings = graph.aiSettings,
-                db = graph.db,
+                createDb = graph.createDb,
                 drafts = graph.drafts,
                 updateState = graph.updateState,
-                settingsSync = graph.settingsSync,
+                createSettingsSync = graph.createSettingsSync,
                 dailyDigestSettings = graph.dailyDigestSettings,
             )
         }
