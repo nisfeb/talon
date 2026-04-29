@@ -4,11 +4,20 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.io.File
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
 
 /**
  * JSON-file-backed SessionStore for desktop. Stores sessions at
  * ${user.home}/.config/talon/sessions.json. Single-process — no
  * file locking, race-free for the common single-window use case.
+ *
+ * Threat model: cookieValue (the urbauth secret) is written in
+ * cleartext. Desktop's threat model assumes a single-user device
+ * with whole-disk encryption — same trade-off DesktopAiSettings
+ * makes for the API key. A keychain-backed implementation
+ * (macOS Keychain, libsecret, Windows DPAPI) is a future Stage F
+ * follow-up if the threat model changes.
  */
 class DesktopSessionStore : SessionStore {
 
@@ -27,8 +36,21 @@ class DesktopSessionStore : SessionStore {
         SessionsBlob(emptyList(), null)
     }
 
+    /**
+     * Write through a sibling .tmp file then ATOMIC_MOVE into place.
+     * A JVM crash mid-write would otherwise leave a truncated JSON
+     * blob and the user would silently appear logged out on next
+     * launch. ATOMIC_MOVE is supported on every desktop FS we ship
+     * to (ext4, APFS, NTFS).
+     */
     private fun persist(blob: SessionsBlob) {
-        file.writeText(JSON.encodeToString(blob))
+        val tmp = File(file.parentFile, file.name + ".tmp")
+        tmp.writeText(JSON.encodeToString(blob))
+        Files.move(
+            tmp.toPath(), file.toPath(),
+            StandardCopyOption.ATOMIC_MOVE,
+            StandardCopyOption.REPLACE_EXISTING,
+        )
     }
 
     override fun all(): List<SavedSession> = load().sessions.sortedBy { it.ship }

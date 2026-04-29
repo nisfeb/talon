@@ -6,6 +6,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.io.File
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
 
 /**
  * JSON-file-backed AI settings for desktop. Stored at
@@ -36,8 +38,20 @@ class DesktopAiSettings : AiSettingsRepository {
             .getOrElse { defaultConfig() }
     }
 
+    /**
+     * Atomic write — temp file + ATOMIC_MOVE. A JVM crash mid-write
+     * would otherwise leave a truncated config and the next launch
+     * would fall back to defaults, silently dropping the user's
+     * provider + API key.
+     */
     private fun persist(cfg: AiSettings.Config) {
-        file.writeText(JSON.encodeToString(cfg))
+        val tmp = File(file.parentFile, file.name + ".tmp")
+        tmp.writeText(JSON.encodeToString(cfg))
+        Files.move(
+            tmp.toPath(), file.toPath(),
+            StandardCopyOption.ATOMIC_MOVE,
+            StandardCopyOption.REPLACE_EXISTING,
+        )
         _state.value = cfg
     }
 
