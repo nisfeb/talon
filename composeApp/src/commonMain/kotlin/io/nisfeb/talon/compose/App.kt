@@ -525,6 +525,46 @@ fun App(
                         onOpenAdministration = { showGroupAdminList = true },
                         onOpenSettings = { showSettings = true },
                         activeShip = ship,
+                        allShips = remember(loggedInShip) {
+                            sessionStore.all().map { it.ship }
+                        },
+                        shipNicknames = remember(loggedInShip) {
+                            sessionStore.all()
+                                .mapNotNull { saved ->
+                                    val nick = runCatching {
+                                        kotlinx.coroutines.runBlocking {
+                                            db.contacts().get(saved.ship)?.nickname
+                                        }
+                                    }.getOrNull()
+                                    if (nick.isNullOrBlank()) null
+                                    else saved.ship to nick
+                                }
+                                .toMap()
+                        },
+                        onSwitchShip = { newShip ->
+                            sessionStore.setActive(newShip)
+                            // Reset nav: previous ship's chat ids would
+                            // otherwise be queried against the new ship's db.
+                            openChat = null
+                            openThreadParent = null
+                            openThreadReplyAnchor = null
+                            viewerImageUrl = null
+                            showSelfProfile = false
+                            showSettings = false
+                            loggedInShip = newShip
+                        },
+                        onAddShip = {
+                            // Drop to LoginScreen without signing the current
+                            // ship out — its session entry stays in sessionStore
+                            // so the drawer can switch back after the new login.
+                            openChat = null
+                            openThreadParent = null
+                            openThreadReplyAnchor = null
+                            viewerImageUrl = null
+                            showSelfProfile = false
+                            showSettings = false
+                            loggedInShip = null
+                        },
                     )
                 }
 
