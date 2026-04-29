@@ -30,7 +30,11 @@ import io.nisfeb.talon.urbit.UrbitSession
 import kotlinx.coroutines.launch
 
 @Composable
-fun LoginScreen(session: UrbitSession, onLoggedIn: (ship: String) -> Unit) {
+fun LoginScreen(
+    session: UrbitSession,
+    onLoggedIn: (ship: String) -> Unit,
+    notice: String? = null,
+) {
     var shipUrl by remember { mutableStateOf("http://localhost:8080") }
     var code by remember { mutableStateOf("") }
     var status by remember { mutableStateOf<String?>(null) }
@@ -46,6 +50,16 @@ fun LoginScreen(session: UrbitSession, onLoggedIn: (ship: String) -> Unit) {
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Text("Connect to your ship", style = MaterialTheme.typography.headlineSmall)
+        // Recovery notice from App-level state — surfaces when
+        // tryRestore failed for a saved ship so the user knows why
+        // they're back at login. Self-clears once they sign in.
+        notice?.let {
+            Text(
+                it,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.error,
+            )
+        }
         OutlinedTextField(
             value = shipUrl,
             onValueChange = { shipUrl = it },

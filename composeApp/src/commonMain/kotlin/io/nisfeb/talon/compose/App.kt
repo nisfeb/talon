@@ -64,6 +64,13 @@ fun App(
     var openThreadParent by remember { mutableStateOf<String?>(null) }
     var openThreadReplyAnchor by remember { mutableStateOf<String?>(null) }
     var showSelfProfile by remember { mutableStateOf(false) }
+    // Hoisted at App level (not inside the key block) so it survives
+    // the re-key triggered by tryRestore-failure recovery. Cleared
+    // automatically once the user successfully signs back in.
+    var loginNotice by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(loggedInShip) {
+        if (loggedInShip != null) loginNotice = null
+    }
 
     // BackHandlers live outside the key block so they observe the
     // global state without being rebuilt on ship change. LIFO — the
@@ -121,14 +128,18 @@ fun App(
         // tryRestore-failure recovery. If loggedInShip says a ship
         // is signed in but the session couldn't actually restore
         // (shipName stayed null), wipe the bad sessionStore entry
-        // — without this, every cold start would loop through the
-        // same recovery path because the corrupt entry persists —
         // and reset loggedInShip so the next re-key lands on
-        // LoginScreen.
+        // LoginScreen — and surface a notice so the user knows
+        // why they got logged out, instead of assuming the app
+        // randomly forgot.
         LaunchedEffect(Unit) {
             if (loggedInShip != null && session.shipName == null) {
-                runCatching {
-                    sessionStore.activeShip()?.let { sessionStore.remove(it) }
+                val staleShip = sessionStore.activeShip()
+                runCatching { staleShip?.let { sessionStore.remove(it) } }
+                loginNotice = if (staleShip != null) {
+                    "Couldn't restore your session for $staleShip — please sign in again."
+                } else {
+                    "Couldn't restore your session — please sign in again."
                 }
                 loggedInShip = null
             }
@@ -152,6 +163,7 @@ fun App(
                     ship == null -> LoginScreen(
                         session = session,
                         onLoggedIn = { loggedInShip = it },
+                        notice = loginNotice,
                     )
                     showSettings -> SettingsScreen(
                         aiSettings = aiSettings,
