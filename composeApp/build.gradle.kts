@@ -143,10 +143,15 @@ compose.desktop {
         nativeDistributions {
             targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Deb)
             packageName = "Talon"
-            // jpackage requires MAJOR > 0; the Android-side versionName
-            // follows its own scheme. Stage F can align these once
-            // composeApp takes over as the production module.
-            packageVersion = "1.0.0"
+            // jpackage requires MAJOR > 0, but the Android-side
+            // versionName starts with "0." today (0.5.0). To keep
+            // installer filenames in lockstep with the release tag,
+            // map "0.MINOR.PATCH" → "1.MINOR.PATCH" until the project
+            // crosses 1.0 for real. After that the read-through is
+            // straight identity. Source of truth is
+            // app/build.gradle.kts:versionName (also what the release
+            // workflow's tag check reads).
+            packageVersion = derivePackageVersion()
             description = "Native chat client for Urbit"
             copyright = "© 2026 ~nisfeb"
             vendor = "nisfeb"
@@ -168,6 +173,25 @@ compose.desktop {
             // src/desktopMain/resources/icon.icns is dropped in.
         }
     }
+}
+
+/**
+ * Read app/build.gradle.kts's versionName, apply the "0.M.P → 1.M.P"
+ * map for jpackage's MAJOR > 0 constraint. Falls back to "1.0.0"
+ * if the file or property is missing — so a fresh checkout that
+ * runs a desktop task before app/ exists still gets a valid
+ * installer (relevant during Stage B-style restructures).
+ */
+fun derivePackageVersion(): String {
+    val appBuild = rootProject.file("app/build.gradle.kts")
+    if (!appBuild.exists()) return "1.0.0"
+    val match = Regex("""versionName\s*=\s*"([^"]+)"""")
+        .find(appBuild.readText()) ?: return "1.0.0"
+    val raw = match.groupValues[1]
+    val parts = raw.split(".")
+    if (parts.size < 3) return "1.0.0"
+    val major = parts[0].toIntOrNull() ?: return "1.0.0"
+    return if (major == 0) "1.${parts[1]}.${parts[2]}" else raw
 }
 
 // Room 2.7 KMP generates per-target. We attach the room-compiler
