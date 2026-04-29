@@ -1,0 +1,56 @@
+name: test
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+
+# Cancel an older run on the same branch when a new push lands —
+# saves runner minutes and keeps the latest commit's status as the
+# canonical answer.
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  unit-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      # Two test targets:
+      #  - :app:test — the parser / wire-format unit tests in app/.
+      #    These guard against Tlon protocol regressions; they're the
+      #    most load-bearing tests in the repo.
+      #  - :composeApp:desktopTest — desktop-only unit tests for the
+      #    JSON-backed settings stores and the per-ship DB filename
+      #    sanitizer. Covers code paths that have no equivalent in
+      #    app/'s test suite.
+      #
+      # Both run on ubuntu-latest because they're pure JVM (no
+      # platform-specific behavior under test).
+      - name: Run unit tests
+        run: ./gradlew :app:test :composeApp:desktopTest --stacktrace
+
+      # Upload JUnit XML reports on failure so the failing test names
+      # are surfaced in the PR check view without having to dig into
+      # raw build logs.
+      - name: Upload test reports
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports
+          path: |
+            app/build/reports/tests/
+            app/build/test-results/
+            composeApp/build/reports/tests/
+            composeApp/build/test-results/
+          if-no-files-found: ignore
