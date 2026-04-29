@@ -130,12 +130,22 @@ private fun wipeDb(dbFile: File) {
         // after db.close(). Falling back to a rename moves the
         // corrupt file aside so the rebuild gets a fresh slot
         // regardless. The orphan stays on disk for postmortem.
-        runCatching {
-            val orphan = File(
-                target.parentFile,
-                "${target.name}.corrupt-${System.currentTimeMillis()}",
+        // nanoTime() included so two recovery cycles within the same
+        // millisecond don't collide on the orphan name.
+        val orphan = File(
+            target.parentFile,
+            "${target.name}.corrupt-${System.currentTimeMillis()}-${System.nanoTime()}",
+        )
+        if (!runCatching { target.renameTo(orphan) }.getOrDefault(false)) {
+            // renameTo can return false silently (cross-device,
+            // locked) without throwing. If we got here, neither
+            // delete nor rename worked — log so the rebuild's
+            // eventual failure is traceable.
+            Log.w(
+                TAG,
+                "wipeDb: failed to delete or rename ${target.name}; " +
+                    "next open may inherit corruption",
             )
-            target.renameTo(orphan)
         }
     }
 }
