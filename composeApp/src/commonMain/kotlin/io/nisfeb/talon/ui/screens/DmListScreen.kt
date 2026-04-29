@@ -479,13 +479,11 @@ fun DmListScreen(
             modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Icon(
-                // TODO(port-d4-followup): replace with multiplatform app logo resource once asset pipeline lands
-                imageVector = Icons.Filled.Home,
+            androidx.compose.foundation.Image(
+                painter = io.nisfeb.talon.ui.talonLogoPainter(),
                 contentDescription = "Switch ship",
-                tint = MaterialTheme.colorScheme.primary,
                 modifier = Modifier
-                    .size(28.dp)
+                    .size(32.dp)
                     .clickable { scope.launch { drawerState.open() } },
             )
             Text(
