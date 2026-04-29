@@ -55,18 +55,26 @@ private class DesktopAppGraph {
     )
 
     fun shutdown() {
-        // Best-effort teardown. Order matters slightly — cancel the
-        // update scope first so its in-flight HTTP calls bail before
-        // we yank the OkHttp dispatcher out from under them, then
-        // drain the OkHttp pool, then close Room.
+        // Best-effort teardown. Order matters:
+        //  1. Cancel update scope so its in-flight HTTP calls bail.
+        //  2. dispatcher.cancelAll() interrupts ALL in-flight calls
+        //     including TlonChatRepo's SSE drain (parked on a
+        //     long-poll execute()). Without this the executor
+        //     shutdown waits for the SSE call to return — which it
+        //     won't until the server times out — and the JVM lingers.
+        //  3. Shut the executor service. Now-empty queue + idle
+        //     threads → orderly thread exit.
+        //  4. Evict the connection pool.
+        //  5. Close Room.
+        // TlonChatRepo's repo.stop() still fires from App()'s
+        // key-block DisposableEffect during exitApplication's
+        // composition teardown, but it runs AFTER this shutdown(),
+        // so the SSE drain coroutine has already thrown by then.
         runCatching { updateScope.cancel() }
+        runCatching { http.dispatcher.cancelAll() }
         runCatching { http.dispatcher.executorService.shutdown() }
         runCatching { http.connectionPool.evictAll() }
         runCatching { db.close() }
-        // Note: TlonChatRepo's SSE drain runs inside App()'s
-        // key(loggedInShip) block; its DisposableEffect.onDispose
-        // calls repo.stop() when the composition tears down, which
-        // happens during exitApplication's runtime shutdown.
     }
 }
 
