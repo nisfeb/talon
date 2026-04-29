@@ -397,6 +397,7 @@ fun App(
                     )
                     showSearch -> SearchScreen(
                         db = db,
+                        aiSettings = aiSettings,
                         onBack = { showSearch = false },
                         onOpenConversation = { other ->
                             showSearch = false

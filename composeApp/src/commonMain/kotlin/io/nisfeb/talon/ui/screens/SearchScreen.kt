@@ -53,16 +53,18 @@ import java.util.Locale
 @Composable
 fun SearchScreen(
     db: AppDatabase,
+    aiSettings: io.nisfeb.talon.ai.AiSettingsRepository,
     onOpenConversation: (whom: String) -> Unit,
     onOpenMessage: (whom: String, postId: String, parentId: String?) -> Unit,
     onBack: () -> Unit,
+    /** Optional ML-backed search affordances. Android wires the real
+     *  Embedder + EmbeddingIndexer; desktop passes null and the screen
+     *  renders substring + people-search only (no smart mode chip, no
+     *  index status, no highlights — the previous gated-off shape). */
+    embedder: io.nisfeb.talon.ai.SearchEmbedderClient? = null,
     modifier: Modifier = Modifier,
 ) {
-    // composeApp's SearchScreen is the substring + people-search subset.
-    // Production app/ also has semantic-search and important-messages
-    // highlights backed by ML Kit's text embedder + an EmbeddingIndexer
-    // — both Android-only. They're gated off here so users see the
-    // search-text-and-people experience without the AI affordances.
+    val aiState by aiSettings.state.collectAsState()
     var query by remember { mutableStateOf("") }
     val trimmed = query.trim()
 
@@ -70,8 +72,6 @@ fun SearchScreen(
         if (trimmed.length < 2) flowOf(emptyList())
         else db.messages().search(io.nisfeb.talon.data.escapeLikeNeedle(trimmed))
     }.collectAsState(initial = emptyList<MessageEntity>())
-
-    val results = substringResults
 
     val people by remember(trimmed) {
         if (trimmed.length < 2) flowOf(emptyList())
@@ -87,13 +87,41 @@ fun SearchScreen(
         )
     }.collectAsState(initial = ContactMap.EMPTY)
 
-    val semanticEnabled = false  // gated off in composeApp; see KDoc above
-    val smartMode = false
-    val highlightsEnabled = false
+    // Smart-mode + highlights are gated on BOTH the user enabling the
+    // feature AND the platform supplying an embedder. Desktop never
+    // satisfies the second condition; Android targets do once the
+    // embedder cluster lives in androidMain.
+    val semanticEnabled = embedder != null && aiState.semanticSearchEnabled
+    var smartMode by remember(semanticEnabled) { mutableStateOf(false) }
+    val highlightsEnabled = embedder != null && aiState.importantMessagesEnabled
+
+    val indexProgress by (embedder?.progress?.collectAsState()
+        ?: remember { mutableStateOf(io.nisfeb.talon.ai.IndexProgress()) })
+
+    val semanticResults = remember { mutableStateOf<List<MessageEntity>>(emptyList()) }
+    var semanticBusy by remember { mutableStateOf(false) }
+    androidx.compose.runtime.LaunchedEffect(trimmed, smartMode, embedder) {
+        if (!smartMode || trimmed.length < 2 || embedder == null) {
+            semanticResults.value = emptyList()
+            return@LaunchedEffect
+        }
+        semanticBusy = true
+        semanticResults.value = runCatching { embedder.semanticSearch(trimmed) }
+            .getOrElse { emptyList() }
+        semanticBusy = false
+    }
+
     val highlights = remember { mutableStateOf<List<MessageEntity>>(emptyList()) }
-    val semanticBusy = false
-    data class IndexProgressStub(val indexed: Int = 0, val total: Int = 0)
-    val indexProgress = IndexProgressStub()
+    androidx.compose.runtime.LaunchedEffect(highlightsEnabled, indexProgress.indexed, embedder) {
+        highlights.value = if (!highlightsEnabled || embedder == null) emptyList()
+        else runCatching { embedder.computeHighlights() }.getOrElse { emptyList() }
+    }
+
+    androidx.compose.runtime.LaunchedEffect(semanticEnabled, embedder) {
+        if (semanticEnabled && embedder != null) embedder.start()
+    }
+
+    val results = if (smartMode) semanticResults.value else substringResults
 
     Column(modifier = modifier.windowInsetsPadding(WindowInsets.safeDrawing)) {
         Row(
@@ -113,8 +141,37 @@ fun SearchScreen(
                 modifier = Modifier.fillMaxWidth().padding(start = 4.dp),
             )
         }
-        // Smart-search toggle + indexer status are gated off in
-        // composeApp (Embedder + EmbeddingIndexer are Android-only).
+        // Smart-mode toggle + index status. Render only when an
+        // embedder is provided (Android with on-device ML) AND the
+        // user enabled semantic search in settings.
+        if (semanticEnabled) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                FilterChip(
+                    selected = smartMode,
+                    onClick = { smartMode = !smartMode },
+                    label = { Text(if (smartMode) "✨ Smart on" else "✨ Smart") },
+                )
+                if (smartMode) {
+                    val p = indexProgress
+                    val status = when {
+                        semanticBusy -> "embedding query…"
+                        p.running && p.total > 0 -> "indexing ${p.indexed}/${p.total}…"
+                        p.running -> "scanning local archive…"
+                        p.total == 0 -> "no messages indexed yet"
+                        else -> "${p.indexed} messages indexed"
+                    }
+                    Text(
+                        status,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
         HorizontalDivider()
         if (trimmed.length < 2 && highlightsEnabled && highlights.value.isNotEmpty()) {
             // No query yet, but the user has highlights — show them
