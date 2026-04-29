@@ -17,10 +17,12 @@ import io.nisfeb.talon.ui.DraftStore
 import io.nisfeb.talon.ui.PlatformBackHandler
 import io.nisfeb.talon.ui.screens.DmChatScreen
 import io.nisfeb.talon.ui.screens.DmListScreen
+import io.nisfeb.talon.ui.screens.GroupInvitesScreen
 import io.nisfeb.talon.ui.screens.ImageViewerScreen
 import io.nisfeb.talon.ui.screens.LoginScreen
 import io.nisfeb.talon.ui.screens.ProfileEditScreen
 import io.nisfeb.talon.ui.screens.SettingsScreen
+import io.nisfeb.talon.ui.screens.StatusFeedScreen
 import io.nisfeb.talon.ui.screens.ThreadScreen
 import io.nisfeb.talon.ui.theme.TalonTheme
 import io.nisfeb.talon.update.UpdateState
@@ -64,6 +66,8 @@ fun App(
     var openThreadParent by remember { mutableStateOf<String?>(null) }
     var openThreadReplyAnchor by remember { mutableStateOf<String?>(null) }
     var showSelfProfile by remember { mutableStateOf(false) }
+    var showStatusFeed by remember { mutableStateOf(false) }
+    var showInvites by remember { mutableStateOf(false) }
     // Hoisted at App level (not inside the key block) so it survives
     // the re-key triggered by tryRestore-failure recovery. Cleared
     // automatically once the user successfully signs back in.
@@ -88,6 +92,12 @@ fun App(
     }
     PlatformBackHandler(enabled = showSelfProfile) {
         showSelfProfile = false
+    }
+    PlatformBackHandler(enabled = showStatusFeed) {
+        showStatusFeed = false
+    }
+    PlatformBackHandler(enabled = showInvites) {
+        showInvites = false
     }
     PlatformBackHandler(enabled = showSettings) {
         showSettings = false
@@ -175,6 +185,20 @@ fun App(
                         ourPatp = ship,
                         onBack = { showSelfProfile = false },
                     )
+                    showStatusFeed -> StatusFeedScreen(
+                        db = db,
+                        repo = repo,
+                        ourPatp = ship,
+                        onBack = { showStatusFeed = false },
+                        onOpenContact = { _ ->
+                            // TODO(port-d4-followup): wire ContactProfileSheet
+                            // for now, dismiss back to the feed
+                        },
+                    )
+                    showInvites -> GroupInvitesScreen(
+                        repo = repo,
+                        onBack = { showInvites = false },
+                    )
                     viewerImageUrl != null -> ImageViewerScreen(
                         url = viewerImageUrl!!,
                         onClose = { viewerImageUrl = null },
@@ -253,10 +277,8 @@ fun App(
                             loggedInShip = null
                         },
                         onOpenSelfProfile = { showSelfProfile = true },
-                        onOpenStatusFeed = {
-                            // TODO(port-d4-followup): wire status feed screen
-                            println("TODO: open status feed")
-                        },
+                        onOpenStatusFeed = { showStatusFeed = true },
+                        onOpenInvites = { showInvites = true },
                         onOpenBookmarks = {
                             // TODO(port-d4-followup): wire bookmarks screen
                             println("TODO: open bookmarks")
