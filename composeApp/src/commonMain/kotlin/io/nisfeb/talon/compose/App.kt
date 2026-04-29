@@ -49,7 +49,14 @@ fun App(
     drafts: DraftStore,
     updateState: UpdateState,
 ) {
-    var loggedInShip by remember { mutableStateOf(sessionStore.activeShip()) }
+    // Derive the initial logged-in ship from sessionStore.active()
+    // (the joined SavedSession) rather than activeShip() (just the
+    // ship pointer). active() returns null when the pointer is stale
+    // — i.e. when activeShip points at a ship whose entry was
+    // removed but the pointer wasn't repaired. Otherwise the next
+    // tryRestore() returns null while loggedInShip stays non-null
+    // and repo.start crashes on session.ourPatp ("not logged in").
+    var loggedInShip by remember { mutableStateOf(sessionStore.active()?.ship) }
     var showSettings by remember { mutableStateOf(false) }
     var openChat by remember { mutableStateOf<String?>(null) }
     var viewerImageUrl by remember { mutableStateOf<String?>(null) }
@@ -97,7 +104,12 @@ fun App(
             onDispose { runCatching { repo.stop() } }
         }
 
-        if (loggedInShip != null) {
+        // Belt-and-suspenders: also gate on session.shipName.
+        // tryRestore() failure modes (malformed shipUrl, missing
+        // entry) leave shipName null even when activeShip() said
+        // a ship was active. Without this guard, repo.start reads
+        // session.ourPatp which throws on a half-initialized session.
+        if (loggedInShip != null && session.shipName != null) {
             LaunchedEffect(Unit) { repo.start(session) }
         }
 
