@@ -83,7 +83,44 @@ private fun buildAndPing(dbFile: File): AppDatabase {
 }
 
 private fun wipeDb(dbFile: File) {
-    runCatching { dbFile.delete() }
-    runCatching { File(dbFile.parentFile, "${dbFile.name}-shm").delete() }
-    runCatching { File(dbFile.parentFile, "${dbFile.name}-wal").delete() }
+    // SQLite journal files: WAL (-shm + -wal) when WAL mode is on,
+    // -journal in rollback mode. We don't know the mode of a corrupt
+    // file so try all three. A residual journal that survives the
+    // wipe can re-corrupt the next-built file.
+    val siblings = listOf(
+        dbFile,
+        File(dbFile.parentFile, "${dbFile.name}-shm"),
+        File(dbFile.parentFile, "${dbFile.name}-wal"),
+        File(dbFile.parentFile, "${dbFile.name}-journal"),
+    )
+    for (target in siblings) {
+        if (deleteWithRetries(target)) continue
+        // On Windows the bundled SQLite driver's native handle close
+        // can lag the JVM File API close, so the delete fails even
+        // after db.close(). Falling back to a rename moves the
+        // corrupt file aside so the rebuild gets a fresh slot
+        // regardless. The orphan stays on disk for postmortem.
+        runCatching {
+            val orphan = File(
+                target.parentFile,
+                "${target.name}.corrupt-${System.currentTimeMillis()}",
+            )
+            target.renameTo(orphan)
+        }
+    }
+}
+
+/**
+ * Three attempts with a 50ms sleep between, so a Windows handle
+ * release window can pass before we declare it stuck. Returns true
+ * on success, false on persistent failure.
+ */
+private fun deleteWithRetries(target: File): Boolean {
+    if (!target.exists()) return true
+    repeat(3) { attempt ->
+        if (runCatching { target.delete() }.getOrDefault(false)) return true
+        if (!target.exists()) return true
+        if (attempt < 2) Thread.sleep(50)
+    }
+    return false
 }
