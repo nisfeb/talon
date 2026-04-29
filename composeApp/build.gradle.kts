@@ -69,11 +69,19 @@ kotlin {
             implementation(compose.desktop.currentOs)
             implementation(libs.kotlinx.coroutines.swing)
         }
-        // JUnit-on-JVM for the desktop target's unit tests. Other
-        // target test source sets stay unconfigured for now —
-        // KMP-shared tests in commonTest can land later, once the
-        // composeApp duplicates of app/'s tested classes have
-        // displaced their app/ originals (Stage F).
+        // commonTest carries shared kotlin.test assertions. Tests
+        // here are picked up by both desktopTest and (when wired)
+        // androidUnitTest source sets, so a parser test moved out of
+        // app/src/test/ runs against the composeApp/commonMain copy
+        // on every supported target.
+        commonTest.dependencies {
+            implementation(kotlin("test"))
+        }
+        // JUnit-on-JVM for the desktop target's unit tests; the
+        // common kotlin.test surface delegates to JUnit on JVM
+        // backends. Other target test source sets stay unconfigured
+        // for now — Android composeApp tests land when that target
+        // gets exercised end-to-end.
         val desktopTest by getting
         desktopTest.dependencies {
             implementation(libs.junit)
