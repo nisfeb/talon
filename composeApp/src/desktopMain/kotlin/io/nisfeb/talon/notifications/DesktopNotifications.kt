@@ -65,6 +65,18 @@ class DesktopNotifications : Notifications {
         // Tray notifications can't be cancelled after display.
     }
 
+    /**
+     * Remove the tray icon so the app doesn't leave a dead icon
+     * behind after window close. Safe to call even if the lazy
+     * trayIcon was never realised. Call from DesktopAppGraph.shutdown
+     * once this class is wired into the graph (it isn't yet —
+     * Notifications integration is deferred to Stage F).
+     */
+    fun close() {
+        val icon = trayIcon ?: return
+        runCatching { SystemTray.getSystemTray().remove(icon) }
+    }
+
     private companion object {
         private const val TAG = "DesktopNotifications"
     }
