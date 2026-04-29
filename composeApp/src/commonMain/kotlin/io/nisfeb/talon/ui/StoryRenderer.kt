@@ -45,6 +45,7 @@ import coil3.compose.AsyncImage
 import io.nisfeb.talon.urbit.MENTION_TAG
 import io.nisfeb.talon.urbit.StoryPart
 import io.nisfeb.talon.urbit.URL_TAG
+import kotlinx.coroutines.sync.withLock
 
 /**
  * Resolver for citation lookups. The production app couples this
@@ -61,6 +62,45 @@ interface CiteResolver {
 }
 
 val LocalCiteResolver = compositionLocalOf<CiteResolver?> { null }
+
+/**
+ * Process-level cache + per-key dedup for citation resolution.
+ * Without this, N visible citations to the same channel/post each
+ * fire their own scry — a dense chat with 8 cites = 8 redundant
+ * network round-trips, and scrolling re-creates the Composables
+ * so cites re-resolve every time they re-enter the viewport.
+ *
+ * Caches positives only; null results are retried (a scry that
+ * failed once might succeed later when network improves). The
+ * underlying message body is effectively immutable for cite
+ * purposes (edits / deletes show in separate UI), so unbounded
+ * cache growth is fine — bounded by unique (whom, postDa) pairs
+ * the user has viewed in a session, GC'd on process exit.
+ *
+ * The per-key Mutex serializes concurrent loads for the same key
+ * so simultaneous renders coalesce into one network call.
+ */
+internal object CiteCache {
+    private val cache = java.util.concurrent.ConcurrentHashMap<Pair<String, String>, MessageEntity>()
+    private val mutexes = java.util.concurrent.ConcurrentHashMap<Pair<String, String>, kotlinx.coroutines.sync.Mutex>()
+
+    suspend fun resolve(
+        whom: String,
+        da: String,
+        load: suspend () -> MessageEntity?,
+    ): MessageEntity? {
+        val key = whom to da
+        cache[key]?.let { return it }
+        val mutex = mutexes.getOrPut(key) { kotlinx.coroutines.sync.Mutex() }
+        return mutex.withLock {
+            cache[key]?.let { return@withLock it }
+            val result = load()
+            if (result != null) cache[key] = result
+            mutexes.remove(key)
+            result
+        }
+    }
+}
 
 enum class MediaKind { AUDIO, VIDEO }
 
@@ -340,23 +380,24 @@ private fun InlineCitation(
     val resolver = LocalCiteResolver.current
 
     // Resolve cite → stored message, falling back to a channel scry
-    // when the post isn't in our local window.
+    // when the post isn't in our local window. Routes through
+    // CiteCache so 50 cites in viewport for the same channel/post
+    // coalesce into one network call instead of stampeding the
+    // ship with 50.
     var resolved by remember(cite) { mutableStateOf<MessageEntity?>(null) }
     LaunchedEffect(cite, resolver) {
         if (resolver == null) return@LaunchedEffect
         val whom = cite.openTarget ?: return@LaunchedEffect
         val da = cite.replyDa ?: cite.postDa ?: return@LaunchedEffect
-        // 1. Try the local db first — free if we already have the post.
-        resolver.findLocal(whom, da)?.let { resolved = it; return@LaunchedEffect }
-        // 2. Scry the channel. Works for chat/* nests; DM cites aren't
-        //    supported by this path but we don't currently see them in
-        //    the wild either.
-        if (whom.startsWith("chat/")) {
-            resolved = if (cite.replyDa != null && cite.postDa != null) {
-                resolver.fetchReply(whom, cite.postDa, cite.replyDa)
-            } else {
-                resolver.fetchPost(whom, da)
-            }
+        resolved = CiteCache.resolve(whom, da) {
+            resolver.findLocal(whom, da)?.let { return@resolve it }
+            if (whom.startsWith("chat/")) {
+                if (cite.replyDa != null && cite.postDa != null) {
+                    resolver.fetchReply(whom, cite.postDa, cite.replyDa)
+                } else {
+                    resolver.fetchPost(whom, da)
+                }
+            } else null
         }
     }
 
