@@ -17,11 +17,11 @@ import java.nio.file.StandardCopyOption
  * so a JVM crash mid-write can't truncate the file to an unparseable
  * state.
  */
-class DesktopUiSettings : UiSettings {
+class DesktopUiSettings(
+    private val file: File = File(AppDirs.userData, "ui.json"),
+) : UiSettings {
     @Serializable
     private data class Persisted(val hideComposerButtons: Boolean = false)
-
-    private val file: File by lazy { File(AppDirs.userData, "ui.json") }
 
     private val _hideComposerButtons = MutableStateFlow(loadInitial())
     override val hideComposerButtons: StateFlow<Boolean> =

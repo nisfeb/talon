@@ -17,11 +17,11 @@ import java.nio.file.StandardCopyOption
  * (temp + ATOMIC_MOVE) so a JVM crash mid-write can't truncate the
  * file to an unparseable state.
  */
-class DesktopWatchwordsSyncSettings : WatchwordsSyncSettings {
+class DesktopWatchwordsSyncSettings(
+    private val file: File = File(AppDirs.userData, "watchwords_sync.json"),
+) : WatchwordsSyncSettings {
     @Serializable
     private data class Persisted(val enabled: Boolean = false)
-
-    private val file: File by lazy { File(AppDirs.userData, "watchwords_sync.json") }
 
     private val _enabled = MutableStateFlow(loadInitial())
     override val enabled: StateFlow<Boolean> = _enabled.asStateFlow()

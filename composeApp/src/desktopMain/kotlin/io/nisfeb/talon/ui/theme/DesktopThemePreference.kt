@@ -17,11 +17,11 @@ import java.nio.file.StandardCopyOption
  * writes (temp + ATOMIC_MOVE) so a JVM crash mid-write can't truncate
  * the file to an unparseable state.
  */
-class DesktopThemePreference : ThemePreference {
+class DesktopThemePreference(
+    private val file: File = File(AppDirs.userData, "theme.json"),
+) : ThemePreference {
     @Serializable
     private data class Persisted(val mode: String = ThemePreference.Mode.System.name)
-
-    private val file: File by lazy { File(AppDirs.userData, "theme.json") }
 
     private val _mode = MutableStateFlow(loadInitial())
     override val mode: StateFlow<ThemePreference.Mode> = _mode.asStateFlow()

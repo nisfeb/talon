@@ -16,15 +16,18 @@ import java.nio.file.StandardCopyOption
  * platform-standard user-data dir (see [AppDirs]). Atomic writes
  * (temp + ATOMIC_MOVE) to survive JVM crashes mid-write.
  */
-class DesktopDailyDigestSettings : DailyDigestSettings {
+class DesktopDailyDigestSettings(
+    // Injectable for tests. Production callers use the default which
+    // resolves to ~/.config/talon/daily_digest.json (or its platform
+    // equivalent via AppDirs).
+    private val file: File = File(AppDirs.userData, "daily_digest.json"),
+) : DailyDigestSettings {
     @Serializable
     private data class Persisted(
         val enabled: Boolean = false,
         val hourOfDay: Int = 6,
         val minuteOfDay: Int = 0,
     )
-
-    private val file: File by lazy { File(AppDirs.userData, "daily_digest.json") }
 
     private val _state = MutableStateFlow(loadInitial())
     override val state: StateFlow<DailyDigestSettings.State> = _state.asStateFlow()

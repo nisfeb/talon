@@ -80,8 +80,12 @@ fun createAppDatabase(shipKey: String): AppDatabase {
 
 // Patps are filesystem-safe on Linux/macOS but the leading `~` is
 // awkward enough to strip; replace anything outside [a-zA-Z0-9_-]
-// to be conservative across platforms.
-private fun sanitizeShipKey(shipKey: String): String =
+// to be conservative across platforms (Windows reserved chars,
+// shell special chars).
+//
+// `internal` so the desktopTest source set can call it directly
+// instead of going through a full Room db open.
+internal fun sanitizeShipKey(shipKey: String): String =
     shipKey.map { c ->
         if (c.isLetterOrDigit() || c == '-' || c == '_') c else '_'
     }.joinToString("")
