@@ -5,6 +5,7 @@ import androidx.compose.ui.window.application
 import io.nisfeb.talon.ai.AiSettingsRepository
 import io.nisfeb.talon.ai.createAiSettings
 import io.nisfeb.talon.data.AppDatabase
+import io.nisfeb.talon.data.DatabaseOpenTimeoutException
 import io.nisfeb.talon.data.createAppDatabase
 import io.nisfeb.talon.ui.DraftStore
 import io.nisfeb.talon.ui.InMemoryDraftStore
@@ -91,11 +92,23 @@ fun main() {
     // here runs on the JVM main thread and the window only mounts
     // once the graph is ready.
     //
-    // Bonus: any throw during graph construction now surfaces as a
-    // proper main-thread crash with a stack trace, instead of an
-    // uncaught exception inside Compose's application body that
-    // leaves the user with no window.
-    val graph = DesktopAppGraph()
+    // DatabaseOpenTimeoutException is special: the disk is wedged
+    // (unreachable NFS, stalled FUSE), the data may be fine. Show a
+    // dialog and exit non-zero rather than wiping or crashing
+    // silently with a stack trace nobody will see.
+    val graph = try {
+        DesktopAppGraph()
+    } catch (t: DatabaseOpenTimeoutException) {
+        javax.swing.JOptionPane.showMessageDialog(
+            null,
+            "Talon couldn't open its data directory at:\n\n${t.dbPath}\n\n" +
+                "If you store your home directory on a network mount or " +
+                "encrypted volume, make sure it's available and try again.",
+            "Talon — startup error",
+            javax.swing.JOptionPane.ERROR_MESSAGE,
+        )
+        kotlin.system.exitProcess(2)
+    }
     application {
         Window(
             onCloseRequest = {

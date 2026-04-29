@@ -4,7 +4,9 @@ import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.sqlite.driver.bundled.BundledSQLiteDriver
 import io.nisfeb.talon.util.Log
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import java.io.File
 
 private const val TAG = "AppDatabase.desktop"
@@ -57,13 +59,33 @@ actual abstract class AppDatabase : RoomDatabase() {
  */
 fun createAppDatabase(): AppDatabase {
     val dbFile = File(io.nisfeb.talon.util.AppDirs.userData, "talon-port.db")
-    return runCatching { buildAndPing(dbFile) }
-        .getOrElse { err ->
-            Log.w(TAG, "DB open failed (${err.message}); wiping and retrying once")
-            wipeDb(dbFile)
-            buildAndPing(dbFile)
-        }
+    return try {
+        buildAndPing(dbFile)
+    } catch (timeout: DatabaseOpenTimeoutException) {
+        // Don't wipe on timeout — the file might be perfectly fine,
+        // the disk is just unreachable. Surface to caller (Main.kt
+        // shows a dialog and exits) rather than corrupting good data.
+        throw timeout
+    } catch (err: Throwable) {
+        Log.w(TAG, "DB open failed (${err.message}); wiping and retrying once")
+        wipeDb(dbFile)
+        buildAndPing(dbFile)
+    }
 }
+
+/**
+ * Thrown when the SQLite open exceeds [SMOKE_TEST_TIMEOUT_MS]. Distinct
+ * from corruption — Main.kt translates this to a "your data directory
+ * is unavailable" dialog rather than wiping the (possibly fine) DB.
+ * Wedged-disk causes: unreachable NFS, stalled FUSE, multi-second
+ * Windows AV scan on a freshly-created file.
+ */
+class DatabaseOpenTimeoutException internal constructor(
+    val dbPath: String,
+    cause: Throwable? = null,
+) : RuntimeException("DB open exceeded ${SMOKE_TEST_TIMEOUT_MS}ms: $dbPath", cause)
+
+private const val SMOKE_TEST_TIMEOUT_MS = 15_000L
 
 private fun buildAndPing(dbFile: File): AppDatabase {
     val db = Room.databaseBuilder<AppDatabase>(name = dbFile.absolutePath)
@@ -71,11 +93,19 @@ private fun buildAndPing(dbFile: File): AppDatabase {
         .fallbackToDestructiveMigration(dropAllTables = true)
         .build()
     try {
-        // Smoke test — getOne on a sentinel key opens the connection
-        // and runs a SELECT. Corrupt or schema-incompatible files
-        // throw here; we close + propagate so the outer wipe runs.
-        runBlocking { db.unreads().getOne("__smoke_test__") }
+        // Smoke test under a hard timeout. A wedged disk would
+        // otherwise hang main thread forever — no window, no error.
+        // 15s is generous for a healthy disk's open; anything past
+        // it surfaces as a real failure the user can act on.
+        runBlocking {
+            withTimeout(SMOKE_TEST_TIMEOUT_MS) {
+                db.unreads().getOne("__smoke_test__")
+            }
+        }
         return db
+    } catch (t: TimeoutCancellationException) {
+        runCatching { db.close() }
+        throw DatabaseOpenTimeoutException(dbFile.absolutePath, t)
     } catch (t: Throwable) {
         runCatching { db.close() }
         throw t
