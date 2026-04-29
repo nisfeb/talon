@@ -84,6 +84,28 @@ private class DesktopAppGraph {
     }
 }
 
+/**
+ * Show a Swing error dialog from a startup-failure code path. Uses
+ * a scrollable JTextArea inside a JScrollPane so long stack-trace
+ * bodies don't overflow the screen the way JOptionPane.PLAIN_MESSAGE
+ * with a giant String does.
+ */
+private fun showStartupError(title: String, body: String) {
+    val area = javax.swing.JTextArea(body).apply {
+        isEditable = false
+        lineWrap = true
+        wrapStyleWord = true
+        rows = 12
+        columns = 60
+    }
+    val scroll = javax.swing.JScrollPane(area).apply {
+        preferredSize = java.awt.Dimension(640, 280)
+    }
+    javax.swing.JOptionPane.showMessageDialog(
+        null, scroll, title, javax.swing.JOptionPane.ERROR_MESSAGE,
+    )
+}
+
 fun main() {
     // Construct the dependency graph BEFORE entering application { … }.
     // application's body composes on the AWT EDT; building the graph
@@ -97,18 +119,32 @@ fun main() {
     // (unreachable NFS, stalled FUSE), the data may be fine. Show a
     // dialog and exit non-zero rather than wiping or crashing
     // silently with a stack trace nobody will see.
+    // Two catch arms: the DB-timeout case has actionable user
+    // guidance; everything else (UnsatisfiedLinkError on the
+    // bundled SQLite native, OOM, corrupt sessions.json that the
+    // DesktopSessionStore loader didn't recover from, etc.) gets
+    // the generic dialog with a stack trace excerpt. Without the
+    // generic catch, double-clicking the app on Windows produces
+    // an invisible stderr trace and the user sees a process that
+    // briefly appeared and disappeared.
     val graph = try {
         DesktopAppGraph()
     } catch (t: DatabaseOpenTimeoutException) {
-        javax.swing.JOptionPane.showMessageDialog(
-            null,
-            "Talon couldn't open its data directory at:\n\n${t.dbPath}\n\n" +
-                "If you store your home directory on a network mount or " +
-                "encrypted volume, make sure it's available and try again.",
-            "Talon — startup error",
-            javax.swing.JOptionPane.ERROR_MESSAGE,
+        showStartupError(
+            title = "Talon — couldn't open data directory",
+            body = "Talon couldn't open its data directory at:\n\n${t.dbPath}\n\n" +
+                "If your home directory is on a network mount or encrypted " +
+                "volume, make sure it's available and try again.",
         )
         kotlin.system.exitProcess(2)
+    } catch (t: Throwable) {
+        showStartupError(
+            title = "Talon — startup error",
+            body = "Talon couldn't start.\n\n" +
+                "${t.javaClass.simpleName}: ${t.message ?: "(no message)"}\n\n" +
+                t.stackTraceToString().lineSequence().take(15).joinToString("\n"),
+        )
+        kotlin.system.exitProcess(3)
     }
     application {
         Window(
