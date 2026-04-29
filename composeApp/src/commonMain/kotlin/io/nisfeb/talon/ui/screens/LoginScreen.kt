@@ -34,6 +34,7 @@ fun LoginScreen(session: UrbitSession, onLoggedIn: (ship: String) -> Unit) {
     var shipUrl by remember { mutableStateOf("http://localhost:8080") }
     var code by remember { mutableStateOf("") }
     var status by remember { mutableStateOf<String?>(null) }
+    var connecting by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
     Column(
@@ -50,6 +51,7 @@ fun LoginScreen(session: UrbitSession, onLoggedIn: (ship: String) -> Unit) {
             onValueChange = { shipUrl = it },
             label = { Text("Ship URL") },
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+            enabled = !connecting,
         )
         OutlinedTextField(
             value = code,
@@ -57,20 +59,50 @@ fun LoginScreen(session: UrbitSession, onLoggedIn: (ship: String) -> Unit) {
             label = { Text("+code") },
             visualTransformation = PasswordVisualTransformation(),
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+            enabled = !connecting,
         )
-        Button(onClick = {
-            status = "Connecting…"
-            scope.launch {
-                session.login(shipUrl, code)
-                    .onSuccess { ship ->
-                        status = "Connected as ~$ship"
-                        onLoggedIn(ship)
-                    }
-                    .onFailure { err ->
-                        status = "Failed: ${err::class.simpleName}: ${err.message ?: "(no message)"}"
-                    }
-            }
-        }) { Text("Connect") }
+        Button(
+            onClick = {
+                status = "Connecting…"
+                connecting = true
+                scope.launch {
+                    session.login(shipUrl, code)
+                        .onSuccess { ship ->
+                            status = "Connected as ~$ship"
+                            onLoggedIn(ship)
+                        }
+                        .onFailure { err ->
+                            status = friendlyError(err)
+                        }
+                    connecting = false
+                }
+            },
+            enabled = !connecting,
+        ) { Text(if (connecting) "Connecting…" else "Connect") }
         status?.let { Text(it, style = MaterialTheme.typography.bodyMedium) }
+    }
+}
+
+/**
+ * Map common login failures to plain-English text. Falls through to
+ * the underlying message for anything we don't recognise — which is
+ * still better than `IllegalStateException: login HTTP 401`.
+ */
+private fun friendlyError(err: Throwable): String {
+    val msg = err.message.orEmpty()
+    return when {
+        "HTTP 401" in msg || "HTTP 403" in msg -> "Wrong +code — try again"
+        "UnknownHostException" in err::class.simpleName.orEmpty() ||
+            "host" in msg.lowercase() && "resolve" in msg.lowercase() ->
+            "Can't reach that ship URL — check it and your connection"
+        "SSL" in err::class.simpleName.orEmpty() ||
+            "certificate" in msg.lowercase() ->
+            "TLS error connecting — the ship's certificate was rejected"
+        "no urbauth cookie" in msg ->
+            "Ship didn't return a session cookie — is the URL correct?"
+        "ConnectException" in err::class.simpleName.orEmpty() ->
+            "Connection refused — is the ship running?"
+        msg.isNotBlank() -> "Couldn't sign in: $msg"
+        else -> "Couldn't sign in: ${err::class.simpleName ?: "unknown error"}"
     }
 }
