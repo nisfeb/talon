@@ -130,6 +130,24 @@ jobs:
           path: ${{ matrix.artifact_glob }}
           if-no-files-found: error
 
+      # AppImage piggybacks on the Linux deb job so we don't pay for a
+      # second runner. createReleaseDistributable is a transitive
+      # dependency of packageReleaseDeb, so the bundled app dir already
+      # exists by the time we get here. --skip-build avoids re-running
+      # gradle. libfuse2 is for the AppImage's runtime on the testers'
+      # machines; appimagetool itself is invoked with
+      # --appimage-extract-and-run so this runner doesn't need FUSE.
+      - name: Build AppImage (Linux only)
+        if: runner.os == 'Linux'
+        run: ./scripts/build-appimage.sh --skip-build
+      - name: Upload AppImage (Linux only)
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-appimage
+          path: dist/Talon-x86_64.AppImage
+          if-no-files-found: error
+
   release:
     needs: [build, build-desktop]
     runs-on: ubuntu-latest
@@ -162,6 +180,7 @@ jobs:
             -name '*.deb' -o \
             -name '*.dmg' -o \
             -name '*.msi' -o \
+            -name '*.AppImage' -o \
             -name 'latest.json' \
           \) -print0)
           if [ "$collisions" -gt 0 ]; then
@@ -169,12 +188,12 @@ jobs:
             exit 1
           fi
           # Sanity check: the matrix is configured to emit one .apk,
-          # one .deb, one .dmg, one .msi, and one latest.json. Bail if
-          # we got fewer (e.g. an artifact-glob mismatch silently
-          # produced nothing).
+          # one .deb, one .dmg, one .msi, one .AppImage, and one
+          # latest.json. Bail if we got fewer (e.g. an artifact-glob
+          # mismatch silently produced nothing).
           count=$(find release-files -type f | wc -l)
-          if [ "$count" -lt 5 ]; then
-            echo "::error::Expected ≥5 release files, got $count"
+          if [ "$count" -lt 6 ]; then
+            echo "::error::Expected ≥6 release files, got $count"
             ls -la release-files/
             exit 1
           fi
