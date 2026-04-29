@@ -185,8 +185,16 @@ compose.desktop {
 fun derivePackageVersion(): String {
     val appBuild = rootProject.file("app/build.gradle.kts")
     if (!appBuild.exists()) return "1.0.0"
-    val match = Regex("""versionName\s*=\s*"([^"]+)"""")
-        .find(appBuild.readText()) ?: return "1.0.0"
+    // Match `versionName = "x.y.z"` only when it's the leading
+    // assignment on a line (whitespace-only prefix). Skips
+    // commented-out lines (`// versionName = "..."`) and inline
+    // assignments inside flavour blocks. Multiple uncommented
+    // matches still risk picking the wrong one — but we only have
+    // the canonical defaultConfig assignment in app/build.gradle.kts
+    // today, and a future flavour split would force us to revisit
+    // this anyway.
+    val regex = Regex("""(?m)^\s+versionName\s*=\s*"([^"]+)"""")
+    val match = regex.find(appBuild.readText()) ?: return "1.0.0"
     val raw = match.groupValues[1]
     val parts = raw.split(".")
     if (parts.size < 3) return "1.0.0"
