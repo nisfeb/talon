@@ -1,5 +1,6 @@
 package io.nisfeb.talon.compose
 
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Surface
 import androidx.compose.ui.Modifier
@@ -42,7 +43,9 @@ import io.nisfeb.talon.ui.screens.SettingsScreen
 import io.nisfeb.talon.ui.screens.StatusFeedScreen
 import io.nisfeb.talon.ui.screens.ThreadScreen
 import io.nisfeb.talon.ui.screens.WatchwordsScreen
+import io.nisfeb.talon.ui.theme.InMemoryThemePreference
 import io.nisfeb.talon.ui.theme.TalonTheme
+import io.nisfeb.talon.ui.theme.ThemePreference
 import io.nisfeb.talon.update.UpdateState
 import io.nisfeb.talon.urbit.SessionStore
 import io.nisfeb.talon.urbit.SettingsSync
@@ -85,6 +88,10 @@ fun App(
      *  Defaults to in-memory; desktop passes a JSON-backed impl so the
      *  flag survives restart. */
     watchwordsSync: WatchwordsSyncSettings = InMemoryWatchwordsSyncSettings(),
+    /** Per-device theme override (System / Light / Dark). In-memory by
+     *  default; desktop passes a JSON-backed impl so the choice
+     *  survives restart. */
+    themePreference: ThemePreference = InMemoryThemePreference(),
 ) {
     // Derive the initial logged-in ship from sessionStore.active()
     // (the joined SavedSession) rather than activeShip() (just the
@@ -266,7 +273,14 @@ fun App(
             LaunchedEffect(Unit) { repo.start(session) }
         }
 
-        TalonTheme {
+        val themeMode by themePreference.mode.collectAsState()
+        val systemDark = isSystemInDarkTheme()
+        val darkTheme = when (themeMode) {
+            ThemePreference.Mode.System -> systemDark
+            ThemePreference.Mode.Light -> false
+            ThemePreference.Mode.Dark -> true
+        }
+        TalonTheme(darkTheme = darkTheme) {
             Surface(modifier = Modifier.fillMaxSize()) {
                 // Effective ship: the session's actual restored state.
                 // Using session.shipName instead of loggedInShip avoids
@@ -284,6 +298,7 @@ fun App(
                     )
                     showSettings -> SettingsScreen(
                         aiSettings = aiSettings,
+                        themePreference = themePreference,
                         onBack = { showSettings = false },
                     )
                     showSelfProfile -> ProfileEditScreen(

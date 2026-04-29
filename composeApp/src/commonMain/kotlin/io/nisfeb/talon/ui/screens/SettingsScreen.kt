@@ -52,18 +52,22 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
+import androidx.compose.material3.FilterChip
 import io.nisfeb.talon.ai.AiSettings
 import io.nisfeb.talon.ai.AiSettingsRepository
 import io.nisfeb.talon.ui.isDailyDigestSupported
 import io.nisfeb.talon.ui.isOnDeviceAiSupported
+import io.nisfeb.talon.ui.theme.ThemePreference
 
 @Composable
 fun SettingsScreen(
     aiSettings: AiSettingsRepository,
+    themePreference: ThemePreference,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val aiState by aiSettings.state.collectAsState()
+    val themeMode by themePreference.mode.collectAsState()
 
     var provider by remember { mutableStateOf(aiState.provider) }
     var apiKey by remember { mutableStateOf(aiState.apiKey) }
@@ -102,6 +106,21 @@ fun SettingsScreen(
         ) {
             // TODO(port): Composer section (hideComposerButtons) requires UiSettings to move to
             // commonMain. Re-enable when UiSettings is ported.
+
+            Text(
+                "Appearance",
+                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                ThemePreference.Mode.values().forEach { mode ->
+                    FilterChip(
+                        selected = themeMode == mode,
+                        onClick = { themePreference.setMode(mode) },
+                        label = { Text(mode.label()) },
+                    )
+                }
+            }
+            Spacer(Modifier.height(4.dp))
 
             Text(
                 "AI",
@@ -341,4 +360,10 @@ private fun FeatureToggleRow(
         }
         Switch(checked = enabled, onCheckedChange = onChange)
     }
+}
+
+private fun ThemePreference.Mode.label(): String = when (this) {
+    ThemePreference.Mode.System -> "System"
+    ThemePreference.Mode.Light -> "Light"
+    ThemePreference.Mode.Dark -> "Dark"
 }

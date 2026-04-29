@@ -11,6 +11,8 @@ import io.nisfeb.talon.ai.DesktopDailyDigestSettings
 import io.nisfeb.talon.ai.DesktopWatchwordsSyncSettings
 import io.nisfeb.talon.ai.WatchwordsSyncSettings
 import io.nisfeb.talon.ai.createAiSettings
+import io.nisfeb.talon.ui.theme.DesktopThemePreference
+import io.nisfeb.talon.ui.theme.ThemePreference
 import io.nisfeb.talon.data.AppDatabase
 import io.nisfeb.talon.data.DatabaseOpenTimeoutException
 import io.nisfeb.talon.data.createAppDatabase
@@ -55,6 +57,7 @@ private class DesktopAppGraph {
     val aiSettings: AiSettingsRepository = createAiSettings()
     val dailyDigestSettings: DailyDigestSettings = DesktopDailyDigestSettings()
     val watchwordsSync: WatchwordsSyncSettings = DesktopWatchwordsSyncSettings()
+    val themePreference: ThemePreference = DesktopThemePreference()
     val drafts: DraftStore = InMemoryDraftStore()
 
     init {
@@ -231,6 +234,7 @@ fun main() {
                 createSettingsSync = graph.createSettingsSync,
                 dailyDigestSettings = graph.dailyDigestSettings,
                 watchwordsSync = graph.watchwordsSync,
+                themePreference = graph.themePreference,
             )
         }
     }
