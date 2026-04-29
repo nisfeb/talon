@@ -37,17 +37,13 @@ actual abstract class AppDatabase : RoomDatabase() {
 }
 
 /**
- * Open the desktop AppDatabase. The file lives under
- * `~/.config/talon/talon-port.db` so it doesn't collide with
- * production's `talon.db` — the two coexist while the port is in
- * flight, and either can be removed independently. The parent
- * directory is created on demand.
+ * Open the desktop AppDatabase. The file lives in the platform-
+ * standard user-data dir (see [io.nisfeb.talon.util.AppDirs]) and is
+ * named `talon-port.db` so it doesn't collide with production
+ * Android's `talon.db`. The directory is created on demand.
  */
 fun createAppDatabase(): AppDatabase {
-    val home = System.getProperty("user.home") ?: "."
-    val dbFile = File(home, ".config/talon/talon-port.db").apply {
-        parentFile?.mkdirs()
-    }
+    val dbFile = File(io.nisfeb.talon.util.AppDirs.userData, "talon-port.db")
     return Room.databaseBuilder<AppDatabase>(name = dbFile.absolutePath)
         .setDriver(BundledSQLiteDriver())
         .fallbackToDestructiveMigration(dropAllTables = true)

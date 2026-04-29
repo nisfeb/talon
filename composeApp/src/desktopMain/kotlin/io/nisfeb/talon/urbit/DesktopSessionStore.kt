@@ -1,5 +1,6 @@
 package io.nisfeb.talon.urbit
 
+import io.nisfeb.talon.util.AppDirs
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -8,9 +9,9 @@ import java.nio.file.Files
 import java.nio.file.StandardCopyOption
 
 /**
- * JSON-file-backed SessionStore for desktop. Stores sessions at
- * ${user.home}/.config/talon/sessions.json. Single-process — no
- * file locking, race-free for the common single-window use case.
+ * JSON-file-backed SessionStore for desktop. Stores sessions in the
+ * platform-standard user-data dir (see [AppDirs]). Single-process —
+ * no file locking, race-free for the common single-window use case.
  *
  * Threat model: cookieValue (the urbauth secret) is written in
  * cleartext. Desktop's threat model assumes a single-user device
@@ -21,13 +22,7 @@ import java.nio.file.StandardCopyOption
  */
 class DesktopSessionStore : SessionStore {
 
-    private val file: File by lazy {
-        val home = System.getProperty("user.home")
-            ?: error("user.home system property not set")
-        File(home, ".config/talon/sessions.json").also {
-            it.parentFile?.mkdirs()
-        }
-    }
+    private val file: File by lazy { File(AppDirs.userData, "sessions.json") }
 
     private fun load(): SessionsBlob = if (file.exists()) {
         runCatching { JSON.decodeFromString<SessionsBlob>(file.readText()) }

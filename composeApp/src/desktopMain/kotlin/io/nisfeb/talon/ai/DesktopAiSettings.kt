@@ -1,5 +1,6 @@
 package io.nisfeb.talon.ai
 
+import io.nisfeb.talon.util.AppDirs
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -10,21 +11,15 @@ import java.nio.file.Files
 import java.nio.file.StandardCopyOption
 
 /**
- * JSON-file-backed AI settings for desktop. Stored at
- * ${user.home}/.config/talon/ai_settings.json. No encryption —
- * desktop's threat model differs from mobile (whole-disk encryption
- * + the user controls the device); explicit encrypted storage is a
- * future Stage F follow-up if anyone asks for it.
+ * JSON-file-backed AI settings for desktop. Stored in the platform-
+ * standard user-data dir (see [AppDirs]). No encryption — desktop's
+ * threat model differs from mobile (whole-disk encryption + the user
+ * controls the device); explicit encrypted storage is a future
+ * Stage F follow-up if anyone asks for it.
  */
 class DesktopAiSettings : AiSettingsRepository {
 
-    private val file: File by lazy {
-        val home = System.getProperty("user.home")
-            ?: error("user.home system property not set")
-        File(home, ".config/talon/ai_settings.json").also {
-            it.parentFile?.mkdirs()
-        }
-    }
+    private val file: File by lazy { File(AppDirs.userData, "ai_settings.json") }
 
     private val _state = MutableStateFlow(loadInitial())
     override val state: StateFlow<AiSettings.Config> = _state.asStateFlow()
