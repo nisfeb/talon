@@ -3,6 +3,8 @@ package io.nisfeb.talon.util
 import java.io.File
 import java.util.Locale
 
+private const val TAG = "AppDirs"
+
 /**
  * Per-OS user-data directory for Talon. Returns the platform-
  * idiomatic location:
@@ -18,7 +20,17 @@ import java.util.Locale
  * standard "user data" path.
  */
 object AppDirs {
-    val userData: File by lazy { resolve().also { it.mkdirs() } }
+    val userData: File by lazy {
+        resolve().also { dir ->
+            // mkdirs() returns false on permission denied, read-only
+            // home, or a deleted profile dir on Windows. Surface the
+            // root cause instead of letting downstream callers fail
+            // with an opaque "unable to open database" later.
+            if (!dir.exists() && !dir.mkdirs()) {
+                Log.w(TAG, "Failed to create user-data dir: ${dir.absolutePath}")
+            }
+        }
+    }
 
     private fun resolve(): File {
         val osName = System.getProperty("os.name").orEmpty().lowercase(Locale.ROOT)
