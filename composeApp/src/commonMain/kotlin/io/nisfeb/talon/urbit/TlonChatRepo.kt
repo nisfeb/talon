@@ -103,6 +103,24 @@ class TlonChatRepo(
 ) {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    /**
+     * Scope for fire-and-forget ship pokes (folder reorder,
+     * watchword exclude, etc.) that should complete even if the
+     * caller's composition disposes mid-flight. Common case the
+     * main `scope` doesn't cover: user drags a folder, then
+     * rotates the device — composition disposes, the drag
+     * handler's rememberCoroutineScope cancels, the push never
+     * happens, ship has stale order. With pushScope the launch
+     * still has a live owner.
+     *
+     * NOT cancelled on stop() — orphaned launches from the prior
+     * ship complete on their own and are GC'd. Each repo instance
+     * has its own pushScope; a new instance per ship doesn't
+     * inherit pending pushes from the previous one (which is
+     * correct: the previous ship's cookie is gone, those pushes
+     * would 401).
+     */
+    val pushScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     @Volatile private var started = false
     @Volatile private var channel: UrbitChannel? = null
     @Volatile private var http: OkHttpClient? = null

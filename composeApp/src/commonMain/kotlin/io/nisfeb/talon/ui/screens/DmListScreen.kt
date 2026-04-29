@@ -436,7 +436,12 @@ fun DmListScreen(
         pendingPushFolderId = null
         pendingPushGroupOrders = false
         if (folderId != null || pushGroups) {
-            scope.launch {
+            // repo.pushScope (not the composition scope) so a
+            // rotation or quick navigation away mid-drag doesn't
+            // cancel the push before it runs. Local Room reorder
+            // is already committed by this point; we just need the
+            // ship to learn about it.
+            repo.pushScope.launch {
                 if (folderId != null) {
                     runCatching { repo.settingsSync?.pushFolderMembersOrder(folderId) }
                 }
