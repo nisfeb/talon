@@ -1,6 +1,5 @@
 package io.nisfeb.talon.compose
 
-import androidx.compose.runtime.remember
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.application
 import io.nisfeb.talon.ai.AiSettingsRepository
@@ -78,22 +77,36 @@ private class DesktopAppGraph {
     }
 }
 
-fun main() = application {
-    val graph = remember { DesktopAppGraph() }
-    Window(
-        onCloseRequest = {
-            graph.shutdown()
-            exitApplication()
-        },
-        title = "Talon",
-    ) {
-        App(
-            http = graph.http,
-            sessionStore = graph.sessionStore,
-            aiSettings = graph.aiSettings,
-            db = graph.db,
-            drafts = graph.drafts,
-            updateState = graph.updateState,
-        )
+fun main() {
+    // Construct the dependency graph BEFORE entering application { … }.
+    // application's body composes on the AWT EDT; building the graph
+    // there means the SQLite smoke-test's runBlocking parks the EDT
+    // until the open completes — multi-second hitches on slow disks
+    // (encrypted home dir, AV-scanned new file on Windows). Building
+    // here runs on the JVM main thread and the window only mounts
+    // once the graph is ready.
+    //
+    // Bonus: any throw during graph construction now surfaces as a
+    // proper main-thread crash with a stack trace, instead of an
+    // uncaught exception inside Compose's application body that
+    // leaves the user with no window.
+    val graph = DesktopAppGraph()
+    application {
+        Window(
+            onCloseRequest = {
+                graph.shutdown()
+                exitApplication()
+            },
+            title = "Talon",
+        ) {
+            App(
+                http = graph.http,
+                sessionStore = graph.sessionStore,
+                aiSettings = graph.aiSettings,
+                db = graph.db,
+                drafts = graph.drafts,
+                updateState = graph.updateState,
+            )
+        }
     }
 }
