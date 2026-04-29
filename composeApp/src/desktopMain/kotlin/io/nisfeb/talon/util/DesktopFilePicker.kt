@@ -2,6 +2,8 @@ package io.nisfeb.talon.util
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.swing.Swing
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import javax.swing.JFileChooser
 import javax.swing.filechooser.FileNameExtensionFilter
@@ -16,9 +18,16 @@ import javax.swing.filechooser.FileNameExtensionFilter
  *
  * File reads run on Dispatchers.IO afterward so they don't park
  * the EDT for large images.
+ *
+ * Reentry guard: a Mutex serializes concurrent pickImage() calls.
+ * Without it, double-tapping the attach button would queue two
+ * modal dialogs — the user picks once, dismisses, then a second
+ * picker pops up unexpectedly.
  */
 class DesktopFilePicker : FilePicker {
-    override suspend fun pickImage(): PickedImage? {
+    private val mutex = Mutex()
+
+    override suspend fun pickImage(): PickedImage? = mutex.withLock {
         val file = withContext(Dispatchers.Swing) {
             val chooser = JFileChooser().apply {
                 dialogTitle = "Pick an image"
