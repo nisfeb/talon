@@ -143,14 +143,41 @@ jobs:
 
       - name: Flatten artifact tree
         run: |
+          set -euo pipefail
           mkdir -p release-files
-          find artifacts -type f \( \
+          # Use cp -n (no-clobber) so a future change that emits two
+          # artifacts with the same basename (e.g. arm64 + amd64 .deb)
+          # surfaces a collision rather than silently overwriting.
+          collisions=0
+          while IFS= read -r -d '' src; do
+            dest="release-files/$(basename "$src")"
+            if [ -e "$dest" ]; then
+              echo "::error::Artifact name collision: $src would overwrite $dest"
+              collisions=$((collisions + 1))
+            else
+              cp "$src" "$dest"
+            fi
+          done < <(find artifacts -type f \( \
             -name '*.apk' -o \
             -name '*.deb' -o \
             -name '*.dmg' -o \
             -name '*.msi' -o \
             -name 'latest.json' \
-          \) -exec cp {} release-files/ \;
+          \) -print0)
+          if [ "$collisions" -gt 0 ]; then
+            echo "::error::$collisions artifact name collision(s) — refusing to publish"
+            exit 1
+          fi
+          # Sanity check: the matrix is configured to emit one .apk,
+          # one .deb, one .dmg, one .msi, and one latest.json. Bail if
+          # we got fewer (e.g. an artifact-glob mismatch silently
+          # produced nothing).
+          count=$(find release-files -type f | wc -l)
+          if [ "$count" -lt 5 ]; then
+            echo "::error::Expected ≥5 release files, got $count"
+            ls -la release-files/
+            exit 1
+          fi
           ls -la release-files/
 
       - name: Publish GitHub Release
