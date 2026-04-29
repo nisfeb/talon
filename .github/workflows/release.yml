@@ -155,15 +155,16 @@ jobs:
           if-no-files-found: error
 
       # AppImage piggybacks on the Linux deb job so we don't pay for a
-      # second runner. createReleaseDistributable is a transitive
-      # dependency of packageReleaseDeb, so the bundled app dir already
-      # exists by the time we get here. --skip-build avoids re-running
-      # gradle. libfuse2 is for the AppImage's runtime on the testers'
-      # machines; appimagetool itself is invoked with
-      # --appimage-extract-and-run so this runner doesn't need FUSE.
+      # second runner. The script invokes :createReleaseDistributable
+      # itself — packageReleaseDeb produces the deb directly without
+      # leaving the bundled-app dir behind, so we have to (re)build
+      # the app-image. The second gradle invocation is mostly cache
+      # hits since compileKotlinDesktop is up to date.
+      # appimagetool itself is invoked with --appimage-extract-and-run
+      # so this runner doesn't need FUSE.
       - name: Build AppImage (Linux only)
         if: runner.os == 'Linux'
-        run: ./scripts/build-appimage.sh --skip-build
+        run: ./scripts/build-appimage.sh
       - name: Upload AppImage (Linux only)
         if: runner.os == 'Linux'
         uses: actions/upload-artifact@v4
