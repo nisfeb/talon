@@ -335,8 +335,30 @@ fun DmChatScreen(
         }
     }
 
+    // Auto-scroll-to-bottom heuristic: only fire when a NEW message
+    // landed at the head (newest), not when pagination prepended
+    // older messages at the tail. Without this, short chats where
+    // the load-older trigger and "near bottom" guard overlap will
+    // yank the user from history they were trying to read.
+    // rows is oldest-first; LazyColumn renders displayRows.asReversed()
+    // with reverseLayout=true so the LAST Message renders at the
+    // visual bottom (newest). Walk backward to find the newest id.
+    fun newestMessageId(items: List<ChatListItem>): String? {
+        for (i in items.indices.reversed()) {
+            val item = items[i]
+            if (item is ChatListItem.Message) return item.row.m.id
+        }
+        return null
+    }
+    var lastNewestId by remember(whom) { mutableStateOf<String?>(newestMessageId(rows)) }
+    var lastSize by remember(whom) { mutableStateOf(rows.size) }
     LaunchedEffect(rows.size) {
-        if (rows.isNotEmpty() && listState.firstVisibleItemIndex <= 12) {
+        val newestId = newestMessageId(rows)
+        val gotNewerHead =
+            newestId != null && newestId != lastNewestId && rows.size > lastSize
+        lastNewestId = newestId
+        lastSize = rows.size
+        if (gotNewerHead && listState.firstVisibleItemIndex <= 12) {
             listState.scrollToItem(0)
         }
     }
