@@ -56,22 +56,27 @@ private class DesktopAppGraph {
     fun shutdown() {
         // Best-effort teardown. Order matters:
         //  1. Cancel update scope so its in-flight HTTP calls bail.
-        //  2. dispatcher.cancelAll() interrupts ALL in-flight calls
-        //     including TlonChatRepo's SSE drain (parked on a
-        //     long-poll execute()). Without this the executor
-        //     shutdown waits for the SSE call to return — which it
-        //     won't until the server times out — and the JVM lingers.
-        //  3. Shut the executor service. Now-empty queue + idle
-        //     threads → orderly thread exit.
+        //  2. dispatcher.cancelAll() interrupts dispatcher-tracked
+        //     calls (enqueue + EventSources). Synchronous execute()
+        //     calls running on coroutine workers aren't always
+        //     reached by cancelAll, so we rely on shutdownNow below
+        //     to interrupt their threads.
+        //  3. shutdown() → awaitTermination(2s) → shutdownNow().
+        //     Graceful first; if anything's still parked after 2s
+        //     (e.g. a synchronous long-poll that didn't see the
+        //     cancel), interrupt the threads so the JVM can exit
+        //     instead of lingering for the server's 60s timeout.
         //  4. Evict the connection pool.
         //  5. Close Room.
-        // TlonChatRepo's repo.stop() still fires from App()'s
-        // key-block DisposableEffect during exitApplication's
-        // composition teardown, but it runs AFTER this shutdown(),
-        // so the SSE drain coroutine has already thrown by then.
         runCatching { updateScope.cancel() }
         runCatching { http.dispatcher.cancelAll() }
-        runCatching { http.dispatcher.executorService.shutdown() }
+        runCatching {
+            val executor = http.dispatcher.executorService
+            executor.shutdown()
+            if (!executor.awaitTermination(2, TimeUnit.SECONDS)) {
+                executor.shutdownNow()
+            }
+        }
         runCatching { http.connectionPool.evictAll() }
         runCatching { db.close() }
     }
