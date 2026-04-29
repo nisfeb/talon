@@ -1,27 +1,3 @@
-// TEMPORARY DUPLICATE of app/src/main/java/io/nisfeb/talon/ui/screens/DmChatScreen.kt
-//
-// This is a heavily reduced port that captures the screen's core
-// rendering surface — header, reverse-layout message list, composer
-// with mention / emoji / slash autocomplete + a swipe-to-reply gesture
-// — but stubs out every feature that depended on TalonApplication
-// internals, ML Kit, ExoPlayer, ActivityResultContracts, Android
-// clipboard, or the Android-only sensor stack. Each stub carries a
-// TODO(port-d5-followup) marker explaining what's missing.
-//
-// Implemented since the initial D5 port:
-//   - image picker (rememberImagePicker via Compose-bound
-//     PickVisualMedia on Android, JFileChooser on desktop)
-//   - clipboard "Copy text" (LocalClipboardManager)
-//   - message action sheet (long-press menu) — react/reply/quote/
-//     copy/bookmark/edit/delete/pin
-//   - delete confirmation dialog (AlertDialog → repo.delete)
-//
-// Still stubbed (each gated by a `// TODO(port-d5-followup):`):
-//   - non-image file picker (GetContent equivalent for desktop)
-//   - voice preview playback (production uses ExoPlayer; commonMain
-//     ships without inline playback for now — Send/Cancel only)
-//
-// Keep in sync with production until app/ is removed in Stage F.
 package io.nisfeb.talon.ui.screens
 
 import androidx.compose.animation.core.Animatable
@@ -187,15 +163,19 @@ fun DmChatScreen(
     /** Optional Android-only platform widget slots. Each replaces a
      *  former expect/actual shim; desktop and tests pass null and the
      *  surface degrades gracefully (no chips, no voice button, no GPS
-     *  for /loc). The platform entry point that creates App() supplies
-     *  these — Main.kt stays null, the future MainActivity will pass
-     *  real Composables. */
+     *  for /loc, no voice preview playback). The platform entry point
+     *  that creates App() supplies these — Main.kt stays null, the
+     *  future MainActivity will pass real Composables. */
     entityChips: (@Composable (text: String, modifier: Modifier) -> Unit)? = null,
     voiceComposer: (@Composable (
         enabled: Boolean,
         onRecorded: (path: String, durationMs: Long) -> Unit,
     ) -> Unit)? = null,
     locationProvider: io.nisfeb.talon.ui.LocationProvider? = null,
+    /** Inline play/pause control for the voice preview row. Android
+     *  wires an ExoPlayer-backed control; desktop passes null and
+     *  the preview row hides the play button (still allows send/cancel). */
+    voicePlayer: (@Composable (path: String, sending: Boolean) -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val aiConfigured by aiSettings.state.collectAsState()
@@ -725,10 +705,6 @@ fun DmChatScreen(
                     modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
                 )
             }
-            // TODO(port-d5-followup): full composer in production has
-            // image / file / mic buttons via ActivityResultContracts and
-            // hooks into watchwords / AI / clipboard. The reduced
-            // composer here covers plain-text + slash + mention + emoji.
             val doSend: () -> Boolean = {
                 val body = draft.text.trim()
                 val quote = pendingQuote
@@ -789,6 +765,7 @@ fun DmChatScreen(
                 VoicePreviewRow(
                     pending = pv,
                     sending = uploading,
+                    voicePlayer = voicePlayer,
                     onCancel = {
                         java.io.File(pv.path).delete()
                         pendingVoice = null
@@ -1459,8 +1436,6 @@ private fun dividerLabel(ms: Long): String {
 //    show only when repo.settingsSync != null.  Hides on desktop.
 //  - `canPin` parameter gates pin/unpin.  Pin calls repo.pinPost /
 //    unpinPost which live in commonMain TlonChatRepo.
-//  - AI emoji picker removed (aiConfigured / TalonApplication AI stack
-//    is Android-only; TODO(port-d5-followup) when AI bridge is ported).
 //  - windowInsetsPadding(WindowInsets.navigationBars) kept — no-ops on
 //    desktop but harmless.
 
@@ -1526,6 +1501,7 @@ private fun QuotePreviewRow(
 private fun VoicePreviewRow(
     pending: PendingVoice,
     sending: Boolean,
+    voicePlayer: (@Composable (path: String, sending: Boolean) -> Unit)?,
     onCancel: () -> Unit,
     onSend: () -> Unit,
 ) {
@@ -1537,8 +1513,15 @@ private fun VoicePreviewRow(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {
+        // Platform-supplied play/pause control. When null (desktop),
+        // the row falls back to a "preview not available" hint.
+        if (voicePlayer != null) {
+            voicePlayer(pending.path, sending)
+        }
+        val label = if (voicePlayer != null) "🎙 ${seconds}s"
+        else "🎙 ${seconds}s recorded — preview not available, tap send when ready"
         Text(
-            "🎙 ${seconds}s recorded — preview not available, tap send when ready",
+            label,
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier
