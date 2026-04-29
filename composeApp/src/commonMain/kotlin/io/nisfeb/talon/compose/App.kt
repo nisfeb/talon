@@ -32,6 +32,7 @@ import io.nisfeb.talon.ui.screens.ThreadScreen
 import io.nisfeb.talon.ui.theme.TalonTheme
 import io.nisfeb.talon.update.UpdateState
 import io.nisfeb.talon.urbit.SessionStore
+import io.nisfeb.talon.urbit.SettingsSync
 import io.nisfeb.talon.urbit.TlonChatRepo
 import io.nisfeb.talon.urbit.UrbitSession
 import io.nisfeb.talon.util.Log
@@ -56,6 +57,7 @@ fun App(
     db: AppDatabase,
     drafts: DraftStore,
     updateState: UpdateState,
+    settingsSync: SettingsSync? = null,
 ) {
     // Derive the initial logged-in ship from sessionStore.active()
     // (the joined SavedSession) rather than activeShip() (just the
@@ -146,7 +148,7 @@ fun App(
                 }
             }
         }
-        val repo = remember { TlonChatRepo(db = db) }
+        val repo = remember { TlonChatRepo(db = db, settingsSync = settingsSync) }
 
         DisposableEffect(Unit) {
             onDispose { runCatching { repo.stop() } }

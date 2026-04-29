@@ -3,6 +3,8 @@ package io.nisfeb.talon.compose
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.application
 import io.nisfeb.talon.ai.AiSettingsRepository
+import io.nisfeb.talon.ai.DailyDigestSettings
+import io.nisfeb.talon.ai.DesktopDailyDigestSettings
 import io.nisfeb.talon.ai.createAiSettings
 import io.nisfeb.talon.data.AppDatabase
 import io.nisfeb.talon.data.DatabaseOpenTimeoutException
@@ -13,6 +15,8 @@ import io.nisfeb.talon.update.NoopUpdateInstallerHook
 import io.nisfeb.talon.update.StaticUpdateRuntime
 import io.nisfeb.talon.update.UpdateState
 import io.nisfeb.talon.urbit.SessionStore
+import io.nisfeb.talon.urbit.SettingsSync
+import io.nisfeb.talon.urbit.SettingsSyncImpl
 import io.nisfeb.talon.urbit.createSessionStore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -44,8 +48,18 @@ private class DesktopAppGraph {
         .build()
     val sessionStore: SessionStore = createSessionStore()
     val aiSettings: AiSettingsRepository = createAiSettings()
+    val dailyDigestSettings: DailyDigestSettings = DesktopDailyDigestSettings()
     val db: AppDatabase = createAppDatabase()
     val drafts: DraftStore = InMemoryDraftStore()
+    val settingsSync: SettingsSync = SettingsSyncImpl(
+        db = db,
+        aiSettings = aiSettings,
+        dailyDigestSettings = dailyDigestSettings,
+        // Desktop has no AlarmManager equivalent wired, so the
+        // digest doesn't actually fire here. The callback's a no-op
+        // until that subsystem ports.
+        rearmDailyDigest = {},
+    )
 
     private val updateScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     val updateState: UpdateState = UpdateState(
@@ -173,6 +187,7 @@ fun main() {
                 db = graph.db,
                 drafts = graph.drafts,
                 updateState = graph.updateState,
+                settingsSync = graph.settingsSync,
             )
         }
     }
