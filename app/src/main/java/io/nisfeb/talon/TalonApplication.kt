@@ -133,7 +133,7 @@ class TalonApplication : Application() {
         val updatePrefs = getSharedPreferences("update_state", MODE_PRIVATE)
         val httpChecker = HttpUpdateChecker(
             http = http,
-            url = "https://github.com/sneagan/talon/releases/latest/download/latest.json",
+            url = "https://github.com/nisfeb/talon/releases/latest/download/latest.json",
             now = { System.currentTimeMillis() },
             lastCheckedAtMs = { updatePrefs.getLong("last_http_check_ms", 0L) },
             recordCheckedAt = { updatePrefs.edit().putLong("last_http_check_ms", it).apply() },

@@ -1,47 +1,47 @@
 # Talon
 
-Native Android chat client for Urbit. See [PLAN.md](PLAN.md).
+Native chat client for Urbit. Android-first; desktop (Linux / macOS /
+Windows) ships via Compose Multiplatform — see [PLAN.md](PLAN.md).
 
 ## Requirements
 
-- Android Studio Koala (2024.1+) or newer
-- JDK 17 (project uses `/home/sneagan/jdk-install/jdk-17.0.12+7`)
-- Android SDK 34, build-tools 34
-- Gradle 8.9+
+- JDK 17 (Temurin or any full JDK with the standard jmods)
+- Android SDK 34, build-tools 34 (Android target only)
+- Gradle wrapper handles its own version
 
-## Bootstrap
-
-The gradle wrapper jar is not checked in yet. Generate it once:
+## Build
 
 ```bash
-cd /home/sneagan/software/personal/talon
-gradle wrapper --gradle-version 8.9
-```
-
-Then build and install on a connected device:
-
-```bash
-JAVA_HOME=/home/sneagan/jdk-install/jdk-17.0.12+7 \
-ANDROID_HOME=/home/sneagan/Android/Sdk \
+# Android debug install on a connected device
 ./gradlew installDebug
+
+# Android signed release APK (requires keystore — see RELEASE.md)
+./gradlew :app:assembleRelease
+
+# Desktop self-contained app dir
+./gradlew :composeApp:createReleaseDistributable
+
+# Desktop installers / AppImage — see scripts/build-appimage.sh and
+# the package* tasks (packageReleaseDeb, packageReleaseDmg,
+# packageReleaseMsi). Each builds for the host OS only.
 ```
 
 ## Layout
 
 ```
-app/src/main/java/io/nisfeb/talon/
-  MainActivity.kt       — entry, sets Compose content
-  TalonApp.kt           — root composable
-  urbit/
-    UrbitSession.kt     — auth + SSE channel
-    UrbitChannel.kt     — subscribe / poke / scry
-  data/
-    AppDatabase.kt      — Room database
-  ui/
-    theme/              — Material 3 theme
-    screens/            — Home, Chat, Profile
+app/                       — Android-only production app
+composeApp/                — KMP module (Android + desktop)
+  src/commonMain/          — shared screens, repos, data layer
+  src/androidMain/         — Android actuals (file picker, etc.)
+  src/desktopMain/         — Desktop actuals + Main.kt entry
+.github/workflows/         — release CI (Android APK, .deb, .dmg, .msi, AppImage)
+scripts/build-appimage.sh  — AppImage packaging
+RELEASE.md                 — keystore + tagging procedure
 ```
 
-## Status
+## Releases
 
-Week 0: skeleton + plan only. Nothing wires up yet.
+Tag `vX.Y.Z` (matching `versionName` in `app/build.gradle.kts`) and
+push. CI builds all platform artifacts and publishes a GitHub Release.
+Configure the four `RELEASE_KEYSTORE_*` repo secrets to enable APK
+signing — without them, desktop artifacts still ship.

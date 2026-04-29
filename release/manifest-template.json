@@ -1,7 +1,7 @@
 {
   "versionCode": __VERSION_CODE__,
   "versionName": "__VERSION_NAME__",
-  "url": "https://github.com/sneagan/talon/releases/download/v__VERSION_NAME__/talon-__VERSION_NAME__.apk",
+  "url": "https://github.com/nisfeb/talon/releases/download/v__VERSION_NAME__/talon-__VERSION_NAME__.apk",
   "sha256": "__SHA256__",
   "minSdk": 26,
   "changelog": "__CHANGELOG__",

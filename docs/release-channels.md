@@ -68,7 +68,7 @@ git push origin master
 git push origin v0.5.0
 
 # 3. Wait ~3 min for the release.yml workflow.
-# 4. Verify the Release at https://github.com/sneagan/talon/releases/tag/v0.5.0
+# 4. Verify the Release at https://github.com/nisfeb/talon/releases/tag/v0.5.0
 # 5. On any device running an older Talon, force-stop + reopen → banner appears.
 ```
 
