@@ -286,11 +286,14 @@ fun App(
             // OS notifications for incoming messages. Watches the
             // per-conversation latest-message flow and fires a balloon
             // when a whom's latest id changes to something authored by
-            // someone other than us, AND the chat isn't currently open.
-            // The first emission seeds the baseline so we don't notify
-            // for every existing chat at app startup.
+            // someone other than us, AND the chat isn't currently open,
+            // AND the chat isn't muted. The first emission seeds the
+            // baseline so we don't notify for every existing chat at
+            // app startup. Decision logic lives in
+            // [diffNewMessageNotifications] — kept pure and unit-tested
+            // so the seeding behavior can't silently regress.
             LaunchedEffect(notifier, loggedInShip) {
-                val lastSeenIds = mutableMapOf<String, String>()
+                var lastSeenIds: Map<String, String> = emptyMap()
                 var seeded = false
                 kotlinx.coroutines.flow.combine(
                     db.messages().conversationLatest(),
@@ -298,24 +301,25 @@ fun App(
                 ) { rows, muted -> rows to muted.toHashSet() }
                     .collect { (rows, muted) ->
                         if (!seeded) {
-                            for (row in rows) lastSeenIds[row.whom] = row.id
+                            lastSeenIds = io.nisfeb.talon.notify
+                                .seedNewMessageBaseline(rows)
                             seeded = true
                             return@collect
                         }
-                        for (row in rows) {
-                            val prior = lastSeenIds[row.whom]
-                            lastSeenIds[row.whom] = row.id
-                            if (prior == row.id) continue
-                            if (row.author == loggedInShip) continue
-                            if (row.whom == openChat) continue
-                            if (row.whom in muted) continue
-                            val title = row.author
-                            val body = io.nisfeb.talon.urbit.StoryCache
-                                .textFor(row.id, row.contentJson)
-                                .replace('\n', ' ')
-                                .take(200)
-                                .ifBlank { "(attachment)" }
-                            runCatching { notifier.notify(title, body) }
+                        val diff = io.nisfeb.talon.notify
+                            .diffNewMessageNotifications(
+                                rows = rows,
+                                lastSeen = lastSeenIds,
+                                ourPatp = loggedInShip,
+                                openChat = openChat,
+                                mutedWhoms = muted,
+                                storyText = { id, json ->
+                                    io.nisfeb.talon.urbit.StoryCache.textFor(id, json)
+                                },
+                            )
+                        lastSeenIds = diff.newLastSeen
+                        for (n in diff.notifications) {
+                            runCatching { notifier.notify(n.title, n.body) }
                         }
                     }
             }
