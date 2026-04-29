@@ -26,6 +26,12 @@ interface NotifyPreferenceDao {
     @Query("SELECT * FROM notify_preferences WHERE whom = :whom LIMIT 1")
     fun stream(whom: String): Flow<NotifyPreferenceEntity?>
 
+    /** Live set of every chat the user has muted. Used by the
+     *  notification subscriber to skip new-message balloons for
+     *  muted whoms without an extra DB call per message. */
+    @Query("SELECT whom FROM notify_preferences WHERE level = 'none'")
+    fun streamMutedWhoms(): Flow<List<String>>
+
     @Query("DELETE FROM notify_preferences")
     suspend fun clearAll()
 

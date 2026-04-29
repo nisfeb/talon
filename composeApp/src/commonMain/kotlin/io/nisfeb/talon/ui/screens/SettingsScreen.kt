@@ -55,6 +55,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.material3.FilterChip
 import io.nisfeb.talon.ai.AiSettings
 import io.nisfeb.talon.ai.AiSettingsRepository
+import io.nisfeb.talon.ui.UiSettings
 import io.nisfeb.talon.ui.isDailyDigestSupported
 import io.nisfeb.talon.ui.isOnDeviceAiSupported
 import io.nisfeb.talon.ui.theme.ThemePreference
@@ -63,11 +64,13 @@ import io.nisfeb.talon.ui.theme.ThemePreference
 fun SettingsScreen(
     aiSettings: AiSettingsRepository,
     themePreference: ThemePreference,
+    uiSettings: UiSettings,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val aiState by aiSettings.state.collectAsState()
     val themeMode by themePreference.mode.collectAsState()
+    val hideComposerButtons by uiSettings.hideComposerButtons.collectAsState()
 
     var provider by remember { mutableStateOf(aiState.provider) }
     var apiKey by remember { mutableStateOf(aiState.apiKey) }
@@ -120,6 +123,19 @@ fun SettingsScreen(
                     )
                 }
             }
+            Spacer(Modifier.height(4.dp))
+
+            Text(
+                "Composer",
+                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
+            )
+            FeatureToggleRow(
+                label = "Hide composer buttons",
+                description = "Hide the image / file / mic buttons next to the message field. " +
+                    "Useful when you mostly send plain text and want a tighter input row.",
+                enabled = hideComposerButtons,
+                onChange = { uiSettings.setHideComposerButtons(it) },
+            )
             Spacer(Modifier.height(4.dp))
 
             Text(

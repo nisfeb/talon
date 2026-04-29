@@ -177,6 +177,7 @@ fun DmChatScreen(
     drafts: DraftStore,
     http: OkHttpClient,
     aiSettings: AiSettingsRepository,
+    uiSettings: io.nisfeb.talon.ui.UiSettings,
     ourPatp: String,
     whom: String,
     initialScrollMessageId: String? = null,
@@ -190,6 +191,7 @@ fun DmChatScreen(
     modifier: Modifier = Modifier,
 ) {
     val aiConfigured by aiSettings.state.collectAsState()
+    val hideComposerButtons by uiSettings.hideComposerButtons.collectAsState()
     val locationProvider = rememberLocationProvider()
     val aiFeatures = remember(aiSettings) {
         AiFeatures(AiClient { aiSettings.state.value })
@@ -817,39 +819,41 @@ fun DmChatScreen(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(2.dp),
             ) {
-                IconButton(
-                    onClick = onPickAndSendImage,
-                    enabled = canSend && !uploading,
-                    modifier = Modifier.size(36.dp),
-                ) {
-                    if (uploading) {
-                        CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
-                    } else {
+                if (!hideComposerButtons) {
+                    IconButton(
+                        onClick = onPickAndSendImage,
+                        enabled = canSend && !uploading,
+                        modifier = Modifier.size(36.dp),
+                    ) {
+                        if (uploading) {
+                            CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                        } else {
+                            Icon(
+                                Icons.Filled.Image,
+                                contentDescription = "Attach image",
+                                modifier = Modifier.size(22.dp),
+                            )
+                        }
+                    }
+                    IconButton(
+                        onClick = onPickAndSendFile,
+                        enabled = canSend && !uploading,
+                        modifier = Modifier.size(36.dp),
+                    ) {
                         Icon(
-                            Icons.Filled.Image,
-                            contentDescription = "Attach image",
+                            Icons.Filled.AttachFile,
+                            contentDescription = "Attach file",
                             modifier = Modifier.size(22.dp),
                         )
                     }
-                }
-                IconButton(
-                    onClick = onPickAndSendFile,
-                    enabled = canSend && !uploading,
-                    modifier = Modifier.size(36.dp),
-                ) {
-                    Icon(
-                        Icons.Filled.AttachFile,
-                        contentDescription = "Attach file",
-                        modifier = Modifier.size(22.dp),
-                    )
-                }
-                if (isVoiceMessagesSupported) {
-                    VoiceRecordButton(
-                        enabled = canSend && !uploading,
-                        onRecorded = { path, durationMs ->
-                            pendingVoice = PendingVoice(path, durationMs)
-                        },
-                    )
+                    if (isVoiceMessagesSupported) {
+                        VoiceRecordButton(
+                            enabled = canSend && !uploading,
+                            onRecorded = { path, durationMs ->
+                                pendingVoice = PendingVoice(path, durationMs)
+                            },
+                        )
+                    }
                 }
                 OutlinedTextField(
                     value = draft,

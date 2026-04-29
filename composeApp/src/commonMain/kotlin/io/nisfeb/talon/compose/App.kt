@@ -20,7 +20,9 @@ import io.nisfeb.talon.notify.NoopNotifier
 import io.nisfeb.talon.notify.Notifier
 import io.nisfeb.talon.data.AppDatabase
 import io.nisfeb.talon.ui.DraftStore
+import io.nisfeb.talon.ui.InMemoryUiSettings
 import io.nisfeb.talon.ui.PlatformBackHandler
+import io.nisfeb.talon.ui.UiSettings
 import io.nisfeb.talon.ui.screens.DmChatScreen
 import io.nisfeb.talon.ui.screens.DmListScreen
 import io.nisfeb.talon.ui.screens.ActivityFeedScreen
@@ -98,6 +100,9 @@ fun App(
      *  platforms (Android composeApp) get the no-op default until
      *  their notification stories port. */
     notifier: Notifier = NoopNotifier,
+    /** UI preferences (composer toggles). In-memory default; desktop
+     *  passes a JSON-backed impl. */
+    uiSettings: UiSettings = InMemoryUiSettings(),
 ) {
     // Derive the initial logged-in ship from sessionStore.active()
     // (the joined SavedSession) rather than activeShip() (just the
@@ -287,8 +292,11 @@ fun App(
             LaunchedEffect(notifier, loggedInShip) {
                 val lastSeenIds = mutableMapOf<String, String>()
                 var seeded = false
-                db.messages().conversationLatest()
-                    .collect { rows ->
+                kotlinx.coroutines.flow.combine(
+                    db.messages().conversationLatest(),
+                    db.notifyPrefs().streamMutedWhoms(),
+                ) { rows, muted -> rows to muted.toHashSet() }
+                    .collect { (rows, muted) ->
                         if (!seeded) {
                             for (row in rows) lastSeenIds[row.whom] = row.id
                             seeded = true
@@ -300,6 +308,7 @@ fun App(
                             if (prior == row.id) continue
                             if (row.author == loggedInShip) continue
                             if (row.whom == openChat) continue
+                            if (row.whom in muted) continue
                             val title = row.author
                             val body = io.nisfeb.talon.urbit.StoryCache
                                 .textFor(row.id, row.contentJson)
@@ -338,6 +347,7 @@ fun App(
                     showSettings -> SettingsScreen(
                         aiSettings = aiSettings,
                         themePreference = themePreference,
+                        uiSettings = uiSettings,
                         onBack = { showSettings = false },
                     )
                     showSelfProfile -> ProfileEditScreen(
@@ -551,6 +561,7 @@ fun App(
                         drafts = drafts,
                         http = http,
                         aiSettings = aiSettings,
+                        uiSettings = uiSettings,
                         ourPatp = ship,
                         whom = openChat!!,
                         onBack = { openChat = null },

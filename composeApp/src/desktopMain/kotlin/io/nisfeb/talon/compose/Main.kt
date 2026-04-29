@@ -1,13 +1,18 @@
 package io.nisfeb.talon.compose
 
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.painter.BitmapPainter
 import androidx.compose.ui.graphics.toComposeImageBitmap
+import androidx.compose.ui.window.MenuBar
 import androidx.compose.ui.window.Notification
 import androidx.compose.ui.window.Tray
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberTrayState
+import androidx.compose.ui.window.rememberWindowState
 import io.nisfeb.talon.notify.Notifier
 import org.jetbrains.skia.Image as SkiaImage
 import io.nisfeb.talon.ai.AiSettingsRepository
@@ -16,6 +21,8 @@ import io.nisfeb.talon.ai.DesktopDailyDigestSettings
 import io.nisfeb.talon.ai.DesktopWatchwordsSyncSettings
 import io.nisfeb.talon.ai.WatchwordsSyncSettings
 import io.nisfeb.talon.ai.createAiSettings
+import io.nisfeb.talon.ui.DesktopUiSettings
+import io.nisfeb.talon.ui.UiSettings
 import io.nisfeb.talon.ui.theme.DesktopThemePreference
 import io.nisfeb.talon.ui.theme.ThemePreference
 import io.nisfeb.talon.data.AppDatabase
@@ -63,6 +70,7 @@ private class DesktopAppGraph {
     val dailyDigestSettings: DailyDigestSettings = DesktopDailyDigestSettings()
     val watchwordsSync: WatchwordsSyncSettings = DesktopWatchwordsSyncSettings()
     val themePreference: ThemePreference = DesktopThemePreference()
+    val uiSettings: UiSettings = DesktopUiSettings()
     val drafts: DraftStore = InMemoryDraftStore()
 
     init {
@@ -209,19 +217,49 @@ fun main() {
     }.getOrNull()
 
     application {
+        // visible: false hides the window without tearing down the
+        // composition or the rest of the dependency graph (SSE keeps
+        // running, notifications keep firing). The user reopens via
+        // the tray menu's "Show Talon" item or fully exits via "Quit".
+        var windowVisible by remember { mutableStateOf(true) }
+        val windowState = rememberWindowState()
         val trayState = rememberTrayState()
-        // Tray icon for OS notifications. iconPainter may be null when
-        // the bundled resource fails to load — Tray requires non-null,
-        // so fall back to a tiny transparent painter to keep the tray
-        // entry visible. The notifier still works either way.
+        // Tray icon for OS notifications + show/quit menu. iconPainter
+        // may be null when the bundled resource fails to load — Tray
+        // requires non-null, so fall back to a tiny transparent painter
+        // to keep the tray entry visible.
         val trayIconPainter = iconPainter
             ?: androidx.compose.ui.graphics.painter.ColorPainter(
                 androidx.compose.ui.graphics.Color.Transparent,
             )
+        // Full quit path — same teardown the old onCloseRequest used:
+        // background thread runs shutdown + exitProcess so the user
+        // sees the window vanish immediately.
+        val quitToOs: () -> Unit = {
+            Thread {
+                runCatching { graph.shutdown() }
+                kotlin.system.exitProcess(0)
+            }.apply { isDaemon = true; name = "Talon-shutdown" }.start()
+            exitApplication()
+        }
         Tray(
             icon = trayIconPainter,
             state = trayState,
             tooltip = "Talon",
+            // Primary click on the tray icon (Linux/Windows) reopens
+            // the window if it's been minimized to tray. macOS tray
+            // primary-click usually opens the menu instead.
+            onAction = {
+                windowVisible = true
+                windowState.isMinimized = false
+            },
+            menu = {
+                Item("Show Talon", onClick = {
+                    windowVisible = true
+                    windowState.isMinimized = false
+                })
+                Item("Quit", onClick = quitToOs)
+            },
         )
         val notifier: Notifier = remember(trayState) {
             object : Notifier {
@@ -233,22 +271,13 @@ fun main() {
             }
         }
         Window(
-            // onCloseRequest runs on the AWT EDT. We can't graph.shutdown()
-            // here because shutdown's awaitTermination(2s) would freeze
-            // the window for that duration — Windows surfaces "Not
-            // Responding" near the threshold. Move the wait to a daemon
-            // thread, exitApplication immediately so the window vanishes,
-            // and exitProcess(0) when shutdown completes (or 2s elapses)
-            // to force JVM exit even if non-daemon OkHttp workers are
-            // still alive. The daemon flag on this thread ensures it
-            // doesn't itself block JVM exit.
-            onCloseRequest = {
-                Thread {
-                    runCatching { graph.shutdown() }
-                    kotlin.system.exitProcess(0)
-                }.apply { isDaemon = true; name = "Talon-shutdown" }.start()
-                exitApplication()
-            },
+            // Minimize to tray instead of quitting. SSE / repo / db all
+            // keep running so notifications continue firing while the
+            // window is hidden. The tray menu's "Quit" is the only path
+            // that fully exits the JVM.
+            onCloseRequest = { windowVisible = false },
+            visible = windowVisible,
+            state = windowState,
             title = "Talon",
             icon = iconPainter,
         ) {
@@ -264,6 +293,7 @@ fun main() {
                 watchwordsSync = graph.watchwordsSync,
                 themePreference = graph.themePreference,
                 notifier = notifier,
+                uiSettings = graph.uiSettings,
             )
         }
     }
