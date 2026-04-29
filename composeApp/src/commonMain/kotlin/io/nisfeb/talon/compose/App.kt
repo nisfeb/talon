@@ -69,19 +69,21 @@ fun App(
     }
 
     // System Back navigates up through the state machine on Android;
-    // no-op on desktop. Order from innermost to outermost so the
-    // first matching enabled handler wins (Compose registers them
-    // LIFO via OnBackPressedDispatcher, so declaration order = stack
-    // order). Image viewer overlays everything → handle it first.
-    PlatformBackHandler(enabled = viewerImageUrl != null) {
-        viewerImageUrl = null
+    // no-op on desktop. OnBackPressedDispatcher is LIFO — the LAST
+    // registered enabled callback wins. Declare in reverse render
+    // precedence so the highest-precedence rendered screen also
+    // catches Back: chat (lowest) → thread → viewer → profile →
+    // settings (highest). Mirrors app/.../ui/TalonApp.kt:407-427
+    // which puts the innermost overlays last.
+    PlatformBackHandler(enabled = openChat != null && openThreadParent == null) {
+        openChat = null
     }
     PlatformBackHandler(enabled = openThreadParent != null) {
         openThreadParent = null
         openThreadReplyAnchor = null
     }
-    PlatformBackHandler(enabled = openChat != null && openThreadParent == null) {
-        openChat = null
+    PlatformBackHandler(enabled = viewerImageUrl != null) {
+        viewerImageUrl = null
     }
     PlatformBackHandler(enabled = showSelfProfile) {
         showSelfProfile = false
