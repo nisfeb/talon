@@ -6,20 +6,17 @@ on:
       - 'v*'
 
 jobs:
-  build:
+  # Single source of truth for the tag-vs-versionName check, so the
+  # downstream jobs don't each re-parse build.gradle.kts. Outputs the
+  # parsed version_name / version_code for steps that need them.
+  tagcheck:
     runs-on: ubuntu-latest
-    permissions:
-      # Required for softprops/action-gh-release to publish the
-      # release. Modern repos default GITHUB_TOKEN.contents to read,
-      # which would 403 on any release-creation API call.
-      contents: write
     outputs:
-      version_name: ${{ steps.tagcheck.outputs.version_name }}
+      version_name: ${{ steps.parse.outputs.version_name }}
+      version_code: ${{ steps.parse.outputs.version_code }}
     steps:
       - uses: actions/checkout@v4
-
-      - name: Verify tag matches versionName
-        id: tagcheck
+      - id: parse
         run: |
           TAG="${GITHUB_REF#refs/tags/v}"
           VERSION_CODE=$(grep 'versionCode = ' app/build.gradle.kts | head -1 | grep -oE '[0-9]+')
@@ -31,20 +28,45 @@ jobs:
           echo "version_code=$VERSION_CODE" >> $GITHUB_OUTPUT
           echo "version_name=$VERSION_NAME" >> $GITHUB_OUTPUT
 
+  # Android APK build + sign. Conditional on the four signing secrets
+  # being set on the repo. When they're absent (e.g. desktop-only
+  # release flows, fresh forks), the job runs to completion but emits
+  # no APK artifact and the release publishes desktop installers only.
+  build-android:
+    needs: tagcheck
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check keystore secret presence
+        id: chk
+        env:
+          KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
+        run: |
+          if [ -z "$KEYSTORE_BASE64" ]; then
+            echo "::warning::RELEASE_KEYSTORE_BASE64 not set — skipping Android APK build"
+            echo "have_keystore=false" >> $GITHUB_OUTPUT
+          else
+            echo "have_keystore=true" >> $GITHUB_OUTPUT
+          fi
+
       - name: Set up JDK 17
+        if: steps.chk.outputs.have_keystore == 'true'
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
           java-version: '17'
 
       - name: Decode keystore
+        if: steps.chk.outputs.have_keystore == 'true'
         env:
           KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
           STORE_PASSWORD: ${{ secrets.RELEASE_STORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
         run: |
-          : "${KEYSTORE_BASE64:?RELEASE_KEYSTORE_BASE64 secret is not set}"
           : "${STORE_PASSWORD:?RELEASE_STORE_PASSWORD secret is not set}"
           : "${KEY_ALIAS:?RELEASE_KEY_ALIAS secret is not set}"
           : "${KEY_PASSWORD:?RELEASE_KEY_PASSWORD secret is not set}"
@@ -59,15 +81,17 @@ jobs:
           } > ~/.config/talon/keystore.properties
 
       - name: Build release APK
+        if: steps.chk.outputs.have_keystore == 'true'
         env:
           RELEASE_KEYSTORE_PROPS: /home/runner/.config/talon/keystore.properties
         run: ./gradlew :app:assembleRelease
 
       - name: Stage release artifacts
+        if: steps.chk.outputs.have_keystore == 'true'
         id: stage
         env:
-          VERSION_CODE: ${{ steps.tagcheck.outputs.version_code }}
-          VERSION_NAME: ${{ steps.tagcheck.outputs.version_name }}
+          VERSION_CODE: ${{ needs.tagcheck.outputs.version_code }}
+          VERSION_NAME: ${{ needs.tagcheck.outputs.version_name }}
         run: |
           APK=app/build/outputs/apk/release/app-release.apk
           OUT_APK="talon-$VERSION_NAME.apk"
@@ -83,6 +107,7 @@ jobs:
           echo "apk=$OUT_APK" >> $GITHUB_OUTPUT
 
       - name: Upload Android APK + manifest
+        if: steps.chk.outputs.have_keystore == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: android
@@ -92,11 +117,10 @@ jobs:
 
   # Desktop matrix runs jpackage on each host OS so the per-platform
   # installer toolchains are present (dpkg + fakeroot on Linux,
-  # hdiutil on macOS, WiX on Windows). Each job uploads its installer
-  # as a workflow artifact; the `release` job below collects all four
-  # and publishes them as a single GitHub Release.
+  # hdiutil on macOS, WiX on Windows). Independent of build-android so
+  # the desktop pipeline ships even without Android signing secrets.
   build-desktop:
-    needs: build
+    needs: tagcheck
     strategy:
       fail-fast: false
       matrix:
@@ -149,7 +173,7 @@ jobs:
           if-no-files-found: error
 
   release:
-    needs: [build, build-desktop]
+    needs: [tagcheck, build-android, build-desktop]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -187,13 +211,15 @@ jobs:
             echo "::error::$collisions artifact name collision(s) — refusing to publish"
             exit 1
           fi
-          # Sanity check: the matrix is configured to emit one .apk,
-          # one .deb, one .dmg, one .msi, one .AppImage, and one
-          # latest.json. Bail if we got fewer (e.g. an artifact-glob
-          # mismatch silently produced nothing).
-          count=$(find release-files -type f | wc -l)
-          if [ "$count" -lt 6 ]; then
-            echo "::error::Expected ≥6 release files, got $count"
+          # Desktop matrix is configured to emit one .deb, one .dmg,
+          # one .msi, and one .AppImage. Bail if any of those are
+          # missing — they're not optional. APK + latest.json are
+          # optional (only present when the keystore secret is set).
+          required_count=$(find release-files -type f \
+            \( -name '*.deb' -o -name '*.dmg' -o -name '*.msi' \
+               -o -name '*.AppImage' \) | wc -l)
+          if [ "$required_count" -lt 4 ]; then
+            echo "::error::Expected ≥4 desktop installers (.deb, .dmg, .msi, .AppImage), got $required_count"
             ls -la release-files/
             exit 1
           fi
