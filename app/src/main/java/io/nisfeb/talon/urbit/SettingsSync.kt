@@ -104,6 +104,12 @@ class SettingsSync(
             applyBucket(BUCKET_BOOKMARKS, deskMap[BUCKET_BOOKMARKS] as? JsonObject)
             applyBucket(BUCKET_BOOKMARK_FOLDERS, deskMap[BUCKET_BOOKMARK_FOLDERS] as? JsonObject)
             applyBucket(BUCKET_BOOKMARK_FOLDER_MEMBERS, deskMap[BUCKET_BOOKMARK_FOLDER_MEMBERS] as? JsonObject)
+            // Watchwords are unconditionally applied (mirrors live
+            // subscribe semantics) so a fresh login hydrates the
+            // ship's existing terms — without this, push works but
+            // the bootstrap never pulls.
+            applyBucket(BUCKET_WATCHWORDS, deskMap[BUCKET_WATCHWORDS] as? JsonObject)
+            applyBucket(BUCKET_WATCHWORD_EXCLUDES, deskMap[BUCKET_WATCHWORD_EXCLUDES] as? JsonObject)
             // AI settings: only applied if the local device has opted
             // into sync — otherwise we respect the device's local key.
             if (aiSettings.state.value.syncEnabled) {

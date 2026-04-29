@@ -13,6 +13,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import io.nisfeb.talon.ai.AiSettingsRepository
+import io.nisfeb.talon.ai.InMemoryWatchwordsSyncSettings
+import io.nisfeb.talon.ai.WatchwordsSyncSettings
 import io.nisfeb.talon.data.AppDatabase
 import io.nisfeb.talon.ui.DraftStore
 import io.nisfeb.talon.ui.PlatformBackHandler
@@ -79,6 +81,10 @@ fun App(
      *  DmListScreen reveals the "Today's brief" drawer entry only
      *  if the user enabled the alarm. */
     dailyDigestSettings: io.nisfeb.talon.ai.DailyDigestSettings? = null,
+    /** Source of truth for the "mirror watchwords to %settings" toggle.
+     *  Defaults to in-memory; desktop passes a JSON-backed impl so the
+     *  flag survives restart. */
+    watchwordsSync: WatchwordsSyncSettings = InMemoryWatchwordsSyncSettings(),
 ) {
     // Derive the initial logged-in ship from sessionStore.active()
     // (the joined SavedSession) rather than activeShip() (just the
@@ -120,10 +126,11 @@ fun App(
     var galleryComposeOpen by remember { mutableStateOf(false) }
     var openGalleryPostId by remember { mutableStateOf<String?>(null) }
     var profileSheetShip by remember { mutableStateOf<String?>(null) }
-    // Watchwords-sync flag, in-memory. Production persists on
-    // SharedPreferences via TalonApplication; composeApp keeps it
-    // ephemeral until a desktop persistence story lands.
-    val watchwordsSyncEnabled = remember { kotlinx.coroutines.flow.MutableStateFlow(false) }
+    // Watchwords-sync flag. Backed by [watchwordsSync] (caller-supplied)
+    // so desktop's JSON-file impl can persist across restarts and
+    // production Android can wire its SharedPreferences variant in
+    // when composeApp lands there.
+    val watchwordsSyncEnabled = watchwordsSync.enabled
     // Hoisted at App level (not inside the key block) so it survives
     // the re-key triggered by tryRestore-failure recovery. Cleared
     // automatically once the user successfully signs back in.
@@ -346,7 +353,7 @@ fun App(
                     showWatchwords -> WatchwordsScreen(
                         db = db,
                         watchwordsSyncEnabled = watchwordsSyncEnabled,
-                        onSetWatchwordsSyncEnabled = { watchwordsSyncEnabled.value = it },
+                        onSetWatchwordsSyncEnabled = watchwordsSync::setEnabled,
                         onBack = { showWatchwords = false },
                         onOpenConversation = { other, _ ->
                             showWatchwords = false

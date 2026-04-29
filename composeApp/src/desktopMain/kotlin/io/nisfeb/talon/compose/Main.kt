@@ -8,6 +8,8 @@ import org.jetbrains.skia.Image as SkiaImage
 import io.nisfeb.talon.ai.AiSettingsRepository
 import io.nisfeb.talon.ai.DailyDigestSettings
 import io.nisfeb.talon.ai.DesktopDailyDigestSettings
+import io.nisfeb.talon.ai.DesktopWatchwordsSyncSettings
+import io.nisfeb.talon.ai.WatchwordsSyncSettings
 import io.nisfeb.talon.ai.createAiSettings
 import io.nisfeb.talon.data.AppDatabase
 import io.nisfeb.talon.data.DatabaseOpenTimeoutException
@@ -52,6 +54,7 @@ private class DesktopAppGraph {
     val sessionStore: SessionStore = createSessionStore()
     val aiSettings: AiSettingsRepository = createAiSettings()
     val dailyDigestSettings: DailyDigestSettings = DesktopDailyDigestSettings()
+    val watchwordsSync: WatchwordsSyncSettings = DesktopWatchwordsSyncSettings()
     val drafts: DraftStore = InMemoryDraftStore()
 
     init {
@@ -227,6 +230,7 @@ fun main() {
                 updateState = graph.updateState,
                 createSettingsSync = graph.createSettingsSync,
                 dailyDigestSettings = graph.dailyDigestSettings,
+                watchwordsSync = graph.watchwordsSync,
             )
         }
     }

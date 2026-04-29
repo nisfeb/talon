@@ -121,6 +121,12 @@ class SettingsSyncImpl(
             if (aiSettings.state.value.syncEnabled) {
                 applyBucket(BUCKET_AI_SETTINGS, deskMap[BUCKET_AI_SETTINGS] as? JsonObject)
             }
+            // Watchwords are unconditionally applied (mirrors live
+            // subscribe semantics) so a fresh login hydrates the
+            // ship's existing terms — without this, push works but
+            // the bootstrap never pulls.
+            applyBucket(BUCKET_WATCHWORDS, deskMap[BUCKET_WATCHWORDS] as? JsonObject)
+            applyBucket(BUCKET_WATCHWORD_EXCLUDES, deskMap[BUCKET_WATCHWORD_EXCLUDES] as? JsonObject)
             applyBucket(BUCKET_DAILY_DIGEST, deskMap[BUCKET_DAILY_DIGEST] as? JsonObject)
         }
 
