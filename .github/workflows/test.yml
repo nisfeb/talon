@@ -40,6 +40,13 @@ jobs:
       - name: Run unit tests
         run: ./gradlew :app:test :composeApp:desktopTest --stacktrace
 
+      # Hook test runs the bash test harness that stages synthetic
+      # content into throwaway git repos and asserts the pre-commit
+      # rules (block / allow) match expectations. Catches both rule
+      # regressions and exemption-path drift.
+      - name: Run pre-commit hook tests
+        run: ./scripts/hooks/test-pre-commit.sh
+
       # Upload JUnit XML reports on failure so the failing test names
       # are surfaced in the PR check view without having to dig into
       # raw build logs.

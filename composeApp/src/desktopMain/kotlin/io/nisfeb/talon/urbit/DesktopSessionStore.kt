@@ -20,9 +20,9 @@ import java.nio.file.StandardCopyOption
  * (macOS Keychain, libsecret, Windows DPAPI) is a future Stage F
  * follow-up if the threat model changes.
  */
-class DesktopSessionStore : SessionStore {
-
-    private val file: File by lazy { File(AppDirs.userData, "sessions.json") }
+class DesktopSessionStore(
+    private val file: File = File(AppDirs.userData, "sessions.json"),
+) : SessionStore {
 
     private fun load(): SessionsBlob = if (file.exists()) {
         runCatching { JSON.decodeFromString<SessionsBlob>(file.readText()) }

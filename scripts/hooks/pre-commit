@@ -56,11 +56,12 @@ mapfile -t FILES < <(git diff --cached --name-only --diff-filter=AM)
 [ "${#FILES[@]}" -eq 0 ] && exit 0
 
 for file in "${FILES[@]}"; do
-    # The hook script itself contains the literal patterns it scans
-    # for — skip it so editing the ruleset doesn't trip the hook.
-    if [ "$file" = "scripts/hooks/pre-commit" ]; then
-        continue
-    fi
+    # The hook script itself + its test harness contain the literal
+    # patterns the rules scan for. Skip both so editing them doesn't
+    # trip the hook against itself.
+    case "$file" in
+        scripts/hooks/pre-commit|scripts/hooks/test-pre-commit.sh) continue ;;
+    esac
     # Per-file diff, only added lines (start with "+", excluding "+++" header).
     added=$(git diff --cached --no-color -U0 -- "$file" \
         | sed -n '/^+++ /!{ /^+/p; }' \
