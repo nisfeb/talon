@@ -90,8 +90,12 @@ fun buildHomeRows(
         }
     }
 
+    // Channel-shaped whoms (chat/host/name etc.) are never DMs. Filter
+    // them out by shape, not just by group-membership lookup — the latter
+    // returns null while group→channel state hasn't synced yet, which
+    // would let the channel briefly show up in the DM section.
     val dmRows = allConvs
-        .filter { (m, _) -> contactMap.groupOfChannel(m.whom) == null }
+        .filter { (m, _) -> !isChannelNest(m.whom) && contactMap.groupOfChannel(m.whom) == null }
         .sortedByDescending { (m, _) -> m.sentMs }
     if (dmRows.isNotEmpty()) {
         out += HomeRow.Header("Direct Messages", "dms")
@@ -102,6 +106,11 @@ fun buildHomeRows(
 
     return out
 }
+
+private fun isChannelNest(whom: String): Boolean =
+    whom.startsWith("chat/") ||
+        whom.startsWith("diary/") ||
+        whom.startsWith("heap/")
 
 fun buildFolderRows(
     members: List<FolderMemberEntity>,
