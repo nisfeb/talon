@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Surface
 import androidx.compose.ui.Modifier
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -56,6 +57,15 @@ fun App(
     var openThreadParent by remember { mutableStateOf<String?>(null) }
     var openThreadReplyAnchor by remember { mutableStateOf<String?>(null) }
     var showSelfProfile by remember { mutableStateOf(false) }
+
+    // Drives the SSE drain loop. Without this, TlonChatRepo can scry
+    // on demand but never receives pushed events — no live messages,
+    // no presence, no reactions. Production wires this in
+    // app/.../ui/TalonApp.kt:262 right after login. Keyed on
+    // loggedInShip so re-login (different ship) restarts the loop.
+    LaunchedEffect(loggedInShip) {
+        if (loggedInShip != null) repo.start(session)
+    }
 
     TalonTheme {
         Surface(modifier = Modifier.fillMaxSize()) {
