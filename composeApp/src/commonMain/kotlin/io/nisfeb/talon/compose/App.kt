@@ -20,15 +20,26 @@ import io.nisfeb.talon.ui.screens.DmChatScreen
 import io.nisfeb.talon.ui.screens.DmListScreen
 import io.nisfeb.talon.ui.screens.ActivityFeedScreen
 import io.nisfeb.talon.ui.screens.BookmarksScreen
+import io.nisfeb.talon.ui.screens.DailyDigestScreen
+import io.nisfeb.talon.ui.screens.GalleryComposeScreen
+import io.nisfeb.talon.ui.screens.GalleryGridScreen
+import io.nisfeb.talon.ui.screens.GalleryPostScreen
+import io.nisfeb.talon.ui.screens.GroupAdminListScreen
+import io.nisfeb.talon.ui.screens.GroupAdminScreen
+import io.nisfeb.talon.ui.screens.GroupHomeScreen
 import io.nisfeb.talon.ui.screens.GroupInvitesScreen
 import io.nisfeb.talon.ui.screens.ImageViewerScreen
 import io.nisfeb.talon.ui.screens.LoginScreen
 import io.nisfeb.talon.ui.screens.NewDmScreen
+import io.nisfeb.talon.ui.screens.NotebookComposeScreen
+import io.nisfeb.talon.ui.screens.NotebookListScreen
+import io.nisfeb.talon.ui.screens.NotebookPostScreen
 import io.nisfeb.talon.ui.screens.ProfileEditScreen
 import io.nisfeb.talon.ui.screens.SearchScreen
 import io.nisfeb.talon.ui.screens.SettingsScreen
 import io.nisfeb.talon.ui.screens.StatusFeedScreen
 import io.nisfeb.talon.ui.screens.ThreadScreen
+import io.nisfeb.talon.ui.screens.WatchwordsScreen
 import io.nisfeb.talon.ui.theme.TalonTheme
 import io.nisfeb.talon.update.UpdateState
 import io.nisfeb.talon.urbit.SessionStore
@@ -79,7 +90,30 @@ fun App(
     var showActivity by remember { mutableStateOf(false) }
     var showSearch by remember { mutableStateOf(false) }
     var showNewDm by remember { mutableStateOf(false) }
+    var showWatchwords by remember { mutableStateOf(false) }
+    var showDailyDigest by remember { mutableStateOf(false) }
+    var showGroupAdminList by remember { mutableStateOf(false) }
+    var openGroupAdminFlag by remember { mutableStateOf<String?>(null) }
+    var openGroupHomeFlag by remember { mutableStateOf<String?>(null) }
+    // Notebook overlay state. notebookComposeOpen + notebookEdit*
+    // mirror production's edit flow: tap Edit on a post → close
+    // the viewer, capture the existing fields into the edit-* vars,
+    // open compose with that context. Compose's onPosted clears.
+    var notebookComposeOpen by remember { mutableStateOf(false) }
+    var openNotebookPostId by remember { mutableStateOf<String?>(null) }
+    var notebookEditPostId by remember { mutableStateOf<String?>(null) }
+    var notebookEditTitle by remember { mutableStateOf("") }
+    var notebookEditImage by remember { mutableStateOf("") }
+    var notebookEditBody by remember { mutableStateOf("") }
+    var notebookEditSentMs by remember { mutableStateOf(0L) }
+    // Gallery: simpler — no in-place edit on desktop yet.
+    var galleryComposeOpen by remember { mutableStateOf(false) }
+    var openGalleryPostId by remember { mutableStateOf<String?>(null) }
     var profileSheetShip by remember { mutableStateOf<String?>(null) }
+    // Watchwords-sync flag, in-memory. Production persists on
+    // SharedPreferences via TalonApplication; composeApp keeps it
+    // ephemeral until a desktop persistence story lands.
+    val watchwordsSyncEnabled = remember { kotlinx.coroutines.flow.MutableStateFlow(false) }
     // Hoisted at App level (not inside the key block) so it survives
     // the re-key triggered by tryRestore-failure recovery. Cleared
     // automatically once the user successfully signs back in.
@@ -118,6 +152,25 @@ fun App(
     PlatformBackHandler(enabled = showActivity) { showActivity = false }
     PlatformBackHandler(enabled = showSearch) { showSearch = false }
     PlatformBackHandler(enabled = showNewDm) { showNewDm = false }
+    PlatformBackHandler(enabled = showWatchwords) { showWatchwords = false }
+    PlatformBackHandler(enabled = showDailyDigest) { showDailyDigest = false }
+    PlatformBackHandler(
+        enabled = openGroupAdminFlag != null,
+    ) { openGroupAdminFlag = null }
+    PlatformBackHandler(
+        enabled = showGroupAdminList && openGroupAdminFlag == null,
+    ) { showGroupAdminList = false }
+    PlatformBackHandler(enabled = openGroupHomeFlag != null) { openGroupHomeFlag = null }
+    // Notebook: compose overlays the post viewer (which overlays the list).
+    PlatformBackHandler(enabled = notebookComposeOpen) { notebookComposeOpen = false }
+    PlatformBackHandler(
+        enabled = openNotebookPostId != null && !notebookComposeOpen,
+    ) { openNotebookPostId = null }
+    // Gallery: same precedence.
+    PlatformBackHandler(enabled = galleryComposeOpen) { galleryComposeOpen = false }
+    PlatformBackHandler(
+        enabled = openGalleryPostId != null && !galleryComposeOpen,
+    ) { openGalleryPostId = null }
     PlatformBackHandler(enabled = showSettings) {
         showSettings = false
     }
@@ -262,10 +315,128 @@ fun App(
                             openChat = peer
                         },
                     )
+                    showWatchwords -> WatchwordsScreen(
+                        db = db,
+                        watchwordsSyncEnabled = watchwordsSyncEnabled,
+                        onSetWatchwordsSyncEnabled = { watchwordsSyncEnabled.value = it },
+                        onBack = { showWatchwords = false },
+                        onOpenConversation = { other, _ ->
+                            showWatchwords = false
+                            openChat = other
+                        },
+                    )
+                    showDailyDigest -> DailyDigestScreen(
+                        db = db,
+                        activeShip = ship,
+                        onBack = { showDailyDigest = false },
+                        onOpenMessage = { whomTarget, _ ->
+                            showDailyDigest = false
+                            openChat = whomTarget
+                        },
+                        // Desktop has no AlarmManager-equivalent
+                        // wired; the Android-side Generate-Now flow
+                        // doesn't fire here. No-op until Stage F.
+                        onGenerateNow = {},
+                    )
+                    openGroupAdminFlag != null -> GroupAdminScreen(
+                        db = db,
+                        repo = repo,
+                        flag = openGroupAdminFlag!!,
+                        onBack = { openGroupAdminFlag = null },
+                    )
+                    showGroupAdminList -> GroupAdminListScreen(
+                        repo = repo,
+                        onBack = { showGroupAdminList = false },
+                        onOpenGroup = { flag -> openGroupAdminFlag = flag },
+                    )
+                    openGroupHomeFlag != null -> GroupHomeScreen(
+                        db = db,
+                        repo = repo,
+                        flag = openGroupHomeFlag!!,
+                        onBack = { openGroupHomeFlag = null },
+                        onOpenChannel = { nest ->
+                            openGroupHomeFlag = null
+                            openChat = nest
+                        },
+                    )
                     viewerImageUrl != null -> ImageViewerScreen(
                         url = viewerImageUrl!!,
                         onClose = { viewerImageUrl = null },
                     )
+                    // Notebook channels (whom prefix "diary/").
+                    // Compose overlays the post viewer overlays the
+                    // list — same precedence as production.
+                    openChat?.startsWith("diary/") == true && notebookComposeOpen ->
+                        NotebookComposeScreen(
+                            repo = repo,
+                            whom = openChat!!,
+                            onBack = {
+                                notebookComposeOpen = false
+                                notebookEditPostId = null
+                            },
+                            onPosted = {
+                                notebookComposeOpen = false
+                                notebookEditPostId = null
+                            },
+                            editPostId = notebookEditPostId,
+                            initialTitle = notebookEditTitle,
+                            initialImage = notebookEditImage,
+                            initialBody = notebookEditBody,
+                            originalSentMs = notebookEditSentMs,
+                        )
+                    openChat?.startsWith("diary/") == true && openNotebookPostId != null ->
+                        NotebookPostScreen(
+                            db = db,
+                            repo = repo,
+                            ourPatp = ship,
+                            whom = openChat!!,
+                            postId = openNotebookPostId!!,
+                            onBack = { openNotebookPostId = null },
+                            onEdit = { title, image, body, sent ->
+                                notebookEditPostId = openNotebookPostId
+                                notebookEditTitle = title
+                                notebookEditImage = image
+                                notebookEditBody = body
+                                notebookEditSentMs = sent
+                                openNotebookPostId = null
+                                notebookComposeOpen = true
+                            },
+                        )
+                    openChat?.startsWith("diary/") == true ->
+                        NotebookListScreen(
+                            db = db,
+                            repo = repo,
+                            whom = openChat!!,
+                            onBack = { openChat = null },
+                            onOpenPost = { id -> openNotebookPostId = id },
+                            onCompose = { notebookComposeOpen = true },
+                        )
+                    // Gallery channels (whom prefix "heap/").
+                    openChat?.startsWith("heap/") == true && galleryComposeOpen ->
+                        GalleryComposeScreen(
+                            repo = repo,
+                            whom = openChat!!,
+                            onBack = { galleryComposeOpen = false },
+                            onPosted = { galleryComposeOpen = false },
+                        )
+                    openChat?.startsWith("heap/") == true && openGalleryPostId != null ->
+                        GalleryPostScreen(
+                            db = db,
+                            repo = repo,
+                            ourPatp = ship,
+                            whom = openChat!!,
+                            postId = openGalleryPostId!!,
+                            onBack = { openGalleryPostId = null },
+                        )
+                    openChat?.startsWith("heap/") == true ->
+                        GalleryGridScreen(
+                            db = db,
+                            repo = repo,
+                            whom = openChat!!,
+                            onBack = { openChat = null },
+                            onOpenPost = { id -> openGalleryPostId = id },
+                            onCompose = { galleryComposeOpen = true },
+                        )
                     openChat != null && openThreadParent != null -> ThreadScreen(
                         db = db,
                         repo = repo,

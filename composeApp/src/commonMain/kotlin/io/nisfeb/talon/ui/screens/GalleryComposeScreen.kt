@@ -65,6 +65,7 @@ private enum class GalleryTab(val label: String) {
  * paste a link (server-side enriches the preview), or write a short
  * text snippet. Exactly one of those goes out as the post content.
  */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 fun GalleryComposeScreen(
     repo: TlonChatRepo,
