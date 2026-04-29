@@ -58,21 +58,27 @@ private class DesktopAppGraph {
         // Best-effort teardown. Order matters:
         //  1. Cancel update scope so its in-flight HTTP calls bail.
         //  2. dispatcher.cancelAll() — soft signal to dispatcher-
-        //     tracked calls.
-        //  3. shutdownNow() — hard interrupt of running threads.
-        //     OkHttp's dispatcher worker threads are daemons, so
-        //     hard-interrupting them is safe; the JVM can exit
-        //     even if a thread doesn't fully unwind. We don't
-        //     awaitTermination — that would block the caller (the
-        //     AWT EDT in onCloseRequest). Stragglers die on JVM
-        //     exit anyway.
+        //     tracked calls (enqueue + EventSources).
+        //  3. shutdownNow() then awaitTermination(2s).
+        //     OkHttp 4.x's Dispatcher constructs its executor with
+        //     a NON-daemon thread factory (verified against
+        //     OkHttp 4.12 source — Util.threadFactory(name, false)).
+        //     A worker mid-Socket.read on a synchronous execute()
+        //     only unwinds when the underlying socket closes;
+        //     shutdownNow interrupts but doesn't always reach the
+        //     blocking syscall. Without awaitTermination the JVM
+        //     stays alive waiting for the non-daemon worker.
+        //     2s is the cap before we give up and let the daemon-
+        //     wrapped exitProcess in Main.kt force-kill.
         //  4. Evict the connection pool.
-        //  5. Close Room — this DOES wait for SQLite WAL flush,
-        //     but it's cheap (typically <100ms) and we want it
-        //     fully durable before the JVM unwinds.
+        //  5. Close Room — synchronous WAL flush, must complete.
         runCatching { updateScope.cancel() }
         runCatching { http.dispatcher.cancelAll() }
-        runCatching { http.dispatcher.executorService.shutdownNow() }
+        runCatching {
+            val exec = http.dispatcher.executorService
+            exec.shutdownNow()
+            exec.awaitTermination(2, TimeUnit.SECONDS)
+        }
         runCatching { http.connectionPool.evictAll() }
         runCatching { db.close() }
     }
@@ -106,8 +112,20 @@ fun main() {
     }
     application {
         Window(
+            // onCloseRequest runs on the AWT EDT. We can't graph.shutdown()
+            // here because shutdown's awaitTermination(2s) would freeze
+            // the window for that duration — Windows surfaces "Not
+            // Responding" near the threshold. Move the wait to a daemon
+            // thread, exitApplication immediately so the window vanishes,
+            // and exitProcess(0) when shutdown completes (or 2s elapses)
+            // to force JVM exit even if non-daemon OkHttp workers are
+            // still alive. The daemon flag on this thread ensures it
+            // doesn't itself block JVM exit.
             onCloseRequest = {
-                graph.shutdown()
+                Thread {
+                    runCatching { graph.shutdown() }
+                    kotlin.system.exitProcess(0)
+                }.apply { isDaemon = true; name = "Talon-shutdown" }.start()
                 exitApplication()
             },
             title = "Talon",
