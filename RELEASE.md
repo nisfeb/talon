@@ -1,10 +1,20 @@
 # Releasing Talon publicly
 
-## Current state (pre-release)
+## Current state
 
-- APK is signed with the **debug keystore**. Any build you `adb install` is fine, but **Google Play will refuse this**. First step of shipping is generating a real release keystore — once signed with it, you can never rotate without abandoning the app identity.
-- Version is pinned at `0.1.0` / `versionCode=1` in `app/build.gradle.kts`.
-- No Play Store listing, no F-Droid metadata, no crash reporting, no privacy policy.
+- Sideload-only via [GitHub Releases](https://github.com/nisfeb/talon/releases).
+  Each tagged push runs the CI matrix in `.github/workflows/release.yml`
+  and publishes Android `.apk`, Linux `.deb` + `.AppImage`, macOS
+  `.dmg`, and Windows `.msi` artifacts.
+- Android APK is signed with a real release keystore (kept outside
+  the repo, decoded on the runner from the `RELEASE_KEYSTORE_BASE64`
+  secret). Once you've installed a release-signed build, future
+  versions install as updates without uninstall.
+- Desktop builds are unsigned for now — Gatekeeper / SmartScreen will
+  warn on first launch. See README's install table for the per-OS
+  bypass.
+- No Play Store / F-Droid listing yet; the rest of this doc captures
+  what'd be required to add one.
 
 ## Decide: Play Store or F-Droid (or both)
 

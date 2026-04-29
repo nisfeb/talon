@@ -1,8 +1,13 @@
-# Talon — Native Android Plan
+# Talon — Plan
 
-A native Android chat client for Urbit, designed to compete with Tlon on the
+A native chat client for Urbit, designed to compete with Tlon on the
 core daily-use loop (DMs + group chat channels) while being an order of
 magnitude faster to open, scroll, and react.
+
+Originally Android-only; now also ships for Linux, macOS, and Windows
+via Compose Multiplatform. The Android app is the canonical
+implementation; the desktop port reuses the shared `composeApp/`
+module for screens, data layer, and Urbit protocol code.
 
 Target user: someone who runs (or is hosted on) an Urbit ship and uses it
 mostly for chat. If you need notebooks, galleries, boardrooms, or multi-pane
@@ -18,12 +23,15 @@ Compose + LazyColumn is a direct path to sub-50ms channel open.
 
 ## Stack
 
-- **Kotlin + Jetpack Compose** (Material 3, dark mode day one)
-- **Room** for SQLite (the same engine Tlon uses, just native bindings)
+- **Kotlin + Compose** — Jetpack Compose on Android, Compose
+  Multiplatform on desktop. Material 3, dark mode day one.
+- **Room** for SQLite (the same engine Tlon uses, just native bindings).
+  KMP-aware so both Android and desktop targets share the schema.
 - **OkHttp** for HTTP + Server-Sent Events
 - **Coroutines + Flow** — Room exposes Flow, SSE events push into it, Compose
   collects. Pure reactive.
-- **Coil** for images. **ExoPlayer** (media3) for video.
+- **Coil** for images. **ExoPlayer** (media3) for video on Android;
+  desktop hands video off to the OS default media app for now.
 - **Gradle + KSP**. Manual DI, no Hilt (smaller cold start).
 
 ## Protocol layer
