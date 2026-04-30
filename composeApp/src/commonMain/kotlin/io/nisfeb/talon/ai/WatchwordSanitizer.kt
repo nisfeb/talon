@@ -1,6 +1,7 @@
-// Pure-string watchword helpers consumed by SettingsSyncImpl. The
-// runtime Watchwords runner (Embedder + EmbeddingIndexer + ML Kit)
-// stays in androidMain — commonMain only needs the sanitizer.
+// Pure-string watchword helper consumed by SettingsSyncImpl. Lives
+// in its own file (rather than commonMain Watchwords.kt) so it
+// doesn't FQN-shadow production app/'s Watchwords.kt — that class
+// stays Android-only by design (Embedder + EmbeddingIndexer + ML Kit).
 package io.nisfeb.talon.ai
 
 /**
