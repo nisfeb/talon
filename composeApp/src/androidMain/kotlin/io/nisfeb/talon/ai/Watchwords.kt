@@ -196,23 +196,30 @@ class Watchwords(
      * that races to write the same hits and orphans the prior job.
      */
     private fun startBackfill(term: WatchwordEntity) {
-        if (backfillJobs.containsKey(term.id)) return
+        // Common-case fast path: already running, skip.
+        if (backfillJobs[term.id]?.isActive == true) return
         val job = scope.launch(Dispatchers.Default) {
             _backfilling.update { it + term.id }
             try {
                 runBackfill(term)
             } finally {
                 _backfilling.update { it - term.id }
-                backfillJobs.remove(term.id)
+                // Compare-and-remove: only clear the map entry if it
+                // still points at *this* job. In the race where two
+                // concurrent startBackfills both passed the isActive
+                // check, the race-loser is cancelled (below); its
+                // finally runs `remove(id, self)` which fails the
+                // identity check (map holds the winner's job) so it
+                // doesn't clobber the winner's entry.
+                val self = coroutineContext[Job]
+                if (self != null) backfillJobs.remove(term.id, self)
             }
         }
-        // putIfAbsent guards the case where two concurrent
-        // startBackfill() calls both passed the containsKey check —
-        // the second putIfAbsent returns non-null and we cancel its
-        // own job to keep only one scan running.
-        backfillJobs.putIfAbsent(term.id, job)?.let {
-            // Race-loser: another thread already registered a job. Drop
-            // ours and let theirs run.
+        val prior = backfillJobs.putIfAbsent(term.id, job)
+        if (prior != null && prior.isActive) {
+            // Race-loser: another thread already registered. Cancel
+            // our duplicate; the compare-and-remove above keeps the
+            // winner's entry intact.
             job.cancel()
         }
     }

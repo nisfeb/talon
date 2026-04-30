@@ -55,6 +55,13 @@ class SettingsSyncImpl(
      *  avoid bouncing the change back to the ship (pingpong), but that
      *  also skips the local re-arm — this callback restores it. */
     private val rearmDailyDigest: () -> Unit = {},
+    /** Toggle a chat's watchword-exclusion through the Android-only
+     *  Watchwords class (which fires backfill cleanup + onChange →
+     *  %settings push). commonMain can't reference Watchwords directly
+     *  (it lives in androidMain), so the host injects this. Default is
+     *  a no-op for desktop and tests. */
+    private val watchwordExcludeRouter: suspend (whom: String, excluded: Boolean) -> Unit =
+        { _, _ -> },
 ) : SettingsSync {
 
     companion object {
@@ -564,6 +571,14 @@ class SettingsSyncImpl(
             BUCKET_NOTIFY_PREFS, whom,
             buildJsonObject { put("level", level) },
         )
+    }
+
+    override suspend fun setWatchwordExclude(whom: String, excluded: Boolean) {
+        // Routes through Watchwords.excludeChat (Android-only) so the
+        // local DB write + onChange → %settings push fire correctly.
+        // Desktop builds inject a no-op router and the exclude row is
+        // only mutated through the Watchwords screen instead.
+        watchwordExcludeRouter(whom, excluded)
     }
 
     /** Mirror one watchword term to the ship's settings. */

@@ -287,6 +287,14 @@ class TalonApplication : Application() {
                 // initialization, so the runtime guard is sufficient.
                 runCatching { dailyDigest.scheduleNext() }
             },
+            watchwordExcludeRouter = { whom, excluded ->
+                // Route to Watchwords.excludeChat so backfill cleanup +
+                // onChange → %settings push both fire. `watchwords` is
+                // assigned just below in this same buildShipScoped call,
+                // so by the time the chat-screen dropdown invokes this
+                // it's safely initialized.
+                watchwords.excludeChat(whom, excluded)
+            },
         )
         repo = TlonChatRepo(db, settingsSync = settingsSync)
         watchwords = io.nisfeb.talon.ai.Watchwords(

@@ -468,6 +468,32 @@ class SettingsSyncApplyBucketTest {
             assertEquals(listOf("~zod/keep"), rows.map { it.flag })
         }
 
+    // ── setWatchwordExclude routes to the injected callback ─────────
+
+    @Test
+    fun `setWatchwordExclude invokes the injected router with whom and excluded`() = runBlocking {
+        // Pre-Stage-F app/ DmChatScreen called Watchwords.excludeChat
+        // directly. Stage F moved DmChatScreen to commonMain; the call
+        // re-routed through SettingsSync.setWatchwordExclude. Verify
+        // the override actually fires the router (vs. inheriting the
+        // interface's no-op default).
+        val captured = mutableListOf<Pair<String, Boolean>>()
+        val routedSync = SettingsSyncImpl(
+            db = db,
+            aiSettings = aiSettings,
+            dailyDigestSettings = dailyDigest,
+            watchwordExcludeRouter = { whom, excluded ->
+                captured += whom to excluded
+            },
+        )
+        routedSync.setWatchwordExclude("~zod", true)
+        routedSync.setWatchwordExclude("chat/~host/general", false)
+        assertEquals(
+            listOf("~zod" to true, "chat/~host/general" to false),
+            captured,
+        )
+    }
+
     // ── cord-stringified value compatibility ────────────────────────
 
     @Test
