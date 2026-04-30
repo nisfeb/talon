@@ -505,6 +505,20 @@ fun DmListScreen(
                 val collision = activeNick != null &&
                     allShips.count { shipNicknames[it] == activeNick } > 1
                 val label = if (activeNick != null && !collision) activeNick else activeShip
+                // Colored dot in the active ship's contact color so a
+                // multi-ship user can tell at a glance which one
+                // they're about to post as. Falls back to brand
+                // primary when the user hasn't set a color on their
+                // own contact entry.
+                val accent = io.nisfeb.talon.ui.rememberShipAccent(activeShip, contactMap)
+                    ?: MaterialTheme.colorScheme.primary
+                Box(
+                    modifier = Modifier
+                        .padding(start = 6.dp)
+                        .size(8.dp)
+                        .clip(CircleShape)
+                        .background(accent),
+                )
                 Text(
                     label,
                     style = MaterialTheme.typography.labelMedium,

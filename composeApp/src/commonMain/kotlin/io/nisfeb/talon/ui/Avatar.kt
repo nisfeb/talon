@@ -93,7 +93,7 @@ private fun colorForLabel(label: String): Color {
 }
 
 /** Parses `#RRGGBB` into a Compose Color, or null if malformed. */
-private fun parseHexColor(hex: String): Color? {
+internal fun parseHexColor(hex: String): Color? {
     val trimmed = hex.trim().removePrefix("#")
     if (trimmed.length != 6) return null
     val r = trimmed.substring(0, 2).toIntOrNull(16) ?: return null

@@ -47,6 +47,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -789,11 +790,20 @@ fun DmChatScreen(
                     onDismiss = { pendingQuote = null },
                 )
             }
+            // Send-button accent in the active ship's contact color.
+            // Peripheral cue against posting-as-the-wrong-ship in
+            // groups shared between multiple logged-in ships. Brand
+            // amber as fallback when the user hasn't set their own
+            // contact color. Hoisted here so the text composer and
+            // the voice-preview row share the same accent.
+            val sendAccent = io.nisfeb.talon.ui.rememberShipAccent(ourPatp, contactMap)
+                ?: MaterialTheme.colorScheme.primary
             val pv = pendingVoice
             if (pv != null) {
                 VoicePreviewRow(
                     pending = pv,
                     sending = uploading,
+                    sendAccent = sendAccent,
                     voicePlayer = voicePlayer,
                     onCancel = {
                         java.io.File(pv.path).delete()
@@ -897,6 +907,8 @@ fun DmChatScreen(
                         Icons.AutoMirrored.Filled.Send,
                         contentDescription = "Send",
                         modifier = Modifier.size(22.dp),
+                        tint = if (canSend && draft.text.isNotBlank()) sendAccent
+                        else LocalContentColor.current,
                     )
                 }
             }
@@ -1540,6 +1552,7 @@ private fun VoicePreviewRow(
     voicePlayer: (@Composable (path: String, sending: Boolean) -> Unit)?,
     onCancel: () -> Unit,
     onSend: () -> Unit,
+    sendAccent: androidx.compose.ui.graphics.Color,
 ) {
     val seconds = (pending.durationMs / 1000L).coerceAtLeast(1L)
     Row(
@@ -1590,6 +1603,7 @@ private fun VoicePreviewRow(
                     Icons.AutoMirrored.Filled.Send,
                     contentDescription = "Send recording",
                     modifier = Modifier.size(22.dp),
+                    tint = if (!sending) sendAccent else LocalContentColor.current,
                 )
             }
         }

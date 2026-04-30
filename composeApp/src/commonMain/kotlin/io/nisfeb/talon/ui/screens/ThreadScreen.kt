@@ -36,6 +36,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -372,6 +373,11 @@ fun ThreadScreen(
                 placeholder = { Text("Reply") },
                 modifier = Modifier.weight(1f),
             )
+            // Send-button accent in the active ship's contact color
+            // — peripheral cue against posting-as-the-wrong-ship in
+            // shared groups. Brand amber as fallback.
+            val sendAccent = io.nisfeb.talon.ui.rememberShipAccent(ourPatp, contactMap)
+                ?: MaterialTheme.colorScheme.primary
             IconButton(
                 onClick = {
                     val body = draft.text.trim()
@@ -387,7 +393,12 @@ fun ThreadScreen(
                 },
                 enabled = draft.text.isNotBlank(),
             ) {
-                Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Send")
+                Icon(
+                    Icons.AutoMirrored.Filled.Send,
+                    contentDescription = "Send",
+                    tint = if (draft.text.isNotBlank()) sendAccent
+                    else LocalContentColor.current,
+                )
             }
         }
     }
