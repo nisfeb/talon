@@ -47,6 +47,7 @@ import androidx.compose.material3.FilterChip
 import io.nisfeb.talon.ai.AiSettings
 import io.nisfeb.talon.ai.AiSettingsRepository
 import io.nisfeb.talon.ui.UiSettings
+import io.nisfeb.talon.ui.isOnDeviceAiFeatureSupported
 import io.nisfeb.talon.ui.isOnDeviceAiSupported
 import io.nisfeb.talon.ui.theme.ThemePreference
 
@@ -302,6 +303,7 @@ fun SettingsScreen(
                 )
                 AiSettings.Feature.values()
                     .filter { !it.requiresCloudKey }
+                    .filter { isOnDeviceAiFeatureSupported(it) }
                     .forEach { feature ->
                         FeatureToggleRow(
                             label = feature.label,
