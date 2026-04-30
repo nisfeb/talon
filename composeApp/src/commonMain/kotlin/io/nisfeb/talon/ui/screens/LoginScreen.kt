@@ -1,11 +1,12 @@
 package io.nisfeb.talon.ui.screens
 
-// Autofill content-type hints arrive via the Modifier slot params
-// below. Compose UI 1.7 (current CMP) marks ContentType internal, so
-// neither desktop nor Android can attach the hint today — the slots
-// are forward-compatible: when the API graduates (Compose UI 1.8+),
-// the Android host supplies Modifier.semantics { contentType = ... }
-// without changing this signature.
+// Autofill content-type hints arrive via the Composable slot lambdas
+// below. The slots take the field's onValueChange-equivalent setter
+// and return a Modifier — Android wires Compose's older
+// AutofillType+AutofillNode path (Autofill Framework, public-but-
+// experimental in CMP 1.7) so password managers (Bitwarden, 1Password,
+// Google Password Manager) can suggest the saved credential. Desktop
+// passes the default `{ Modifier }` and the field is keyboard-only.
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -38,15 +39,17 @@ fun LoginScreen(
     session: UrbitSession,
     onLoggedIn: (ship: String) -> Unit,
     notice: String? = null,
-    /** Optional Modifier overlay for the ship-URL field, used by Android
-     *  hosts to attach `Modifier.semantics { contentType =
-     *  ContentType.Username }` so password managers (Bitwarden, 1Password,
-     *  Google) can auto-suggest. Desktop passes Modifier and the field
-     *  is keyboard-only. */
-    usernameAutofillModifier: Modifier = Modifier,
-    /** Modifier overlay for the +code field. Same pattern as
-     *  [usernameAutofillModifier]. */
-    passwordAutofillModifier: Modifier = Modifier,
+    /** Optional Composable slot that wires Android's Autofill Framework
+     *  to the ship-URL field. Receives the `(String) -> Unit` setter
+     *  the user's typing would normally invoke and returns a Modifier
+     *  that registers the field with the framework. Desktop passes
+     *  the default `{ Modifier }`. */
+    usernameAutofill: @Composable ((onFill: (String) -> Unit) -> Modifier) =
+        { Modifier },
+    /** Same pattern as [usernameAutofill] for the +code (password)
+     *  field. */
+    passwordAutofill: @Composable ((onFill: (String) -> Unit) -> Modifier) =
+        { Modifier },
 ) {
     var shipUrl by remember { mutableStateOf("http://localhost:8080") }
     var code by remember { mutableStateOf("") }
@@ -73,6 +76,8 @@ fun LoginScreen(
                 color = MaterialTheme.colorScheme.error,
             )
         }
+        val usernameAutofillModifier = usernameAutofill { shipUrl = it }
+        val passwordAutofillModifier = passwordAutofill { code = it }
         OutlinedTextField(
             value = shipUrl,
             onValueChange = { shipUrl = it },

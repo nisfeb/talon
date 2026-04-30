@@ -34,6 +34,7 @@ import io.nisfeb.talon.ui.LocalMapsLauncher
 import io.nisfeb.talon.ui.MapsLauncher
 import io.nisfeb.talon.ui.MediaKind
 import io.nisfeb.talon.ui.VoiceRecordButton
+import io.nisfeb.talon.ui.rememberAutofillModifier
 import io.nisfeb.talon.ui.rememberLocationProvider
 import io.nisfeb.talon.data.MessageEntity
 import io.nisfeb.talon.data.NotifyLevel
@@ -101,6 +102,7 @@ private fun resolveFileName(
     return default
 }
 
+@OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
 @Composable
 fun TalonApp(
     initialOpenWhom: String? = null,
@@ -526,17 +528,43 @@ fun TalonApp(
                     addingAnotherShip = false
                     app.onShipLoggedIn(ship)
                 },
-                // TODO: ContentType-based autofill requires
-                // Compose UI 1.8+ (the API is `internal` in the CMP
-                // 1.7 we ship). Bump CMP or wait for the API to
-                // graduate; until then password managers don't
-                // auto-suggest. Tracked alongside other Android
-                // capability slots.
+                usernameAutofill = { onFill ->
+                    rememberAutofillModifier(
+                        types = listOf(
+                            androidx.compose.ui.autofill.AutofillType.Username,
+                        ),
+                        onFill = onFill,
+                    )
+                },
+                passwordAutofill = { onFill ->
+                    rememberAutofillModifier(
+                        types = listOf(
+                            androidx.compose.ui.autofill.AutofillType.Password,
+                        ),
+                        onFill = onFill,
+                    )
+                },
             )
 
             loggedInShip == null -> LoginScreen(
                 session = app.session,
                 onLoggedIn = { ship -> app.onShipLoggedIn(ship) },
+                usernameAutofill = { onFill ->
+                    rememberAutofillModifier(
+                        types = listOf(
+                            androidx.compose.ui.autofill.AutofillType.Username,
+                        ),
+                        onFill = onFill,
+                    )
+                },
+                passwordAutofill = { onFill ->
+                    rememberAutofillModifier(
+                        types = listOf(
+                            androidx.compose.ui.autofill.AutofillType.Password,
+                        ),
+                        onFill = onFill,
+                    )
+                },
             )
 
             viewerImageUrl != null -> ImageViewerScreen(
@@ -764,6 +792,17 @@ fun TalonApp(
 
             openWhom != null -> {
                 val locationProvider = rememberLocationProvider()
+                // Bridge between the `/mic` slash command and the
+                // voice button. The slash handler emits Unit; the
+                // button observes the same flow and toggles its
+                // recorder. One SharedFlow per chat instance —
+                // re-keyed by openWhom so a new chat starts a fresh
+                // bridge.
+                val micTrigger = remember(openWhom) {
+                    kotlinx.coroutines.flow.MutableSharedFlow<Unit>(
+                        extraBufferCapacity = 1,
+                    )
+                }
                 DmChatScreen(
                     db = app.db,
                     repo = app.repo,
@@ -793,7 +832,15 @@ fun TalonApp(
                             enabled = enabled,
                             onRecorded = onRecorded,
                             modifier = Modifier,
+                            externalTrigger = micTrigger,
                         )
+                    },
+                    onSlashMic = {
+                        // tryEmit is sync (no coroutine needed) and
+                        // can't fail because the buffer has room — the
+                        // VoiceRecordButton's collect picks it up on
+                        // the next frame and toggles the recorder.
+                        micTrigger.tryEmit(Unit)
                     },
                     locationProvider = locationProvider,
                     voicePlayer = { path, sending ->
