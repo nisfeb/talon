@@ -4,9 +4,9 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Talon — chat for Urbit</title>
-    <meta name="description" content="Fast native Android client for Urbit chat. Direct messages, group channels, reactions, threads. Bring your own ship.">
+    <meta name="description" content="Fast native chat client for Urbit. Android, Linux, macOS, Windows. DMs, group channels, reactions, threads, semantic search. Bring your own ship.">
     <meta property="og:title" content="Talon — chat for Urbit">
-    <meta property="og:description" content="Fast native Android client for Urbit chat. Direct messages, group channels, reactions, threads. Bring your own ship.">
+    <meta property="og:description" content="Fast native chat client for Urbit. Android, Linux, macOS, Windows. DMs, group channels, reactions, threads, semantic search. Bring your own ship.">
     <meta property="og:image" content="../branding/play_store_icon_512.png">
     <meta name="theme-color" content="#0F0D1A">
     <link rel="icon" href="../branding/play_store_icon_512.png" type="image/png">
@@ -251,6 +251,59 @@
             color: var(--outline);
         }
 
+        /* Download table */
+        .dl-grid {
+            display: grid;
+            gap: 0;
+            margin: 8px 0 24px;
+        }
+        .dl-row {
+            display: grid;
+            grid-template-columns: minmax(140px, 1fr) 2fr auto;
+            gap: 16px;
+            align-items: center;
+            padding: 14px 0;
+            border-top: 1px solid var(--outline-var);
+        }
+        .dl-row:last-child { border-bottom: 1px solid var(--outline-var); }
+        .dl-row .platform {
+            font-weight: 600;
+            color: var(--on-surface);
+        }
+        .dl-row .desc {
+            color: var(--on-surf-var);
+            font-size: 14px;
+        }
+        .dl-row .desc code {
+            background: var(--surface);
+            padding: 1px 6px;
+            border-radius: 3px;
+        }
+        .dl-row .dl-link {
+            font-family: var(--body);
+            font-weight: 600;
+            font-size: 14px;
+            padding: 8px 14px;
+            border-radius: 6px;
+            text-decoration: none;
+            background: transparent;
+            color: var(--amber-400);
+            border: 1px solid var(--outline);
+            white-space: nowrap;
+        }
+        .dl-row .dl-link:hover {
+            border-color: var(--amber-400);
+            color: var(--amber-500);
+        }
+        @media (max-width: 600px) {
+            .dl-row {
+                grid-template-columns: 1fr;
+                gap: 6px;
+                padding: 16px 0;
+            }
+            .dl-row .dl-link { justify-self: start; }
+        }
+
         /* Privacy callout */
         .privacy-card {
             border: 1px solid var(--outline);
@@ -332,25 +385,27 @@
             <span class="wordmark">Talon</span>
         </div>
 
-        <h1>Native Android chat <br>for <span class="accent">Urbit</span>.</h1>
+        <h1>Native chat <br>for <span class="accent">Urbit</span>.</h1>
 
         <p class="lede">
-            Talon is a fast Android client for the parts of Urbit chat you actually use day-to-day —
-            DMs, group channels, reactions, threads. Bring your own ship.
+            Fast chat client for the parts of Urbit you actually use day-to-day —
+            DMs, group channels, reactions, threads. Native on Android, Linux, macOS,
+            and Windows. Bring your own ship.
         </p>
 
         <div class="ctas">
-            <a class="btn btn-primary" href="https://github.com/sneagan/talon/releases/latest">
-                Download&nbsp;APK
+            <a class="btn btn-primary" href="#download">
+                Download
             </a>
-            <a class="btn btn-secondary" href="https://github.com/sneagan/talon">
+            <a class="btn btn-secondary" href="https://github.com/nisfeb/talon">
                 Source&nbsp;on&nbsp;GitHub
             </a>
         </div>
 
         <div class="meta-row">
             <span><strong>Android 8+</strong></span>
-            <span><strong>Open source</strong> · MIT</span>
+            <span><strong>Linux · macOS · Windows</strong></span>
+            <span><strong>Open source</strong> · PolyForm Noncommercial</span>
             <span><strong>No analytics</strong></span>
         </div>
     </div>
@@ -377,8 +432,12 @@
                 <span class="desc"><span class="mono">/poll question | a | b | c</span> — votes ride on the existing reactions wire, no new agent state.</span>
             </li>
             <li>
+                <span class="name">Semantic search</span>
+                <span class="desc">Find that chat you half-remember. On-device embedder — MediaPipe on Android, ONNX MiniLM-L6 on desktop. Private; nothing leaves your machine.</span>
+            </li>
+            <li>
                 <span class="name">Daily digest</span>
-                <span class="desc">Optional morning brief: who pinged you, what watchwords matched, the chats you missed. Local AI summary, plus today's weather.</span>
+                <span class="desc">Optional morning brief: who pinged you, what watchwords matched, the chats you missed. Local AI summary, plus today's weather. (Android only — depends on AlarmManager.)</span>
             </li>
             <li>
                 <span class="name">Watchwords</span>
@@ -392,6 +451,14 @@
                 <span class="name">Voice messages</span>
                 <span class="desc">Record, send, and play back voice notes inline. On-device transcription on devices that support it.</span>
             </li>
+            <li>
+                <span class="name">Native notifications</span>
+                <span class="desc">libnotify on Linux, Notification Center on macOS, system toasts on Windows + Android — no AWT-balloon ugliness.</span>
+            </li>
+            <li>
+                <span class="name">Multi-ship at once</span>
+                <span class="desc">Sign in to as many ships as you like; switch from the top-left. The active ship's color tints the send button, so you don't accidentally post as the wrong identity in shared groups.</span>
+            </li>
         </ul>
     </div>
 </section>
@@ -403,7 +470,8 @@
             <li>Not a host. Bring your own ship — yours, or one a friend hosts for you, or one of the hosting services.</li>
             <li>Not Tlon. Talon talks to the same agents but is an independent client. If you already use a Tlon-hosted ship, Talon sees your full history immediately.</li>
             <li>No notebooks or galleries — yet. The scope is chat, done well.</li>
-            <li>Not on the Play Store today. Sideload from GitHub Releases; the in-app updater handles future versions.</li>
+            <li>Not on the Play Store today. Sideload from GitHub Releases; the in-app updater handles future versions on Android.</li>
+            <li>Desktop builds are unsigned for now — Gatekeeper / SmartScreen will warn on first launch and you have to bypass it.</li>
         </ul>
     </div>
 </section>
@@ -430,50 +498,157 @@
     <div class="wrap">
         <h2>Under the hood</h2>
         <p>
-            Native Kotlin + Jetpack Compose. Room for local storage, OkHttp for the SSE
-            channel, kotlinx.serialization for everything on the wire. Mutation-tested at
-            ~93% on the parsers and wire helpers; ~180 unit tests across the JVM-only test
-            suite.
+            Kotlin + Compose Multiplatform. ~26k lines of shared code across Android +
+            JVM Desktop; per-platform leaves only where they have to be (file pickers,
+            on-device AI backends, daily-digest scheduling, native notifications). Room
+            for local storage, OkHttp for the SSE channel, kotlinx.serialization for
+            everything on the wire. Mutation-tested at ~97% on the parsers and wire
+            helpers; ~558 unit tests across the JVM test suite.
         </p>
         <div class="tech-grid">
-            <div class="cell"><div class="k">min sdk</div><div class="v">Android 8.0 (API 26)</div></div>
-            <div class="cell"><div class="k">target sdk</div><div class="v">Android 15 (API 35)</div></div>
+            <div class="cell"><div class="k">android</div><div class="v">8.0+ (API 26-35)</div></div>
+            <div class="cell"><div class="k">desktop</div><div class="v">Linux · macOS · Windows · JRE bundled</div></div>
             <div class="cell"><div class="k">backend</div><div class="v">Your Urbit ship</div></div>
-            <div class="cell"><div class="k">license</div><div class="v">MIT</div></div>
+            <div class="cell"><div class="k">license</div><div class="v">PolyForm Noncommercial 1.0.0</div></div>
         </div>
     </div>
 </section>
 
-<section>
+<section id="download">
     <div class="wrap">
-        <h2>Get it</h2>
+        <h2>Download</h2>
         <p>
-            <a href="https://github.com/sneagan/talon/releases/latest">Latest release on GitHub</a>
-            — download the APK, allow installs from the source you used (browser or file manager),
-            tap to install. Future updates land via the in-app banner once you're on a build that
-            supports it.
+            Pick your platform. Direct download links resolve to the latest tagged
+            release; fall back to the
+            <a href="https://github.com/nisfeb/talon/releases/latest">releases page</a>
+            for older versions, signature checksums, and release notes.
         </p>
-        <p>
+
+        <h3 style="margin-top:32px;">Android</h3>
+        <p style="font-size:14px;color:var(--on-surf-var);">
+            On install: tap the APK; you may need to allow "Install unknown apps" for
+            your browser or file manager. Future updates land via the in-app banner.
+        </p>
+        <div class="dl-grid">
+            <div class="dl-row">
+                <span class="platform">arm64-v8a</span>
+                <span class="desc">Most modern Android phones (~25 MB). Pick this one if unsure.</span>
+                <a class="dl-link" data-asset-pattern="^talon-[0-9.]+-arm64-v8a\.apk$"
+                   href="https://github.com/nisfeb/talon/releases/latest">Download</a>
+            </div>
+            <div class="dl-row">
+                <span class="platform">armeabi-v7a</span>
+                <span class="desc">Older 32-bit ARM devices (~20 MB).</span>
+                <a class="dl-link" data-asset-pattern="^talon-[0-9.]+-armeabi-v7a\.apk$"
+                   href="https://github.com/nisfeb/talon/releases/latest">Download</a>
+            </div>
+            <div class="dl-row">
+                <span class="platform">x86_64</span>
+                <span class="desc">Emulators / x86 tablets (~18 MB).</span>
+                <a class="dl-link" data-asset-pattern="^talon-[0-9.]+-x86_64\.apk$"
+                   href="https://github.com/nisfeb/talon/releases/latest">Download</a>
+            </div>
+            <div class="dl-row">
+                <span class="platform">universal</span>
+                <span class="desc">Larger fallback (~54 MB) — works on every supported ABI.</span>
+                <a class="dl-link" data-asset-pattern="^talon-[0-9.]+\.apk$"
+                   href="https://github.com/nisfeb/talon/releases/latest">Download</a>
+            </div>
+        </div>
+
+        <h3 style="margin-top:32px;">Linux</h3>
+        <p style="font-size:14px;color:var(--on-surf-var);">
+            <code>chmod +x</code> the AppImage and run it; needs FUSE 2 (default on
+            most desktops). The .deb installs system-wide on Debian / Ubuntu and
+            derivatives.
+        </p>
+        <div class="dl-grid">
+            <div class="dl-row">
+                <span class="platform">AppImage (any)</span>
+                <span class="desc">Portable, self-contained, ~91 MB. Bundled JRE.</span>
+                <a class="dl-link"
+                   href="https://github.com/nisfeb/talon/releases/latest/download/Talon-x86_64.AppImage">Download</a>
+            </div>
+            <div class="dl-row">
+                <span class="platform">.deb (Debian / Ubuntu)</span>
+                <span class="desc"><code>sudo apt install ./talon_*.deb</code></span>
+                <a class="dl-link" data-asset-pattern="^talon_[0-9.-]+_amd64\.deb$"
+                   href="https://github.com/nisfeb/talon/releases/latest">Download</a>
+            </div>
+        </div>
+
+        <h3 style="margin-top:32px;">macOS</h3>
+        <p style="font-size:14px;color:var(--on-surf-var);">
+            Open the DMG and drag Talon to Applications. <strong>First launch:</strong>
+            right-click → Open → Open. (Unsigned, so a normal double-click is blocked
+            by Gatekeeper.)
+        </p>
+        <div class="dl-grid">
+            <div class="dl-row">
+                <span class="platform">.dmg</span>
+                <span class="desc">Universal disk image. Bundled JRE.</span>
+                <a class="dl-link" data-asset-pattern="^Talon-[0-9.]+\.dmg$"
+                   href="https://github.com/nisfeb/talon/releases/latest">Download</a>
+            </div>
+        </div>
+
+        <h3 style="margin-top:32px;">Windows</h3>
+        <p style="font-size:14px;color:var(--on-surf-var);">
+            Double-click the MSI to install. SmartScreen may warn — click "More info"
+            → "Run anyway".
+        </p>
+        <div class="dl-grid">
+            <div class="dl-row">
+                <span class="platform">.msi</span>
+                <span class="desc">x64 installer. Bundled JRE.</span>
+                <a class="dl-link" data-asset-pattern="^Talon-[0-9.]+\.msi$"
+                   href="https://github.com/nisfeb/talon/releases/latest">Download</a>
+            </div>
+        </div>
+
+        <p style="margin-top:32px;">
             New to Urbit?
             <a href="https://urbit.org/getting-started">urbit.org/getting-started</a>
-            walks you through booting a ship. Once you have the ship's HTTP URL and the
-            <span class="mono">+code</span> output, log in inside Talon and you're done.
+            walks you through booting a ship. Once you have the ship's HTTP URL and
+            the <span class="mono">+code</span> output, log in inside Talon and you're done.
         </p>
+
         <div class="ctas" style="margin-top:24px;">
-            <a class="btn btn-primary" href="https://github.com/sneagan/talon/releases/latest">
-                Download&nbsp;APK
-            </a>
-            <a class="btn btn-secondary" href="https://github.com/sneagan/talon">
+            <a class="btn btn-secondary" href="https://github.com/nisfeb/talon">
                 Source&nbsp;&amp;&nbsp;issues
             </a>
         </div>
     </div>
 </section>
 
+<script>
+// Resolve `data-asset-pattern` links to direct GitHub Release asset URLs from
+// the latest release. Without JS, the same anchor falls through to the
+// release page (its href) so the page still works. Single fetch, cached
+// for the page lifetime.
+(function () {
+    const links = document.querySelectorAll('.dl-link[data-asset-pattern]');
+    if (links.length === 0) return;
+    fetch('https://api.github.com/repos/nisfeb/talon/releases/latest', {
+        headers: { 'Accept': 'application/vnd.github+json' },
+    })
+        .then(r => r.ok ? r.json() : null)
+        .then(release => {
+            if (!release || !release.assets) return;
+            for (const link of links) {
+                const re = new RegExp(link.dataset.assetPattern);
+                const match = release.assets.find(a => re.test(a.name));
+                if (match) link.href = match.browser_download_url;
+            }
+        })
+        .catch(() => { /* leave fallback /releases/latest links in place */ });
+})();
+</script>
+
 <footer>
     <div class="wrap footer-row">
-        <span>© Talon — built by <span class="patp">~nisfeb</span>. MIT licensed.</span>
-        <span><a href="https://github.com/sneagan/talon">github.com/sneagan/talon</a></span>
+        <span>© Talon — built by <span class="patp">~nisfeb</span>. PolyForm Noncommercial 1.0.0 licensed.</span>
+        <span><a href="https://github.com/nisfeb/talon">github.com/nisfeb/talon</a></span>
     </div>
 </footer>
 
