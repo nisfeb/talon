@@ -568,65 +568,37 @@ class SettingsSyncImpl(
 
     /** Mirror one watchword term to the ship's settings. */
     suspend fun pushWatchwordEntry(term: io.nisfeb.talon.data.WatchwordEntity) {
-        val ch = channel ?: return
         val key = io.nisfeb.talon.ai.sanitizeTerm(term.term)
         if (key.isEmpty()) return
-        val payload = buildJsonObject {
-            put("put-entry", buildJsonObject {
-                put("desk", DESK)
-                put("bucket-key", BUCKET_WATCHWORDS)
-                put("entry-key", key)
-                put("value", buildJsonObject {
-                    put("term", term.term)
-                    put("notify", term.notify)
-                    put("createdMs", term.createdMs)
-                })
-            })
-        }
-        runCatching { ch.poke("settings", "settings-event", payload) }
-            .onFailure { Log.w(TAG, "pushWatchwordEntry failed", it) }
+        // Route through pokePutEntry so the value is stringified to a
+        // cord like every other bucket — %settings's mark dejs expects
+        // the cord shape; bypassing it caused cross-device sync to
+        // silently no-op on stricter dejs builds.
+        pokePutEntry(
+            BUCKET_WATCHWORDS, key,
+            buildJsonObject {
+                put("term", term.term)
+                put("notify", term.notify)
+                put("createdMs", term.createdMs)
+            },
+        )
     }
 
     suspend fun deleteWatchwordEntry(termText: String) {
-        val ch = channel ?: return
         val key = io.nisfeb.talon.ai.sanitizeTerm(termText)
         if (key.isEmpty()) return
-        val payload = buildJsonObject {
-            put("del-entry", buildJsonObject {
-                put("desk", DESK)
-                put("bucket-key", BUCKET_WATCHWORDS)
-                put("entry-key", key)
-            })
-        }
-        runCatching { ch.poke("settings", "settings-event", payload) }
-            .onFailure { Log.w(TAG, "deleteWatchwordEntry failed", it) }
+        pokeDelEntry(BUCKET_WATCHWORDS, key)
     }
 
     suspend fun pushWatchwordExclude(whom: String) {
-        val ch = channel ?: return
-        val payload = buildJsonObject {
-            put("put-entry", buildJsonObject {
-                put("desk", DESK)
-                put("bucket-key", BUCKET_WATCHWORD_EXCLUDES)
-                put("entry-key", whom)
-                put("value", JsonPrimitive(true))
-            })
-        }
-        runCatching { ch.poke("settings", "settings-event", payload) }
-            .onFailure { Log.w(TAG, "pushWatchwordExclude failed", it) }
+        // Cord-stringified value, matching every other bucket. The
+        // value itself is unused on the apply side (presence-of-key is
+        // the signal); we send `true` for parity.
+        pokePutEntry(BUCKET_WATCHWORD_EXCLUDES, whom, JsonPrimitive(true))
     }
 
     suspend fun deleteWatchwordExclude(whom: String) {
-        val ch = channel ?: return
-        val payload = buildJsonObject {
-            put("del-entry", buildJsonObject {
-                put("desk", DESK)
-                put("bucket-key", BUCKET_WATCHWORD_EXCLUDES)
-                put("entry-key", whom)
-            })
-        }
-        runCatching { ch.poke("settings", "settings-event", payload) }
-            .onFailure { Log.w(TAG, "deleteWatchwordExclude failed", it) }
+        pokeDelEntry(BUCKET_WATCHWORD_EXCLUDES, whom)
     }
 
     /** One-shot full flush of watchwords + excludes when sync is enabled. */
@@ -786,7 +758,10 @@ class SettingsSyncImpl(
                 // the local watchwords table also feeds the live runtime.
                 // Per-entry upsert + drop-if-not-in-bucket.
                 val incoming = entries?.entries?.mapNotNull { (key, value) ->
-                    val obj = value as? JsonObject ?: return@mapNotNull null
+                    // Values arrive as cord-stringified JsonObject (see
+                    // pokePutEntry stringification). unwrap parses the
+                    // cord back into the inner JsonObject.
+                    val obj = unwrap(value) as? JsonObject ?: return@mapNotNull null
                     val termText = obj["term"].asStr() ?: return@mapNotNull null
                     val notify = (obj["notify"] as? JsonPrimitive)?.booleanOrNull ?: true
                     val createdMs = (obj["createdMs"] as? JsonPrimitive)?.longOrNull
@@ -916,6 +891,14 @@ class SettingsSyncImpl(
                 }
             }
             BUCKET_WATCHWORD_EXCLUDES -> {
+                // Honor the value: explicit `false` means "not excluded"
+                // and shouldn't create the row. Treat any other shape
+                // (true, missing, non-boolean) as the legacy "presence
+                // == excluded" semantics. Removal still routes through
+                // del-entry, but defending against a stale `false`
+                // writer keeps the row from being recreated.
+                val v = (unwrapped as? JsonPrimitive)?.booleanOrNull
+                if (v == false) return
                 db.watchwords().upsertExclude(
                     io.nisfeb.talon.data.WatchwordChatExcludeEntity(entry)
                 )

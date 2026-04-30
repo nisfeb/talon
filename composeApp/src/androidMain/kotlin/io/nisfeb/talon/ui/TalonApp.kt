@@ -23,6 +23,11 @@ import io.nisfeb.talon.Notifications
 import io.nisfeb.talon.ShareIntent
 import io.nisfeb.talon.TalonApplication
 import io.nisfeb.talon.TalonSyncService
+import io.nisfeb.talon.ui.BatteryExemptionBanner
+import io.nisfeb.talon.ui.EntityActionChips
+import io.nisfeb.talon.ui.InlineAudioPlayer
+import io.nisfeb.talon.ui.VoiceRecordButton
+import io.nisfeb.talon.ui.rememberLocationProvider
 import io.nisfeb.talon.data.MessageEntity
 import io.nisfeb.talon.data.NotifyLevel
 import io.nisfeb.talon.urbit.StoryCache
@@ -704,28 +709,46 @@ fun TalonApp(
                 )
             }
 
-            openWhom != null -> DmChatScreen(
-                db = app.db,
-                repo = app.repo,
-                drafts = app.drafts,
-                http = app.http,
-                aiSettings = app.aiSettings,
-                uiSettings = app.uiSettings,
-                ourPatp = loggedInShip ?: "",
-                whom = openWhom!!,
-                initialScrollMessageId = pendingScrollMessageId,
-                onScrollConsumed = { pendingScrollMessageId = null },
-                onBack = { openWhom = null },
-                onOpenThread = { openThread = it },
-                onOpenThreadAt = { parent, anchor ->
-                    pendingThreadAnchor = anchor
-                    openThread = parent
-                },
-                onOpenConversation = openConversation,
-                onOpenImage = { viewerImageUrl = it },
-                onOpenSelfProfile = { editingProfile = true },
-                modifier = mod,
-            )
+            openWhom != null -> {
+                val locationProvider = rememberLocationProvider()
+                DmChatScreen(
+                    db = app.db,
+                    repo = app.repo,
+                    drafts = app.drafts,
+                    http = app.http,
+                    aiSettings = app.aiSettings,
+                    uiSettings = app.uiSettings,
+                    ourPatp = loggedInShip ?: "",
+                    whom = openWhom!!,
+                    initialScrollMessageId = pendingScrollMessageId,
+                    onScrollConsumed = { pendingScrollMessageId = null },
+                    onBack = { openWhom = null },
+                    onOpenThread = { openThread = it },
+                    onOpenThreadAt = { parent, anchor ->
+                        pendingThreadAnchor = anchor
+                        openThread = parent
+                    },
+                    onOpenConversation = openConversation,
+                    onOpenImage = { viewerImageUrl = it },
+                    onOpenSelfProfile = { editingProfile = true },
+                    // Android-only platform widgets — desktop hosts pass null
+                    // and the screen degrades gracefully. Wired via
+                    // composable slots so commonMain has no Android deps.
+                    entityChips = { text, m -> EntityActionChips(text, m) },
+                    voiceComposer = { enabled, onRecorded ->
+                        VoiceRecordButton(
+                            enabled = enabled,
+                            onRecorded = onRecorded,
+                            modifier = Modifier,
+                        )
+                    },
+                    locationProvider = locationProvider,
+                    voicePlayer = { path, _ ->
+                        InlineAudioPlayer(url = path)
+                    },
+                    modifier = mod,
+                )
+            }
 
             searchOpen -> SearchScreen(
                 db = app.db,
@@ -801,6 +824,9 @@ fun TalonApp(
                     }
                 },
                 onAddShip = { addingAnotherShip = true },
+                // Android-only OEM-killer nudge banner. Desktop hosts
+                // pass null and the slot is hidden.
+                batteryBanner = { BatteryExemptionBanner() },
                 modifier = mod,
             )
         }

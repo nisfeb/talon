@@ -468,6 +468,63 @@ class SettingsSyncApplyBucketTest {
             assertEquals(listOf("~zod/keep"), rows.map { it.flag })
         }
 
+    // ── cord-stringified value compatibility ────────────────────────
+
+    @Test
+    fun `applyBucket WATCHWORDS accepts cord-stringified entry values`() = runBlocking {
+        // After the watchword push paths were aligned with the cord
+        // pattern, ship-side values arrive as JsonPrimitive(jsonString)
+        // and must be unwrapped before reading the term/notify fields.
+        val cordValue = JsonPrimitive(
+            "{\"term\":\"alpha\",\"notify\":true,\"createdMs\":1700000000000}",
+        )
+        val bucket = buildJsonObject { put("k1", cordValue) }
+        sync.applyBucket(SettingsSyncImpl.BUCKET_WATCHWORDS, bucket)
+
+        val rows = db.watchwords().streamTerms().first()
+        assertEquals(listOf("alpha"), rows.map { it.term })
+    }
+
+    @Test
+    fun `applyEntry WATCHWORD_EXCLUDES with explicit false skips upsert`() = runBlocking {
+        // Defensive: a stale or future writer could put-entry the
+        // exclude bucket with `false` value. The legacy semantics
+        // were "presence = excluded, removal via del-entry"; honoring
+        // an explicit `false` keeps a `false` writer from accidentally
+        // creating the row.
+        val payload = buildJsonObject {
+            put("put-entry", buildJsonObject {
+                put("desk", "talon")
+                put("bucket-key", SettingsSyncImpl.BUCKET_WATCHWORD_EXCLUDES)
+                put("entry-key", "~zod")
+                put("value", JsonPrimitive("false"))
+            })
+        }
+        sync.applySettingsEvent(payload)
+
+        assertTrue(
+            db.watchwords().excludesAsList().isEmpty(),
+            "explicit false must not create the exclude row",
+        )
+    }
+
+    @Test
+    fun `applyEntry WATCHWORD_EXCLUDES with explicit true creates the row`() = runBlocking {
+        // Symmetric to the false-skips case — true is the documented
+        // shape pushWatchwordExclude emits.
+        val payload = buildJsonObject {
+            put("put-entry", buildJsonObject {
+                put("desk", "talon")
+                put("bucket-key", SettingsSyncImpl.BUCKET_WATCHWORD_EXCLUDES)
+                put("entry-key", "~zod")
+                put("value", JsonPrimitive("true"))
+            })
+        }
+        sync.applySettingsEvent(payload)
+
+        assertEquals(listOf("~zod"), db.watchwords().excludesAsList())
+    }
+
     // ── applyEntry per-key paths for daily-digest ────────────────────
 
     @Test

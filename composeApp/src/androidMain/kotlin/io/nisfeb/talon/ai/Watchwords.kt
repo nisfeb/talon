@@ -189,8 +189,14 @@ class Watchwords(
     /**
      * Fire-and-forget backfill scan for [term]. Adds [term.id] to
      * [_backfilling] for the duration. Cancellable from [remove].
+     *
+     * Idempotent: if a backfill is already in flight for this term id
+     * (rapid double-add — `upsertTerm` returns the same id on the
+     * UNIQUE constraint), no-op rather than spawn a parallel scan
+     * that races to write the same hits and orphans the prior job.
      */
     private fun startBackfill(term: WatchwordEntity) {
+        if (backfillJobs.containsKey(term.id)) return
         val job = scope.launch(Dispatchers.Default) {
             _backfilling.update { it + term.id }
             try {
@@ -200,7 +206,15 @@ class Watchwords(
                 backfillJobs.remove(term.id)
             }
         }
-        backfillJobs[term.id] = job
+        // putIfAbsent guards the case where two concurrent
+        // startBackfill() calls both passed the containsKey check —
+        // the second putIfAbsent returns non-null and we cancel its
+        // own job to keep only one scan running.
+        backfillJobs.putIfAbsent(term.id, job)?.let {
+            // Race-loser: another thread already registered a job. Drop
+            // ours and let theirs run.
+            job.cancel()
+        }
     }
 
     private suspend fun runBackfill(term: WatchwordEntity) {

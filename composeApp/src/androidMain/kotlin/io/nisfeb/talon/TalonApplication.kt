@@ -37,14 +37,11 @@ class TalonApplication : Application() {
         private set
     lateinit var uiSettings: UiSettings
         private set
-    /** In-memory theme override. Pre-Stage-F SettingsScreen managed
-     *  the theme internally via SharedPreferences; the canonical
-     *  composeApp SettingsScreen takes a [ThemePreference] slot. We
-     *  ship an in-memory impl for now — themed across navigations but
-     *  resets on process death. SharedPreferences-backed impl is a
-     *  Stage F follow-up. */
-    val themePreference: io.nisfeb.talon.ui.theme.ThemePreference =
-        io.nisfeb.talon.ui.theme.InMemoryThemePreference()
+    /** SharedPreferences-backed override for the app's color scheme.
+     *  Persists the user's choice across process death; observed by
+     *  MainActivity to derive the active TalonTheme darkTheme arg. */
+    lateinit var themePreference: io.nisfeb.talon.ui.theme.ThemePreference
+        private set
     lateinit var shipProfiles: ShipProfileStore
         private set
     lateinit var aiClient: AiClient
@@ -130,6 +127,7 @@ class TalonApplication : Application() {
         aiSettings = io.nisfeb.talon.ai.AndroidAiSettings(this)
         dailyDigestSettings = io.nisfeb.talon.ai.AndroidDailyDigestSettings(this)
         uiSettings = io.nisfeb.talon.ui.AndroidUiSettings(this)
+        themePreference = io.nisfeb.talon.ui.theme.AndroidThemePreference(this)
         shipProfiles = ShipProfileStore(this)
         aiClient = AiClient(settingsProvider = { aiSettings.state.value })
         ai = AiFeatures(aiClient)

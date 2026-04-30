@@ -9,11 +9,14 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.core.content.ContextCompat
 import io.nisfeb.talon.ui.TalonApp
 import io.nisfeb.talon.ui.theme.TalonTheme
+import io.nisfeb.talon.ui.theme.ThemePreference
 
 class MainActivity : ComponentActivity() {
 
@@ -48,6 +51,7 @@ class MainActivity : ComponentActivity() {
             if (!granted) requestNotificationsPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
 
+        val app = applicationContext as TalonApplication
         setContent {
             val whom by deepLinkWhom
             val messageId by deepLinkMessageId
@@ -56,7 +60,14 @@ class MainActivity : ComponentActivity() {
             val openDigest by deepLinkOpenDigest
             val share by pendingShare
             val shareTarget by pendingShareTarget
-            TalonTheme {
+            val themeMode by app.themePreference.mode.collectAsState()
+            val systemDark = isSystemInDarkTheme()
+            val darkTheme = when (themeMode) {
+                ThemePreference.Mode.System -> systemDark
+                ThemePreference.Mode.Light -> false
+                ThemePreference.Mode.Dark -> true
+            }
+            TalonTheme(darkTheme = darkTheme) {
                 TalonApp(
                     initialOpenWhom = whom,
                     initialScrollMessageId = messageId,
