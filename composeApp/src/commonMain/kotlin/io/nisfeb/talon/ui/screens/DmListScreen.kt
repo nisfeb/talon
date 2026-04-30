@@ -483,15 +483,14 @@ fun DmListScreen(
             modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            // Tinted with primary color so the brand mark sits inside
-            // the rest of the toolbar's color hierarchy. `Icon` over
-            // `Image` because we want the tint to apply.
-            Icon(
+            // Full-color brand mark — keep as `Image` (Icon would tint
+            // every non-transparent pixel with the surface color and
+            // flatten the multi-color logo into a silhouette).
+            androidx.compose.foundation.Image(
                 painter = io.nisfeb.talon.ui.talonLogoPainter(),
                 contentDescription = "Switch ship",
-                tint = MaterialTheme.colorScheme.primary,
                 modifier = Modifier
-                    .size(28.dp)
+                    .size(32.dp)
                     .clickable { scope.launch { drawerState.open() } },
             )
             Text(
@@ -1076,11 +1075,9 @@ private fun ShipSwitcherDrawer(
                         .padding(horizontal = 12.dp, vertical = 10.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Icon(
+                    androidx.compose.foundation.Image(
                         painter = io.nisfeb.talon.ui.talonLogoPainter(),
                         contentDescription = null,
-                        tint = if (selected) MaterialTheme.colorScheme.primary
-                        else MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.size(20.dp),
                     )
                     Spacer(Modifier.size(12.dp))
