@@ -80,6 +80,50 @@ mkdir -p "$APPDIR"
 # have to rewrite anything.
 cp -r "$DIST_SRC/." "$APPDIR/"
 
+# Slim cross-platform native libs out of bundled JARs. The Linux
+# AppImage doesn't need Windows DLLs, macOS dylibs (especially their
+# .dSYM debug bundles), or ARM-Linux binaries. DJL's ONNX runtime +
+# HuggingFace tokenizers ship all platforms in single fat JARs;
+# stripping the non-target paths takes the AppImage from ~260 MB
+# down to ~120 MB without changing runtime behavior (the runtime
+# detects platform and loads the matching subdir; absent subdirs
+# are never accessed on the host they don't apply to).
+slim_jar() {
+    local jar="$1"; shift
+    if [[ ! -f "$jar" ]]; then return; fi
+    local before
+    before=$(stat -c%s "$jar")
+    # zip -d takes globs; suppress "nothing to do" warnings on JARs
+    # that don't have one of the patterns (e.g. older ONNX releases
+    # without aarch64 builds).
+    for pattern in "$@"; do
+        zip --quiet -d "$jar" "$pattern" >/dev/null 2>&1 || true
+    done
+    local after
+    after=$(stat -c%s "$jar")
+    if [[ "$after" -lt "$before" ]]; then
+        printf '  slim %-55s %s → %s\n' "$(basename "$jar")" \
+            "$(numfmt --to=iec --suffix=B "$before")" \
+            "$(numfmt --to=iec --suffix=B "$after")"
+    fi
+}
+
+echo "==> Slimming non-Linux-x64 native libs"
+for jar in "$APPDIR"/lib/app/onnxruntime-*.jar; do
+    slim_jar "$jar" \
+        'ai/onnxruntime/native/win-x64/*' \
+        'ai/onnxruntime/native/osx-x64/*' \
+        'ai/onnxruntime/native/osx-aarch64/*' \
+        'ai/onnxruntime/native/linux-aarch64/*'
+done
+for jar in "$APPDIR"/lib/app/tokenizers-*.jar; do
+    slim_jar "$jar" \
+        'native/lib/win-x86_64/*' \
+        'native/lib/osx-aarch64/*' \
+        'native/lib/osx-x86_64/*' \
+        'native/lib/linux-aarch64/*'
+done
+
 # Icon at AppDir root, named to match Icon= in the .desktop file.
 cp "$ICON_SRC" "$APPDIR/talon.png"
 
