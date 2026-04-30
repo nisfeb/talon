@@ -133,8 +133,8 @@ android {
         // matches what RELEASE.md already documents and opts us into
         // Android 15 behavior changes (16 KB page sizes, edge-to-edge).
         targetSdk = 35
-        versionCode = 22
-        versionName = "0.6.1"
+        versionCode = 23
+        versionName = "0.7.0"
     }
 
     signingConfigs {
@@ -230,13 +230,13 @@ compose.desktop {
             targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Deb)
             packageName = "Talon"
             // jpackage requires MAJOR > 0, but the Android-side
-            // versionName starts with "0." today (0.5.0). To keep
-            // installer filenames in lockstep with the release tag,
-            // map "0.MINOR.PATCH" → "1.MINOR.PATCH" until the project
-            // crosses 1.0 for real. After that the read-through is
-            // straight identity. Source of truth is
-            // composeApp/build.gradle.kts:versionName (also what the
-            // release workflow's tag check reads).
+            // versionName still starts with "0." today (pre-1.0).
+            // To keep installer filenames in lockstep with the
+            // release tag, map "0.MINOR.PATCH" → "1.MINOR.PATCH"
+            // until the project crosses 1.0 for real. After that
+            // the read-through is straight identity. Source of
+            // truth is composeApp/build.gradle.kts:versionName
+            // (also what the release workflow's tag check reads).
             packageVersion = derivePackageVersion()
             description = "Native chat client for Urbit"
             copyright = "© 2026 ~nisfeb"
@@ -268,7 +268,7 @@ compose.desktop {
  * project crosses 1.0 the map is straight identity.
  */
 fun derivePackageVersion(): String {
-    val raw = "0.6.1"
+    val raw = "0.7.0"
     val parts = raw.split(".")
     if (parts.size < 3) return "1.0.0"
     val major = parts[0].toIntOrNull() ?: return "1.0.0"

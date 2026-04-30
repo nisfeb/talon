@@ -93,9 +93,34 @@ jobs:
           VERSION_CODE: ${{ needs.tagcheck.outputs.version_code }}
           VERSION_NAME: ${{ needs.tagcheck.outputs.version_name }}
         run: |
-          APK=composeApp/build/outputs/apk/release/composeApp-release.apk
+          set -euo pipefail
+          # ABI splits produce four APKs: arm64-v8a, armeabi-v7a,
+          # x86_64, and a universal fallback. The in-app updater
+          # consumes a single URL from latest.json, so the universal
+          # APK is published as talon-$VERSION_NAME.apk (the name
+          # the manifest template hardcodes). The per-arch splits
+          # ride along under suffixed names for users who want a
+          # smaller manual download.
+          APK_DIR=composeApp/build/outputs/apk/release
+          UNIVERSAL="$APK_DIR/composeApp-universal-release.apk"
+          if [ ! -f "$UNIVERSAL" ]; then
+            echo "::error::universal APK not found at $UNIVERSAL"
+            ls -la "$APK_DIR"
+            exit 1
+          fi
           OUT_APK="talon-$VERSION_NAME.apk"
-          cp "$APK" "$OUT_APK"
+          cp "$UNIVERSAL" "$OUT_APK"
+          STAGED=("$OUT_APK")
+          for abi in arm64-v8a armeabi-v7a x86_64; do
+            SRC="$APK_DIR/composeApp-$abi-release.apk"
+            if [ -f "$SRC" ]; then
+              DEST="talon-$VERSION_NAME-$abi.apk"
+              cp "$SRC" "$DEST"
+              STAGED+=("$DEST")
+            else
+              echo "::warning::missing split APK for $abi at $SRC"
+            fi
+          done
           SHA=$(sha256sum "$OUT_APK" | awk '{print $1}')
           CHANGELOG="$(git log -1 --pretty=%B | tr '\n' ' ' | sed 's/"/\\"/g')"
           sed -e "s|__VERSION_CODE__|$VERSION_CODE|" \
@@ -104,16 +129,19 @@ jobs:
               -e "s|__CHANGELOG__|$CHANGELOG|" \
               -e "s|__MANDATORY__|false|" \
               release/manifest-template.json > latest.json
-          echo "apk=$OUT_APK" >> $GITHUB_OUTPUT
+          # Newline-separated list of staged paths for the upload step.
+          printf '%s\n' "${STAGED[@]}" > staged-apks.txt
+          echo "apks_file=staged-apks.txt" >> $GITHUB_OUTPUT
 
-      - name: Upload Android APK + manifest
+      - name: Upload Android APKs + manifest
         if: steps.chk.outputs.have_keystore == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: android
           path: |
-            ${{ steps.stage.outputs.apk }}
+            talon-*.apk
             latest.json
+          if-no-files-found: error
 
   # Desktop matrix runs jpackage on each host OS so the per-platform
   # installer toolchains are present (dpkg + fakeroot on Linux,
