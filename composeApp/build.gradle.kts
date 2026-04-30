@@ -157,6 +157,21 @@ android {
         }
     }
 
+    // Per-ABI APK splits. The 4 native libs (sqlite-bundled,
+    // mediapipe text, onnxruntime, image-codecs from coil/skia) total
+    // ~41 MB across all architectures. Each user only needs one
+    // architecture. The universal APK stays enabled so the existing
+    // GitHub Releases sideload flow keeps working unchanged; per-arch
+    // APKs are produced alongside as smaller alternatives.
+    splits {
+        abi {
+            isEnable = true
+            reset()
+            include("arm64-v8a", "armeabi-v7a", "x86_64")
+            isUniversalApk = true
+        }
+    }
+
     buildTypes {
         release {
             val hasReleaseKeys = System.getenv("RELEASE_KEYSTORE_PROPS") != null
@@ -388,6 +403,55 @@ val slimReleaseDistributable = tasks.register("slimReleaseDistributable") {
                         entry.startsWith("native/lib/$tokKeep/")
                 }
             }
+
+        // Material Icons Extended ships every Material icon (~11k
+        // class files, 37 MB on desktop). Android R8 strips the
+        // unused ones; jpackage has no equivalent step. We only use
+        // 11 icons from this JAR (the rest come from the small
+        // material-icons-core JAR we leave alone). Keep just those
+        // class files plus the manifest. Sources of truth for the
+        // keep list:
+        //   grep -rhoE 'Icons\.(AutoMirrored\.)?(Filled|Outlined|Rounded|Sharp|TwoTone)\.[A-Za-z0-9_]+' \
+        //     --include='*.kt' composeApp/src | sort -u
+        // and verify each one against the contents of the
+        // material-icons-core-desktop JAR — anything found there
+        // does NOT belong in this list.
+        // CI guard further down catches drift.
+        val iconsExtendedKeep = setOf(
+            "androidx/compose/material/icons/filled/AttachFileKt.class",
+            "androidx/compose/material/icons/filled/DragHandleKt.class",
+            "androidx/compose/material/icons/filled/ExpandMoreKt.class",
+            "androidx/compose/material/icons/filled/ImageKt.class",
+            "androidx/compose/material/icons/filled/MicKt.class",
+            "androidx/compose/material/icons/filled/NotificationsOffKt.class",
+            "androidx/compose/material/icons/filled/PauseKt.class",
+            "androidx/compose/material/icons/filled/StopKt.class",
+            "androidx/compose/material/icons/filled/TopicKt.class",
+            "androidx/compose/material/icons/filled/VisibilityKt.class",
+            "androidx/compose/material/icons/filled/VisibilityOffKt.class",
+        )
+        libApp.listFiles { _, n ->
+            n.startsWith("material-icons-extended-desktop-") && n.endsWith(".jar")
+        }?.forEach { jar ->
+            // Verify keep-list members all exist in the source JAR so
+            // a typo or upstream rename surfaces here, not as a
+            // ClassNotFoundException at runtime.
+            val present = ZipFile(jar).use { zf ->
+                iconsExtendedKeep.filter { zf.getEntry(it) != null }.toSet()
+            }
+            val missing = iconsExtendedKeep - present
+            check(missing.isEmpty()) {
+                "icons-extended slim: keep-list entries not found in ${jar.name}: $missing"
+            }
+            slimJarInPlace(jar) { entry ->
+                when {
+                    entry.endsWith("/") -> true
+                    entry == "META-INF/MANIFEST.MF" -> true
+                    entry.endsWith(".class") -> entry in iconsExtendedKeep
+                    else -> false
+                }
+            }
+        }
     }
 }
 
