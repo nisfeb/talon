@@ -23,7 +23,7 @@
   "latest - 1" Android version (Nov 2026 that's 35, you're already on 35),
   a closed test track with ≥ 12 testers for ≥ 14 days before open beta.
 - $25 one-time developer fee.
-- You ship a signed AAB (`./gradlew :app:bundleRelease`), not APK.
+- You ship a signed AAB (`./gradlew :composeApp:bundleRelease`), not APK.
 - Updates gate behind Play review (~hours).
 - **Your situation:** viable. The crypto library (`androidx.security.crypto`)
   and the API-key storage warrant a tight privacy policy ("AI keys
@@ -58,7 +58,7 @@ Keep a second copy in cold storage (printed QR of the keystore +
 password, or a hardware token). Losing it means you can never update
 this app on Play again.
 
-Wire it into `app/build.gradle.kts`:
+Wire it into `composeApp/build.gradle.kts`:
 
 ```kotlin
 signingConfigs {
@@ -83,7 +83,7 @@ already in `.gitignore`.
 
 ## Version bumping
 
-In `app/build.gradle.kts`:
+In `composeApp/build.gradle.kts`:
 
 ```kotlin
 versionCode = 2   // monotonic, +1 per published build (Play requires)
@@ -127,8 +127,8 @@ Run through this every tag. It's not automated — don't skip it.
   appear during normal use.
 
 **Build artifacts:**
-- [ ] `./gradlew :app:assembleRelease` produces a signed APK.
-- [ ] `./gradlew :app:bundleRelease` produces an AAB (Play).
+- [ ] `./gradlew :composeApp:assembleRelease` produces a signed APK.
+- [ ] `./gradlew :composeApp:bundleRelease` produces an AAB (Play).
 - [ ] Install the release APK fresh on a phone that never had the app
   → login → open chat → send a message. (Catches proguard / R8
   stripping bugs. We've already hit these once; R8 is configured but
