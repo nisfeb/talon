@@ -1,4 +1,3 @@
-// TEMPORARY DUPLICATE of app/src/main/java/io/nisfeb/talon/ui/screens/GroupAdminListScreen.kt
 // Adapted: none — already takes TlonChatRepo as a parameter and has no
 // Android-only dependencies. Keep in sync with production until app/
 // is removed in Stage F.

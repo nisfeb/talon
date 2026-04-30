@@ -1,4 +1,3 @@
-// TEMPORARY DUPLICATE of app/src/main/java/io/nisfeb/talon/ui/screens/WatchwordsScreen.kt
 // Adapted: TalonApplication coupling removed. Production reads
 // `app.watchwords.terms` (Watchwords class wraps the DAO and triggers
 // Embedder/backfill) and `app.watchwordsSyncEnabled` (lives on the

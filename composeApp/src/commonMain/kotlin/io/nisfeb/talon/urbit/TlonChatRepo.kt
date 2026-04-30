@@ -1,4 +1,3 @@
-// TEMPORARY DUPLICATE of app/src/main/java/io/nisfeb/talon/urbit/TlonChatRepo.kt
 // Diverges from production in three controlled ways so that this file
 // can compile in commonMain (no Android, no app/-only types):
 //

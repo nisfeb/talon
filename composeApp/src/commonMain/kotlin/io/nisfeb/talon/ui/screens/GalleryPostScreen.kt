@@ -1,4 +1,3 @@
-// TEMPORARY DUPLICATE of app/src/main/java/io/nisfeb/talon/ui/screens/GalleryPostScreen.kt
 // Adapted: TalonApplication coupling replaced with constructor
 // injection (db, repo, ourPatp). activeShipFlow lookup replaced with
 // the explicit ourPatp parameter (matches DmChatScreen). Keep in

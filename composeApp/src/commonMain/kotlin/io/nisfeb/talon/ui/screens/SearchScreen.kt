@@ -1,4 +1,3 @@
-// TEMPORARY DUPLICATE of app/src/main/java/io/nisfeb/talon/ui/screens/SearchScreen.kt
 // Diverges from production: callers of db.messages().search and
 // db.contacts().search now wrap the needle in escapeLikeNeedle()
 // (round 6 fix) — production has a latent wildcard-injection bug

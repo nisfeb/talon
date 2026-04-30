@@ -1,4 +1,3 @@
-// TEMPORARY DUPLICATE of app/src/main/java/io/nisfeb/talon/ui/LinkPreviewCard.kt
 // Diverges from production: production reads OkHttpClient via
 // TalonApplication.http through LocalContext. commonMain takes the
 // client as an explicit parameter so the screen can pass its own.

@@ -1,6 +1,5 @@
 package io.nisfeb.talon.ui.screens
 
-// TEMPORARY DUPLICATE of app/src/main/java/io/nisfeb/talon/ui/screens/LoginScreen.kt — sync any production fixes; remove on Stage B3
 // NOTE: autofill-related imports and .semantics { contentType = ... } modifiers removed (Android-internal API, not available in commonMain)
 
 import androidx.compose.foundation.layout.Arrangement

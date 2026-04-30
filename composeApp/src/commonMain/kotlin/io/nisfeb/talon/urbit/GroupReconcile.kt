@@ -1,4 +1,3 @@
-// TEMPORARY DUPLICATE of app/src/main/java/io/nisfeb/talon/urbit/GroupReconcile.kt
 package io.nisfeb.talon.urbit
 
 import io.nisfeb.talon.data.ChannelGroupEntity

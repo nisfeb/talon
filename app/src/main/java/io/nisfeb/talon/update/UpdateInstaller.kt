@@ -23,7 +23,7 @@ import java.security.MessageDigest
  * [docs/release-channels.md](../../../../../../../docs/release-channels.md)
  * for the flavor-split plan.
  */
-class UpdateInstaller(private val context: Context) {
+class UpdateInstaller(private val context: Context) : UpdateInstallerHook {
 
     /**
      * Download the APK to external-files/updates, verify its SHA-256,
@@ -32,7 +32,7 @@ class UpdateInstaller(private val context: Context) {
      * onReady callback rather than a final progress tick).
      * onFailure receives a human message.
      */
-    suspend fun download(
+    override suspend fun download(
         manifest: UpdateManifest,
         onProgress: (Int) -> Unit,
         onReady: (String) -> Unit,
@@ -107,7 +107,7 @@ class UpdateInstaller(private val context: Context) {
     }
 
     /** Hand the verified APK to PackageInstaller via FileProvider URI. */
-    fun install(apkPath: String) {
+    override fun install(apkPath: String) {
         val file = File(apkPath)
         val authority = "${context.packageName}.updates.fileprovider"
         val uri = FileProvider.getUriForFile(context, authority, file)

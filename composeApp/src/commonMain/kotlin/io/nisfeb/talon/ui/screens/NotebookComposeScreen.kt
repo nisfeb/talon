@@ -1,4 +1,3 @@
-// TEMPORARY DUPLICATE of app/src/main/java/io/nisfeb/talon/ui/screens/NotebookComposeScreen.kt
 // Adapted: TalonApplication / LocalContext-injected repo replaced with
 // TlonChatRepo Composable parameter. Image picker swapped from
 // rememberLauncherForActivityResult(PickVisualMedia) + ContentResolver +

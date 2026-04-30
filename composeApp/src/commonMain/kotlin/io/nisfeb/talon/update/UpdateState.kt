@@ -1,11 +1,3 @@
-// TEMPORARY DUPLICATE: ported from
-// app/src/main/java/io/nisfeb/talon/update/UpdateState.kt during the
-// CMP desktop port (Task D4 prerequisite). The production version
-// takes a `Context` directly to read installedVersionCode and a
-// concrete `UpdateInstaller`. The commonMain port abstracts those
-// behind two SAM-style hooks so desktop callers can pass a no-op
-// installer + a constant version. The Android wiring in Stage F
-// supplies the production hooks.
 package io.nisfeb.talon.update
 
 import kotlinx.coroutines.CoroutineScope

@@ -1,4 +1,3 @@
-// TEMPORARY DUPLICATE of app/src/main/java/io/nisfeb/talon/ui/screens/ImageViewerScreen.kt
 // Diverges from production: production's compose-foundation 1.8+
 // `rememberTransformableState` lambda takes 4 params (zoom, pan,
 // rotation, centroid). CMP 1.7.3 commonMain only has 3 (zoom, pan,

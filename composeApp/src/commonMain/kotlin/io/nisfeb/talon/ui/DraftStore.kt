@@ -1,10 +1,3 @@
-// TEMPORARY DUPLICATE / portable shim: ported from
-// app/src/main/java/io/nisfeb/talon/ui/DraftStore.kt during the CMP
-// desktop port (Task D4 prerequisite). The production class is
-// SharedPreferences-backed; that's encapsulated behind this expect
-// signature so commonMain UI can depend on it without pulling in
-// android.content.Context. Stage F removes this duplicate when app/
-// is dropped.
 package io.nisfeb.talon.ui
 
 import kotlinx.coroutines.flow.MutableStateFlow

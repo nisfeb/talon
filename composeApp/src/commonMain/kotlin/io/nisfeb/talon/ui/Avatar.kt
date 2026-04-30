@@ -1,8 +1,3 @@
-// TEMPORARY DUPLICATE: ported from
-// app/src/main/java/io/nisfeb/talon/ui/Avatar.kt during the CMP
-// desktop port (Task D4 prerequisite). The production Android module
-// still ships its own copy until app/ is removed in Stage F. Keep
-// this file in lockstep until then.
 package io.nisfeb.talon.ui
 
 import androidx.compose.foundation.background

@@ -1,4 +1,3 @@
-// TEMPORARY DUPLICATE of app/src/main/java/io/nisfeb/talon/ui/screens/NotebookPostScreen.kt
 // Adapted: TalonApplication / LocalContext-injected db+repo replaced with
 // AppDatabase + TlonChatRepo Composable parameters. The
 // `app.activeShipFlow.collectAsState()` lookup that gates the Edit/Delete

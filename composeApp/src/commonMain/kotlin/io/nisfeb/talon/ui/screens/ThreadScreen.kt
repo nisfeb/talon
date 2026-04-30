@@ -1,4 +1,3 @@
-// TEMPORARY DUPLICATE of app/src/main/java/io/nisfeb/talon/ui/screens/ThreadScreen.kt
 // Diverges from production in two spots:
 //   1. android.util.Log.w → io.nisfeb.talon.util.Log.w (commonMain shim).
 //   2. Production's onLinkTap launches an Android VIEW Intent. Desktop

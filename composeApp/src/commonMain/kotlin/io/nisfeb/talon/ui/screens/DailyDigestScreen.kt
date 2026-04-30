@@ -1,4 +1,3 @@
-// TEMPORARY DUPLICATE of app/src/main/java/io/nisfeb/talon/ui/screens/DailyDigestScreen.kt
 // Adapted: TalonApplication coupling replaced with `db: AppDatabase`,
 // `activeShip: String?`, and `onGenerateNow: () -> Unit` injected
 // parameters. The Android-only DailyDigest service (alarm scheduler +

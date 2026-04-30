@@ -1,4 +1,3 @@
-// TEMPORARY DUPLICATE of app/src/main/java/io/nisfeb/talon/urbit/SettingsSync.kt
 // Diverges from production: class renamed to SettingsSyncImpl so it
 // can implement the existing commonMain SettingsSync interface
 // (which TlonChatRepo takes as a constructor param). Replaces:

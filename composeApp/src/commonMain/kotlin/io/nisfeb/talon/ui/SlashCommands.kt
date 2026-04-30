@@ -1,4 +1,3 @@
-// TEMPORARY DUPLICATE of app/src/main/java/io/nisfeb/talon/ui/SlashCommands.kt
 // Diverges from production: production's /loc handler takes an
 // android.content.Context to read LocationManager. commonMain replaces
 // that with an opaque `locationProvider` — an optional suspend lambda

@@ -88,6 +88,12 @@ android {
 }
 
 dependencies {
+    // Stage F: composeApp/commonMain is the canonical source for
+    // screens, repos, parsers, data layer. app/ holds the surviving
+    // Android-only surface (Notifications, MainActivity, alarms,
+    // ML cluster, voice/share/update) that consumes composeApp's
+    // shared code via this dep.
+    implementation(project(":composeApp"))
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.lifecycle.runtime.ktx)

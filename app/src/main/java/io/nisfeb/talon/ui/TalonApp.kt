@@ -536,6 +536,8 @@ fun TalonApp(
 
             watchwordsOpen -> WatchwordsScreen(
                 db = app.db,
+                watchwordsSyncEnabled = app.watchwordsSyncEnabled,
+                onSetWatchwordsSyncEnabled = { app.setWatchwordsSyncEnabled(it) },
                 onBack = { watchwordsOpen = false },
                 onOpenConversation = { whom, postId ->
                     openWhom = whom
@@ -546,16 +548,19 @@ fun TalonApp(
             )
 
             digestOpen -> DailyDigestScreen(
-                app = app,
+                db = app.db,
+                activeShip = loggedInShip,
                 onBack = { digestOpen = false },
                 onOpenMessage = { whom, postId ->
                     openWhom = whom
                     pendingScrollMessageId = postId
                     digestOpen = false
                 },
+                onGenerateNow = { app.dailyDigest.generateAndNotifyAsync("user_test") },
             )
 
             adminGroupFlag != null -> GroupAdminScreen(
+                db = app.db,
                 repo = app.repo,
                 flag = adminGroupFlag!!,
                 onBack = { adminGroupFlag = null },
@@ -576,6 +581,8 @@ fun TalonApp(
             )
 
             openGroupFlag != null -> GroupHomeScreen(
+                db = app.db,
+                repo = app.repo,
                 flag = openGroupFlag!!,
                 onBack = { openGroupFlag = null },
                 onOpenChannel = { nest ->
@@ -586,7 +593,12 @@ fun TalonApp(
             )
 
             settingsOpen -> SettingsScreen(
+                aiSettings = app.aiSettings,
+                themePreference = app.themePreference,
+                uiSettings = app.uiSettings,
                 onBack = { settingsOpen = false },
+                dailyDigestSettings = app.dailyDigestSettings,
+                onTestDigest = { app.dailyDigest.generateAndNotifyAsync("user_test") },
                 modifier = mod,
             )
 
@@ -618,6 +630,7 @@ fun TalonApp(
 
             openWhom != null && openWhom!!.startsWith("diary/") -> when {
                 notebookComposeOpen -> NotebookComposeScreen(
+                    repo = app.repo,
                     whom = openWhom!!,
                     onBack = {
                         notebookComposeOpen = false
@@ -635,6 +648,9 @@ fun TalonApp(
                     modifier = mod,
                 )
                 openNotebookPostId != null -> NotebookPostScreen(
+                    db = app.db,
+                    repo = app.repo,
+                    ourPatp = loggedInShip ?: "",
                     whom = openWhom!!,
                     postId = openNotebookPostId!!,
                     onBack = { openNotebookPostId = null },
@@ -650,6 +666,8 @@ fun TalonApp(
                     modifier = mod,
                 )
                 else -> NotebookListScreen(
+                    db = app.db,
+                    repo = app.repo,
                     whom = openWhom!!,
                     onBack = { openWhom = null },
                     onOpenPost = { openNotebookPostId = it },
@@ -660,18 +678,24 @@ fun TalonApp(
 
             openWhom != null && openWhom!!.startsWith("heap/") -> when {
                 galleryComposeOpen -> GalleryComposeScreen(
+                    repo = app.repo,
                     whom = openWhom!!,
                     onBack = { galleryComposeOpen = false },
                     onPosted = { galleryComposeOpen = false },
                     modifier = mod,
                 )
                 openGalleryPostId != null -> GalleryPostScreen(
+                    db = app.db,
+                    repo = app.repo,
+                    ourPatp = loggedInShip ?: "",
                     whom = openWhom!!,
                     postId = openGalleryPostId!!,
                     onBack = { openGalleryPostId = null },
                     modifier = mod,
                 )
                 else -> GalleryGridScreen(
+                    db = app.db,
+                    repo = app.repo,
                     whom = openWhom!!,
                     onBack = { openWhom = null },
                     onOpenPost = { openGalleryPostId = it },
@@ -683,6 +707,10 @@ fun TalonApp(
             openWhom != null -> DmChatScreen(
                 db = app.db,
                 repo = app.repo,
+                drafts = app.drafts,
+                http = app.http,
+                aiSettings = app.aiSettings,
+                uiSettings = app.uiSettings,
                 ourPatp = loggedInShip ?: "",
                 whom = openWhom!!,
                 initialScrollMessageId = pendingScrollMessageId,
@@ -701,6 +729,7 @@ fun TalonApp(
 
             searchOpen -> SearchScreen(
                 db = app.db,
+                aiSettings = app.aiSettings,
                 // searchOpen stays true under the chat/thread so back
                 // pops back to the highlights/results list instead of
                 // home. The when-block ordering hides SearchScreen
@@ -735,6 +764,9 @@ fun TalonApp(
 
             else -> DmListScreen(
                 db = app.db,
+                repo = app.repo,
+                drafts = app.drafts,
+                updateState = app.updateState,
                 onOpenConversation = { openWhom = it },
                 onOpenSearch = { searchOpen = true },
                 onNewMessage = { newDmOpen = true },

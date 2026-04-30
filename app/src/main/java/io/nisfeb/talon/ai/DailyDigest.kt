@@ -49,7 +49,7 @@ class DailyDigest(
     private val sessionStore: SessionStore,
     private val activeShipFlow: StateFlow<String?>,
     private val getDb: () -> AppDatabase,
-    private val aiSettings: AiSettings,
+    private val aiSettings: AiSettingsRepository,
     private val aiClient: AiClient,
     private val settings: DailyDigestSettings,
     private val http: OkHttpClient,

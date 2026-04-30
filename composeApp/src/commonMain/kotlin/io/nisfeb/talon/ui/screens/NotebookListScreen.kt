@@ -1,4 +1,3 @@
-// TEMPORARY DUPLICATE of app/src/main/java/io/nisfeb/talon/ui/screens/NotebookListScreen.kt
 // Adapted: TalonApplication / LocalContext-injected db+repo replaced with
 // AppDatabase + TlonChatRepo Composable parameters (DmListScreen pattern).
 // The unused `private fun sharePost(intent: Intent)` stub is dropped — its

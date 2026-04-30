@@ -1,4 +1,3 @@
-// TEMPORARY DUPLICATE of app/src/main/java/io/nisfeb/talon/urbit/PostIngest.kt
 package io.nisfeb.talon.urbit
 
 import io.nisfeb.talon.data.MessageEntity

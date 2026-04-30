@@ -31,12 +31,20 @@ class TalonApplication : Application() {
         private set
     lateinit var sessionStore: SessionStore
         private set
-    lateinit var aiSettings: AiSettings
+    lateinit var aiSettings: io.nisfeb.talon.ai.AiSettingsRepository
         private set
     lateinit var dailyDigestSettings: io.nisfeb.talon.ai.DailyDigestSettings
         private set
     lateinit var uiSettings: UiSettings
         private set
+    /** In-memory theme override. Pre-Stage-F SettingsScreen managed
+     *  the theme internally via SharedPreferences; the canonical
+     *  composeApp SettingsScreen takes a [ThemePreference] slot. We
+     *  ship an in-memory impl for now — themed across navigations but
+     *  resets on process death. SharedPreferences-backed impl is a
+     *  Stage F follow-up. */
+    val themePreference: io.nisfeb.talon.ui.theme.ThemePreference =
+        io.nisfeb.talon.ui.theme.InMemoryThemePreference()
     lateinit var shipProfiles: ShipProfileStore
         private set
     lateinit var aiClient: AiClient
@@ -58,6 +66,8 @@ class TalonApplication : Application() {
     lateinit var session: UrbitSession
         private set
     lateinit var repo: TlonChatRepo
+        private set
+    lateinit var settingsSync: io.nisfeb.talon.urbit.SettingsSyncImpl
         private set
     lateinit var drafts: DraftStore
         private set
@@ -116,18 +126,24 @@ class TalonApplication : Application() {
             .readTimeout(0, TimeUnit.SECONDS) // long-lived SSE
             .writeTimeout(15, TimeUnit.SECONDS)
             .build()
-        sessionStore = SessionStore(this)
-        aiSettings = AiSettings(this)
-        dailyDigestSettings = io.nisfeb.talon.ai.DailyDigestSettings(this)
-        uiSettings = UiSettings(this)
+        sessionStore = io.nisfeb.talon.urbit.AndroidSessionStore(this)
+        aiSettings = io.nisfeb.talon.ai.AndroidAiSettings(this)
+        dailyDigestSettings = io.nisfeb.talon.ai.AndroidDailyDigestSettings(this)
+        uiSettings = io.nisfeb.talon.ui.AndroidUiSettings(this)
         shipProfiles = ShipProfileStore(this)
         aiClient = AiClient(settingsProvider = { aiSettings.state.value })
         ai = AiFeatures(aiClient)
         embedder = io.nisfeb.talon.ai.Embedder(this)
         Notifications.ensureChannel(this)
         updateState = UpdateState(
-            context = this,
             scope = appScope,
+            runtime = object : io.nisfeb.talon.update.UpdateRuntime {
+                override fun installedVersionCode(): Int = try {
+                    @Suppress("DEPRECATION")
+                    packageManager.getPackageInfo(packageName, 0).versionCode
+                } catch (_: Exception) { 0 }
+                override fun supportedSdk(): Int = android.os.Build.VERSION.SDK_INT
+            },
             installer = UpdateInstaller(this),
         )
         val updatePrefs = getSharedPreferences("update_state", MODE_PRIVATE)
@@ -184,8 +200,8 @@ class TalonApplication : Application() {
             appScope.launch {
                 runCatching {
                     when {
-                        transitionedOffSync -> repo.settingsSync.clearAiSettingsOnShip()
-                        cfg.syncEnabled -> repo.settingsSync.pushAiSettings()
+                        transitionedOffSync -> settingsSync.clearAiSettingsOnShip()
+                        cfg.syncEnabled -> settingsSync.pushAiSettings()
                     }
                 }
             }
@@ -196,18 +212,18 @@ class TalonApplication : Application() {
                 runCatching {
                     when {
                         transitionedOffSync ->
-                            repo.settingsSync.clearWatchwordsOnShip()
+                            settingsSync.clearWatchwordsOnShip()
                         _watchwordsSyncEnabled.value -> when (evt) {
                             is io.nisfeb.talon.ai.WatchwordChange.Upsert ->
-                                repo.settingsSync.pushWatchwordEntry(evt.term)
+                                settingsSync.pushWatchwordEntry(evt.term)
                             is io.nisfeb.talon.ai.WatchwordChange.Remove ->
-                                repo.settingsSync.deleteWatchwordEntry(evt.termText)
+                                settingsSync.deleteWatchwordEntry(evt.termText)
                             is io.nisfeb.talon.ai.WatchwordChange.Exclude ->
-                                repo.settingsSync.pushWatchwordExclude(evt.whom)
+                                settingsSync.pushWatchwordExclude(evt.whom)
                             is io.nisfeb.talon.ai.WatchwordChange.Unexclude ->
-                                repo.settingsSync.deleteWatchwordExclude(evt.whom)
+                                settingsSync.deleteWatchwordExclude(evt.whom)
                             is io.nisfeb.talon.ai.WatchwordChange.SyncToggled ->
-                                repo.settingsSync.pushAllWatchwords()
+                                settingsSync.pushAllWatchwords()
                         }
                         else -> Unit
                     }
@@ -219,8 +235,8 @@ class TalonApplication : Application() {
             appScope.launch {
                 runCatching {
                     when {
-                        transitionedOffSync -> repo.settingsSync.clearDailyDigestOnShip()
-                        else -> repo.settingsSync.pushDailyDigest(dailyDigestSettings.state.value)
+                        transitionedOffSync -> settingsSync.clearDailyDigestOnShip()
+                        else -> settingsSync.pushDailyDigest(dailyDigestSettings.state.value)
                     }
                 }
                 // Re-arm on toggle / time change.
@@ -253,25 +269,35 @@ class TalonApplication : Application() {
         val priorDb = if (::db.isInitialized) db else null
         val priorIndexer = if (::embeddingIndexer.isInitialized) embeddingIndexer else null
 
-        db = AppDatabase.build(this, ship)
+        db = io.nisfeb.talon.data.createAppDatabase(this, "talon-${ship}.db")
         session = UrbitSession(http, sessionStore)
         // Re-hydrate the cookie jar + baseUrl from the stored session
         // for this ship (if any). Skips silently for the placeholder
         // "none" ship used pre-login.
         if (ship != "none") runCatching { session.tryRestore(ship) }
-        repo = TlonChatRepo(db, aiSettings, dailyDigestSettings, rearmDailyDigest = {
-            // `dailyDigest` is lateinit and built later in onCreate; this
-            // lambda only fires from inbound %settings events long after
-            // initialization, so the runtime guard is sufficient.
-            runCatching { dailyDigest.scheduleNext() }
-        })
+        // Construct SettingsSyncImpl explicitly so callers below have a
+        // typed-as-impl handle (the SettingsSync interface in commonMain
+        // is intentionally narrow — push/clear methods etc. live on the
+        // impl). repo gets it via constructor param.
+        settingsSync = io.nisfeb.talon.urbit.SettingsSyncImpl(
+            db = db,
+            aiSettings = aiSettings,
+            dailyDigestSettings = dailyDigestSettings,
+            rearmDailyDigest = {
+                // `dailyDigest` is lateinit and built later in onCreate; this
+                // lambda only fires from inbound %settings events long after
+                // initialization, so the runtime guard is sufficient.
+                runCatching { dailyDigest.scheduleNext() }
+            },
+        )
+        repo = TlonChatRepo(db, settingsSync = settingsSync)
         watchwords = io.nisfeb.talon.ai.Watchwords(
             db = db,
             ourPatpProvider = { ship.takeIf { it != "none" } ?: "" },
             scope = appScope,
             syncEnabledProvider = { _watchwordsSyncEnabled.value },
         )
-        drafts = DraftStore(this, ship)
+        drafts = io.nisfeb.talon.ui.AndroidDraftStore(this, ship)
         shortcuts = ShortcutsPublisher(this, db)
         embeddingIndexer = io.nisfeb.talon.ai.EmbeddingIndexer(db, embedder, appScope)
 

@@ -1,4 +1,3 @@
-// TEMPORARY DUPLICATE of app/src/main/java/io/nisfeb/talon/ui/screens/GroupHomeScreen.kt
 // Adapted: TalonApplication coupling replaced with `db: AppDatabase`
 // + `repo: TlonChatRepo` constructor parameters; LocalContext +
 // applicationContext cast removed. Keep in sync with production until

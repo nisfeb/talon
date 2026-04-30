@@ -47,13 +47,8 @@ internal fun matchesWordBoundary(haystack: String, needle: String): Boolean {
     }
 }
 
-/**
- * Stable, lower-cased, alphanumerics-only key for a term — used as the
- * %settings entry key when sync is on. Two terms that produce the same
- * key collide on the ship side; the manage UI surfaces a warning.
- */
-internal fun sanitizeTerm(term: String): String =
-    term.lowercase().replace(Regex("[^a-z0-9]+"), "_").trim('_')
+// `sanitizeTerm` lives in composeApp/commonMain/ai/WatchwordSanitizer.kt
+// post-Stage-F. Kept identical content; same FQN.
 
 /** A live match against an incoming message. */
 data class MatchedTerm(val term: WatchwordEntity, val snippet: String)

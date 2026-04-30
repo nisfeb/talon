@@ -1,4 +1,3 @@
-// TEMPORARY DUPLICATE of app/src/main/java/io/nisfeb/talon/ui/screens/DmListScreen.kt
 // Diverges from production in controlled ways so it compiles in commonMain:
 //  1. TalonApplication coupling replaced with constructor injection (repo, drafts, updateState).
 //  2. painterResource(R.mipmap.ic_launcher_monochrome) replaced with Icons.Filled.Home (no-R fallback).

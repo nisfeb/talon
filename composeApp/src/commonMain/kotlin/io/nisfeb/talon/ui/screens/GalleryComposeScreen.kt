@@ -1,4 +1,3 @@
-// TEMPORARY DUPLICATE of app/src/main/java/io/nisfeb/talon/ui/screens/GalleryComposeScreen.kt
 // Adapted: TalonApplication coupling replaced with constructor
 // injection (repo). Image picker switched from
 // rememberLauncherForActivityResult(PickVisualMedia) +
