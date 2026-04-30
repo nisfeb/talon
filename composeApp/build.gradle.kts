@@ -275,6 +275,22 @@ fun derivePackageVersion(): String {
     return if (major == 0) "1.${parts[1]}.${parts[2]}" else raw
 }
 
+// Manual smoke task for the desktop notifier — emits a real native
+// notification so the path can be verified against the user's DE.
+// Not part of any default lifecycle; run explicitly:
+//     ./gradlew :composeApp:notifierSmoke
+tasks.register<JavaExec>("notifierSmoke") {
+    description = "Fire a single native notification via SystemNotifier (manual UX check)."
+    group = "verification"
+    val desktopMain = kotlin.targets.getByName("desktop")
+        .compilations.getByName("main")
+    classpath = files(
+        desktopMain.output.allOutputs,
+        desktopMain.runtimeDependencyFiles,
+    )
+    mainClass.set("io.nisfeb.talon.notify.SystemNotifierSmokeKt")
+}
+
 // Room 2.7 KMP generates per-target. We attach the room-compiler
 // KSP processor to each leaf target individually so the generated
 // DAO impls + AppDatabase_Impl land in the right source set. The

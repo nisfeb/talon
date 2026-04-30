@@ -14,6 +14,7 @@ import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberTrayState
 import androidx.compose.ui.window.rememberWindowState
 import io.nisfeb.talon.notify.Notifier
+import io.nisfeb.talon.notify.SystemNotifier
 import org.jetbrains.skia.Image as SkiaImage
 import io.nisfeb.talon.ai.AiSettingsRepository
 import io.nisfeb.talon.ai.DailyDigestSettings
@@ -261,14 +262,20 @@ fun main() {
                 Item("Quit", onClick = quitToOs)
             },
         )
+        // SystemNotifier shells out to notify-send / gdbus on Linux,
+        // osascript on macOS — real native notifications, not the
+        // ugly Swing balloon Compose's TrayState renders on Linux.
+        // Windows falls through to the tray closure since AWT's
+        // displayMessage already maps to native ITaskbarList3 toasts
+        // there. The closure is also the universal final fallback.
         val notifier: Notifier = remember(trayState) {
-            object : Notifier {
-                override fun notify(title: String, body: String) {
+            SystemNotifier(
+                trayFallback = { title, body ->
                     trayState.sendNotification(
                         Notification(title = title, message = body),
                     )
-                }
-            }
+                },
+            )
         }
         Window(
             // Minimize to tray instead of quitting. SSE / repo / db all
