@@ -294,6 +294,18 @@ fun main() {
                 themePreference = graph.themePreference,
                 notifier = notifier,
                 uiSettings = graph.uiSettings,
+                createSearchEmbedderClient = { db ->
+                    val embedder = io.nisfeb.talon.ai.DesktopEmbedder()
+                    val indexer = io.nisfeb.talon.ai.DesktopEmbeddingIndexer(
+                        db = db,
+                        embedder = embedder,
+                    )
+                    io.nisfeb.talon.ai.DesktopSearchEmbedderClient(
+                        db = db,
+                        embedder = embedder,
+                        indexer = indexer,
+                    )
+                },
             )
         }
     }

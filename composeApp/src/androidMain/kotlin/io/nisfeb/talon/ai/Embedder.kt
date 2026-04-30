@@ -4,8 +4,6 @@ import android.content.Context
 import com.google.mediapipe.tasks.components.containers.Embedding
 import com.google.mediapipe.tasks.core.BaseOptions
 import com.google.mediapipe.tasks.text.textembedder.TextEmbedder
-import java.nio.ByteBuffer
-import java.nio.ByteOrder
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -68,20 +66,5 @@ class Embedder(private val context: Context) {
     companion object {
         private const val TAG = "Embedder"
         private const val MODEL_ASSET = "text_embedder.tflite"
-
-        /** Pack a FloatArray into a little-endian byte blob for SQLite. */
-        fun pack(vector: FloatArray): ByteArray {
-            val bb = ByteBuffer.allocate(vector.size * 4).order(ByteOrder.LITTLE_ENDIAN)
-            for (f in vector) bb.putFloat(f)
-            return bb.array()
-        }
-
-        /** Inverse of [pack]. */
-        fun unpack(bytes: ByteArray, dim: Int): FloatArray {
-            val out = FloatArray(dim)
-            val bb = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN)
-            for (i in 0 until dim) out[i] = bb.float
-            return out
-        }
     }
 }

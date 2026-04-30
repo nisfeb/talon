@@ -32,7 +32,7 @@ internal suspend fun semanticSearch(
         val page = embeddings.page(pageSize, offset)
         if (page.isEmpty()) break
         for (row in page) {
-            val v = Embedder.unpack(row.vector, row.dim)
+            val v = unpackEmbedding(row.vector, row.dim)
             if (v.size != queryVector.size) continue
             val score = cosine(queryVector, v)
             if (score < minScore) continue

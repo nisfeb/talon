@@ -29,7 +29,7 @@ internal suspend fun computeHighlights(
     val dim = bookmarkEmbeddings.first().dim
     val centroid = FloatArray(dim)
     for (e in bookmarkEmbeddings) {
-        val v = Embedder.unpack(e.vector, e.dim)
+        val v = unpackEmbedding(e.vector, e.dim)
         for (i in 0 until dim) centroid[i] += v[i]
     }
     val invN = 1f / bookmarkEmbeddings.size

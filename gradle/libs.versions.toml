@@ -19,6 +19,7 @@ mlkitEntityExtraction = "16.0.0-beta5"
 mediapipeTasksText = "0.10.21"
 composeMultiplatform = "1.7.3"
 junit = "4.13.2"
+djl = "0.34.0"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -56,6 +57,15 @@ reorderable = { group = "sh.calvin.reorderable", name = "reorderable", version.r
 androidx-security-crypto = { group = "androidx.security", name = "security-crypto", version.ref = "securityCrypto" }
 mlkit-entity-extraction = { group = "com.google.mlkit", name = "entity-extraction", version.ref = "mlkitEntityExtraction" }
 mediapipe-tasks-text = { group = "com.google.mediapipe", name = "tasks-text", version.ref = "mediapipeTasksText" }
+
+# DJL for desktop on-device sentence embedding (smart search /
+# important-message highlights). The onnxruntime engine bundles
+# native libs per OS; the huggingface tokenizers artifact handles
+# WordPiece for the all-MiniLM-L6-v2 model DJL pulls from the HF
+# zoo on first use. ~30 MB cached under ~/.djl.ai/cache after that.
+djl-api = { group = "ai.djl", name = "api", version.ref = "djl" }
+djl-onnxruntime-engine = { group = "ai.djl.onnxruntime", name = "onnxruntime-engine", version.ref = "djl" }
+djl-huggingface-tokenizers = { group = "ai.djl.huggingface", name = "tokenizers", version.ref = "djl" }
 
 junit = { group = "junit", name = "junit", version.ref = "junit" }
 kotlinx-coroutines-test = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-test", version.ref = "kotlinxCoroutines" }

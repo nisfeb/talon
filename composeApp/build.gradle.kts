@@ -83,6 +83,15 @@ kotlin {
         desktopMain.dependencies {
             implementation(compose.desktop.currentOs)
             implementation(libs.kotlinx.coroutines.swing)
+            // On-device sentence embedder for smart search +
+            // important-message highlights. DJL (Deep Java Library)
+            // wraps ONNX Runtime + HuggingFace tokenizers and resolves
+            // the all-MiniLM-L6-v2 sentence-transformer model from
+            // its zoo on first use. The model + tokenizer get cached
+            // under ~/.djl.ai/cache (~30 MB) after the initial fetch.
+            implementation(libs.djl.api)
+            implementation(libs.djl.onnxruntime.engine)
+            implementation(libs.djl.huggingface.tokenizers)
         }
         // commonTest carries shared kotlin.test assertions. Tests
         // here are picked up by both desktopTest and (when wired)

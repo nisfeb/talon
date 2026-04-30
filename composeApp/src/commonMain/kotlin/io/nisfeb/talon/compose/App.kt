@@ -103,6 +103,11 @@ fun App(
     /** UI preferences (composer toggles). In-memory default; desktop
      *  passes a JSON-backed impl. */
     uiSettings: UiSettings = InMemoryUiSettings(),
+    /** Optional factory for the on-device search embedder. Desktop
+     *  passes a DJL-ONNX-backed impl that powers smart search +
+     *  important-message highlights. Null means no smart features
+     *  on this build (the screen falls back to substring search). */
+    createSearchEmbedderClient: ((AppDatabase) -> io.nisfeb.talon.ai.SearchEmbedderClient)? = null,
 ) {
     // Derive the initial logged-in ship from sessionStore.active()
     // (the joined SavedSession) rather than activeShip() (just the
@@ -243,6 +248,13 @@ fun App(
             }
         }
         val repo = remember { TlonChatRepo(db = db, settingsSync = settingsSync) }
+        // On-device sentence embedder for smart search + highlights.
+        // Lazy under the hood — model load happens on the first
+        // SemanticSearch / computeHighlights call. Per-ship since the
+        // indexer is bound to this ship's DB.
+        val searchEmbedderClient = remember(db) {
+            createSearchEmbedderClient?.invoke(db)
+        }
 
         DisposableEffect(Unit) {
             onDispose {
@@ -402,6 +414,7 @@ fun App(
                     showSearch -> SearchScreen(
                         db = db,
                         aiSettings = aiSettings,
+                        embedder = searchEmbedderClient,
                         onBack = { showSearch = false },
                         onOpenConversation = { other ->
                             showSearch = false

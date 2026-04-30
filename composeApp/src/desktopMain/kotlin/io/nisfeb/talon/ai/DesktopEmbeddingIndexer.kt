@@ -6,6 +6,7 @@ import io.nisfeb.talon.urbit.StoryCache
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -13,29 +14,23 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.yield
 
 /**
- * Background pass that fills `message_embeddings` from `messages`.
- * Pulls every message the local DB knows about, computes its
- * embedding via [Embedder], and upserts. Idempotent: rows we've
- * already embedded with the same content-hash are skipped on the
- * cheap (no model invocation).
- *
- * One [start] call per app launch; subsequent invocations are no-ops
- * while a prior pass is still running. Live SSE ingest is NOT yet
- * wired through here — the indexer catches up next launch.
+ * Desktop counterpart to the Android `EmbeddingIndexer`. Same
+ * paginated catch-up shape — load page of messages, compute embedding
+ * via [DesktopEmbedder], upsert. Lives in desktopMain because the
+ * embedder is platform-specific; the loop body would otherwise be
+ * identical to Android.
  */
-class EmbeddingIndexer(
+class DesktopEmbeddingIndexer(
     private val db: AppDatabase,
-    private val embedder: Embedder,
-    private val scope: CoroutineScope,
+    private val embedder: DesktopEmbedder,
+    private val scope: CoroutineScope =
+        CoroutineScope(SupervisorJob() + Dispatchers.IO),
 ) {
-    /** State for the small "indexing N / M" UI strip in the search screen. */
     data class Progress(
         val total: Int,
         val indexed: Int,
         val running: Boolean,
-    ) {
-        val complete: Boolean get() = !running && total > 0 && indexed >= total
-    }
+    )
 
     private val _progress = MutableStateFlow(Progress(0, 0, false))
     val progress: StateFlow<Progress> = _progress.asStateFlow()
@@ -50,9 +45,6 @@ class EmbeddingIndexer(
     fun stop() { job?.cancel() }
 
     private suspend fun backfill() {
-        // We don't want to load every message at once on a chatty
-        // archive (could be 50K+ rows). Page through `messages`,
-        // check the embedding existence set per page, embed misses.
         val existing = db.embeddings().allKeys().toHashSet()
         var totalSoFar = existing.size
         var indexed = existing.size
@@ -62,7 +54,7 @@ class EmbeddingIndexer(
         val pageSize = 500
         val pendingRows = mutableListOf<MessageEmbeddingEntity>()
         while (true) {
-            val page = pageMessages(offset, pageSize)
+            val page = db.messages().pageAll(offset, pageSize)
             if (page.isEmpty()) break
             totalSoFar += page.count { keyOf(it.whom, it.id) !in existing }
             for (m in page) {
@@ -102,12 +94,6 @@ class EmbeddingIndexer(
         if (pendingRows.isNotEmpty()) db.embeddings().upsertAll(pendingRows)
         _progress.value = Progress(totalSoFar, indexed, running = false)
     }
-
-    /** Pull a page of messages, including deleted rows (we want to
-     *  mark them as "seen" in the existence set so the indexer
-     *  doesn't try to embed them every launch). */
-    private suspend fun pageMessages(offset: Int, limit: Int) =
-        db.messages().pageAll(offset, limit)
 
     private fun keyOf(whom: String, id: String) = "$whom:$id"
 }

@@ -9,7 +9,14 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import kotlin.math.sqrt
 
-/** Inverse of Embedder.pack — read a little-endian Float blob. */
+/** Pack a FloatArray into a little-endian byte blob for SQLite. */
+fun packEmbedding(vector: FloatArray): ByteArray {
+    val bb = ByteBuffer.allocate(vector.size * 4).order(ByteOrder.LITTLE_ENDIAN)
+    for (f in vector) bb.putFloat(f)
+    return bb.array()
+}
+
+/** Inverse of [packEmbedding] — read a little-endian Float blob. */
 fun unpackEmbedding(bytes: ByteArray, dim: Int): FloatArray {
     val out = FloatArray(dim)
     val bb = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN)
