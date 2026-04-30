@@ -1,5 +1,11 @@
+import java.io.File
 import java.io.FileInputStream
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
 import java.util.Properties
+import java.util.zip.ZipEntry
+import java.util.zip.ZipFile
+import java.util.zip.ZipOutputStream
 import org.jetbrains.compose.desktop.application.dsl.TargetFormat
 
 plugins {
@@ -270,4 +276,128 @@ ksp {
     // Android both write here; Room namespaces the JSON output by
     // database name + version, so the two targets coexist.
     arg("room.schemaLocation", "$projectDir/schemas")
+}
+
+// ─── Native-lib slimming for the desktop release distributable ───
+//
+// DJL's onnxruntime-engine + huggingface tokenizers ship single fat
+// JARs containing native libraries for every supported platform
+// (linux-x64, linux-aarch64, osx-x64, osx-aarch64, win-x64). A
+// jpackage installer for one host platform doesn't need the others —
+// each platform's CI matrix entry produces a single .deb / .dmg /
+// .msi from the same source distributable, and we want each artifact
+// to ship only its host's natives.
+//
+// The slim step rewrites the bundled JARs in place, post-
+// createReleaseDistributable but pre-package*. ONNX Runtime detects
+// host platform and loads from a single subdir; absent subdirs are
+// never enumerated, so removing them is invisible to the runtime.
+//
+// Pure JVM impl (no `zip` binary dep) so this works the same on
+// every CI runner.
+val slimReleaseDistributable = tasks.register("slimReleaseDistributable") {
+    description = "Strip non-host-platform native libs from bundled DJL/ONNX/tokenizers JARs in the release distributable."
+    dependsOn("createReleaseDistributable")
+    val distDirProvider = layout.buildDirectory.dir("compose/binaries/main-release/app/Talon")
+    outputs.dir(distDirProvider)
+    doLast {
+        // All helpers inlined inside doLast so the configuration
+        // cache doesn't have to serialize a reference back to the
+        // build script's class for top-level helper functions
+        // (which the cache rejects as "Gradle script object
+        // references are not supported").
+        val distDir = distDirProvider.get().asFile
+        val libApp = File(distDir, "lib/app")
+        if (!libApp.isDirectory) {
+            println("slimReleaseDistributable: $libApp not found, skipping")
+            return@doLast
+        }
+        val osName = System.getProperty("os.name").lowercase()
+        val osArch = System.getProperty("os.arch").lowercase()
+        val isArm = "aarch64" in osArch || "arm64" in osArch
+        val (onnxKeep, tokKeep) = when {
+            "linux" in osName && isArm -> "linux-aarch64" to "linux-aarch64"
+            "linux" in osName -> "linux-x64" to "linux-x86_64"
+            "mac" in osName && isArm -> "osx-aarch64" to "osx-aarch64"
+            "mac" in osName -> "osx-x64" to "osx-x86_64"
+            "windows" in osName -> "win-x64" to "win-x86_64"
+            else -> error(
+                "slimReleaseDistributable: unsupported host OS/arch: $osName/$osArch — " +
+                    "add a mapping for it in build.gradle.kts"
+            )
+        }
+        println("==> slimReleaseDistributable: keep onnx=$onnxKeep, tokenizers=$tokKeep")
+
+        fun humanBytes(b: Long): String = when {
+            b >= 1_000_000_000 -> "%.1f GB".format(b / 1_000_000_000.0)
+            b >= 1_000_000 -> "%.1f MB".format(b / 1_000_000.0)
+            b >= 1_000 -> "%.1f kB".format(b / 1_000.0)
+            else -> "$b B"
+        }
+
+        fun slimJarInPlace(jar: File, keep: (String) -> Boolean) {
+            val before = jar.length()
+            val tmp = File(jar.parentFile, jar.name + ".slim.tmp")
+            var droppedBytes = 0L
+            var droppedCount = 0
+            ZipFile(jar).use { input ->
+                ZipOutputStream(tmp.outputStream().buffered()).use { output ->
+                    val entries = input.entries()
+                    while (entries.hasMoreElements()) {
+                        val entry = entries.nextElement()
+                        if (!keep(entry.name)) {
+                            droppedBytes += entry.size.coerceAtLeast(0)
+                            droppedCount += 1
+                            continue
+                        }
+                        val newEntry = ZipEntry(entry.name)
+                        newEntry.time = entry.time
+                        output.putNextEntry(newEntry)
+                        input.getInputStream(entry).use { it.copyTo(output) }
+                        output.closeEntry()
+                    }
+                }
+            }
+            if (droppedCount == 0) {
+                tmp.delete()
+                return
+            }
+            Files.move(
+                tmp.toPath(), jar.toPath(),
+                StandardCopyOption.REPLACE_EXISTING,
+                StandardCopyOption.ATOMIC_MOVE,
+            )
+            val after = jar.length()
+            println(
+                "  slim ${jar.name.padEnd(55)} ${humanBytes(before)} → ${humanBytes(after)} " +
+                    "(-$droppedCount entries, ${humanBytes(droppedBytes)} uncompressed)"
+            )
+        }
+
+        libApp.listFiles { _, n -> n.startsWith("onnxruntime-") && n.endsWith(".jar") }
+            ?.forEach { jar ->
+                slimJarInPlace(jar) { entry ->
+                    !entry.startsWith("ai/onnxruntime/native/") ||
+                        entry.startsWith("ai/onnxruntime/native/$onnxKeep/")
+                }
+            }
+        libApp.listFiles { _, n -> n.startsWith("tokenizers-") && n.endsWith(".jar") }
+            ?.forEach { jar ->
+                slimJarInPlace(jar) { entry ->
+                    !entry.startsWith("native/lib/") ||
+                        entry.startsWith("native/lib/$tokKeep/")
+                }
+            }
+    }
+}
+
+afterEvaluate {
+    listOf(
+        "packageReleaseDeb", "packageReleaseDmg", "packageReleaseMsi",
+        "packageReleaseAppImage", "packageReleaseDistributableForCurrentOS",
+    ).forEach { name ->
+        tasks.matching { it.name == name }.configureEach {
+            dependsOn(slimReleaseDistributable)
+        }
+    }
 }

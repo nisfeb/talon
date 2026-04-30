@@ -52,7 +52,14 @@ if [[ "$SKIP_BUILD" -eq 0 ]]; then
         done
     fi
     : "${JAVA_HOME:?JAVA_HOME must point to a JDK with full jmods (java.sql, java.desktop)}"
-    PATH="$JAVA_HOME/bin:$PATH" "$ROOT/gradlew" :composeApp:createReleaseDistributable
+    # `slimReleaseDistributable` depends on `createReleaseDistributable`
+    # and runs after — so a single Gradle call gives us a slim host-
+    # native-only distributable. The Gradle slim is host-OS-aware
+    # (linux-x64 here) and shared by every package* task; the
+    # post-cp slim block below stays as a belt-and-suspenders
+    # idempotent fallback for `--skip-build` runs against an
+    # unslimmed dist.
+    PATH="$JAVA_HOME/bin:$PATH" "$ROOT/gradlew" :composeApp:slimReleaseDistributable
 fi
 
 if [[ ! -d "$DIST_SRC" ]]; then
