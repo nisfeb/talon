@@ -8,10 +8,11 @@ store art wins — update this doc and the theme to track it.
 
 ## Brand
 
-**Talon** is a native Android Urbit chat client. The visual identity is:
-sharp, modern, slightly brutalist — "a tool, not a toy." The icon is a
-stylized raptor talon curling around a negative-space chat bubble. Two
-dominant colors: amber on deep indigo.
+**Talon** is a native Urbit chat client for Android, Linux, macOS, and
+Windows. The visual identity is: sharp, modern, slightly brutalist —
+"a tool, not a toy." The icon is a stylized raptor talon curling
+around a negative-space chat bubble. Two dominant colors: amber on
+deep indigo.
 
 ## Palette
 
@@ -41,8 +42,9 @@ Warm neutrals, not pure grays — they sit better next to amber.
 
 ### Material3 mapping
 
-See `app/src/main/java/io/nisfeb/talon/ui/theme/Theme.kt` for the full
-`lightColorScheme` / `darkColorScheme` wiring. Role assignments:
+See `composeApp/src/commonMain/kotlin/io/nisfeb/talon/ui/theme/Theme.kt`
+for the full `lightColorScheme` / `darkColorScheme` wiring (shared
+across Android and desktop). Role assignments:
 
 - `primary` — send button, selected reaction pill, AI pick, pin indicator,
   catch-me-up banner, focus ring.
@@ -52,12 +54,12 @@ See `app/src/main/java/io/nisfeb/talon/ui/theme/Theme.kt` for the full
 - `surfaceVariant` — incoming message bubble, quote preview row, inline code bg.
 - `error` — delete button, send failures, form validation.
 
-### Dynamic color is off
+### Dynamic color is off (Android)
 
 Android's Material You dynamic theming is explicitly disabled. Brand
 consistency with the store listing takes priority over per-device wallpaper
 integration. If we later want user-facing customization, expose it as an
-opt-in setting, not the default.
+opt-in setting, not the default. (Desktop has no equivalent.)
 
 ## Typography
 
@@ -97,7 +99,7 @@ scratch — work from these if refining.
 - `branding/ic_launcher_monochrome_1024.png` — silhouette for themed icons.
 - `branding/play_store_icon_512.png` — exact file to upload to Play Console.
 
-Installed into the APK at:
+Installed into the APK at `composeApp/src/androidMain/res/`:
 
 - `mipmap-<density>/ic_launcher.png` + `ic_launcher_round.png` — legacy
   launcher icons (48/72/96/144/192 dp).
@@ -107,6 +109,11 @@ Installed into the APK at:
 - `mipmap-anydpi-v26/ic_launcher.xml` + `ic_launcher_round.xml` — adaptive
   icon definitions wiring background color + foreground + monochrome.
 - `values/colors.xml` — `ic_launcher_background` = `#1E1B4B`.
+
+For desktop, the launcher / window / taskbar icon comes from
+`composeApp/src/desktopMain/resources/icon.png` (linux + window icon)
+and `icon.ico` (windows installer). Same brand artwork; export from
+`branding/` if refreshing.
 
 **Feature graphic** — 1024×500, icon left ~40%, wordmark right ~60%,
 radial indigo-to-black gradient background with scattered amber accent

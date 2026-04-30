@@ -1,6 +1,6 @@
 # Talon — Privacy Policy
 
-_Last updated: 2026-04-24_
+_Last updated: 2026-04-30_
 
 Talon is a native Android client for the Urbit network. It connects to
 a user-supplied Urbit ship over the network and renders chat / DM
@@ -35,6 +35,12 @@ describes what Talon does (and doesn't) do with user data.
   API key is stored encrypted via `EncryptedSharedPreferences`. The
   key is sent only to the configured provider, only when the user
   invokes an AI feature.
+- **Watchwords** — terms the user wants highlighted in chat. Stored
+  locally; never transmitted.
+- **Daily digest history** — the rolling list of past summaries the
+  app has produced for the user. Stored locally; the underlying
+  message text is sent to the configured AI provider only at digest
+  generation time.
 - **Drafts** — unsent messages typed in the composer, kept locally so
   the app can restore them on relaunch.
 

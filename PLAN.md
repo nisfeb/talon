@@ -1,13 +1,23 @@
-# Talon — Plan
+# Talon — Original Plan (historical)
+
+> **This document is the project's v0 inception plan, kept as a record
+> of what the MVP set out to build.** The MVP shipped, the desktop
+> port shipped, and the v2 items (push notifications, search, member
+> lists, mute) all shipped. For current architecture and conventions
+> see `CLAUDE.md`; for what's installed and how to build, see
+> `README.md`. Don't take milestones, weekly schedule, or "Unknowns to
+> kill week 0" below as forward-looking — they were forward-looking
+> when written and are now retrospective.
 
 A native chat client for Urbit, designed to compete with Tlon on the
 core daily-use loop (DMs + group chat channels) while being an order of
 magnitude faster to open, scroll, and react.
 
 Originally Android-only; now also ships for Linux, macOS, and Windows
-via Compose Multiplatform. The Android app is the canonical
-implementation; the desktop port reuses the shared `composeApp/`
-module for screens, data layer, and Urbit protocol code.
+via Compose Multiplatform. Most code lives in `composeApp/src/commonMain`
+and is shared across all targets; per-platform impls handle the small
+surface that genuinely differs (file pickers, daily-digest scheduling,
+notifications, on-device AI backends).
 
 Target user: someone who runs (or is hosted on) an Urbit ship and uses it
 mostly for chat. If you need notebooks, galleries, boardrooms, or multi-pane

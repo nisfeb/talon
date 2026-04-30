@@ -50,23 +50,18 @@ Urbit chat that you actually use day-to-day.
   the Talon developer.
 
 **Open source**
-[Repo URL goes here once published.] Mutation-tested at ~93% on the
-parsers / wire helpers; ~180 unit tests across the JVM-only test suite.
+<https://github.com/nisfeb/talon>. Mutation-tested at ~97% on the
+parsers / wire helpers; ~558 unit tests across the JVM-only test suite.
 
 ---
 
-## What's new (release notes — versionName 0.2.0)
+## What's new
 
-- Pinned posts: admins can pin chat messages; pinned banner at the top
-  of the channel for everyone.
-- AI catch-me-up race fixed (banner now appears reliably).
-- "All" tab scroll perf — stable composables, no jank during DAO
-  flurries.
-- DAO-level guard so post-id deduplication can't regress: dotted ids
-  are stripped at the DB boundary regardless of which ingest path
-  wrote them.
-- Bootstrap reconciliation: groups you left or that the host deleted
-  while Talon was offline now drop on next app launch.
+Release notes are kept per-tag in the GitHub Releases page
+(<https://github.com/nisfeb/talon/releases>) so they stay in lockstep
+with what was actually shipped. When promoting a build to Play,
+copy the bullet points from that release into the Play Console's
+"What's new" field (≤500 chars).
 
 ---
 

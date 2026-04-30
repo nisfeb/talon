@@ -32,7 +32,7 @@
   user-provided Urbit ship over user-configured HTTP.
 
 **F-Droid**
-- Required: fully open-source repo, reproducible build, `fastlane/metadata/` under `app/`.
+- Required: fully open-source repo, reproducible build, F-Droid metadata under `fastlane/metadata/android/` (or alongside `composeApp/`, depending on the layout F-Droid's metadata fork ends up using).
 - F-Droid's build server handles signing.
 - Updates usually lag ~1 week.
 - **Your situation:** the AI providers (Anthropic / OpenAI / custom)
@@ -86,14 +86,19 @@ already in `.gitignore`.
 In `composeApp/build.gradle.kts`:
 
 ```kotlin
-versionCode = 2   // monotonic, +1 per published build (Play requires)
-versionName = "0.2.0"   // user-visible
+versionCode = 23      // monotonic, +1 per published build (Play requires)
+versionName = "0.6.2" // user-visible
 ```
+
+`derivePackageVersion()` in the same file rewrites `0.M.P → 1.M.P`
+when handing to jpackage (jpackage rejects MAJOR=0). After the
+project crosses 1.0 that mapping becomes identity. Don't update it
+prematurely.
 
 Tag and push:
 
 ```sh
-git tag v0.2.0
+git tag v0.6.2
 git push --tags
 ```
 
@@ -102,7 +107,8 @@ git push --tags
 Run through this every tag. It's not automated — don't skip it.
 
 **Offline unit tests:**
-- [ ] `./gradlew test` → all green.
+- [ ] `./gradlew :composeApp:desktopTest` → all green (this runs every
+  test the JVM can run, ~558 methods, sub-second total).
 
 **Fakezod smoke test** (see `scripts/fakezod/README.md`):
 - [ ] `./boot.sh && ./install-tlon.sh` land cleanly on current
@@ -127,12 +133,28 @@ Run through this every tag. It's not automated — don't skip it.
   appear during normal use.
 
 **Build artifacts:**
-- [ ] `./gradlew :composeApp:assembleRelease` produces a signed APK.
+- [ ] `./gradlew :composeApp:assembleRelease` produces signed APKs
+  under `composeApp/build/outputs/apk/release/`. With ABI splits
+  enabled, you get four artifacts:
+  `composeApp-arm64-v8a-release.apk` (~25 MB),
+  `composeApp-armeabi-v7a-release.apk` (~20 MB),
+  `composeApp-x86_64-release.apk` (~18 MB), and
+  `composeApp-universal-release.apk` (~54 MB fallback).
 - [ ] `./gradlew :composeApp:bundleRelease` produces an AAB (Play).
-- [ ] Install the release APK fresh on a phone that never had the app
-  → login → open chat → send a message. (Catches proguard / R8
-  stripping bugs. We've already hit these once; R8 is configured but
-  worth the smoke.)
+- [ ] Install the **arm64-v8a** APK fresh on a phone that never had
+  the app → login → open chat → send a message. Most modern Android
+  devices are arm64-v8a; that's the artifact most users get. Also
+  smoke the universal APK if you've changed anything that could vary
+  by ABI (native deps, packaging rules). Catches proguard / R8
+  stripping bugs.
+- [ ] `scripts/build-appimage.sh` produces `dist/Talon-x86_64.AppImage`
+  (~91 MB). Launch once: window opens, native notification fires
+  via `notify-send` / `gdbus` (not the AWT balloon). The
+  `:composeApp:notifierSmoke` Gradle task fires a single notification
+  for manual UX verification.
+- [ ] `./gradlew :composeApp:packageReleaseDeb` (Linux),
+  `packageReleaseDmg` (macOS), `packageReleaseMsi` (Windows) — each
+  runs only on its host OS via CI matrix.
 
 **Legal:**
 - [ ] Privacy policy URL reachable.

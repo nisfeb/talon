@@ -10,7 +10,9 @@ Pick your platform on the [latest release page](https://github.com/nisfeb/talon/
 
 | Platform | File | How to install |
 |---|---|---|
-| Android | `talon-X.Y.Z.apk` | Tap to install. May require enabling "Install unknown apps" for your browser/file manager. Android 8+ (API 26). |
+| Android (most phones) | `talon-X.Y.Z-arm64-v8a.apk` | Tap to install. May require enabling "Install unknown apps" for your browser/file manager. Android 8+ (API 26). |
+| Android (older 32-bit ARM) | `talon-X.Y.Z-armeabi-v7a.apk` | Same; pick this only if your device reports `armeabi-v7a` and not `arm64-v8a`. |
+| Android (any architecture) | `talon-X.Y.Z-universal.apk` | Larger fallback — works on every supported ABI. Use if you're not sure which split to grab. |
 | macOS | `Talon-X.Y.Z.dmg` | Open the DMG, drag Talon to Applications. **First launch**: right-click the app → Open → Open. (Unsigned, so a normal double-click is blocked by Gatekeeper.) |
 | Windows | `Talon-X.Y.Z.msi` | Double-click. SmartScreen may warn — click "More info" → "Run anyway". |
 | Linux (any) | `Talon-x86_64.AppImage` | `chmod +x Talon-x86_64.AppImage && ./Talon-x86_64.AppImage`. Needs FUSE 2 (default on most desktops). |
@@ -26,10 +28,16 @@ don't need Java installed.
 - DMs (single + group), %chat group channels, threads, reactions,
   edits, deletes, image / file attachments, link previews, location
   + calendar tags.
-- AI catch-up summaries, daily digests, watchwords (highlight terms
-  across chats), semantic search — all opt-in, BYO API key.
-- OS notifications, system tray, dark / light / system theme, in-app
-  updater (Android), per-chat mute, folder organization.
+- AI catch-up summaries, watchwords (highlight terms across chats),
+  emoji-react suggestions — all opt-in, BYO API key.
+- Daily digests (Android only — uses AlarmManager).
+- Semantic search across chat history. Android uses MediaPipe; desktop
+  uses an on-device sentence-transformer (DJL ONNX, model auto-cached
+  on first use under `~/.djl.ai/cache`, ~30 MB).
+- Native OS notifications (libnotify on Linux, Notification Center on
+  macOS, system toasts on Windows / Android), system tray (desktop),
+  dark / light / system theme, in-app updater (Android sideload),
+  per-chat mute, folder organization.
 
 ## Need help / found a bug?
 
@@ -54,38 +62,48 @@ yourself.
 
 ```bash
 # Android debug install on a connected device
-./gradlew installDebug
+./gradlew :composeApp:installDebug
 
-# Android signed release APK (requires keystore — see RELEASE.md)
-./gradlew :app:assembleRelease
+# Android signed release APKs — produces per-ABI splits +
+# universal fallback under composeApp/build/outputs/apk/release/
+./gradlew :composeApp:assembleRelease
 
-# Desktop self-contained app dir
+# Desktop self-contained app dir (host OS only)
 ./gradlew :composeApp:createReleaseDistributable
 
-# Desktop installers / AppImage — see scripts/build-appimage.sh and
-# the package* tasks (packageReleaseDeb, packageReleaseDmg,
-# packageReleaseMsi). Each builds for the host OS only.
+# Desktop installers — package* tasks build for the host OS only.
+./gradlew :composeApp:packageReleaseDeb     # .deb on Linux
+./gradlew :composeApp:packageReleaseDmg     # .dmg on macOS
+./gradlew :composeApp:packageReleaseMsi     # .msi on Windows
+scripts/build-appimage.sh                   # AppImage on Linux
 ```
+
+The desktop release build runs `slimReleaseDistributable` automatically
+to strip non-host native libs and unused Material Icons Extended
+classes — see `composeApp/build.gradle.kts` and `CLAUDE.md` for
+details.
 
 ### Layout
 
 ```
-app/                       — Android-only production app
-composeApp/                — KMP module (Android + desktop)
-  src/commonMain/          — shared screens, repos, data layer
-  src/androidMain/         — Android actuals (file picker, etc.)
-  src/desktopMain/         — Desktop actuals + Main.kt entry
-.github/workflows/         — release CI (Android APK, .deb, .dmg, .msi, AppImage)
+composeApp/                — KMP module (Android + Linux/macOS/Windows desktop)
+  src/commonMain/          — shared screens, repos, data layer (~26k lines)
+  src/androidMain/         — Android-only impls + background services
+  src/desktopMain/         — Desktop impls + Main.kt entry
+  src/commonTest/          — pure-logic tests (run on every target)
+  src/desktopTest/         — JVM-only tests (where most coverage lives)
+.github/workflows/         — release CI (per-ABI APKs + .deb/.dmg/.msi/.AppImage)
 scripts/build-appimage.sh  — AppImage packaging
+CLAUDE.md                  — architecture + cross-platform discipline
 RELEASE.md                 — keystore + tagging procedure
 ```
 
 ### Releases
 
-Tag `vX.Y.Z` (matching `versionName` in `app/build.gradle.kts`) and
-push. CI builds all platform artifacts and publishes a GitHub Release.
-Configure the four `RELEASE_KEYSTORE_*` repo secrets to enable APK
-signing — without them, desktop artifacts still ship.
+Tag `vX.Y.Z` (matching `versionName` in `composeApp/build.gradle.kts`)
+and push. CI builds all platform artifacts and publishes a GitHub
+Release. Configure the four `RELEASE_KEYSTORE_*` repo secrets to
+enable APK signing — without them, desktop artifacts still ship.
 
 ### Pre-commit hook
 
