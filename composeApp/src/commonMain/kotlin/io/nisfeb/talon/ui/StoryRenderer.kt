@@ -263,7 +263,13 @@ fun StoryRenderer(
         // [LocalInlineMediaPlayer]; desktop / unset falls through to a
         // tap-to-open-in-browser pill (the FallbackInlineMediaRow).
         val inlinePlayer = LocalInlineMediaPlayer.current
-        mediaInStory(parts).forEach { (url, kind) ->
+        // Memoize the media-extraction walk: it allocates a list + a
+        // hash set and visits every annotation of every Text part.
+        // Without `remember`, every recomposition (caused by ANY
+        // upstream state change a row reads) re-does the walk for
+        // every visible row.
+        val media = remember(parts) { mediaInStory(parts) }
+        media.forEach { (url, kind) ->
             if (inlinePlayer != null) {
                 inlinePlayer(url, kind)
             } else {

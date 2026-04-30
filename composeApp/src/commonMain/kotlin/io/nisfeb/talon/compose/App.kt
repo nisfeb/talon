@@ -645,18 +645,26 @@ fun App(
                         allShips = remember(loggedInShip) {
                             sessionStore.all().map { it.ship }
                         },
-                        shipNicknames = remember(loggedInShip) {
-                            sessionStore.all()
-                                .mapNotNull { saved ->
+                        shipNicknames = run {
+                            // Async lookup — replaces a runBlocking on the
+                            // composing thread that stalled the first
+                            // frame for N saved ships * one DB hit each.
+                            val savedShips = remember(loggedInShip) {
+                                sessionStore.all().map { it.ship }
+                            }
+                            val nicknames = remember(loggedInShip) {
+                                mutableStateOf<Map<String, String>>(emptyMap())
+                            }
+                            LaunchedEffect(savedShips) {
+                                val map = savedShips.mapNotNull { ship ->
                                     val nick = runCatching {
-                                        kotlinx.coroutines.runBlocking {
-                                            db.contacts().get(saved.ship)?.nickname
-                                        }
+                                        db.contacts().get(ship)?.nickname
                                     }.getOrNull()
-                                    if (nick.isNullOrBlank()) null
-                                    else saved.ship to nick
-                                }
-                                .toMap()
+                                    if (nick.isNullOrBlank()) null else ship to nick
+                                }.toMap()
+                                nicknames.value = map
+                            }
+                            nicknames.value
                         },
                         onSwitchShip = { newShip ->
                             sessionStore.setActive(newShip)

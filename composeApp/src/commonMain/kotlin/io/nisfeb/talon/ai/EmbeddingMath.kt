@@ -101,7 +101,11 @@ fun kMeansAssign(
     return assignment
 }
 
-private fun dotNorm(a: FloatArray, b: FloatArray): Float {
+/** Dot product. For L2-normalized inputs this equals cosine
+ *  similarity — the embedder produces normalized vectors so callers
+ *  can use this directly instead of the more expensive [cosine]
+ *  helper that re-normalizes. */
+internal fun dotNorm(a: FloatArray, b: FloatArray): Float {
     var dot = 0f
     for (i in a.indices) dot += a[i] * b[i]
     return dot

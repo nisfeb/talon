@@ -31,6 +31,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -67,14 +68,32 @@ fun SearchScreen(
     var query by remember { mutableStateOf("") }
     val trimmed = query.trim()
 
-    val substringResults by remember(trimmed) {
-        if (trimmed.length < 2) flowOf(emptyList())
-        else db.messages().search(io.nisfeb.talon.data.escapeLikeNeedle(trimmed))
+    // Debounce typing — `db.messages().search(...)` is a full-table LIKE
+    // scan with no index. On a 50K-row archive every keystroke would
+    // jank the typing thread; settle for 250ms after the user pauses.
+    val debouncedTrimmed by produceState(initialValue = "", trimmed) {
+        if (trimmed.length < 2) {
+            value = trimmed
+            return@produceState
+        }
+        kotlinx.coroutines.delay(250)
+        value = trimmed
+    }
+
+    // Escape once per debounced needle, not twice per keystroke.
+    val escapedNeedle = remember(debouncedTrimmed) {
+        if (debouncedTrimmed.length < 2) ""
+        else io.nisfeb.talon.data.escapeLikeNeedle(debouncedTrimmed)
+    }
+
+    val substringResults by remember(debouncedTrimmed, escapedNeedle) {
+        if (debouncedTrimmed.length < 2) flowOf(emptyList())
+        else db.messages().search(escapedNeedle)
     }.collectAsState(initial = emptyList<MessageEntity>())
 
-    val people by remember(trimmed) {
-        if (trimmed.length < 2) flowOf(emptyList())
-        else db.contacts().search(io.nisfeb.talon.data.escapeLikeNeedle(trimmed))
+    val people by remember(debouncedTrimmed, escapedNeedle) {
+        if (debouncedTrimmed.length < 2) flowOf(emptyList())
+        else db.contacts().search(escapedNeedle)
     }.collectAsState(initial = emptyList<ContactEntity>())
 
     val contactMap by remember {
@@ -99,13 +118,13 @@ fun SearchScreen(
 
     val semanticResults = remember { mutableStateOf<List<MessageEntity>>(emptyList()) }
     var semanticBusy by remember { mutableStateOf(false) }
-    androidx.compose.runtime.LaunchedEffect(trimmed, smartMode, embedder) {
-        if (!smartMode || trimmed.length < 2 || embedder == null) {
+    androidx.compose.runtime.LaunchedEffect(debouncedTrimmed, smartMode, embedder) {
+        if (!smartMode || debouncedTrimmed.length < 2 || embedder == null) {
             semanticResults.value = emptyList()
             return@LaunchedEffect
         }
         semanticBusy = true
-        semanticResults.value = runCatching { embedder.semanticSearch(trimmed) }
+        semanticResults.value = runCatching { embedder.semanticSearch(debouncedTrimmed) }
             .getOrElse { emptyList() }
         semanticBusy = false
     }

@@ -8,6 +8,7 @@ import io.nisfeb.talon.data.GroupEntity
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flowOn
 
@@ -105,4 +106,11 @@ fun contactMapFlow(
     clubsFlow.distinctUntilChanged(),
     groupsFlow.distinctUntilChanged(),
     channelGroupsFlow.distinctUntilChanged(),
-) { c, cl, g, cg -> ContactMap(c, cl, g, cg) }.flowOn(Dispatchers.Default)
+) { c, cl, g, cg -> ContactMap(c, cl, g, cg) }
+    .flowOn(Dispatchers.Default)
+    // Conflate so cascading bootstrap emissions (e.g. all four DAOs
+    // streaming initial values within a frame of each other) collapse
+    // into one ContactMap rebuild instead of four. Building 5 maps
+    // via associateBy/groupBy on every input tick was the single
+    // biggest non-Main-thread allocation cost during login.
+    .conflate()

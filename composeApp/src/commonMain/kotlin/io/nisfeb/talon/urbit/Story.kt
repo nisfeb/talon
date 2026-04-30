@@ -12,8 +12,6 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.jsonArray
-import kotlinx.serialization.json.jsonObject
 
 /**
  * Structured representation of a Tlon `story` (Verse[]) for rendering.
@@ -119,9 +117,10 @@ sealed interface StoryPart {
  *
  * Ported from yap's parseChanCiteWhere so cites round-trip the same way.
  */
+private val NUMERIC_DOTTED_RE = Regex("([0-9][0-9.]*)")
+
 fun parseChanCiteWhere(where: String): Pair<String, String?>? {
-    val numericRe = Regex("([0-9][0-9.]*)")
-    val raws = numericRe.findAll(where).map { it.value.replace(".", "") }.toList()
+    val raws = NUMERIC_DOTTED_RE.findAll(where).map { it.value.replace(".", "") }.toList()
     if (raws.isEmpty()) return null
     val post = reDot(raws[0])
     val reply = raws.getOrNull(1)?.let(::reDot)
@@ -151,19 +150,19 @@ object Story {
     /** Parse a JSON story into structured parts. Returns an empty list on junk. */
     fun parse(element: JsonElement?): List<StoryPart> {
         if (element == null) return emptyList()
-        val verses = runCatching { element.jsonArray }.getOrNull() ?: return emptyList()
+        val verses = element as? JsonArray ?: return emptyList()
         val out = mutableListOf<StoryPart>()
         for (verse in verses) {
-            val obj = runCatching { verse.jsonObject }.getOrNull() ?: continue
+            val obj = verse as? JsonObject ?: continue
             obj["inline"]?.let { inline ->
-                val arr = runCatching { inline.jsonArray }.getOrNull() ?: return@let
+                val arr = inline as? JsonArray ?: return@let
                 val rendered = buildAnnotatedString {
                     arr.forEach { renderInline(it, this) }
                 }
                 if (rendered.isNotEmpty()) out.addAll(splitForWidgetTags(rendered))
             }
             obj["block"]?.let { block ->
-                val blockObj = runCatching { block.jsonObject }.getOrNull() ?: return@let
+                val blockObj = block as? JsonObject ?: return@let
                 renderBlock(blockObj)?.let(out::add)
             }
         }
@@ -233,7 +232,7 @@ object Story {
             out.append(if (it.isString) it.content else it.content)
             return
         }
-        val obj = runCatching { element.jsonObject }.getOrNull() ?: return
+        val obj = element as? JsonObject ?: return
 
         obj["break"]?.let { out.append('\n'); return }
         (obj["ship"] as? JsonPrimitive)?.let { prim ->
@@ -304,7 +303,7 @@ object Story {
         element: JsonElement,
         out: androidx.compose.ui.text.AnnotatedString.Builder,
     ) {
-        val arr = runCatching { element.jsonArray }.getOrNull() ?: return
+        val arr = element as? JsonArray ?: return
         arr.forEach { renderInline(it, out) }
     }
 
@@ -340,25 +339,52 @@ object Story {
 
         val indent = "  ".repeat(depth)
 
+        // Track whether the builder currently ends with '\n' so we can
+        // skip the per-iteration `out.toString().endsWith('\n')` —
+        // that materializes the entire builder and turns the loop into
+        // O(N²) on large lists. The fallback toString() runs at most
+        // once per call (on the first iteration where we don't yet
+        // know what the outer caller left in `out`).
+        var endsWithNewline: Boolean? = null
+        fun ensureNewline() {
+            if (out.length == 0) {
+                endsWithNewline = true
+                return
+            }
+            val known = endsWithNewline
+                ?: out.toString().endsWith('\n').also { endsWithNewline = it }
+            if (!known) {
+                out.append('\n')
+                endsWithNewline = true
+            }
+        }
+
         // Optional intro text ("Next steps:" style) appears before items.
         if (contents != null && contents.isNotEmpty()) {
-            if (out.length > 0 && !out.toString().endsWith('\n')) out.append('\n')
+            ensureNewline()
             out.append(indent)
             renderInlineArray(contents, out)
+            // Inline content doesn't terminate with '\n' by convention
+            // (the only way it does is a trailing `break` inline; the
+            // worst-case cost of a wrong guess here is one redundant
+            // newline appended next iteration — a blank line visually).
+            endsWithNewline = false
         }
 
         items.forEachIndexed { idx, raw ->
             val itemObj = raw as? JsonObject ?: return@forEachIndexed
             (itemObj["item"] as? JsonArray)?.let { inlineArr ->
-                if (out.length > 0 && !out.toString().endsWith('\n')) out.append('\n')
+                ensureNewline()
                 val bullet = if (ordered) "${idx + 1}. " else "• "
                 out.append(indent)
                 out.append(bullet)
                 renderInlineArray(inlineArr, out)
+                endsWithNewline = false
                 return@forEachIndexed
             }
             (itemObj["list"] as? JsonObject)?.let { nested ->
                 renderList(nested, out, depth + 1)
+                endsWithNewline = null  // recursion: unknown, force re-check
             }
         }
     }

@@ -86,12 +86,18 @@ internal fun pureEntity(whom: String, id: String, essay: JsonObject): MessageEnt
     val meta = essay["meta"] as? JsonObject
     val title = meta?.get("title").asText()?.takeIf { it.isNotBlank() }
     val image = meta?.get("image").asText()?.takeIf { it.isNotBlank() }
+    val mergedStr = merged.toString()
+    // Pre-warm StoryCache so the first render of this message doesn't
+    // re-parse JSON we just built. We pay the parse here on the apply
+    // path (already off the main thread); the render path becomes
+    // free for this id.
+    StoryCache.warm(id, mergedStr, merged)
     return MessageEntity(
         whom = whom,
         id = id,
         author = author,
         sentMs = sent,
-        contentJson = merged.toString(),
+        contentJson = mergedStr,
         kind = kind,
         title = title,
         image = image,
@@ -109,12 +115,14 @@ internal fun pureReplyEntity(
     val sent = replyEssay["sent"].asLong() ?: 0L
     val content = replyEssay["content"] ?: JsonArray(emptyList())
     val merged = mergeBlobIntoContent(content, replyEssay["blob"])
+    val mergedStr = merged.toString()
+    StoryCache.warm(replyId, mergedStr, merged)
     return MessageEntity(
         whom = whom,
         id = replyId,
         author = author,
         sentMs = sent,
-        contentJson = merged.toString(),
+        contentJson = mergedStr,
         kind = "/chat",
         parentId = parentId,
     )

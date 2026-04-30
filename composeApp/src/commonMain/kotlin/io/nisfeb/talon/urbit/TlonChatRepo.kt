@@ -335,7 +335,15 @@ class TlonChatRepo(
             ch.events().collect { event ->
                 lastEventMs = System.currentTimeMillis()
                 runCatching { applyEvent(event.body) }
-                    .onFailure { Log.w(TAG, "apply event failed", it) }
+                    .onFailure {
+                        // Rethrow cancellation so structured-concurrency
+                        // children of applyEvent can propagate properly;
+                        // without this any future child coroutine that
+                        // gets cancelled would silently fall through and
+                        // the caller would see a "stuck" UI.
+                        if (it is kotlinx.coroutines.CancellationException) throw it
+                        Log.w(TAG, "apply event failed", it)
+                    }
                 event.id?.let { runCatching { ch.ack(it) } }
             }
             Log.w(TAG, "event stream completed; will reconnect")

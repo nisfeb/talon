@@ -106,8 +106,6 @@ import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
 import sh.calvin.reorderable.ReorderableItem
 import sh.calvin.reorderable.rememberReorderableLazyListState
-import java.text.SimpleDateFormat
-import java.util.Date
 import java.util.Locale
 
 @OptIn(ExperimentalFoundationApi::class)
@@ -649,6 +647,15 @@ fun DmListScreen(
             },
             onDismiss = { updateState.dismiss() },
         )
+        // Hoist the mentions-tab filter+sort outside the LazyColumn DSL
+        // (LazyListScope isn't a Composable scope, so `remember` would
+        // fail there). Memoized on the inputs so a parent recomposition
+        // — drafts/typing/unread tick — doesn't re-allocate the list.
+        val mentionRows = remember(rows, mentionCounts) {
+            rows
+                .filter { (m, _) -> (mentionCounts[m.whom] ?: 0) > 0 }
+                .sortedByDescending { (m, _) -> m.sentMs }
+        }
         LazyColumn(
             state = listState,
             contentPadding = PaddingValues(vertical = 8.dp),
@@ -681,9 +688,8 @@ fun DmListScreen(
             } else if (selectedFolderId == null && selectedSpecial == SpecialTab.Mentions) {
                 // Mentions view — whoms where %activity reports a non-zero
                 // notify-count (@-mentions and replies-to-your-posts).
-                val mentionRows = rows
-                    .filter { (m, _) -> (mentionCounts[m.whom] ?: 0) > 0 }
-                    .sortedByDescending { (m, _) -> m.sentMs }
+                // `mentionRows` is hoisted above the LazyColumn so the
+                // memoization works (LazyListScope isn't a Composable).
                 if (mentionRows.isEmpty()) {
                     item(key = "__mentions_empty") {
                         SpecialEmpty("No mentions.")
@@ -1454,15 +1460,24 @@ private fun ConversationRow(
     }
 }
 
-private val TIME_TODAY = SimpleDateFormat("HH:mm", Locale.getDefault())
-private val DATE_OLD = SimpleDateFormat("MMM d", Locale.getDefault())
+// java.time.format.DateTimeFormatter is immutable and thread-safe;
+// SimpleDateFormat is neither, and chat-list rebuilds happen
+// concurrently from multiple flow emissions on Dispatchers.Default —
+// the SDF version was a thread-safety bug waiting to fire.
+private val TIME_TODAY: java.time.format.DateTimeFormatter =
+    java.time.format.DateTimeFormatter.ofPattern("HH:mm", Locale.getDefault())
+        .withZone(java.time.ZoneId.systemDefault())
+private val DATE_OLD: java.time.format.DateTimeFormatter =
+    java.time.format.DateTimeFormatter.ofPattern("MMM d", Locale.getDefault())
+        .withZone(java.time.ZoneId.systemDefault())
 
 private fun formatRelative(ms: Long): String {
     val now = System.currentTimeMillis()
     val diff = now - ms
+    val instant = java.time.Instant.ofEpochMilli(ms)
     return when {
-        diff < 24 * 3600_000L -> TIME_TODAY.format(Date(ms))
-        else -> DATE_OLD.format(Date(ms))
+        diff < 24 * 3600_000L -> TIME_TODAY.format(instant)
+        else -> DATE_OLD.format(instant)
     }
 }
 
