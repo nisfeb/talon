@@ -24,8 +24,15 @@ import io.nisfeb.talon.ShareIntent
 import io.nisfeb.talon.TalonApplication
 import io.nisfeb.talon.TalonSyncService
 import io.nisfeb.talon.ui.BatteryExemptionBanner
+import io.nisfeb.talon.ui.CalendarLauncher
 import io.nisfeb.talon.ui.EntityActionChips
 import io.nisfeb.talon.ui.InlineAudioPlayer
+import io.nisfeb.talon.ui.InlineVideoPlayer
+import io.nisfeb.talon.ui.LocalCalendarLauncher
+import io.nisfeb.talon.ui.LocalInlineMediaPlayer
+import io.nisfeb.talon.ui.LocalMapsLauncher
+import io.nisfeb.talon.ui.MapsLauncher
+import io.nisfeb.talon.ui.MediaKind
 import io.nisfeb.talon.ui.VoiceRecordButton
 import io.nisfeb.talon.ui.rememberLocationProvider
 import io.nisfeb.talon.data.MessageEntity
@@ -400,6 +407,46 @@ fun TalonApp(
     // Screens handle their own window insets via Modifier.windowInsetsPadding
     // so that composers can push up with the IME while everything else stays
     // under the status bar.
+    val calendarLauncher = remember(context) {
+        CalendarLauncher { startMs, endMs, title ->
+            // Pop the system "create event" sheet pre-filled. Falls
+            // through to a generic chooser if no calendar app handles
+            // ACTION_INSERT.
+            val intent = android.content.Intent(android.content.Intent.ACTION_INSERT)
+                .setData(android.provider.CalendarContract.Events.CONTENT_URI)
+                .putExtra(android.provider.CalendarContract.EXTRA_EVENT_BEGIN_TIME, startMs)
+                .putExtra(android.provider.CalendarContract.EXTRA_EVENT_END_TIME, endMs)
+                .putExtra(android.provider.CalendarContract.Events.TITLE, title)
+                .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+            runCatching { context.startActivity(intent) }
+        }
+    }
+    val mapsLauncher = remember(context) {
+        MapsLauncher { lat, lng ->
+            // geo:lat,lng?q=lat,lng — handled by Google Maps / OsmAnd
+            // / etc. directly. Falls through to the chooser if no
+            // maps app handles geo://.
+            val uri = android.net.Uri.parse(
+                "geo:%.5f,%.5f?q=%.5f,%.5f".format(lat, lng, lat, lng),
+            )
+            val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, uri)
+                .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+            runCatching { context.startActivity(intent) }
+        }
+    }
+    androidx.compose.runtime.CompositionLocalProvider(
+        // Bind the real ExoPlayer-backed inline players for chat
+        // messages. Without this, StoryRenderer falls back to a
+        // tap-to-open-in-browser pill — the desktop default.
+        LocalInlineMediaPlayer provides { url, kind ->
+            when (kind) {
+                MediaKind.AUDIO -> InlineAudioPlayer(url = url)
+                MediaKind.VIDEO -> InlineVideoPlayer(url = url)
+            }
+        },
+        LocalCalendarLauncher provides calendarLauncher,
+        LocalMapsLauncher provides mapsLauncher,
+    ) {
     Scaffold(contentWindowInsets = WindowInsets(0, 0, 0, 0)) { _ ->
         val mod = Modifier.fillMaxSize()
 
@@ -479,6 +526,12 @@ fun TalonApp(
                     addingAnotherShip = false
                     app.onShipLoggedIn(ship)
                 },
+                // TODO: ContentType-based autofill requires
+                // Compose UI 1.8+ (the API is `internal` in the CMP
+                // 1.7 we ship). Bump CMP or wait for the API to
+                // graduate; until then password managers don't
+                // auto-suggest. Tracked alongside other Android
+                // capability slots.
             )
 
             loggedInShip == null -> LoginScreen(
@@ -743,8 +796,16 @@ fun TalonApp(
                         )
                     },
                     locationProvider = locationProvider,
-                    voicePlayer = { path, _ ->
-                        InlineAudioPlayer(url = path)
+                    voicePlayer = { path, sending ->
+                        // Compact play/pause-only button for the
+                        // in-progress voice-preview row. The full
+                        // scrubber + duration of InlineAudioPlayer is
+                        // overkill here and visually heavier than the
+                        // pre-Stage-F UI was. `sending` disables the
+                        // control during upload, matching the old
+                        // behavior where the user couldn't replay an
+                        // already-uploading recording.
+                        VoicePreviewPlayButton(path = path, enabled = !sending)
                     },
                     modifier = mod,
                 )
@@ -753,6 +814,7 @@ fun TalonApp(
             searchOpen -> SearchScreen(
                 db = app.db,
                 aiSettings = app.aiSettings,
+                embedder = app.searchEmbedderClient,
                 // searchOpen stays true under the chat/thread so back
                 // pops back to the highlights/results list instead of
                 // home. The when-block ordering hides SearchScreen
@@ -852,4 +914,5 @@ fun TalonApp(
         }
         } // key(loggedInShip)
     }
+    } // CompositionLocalProvider(LocalInlineMediaPlayer)
 }

@@ -1,6 +1,11 @@
 package io.nisfeb.talon.ui.screens
 
-// NOTE: autofill-related imports and .semantics { contentType = ... } modifiers removed (Android-internal API, not available in commonMain)
+// Autofill content-type hints arrive via the Modifier slot params
+// below. Compose UI 1.7 (current CMP) marks ContentType internal, so
+// neither desktop nor Android can attach the hint today — the slots
+// are forward-compatible: when the API graduates (Compose UI 1.8+),
+// the Android host supplies Modifier.semantics { contentType = ... }
+// without changing this signature.
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -33,6 +38,15 @@ fun LoginScreen(
     session: UrbitSession,
     onLoggedIn: (ship: String) -> Unit,
     notice: String? = null,
+    /** Optional Modifier overlay for the ship-URL field, used by Android
+     *  hosts to attach `Modifier.semantics { contentType =
+     *  ContentType.Username }` so password managers (Bitwarden, 1Password,
+     *  Google) can auto-suggest. Desktop passes Modifier and the field
+     *  is keyboard-only. */
+    usernameAutofillModifier: Modifier = Modifier,
+    /** Modifier overlay for the +code field. Same pattern as
+     *  [usernameAutofillModifier]. */
+    passwordAutofillModifier: Modifier = Modifier,
 ) {
     var shipUrl by remember { mutableStateOf("http://localhost:8080") }
     var code by remember { mutableStateOf("") }
@@ -65,6 +79,7 @@ fun LoginScreen(
             label = { Text("Ship URL") },
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
             enabled = !connecting,
+            modifier = usernameAutofillModifier,
         )
         OutlinedTextField(
             value = code,
@@ -73,6 +88,7 @@ fun LoginScreen(
             visualTransformation = PasswordVisualTransformation(),
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
             enabled = !connecting,
+            modifier = passwordAutofillModifier,
         )
         Button(
             onClick = {

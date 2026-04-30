@@ -483,11 +483,15 @@ fun DmListScreen(
             modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            androidx.compose.foundation.Image(
+            // Tinted with primary color so the brand mark sits inside
+            // the rest of the toolbar's color hierarchy. `Icon` over
+            // `Image` because we want the tint to apply.
+            Icon(
                 painter = io.nisfeb.talon.ui.talonLogoPainter(),
                 contentDescription = "Switch ship",
+                tint = MaterialTheme.colorScheme.primary,
                 modifier = Modifier
-                    .size(32.dp)
+                    .size(28.dp)
                     .clickable { scope.launch { drawerState.open() } },
             )
             Text(
@@ -1073,8 +1077,7 @@ private fun ShipSwitcherDrawer(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Icon(
-                        // TODO(port-d4-followup): replace with multiplatform app logo resource once asset pipeline lands
-                        imageVector = Icons.Filled.Home,
+                        painter = io.nisfeb.talon.ui.talonLogoPainter(),
                         contentDescription = null,
                         tint = if (selected) MaterialTheme.colorScheme.primary
                         else MaterialTheme.colorScheme.onSurfaceVariant,

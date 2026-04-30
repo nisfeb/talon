@@ -41,6 +41,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -61,8 +62,10 @@ import androidx.compose.ui.unit.dp
 import io.nisfeb.talon.data.AppDatabase
 import io.nisfeb.talon.data.MessageEntity
 import io.nisfeb.talon.data.ReactionEntity
+import io.nisfeb.talon.ui.CiteResolver
 import io.nisfeb.talon.ui.ContactMap
 import io.nisfeb.talon.ui.EmojiCatalog
+import io.nisfeb.talon.ui.LocalCiteResolver
 import io.nisfeb.talon.ui.EmojiPickerDropdown
 import io.nisfeb.talon.ui.MentionPicker
 import io.nisfeb.talon.ui.ReactionPalette
@@ -224,6 +227,21 @@ fun ThreadScreen(
         { target -> onOpenConversation(target) }
     }
 
+    val citeResolver = remember(db, repo) {
+        object : CiteResolver {
+            override suspend fun findLocal(whom: String, da: String): MessageEntity? =
+                db.messages().findByDa(whom, da)
+            override suspend fun fetchPost(whom: String, da: String): MessageEntity? =
+                repo.fetchCitePost(whom, da)
+            override suspend fun fetchReply(
+                whom: String,
+                postDa: String,
+                replyDa: String,
+            ): MessageEntity? = repo.fetchCiteReply(whom, postDa, replyDa)
+        }
+    }
+
+    CompositionLocalProvider(LocalCiteResolver provides citeResolver) {
     Column(modifier = modifier.windowInsetsPadding(WindowInsets.safeDrawing)) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
@@ -410,6 +428,7 @@ fun ThreadScreen(
             },
         )
     }
+    } // CompositionLocalProvider(LocalCiteResolver)
 }
 
 @OptIn(ExperimentalFoundationApi::class, ExperimentalLayoutApi::class)

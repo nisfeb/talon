@@ -72,6 +72,11 @@ class TalonApplication : Application() {
         private set
     lateinit var embeddingIndexer: io.nisfeb.talon.ai.EmbeddingIndexer
         private set
+    /** Adapter that satisfies the commonMain SearchEmbedderClient
+     *  interface SearchScreen consumes. Rebuilt per ship since both
+     *  db and embeddingIndexer are ship-scoped. */
+    lateinit var searchEmbedderClient: io.nisfeb.talon.ai.AndroidSearchEmbedderClient
+        private set
     lateinit var watchwords: io.nisfeb.talon.ai.Watchwords
         private set
 
@@ -306,6 +311,9 @@ class TalonApplication : Application() {
         drafts = io.nisfeb.talon.ui.AndroidDraftStore(this, ship)
         shortcuts = ShortcutsPublisher(this, db)
         embeddingIndexer = io.nisfeb.talon.ai.EmbeddingIndexer(db, embedder, appScope)
+        searchEmbedderClient = io.nisfeb.talon.ai.AndroidSearchEmbedderClient(
+            db, embedder, embeddingIndexer,
+        )
 
         if (priorDb != null || priorIndexer != null) {
             scheduleShipScopedTeardown(priorDb, priorIndexer)

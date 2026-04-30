@@ -176,6 +176,11 @@ fun DmChatScreen(
      *  wires an ExoPlayer-backed control; desktop passes null and
      *  the preview row hides the play button (still allows send/cancel). */
     voicePlayer: (@Composable (path: String, sending: Boolean) -> Unit)? = null,
+    /** Triggered when the user types `/mic` and hits send. Android
+     *  wires this to start the voice recorder (same path the
+     *  voiceComposer mic button uses). When null the slash command
+     *  surfaces a user-facing "tap the mic button" error. */
+    onSlashMic: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val aiConfigured by aiSettings.state.collectAsState()
@@ -714,16 +719,42 @@ fun DmChatScreen(
                 if (!canEmit) {
                     false
                 } else {
+                    // Intercept the UI-dispatched commands (pickers /
+                    // recorder) before runCommand. The autocomplete
+                    // surfaces /img /file /mic; without this branch
+                    // they'd be silently swallowed by runCommand's
+                    // `Handled` fallthrough. Quoted sends bypass —
+                    // a quote is a structured payload, not text the
+                    // command runner is meant to interpret.
+                    val firstWord = body.lowercase().substringBefore(' ')
+                    val handledInUi = when {
+                        quote != null -> false
+                        firstWord == "/img" -> {
+                            onPickAndSendImage()
+                            true
+                        }
+                        firstWord == "/file" -> {
+                            onPickAndSendFile()
+                            true
+                        }
+                        firstWord == "/mic" -> {
+                            if (onSlashMic != null) {
+                                onSlashMic()
+                            } else {
+                                sendError =
+                                    "/mic: tap the mic button instead — slash trigger isn't wired here"
+                            }
+                            true
+                        }
+                        else -> false
+                    }
                     draft = TextFieldValue("")
                     drafts.clear(whom)
                     sendError = null
                     forceBottomTick += 1
                     pendingQuote = null
-                    scope.launch {
+                    if (!handledInUi) scope.launch {
                         runCatching {
-                            // Slash commands are bypassed when quoting — a
-                            // quote is a structured payload, not text the
-                            // command runner is meant to interpret.
                             val cmd = if (quote == null) {
                                 runCommand(
                                     rawText = body,
