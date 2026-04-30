@@ -1,12 +1,3 @@
-// TEMPORARY DUPLICATE of app/src/main/java/io/nisfeb/talon/ui/StoryRenderer.kt
-// Diverges from production in controlled ways so it compiles in commonMain:
-//  1. InlineCitation no longer pulls TalonApplication via LocalContext.
-//     A new LocalCiteResolver CompositionLocal handles cite lookup so any
-//     consumer (DmChatScreen) wires its own resolver.
-//  2. LocWidgetBlock and CalWidgetBlock's Android Intent launches are
-//     stubbed: TODO(port-d5-followup) — desktop will need its own URL
-//     opener.
-// Keep in sync with production until app/ is removed in Stage F.
 package io.nisfeb.talon.ui
 
 import androidx.compose.foundation.background
@@ -267,42 +258,63 @@ fun StoryRenderer(
 
         // Inline media players below the text content, one per linked
         // audio/video URL (de-duped). Lets senders just paste a URL and
-        // get playback without needing a bespoke block type.
+        // get playback without needing a bespoke block type. Android
+        // host installs a real ExoPlayer-backed renderer via
+        // [LocalInlineMediaPlayer]; desktop / unset falls through to a
+        // tap-to-open-in-browser pill (the FallbackInlineMediaRow).
+        val inlinePlayer = LocalInlineMediaPlayer.current
         mediaInStory(parts).forEach { (url, kind) ->
-            when (kind) {
-                MediaKind.AUDIO -> InlineAudioPlayer(url)
-                MediaKind.VIDEO -> InlineVideoPlayer(url)
+            if (inlinePlayer != null) {
+                inlinePlayer(url, kind)
+            } else {
+                FallbackInlineMediaRow(url, kind)
             }
         }
     }
 }
 
-// Inline media is currently a tappable pill that hands off to the OS
-// default media app (browser → media player). True inline playback
-// requires AndroidView+ExoPlayer on Android and a JavaFX MediaPlayer
-// or VLCJ wrapper on desktop — neither has landed yet, but the
-// hand-off keeps the feature usable in the meantime.
-@Composable
-private fun InlineAudioPlayer(url: String) {
-    val uriHandler = androidx.compose.ui.platform.LocalUriHandler.current
-    Surface(
-        shape = RoundedCornerShape(10.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant,
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable { runCatching { uriHandler.openUri(url) } },
-    ) {
-        Text(
-            "🔊 Play $url",
-            style = MaterialTheme.typography.bodySmall,
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-        )
-    }
+/**
+ * Composable slot for inline audio/video playback inside chat
+ * messages. Android binds this to ExoPlayer-backed [InlineAudioPlayer]
+ * / [InlineVideoPlayer] so received voice messages and shared
+ * audio/video URLs play directly in the chat row. Unset (desktop and
+ * tests) falls through to [FallbackInlineMediaRow], a tap-to-open
+ * browser handoff that keeps the feature usable without a platform
+ * media stack.
+ */
+val LocalInlineMediaPlayer:
+    androidx.compose.runtime.ProvidableCompositionLocal<
+        (@Composable (url: String, kind: MediaKind) -> Unit)?
+    > = androidx.compose.runtime.compositionLocalOf { null }
+
+/**
+ * Routes for entity-style external launches (calendar event, maps
+ * pin). Android binds these to platform Intents
+ * (CalendarContract.ACTION_INSERT, geo://lat,lng) so the user lands
+ * directly in their calendar / maps app. Unset (desktop) falls
+ * through to a generic URI-handler / browser handoff — the calendar
+ * path uses an .ics tempfile, the maps path uses an OSM web URL.
+ */
+fun interface CalendarLauncher {
+    fun launch(startEpochMs: Long, endEpochMs: Long, title: String)
 }
+fun interface MapsLauncher {
+    fun launch(lat: Double, lng: Double)
+}
+val LocalCalendarLauncher:
+    androidx.compose.runtime.ProvidableCompositionLocal<CalendarLauncher?> =
+    androidx.compose.runtime.compositionLocalOf { null }
+val LocalMapsLauncher:
+    androidx.compose.runtime.ProvidableCompositionLocal<MapsLauncher?> =
+    androidx.compose.runtime.compositionLocalOf { null }
 
 @Composable
-private fun InlineVideoPlayer(url: String) {
+private fun FallbackInlineMediaRow(url: String, kind: MediaKind) {
     val uriHandler = androidx.compose.ui.platform.LocalUriHandler.current
+    val label = when (kind) {
+        MediaKind.AUDIO -> "🔊 Play $url"
+        MediaKind.VIDEO -> "🎬 Play $url"
+    }
     Surface(
         shape = RoundedCornerShape(10.dp),
         color = MaterialTheme.colorScheme.surfaceVariant,
@@ -311,7 +323,7 @@ private fun InlineVideoPlayer(url: String) {
             .clickable { runCatching { uriHandler.openUri(url) } },
     ) {
         Text(
-            "🎬 Play $url",
+            label,
             style = MaterialTheme.typography.bodySmall,
             modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
         )
@@ -578,8 +590,15 @@ private fun LocWidgetBlock(
                 )
             }
             val uriHandlerLoc = androidx.compose.ui.platform.LocalUriHandler.current
+            val mapsLauncher = LocalMapsLauncher.current
             androidx.compose.material3.TextButton(onClick = {
-                runCatching { uriHandlerLoc.openUri(osmViewerUrl(lat, lng)) }
+                runCatching {
+                    // Android: Intent(geo:) hands off to Google Maps /
+                    // OsmAnd / etc. directly. Desktop / unset: browser
+                    // → OSM web viewer.
+                    if (mapsLauncher != null) mapsLauncher.launch(lat, lng)
+                    else uriHandlerLoc.openUri(osmViewerUrl(lat, lng))
+                }
             }) { Text("Open") }
         }
     }
@@ -624,14 +643,23 @@ private fun CalWidgetBlock(
                 )
             }
             val uriHandlerCal = androidx.compose.ui.platform.LocalUriHandler.current
+            val calendarLauncher = LocalCalendarLauncher.current
             androidx.compose.material3.TextButton(onClick = {
                 runCatching {
-                    val ics = buildIcs(startEpochMs, endEpochMs, title)
-                    val tmp = java.io.File.createTempFile("talon-event-", ".ics").apply {
-                        deleteOnExit()
-                        writeText(ics, Charsets.UTF_8)
+                    // Android: Intent.ACTION_INSERT pops the system
+                    // create-event sheet pre-filled. Desktop / unset:
+                    // ICS tempfile + URI-handler handoff (browsers /
+                    // mail clients on most OSes attach the file).
+                    if (calendarLauncher != null) {
+                        calendarLauncher.launch(startEpochMs, endEpochMs, title)
+                    } else {
+                        val ics = buildIcs(startEpochMs, endEpochMs, title)
+                        val tmp = java.io.File.createTempFile("talon-event-", ".ics").apply {
+                            deleteOnExit()
+                            writeText(ics, Charsets.UTF_8)
+                        }
+                        uriHandlerCal.openUri(tmp.toURI().toString())
                     }
-                    uriHandlerCal.openUri(tmp.toURI().toString())
                 }
             }) { Text("Add") }
         }

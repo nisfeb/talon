@@ -1,4 +1,3 @@
-// TEMPORARY DUPLICATE of app/src/main/java/io/nisfeb/talon/ui/screens/ActivityFeedScreen.kt
 // Verbatim copy — pure Compose. Keep in sync until app/ is removed.
 
 package io.nisfeb.talon.ui.screens

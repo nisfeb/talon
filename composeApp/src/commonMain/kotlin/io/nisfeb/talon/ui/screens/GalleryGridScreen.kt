@@ -1,4 +1,3 @@
-// TEMPORARY DUPLICATE of app/src/main/java/io/nisfeb/talon/ui/screens/GalleryGridScreen.kt
 // Adapted: TalonApplication coupling replaced with constructor
 // injection (db, repo) — matches the DmListScreen / DmChatScreen
 // pattern. Keep in sync with production until app/ is removed in

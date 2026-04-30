@@ -113,10 +113,15 @@ private class AndroidVoiceRecorder(private val context: Context) {
 }
 
 @Composable
-actual fun VoiceRecordButton(
+fun VoiceRecordButton(
     enabled: Boolean,
     onRecorded: (path: String, durationMs: Long) -> Unit,
     modifier: Modifier,
+    /** Optional external trigger — when this Flow emits Unit, the
+     *  button starts recording (or stops if already recording),
+     *  same code path as a tap. Used by the `/mic` slash command
+     *  so typing `/mic` and pressing send begins a recording. */
+    externalTrigger: kotlinx.coroutines.flow.Flow<Unit>? = null,
 ) {
     val context = LocalContext.current
     val recorder = remember { AndroidVoiceRecorder(context) }
@@ -134,6 +139,53 @@ actual fun VoiceRecordButton(
         }
     }
 
+    // Hoist the toggle logic so the click handler and the external
+    // trigger run the same code path.
+    val toggle: () -> Unit = {
+        if (recording) {
+            val result = recorder.stop()
+            recording = false
+            if (result == null) {
+                Toast.makeText(context, "Recording failed", Toast.LENGTH_SHORT).show()
+            } else {
+                val (file, durMs) = result
+                if (durMs < 300) {
+                    Toast.makeText(
+                        context, "Too short — hold longer", Toast.LENGTH_SHORT,
+                    ).show()
+                    file.delete()
+                } else {
+                    onRecorded(file.absolutePath, durMs)
+                }
+            }
+        } else if (enabled) {
+            val granted = ContextCompat.checkSelfPermission(
+                context, Manifest.permission.RECORD_AUDIO,
+            ) == PackageManager.PERMISSION_GRANTED
+            if (!granted) {
+                permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+            } else {
+                runCatching {
+                    recorder.start()
+                    recording = true
+                }.onFailure { err ->
+                    Log.e(TAG, "recorder.start threw", err)
+                    Toast.makeText(
+                        context,
+                        "Couldn't start: ${err.message ?: err::class.simpleName}",
+                        Toast.LENGTH_SHORT,
+                    ).show()
+                }
+            }
+        }
+    }
+
+    if (externalTrigger != null) {
+        androidx.compose.runtime.LaunchedEffect(externalTrigger) {
+            externalTrigger.collect { toggle() }
+        }
+    }
+
     Box(
         modifier = modifier
             .size(36.dp)
@@ -141,44 +193,7 @@ actual fun VoiceRecordButton(
             .background(
                 if (recording) MaterialTheme.colorScheme.errorContainer else Color.Transparent
             )
-            .clickable(enabled = enabled) {
-                if (recording) {
-                    val result = recorder.stop()
-                    recording = false
-                    if (result == null) {
-                        Toast.makeText(context, "Recording failed", Toast.LENGTH_SHORT).show()
-                        return@clickable
-                    }
-                    val (file, durMs) = result
-                    if (durMs < 300) {
-                        Toast.makeText(
-                            context, "Too short — hold longer", Toast.LENGTH_SHORT,
-                        ).show()
-                        file.delete()
-                    } else {
-                        onRecorded(file.absolutePath, durMs)
-                    }
-                } else {
-                    val granted = ContextCompat.checkSelfPermission(
-                        context, Manifest.permission.RECORD_AUDIO,
-                    ) == PackageManager.PERMISSION_GRANTED
-                    if (!granted) {
-                        permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
-                        return@clickable
-                    }
-                    runCatching {
-                        recorder.start()
-                        recording = true
-                    }.onFailure { err ->
-                        Log.e(TAG, "recorder.start threw", err)
-                        Toast.makeText(
-                            context,
-                            "Couldn't start: ${err.message ?: err::class.simpleName}",
-                            Toast.LENGTH_SHORT,
-                        ).show()
-                    }
-                }
-            },
+            .clickable(enabled = enabled) { toggle() },
         contentAlignment = Alignment.Center,
     ) {
         Icon(

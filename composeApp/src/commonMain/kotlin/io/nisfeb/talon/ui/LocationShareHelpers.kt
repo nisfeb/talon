@@ -1,4 +1,3 @@
-// TEMPORARY DUPLICATE of the pure-Kotlin pieces of
 // app/src/main/java/io/nisfeb/talon/ui/LocationShare.kt. The Android-only
 // sensor fetch helpers (`hasLocationPermission`, `fetchLastKnownLocation`,
 // `requestSingleUpdate`) stay in app/ since they touch LocationManager.

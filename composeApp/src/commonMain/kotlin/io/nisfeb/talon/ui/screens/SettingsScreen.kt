@@ -1,14 +1,5 @@
 package io.nisfeb.talon.ui.screens
 
-// TEMPORARY DUPLICATE — adapted from app/src/main/java/io/nisfeb/talon/ui/screens/SettingsScreen.kt.
-// Changes from production:
-//   - TalonApplication replaced with AiSettingsRepository parameter.
-//   - DailyDigestSection gated behind isDailyDigestSupported capability flag.
-//   - Composer section (uiSettings.hideComposerButtons) stubbed with TODO — requires
-//     UiSettings to move to commonMain first (future task).
-//   - formatNextFire helper removed (only needed by DailyDigestSection, which is Android-only).
-// When production :app module is retired, this file becomes canonical.
-
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -56,7 +47,6 @@ import androidx.compose.material3.FilterChip
 import io.nisfeb.talon.ai.AiSettings
 import io.nisfeb.talon.ai.AiSettingsRepository
 import io.nisfeb.talon.ui.UiSettings
-import io.nisfeb.talon.ui.isDailyDigestSupported
 import io.nisfeb.talon.ui.isOnDeviceAiSupported
 import io.nisfeb.talon.ui.theme.ThemePreference
 
@@ -66,6 +56,14 @@ fun SettingsScreen(
     themePreference: ThemePreference,
     uiSettings: UiSettings,
     onBack: () -> Unit,
+    /** Optional daily-digest config + alarm controls. Android wires
+     *  the JSON-prefs-backed impl that drives AlarmManager; desktop
+     *  passes null until a desktop scheduler lands and the section
+     *  hides entirely. */
+    dailyDigestSettings: io.nisfeb.talon.ai.DailyDigestSettings? = null,
+    /** Optional Android-only "Test now" handler that fires the digest
+     *  immediately. When null the button isn't rendered. */
+    onTestDigest: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val aiState by aiSettings.state.collectAsState()
@@ -107,9 +105,6 @@ fun SettingsScreen(
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            // TODO(port): Composer section (hideComposerButtons) requires UiSettings to move to
-            // commonMain. Re-enable when UiSettings is ported.
-
             Text(
                 "Appearance",
                 style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
@@ -289,11 +284,9 @@ fun SettingsScreen(
                     }
             }
 
-            // On-device features — gated behind isOnDeviceAiSupported because the
-            // description says "on your phone" and they need ML Kit / on-device
-            // infrastructure not yet ported to desktop.
-            // TODO(port): flip isOnDeviceAiSupported = true on desktop when on-device
-            // ML infrastructure ports to commonMain.
+            // On-device features — gated behind isOnDeviceAiSupported.
+            // True on Android (ML Kit + on-device embedder available);
+            // false on desktop until / unless an equivalent stack lands.
             if (isOnDeviceAiSupported) {
                 Spacer(Modifier.height(8.dp))
                 HorizontalDivider()
@@ -319,25 +312,124 @@ fun SettingsScreen(
                     }
             }
 
-            // DailyDigestSection requires Android alarm + WorkManager infrastructure —
-            // gated behind isDailyDigestSupported until those port to commonMain.
-            // TODO(port): re-enable DailyDigestSection when DailyDigest ports to commonMain.
-            if (isDailyDigestSupported) {
+            // Daily digest config — only when the platform supplied
+            // a concrete settings impl (Android does today; desktop
+            // gets null until a scheduler lands).
+            if (dailyDigestSettings != null) {
                 Spacer(Modifier.height(16.dp))
                 HorizontalDivider()
                 Spacer(Modifier.height(8.dp))
-                Text(
-                    "Daily digest",
-                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
-                )
-                Text(
-                    "Daily digest configuration is available on mobile.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                DailyDigestSection(
+                    settings = dailyDigestSettings,
+                    onTestDigest = onTestDigest,
                 )
             }
         }
     }
+}
+
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@Composable
+private fun DailyDigestSection(
+    settings: io.nisfeb.talon.ai.DailyDigestSettings,
+    onTestDigest: (() -> Unit)?,
+) {
+    val ddState by settings.state.collectAsState()
+    var showTimePicker by remember { mutableStateOf(false) }
+
+    Text(
+        "Daily digest",
+        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
+    )
+    Text(
+        "A morning brief at your chosen time: unread, watchword hits, and @mentions. " +
+            "The AI summary toggle is in Cloud features above; this section just controls the alarm.",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+
+    Spacer(Modifier.height(8.dp))
+
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text("Enabled", style = MaterialTheme.typography.bodyLarge)
+            val sub = if (ddState.enabled) {
+                "Next: ${formatNextFire(ddState.hourOfDay, ddState.minuteOfDay)}"
+            } else "Off"
+            Text(
+                sub,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Switch(
+            checked = ddState.enabled,
+            onCheckedChange = { settings.setEnabled(it) },
+        )
+    }
+
+    if (ddState.enabled) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text("Fire time", Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
+            TextButton(onClick = { showTimePicker = true }) {
+                Text("%02d:%02d".format(ddState.hourOfDay, ddState.minuteOfDay))
+            }
+        }
+
+        Spacer(Modifier.height(8.dp))
+
+        // "Test now" only when the platform supplies an immediate-
+        // fire path (Android wires DailyDigest.generateAndNotifyAsync;
+        // desktop has no equivalent yet).
+        if (onTestDigest != null) {
+            OutlinedButton(onClick = onTestDigest) { Text("Test now") }
+        }
+    }
+
+    if (showTimePicker) {
+        val state = androidx.compose.material3.rememberTimePickerState(
+            initialHour = ddState.hourOfDay,
+            initialMinute = ddState.minuteOfDay,
+            is24Hour = false,
+        )
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { showTimePicker = false },
+            confirmButton = {
+                TextButton(onClick = {
+                    settings.setTime(state.hour, state.minute)
+                    showTimePicker = false
+                }) { Text("OK") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showTimePicker = false }) { Text("Cancel") }
+            },
+            text = {
+                androidx.compose.material3.TimePicker(state = state)
+            },
+        )
+    }
+}
+
+/** Wallclock-friendly "Next: 7:30 AM" / "Tomorrow at 7:30 AM" string. */
+private fun formatNextFire(hourOfDay: Int, minuteOfDay: Int): String {
+    val now = java.util.Calendar.getInstance()
+    val target = (now.clone() as java.util.Calendar).apply {
+        set(java.util.Calendar.HOUR_OF_DAY, hourOfDay)
+        set(java.util.Calendar.MINUTE, minuteOfDay)
+        set(java.util.Calendar.SECOND, 0)
+        set(java.util.Calendar.MILLISECOND, 0)
+    }
+    val tomorrow = target.timeInMillis <= now.timeInMillis
+    if (tomorrow) target.add(java.util.Calendar.DAY_OF_MONTH, 1)
+    val fmt = java.text.SimpleDateFormat("h:mm a", java.util.Locale.getDefault())
+    val timeStr = fmt.format(target.time)
+    return if (tomorrow) "Tomorrow at $timeStr" else "Today at $timeStr"
 }
 
 /** Single source of truth for "is this feature toggle on?" — keeps the

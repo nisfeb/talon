@@ -1,4 +1,3 @@
-// TEMPORARY DUPLICATE of app/src/main/java/io/nisfeb/talon/data/GroupDao.kt
 package io.nisfeb.talon.data
 
 import androidx.room.Dao

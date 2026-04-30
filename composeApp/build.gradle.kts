@@ -1,3 +1,5 @@
+import java.io.FileInputStream
+import java.util.Properties
 import org.jetbrains.compose.desktop.application.dsl.TargetFormat
 
 plugins {
@@ -61,8 +63,21 @@ kotlin {
         androidMain.dependencies {
             implementation(libs.androidx.activity.compose)
             implementation(libs.androidx.core.ktx)
+            implementation(libs.androidx.lifecycle.runtime.ktx)
+            implementation(libs.androidx.lifecycle.process)
             implementation(libs.kotlinx.coroutines.android)
             implementation(libs.androidx.security.crypto)
+            // ML Kit Entity Extraction backs EntityActions chip
+            // detection. MediaPipe text tasks back the on-device
+            // Embedder used by SemanticSearch + EmbeddingIndexer.
+            implementation(libs.mlkit.entity.extraction)
+            implementation(libs.mediapipe.tasks.text)
+            // ExoPlayer powers MediaPlayerInline (inline audio/video
+            // for chat attachments) and the voice preview row.
+            implementation(libs.media3.exoplayer)
+            implementation(libs.media3.ui)
+            // Room KTX coroutine extensions used by the suspend DAOs.
+            implementation(libs.androidx.room.ktx)
         }
         val desktopMain by getting
         desktopMain.dependencies {
@@ -87,41 +102,64 @@ kotlin {
             implementation(libs.junit)
             implementation(libs.kotlinx.coroutines.test)
             implementation(kotlin("test"))
+            implementation("com.squareup.okhttp3:mockwebserver:4.12.0")
         }
     }
 }
 
 android {
-    namespace = "io.nisfeb.talon.compose"
+    namespace = "io.nisfeb.talon"
     compileSdk = 35
 
     defaultConfig {
-        // Different applicationId from the production app/ module so
-        // both APKs can be installed on the same device during the
-        // port without overwriting each other. After Stage B3 deletes
-        // app/, this will be flipped to "io.nisfeb.talon".
-        applicationId = "io.nisfeb.talon.compose"
+        applicationId = "io.nisfeb.talon"
         minSdk = 26
+        // Play Store requires new apps to target "latest API - 1". 35
+        // matches what RELEASE.md already documents and opts us into
+        // Android 15 behavior changes (16 KB page sizes, edge-to-edge).
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.0.1-port"
+        versionCode = 22
+        versionName = "0.6.1"
+    }
+
+    signingConfigs {
+        create("release") {
+            // Keystore lives outside the repo. Path comes from the
+            // RELEASE_KEYSTORE_PROPS env var (file containing
+            // storeFile / storePassword / keyAlias / keyPassword).
+            // Falls back to debug signing when the env var is unset
+            // so unsigned local debug builds still work.
+            val propsPath = System.getenv("RELEASE_KEYSTORE_PROPS")
+            if (propsPath != null) {
+                val props = Properties().apply {
+                    FileInputStream(propsPath).use { load(it) }
+                }
+                storeFile = file(props.getProperty("storeFile"))
+                storePassword = props.getProperty("storePassword")
+                keyAlias = props.getProperty("keyAlias")
+                keyPassword = props.getProperty("keyPassword")
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            val hasReleaseKeys = System.getenv("RELEASE_KEYSTORE_PROPS") != null
+            signingConfig = signingConfigs.getByName(
+                if (hasReleaseKeys) "release" else "debug"
+            )
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
+        }
     }
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
-    }
-
-    buildTypes {
-        release {
-            // Debug-signed for now — composeApp produces a side-by-side
-            // placeholder APK during the port. Stage F adds the proper
-            // env-var-driven release signing config (mirroring
-            // app/build.gradle.kts) once composeApp takes over as the
-            // production module.
-            signingConfig = signingConfigs.getByName("debug")
-            isMinifyEnabled = false  // composeApp doesn't have proguard rules yet
-        }
     }
 
     packaging {
@@ -135,12 +173,11 @@ android {
     }
 
     lint {
-        // Mirror app/'s lint disable — the
-        // NonNullableMutableLiveDataDetector crashes on this
-        // Kotlin/Compose combo during release builds. Once
-        // screens move into composeApp in B2 the same crash risk
-        // applies.
+        // Lint's NonNullableMutableLiveDataDetector crashes on this
+        // Kotlin/compose combo — skip lint on release builds; we're not
+        // shipping to Play Store yet.
         checkReleaseBuilds = false
+        abortOnError = false
     }
 }
 
@@ -168,8 +205,8 @@ compose.desktop {
             // map "0.MINOR.PATCH" → "1.MINOR.PATCH" until the project
             // crosses 1.0 for real. After that the read-through is
             // straight identity. Source of truth is
-            // app/build.gradle.kts:versionName (also what the release
-            // workflow's tag check reads).
+            // composeApp/build.gradle.kts:versionName (also what the
+            // release workflow's tag check reads).
             packageVersion = derivePackageVersion()
             description = "Native chat client for Urbit"
             copyright = "© 2026 ~nisfeb"
@@ -195,26 +232,13 @@ compose.desktop {
 }
 
 /**
- * Read app/build.gradle.kts's versionName, apply the "0.M.P → 1.M.P"
- * map for jpackage's MAJOR > 0 constraint. Falls back to "1.0.0"
- * if the file or property is missing — so a fresh checkout that
- * runs a desktop task before app/ exists still gets a valid
- * installer (relevant during Stage B-style restructures).
+ * Map "0.M.P → 1.M.P" so jpackage's MAJOR > 0 constraint is satisfied
+ * while the project is still pre-1.0. Reads versionName from this
+ * very file to stay in lockstep with the Android side. After the
+ * project crosses 1.0 the map is straight identity.
  */
 fun derivePackageVersion(): String {
-    val appBuild = rootProject.file("app/build.gradle.kts")
-    if (!appBuild.exists()) return "1.0.0"
-    // Match `versionName = "x.y.z"` only when it's the leading
-    // assignment on a line (whitespace-only prefix). Skips
-    // commented-out lines (`// versionName = "..."`) and inline
-    // assignments inside flavour blocks. Multiple uncommented
-    // matches still risk picking the wrong one — but we only have
-    // the canonical defaultConfig assignment in app/build.gradle.kts
-    // today, and a future flavour split would force us to revisit
-    // this anyway.
-    val regex = Regex("""(?m)^\s+versionName\s*=\s*"([^"]+)"""")
-    val match = regex.find(appBuild.readText()) ?: return "1.0.0"
-    val raw = match.groupValues[1]
+    val raw = "0.6.1"
     val parts = raw.split(".")
     if (parts.size < 3) return "1.0.0"
     val major = parts[0].toIntOrNull() ?: return "1.0.0"

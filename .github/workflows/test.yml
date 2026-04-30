@@ -26,19 +26,11 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      # Two test targets:
-      #  - :app:test — the parser / wire-format unit tests in app/.
-      #    These guard against Tlon protocol regressions; they're the
-      #    most load-bearing tests in the repo.
-      #  - :composeApp:desktopTest — desktop-only unit tests for the
-      #    JSON-backed settings stores and the per-ship DB filename
-      #    sanitizer. Covers code paths that have no equivalent in
-      #    app/'s test suite.
-      #
-      # Both run on ubuntu-latest because they're pure JVM (no
-      # platform-specific behavior under test).
+      # All unit tests now live under :composeApp — desktopTest covers
+      # the parser / wire-format Tlon protocol regressions plus the
+      # JSON-backed settings stores. Pure JVM, runs on ubuntu-latest.
       - name: Run unit tests
-        run: ./gradlew :app:test :composeApp:desktopTest --stacktrace
+        run: ./gradlew :composeApp:desktopTest --stacktrace
 
       # Hook test runs the bash test harness that stages synthetic
       # content into throwaway git repos and asserts the pre-commit
@@ -56,8 +48,6 @@ jobs:
         with:
           name: test-reports
           path: |
-            app/build/reports/tests/
-            app/build/test-results/
             composeApp/build/reports/tests/
             composeApp/build/test-results/
           if-no-files-found: ignore

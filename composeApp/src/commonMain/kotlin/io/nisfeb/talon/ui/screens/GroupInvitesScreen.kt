@@ -1,4 +1,3 @@
-// TEMPORARY DUPLICATE of app/src/main/java/io/nisfeb/talon/ui/screens/GroupInvitesScreen.kt
 // Verbatim copy — pure Compose, no Android-only deps. Keep in sync
 // with production until app/ is removed in Stage F.
 package io.nisfeb.talon.ui.screens

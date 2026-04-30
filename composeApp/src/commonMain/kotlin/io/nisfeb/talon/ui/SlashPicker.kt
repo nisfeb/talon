@@ -1,4 +1,3 @@
-// TEMPORARY DUPLICATE of app/src/main/java/io/nisfeb/talon/ui/SlashPicker.kt
 // No divergence — pure Compose. Keep in sync until app/ is removed in Stage F.
 package io.nisfeb.talon.ui
 

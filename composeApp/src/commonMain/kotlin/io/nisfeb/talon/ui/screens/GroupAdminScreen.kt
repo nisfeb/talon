@@ -1,4 +1,3 @@
-// TEMPORARY DUPLICATE of app/src/main/java/io/nisfeb/talon/ui/screens/GroupAdminScreen.kt
 // Adapted:
 //   - TalonApplication coupling replaced with `db: AppDatabase`
 //     constructor parameter; LocalContext + applicationContext cast

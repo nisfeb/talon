@@ -1,4 +1,3 @@
-// TEMPORARY DUPLICATE of app/src/main/java/io/nisfeb/talon/ui/screens/DmListScreen.kt
 // Diverges from production in controlled ways so it compiles in commonMain:
 //  1. TalonApplication coupling replaced with constructor injection (repo, drafts, updateState).
 //  2. painterResource(R.mipmap.ic_launcher_monochrome) replaced with Icons.Filled.Home (no-R fallback).
@@ -92,7 +91,6 @@ import io.nisfeb.talon.data.FolderEntity
 import io.nisfeb.talon.data.FolderMemberEntity
 import io.nisfeb.talon.data.MessageEntity
 import io.nisfeb.talon.ui.Avatar
-import io.nisfeb.talon.ui.BatteryExemptionBanner
 import io.nisfeb.talon.ui.ContactMap
 import io.nisfeb.talon.ui.FolderAssignmentSheet
 import io.nisfeb.talon.ui.UpdateBanner
@@ -146,6 +144,11 @@ fun DmListScreen(
     shipNicknames: Map<String, String> = emptyMap(),
     onSwitchShip: (String) -> Unit = {},
     onAddShip: () -> Unit = {},
+    /** Optional slot for the platform-specific battery-exemption nudge
+     *  banner. Android wires it to a real Composable; desktop (and
+     *  tests) leave it null. Replaces the previous expect/actual
+     *  shim that put a no-op on every non-Android target. */
+    batteryBanner: (@Composable () -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val scope = rememberCoroutineScope()
@@ -480,11 +483,15 @@ fun DmListScreen(
             modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            androidx.compose.foundation.Image(
+            // Tinted with primary color so the brand mark sits inside
+            // the rest of the toolbar's color hierarchy. `Icon` over
+            // `Image` because we want the tint to apply.
+            Icon(
                 painter = io.nisfeb.talon.ui.talonLogoPainter(),
                 contentDescription = "Switch ship",
+                tint = MaterialTheme.colorScheme.primary,
                 modifier = Modifier
-                    .size(32.dp)
+                    .size(28.dp)
                     .clickable { scope.launch { drawerState.open() } },
             )
             Text(
@@ -605,7 +612,7 @@ fun DmListScreen(
             }
         }
         HorizontalDivider()
-        BatteryExemptionBanner()
+        batteryBanner?.invoke()
         val totalUnread = remember(unreadRows) { unreadRows.sumOf { it.second } }
         val totalMentions = remember(mentionCounts) { mentionCounts.values.sum() }
         FolderTabs(
@@ -1070,8 +1077,7 @@ private fun ShipSwitcherDrawer(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Icon(
-                        // TODO(port-d4-followup): replace with multiplatform app logo resource once asset pipeline lands
-                        imageVector = Icons.Filled.Home,
+                        painter = io.nisfeb.talon.ui.talonLogoPainter(),
                         contentDescription = null,
                         tint = if (selected) MaterialTheme.colorScheme.primary
                         else MaterialTheme.colorScheme.onSurfaceVariant,

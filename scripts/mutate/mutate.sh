@@ -98,7 +98,7 @@ MUTATIONS=(
 
 # ── test runner ──────────────────────────────────────────────────
 run_tests() {
-    ./gradlew :app:testReleaseUnitTest --quiet \
+    ./gradlew :composeApp:desktopTest --quiet \
         > "$LOG_DIR/last.log" 2>&1
 }
 

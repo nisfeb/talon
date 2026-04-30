@@ -1,27 +1,3 @@
-// TEMPORARY DUPLICATE of app/src/main/java/io/nisfeb/talon/ui/screens/DmChatScreen.kt
-//
-// This is a heavily reduced port that captures the screen's core
-// rendering surface — header, reverse-layout message list, composer
-// with mention / emoji / slash autocomplete + a swipe-to-reply gesture
-// — but stubs out every feature that depended on TalonApplication
-// internals, ML Kit, ExoPlayer, ActivityResultContracts, Android
-// clipboard, or the Android-only sensor stack. Each stub carries a
-// TODO(port-d5-followup) marker explaining what's missing.
-//
-// Implemented since the initial D5 port:
-//   - image picker (rememberImagePicker via Compose-bound
-//     PickVisualMedia on Android, JFileChooser on desktop)
-//   - clipboard "Copy text" (LocalClipboardManager)
-//   - message action sheet (long-press menu) — react/reply/quote/
-//     copy/bookmark/edit/delete/pin
-//   - delete confirmation dialog (AlertDialog → repo.delete)
-//
-// Still stubbed (each gated by a `// TODO(port-d5-followup):`):
-//   - non-image file picker (GetContent equivalent for desktop)
-//   - voice preview playback (production uses ExoPlayer; commonMain
-//     ships without inline playback for now — Send/Cancel only)
-//
-// Keep in sync with production until app/ is removed in Stage F.
 package io.nisfeb.talon.ui.screens
 
 import androidx.compose.animation.core.Animatable
@@ -131,11 +107,7 @@ import io.nisfeb.talon.ui.ContactProfileSheet
 import io.nisfeb.talon.ui.DraftStore
 import io.nisfeb.talon.ui.EmojiCatalog
 import io.nisfeb.talon.ui.EmojiPickerDropdown
-import io.nisfeb.talon.ui.EntityActionChips
 import io.nisfeb.talon.ui.LinkPreviewCard
-import io.nisfeb.talon.ui.VoiceRecordButton
-import io.nisfeb.talon.ui.isVoiceMessagesSupported
-import io.nisfeb.talon.ui.rememberLocationProvider
 import io.nisfeb.talon.ui.LocalCiteResolver
 import io.nisfeb.talon.ui.firstLinkUrl
 import io.nisfeb.talon.ui.MentionPicker
@@ -188,11 +160,31 @@ fun DmChatScreen(
     onOpenConversation: (whom: String) -> Unit,
     onOpenImage: (url: String) -> Unit,
     onOpenSelfProfile: () -> Unit,
+    /** Optional Android-only platform widget slots. Each replaces a
+     *  former expect/actual shim; desktop and tests pass null and the
+     *  surface degrades gracefully (no chips, no voice button, no GPS
+     *  for /loc, no voice preview playback). The platform entry point
+     *  that creates App() supplies these — Main.kt stays null, the
+     *  future MainActivity will pass real Composables. */
+    entityChips: (@Composable (text: String, modifier: Modifier) -> Unit)? = null,
+    voiceComposer: (@Composable (
+        enabled: Boolean,
+        onRecorded: (path: String, durationMs: Long) -> Unit,
+    ) -> Unit)? = null,
+    locationProvider: io.nisfeb.talon.ui.LocationProvider? = null,
+    /** Inline play/pause control for the voice preview row. Android
+     *  wires an ExoPlayer-backed control; desktop passes null and
+     *  the preview row hides the play button (still allows send/cancel). */
+    voicePlayer: (@Composable (path: String, sending: Boolean) -> Unit)? = null,
+    /** Triggered when the user types `/mic` and hits send. Android
+     *  wires this to start the voice recorder (same path the
+     *  voiceComposer mic button uses). When null the slash command
+     *  surfaces a user-facing "tap the mic button" error. */
+    onSlashMic: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val aiConfigured by aiSettings.state.collectAsState()
     val hideComposerButtons by uiSettings.hideComposerButtons.collectAsState()
-    val locationProvider = rememberLocationProvider()
     val aiFeatures = remember(aiSettings) {
         AiFeatures(AiClient { aiSettings.state.value })
     }
@@ -653,6 +645,7 @@ fun DmChatScreen(
                             onAvatarTap = onAvatarTap,
                             onCitationTap = onCitationTap,
                             entityActionsEnabled = aiConfigured.entityActionsEnabled,
+                            entityChips = entityChips,
                             flashAmber = item.row.m.id == flashMessageId,
                         )
                     }
@@ -717,10 +710,6 @@ fun DmChatScreen(
                     modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
                 )
             }
-            // TODO(port-d5-followup): full composer in production has
-            // image / file / mic buttons via ActivityResultContracts and
-            // hooks into watchwords / AI / clipboard. The reduced
-            // composer here covers plain-text + slash + mention + emoji.
             val doSend: () -> Boolean = {
                 val body = draft.text.trim()
                 val quote = pendingQuote
@@ -730,16 +719,42 @@ fun DmChatScreen(
                 if (!canEmit) {
                     false
                 } else {
+                    // Intercept the UI-dispatched commands (pickers /
+                    // recorder) before runCommand. The autocomplete
+                    // surfaces /img /file /mic; without this branch
+                    // they'd be silently swallowed by runCommand's
+                    // `Handled` fallthrough. Quoted sends bypass —
+                    // a quote is a structured payload, not text the
+                    // command runner is meant to interpret.
+                    val firstWord = body.lowercase().substringBefore(' ')
+                    val handledInUi = when {
+                        quote != null -> false
+                        firstWord == "/img" -> {
+                            onPickAndSendImage()
+                            true
+                        }
+                        firstWord == "/file" -> {
+                            onPickAndSendFile()
+                            true
+                        }
+                        firstWord == "/mic" -> {
+                            if (onSlashMic != null) {
+                                onSlashMic()
+                            } else {
+                                sendError =
+                                    "/mic: tap the mic button instead — slash trigger isn't wired here"
+                            }
+                            true
+                        }
+                        else -> false
+                    }
                     draft = TextFieldValue("")
                     drafts.clear(whom)
                     sendError = null
                     forceBottomTick += 1
                     pendingQuote = null
-                    scope.launch {
+                    if (!handledInUi) scope.launch {
                         runCatching {
-                            // Slash commands are bypassed when quoting — a
-                            // quote is a structured payload, not text the
-                            // command runner is meant to interpret.
                             val cmd = if (quote == null) {
                                 runCommand(
                                     rawText = body,
@@ -781,6 +796,7 @@ fun DmChatScreen(
                 VoicePreviewRow(
                     pending = pv,
                     sending = uploading,
+                    voicePlayer = voicePlayer,
                     onCancel = {
                         java.io.File(pv.path).delete()
                         pendingVoice = null
@@ -846,10 +862,10 @@ fun DmChatScreen(
                             modifier = Modifier.size(22.dp),
                         )
                     }
-                    if (isVoiceMessagesSupported) {
-                        VoiceRecordButton(
-                            enabled = canSend && !uploading,
-                            onRecorded = { path, durationMs ->
+                    if (voiceComposer != null) {
+                        voiceComposer(
+                            canSend && !uploading,
+                            { path, durationMs ->
                                 pendingVoice = PendingVoice(path, durationMs)
                             },
                         )
@@ -1113,6 +1129,7 @@ private fun MessageRow(
     onAvatarTap: (String) -> Unit,
     onCitationTap: (String) -> Unit,
     entityActionsEnabled: Boolean,
+    entityChips: (@Composable (text: String, modifier: Modifier) -> Unit)? = null,
     flashAmber: Boolean = false,
 ) {
     val m = row.m
@@ -1215,10 +1232,7 @@ private fun MessageRow(
                 val plainText = remember(m.id, m.contentJson) {
                     StoryCache.textFor(m.id, m.contentJson)
                 }
-                EntityActionChips(
-                    text = plainText,
-                    modifier = Modifier.padding(top = 4.dp),
-                )
+                entityChips?.invoke(plainText, Modifier.padding(top = 4.dp))
             }
             if (grouped.isNotEmpty() || row.replyCount > 0) {
                 FlowRow(
@@ -1453,8 +1467,6 @@ private fun dividerLabel(ms: Long): String {
 //    show only when repo.settingsSync != null.  Hides on desktop.
 //  - `canPin` parameter gates pin/unpin.  Pin calls repo.pinPost /
 //    unpinPost which live in commonMain TlonChatRepo.
-//  - AI emoji picker removed (aiConfigured / TalonApplication AI stack
-//    is Android-only; TODO(port-d5-followup) when AI bridge is ported).
 //  - windowInsetsPadding(WindowInsets.navigationBars) kept — no-ops on
 //    desktop but harmless.
 
@@ -1520,6 +1532,7 @@ private fun QuotePreviewRow(
 private fun VoicePreviewRow(
     pending: PendingVoice,
     sending: Boolean,
+    voicePlayer: (@Composable (path: String, sending: Boolean) -> Unit)?,
     onCancel: () -> Unit,
     onSend: () -> Unit,
 ) {
@@ -1531,8 +1544,15 @@ private fun VoicePreviewRow(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {
+        // Platform-supplied play/pause control. When null (desktop),
+        // the row falls back to a "preview not available" hint.
+        if (voicePlayer != null) {
+            voicePlayer(pending.path, sending)
+        }
+        val label = if (voicePlayer != null) "🎙 ${seconds}s"
+        else "🎙 ${seconds}s recorded — preview not available, tap send when ready"
         Text(
-            "🎙 ${seconds}s recorded — preview not available, tap send when ready",
+            label,
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier

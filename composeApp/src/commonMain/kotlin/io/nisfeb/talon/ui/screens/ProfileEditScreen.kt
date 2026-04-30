@@ -1,4 +1,3 @@
-// TEMPORARY DUPLICATE of app/src/main/java/io/nisfeb/talon/ui/screens/ProfileEditScreen.kt
 // Diverges from production: production uses rememberLauncherForActivity
 // Result(PickVisualMedia) + ContentResolver to read bytes; commonMain
 // uses rememberImagePicker() + decodeImageDimensions for the same

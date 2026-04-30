@@ -19,8 +19,8 @@ jobs:
       - id: parse
         run: |
           TAG="${GITHUB_REF#refs/tags/v}"
-          VERSION_CODE=$(grep 'versionCode = ' app/build.gradle.kts | head -1 | grep -oE '[0-9]+')
-          VERSION_NAME=$(grep 'versionName = ' app/build.gradle.kts | head -1 | grep -oE '"[^"]+"' | tr -d '"')
+          VERSION_CODE=$(grep 'versionCode = ' composeApp/build.gradle.kts | head -1 | grep -oE '[0-9]+')
+          VERSION_NAME=$(grep 'versionName = ' composeApp/build.gradle.kts | head -1 | grep -oE '"[^"]+"' | tr -d '"')
           if [ "$TAG" != "$VERSION_NAME" ]; then
             echo "::error::Tag (v$TAG) does not match versionName ($VERSION_NAME) in build.gradle.kts"
             exit 1
@@ -84,7 +84,7 @@ jobs:
         if: steps.chk.outputs.have_keystore == 'true'
         env:
           RELEASE_KEYSTORE_PROPS: /home/runner/.config/talon/keystore.properties
-        run: ./gradlew :app:assembleRelease
+        run: ./gradlew :composeApp:assembleRelease
 
       - name: Stage release artifacts
         if: steps.chk.outputs.have_keystore == 'true'
@@ -93,7 +93,7 @@ jobs:
           VERSION_CODE: ${{ needs.tagcheck.outputs.version_code }}
           VERSION_NAME: ${{ needs.tagcheck.outputs.version_name }}
         run: |
-          APK=app/build/outputs/apk/release/app-release.apk
+          APK=composeApp/build/outputs/apk/release/composeApp-release.apk
           OUT_APK="talon-$VERSION_NAME.apk"
           cp "$APK" "$OUT_APK"
           SHA=$(sha256sum "$OUT_APK" | awk '{print $1}')

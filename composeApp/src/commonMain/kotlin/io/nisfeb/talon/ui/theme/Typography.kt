@@ -1,6 +1,5 @@
 package io.nisfeb.talon.ui.theme
 
-// TEMPORARY DUPLICATE of app/src/main/java/io/nisfeb/talon/ui/theme/Typography.kt — sync any production fixes; remove on Stage B3
 
 import androidx.compose.material3.Typography
 import androidx.compose.ui.text.TextStyle

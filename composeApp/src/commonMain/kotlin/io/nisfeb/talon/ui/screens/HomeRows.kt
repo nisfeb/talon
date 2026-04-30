@@ -1,8 +1,3 @@
-// TEMPORARY DUPLICATE: ported from
-// app/src/main/java/io/nisfeb/talon/ui/screens/HomeRows.kt during the
-// CMP desktop port (Task D4 prerequisite). Pure Kotlin already; just
-// relocated into commonMain. Keep in lockstep with the production
-// copy until app/ is removed in Stage F.
 package io.nisfeb.talon.ui.screens
 
 import io.nisfeb.talon.data.FolderMemberEntity

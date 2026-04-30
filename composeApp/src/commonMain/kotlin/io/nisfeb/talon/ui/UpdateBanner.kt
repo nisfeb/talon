@@ -1,7 +1,3 @@
-// TEMPORARY DUPLICATE: ported from
-// app/src/main/java/io/nisfeb/talon/ui/UpdateBanner.kt during the CMP
-// desktop port (Task D4 prerequisite). Keep in lockstep with the
-// production copy until app/ is removed in Stage F.
 package io.nisfeb.talon.ui
 
 import androidx.compose.foundation.background

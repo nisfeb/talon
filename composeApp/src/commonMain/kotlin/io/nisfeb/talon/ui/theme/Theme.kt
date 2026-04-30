@@ -1,6 +1,5 @@
 package io.nisfeb.talon.ui.theme
 
-// TEMPORARY DUPLICATE of app/src/main/java/io/nisfeb/talon/ui/theme/Theme.kt — sync any production fixes; remove on Stage B3
 
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme

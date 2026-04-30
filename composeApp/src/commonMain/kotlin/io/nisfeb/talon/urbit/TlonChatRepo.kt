@@ -1,4 +1,3 @@
-// TEMPORARY DUPLICATE of app/src/main/java/io/nisfeb/talon/urbit/TlonChatRepo.kt
 // Diverges from production in three controlled ways so that this file
 // can compile in commonMain (no Android, no app/-only types):
 //
@@ -270,6 +269,11 @@ class TlonChatRepo(
         val ch = session.openChannel()
         channel = ch
         lastEventMs = System.currentTimeMillis()
+        // Pagination markers are per-(channel, ship). A new channel
+        // means the ship may surface old history we previously couldn't
+        // reach (e.g. backfill arrived during the disconnect). Drop the
+        // markers so loadOlder retries them on demand.
+        paginationExhausted.clear()
 
         // Subscribe to all streams we care about. Failures here don't
         // skip the event-loop — a partial subscribe set still delivers
@@ -398,6 +402,13 @@ class TlonChatRepo(
         started = false
         channel = null
         scope.cancel()
+        // Clear pagination markers so a future repo instance for the
+        // same ship doesn't inherit stale "history exhausted" state.
+        // (Each ship gets a new TlonChatRepo, but a forceReconnect
+        // recovers the same instance and may receive new old history
+        // from the ship — without this, loadOlder would silently
+        // refuse forever.)
+        paginationExhausted.clear()
     }
 
     // ───────── sends ─────────

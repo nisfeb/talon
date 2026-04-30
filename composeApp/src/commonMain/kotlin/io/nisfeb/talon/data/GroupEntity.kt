@@ -1,4 +1,3 @@
-// TEMPORARY DUPLICATE of app/src/main/java/io/nisfeb/talon/data/GroupEntity.kt
 package io.nisfeb.talon.data
 
 import androidx.room.Entity

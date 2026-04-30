@@ -1,11 +1,5 @@
 package io.nisfeb.talon.ai
 
-// TEMPORARY DUPLICATE — copied from app/src/main/java/io/nisfeb/talon/ai/AiSettings.kt
-// and renamed to AndroidAiSettings implementing AiSettingsRepository.
-// Keep in sync with the production class until the :app module is fully
-// replaced by :composeApp in a later stage. At that point this file
-// becomes canonical and the production copy is deleted.
-
 import android.content.Context
 import android.content.SharedPreferences
 import androidx.security.crypto.EncryptedSharedPreferences
@@ -15,14 +9,14 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
 /**
- * Android implementation of [AiSettingsRepository] backed by
- * EncryptedSharedPreferences so the API key doesn't sit in plaintext
- * on disk; the master key is backed by the Android Keystore.
+ * Android implementation of [AiSettingsRepository], backed by
+ * [EncryptedSharedPreferences] (master key in the Android Keystore).
+ *
+ * The data classes ([AiSettings.Config], [AiSettings.Provider],
+ * [AiSettings.Feature]) live in commonMain's `object AiSettings`;
+ * this class only owns the state-management surface.
  */
 class AndroidAiSettings(context: Context) : AiSettingsRepository {
-
-    @Volatile
-    override var onStateChange: ((AiSettings.Config, Boolean) -> Unit)? = null
 
     private val prefs: SharedPreferences = run {
         val key = MasterKey.Builder(context)
@@ -40,7 +34,8 @@ class AndroidAiSettings(context: Context) : AiSettingsRepository {
     private val _state = MutableStateFlow(read())
     override val state: StateFlow<AiSettings.Config> = _state.asStateFlow()
 
-    val isConfigured: Boolean get() = _state.value.hasKey()
+    @Volatile
+    override var onStateChange: ((AiSettings.Config, Boolean) -> Unit)? = null
 
     override fun update(
         provider: AiSettings.Provider,
@@ -85,10 +80,6 @@ class AndroidAiSettings(context: Context) : AiSettingsRepository {
         onStateChange?.invoke(_state.value, wasEnabled && !enabled)
     }
 
-    /**
-     * Apply a snapshot received from %settings. Bypasses onStateChange
-     * so we don't pingpong back to the ship.
-     */
     override fun applyRemote(config: AiSettings.Config) {
         prefs.edit()
             .putString(KEY_PROVIDER, config.provider.name)
@@ -102,9 +93,9 @@ class AndroidAiSettings(context: Context) : AiSettingsRepository {
             .putBoolean(AiSettings.Feature.SemanticSearch.key, config.semanticSearchEnabled)
             .putBoolean(AiSettings.Feature.TopicClusters.key, config.topicClustersEnabled)
             .putBoolean(AiSettings.Feature.ImportantMessages.key, config.importantMessagesEnabled)
-            .putBoolean(KEY_SYNC, true)
+            .putBoolean(KEY_SYNC, config.syncEnabled)
             .apply()
-        _state.value = config.copy(syncEnabled = true)
+        _state.value = config
     }
 
     override fun clear() {
@@ -125,17 +116,7 @@ class AndroidAiSettings(context: Context) : AiSettingsRepository {
     private fun read(): AiSettings.Config {
         val savedName = prefs.getString(KEY_PROVIDER, null)
         val provider = savedName
-            ?.let {
-                runCatching { AiSettings.Provider.valueOf(it) }
-                    .onFailure { e ->
-                        android.util.Log.w(
-                            "AndroidAiSettings",
-                            "couldn't resolve saved provider '$it'; " +
-                                "falling back to Anthropic. ${e.message}",
-                        )
-                    }
-                    .getOrNull()
-            }
+            ?.let { runCatching { AiSettings.Provider.valueOf(it) }.getOrNull() }
             ?: AiSettings.Provider.Anthropic
         val key = prefs.getString(KEY_API_KEY, "").orEmpty()
         val model = prefs.getString(KEY_MODEL, null)?.takeIf { it.isNotBlank() }

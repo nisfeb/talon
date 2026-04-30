@@ -353,6 +353,10 @@ fun App(
                         themePreference = themePreference,
                         uiSettings = uiSettings,
                         onBack = { showSettings = false },
+                        dailyDigestSettings = dailyDigestSettings,
+                        // onTestDigest stays null on desktop — Android
+                        // wires it to dailyDigest.generateAndNotifyAsync
+                        // when the production MainActivity migrates here.
                     )
                     showSelfProfile -> ProfileEditScreen(
                         db = db,
@@ -397,6 +401,7 @@ fun App(
                     )
                     showSearch -> SearchScreen(
                         db = db,
+                        aiSettings = aiSettings,
                         onBack = { showSearch = false },
                         onOpenConversation = { other ->
                             showSearch = false

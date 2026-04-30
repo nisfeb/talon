@@ -1,4 +1,3 @@
-// TEMPORARY DUPLICATE of app/src/main/java/io/nisfeb/talon/ai/AiFeatures.kt
 package io.nisfeb.talon.ai
 
 import io.nisfeb.talon.data.MessageEntity

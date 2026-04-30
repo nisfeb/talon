@@ -41,11 +41,11 @@ You ship both from the same `master`. Tagging a release builds both APKs. Each g
 
 | Concern | Shape A (sideload only) | Shape B (Play only) | Shape C (both) |
 |---|---|---|---|
-| `app/build.gradle.kts` flavors | none | none | `productFlavors { create("direct"); create("play") }` |
+| `composeApp/build.gradle.kts` flavors | none | none | `productFlavors { create("direct"); create("play") }` |
 | `update/` package | included | **deleted** | `direct` source set only |
 | `REQUEST_INSTALL_PACKAGES` | declared | **removed** | `src/direct/AndroidManifest.xml` only |
 | FileProvider for APKs | declared | **removed** | `src/direct/AndroidManifest.xml` only |
-| `release.yml` build target | `:app:assembleRelease` | `:app:bundlePlayRelease` (AAB) | both: `:app:assembleDirectRelease` + `:app:bundlePlayRelease` |
+| `release.yml` build target | `:composeApp:assembleRelease` | `:composeApp:bundlePlayRelease` (AAB) | both: `:composeApp:assembleDirectRelease` + `:composeApp:bundlePlayRelease` |
 | GitHub Release artifacts | APK + `latest.json` | none (or unsigned mapping for crash-symbolication) | `talon-direct-X.Y.Z.apk` + `latest.json` only — Play AAB stays out of public releases |
 | Manifest discovery in-app | HTTP fetch + Urbit push (Stage C) | Play In-App Updates API (or nothing) | flavor-conditional |
 | Pre-release ceremony | tag, push | tag, push, wait for Play review, fill out console forms | tag, push, ALSO Play review for the `play` artifact |
@@ -58,10 +58,10 @@ You ship both from the same `master`. Tagging a release builds both APKs. Each g
 
 ```bash
 # 1. Bump version
-$EDITOR app/build.gradle.kts   # versionCode + versionName
+$EDITOR composeApp/build.gradle.kts   # versionCode + versionName
 
 # 2. Commit + tag
-git add app/build.gradle.kts
+git add composeApp/build.gradle.kts
 git commit -m "release: 0.5.0"
 git tag v0.5.0
 git push origin master
@@ -78,13 +78,13 @@ That's the whole release.
 
 ```bash
 # 1. Bump version
-$EDITOR app/build.gradle.kts
+$EDITOR composeApp/build.gradle.kts
 
 # 2. Build the AAB locally (Play needs an AAB, not APK)
 RELEASE_KEYSTORE_PROPS=$HOME/.config/talon/keystore.properties \
-    ./gradlew :app:bundleRelease
+    ./gradlew :composeApp:bundleRelease
 
-# 3. Upload app/build/outputs/bundle/release/app-release.aab to Play Console.
+# 3. Upload composeApp/build/outputs/bundle/release/composeApp-release.aab to Play Console.
 # 4. Promote through tracks: internal → closed → open → production.
 #    First time on a track usually requires filling out:
 #      - What's new (release notes, ≤500 chars)
@@ -102,7 +102,7 @@ For Shape B you'd remove the GitHub Releases workflow entirely or repurpose it t
 
 ```bash
 # 1. Bump version
-$EDITOR app/build.gradle.kts
+$EDITOR composeApp/build.gradle.kts
 
 # 2. Commit + tag
 git tag v0.5.0
@@ -144,7 +144,7 @@ If none of those apply, Shape A is fine indefinitely. The current code is not bl
 
 The cleanest order is:
 1. Read `RELEASE.md` for the pre-release prep that's the same regardless of channel (privacy policy, screenshots, store listing).
-2. Add the `direct` / `play` flavor split to `app/build.gradle.kts`.
+2. Add the `direct` / `play` flavor split to `composeApp/build.gradle.kts`.
 3. Move `update/`, `REQUEST_INSTALL_PACKAGES`, and the FileProvider into `src/direct/`.
 4. (Optional) integrate Play In-App Updates in `src/play/` so the banner UX still exists for Play users.
 5. Update `release.yml` to build both flavors.

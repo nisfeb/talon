@@ -1,4 +1,3 @@
-// TEMPORARY DUPLICATE of app/src/main/java/io/nisfeb/talon/ui/screens/ManageTermsSheet.kt
 // Adapted: TalonApplication coupling removed. Production reads
 // `app.watchwords.terms` + `app.watchwords.backfilling` and calls
 // add/remove/setNotify on the Watchwords class (which schedules
