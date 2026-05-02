@@ -14,6 +14,10 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.core.content.ContextCompat
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.remember
+import io.nisfeb.talon.ui.AndroidImageDownloader
+import io.nisfeb.talon.ui.LocalImageDownloader
 import io.nisfeb.talon.ui.TalonApp
 import io.nisfeb.talon.ui.theme.TalonTheme
 import io.nisfeb.talon.ui.theme.ThemePreference
@@ -67,20 +71,31 @@ class MainActivity : ComponentActivity() {
                 ThemePreference.Mode.Light -> false
                 ThemePreference.Mode.Dark -> true
             }
+            // Wire AndroidImageDownloader behind the LocalImageDownloader
+            // composition-local so the fullscreen viewer's download
+            // button can save without an extra plumbing parameter on
+            // every screen between here and ImageViewerScreen. Memoized
+            // on `app` so the downloader instance survives configuration
+            // changes that re-run setContent.
+            val imageDownloader = remember(app) {
+                AndroidImageDownloader(applicationContext, app.http)
+            }
             TalonTheme(darkTheme = darkTheme) {
-                TalonApp(
-                    initialOpenWhom = whom,
-                    initialScrollMessageId = messageId,
-                    initialOpenThread = threadParent,
-                    initialThreadAnchor = threadAnchor,
-                    initialOpenDigest = openDigest,
-                    pendingShare = share,
-                    pendingShareTarget = shareTarget,
-                    onShareConsumed = {
-                        pendingShare.value = null
-                        pendingShareTarget.value = null
-                    },
-                )
+                CompositionLocalProvider(LocalImageDownloader provides imageDownloader) {
+                    TalonApp(
+                        initialOpenWhom = whom,
+                        initialScrollMessageId = messageId,
+                        initialOpenThread = threadParent,
+                        initialThreadAnchor = threadAnchor,
+                        initialOpenDigest = openDigest,
+                        pendingShare = share,
+                        pendingShareTarget = shareTarget,
+                        onShareConsumed = {
+                            pendingShare.value = null
+                            pendingShareTarget.value = null
+                        },
+                    )
+                }
             }
         }
     }

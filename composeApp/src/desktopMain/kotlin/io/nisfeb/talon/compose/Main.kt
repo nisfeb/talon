@@ -331,6 +331,9 @@ fun main() {
                         indexer = indexer,
                     )
                 },
+                imageDownloader = io.nisfeb.talon.ui.DesktopImageDownloader(
+                    http = graph.http,
+                ),
             )
         }
     }

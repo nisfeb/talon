@@ -24,6 +24,16 @@
     -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
+    <!--
+      Image-download support on pre-Q devices: writing to public
+      Pictures/Talon/ uses the legacy storage path on API 26-28,
+      which still requires this permission. API 29+ uses MediaStore
+      with RELATIVE_PATH and doesn't need it — maxSdkVersion="28"
+      keeps newer devices clean.
+    -->
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+        android:maxSdkVersion="28" />
+
     <application
         android:name="io.nisfeb.talon.TalonApplication"
         android:label="Talon"

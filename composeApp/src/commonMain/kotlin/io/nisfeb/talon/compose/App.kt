@@ -108,6 +108,12 @@ fun App(
      *  important-message highlights. Null means no smart features
      *  on this build (the screen falls back to substring search). */
     createSearchEmbedderClient: ((AppDatabase) -> io.nisfeb.talon.ai.SearchEmbedderClient)? = null,
+    /** Saves images shown in the fullscreen viewer to the user's
+     *  device. NoopImageDownloader (default) returns Unsupported and
+     *  the viewer hides its download button; production hosts pass
+     *  their platform-specific impl. */
+    imageDownloader: io.nisfeb.talon.ui.ImageDownloader =
+        io.nisfeb.talon.ui.NoopImageDownloader,
 ) {
     // Derive the initial logged-in ship from sessionStore.active()
     // (the joined SavedSession) rather than activeShip() (just the
@@ -345,6 +351,9 @@ fun App(
             ThemePreference.Mode.Dark -> true
         }
         TalonTheme(darkTheme = darkTheme) {
+          androidx.compose.runtime.CompositionLocalProvider(
+              io.nisfeb.talon.ui.LocalImageDownloader provides imageDownloader,
+          ) {
             Surface(modifier = Modifier.fillMaxSize()) {
                 // Effective ship: the session's actual restored state.
                 // Using session.shipName instead of loggedInShip avoids
@@ -716,6 +725,7 @@ fun App(
                     )
                 }
             }
+          }
         }
     }
 }
