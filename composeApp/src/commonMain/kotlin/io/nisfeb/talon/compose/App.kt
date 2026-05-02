@@ -608,11 +608,41 @@ fun App(
                         onOpenImage = { url -> viewerImageUrl = url },
                         onOpenSelfProfile = { showSelfProfile = true },
                     )
-                    else -> DmListScreen(
+                    else -> {
+                    // Subtle freshness flags for the More menu's
+                    // ellipsis + per-row dots. Cheap collects:
+                    // invitesFlow is a one-shot StateFlow the repo
+                    // already maintains; the latest digest is one
+                    // row keyed on today's date; status-feed query
+                    // is already used by StatusFeedScreen.
+                    val pendingInvitesCount = repo.invitesFlow
+                        .collectAsState().value?.size ?: 0
+                    val latestDigest by remember(db, ship) {
+                        db.dailyDigests().streamLatestForShip(ship)
+                    }.collectAsState(initial = null)
+                    val statusFeed by remember(db) {
+                        db.contacts().streamStatusFeed()
+                    }.collectAsState(initial = emptyList())
+                    val hasFreshStatuses = remember(statusFeed) {
+                        val cutoff = System.currentTimeMillis() - 4 * 3600_000L
+                        statusFeed.any { c ->
+                            (c.statusUpdatedMs ?: 0L) > cutoff &&
+                                !c.status.isNullOrBlank() &&
+                                c.ship != ship
+                        }
+                    }
+                    val todayLocal = remember {
+                        java.time.LocalDate.now().toString()
+                    }
+                    val hasFreshDigest = latestDigest?.dateLocal == todayLocal
+                    DmListScreen(
                         db = db,
                         repo = repo,
                         drafts = drafts,
                         updateState = updateState,
+                        hasFreshDigest = hasFreshDigest,
+                        hasFreshStatuses = hasFreshStatuses,
+                        hasPendingInvites = pendingInvitesCount > 0,
                         onOpenConversation = { whom -> openChat = whom },
                         onOpenSearch = { showSearch = true },
                         onNewMessage = { showNewDm = true },
@@ -700,6 +730,7 @@ fun App(
                             loggedInShip = null
                         },
                     )
+                    } // end else-branch wrapper added for menu-badge
                 }
 
                 // ContactProfileSheet rendered as an overlay so it

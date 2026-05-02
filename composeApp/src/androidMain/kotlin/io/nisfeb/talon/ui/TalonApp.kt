@@ -894,11 +894,38 @@ fun TalonApp(
                 modifier = mod,
             )
 
-            else -> DmListScreen(
+            else -> {
+            // Subtle freshness flags for the More menu (ellipsis dot
+            // + per-row trailing dots on Today's brief / Statuses /
+            // Invites). See DmListScreen's hasFresh* params.
+            val pendingInvitesCount = app.repo.invitesFlow
+                .collectAsState().value?.size ?: 0
+            val latestDigest by remember(app.db, loggedInShip) {
+                app.db.dailyDigests().streamLatestForShip(loggedInShip ?: "")
+            }.collectAsState(initial = null)
+            val statusFeed by remember(app.db) {
+                app.db.contacts().streamStatusFeed()
+            }.collectAsState(initial = emptyList())
+            val hasFreshStatuses = remember(statusFeed, loggedInShip) {
+                val cutoff = System.currentTimeMillis() - 4 * 3600_000L
+                statusFeed.any { c ->
+                    (c.statusUpdatedMs ?: 0L) > cutoff &&
+                        !c.status.isNullOrBlank() &&
+                        c.ship != loggedInShip
+                }
+            }
+            val todayLocal = remember {
+                java.time.LocalDate.now().toString()
+            }
+            val hasFreshDigest = latestDigest?.dateLocal == todayLocal
+            DmListScreen(
                 db = app.db,
                 repo = app.repo,
                 drafts = app.drafts,
                 updateState = app.updateState,
+                hasFreshDigest = hasFreshDigest,
+                hasFreshStatuses = hasFreshStatuses,
+                hasPendingInvites = pendingInvitesCount > 0,
                 onOpenConversation = { openWhom = it },
                 onOpenSearch = { searchOpen = true },
                 onNewMessage = { newDmOpen = true },
@@ -938,6 +965,7 @@ fun TalonApp(
                 batteryBanner = { BatteryExemptionBanner() },
                 modifier = mod,
             )
+            } // end else-branch wrapper added for menu-badge state
         }
 
         // Profile sheet overlay — opened from the status feed, and from

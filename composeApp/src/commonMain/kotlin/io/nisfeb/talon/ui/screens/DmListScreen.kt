@@ -130,6 +130,14 @@ fun DmListScreen(
      *  disabled in settings — no point routing into a screen the user
      *  hasn't opted into yet. */
     digestEnabled: Boolean = false,
+    /** Subtle dot on Today's brief / Statuses / Invites menu rows
+     *  (and a single rolled-up dot on the ellipsis) when there's
+     *  fresh content the user hasn't poked at. Computed by the host
+     *  from the relevant flows so the screen stays free of cross-
+     *  feature collectors. See callers in App.kt / TalonApp.kt. */
+    hasFreshDigest: Boolean = false,
+    hasFreshStatuses: Boolean = false,
+    hasPendingInvites: Boolean = false,
     onOpenAdministration: () -> Unit = {},
     onOpenInvites: () -> Unit = {},
     onOpenSettings: () -> Unit,
@@ -544,9 +552,21 @@ fun DmListScreen(
                 )
             }
             var menuOpen by remember { mutableStateOf(false) }
+            // Roll up the three per-item flags into a single hint on
+            // the ellipsis itself. When true, the user has *something*
+            // worth opening the menu for; the per-item dots inside
+            // tell them which entry.
+            val anyMenuBadge = hasFreshDigest || hasFreshStatuses || hasPendingInvites
             Box {
                 IconButton(onClick = { menuOpen = true }) {
-                    Icon(Icons.Filled.MoreVert, contentDescription = "More")
+                    Box {
+                        Icon(Icons.Filled.MoreVert, contentDescription = "More")
+                        if (anyMenuBadge) MenuBadgeDot(
+                            modifier = Modifier
+                                .align(Alignment.TopEnd)
+                                .padding(top = 1.dp, end = 1.dp),
+                        )
+                    }
                 }
                 DropdownMenu(
                     expanded = menuOpen,
@@ -561,6 +581,9 @@ fun DmListScreen(
                     )
                     DropdownMenuItem(
                         text = { Text("Statuses") },
+                        trailingIcon = {
+                            if (hasFreshStatuses) MenuBadgeDot()
+                        },
                         onClick = {
                             menuOpen = false
                             onOpenStatusFeed()
@@ -590,6 +613,9 @@ fun DmListScreen(
                     if (digestEnabled) {
                         DropdownMenuItem(
                             text = { Text("Today's brief") },
+                            trailingIcon = {
+                                if (hasFreshDigest) MenuBadgeDot()
+                            },
                             onClick = {
                                 menuOpen = false
                                 onOpenDigest()
@@ -605,6 +631,9 @@ fun DmListScreen(
                     )
                     DropdownMenuItem(
                         text = { Text("Invites") },
+                        trailingIcon = {
+                            if (hasPendingInvites) MenuBadgeDot()
+                        },
                         onClick = {
                             menuOpen = false
                             onOpenInvites()
@@ -1583,6 +1612,23 @@ private fun MentionPlaceholderRow(
 // SimpleDateFormat is neither, and chat-list rebuilds happen
 // concurrently from multiple flow emissions on Dispatchers.Default —
 // the SDF version was a thread-safety bug waiting to fire.
+/**
+ * 8.dp filled dot in the theme's primary color — used as a "fresh
+ * content" cue on the More-menu trailing slot and as a corner badge
+ * on the ellipsis IconButton itself. Keeps the ellipsis's own glyph
+ * intact (no overlay over the dots) by aligning to TopEnd rather
+ * than centering.
+ */
+@Composable
+private fun MenuBadgeDot(modifier: Modifier = Modifier) {
+    Box(
+        modifier = modifier
+            .size(8.dp)
+            .clip(CircleShape)
+            .background(MaterialTheme.colorScheme.primary),
+    )
+}
+
 private val TIME_TODAY: java.time.format.DateTimeFormatter =
     java.time.format.DateTimeFormatter.ofPattern("HH:mm", Locale.getDefault())
         .withZone(java.time.ZoneId.systemDefault())
