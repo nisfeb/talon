@@ -15,7 +15,12 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.Button
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.OutlinedTextField
@@ -30,6 +35,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import io.nisfeb.talon.urbit.UrbitSession
 import kotlinx.coroutines.launch
@@ -55,6 +61,7 @@ fun LoginScreen(
     var code by remember { mutableStateOf("") }
     var status by remember { mutableStateOf<String?>(null) }
     var connecting by remember { mutableStateOf(false) }
+    var codeVisible by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
     Column(
@@ -90,9 +97,19 @@ fun LoginScreen(
             value = code,
             onValueChange = { code = it },
             label = { Text("+code") },
-            visualTransformation = PasswordVisualTransformation(),
+            visualTransformation = if (codeVisible) VisualTransformation.None
+                else PasswordVisualTransformation(),
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
             enabled = !connecting,
+            trailingIcon = {
+                IconButton(onClick = { codeVisible = !codeVisible }) {
+                    Icon(
+                        imageVector = if (codeVisible) Icons.Filled.VisibilityOff
+                            else Icons.Filled.Visibility,
+                        contentDescription = if (codeVisible) "Hide code" else "Show code",
+                    )
+                }
+            },
             modifier = passwordAutofillModifier,
         )
         Button(
