@@ -1016,14 +1016,46 @@ class TlonChatRepo(
         color: String? = null,
     ) {
         val ch = channel ?: error("not connected")
-        val edits = buildJsonArray {
-            nickname?.let { add(buildJsonObject { put("nickname", it) }) }
-            bio?.let { add(buildJsonObject { put("bio", it) }) }
-            avatarUrl?.let { add(buildJsonObject { put("avatar", it) }) }
-            status?.let { add(buildJsonObject { put("status", it) }) }
-            color?.let { add(buildJsonObject { put("color", toUrbitHexColor(it)) }) }
+        // Modern %contacts uses `contact-action-1` with a kip-scoped
+        // typed-field map (matches what `parseContact` reads back —
+        // %text for nickname/bio/status, %look for avatar, %tint for
+        // color). The legacy `contact-action` mark cast-failed on the
+        // user's ship the moment any edit list contained `color` or
+        // `avatar`, silently nacking the whole save (HTTP 200 +
+        // SSE poke-nack with `gall: poke-as cast fail`).
+        val contactFields = buildJsonObject {
+            nickname?.let {
+                put("nickname", buildJsonObject {
+                    put("type", "text")
+                    put("value", it)
+                })
+            }
+            bio?.let {
+                put("bio", buildJsonObject {
+                    put("type", "text")
+                    put("value", it)
+                })
+            }
+            status?.let {
+                put("status", buildJsonObject {
+                    put("type", "text")
+                    put("value", it)
+                })
+            }
+            avatarUrl?.let {
+                put("avatar", buildJsonObject {
+                    put("type", "look")
+                    put("value", it)
+                })
+            }
+            color?.let {
+                put("color", buildJsonObject {
+                    put("type", "tint")
+                    put("value", toUrbitHexColor(it))
+                })
+            }
         }
-        if (edits.isEmpty()) return
+        if (contactFields.isEmpty()) return
         // Optimistic local update FIRST so the UI reflects the edit
         // before the poke round-trips. Merge with any existing row so
         // fields the caller didn't supply stay intact. Stamp
@@ -1047,8 +1079,13 @@ class TlonChatRepo(
         )
         ch.poke(
             app = "contacts",
-            mark = "contact-action",
-            payload = buildJsonObject { put("edit", edits) },
+            mark = "contact-action-1",
+            payload = buildJsonObject {
+                put("edit", buildJsonObject {
+                    put("kip", ourPatp)
+                    put("contact", contactFields)
+                })
+            },
         )
     }
 
