@@ -90,6 +90,7 @@ import io.nisfeb.talon.urbit.TlonChatRepo
 import io.nisfeb.talon.data.FolderEntity
 import io.nisfeb.talon.data.FolderMemberEntity
 import io.nisfeb.talon.data.MessageEntity
+import io.nisfeb.talon.data.UnreadEntity
 import io.nisfeb.talon.ui.Avatar
 import io.nisfeb.talon.ui.ContactMap
 import io.nisfeb.talon.ui.FolderAssignmentSheet
@@ -183,19 +184,23 @@ fun DmListScreen(
         }.flowOn(Dispatchers.Default)
     }.collectAsState(initial = snap.rows)
 
-    // Mention (notify-count) map, keyed by whom. Built off the same
-    // %activity summaries — `notifyCount` is the count of events that
-    // should actually ping you (@-mentions, replies to your posts, etc.).
-    val mentionCounts by remember {
+    // Mention-bearing unread rows from %activity. We collect the full
+    // entities (not just counts) so the Mentions tab can render rows
+    // for whoms even when the local messages cache hasn't yet seen
+    // them — e.g. a reply-mention on a notebook post or a new chat
+    // we haven't opened. Filtering to notifyCount > 0 here keeps the
+    // downstream derivations small.
+    val mentionUnreads by remember {
         db.unreads().stream()
             .distinctUntilChanged()
-            .map { list ->
-                val out = HashMap<String, Int>(list.size)
-                for (u in list) out[u.whom] = u.notifyCount
-                out
-            }
+            .map { list -> list.filter { it.notifyCount > 0 } }
             .flowOn(Dispatchers.Default)
-    }.collectAsState(initial = emptyMap())
+    }.collectAsState(initial = emptyList<UnreadEntity>())
+    val mentionCounts = remember(mentionUnreads) {
+        val out = HashMap<String, Int>(mentionUnreads.size)
+        for (u in mentionUnreads) out[u.whom] = u.notifyCount
+        out
+    }
 
     val contactMap by remember {
         contactMapFlow(
@@ -625,7 +630,9 @@ fun DmListScreen(
         HorizontalDivider()
         batteryBanner?.invoke()
         val totalUnread = remember(unreadRows) { unreadRows.sumOf { it.second } }
-        val totalMentions = remember(mentionCounts) { mentionCounts.values.sum() }
+        val totalMentions = remember(mentionUnreads) {
+            mentionUnreads.sumOf { it.notifyCount }
+        }
         FolderTabs(
             folders = folders,
             selectedFolderId = selectedFolderId,
@@ -661,14 +668,21 @@ fun DmListScreen(
             },
             onDismiss = { updateState.dismiss() },
         )
-        // Hoist the mentions-tab filter+sort outside the LazyColumn DSL
-        // (LazyListScope isn't a Composable scope, so `remember` would
-        // fail there). Memoized on the inputs so a parent recomposition
-        // — drafts/typing/unread tick — doesn't re-allocate the list.
-        val mentionRows = remember(rows, mentionCounts) {
-            rows
-                .filter { (m, _) -> (mentionCounts[m.whom] ?: 0) > 0 }
-                .sortedByDescending { (m, _) -> m.sentMs }
+        // Mentions-tab list: drive off the unreads table directly, not
+        // the messages-derived `rows`. A whom can carry notifyCount > 0
+        // (drives the badge total) without having any cached message —
+        // e.g. a reply-mention on a notebook post, or a new chat. The
+        // older filter-against-`rows` approach hid those rows, so the
+        // badge counted mentions the tab couldn't show. Pair each
+        // entity with its cached MessageEntity when one exists; the
+        // renderer falls back to a contact-only placeholder otherwise.
+        val rowsByWhom = remember(rows) {
+            rows.associate { it.first.whom to it.first }
+        }
+        val mentionRows = remember(mentionUnreads, rowsByWhom) {
+            mentionUnreads
+                .sortedByDescending { it.recencyMs }
+                .map { u -> u to rowsByWhom[u.whom] }
         }
         LazyColumn(
             state = listState,
@@ -704,6 +718,10 @@ fun DmListScreen(
                 // notify-count (@-mentions and replies-to-your-posts).
                 // `mentionRows` is hoisted above the LazyColumn so the
                 // memoization works (LazyListScope isn't a Composable).
+                // Each row is (UnreadEntity, MessageEntity?); the second
+                // element is null when we haven't cached any message
+                // for that whom yet, in which case we render a
+                // placeholder so the user can still tap through.
                 if (mentionRows.isEmpty()) {
                     item(key = "__mentions_empty") {
                         SpecialEmpty("No mentions.")
@@ -711,17 +729,28 @@ fun DmListScreen(
                 } else {
                     items(
                         items = mentionRows,
-                        key = { "men:${it.first.whom}" },
+                        key = { (u, _) -> "men:${u.whom}" },
                         contentType = { "men" },
-                    ) { (m, _) ->
-                        ConversationRow(
-                            m = m,
-                            unread = mentionCounts[m.whom] ?: 0,
-                            contactMap = contactMap,
-                            draft = drafts[m.whom],
-                            onClick = onRowOpen,
-                            onLongClick = onRowLongPress,
-                        )
+                    ) { (u, m) ->
+                        if (m != null) {
+                            ConversationRow(
+                                m = m,
+                                unread = u.notifyCount,
+                                contactMap = contactMap,
+                                draft = drafts[u.whom],
+                                onClick = onRowOpen,
+                                onLongClick = onRowLongPress,
+                            )
+                        } else {
+                            MentionPlaceholderRow(
+                                whom = u.whom,
+                                unread = u.notifyCount,
+                                recencyMs = u.recencyMs,
+                                contactMap = contactMap,
+                                onClick = onRowOpen,
+                                onLongClick = onRowLongPress,
+                            )
+                        }
                         HorizontalDivider()
                     }
                 }
@@ -1469,6 +1498,82 @@ private fun ConversationRow(
                 contentDescription = "Drag to reorder",
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(start = 4.dp).size(20.dp),
+            )
+        }
+    }
+}
+
+// Mentions tab fallback row for whoms we have no cached MessageEntity
+// for. Renders the same shape as ConversationRow (avatar, title,
+// channel-type badge, recency, unread count) minus the message
+// preview. Tapping still routes through onClick so the user can open
+// the chat and let the messages cache catch up.
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun MentionPlaceholderRow(
+    whom: String,
+    unread: Int,
+    recencyMs: Long,
+    contactMap: ContactMap,
+    onClick: (String) -> Unit,
+    onLongClick: (String) -> Unit,
+) {
+    val title = remember(whom, contactMap) { contactMap.conversationLabel(whom) }
+    val timestamp = remember(recencyMs) {
+        if (recencyMs > 0L) formatRelative(recencyMs) else ""
+    }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .combinedClickableWithSecondary(
+                onClick = { onClick(whom) },
+                onLongClick = { onLongClick(whom) },
+            )
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Avatar(
+            label = title,
+            url = contactMap.conversationAvatar(whom),
+            colorHex = contactMap.conversationColor(whom),
+            size = 44.dp,
+        )
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                Text(
+                    title,
+                    style = MaterialTheme.typography.titleMedium.copy(
+                        fontWeight = if (unread > 0) FontWeight.Bold else FontWeight.SemiBold,
+                    ),
+                    modifier = Modifier.weight(1f, fill = false),
+                    maxLines = 1,
+                )
+                ChannelTypeBadge(whom)
+            }
+            if (timestamp.isNotEmpty()) {
+                Text(
+                    timestamp,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        if (unread > 0) {
+            Text(
+                if (unread < 100) unread.toString() else "99+",
+                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                color = MaterialTheme.colorScheme.onPrimary,
+                modifier = Modifier
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.primary)
+                    .padding(horizontal = 10.dp, vertical = 4.dp),
             )
         }
     }
