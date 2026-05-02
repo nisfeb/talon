@@ -8,22 +8,35 @@ package io.nisfeb.talon.ui.screens
 // Google Password Manager) can suggest the saved credential. Desktop
 // passes the default `{ Modifier }` and the field is keyboard-only.
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.ClickableText
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -33,12 +46,24 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
+import io.nisfeb.talon.ui.talonLogoPainter
 import io.nisfeb.talon.urbit.UrbitSession
 import kotlinx.coroutines.launch
+
+private const val GETTING_STARTED_URL = "https://urbit.org/overview/running-urbit"
 
 @Composable
 fun LoginScreen(
@@ -63,75 +88,232 @@ fun LoginScreen(
     var connecting by remember { mutableStateOf(false) }
     var codeVisible by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
+    val uriHandler = LocalUriHandler.current
 
-    Column(
+    Box(
         modifier = Modifier
             .fillMaxSize()
-            .windowInsetsPadding(WindowInsets.safeDrawing)
-            .padding(24.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterVertically),
-        horizontalAlignment = Alignment.CenterHorizontally,
+            .windowInsetsPadding(WindowInsets.safeDrawing),
+        contentAlignment = Alignment.Center,
     ) {
-        Text("Connect to your ship", style = MaterialTheme.typography.headlineSmall)
-        // Recovery notice from App-level state — surfaces when
-        // tryRestore failed for a saved ship so the user knows why
-        // they're back at login. Self-clears once they sign in.
-        notice?.let {
-            Text(
-                it,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.error,
-            )
-        }
-        val usernameAutofillModifier = usernameAutofill { shipUrl = it }
-        val passwordAutofillModifier = passwordAutofill { code = it }
-        OutlinedTextField(
-            value = shipUrl,
-            onValueChange = { shipUrl = it },
-            label = { Text("Ship URL") },
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
-            enabled = !connecting,
-            modifier = usernameAutofillModifier,
-        )
-        OutlinedTextField(
-            value = code,
-            onValueChange = { code = it },
-            label = { Text("+code") },
-            visualTransformation = if (codeVisible) VisualTransformation.None
-                else PasswordVisualTransformation(),
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-            enabled = !connecting,
-            trailingIcon = {
-                IconButton(onClick = { codeVisible = !codeVisible }) {
-                    Icon(
-                        imageVector = if (codeVisible) Icons.Filled.VisibilityOff
-                            else Icons.Filled.Visibility,
-                        contentDescription = if (codeVisible) "Hide code" else "Show code",
+        Column(
+            modifier = Modifier
+                .widthIn(max = 420.dp)
+                .padding(horizontal = 24.dp, vertical = 16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            // Brand mark — soft circular badge so the login screen
+            // doesn't look like a generic form. Same logo asset the
+            // home screen and the system Dock/launcher icon use, so
+            // there's a continuous visual identity across surfaces.
+            Surface(
+                shape = CircleShape,
+                color = MaterialTheme.colorScheme.primaryContainer,
+                modifier = Modifier.size(96.dp),
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Image(
+                        painter = talonLogoPainter(),
+                        contentDescription = null,
+                        modifier = Modifier
+                            .size(72.dp)
+                            .clip(CircleShape),
                     )
                 }
-            },
-            modifier = passwordAutofillModifier,
-        )
-        Button(
-            onClick = {
-                status = "Connecting…"
-                connecting = true
-                scope.launch {
-                    session.login(shipUrl, code)
-                        .onSuccess { ship ->
-                            status = "Connected as ~$ship"
-                            onLoggedIn(ship)
+            }
+            Spacer(Modifier.height(20.dp))
+            Text(
+                "Talon",
+                style = MaterialTheme.typography.headlineMedium.copy(
+                    fontWeight = FontWeight.SemiBold,
+                ),
+            )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                "Native chat for Urbit",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.height(28.dp))
+
+            // Recovery notice from App-level state — surfaces when
+            // tryRestore failed for a saved ship so the user knows why
+            // they're back at login. Self-clears once they sign in.
+            notice?.let {
+                Text(
+                    it,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
+                )
+            }
+
+            // Form card — keeps the inputs visually grouped against
+            // the surrounding empty space, and gives the screen a
+            // clear "this is the action area" affordance vs the
+            // brand block above it.
+            Surface(
+                shape = RoundedCornerShape(16.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Column(
+                    modifier = Modifier.padding(20.dp),
+                    verticalArrangement = Arrangement.spacedBy(14.dp),
+                ) {
+                    val usernameAutofillModifier = usernameAutofill { shipUrl = it }
+                    val passwordAutofillModifier = passwordAutofill { code = it }
+                    OutlinedTextField(
+                        value = shipUrl,
+                        onValueChange = { shipUrl = it },
+                        label = { Text("Ship URL") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+                        enabled = !connecting,
+                        singleLine = true,
+                        modifier = usernameAutofillModifier.fillMaxWidth(),
+                    )
+                    OutlinedTextField(
+                        value = code,
+                        onValueChange = { code = it },
+                        label = { Text("+code") },
+                        visualTransformation = if (codeVisible) VisualTransformation.None
+                            else PasswordVisualTransformation(),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                        enabled = !connecting,
+                        singleLine = true,
+                        trailingIcon = {
+                            IconButton(onClick = { codeVisible = !codeVisible }) {
+                                Icon(
+                                    imageVector = if (codeVisible) Icons.Filled.VisibilityOff
+                                        else Icons.Filled.Visibility,
+                                    contentDescription = if (codeVisible) "Hide code" else "Show code",
+                                )
+                            }
+                        },
+                        modifier = passwordAutofillModifier.fillMaxWidth(),
+                    )
+                    Button(
+                        onClick = {
+                            status = "Connecting…"
+                            connecting = true
+                            scope.launch {
+                                session.login(shipUrl, code)
+                                    .onSuccess { ship ->
+                                        status = "Connected as ~$ship"
+                                        onLoggedIn(ship)
+                                    }
+                                    .onFailure { err ->
+                                        status = friendlyError(err)
+                                    }
+                                connecting = false
+                            }
+                        },
+                        enabled = !connecting,
+                        shape = RoundedCornerShape(12.dp),
+                        contentPadding = ButtonDefaults.ContentPadding,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        if (connecting) {
+                            CircularProgressIndicator(
+                                strokeWidth = 2.dp,
+                                color = MaterialTheme.colorScheme.onPrimary,
+                                modifier = Modifier.size(16.dp),
+                            )
+                            Spacer(Modifier.size(8.dp))
+                            Text("Connecting…")
+                        } else {
+                            Text("Connect")
                         }
-                        .onFailure { err ->
-                            status = friendlyError(err)
-                        }
-                    connecting = false
+                    }
+                    status?.let {
+                        Text(
+                            it,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
                 }
-            },
-            enabled = !connecting,
-        ) { Text(if (connecting) "Connecting…" else "Connect") }
-        status?.let { Text(it, style = MaterialTheme.typography.bodyMedium) }
+            }
+
+            Spacer(Modifier.height(24.dp))
+
+            // Don't-have-an-Urbit-yet hand-off. Single text node with
+            // a styled-link span so it reads as one sentence rather
+            // than a button. Tapping anywhere on the link span opens
+            // the urbit.org getting-started page via the platform's
+            // URI handler (Android Intent.ACTION_VIEW, desktop's
+            // Desktop.browse).
+            val linkText = remember {
+                buildAnnotatedString {
+                    append("Don't have an Urbit yet? ")
+                    pushStringAnnotation(tag = "URL", annotation = GETTING_STARTED_URL)
+                    withStyle(
+                        SpanStyle(
+                            color = Color.Unspecified,
+                            fontWeight = FontWeight.Medium,
+                        ),
+                    ) {
+                        append("Get one →")
+                    }
+                    pop()
+                }
+            }
+            ClickableLinkText(
+                text = linkText,
+                primaryColor = MaterialTheme.colorScheme.primary,
+                baseColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                onLinkTap = { url -> runCatching { uriHandler.openUri(url) } },
+            )
+        }
     }
+}
+
+/**
+ * Minimal styled-link text. ClickableText doesn't inherit the
+ * surrounding theme color the way a plain Text does, so we re-stamp
+ * the link span's color from the call site (where MaterialTheme is
+ * accessible) before handing the AnnotatedString down.
+ */
+@Composable
+private fun ClickableLinkText(
+    text: AnnotatedString,
+    primaryColor: Color,
+    baseColor: Color,
+    onLinkTap: (String) -> Unit,
+) {
+    // Re-build the AnnotatedString so the URL-tagged span gets the
+    // theme's primary color. Avoids hard-coding a brand hex into the
+    // composable that built the AnnotatedString upstream.
+    val themed = remember(text, primaryColor, baseColor) {
+        buildAnnotatedString {
+            withStyle(SpanStyle(color = baseColor)) {
+                append(text.text)
+            }
+            text.getStringAnnotations("URL", 0, text.length).forEach { ann ->
+                addStyle(
+                    style = SpanStyle(
+                        color = primaryColor,
+                        fontWeight = FontWeight.Medium,
+                    ),
+                    start = ann.start,
+                    end = ann.end,
+                )
+                addStringAnnotation("URL", ann.item, ann.start, ann.end)
+            }
+        }
+    }
+    ClickableText(
+        text = themed,
+        style = MaterialTheme.typography.bodyMedium.copy(textAlign = TextAlign.Center),
+        onClick = { offset ->
+            themed.getStringAnnotations("URL", offset, offset)
+                .firstOrNull()?.let { onLinkTap(it.item) }
+        },
+        modifier = Modifier.fillMaxWidth(),
+    )
 }
 
 /**
