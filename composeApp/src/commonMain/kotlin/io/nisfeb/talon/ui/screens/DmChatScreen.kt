@@ -405,8 +405,31 @@ fun DmChatScreen(
 
     val scope = rememberCoroutineScope()
     var draft by remember(whom) { mutableStateOf(TextFieldValue(drafts.load(whom))) }
-    LaunchedEffect(whom, draft.text) {
-        drafts.save(whom, draft.text)
+    // Persist the latest draft.text on every TextField edit through
+    // [updateDraft] (called from each OutlinedTextField.onValueChange
+    // and from the doSend / onPickAndSendImage / etc. clear paths).
+    // The previous LaunchedEffect(draft.text)-based save was load-
+    // bearing for save-on-keystroke but raced with dispose: backspacing
+    // the last char and immediately navigating away unmounted the
+    // screen before the LaunchedEffect re-fired with text="" — the
+    // last persisted value stayed as the not-yet-empty text and the
+    // DM list kept advertising "Draft: …". Calling drafts.save inline
+    // makes the write a synchronous side-effect of the keystroke, no
+    // recomposition window in the middle.
+    val updateDraft: (TextFieldValue) -> Unit = remember(whom) {
+        { next ->
+            draft = next
+            drafts.save(whom, next.text)
+        }
+    }
+    // Belt-and-suspenders flush: if the screen is disposed (back
+    // navigation, ship switch, etc.) without ever firing onValueChange
+    // for the cleared state, persist the current draft text once more
+    // so the DM list and the next mount agree.
+    DisposableEffect(whom) {
+        onDispose {
+            drafts.save(whom, draft.text)
+        }
     }
     var sendError by remember(whom) { mutableStateOf<String?>(null) }
     var uploading by remember { mutableStateOf(false) }
@@ -676,9 +699,11 @@ fun DmChatScreen(
                     suggestions = slashSuggestions,
                     onPick = { spec ->
                         val newText = "/${spec.name} "
-                        draft = TextFieldValue(
-                            text = newText,
-                            selection = TextRange(newText.length),
+                        updateDraft(
+                            TextFieldValue(
+                                text = newText,
+                                selection = TextRange(newText.length),
+                            ),
                         )
                     },
                     modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
@@ -695,9 +720,11 @@ fun DmChatScreen(
                         val inserted = "${entry.glyph} "
                         val newText = before + inserted + after
                         val newCaret = before.length + inserted.length
-                        draft = TextFieldValue(
-                            text = newText,
-                            selection = TextRange(newCaret),
+                        updateDraft(
+                            TextFieldValue(
+                                text = newText,
+                                selection = TextRange(newCaret),
+                            ),
                         )
                     },
                     modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
@@ -714,9 +741,11 @@ fun DmChatScreen(
                         val inserted = "$ship "
                         val newText = before + inserted + after
                         val newCaret = before.length + inserted.length
-                        draft = TextFieldValue(
-                            text = newText,
-                            selection = TextRange(newCaret),
+                        updateDraft(
+                            TextFieldValue(
+                                text = newText,
+                                selection = TextRange(newCaret),
+                            ),
                         )
                     },
                     modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
@@ -901,7 +930,7 @@ fun DmChatScreen(
                 }
                 OutlinedTextField(
                     value = draft,
-                    onValueChange = { draft = it },
+                    onValueChange = updateDraft,
                     placeholder = { Text("Message") },
                     enabled = canSend,
                     textStyle = MaterialTheme.typography.bodyMedium,
