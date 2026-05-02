@@ -1077,23 +1077,34 @@ class TlonChatRepo(
                 color = color?.takeIf { it.isNotBlank() } ?: current?.color,
             )
         )
+        // Per tlon-apps desk/lib/contacts/json-1.hoon's `++action`:
+        //   self+contact            <- own profile edit (this code path)
+        //   edit+(ot kip+kip contact+contact ~)  <- pet-name overlay for ANOTHER ship
+        // setPetName above uses `edit` because that's a kip-scoped overlay.
+        // For the user's own profile, the discriminator is `self`, with the
+        // contact object directly as the value (no kip / contact wrapper).
         ch.poke(
             app = "contacts",
             mark = "contact-action-1",
             payload = buildJsonObject {
-                put("edit", buildJsonObject {
-                    put("kip", ourPatp)
-                    put("contact", contactFields)
-                })
+                put("self", contactFields)
             },
         )
     }
 
-    /** `#FF5050` → `0xff.5050` (Urbit @ux form with dot separator). */
+    /**
+     * `#FF5050` → `ff.5050` for the JSON `tint` value.
+     *
+     * The hoon json-1 mark decodes a tint as `(slav %ux (cat 3 '0x' s))` —
+     * it prepends `0x` itself before parsing as @ux. So the value we send
+     * must NOT carry a `0x` prefix; the cat would otherwise produce
+     * `0x0xff.5050` and slav would fail. Dot grouping is optional but
+     * keeps roundtripped values matching the form `parseContact` reads.
+     */
     private fun toUrbitHexColor(hex: String): String {
         val stripped = hex.trim().removePrefix("#").lowercase()
         val padded = stripped.padStart(6, '0').takeLast(6)
-        return "0x" + padded.substring(0, 2) + "." + padded.substring(2, 6)
+        return padded.substring(0, 2) + "." + padded.substring(2, 6)
     }
 
     /**
