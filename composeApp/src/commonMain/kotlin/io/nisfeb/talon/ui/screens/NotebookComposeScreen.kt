@@ -1,9 +1,3 @@
-// Adapted: TalonApplication / LocalContext-injected repo replaced with
-// TlonChatRepo Composable parameter. Image picker swapped from
-// rememberLauncherForActivityResult(PickVisualMedia) + ContentResolver +
-// BitmapFactory.decodeByteArray to rememberImagePicker() +
-// decodeImageDimensions (same idiom as ProfileEditScreen in commonMain).
-// Keep in sync with production until app/ is removed in Stage F.
 package io.nisfeb.talon.ui.screens
 
 import androidx.compose.foundation.layout.Arrangement

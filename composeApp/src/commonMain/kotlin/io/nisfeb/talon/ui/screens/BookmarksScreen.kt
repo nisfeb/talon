@@ -1,5 +1,3 @@
-// Verbatim copy — pure Compose. Keep in sync until app/ is removed.
-
 package io.nisfeb.talon.ui.screens
 
 import androidx.compose.foundation.ExperimentalFoundationApi

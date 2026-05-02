@@ -21,9 +21,11 @@ Urbit chat that you actually use day-to-day.
 - Read and send messages in 1:1 DMs, group DMs (clubs), and group
   channels.
 - React with the full emoji set; long-press a message for the action
-  sheet.
+  sheet. Reactions also work inside threads.
 - Reply in threads.
 - Quote a message inline.
+- Tap an image to open the fullscreen viewer with pinch-to-zoom; save
+  posted images to your Photos / Pictures folder with one tap.
 - Pin posts (admin only) — a pinned banner lives at the top of every
   chat channel that has one.
 - Bookmark messages for later.
@@ -40,8 +42,9 @@ Urbit chat that you actually use day-to-day.
 - Not Tlon. Talon talks to the same `tlon-apps` agents but is an
   independent client; if you're already running a Tlon-hosted ship,
   Talon will see your full chat history immediately.
-- No notebooks or galleries (yet). The scope is chat — DMs and group
-  channels — done well.
+- Notebooks (%diary) and galleries (%heap) are read-and-write supported
+  alongside chat — you can read, comment, post, and delete posts in
+  any of the three channel kinds.
 
 **Privacy**
 - No analytics. No third-party SDKs. The only servers Talon talks to

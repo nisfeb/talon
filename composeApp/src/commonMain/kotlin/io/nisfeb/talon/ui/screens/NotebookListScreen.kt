@@ -1,9 +1,3 @@
-// Adapted: TalonApplication / LocalContext-injected db+repo replaced with
-// AppDatabase + TlonChatRepo Composable parameters (DmListScreen pattern).
-// The unused `private fun sharePost(intent: Intent)` stub is dropped — its
-// only call site was Android Intent, which has no commonMain analogue;
-// see TODO(port-d5-followup): URL opener.
-// Keep in sync with production until app/ is removed in Stage F.
 package io.nisfeb.talon.ui.screens
 
 import androidx.compose.foundation.clickable

@@ -1,9 +1,3 @@
-// Diverges from production: production's /loc handler takes an
-// android.content.Context to read LocationManager. commonMain replaces
-// that with an opaque `locationProvider` — an optional suspend lambda
-// callers (Android) can plug in. Desktop callers pass null and /loc
-// returns an error indicating the feature isn't available.
-// Keep in sync with production until app/ is removed in Stage F.
 package io.nisfeb.talon.ui
 
 import io.nisfeb.talon.urbit.TlonChatRepo

@@ -1,19 +1,3 @@
-// Adapted:
-//   - TalonApplication coupling replaced with `db: AppDatabase`
-//     constructor parameter; LocalContext + applicationContext cast
-//     removed (used previously for app.db + ContentResolver).
-//   - Android image-picker stack
-//     (rememberLauncherForActivityResult / PickVisualMedia /
-//     ContentResolver / BitmapFactory.decodeByteArray) replaced with
-//     io.nisfeb.talon.util.rememberImagePicker() +
-//     io.nisfeb.talon.util.decodeImageDimensions() — same idiom as
-//     ProfileEditScreen.kt in commonMain. Validation that the bytes
-//     are a real image is the bounds-only decode (returns null on
-//     bad bytes) instead of BitmapFactory.
-//   - AdminGroup / AdminMember references unqualified — in commonMain
-//     they live as top-level types in io.nisfeb.talon.urbit, not as
-//     nested types of TlonChatRepo.
-// Keep in sync with production until app/ is removed in Stage F.
 package io.nisfeb.talon.ui.screens
 
 import androidx.compose.foundation.ExperimentalFoundationApi

@@ -1,11 +1,3 @@
-// Adapted: TalonApplication coupling replaced with constructor
-// injection (repo). Image picker switched from
-// rememberLauncherForActivityResult(PickVisualMedia) +
-// BitmapFactory.decodeByteArray to rememberImagePicker() +
-// decodeImageDimensions — the bounds-only decode validates that bytes
-// are a real image without allocating a Bitmap (mirrors
-// ProfileEditScreen). Keep in sync with production until app/ is
-// removed in Stage F.
 package io.nisfeb.talon.ui.screens
 
 import androidx.compose.foundation.layout.Arrangement

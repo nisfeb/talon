@@ -1,8 +1,3 @@
-// Diverges from production: callers of db.messages().search and
-// db.contacts().search now wrap the needle in escapeLikeNeedle()
-// (round 6 fix) — production has a latent wildcard-injection bug
-// for queries containing % or _; this port fixes it. Keep otherwise
-// in sync until app/ is removed in Stage F.
 package io.nisfeb.talon.ui.screens
 
 import androidx.compose.foundation.clickable

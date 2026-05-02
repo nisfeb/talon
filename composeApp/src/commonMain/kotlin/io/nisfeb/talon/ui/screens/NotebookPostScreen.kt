@@ -1,9 +1,3 @@
-// Adapted: TalonApplication / LocalContext-injected db+repo replaced with
-// AppDatabase + TlonChatRepo Composable parameters. The
-// `app.activeShipFlow.collectAsState()` lookup that gates the Edit/Delete
-// menu is replaced with an `ourPatp: String` parameter (same pattern as
-// DmChatScreen).
-// Keep in sync with production until app/ is removed in Stage F.
 package io.nisfeb.talon.ui.screens
 
 import androidx.compose.foundation.layout.Arrangement

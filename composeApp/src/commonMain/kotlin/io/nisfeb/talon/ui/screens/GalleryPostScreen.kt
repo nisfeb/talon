@@ -1,7 +1,3 @@
-// Adapted: TalonApplication coupling replaced with constructor
-// injection (db, repo, ourPatp). activeShipFlow lookup replaced with
-// the explicit ourPatp parameter (matches DmChatScreen). Keep in
-// sync with production until app/ is removed in Stage F.
 package io.nisfeb.talon.ui.screens
 
 import androidx.compose.foundation.layout.Arrangement

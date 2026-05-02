@@ -446,6 +446,7 @@ val slimReleaseDistributable = tasks.register("slimReleaseDistributable") {
         // CI guard further down catches drift.
         val iconsExtendedKeep = setOf(
             "androidx/compose/material/icons/filled/AttachFileKt.class",
+            "androidx/compose/material/icons/filled/DownloadKt.class",
             "androidx/compose/material/icons/filled/DragHandleKt.class",
             "androidx/compose/material/icons/filled/ErrorOutlineKt.class",
             "androidx/compose/material/icons/filled/ExpandMoreKt.class",

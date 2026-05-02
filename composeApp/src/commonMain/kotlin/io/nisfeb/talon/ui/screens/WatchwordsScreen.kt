@@ -1,14 +1,3 @@
-// Adapted: TalonApplication coupling removed. Production reads
-// `app.watchwords.terms` (Watchwords class wraps the DAO and triggers
-// Embedder/backfill) and `app.watchwordsSyncEnabled` (lives on the
-// Application). commonMain has no Watchwords class — only the
-// `sanitizeTerm` helper — so this screen reads `db.watchwords().streamTerms()`
-// directly and takes `watchwordsSyncEnabled` + `onSetWatchwordsSyncEnabled`
-// as parameters, mirroring how SettingsScreen takes its repo. ManageTermsSheet
-// (in this same file's sibling) gets the same parameters passed through.
-// Backfill / Embedder / pruning stay Android-only — desktop calls just
-// upsertTerm / deleteTermById / setNotify on the DAO.
-// Keep in sync with production until app/ is removed in Stage F.
 package io.nisfeb.talon.ui.screens
 
 import androidx.compose.foundation.background

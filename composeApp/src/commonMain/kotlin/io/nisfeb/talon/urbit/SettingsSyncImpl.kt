@@ -1,13 +1,3 @@
-// Diverges from production: class renamed to SettingsSyncImpl so it
-// can implement the existing commonMain SettingsSync interface
-// (which TlonChatRepo takes as a constructor param). Replaces:
-//   - android.util.Log → io.nisfeb.talon.util.Log
-//   - io.nisfeb.talon.ai.AiSettings (Android EncryptedSharedPreferences)
-//     → io.nisfeb.talon.ai.AiSettingsRepository (interface)
-//   - io.nisfeb.talon.ai.DailyDigestSettings concrete Android class
-//     → DailyDigestSettings interface (commonMain)
-// Keep the body in sync with production until app/ is removed in
-// Stage F.
 package io.nisfeb.talon.urbit
 
 import io.nisfeb.talon.ai.AiSettings

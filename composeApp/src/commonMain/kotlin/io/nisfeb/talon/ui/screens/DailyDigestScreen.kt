@@ -1,11 +1,3 @@
-// Adapted: TalonApplication coupling replaced with `db: AppDatabase`,
-// `activeShip: String?`, and `onGenerateNow: () -> Unit` injected
-// parameters. The Android-only DailyDigest service (alarm scheduler +
-// generator) stays in app/; here we read the latest stored digest
-// straight from the daily_digests table. On desktop the alarm never
-// fires so this screen falls into the empty-state branch and the
-// `onGenerateNow` callback is wired to a no-op.
-// Keep in sync with production until app/ is removed in Stage F.
 package io.nisfeb.talon.ui.screens
 
 import androidx.compose.foundation.layout.Arrangement

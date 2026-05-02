@@ -1,8 +1,3 @@
-// app/src/main/java/io/nisfeb/talon/ai/{Embedder.kt,TopicClusters.kt}.
-// The full Embedder class lives in app/ because it owns ML Kit /
-// TFLite — both Android-only. commonMain only needs unpack +
-// kMeansAssign for the Topics sheet, which are pure Kotlin/JVM.
-// Keep in sync with production until app/ is removed in Stage F.
 package io.nisfeb.talon.ai
 
 import java.nio.ByteBuffer

@@ -1,15 +1,3 @@
-// Adapted: TalonApplication coupling removed. Production reads
-// `app.watchwords.terms` + `app.watchwords.backfilling` and calls
-// add/remove/setNotify on the Watchwords class (which schedules
-// Embedder/EmbeddingIndexer backfill). commonMain has no Watchwords
-// class — only the `sanitizeTerm` helper — so:
-//   - terms come from db.watchwords().streamTerms() directly
-//   - add/remove/setNotify call DAO upsertTerm/deleteTermById/setNotify
-//   - the backfilling spinner UI is dropped (no Embedder on desktop)
-//   - app.watchwordsSyncEnabled / setWatchwordsSyncEnabled are passed
-//     in as parameters
-//   - the help text is reworded — no backfill on desktop
-// Keep in sync with production until app/ is removed in Stage F.
 package io.nisfeb.talon.ui.screens
 
 import androidx.compose.foundation.background

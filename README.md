@@ -25,9 +25,12 @@ don't need Java installed.
 
 - Sign in to your ship and use it for chat. Multiple ships supported —
   switch between them from the top-left.
-- DMs (single + group), %chat group channels, threads, reactions,
-  edits, deletes, image / file attachments, link previews, location
-  + calendar tags.
+- DMs (single + group), %chat group channels, threads, reactions
+  (in chats and threads), edits, deletes, image / file attachments,
+  link previews, location + calendar tags. Tap an image to open the
+  fullscreen viewer with pinch-to-zoom, save it to Photos / Downloads.
+  Channel posts you send carry a small clock / "!" indicator until
+  the host echoes them back, so a silently-failing poke is visible.
 - AI catch-up summaries, watchwords (highlight terms across chats),
   emoji-react suggestions — all opt-in, BYO API key.
 - Daily digests (Android only — uses AlarmManager).

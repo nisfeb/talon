@@ -1,9 +1,3 @@
-// Diverges from production: production uses rememberLauncherForActivity
-// Result(PickVisualMedia) + ContentResolver to read bytes; commonMain
-// uses rememberImagePicker() + decodeImageDimensions for the same
-// effect. Validation that the bytes are a real image is the dimension
-// decode (returns null on bad bytes) instead of BitmapFactory.
-// Keep in sync with production until app/ is removed in Stage F.
 package io.nisfeb.talon.ui.screens
 
 import androidx.compose.foundation.background

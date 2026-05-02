@@ -1,4 +1,3 @@
-// Pure Kotlin — no divergence required. Keep in sync until app/ is removed in Stage F.
 package io.nisfeb.talon.ui
 
 /**

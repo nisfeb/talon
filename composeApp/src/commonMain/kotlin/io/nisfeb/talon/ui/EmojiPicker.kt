@@ -1,4 +1,3 @@
-// No divergence — pure Compose. Keep in sync until app/ is removed in Stage F.
 package io.nisfeb.talon.ui
 
 import androidx.compose.foundation.clickable

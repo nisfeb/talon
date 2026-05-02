@@ -1,7 +1,3 @@
-// Diverges from production: production reads OkHttpClient via
-// TalonApplication.http through LocalContext. commonMain takes the
-// client as an explicit parameter so the screen can pass its own.
-// Keep in sync with production until app/ is removed in Stage F.
 package io.nisfeb.talon.ui
 
 import androidx.compose.foundation.background

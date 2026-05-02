@@ -1,9 +1,3 @@
-// Diverges from production in two spots:
-//   1. android.util.Log.w → io.nisfeb.talon.util.Log.w (commonMain shim).
-//   2. Production's onLinkTap launches an Android VIEW Intent. Desktop
-//      will need a `Desktop.getDesktop().browse(URI(...))` actual; for
-//      now this is a TODO placeholder, mirroring DmChatScreen.
-// Keep in sync with production until app/ is removed in Stage F.
 package io.nisfeb.talon.ui.screens
 
 import androidx.compose.animation.core.Animatable

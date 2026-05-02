@@ -1,5 +1,3 @@
-// Adapted: none — pure Compose, no Android-only dependencies. Keep in
-// sync with production until app/ is removed in Stage F.
 package io.nisfeb.talon.ui.screens
 
 import androidx.compose.foundation.layout.Arrangement
