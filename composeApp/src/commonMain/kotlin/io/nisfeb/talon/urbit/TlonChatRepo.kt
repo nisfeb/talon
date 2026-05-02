@@ -2381,7 +2381,17 @@ class TlonChatRepo(
                 toUnread(key, summary as? JsonObject ?: return@mapNotNull null)
             }.map { row ->
                 // User is actively looking at this chat — treat as read.
-                if (row.whom == focused) row.copy(count = 0, notifyCount = 0) else row
+                // Also propagate that to the ship so other clients
+                // (Tlon webapp / mobile) don't keep showing the badge
+                // while we read here. Without this, every new message
+                // bumped the ship's unread count and Talon's local
+                // suppression hid it from us but not from anyone else.
+                if (row.whom == focused) {
+                    if (row.count > 0 || row.notifyCount > 0) {
+                        scope.launch { runCatching { markRead(row.whom) } }
+                    }
+                    row.copy(count = 0, notifyCount = 0)
+                } else row
             }
             if (rows.isNotEmpty()) db.unreads().upsertAll(rows)
             return
@@ -2393,6 +2403,13 @@ class TlonChatRepo(
             toUnread(sourceKey = null, summary = summary, overrideWhom = whom)
                 ?.let { row ->
                     val adjusted = if (row.whom == focused) {
+                        // Same upstream-propagation as the bulk-update
+                        // branch above: if the ship still thinks there
+                        // are unreads here while we're focused, send a
+                        // markRead so other clients agree.
+                        if (row.count > 0 || row.notifyCount > 0) {
+                            scope.launch { runCatching { markRead(row.whom) } }
+                        }
                         row.copy(count = 0, notifyCount = 0)
                     } else row
                     db.unreads().upsert(adjusted)
@@ -2443,23 +2460,40 @@ class TlonChatRepo(
             }
         } else null
         val source = activityReadSource(whom, groupFlag) ?: return
-        runCatching {
-            ch.poke(
-                app = "activity",
-                mark = "activity-action",
-                payload = activityReadAction(source),
-            )
-        }.onFailure { err ->
-            // Distinguish transient socket-closed timeouts (channel cycled
-            // mid-poke; the next focus will mark-read again anyway) from
-            // genuine server errors. The former is expected during
-            // backgrounding / reconnect, so log it lightly without the
-            // 80-line stack and at info level.
+        // Retry on transient errors (channel cycle, socket reset
+        // mid-poke). Mirrors Tlon's TS client (`backOff(...,
+        // numOfAttempts: 4)` in activityApi.ts) — without retry, a
+        // poke that races with a reconnect just dropped, leaving the
+        // ship's unread count stuck and Tlon's UI showing a stale
+        // badge after Talon already cleared it locally.
+        val maxAttempts = 4
+        var attempt = 0
+        var lastErr: Throwable? = null
+        while (attempt < maxAttempts) {
+            val outcome = runCatching {
+                ch.poke(
+                    app = "activity",
+                    mark = "activity-action",
+                    payload = activityReadAction(source),
+                )
+            }
+            if (outcome.isSuccess) return
+            lastErr = outcome.exceptionOrNull()
+            val transient = lastErr is java.io.InterruptedIOException ||
+                lastErr is java.net.SocketException ||
+                lastErr?.cause is java.net.SocketException
+            if (!transient) break
+            attempt += 1
+            if (attempt < maxAttempts) {
+                kotlinx.coroutines.delay(1_000L * (1 shl (attempt - 1)))
+            }
+        }
+        lastErr?.let { err ->
             val transient = err is java.io.InterruptedIOException ||
                 err is java.net.SocketException ||
                 err.cause is java.net.SocketException
             if (transient) {
-                Log.i(TAG, "markRead $whom skipped (channel cycling): ${err.message}")
+                Log.i(TAG, "markRead $whom gave up after $attempt attempts: ${err.message}")
             } else {
                 Log.w(TAG, "markRead poke failed for $whom", err)
             }
