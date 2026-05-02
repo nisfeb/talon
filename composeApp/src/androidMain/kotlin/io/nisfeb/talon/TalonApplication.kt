@@ -68,6 +68,8 @@ class TalonApplication : Application() {
         private set
     lateinit var drafts: DraftStore
         private set
+    lateinit var menuSeen: io.nisfeb.talon.ui.MenuSeenStore
+        private set
     lateinit var shortcuts: ShortcutsPublisher
         private set
     lateinit var embeddingIndexer: io.nisfeb.talon.ai.EmbeddingIndexer
@@ -309,6 +311,7 @@ class TalonApplication : Application() {
             syncEnabledProvider = { _watchwordsSyncEnabled.value },
         )
         drafts = io.nisfeb.talon.ui.AndroidDraftStore(this, ship)
+        menuSeen = io.nisfeb.talon.ui.AndroidMenuSeenStore(this, ship)
         shortcuts = ShortcutsPublisher(this, db)
         embeddingIndexer = io.nisfeb.talon.ai.EmbeddingIndexer(db, embedder, appScope)
         searchEmbedderClient = io.nisfeb.talon.ai.AndroidSearchEmbedderClient(

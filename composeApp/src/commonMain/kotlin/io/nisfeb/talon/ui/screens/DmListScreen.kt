@@ -130,14 +130,14 @@ fun DmListScreen(
      *  disabled in settings — no point routing into a screen the user
      *  hasn't opted into yet. */
     digestEnabled: Boolean = false,
-    /** Subtle dot on Today's brief / Statuses / Invites menu rows
-     *  (and a single rolled-up dot on the ellipsis) when there's
-     *  fresh content the user hasn't poked at. Computed by the host
-     *  from the relevant flows so the screen stays free of cross-
-     *  feature collectors. See callers in App.kt / TalonApp.kt. */
-    hasFreshDigest: Boolean = false,
-    hasFreshStatuses: Boolean = false,
-    hasPendingInvites: Boolean = false,
+    /** Per-ship persistent "I've seen this" timestamps for the More
+     *  menu's freshness dots. Tap-throughs on Today's brief /
+     *  Statuses / Invites mark the corresponding entry seen so the
+     *  pip clears even though the underlying data is still there.
+     *  Defaults to NoopMenuSeenStore for tests / hosts that haven't
+     *  wired persistence yet. */
+    menuSeen: io.nisfeb.talon.ui.MenuSeenStore =
+        io.nisfeb.talon.ui.NoopMenuSeenStore,
     onOpenAdministration: () -> Unit = {},
     onOpenInvites: () -> Unit = {},
     onOpenSettings: () -> Unit,
@@ -552,6 +552,36 @@ fun DmListScreen(
                 )
             }
             var menuOpen by remember { mutableStateOf(false) }
+            // Freshness-dot inputs. Per-feature data flows joined with
+            // the menuSeen state so a tap-through actually clears the
+            // dot — leaving "Today's brief" lit 24/7 just because a
+            // digest exists for today helps no one (the user said
+            // exactly that). The marker writes happen in the per-item
+            // onClick branches below.
+            val seenState by menuSeen.state.collectAsState()
+            val pendingInvites = repo.invitesFlow.collectAsState().value
+                ?: emptyList()
+            val latestDigest by remember(db, activeShip) {
+                db.dailyDigests().streamLatestForShip(activeShip ?: "")
+            }.collectAsState(initial = null)
+            val statusFeedRows by remember(db) {
+                db.contacts().streamStatusFeed()
+            }.collectAsState(initial = emptyList())
+            val invitesSnapshot = remember(pendingInvites) {
+                io.nisfeb.talon.ui.invitesSnapshot(pendingInvites.map { it.flag })
+            }
+            val hasFreshDigest = latestDigest?.dateLocal?.let {
+                it != seenState.lastSeenDigestDate
+            } == true
+            val hasFreshStatuses = remember(statusFeedRows, seenState.lastSeenStatusesMs, activeShip) {
+                statusFeedRows.any { c ->
+                    (c.statusUpdatedMs ?: 0L) > seenState.lastSeenStatusesMs &&
+                        !c.status.isNullOrBlank() &&
+                        c.ship != activeShip
+                }
+            }
+            val hasPendingInvites = pendingInvites.isNotEmpty() &&
+                invitesSnapshot != seenState.lastSeenInvitesSnapshot
             // Roll up the three per-item flags into a single hint on
             // the ellipsis itself. When true, the user has *something*
             // worth opening the menu for; the per-item dots inside
@@ -586,6 +616,7 @@ fun DmListScreen(
                         },
                         onClick = {
                             menuOpen = false
+                            menuSeen.markStatusesSeenAt(System.currentTimeMillis())
                             onOpenStatusFeed()
                         },
                     )
@@ -618,6 +649,9 @@ fun DmListScreen(
                             },
                             onClick = {
                                 menuOpen = false
+                                latestDigest?.dateLocal?.let {
+                                    menuSeen.markDigestSeen(it)
+                                }
                                 onOpenDigest()
                             },
                         )
@@ -636,6 +670,7 @@ fun DmListScreen(
                         },
                         onClick = {
                             menuOpen = false
+                            menuSeen.markInvitesSeen(invitesSnapshot)
                             onOpenInvites()
                         },
                     )

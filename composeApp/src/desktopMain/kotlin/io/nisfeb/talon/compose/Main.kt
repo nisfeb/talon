@@ -334,6 +334,12 @@ fun main() {
                 imageDownloader = io.nisfeb.talon.ui.DesktopImageDownloader(
                     http = graph.http,
                 ),
+                // Per-ship factory: App's key(shipKey) block calls
+                // this on each switch so the JSON file for the
+                // active ship is loaded fresh.
+                createMenuSeen = { ship ->
+                    io.nisfeb.talon.ui.DesktopMenuSeenStore(ship = ship)
+                },
             )
         }
     }
