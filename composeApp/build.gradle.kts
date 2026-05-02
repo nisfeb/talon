@@ -133,8 +133,8 @@ android {
         // matches what RELEASE.md already documents and opts us into
         // Android 15 behavior changes (16 KB page sizes, edge-to-edge).
         targetSdk = 35
-        versionCode = 34
-        versionName = "0.7.11"
+        versionCode = 35
+        versionName = "0.7.12"
     }
 
     signingConfigs {
@@ -279,7 +279,7 @@ compose.desktop {
  * project crosses 1.0 the map is straight identity.
  */
 fun derivePackageVersion(): String {
-    val raw = "0.7.11"
+    val raw = "0.7.12"
     val parts = raw.split(".")
     if (parts.size < 3) return "1.0.0"
     val major = parts[0].toIntOrNull() ?: return "1.0.0"
