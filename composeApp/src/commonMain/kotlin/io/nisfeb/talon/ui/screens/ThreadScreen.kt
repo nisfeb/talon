@@ -22,25 +22,35 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.Immutable
@@ -213,6 +223,25 @@ fun ThreadScreen(
         mention?.let { (q, _) -> suggestionsFor(q, contactMap, allShips) } ?: emptyList()
     }
     var pendingDelete by remember(parentId) { mutableStateOf<MessageEntity?>(null) }
+    // Long-press on any thread message opens this sheet — same role
+    // as DmChatScreen.actionTarget. We keep `pendingDelete` for the
+    // post-confirm flow the sheet kicks off.
+    var actionTarget by remember(parentId) { mutableStateOf<MessageEntity?>(null) }
+    val onReactionForMessage: (MessageEntity, List<ReactionEntity>, String) -> Unit =
+        remember(ourPatp, whom, repo) {
+            { m, rs, emoji ->
+                val mineSame = rs.any { it.author == ourPatp && it.emoji == emoji }
+                scope.launch {
+                    runCatching {
+                        if (mineSame) repo.unreact(whom, m.id)
+                        else repo.react(whom, m.id, emoji)
+                    }.onFailure {
+                        sendError = "react failed: ${it.message ?: it::class.simpleName}"
+                    }
+                }
+                Unit
+            }
+        }
 
     val onMentionTap: (String) -> Unit = remember(onOpenConversation) {
         { patp -> onOpenConversation(patp) }
@@ -285,7 +314,8 @@ fun ThreadScreen(
                         onLinkTap = onLinkTap,
                         onImageTap = onImageTap,
                         onCitationTap = onCitationTap,
-                        onLongPress = { pendingDelete = it },
+                        onLongPress = { actionTarget = it },
+                        onReactionTap = onReactionForMessage,
                         onPollVote = onPollVoteHandler,
                         showHeader = true,
                         highlighted = true,
@@ -308,7 +338,8 @@ fun ThreadScreen(
                     onLinkTap = onLinkTap,
                     onImageTap = onImageTap,
                     onCitationTap = onCitationTap,
-                    onLongPress = { pendingDelete = it },
+                    onLongPress = { actionTarget = it },
+                    onReactionTap = onReactionForMessage,
                     onPollVote = onPollVoteHandler,
                     showHeader = row.showHeader,
                     highlighted = false,
@@ -439,6 +470,30 @@ fun ThreadScreen(
             },
         )
     }
+
+    actionTarget?.let { target ->
+        val isMine = target.author == ourPatp
+        val isChannel = whom.startsWith("chat/")
+        ThreadActionSheet(
+            db = db,
+            ourPatp = ourPatp,
+            canDelete = isMine || isChannel,
+            onDismiss = { actionTarget = null },
+            onPickReaction = { code ->
+                actionTarget = null
+                scope.launch {
+                    runCatching { repo.react(whom, target.id, code) }
+                        .onFailure {
+                            sendError = "react failed: ${it.message ?: it::class.simpleName}"
+                        }
+                }
+            },
+            onDelete = {
+                actionTarget = null
+                pendingDelete = target
+            },
+        )
+    }
     } // CompositionLocalProvider(LocalCiteResolver)
 }
 
@@ -454,6 +509,10 @@ private fun ThreadMessage(
     onImageTap: (String) -> Unit,
     onCitationTap: (String) -> Unit,
     onLongPress: (MessageEntity) -> Unit,
+    /** Called when the user taps an already-rendered reaction chip
+     *  to toggle their own reaction. Same shape as DmChatScreen's
+     *  onReactionTap so the handler logic can be shared. */
+    onReactionTap: (MessageEntity, List<ReactionEntity>, String) -> Unit,
     onPollVote: (MessageEntity, List<ReactionEntity>, String) -> Unit,
     showHeader: Boolean,
     highlighted: Boolean,
@@ -517,6 +576,7 @@ private fun ThreadMessage(
                                 if (mine) MaterialTheme.colorScheme.primaryContainer
                                 else MaterialTheme.colorScheme.surfaceVariant
                             )
+                            .clickable { onReactionTap(m, reactions, emoji) }
                             .padding(horizontal = 10.dp, vertical = 4.dp),
                     ) {
                         Text(ReactionPalette.display(emoji), style = MaterialTheme.typography.bodyMedium)
@@ -544,3 +604,128 @@ private data class ReplyRow(
     val reactions: List<ReactionEntity>,
     val showHeader: Boolean,
 )
+
+/**
+ * Long-press sheet for thread messages. Same React + Search-emojis
+ * vocabulary as DmChatScreen's MessageActionSheet but trimmed to the
+ * actions threads actually need: react and delete (if allowed). No
+ * reply / quote / bookmark / pin — reply is the current view, the
+ * others don't apply to thread replies.
+ */
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+@Composable
+private fun ThreadActionSheet(
+    db: AppDatabase,
+    ourPatp: String,
+    canDelete: Boolean,
+    onDismiss: () -> Unit,
+    onPickReaction: (String) -> Unit,
+    onDelete: () -> Unit,
+) {
+    val sheetState = rememberModalBottomSheetState()
+    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp)
+                .windowInsetsPadding(WindowInsets.navigationBars),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            // Suggested row blends the user's most-used reactions with
+            // the default palette — same blend DmChatScreen uses, so
+            // the thread sheet feels consistent with the chat sheet.
+            val topUsage by remember {
+                db.reactionUsage().streamTop(8)
+            }.collectAsState(initial = emptyList())
+            val suggested = remember(topUsage) {
+                val used = topUsage.map { it.shortcode }
+                val fallback = ReactionPalette.picker.map { it.first }
+                (used + fallback.filter { it !in used }).take(8)
+            }
+
+            var searchOpen by remember { mutableStateOf(false) }
+            var searchQuery by remember { mutableStateOf("") }
+
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    "React",
+                    style = MaterialTheme.typography.labelLarge,
+                    modifier = Modifier.weight(1f),
+                )
+                IconButton(onClick = {
+                    searchOpen = !searchOpen
+                    if (!searchOpen) searchQuery = ""
+                }) {
+                    Icon(Icons.Filled.Search, contentDescription = "Search emojis")
+                }
+            }
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                suggested.forEach { code ->
+                    val glyph = ReactionPalette.display(code)
+                    Text(
+                        glyph,
+                        style = MaterialTheme.typography.headlineSmall,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable { onPickReaction(code) }
+                            .padding(horizontal = 8.dp, vertical = 4.dp),
+                    )
+                }
+            }
+            if (searchOpen) {
+                OutlinedTextField(
+                    value = searchQuery,
+                    onValueChange = { searchQuery = it },
+                    placeholder = { Text("Search emojis") },
+                    singleLine = true,
+                    leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 4.dp),
+                )
+                val results = remember(searchQuery) {
+                    if (searchQuery.isBlank()) emptyList()
+                    else EmojiCatalog.search(searchQuery, limit = 24)
+                }
+                if (results.isNotEmpty()) {
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        results.forEach { entry ->
+                            Text(
+                                entry.glyph,
+                                style = MaterialTheme.typography.headlineSmall,
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .clickable { onPickReaction(entry.shortcode) }
+                                    .padding(horizontal = 8.dp, vertical = 4.dp),
+                            )
+                        }
+                    }
+                }
+            }
+
+            if (canDelete) {
+                HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable(onClick = onDelete)
+                        .padding(horizontal = 8.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(
+                        Icons.Filled.Delete,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.error,
+                    )
+                    Spacer(Modifier.width(12.dp))
+                    Text(
+                        "Delete",
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodyLarge,
+                    )
+                }
+            }
+        }
+    }
+}
