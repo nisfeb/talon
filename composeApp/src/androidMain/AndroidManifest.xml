@@ -32,7 +32,8 @@
         android:supportsRtl="true"
         android:enableOnBackInvokedCallback="true"
         android:allowBackup="false"
-        android:theme="@style/Theme.Talon">
+        android:theme="@style/Theme.Talon"
+        android:usesCleartextTraffic="true">
 
         <activity
             android:name="io.nisfeb.talon.MainActivity"
