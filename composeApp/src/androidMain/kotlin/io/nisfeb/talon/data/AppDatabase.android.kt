@@ -48,7 +48,7 @@ fun createAppDatabase(context: Context, name: String): AppDatabase {
             MIGRATION_17_18, MIGRATION_18_19, MIGRATION_19_20,
             MIGRATION_20_21, MIGRATION_21_22, MIGRATION_22_23,
             MIGRATION_23_24, MIGRATION_24_25, MIGRATION_25_26,
-            MIGRATION_26_27,
+            MIGRATION_26_27, MIGRATION_27_28,
         )
         // dropAllTables = true preserves the pre-2.7 behaviour: when
         // Room can't find a migration path, drop everything and rebuild.
@@ -193,6 +193,16 @@ private val MIGRATION_25_26 = object : Migration(25, 26) {
             )
             """.trimIndent()
         )
+    }
+}
+
+private val MIGRATION_27_28 = object : Migration(27, 28) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        // Per-row send state for our own outgoing channel posts. Old
+        // rows get NULL, which is the "not tracked / sent" path the UI
+        // already treats as the default. See MessageEntity.status
+        // KDoc for the value contract.
+        db.execSQL("ALTER TABLE messages ADD COLUMN status TEXT")
     }
 }
 

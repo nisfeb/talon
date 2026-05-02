@@ -133,8 +133,8 @@ android {
         // matches what RELEASE.md already documents and opts us into
         // Android 15 behavior changes (16 KB page sizes, edge-to-edge).
         targetSdk = 35
-        versionCode = 29
-        versionName = "0.7.6"
+        versionCode = 30
+        versionName = "0.7.7"
     }
 
     signingConfigs {
@@ -279,7 +279,7 @@ compose.desktop {
  * project crosses 1.0 the map is straight identity.
  */
 fun derivePackageVersion(): String {
-    val raw = "0.7.6"
+    val raw = "0.7.7"
     val parts = raw.split(".")
     if (parts.size < 3) return "1.0.0"
     val major = parts[0].toIntOrNull() ?: return "1.0.0"
@@ -447,11 +447,13 @@ val slimReleaseDistributable = tasks.register("slimReleaseDistributable") {
         val iconsExtendedKeep = setOf(
             "androidx/compose/material/icons/filled/AttachFileKt.class",
             "androidx/compose/material/icons/filled/DragHandleKt.class",
+            "androidx/compose/material/icons/filled/ErrorOutlineKt.class",
             "androidx/compose/material/icons/filled/ExpandMoreKt.class",
             "androidx/compose/material/icons/filled/ImageKt.class",
             "androidx/compose/material/icons/filled/MicKt.class",
             "androidx/compose/material/icons/filled/NotificationsOffKt.class",
             "androidx/compose/material/icons/filled/PauseKt.class",
+            "androidx/compose/material/icons/filled/ScheduleKt.class",
             "androidx/compose/material/icons/filled/StopKt.class",
             "androidx/compose/material/icons/filled/TopicKt.class",
             "androidx/compose/material/icons/filled/VisibilityKt.class",

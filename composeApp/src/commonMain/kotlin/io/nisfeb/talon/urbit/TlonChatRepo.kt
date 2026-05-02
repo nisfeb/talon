@@ -549,7 +549,16 @@ class TlonChatRepo(
                 put("time", JsonNull)
             })
         }
-        when {
+        // Channel-chat posts get a status="pending" optimistic insert;
+        // DMs and clubs leave status null. The SSE poke-ack listener
+        // flips pending → failed on NACK; a successful poke leaves the
+        // pending row in place until the server-id echo reaps it.
+        val isChannel = whom.startsWith("chat/") ||
+            whom.startsWith("diary/") ||
+            whom.startsWith("heap/")
+        val initialStatus = if (isChannel) "pending" else null
+        db.messages().upsert(toEntity(whom, id, essay).copy(status = initialStatus))
+        val pokeId = when {
             whom.startsWith("~") -> ch.poke(
                 app = "chat", mark = "chat-dm-action-2",
                 payload = dmAction(whom, id, addDelta),
@@ -558,9 +567,7 @@ class TlonChatRepo(
                 app = "chat", mark = "chat-club-action-2",
                 payload = clubAction(whom, id, addDelta),
             )
-            whom.startsWith("chat/") ||
-                whom.startsWith("diary/") ||
-                whom.startsWith("heap/") -> ch.poke(
+            isChannel -> ch.poke(
                 app = "channels", mark = "channel-action-2",
                 payload = channelAction(whom, buildJsonObject {
                     put("post", buildJsonObject { put("add", essay) })
@@ -568,7 +575,7 @@ class TlonChatRepo(
             )
             else -> error("unsupported whom: $whom")
         }
-        db.messages().upsert(toEntity(whom, id, essay))
+        if (isChannel) pendingChannelPokes[pokeId] = whom to id
         return id
     }
 
@@ -1466,6 +1473,21 @@ class TlonChatRepo(
     private val paginationExhausted = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
 
     /**
+     * Tracks in-flight channel-post pokes so the SSE poke-ack listener
+     * can flip a row's status to "failed" if the channels agent
+     * NACKs. Keys are the request ids returned by [UrbitChannel.poke];
+     * values are the (whom, localId) pair pointing at the optimistic
+     * local twin that needs the update. Cleared on either ack or nack.
+     *
+     * Channel-only — DM and club sends don't populate the map (their
+     * UI doesn't render a status indicator and there's no useful
+     * delivery signal beyond our own ship's ack anyway).
+     */
+    private val pendingChannelPokes:
+        java.util.concurrent.ConcurrentHashMap<Long, Pair<String, String>> =
+        java.util.concurrent.ConcurrentHashMap()
+
+    /**
      * Upload an image. Tries memex first (Tlon-hosted ships with %genuine
      * installed), then falls back to the ship's %storage S3 credentials.
      * Self-hosted ships configure their own bucket in Landscape's Storage
@@ -1854,10 +1876,19 @@ class TlonChatRepo(
                         })
                     })
                 })
-                ch.poke(app = "channels", mark = "channel-action-2", payload = payload)
+                // Same pending-status pattern as postContent: optimistic
+                // insert first with status="pending", then poke, then
+                // track the pokeId so the SSE listener can flip → failed
+                // on a NACK. Server echo reaps the local twin which
+                // implicitly clears the indicator.
                 db.messages().upsert(
                     toReplyEntity(whom, parentId, replyId, replyEssay)
+                        .copy(status = "pending")
                 )
+                val pokeId = ch.poke(
+                    app = "channels", mark = "channel-action-2", payload = payload,
+                )
+                pendingChannelPokes[pokeId] = whom to replyId
             }
             else -> error("unsupported whom: $whom")
         }
@@ -2015,8 +2046,27 @@ class TlonChatRepo(
         val response = outer["response"].asStr()
         if (response == "poke" || response == "subscribe") {
             val err = outer["err"]
+            val pokeIdLong = outer["id"].asLong()
             if (err != null && err !is JsonNull) {
                 Log.w(TAG, "$response nack id=${outer["id"]} err=$err")
+                // Channel-post NACK: flip the optimistic local twin
+                // from "pending" → "failed" so the UI surfaces the
+                // failure (small "!" indicator). DM/club rows aren't
+                // tracked here (their initial status was null).
+                if (response == "poke" && pokeIdLong != null) {
+                    pendingChannelPokes.remove(pokeIdLong)?.let { (whom, id) ->
+                        scope.launch {
+                            runCatching {
+                                db.messages().setStatus(whom, id, "failed")
+                            }.onFailure { Log.w(TAG, "setStatus(failed) failed", it) }
+                        }
+                    }
+                }
+            } else if (response == "poke" && pokeIdLong != null) {
+                // Successful poke — drop the tracking entry. Status is
+                // implicitly cleared when the server-id echo arrives
+                // and reapLocalTwin removes the pending row.
+                pendingChannelPokes.remove(pokeIdLong)
             }
             return
         }

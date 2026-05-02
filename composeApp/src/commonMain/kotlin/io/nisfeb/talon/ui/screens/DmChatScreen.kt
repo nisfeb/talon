@@ -37,9 +37,11 @@ import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.NotificationsOff
+import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Topic
 import androidx.compose.material3.AlertDialog
@@ -1227,11 +1229,34 @@ private fun MessageRow(
             verticalArrangement = Arrangement.spacedBy(2.dp),
         ) {
             if (row.showHeader) {
-                Text(
-                    "$authorLabel · $stamp",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    Text(
+                        "$authorLabel · $stamp",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    // Channel-chat send-state indicator. status is set
+                    // only on our own outgoing channel posts (see
+                    // TlonChatRepo.postContent / reply); DM rows leave
+                    // status null and render nothing here.
+                    when (m.status) {
+                        "failed" -> Icon(
+                            imageVector = Icons.Filled.ErrorOutline,
+                            contentDescription = "Send failed",
+                            tint = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.size(14.dp),
+                        )
+                        "pending" -> Icon(
+                            imageVector = Icons.Filled.Schedule,
+                            contentDescription = "Sending",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(14.dp),
+                        )
+                    }
+                }
             }
             StoryRenderer(
                 parts = parts,

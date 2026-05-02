@@ -132,6 +132,16 @@ abstract class MessageDao {
     """)
     abstract suspend fun reapLocalTwin(whom: String, author: String, sentMs: Long)
 
+    /**
+     * Set the send-state column for one row. Used by the channels
+     * poke-ack listener: marks "failed" on a poke nack, or clears the
+     * pending flag if we ever want to (we don't — sent is implicit by
+     * the local twin getting reaped). Channel-chat only; DM/club rows
+     * never have status set so this is a no-op for them.
+     */
+    @Query("UPDATE messages SET status = :status WHERE whom = :whom AND id = :id")
+    abstract suspend fun setStatus(whom: String, id: String, status: String?)
+
     /** Reply count per top-level post in this conversation. */
     @Query("""
         SELECT parentId AS postId, COUNT(*) AS count
