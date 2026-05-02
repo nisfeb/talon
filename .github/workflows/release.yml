@@ -172,6 +172,14 @@ jobs:
         with:
           distribution: 'temurin'
           java-version: '17'
+      # macOS-only: generate icon.icns from icon.png so the .app
+      # bundle / .dmg / Dock-after-install all get the Talon logo
+      # instead of jpackage's default. The .icns isn't committed; the
+      # script no-ops on non-mac runners.
+      - name: Generate macOS icon
+        if: runner.os == 'macOS'
+        run: ./scripts/build-macos-icns.sh
+        shell: bash
       - name: Build native package (${{ matrix.target }})
         run: ./gradlew :composeApp:${{ matrix.target }}
         shell: bash

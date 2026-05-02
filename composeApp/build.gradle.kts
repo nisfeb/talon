@@ -253,10 +253,21 @@ compose.desktop {
             windows {
                 iconFile.set(project.file("src/desktopMain/resources/icon.ico"))
             }
-            // macOS .icns intentionally omitted — generating a real
-            // ICNS needs `iconutil` (macOS) or `png2icns`. Mac builds
-            // fall back to jpackage's default icon until a real
-            // src/desktopMain/resources/icon.icns is dropped in.
+            macOS {
+                // .icns is generated on the macOS CI runner from icon.png
+                // (see .github/workflows/release.yml's "Generate macOS
+                // icon" step) since iconutil is macOS-only. The file
+                // doesn't live in the repo because it's a build artifact.
+                // When absent (any non-mac local build, or a CI run that
+                // didn't go through the icns step), the macOS bundle
+                // falls back to jpackage's default icon — but local
+                // packageReleaseDmg from a Mac will still work if you
+                // run scripts/build-macos-icns.sh first.
+                val icnsFile = project.file("src/desktopMain/resources/icon.icns")
+                if (icnsFile.exists()) {
+                    iconFile.set(icnsFile)
+                }
+            }
         }
     }
 }

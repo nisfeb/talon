@@ -212,10 +212,28 @@ fun main() {
     // gets packaged onto the classpath at /icon.png. Skia decodes
     // and we hand a Painter to Window. Best-effort: if loading
     // fails for any reason the window just gets the JVM default.
-    val iconPainter = runCatching {
-        val bytes = ClassLoader.getSystemResourceAsStream("icon.png")?.use { it.readBytes() }
-        bytes?.let { BitmapPainter(SkiaImage.makeFromEncoded(it).toComposeImageBitmap()) }
+    val iconBytes = runCatching {
+        ClassLoader.getSystemResourceAsStream("icon.png")?.use { it.readBytes() }
     }.getOrNull()
+    val iconPainter = iconBytes?.let {
+        runCatching {
+            BitmapPainter(SkiaImage.makeFromEncoded(it).toComposeImageBitmap())
+        }.getOrNull()
+    }
+    // macOS dock icon: Compose's Window(icon=...) only sets the
+    // window's title-bar icon, which on macOS isn't surfaced in the
+    // Dock. Without this, the running app shows the JDK's default
+    // Java coffee-cup glyph in the Dock instead of the Talon logo.
+    // java.awt.Taskbar is the cross-platform handle (also drives the
+    // Windows taskbar icon and Linux WM hint, where a default-icon
+    // fallback is also possible). Call before application { } so the
+    // first frame already renders with the right icon.
+    runCatching {
+        if (iconBytes != null && java.awt.Taskbar.isTaskbarSupported()) {
+            val img = javax.imageio.ImageIO.read(java.io.ByteArrayInputStream(iconBytes))
+            if (img != null) java.awt.Taskbar.getTaskbar().iconImage = img
+        }
+    }
 
     application {
         // visible: false hides the window without tearing down the
