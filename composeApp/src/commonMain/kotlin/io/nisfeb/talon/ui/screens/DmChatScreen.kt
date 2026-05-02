@@ -426,6 +426,15 @@ fun DmChatScreen(
                     height = dims?.second ?: 0,
                     alt = picked.displayName,
                 )
+                // Image-attach is treated as a send action, even
+                // though the user may have typed unrelated text in
+                // the composer first. Clear the draft so the DM list
+                // doesn't keep advertising "Draft: …" after the
+                // attach succeeded — same expectation as tapping the
+                // text Send button. Mirrored in onPickAndSendFile and
+                // the voice onSend below.
+                draft = TextFieldValue("")
+                drafts.clear(whom)
             }.onFailure { err ->
                 sendError = "image failed: ${err.message ?: err::class.simpleName}"
             }
@@ -445,6 +454,8 @@ fun DmChatScreen(
             runCatching {
                 val hostedUrl = repo.uploadImage(picked.bytes, picked.mimeType, picked.displayName)
                 repo.send(whom, hostedUrl)
+                draft = TextFieldValue("")
+                drafts.clear(whom)
             }.onFailure { err ->
                 sendError = "file failed: ${err.message ?: err::class.simpleName}"
             }
@@ -813,6 +824,13 @@ fun DmChatScreen(
                         uploading = true
                         sendError = null
                         pendingVoice = null
+                        // Same draft-clear rationale as
+                        // onPickAndSendImage / onPickAndSendFile: the
+                        // user finalized a send, so the composer's
+                        // textual draft (likely orphaned) shouldn't
+                        // keep showing up in the DM list.
+                        draft = TextFieldValue("")
+                        drafts.clear(whom)
                         scope.launch {
                             runCatching {
                                 val file = java.io.File(pv.path)
