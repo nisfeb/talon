@@ -271,6 +271,9 @@ fun DmListScreen(
     // Separate state for group-kind folder assignment — different write path.
     var folderSheetGroup by remember { mutableStateOf<String?>(null) }
     var renamingFolder by remember { mutableStateOf<FolderEntity?>(null) }
+    // Long-press on a tab chip → "Mark all read" confirmation dialog.
+    // Cleared once the user confirms or cancels.
+    var confirmMarkAllRead by remember { mutableStateOf(false) }
     var confirmDeleteFolder by remember { mutableStateOf<FolderEntity?>(null) }
     var creatingFolder by remember { mutableStateOf(false) }
     // Edit mode: when on, rows are drag-reorderable (long-press anywhere
@@ -706,7 +709,16 @@ fun DmListScreen(
                 selectedFolderId = null
                 selectedSpecial = it
             },
-            onLongPress = { f -> renamingFolder = f },
+            onLongPress = { f ->
+                // Edit-mode long-press still opens rename (the
+                // pencil affordance fires the same handler). Outside
+                // edit mode, long-press is the "mark all read"
+                // shortcut so a freshly-installed client can clear
+                // a backlog of stale unreads in one tap.
+                if (editMode) renamingFolder = f
+                else confirmMarkAllRead = true
+            },
+            onSpecialLongPress = { confirmMarkAllRead = true },
             onCreateNew = { creatingFolder = true },
         )
         HorizontalDivider()
@@ -1096,8 +1108,53 @@ fun DmListScreen(
                 }
             },
             onDismiss = { folderSheetGroup = null },
+            onMarkGroupRead = {
+                // Resolve the group's channels to whoms and mark all
+                // read in parallel. We pull from contactMap (which
+                // already has the channel list per group) so we don't
+                // need an extra DAO round-trip.
+                val whoms = contactMap.channelGroups
+                    .filter { it.groupFlag == flag }
+                    .map { it.nest }
+                scope.launch { runCatching { repo.markAllRead(whoms) } }
+            },
             onLeaveGroup = {
                 scope.launch { runCatching { repo.leaveGroup(flag) } }
+            },
+        )
+    }
+
+    if (confirmMarkAllRead) {
+        // Compute the unread set right at confirm time so the dialog
+        // count reflects the current snapshot. We mark every whom in
+        // `rows` with unread > 0 — the user's stated goal is clearing
+        // a backlog of stale unreads, and pokes against zero-unread
+        // whoms are wasted work.
+        val unreadWhoms = rows.filter { (_, count) -> count > 0 }
+            .map { (m, _) -> m.whom }
+        AlertDialog(
+            onDismissRequest = { confirmMarkAllRead = false },
+            title = { Text("Mark all as read?") },
+            text = {
+                Text(
+                    if (unreadWhoms.isEmpty()) "No unread chats."
+                    else "Clears the unread badge on ${unreadWhoms.size} " +
+                        if (unreadWhoms.size == 1) "chat." else "chats.",
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = unreadWhoms.isNotEmpty(),
+                    onClick = {
+                        confirmMarkAllRead = false
+                        scope.launch {
+                            runCatching { repo.markAllRead(unreadWhoms) }
+                        }
+                    },
+                ) { Text("Mark read") }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmMarkAllRead = false }) { Text("Cancel") }
             },
         )
     }
@@ -1258,6 +1315,11 @@ private fun FolderTabs(
     onSelectFolder: (Long?) -> Unit,
     onSelectSpecial: (SpecialTab) -> Unit,
     onLongPress: (FolderEntity) -> Unit,
+    /** Long-press on the All / Unread / Mentions special tabs.
+     *  Same intent as [onLongPress] for folder chips — surfaces the
+     *  "mark all read" affordance regardless of which tab the user
+     *  reached for. */
+    onSpecialLongPress: () -> Unit,
     onCreateNew: () -> Unit,
 ) {
     val specialActive = selectedFolderId == null
@@ -1300,6 +1362,7 @@ private fun FolderTabs(
                     badgeCount = mentionCount,
                     selected = specialActive && selectedSpecial == SpecialTab.Mentions,
                     onClick = { onSelectSpecial(SpecialTab.Mentions) },
+                    onLongClick = onSpecialLongPress,
                 )
             }
         }
@@ -1312,6 +1375,7 @@ private fun FolderTabs(
                     badgeCount = unreadCount,
                     selected = specialActive && selectedSpecial == SpecialTab.Unread,
                     onClick = { onSelectSpecial(SpecialTab.Unread) },
+                    onLongClick = onSpecialLongPress,
                 )
             }
         }
@@ -1320,6 +1384,7 @@ private fun FolderTabs(
                 text = "All",
                 selected = specialActive && selectedSpecial == SpecialTab.All,
                 onClick = { onSelectSpecial(SpecialTab.All) },
+                onLongClick = onSpecialLongPress,
             )
         }
     }

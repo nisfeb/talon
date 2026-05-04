@@ -47,6 +47,12 @@ fun FolderAssignmentSheet(
      *  AFTER the user confirms in the dialog, so the host doesn't
      *  need to put up its own confirmation. */
     onLeaveGroup: (() -> Unit)? = null,
+    /** When non-null, renders a "Mark group as read" row above
+     *  Leave group. Only the group long-press call site provides
+     *  this. The lambda fires immediately on tap — no confirmation,
+     *  since marking-read is reversible (a new message restores the
+     *  unread state) and asking-twice for a one-tap action is noise. */
+    onMarkGroupRead: (() -> Unit)? = null,
 ) {
     val sheetState = rememberModalBottomSheetState()
     var creating by remember { mutableStateOf(false) }
@@ -106,8 +112,20 @@ fun FolderAssignmentSheet(
                 },
             ) { Text("+ New folder") }
 
-            if (onLeaveGroup != null) {
+            if (onMarkGroupRead != null || onLeaveGroup != null) {
                 HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+            }
+            if (onMarkGroupRead != null) {
+                TextButton(
+                    onClick = {
+                        onMarkGroupRead()
+                        onDismiss()
+                    },
+                ) {
+                    Text("Mark group as read")
+                }
+            }
+            if (onLeaveGroup != null) {
                 TextButton(
                     onClick = { confirmLeave = true },
                 ) {

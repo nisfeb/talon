@@ -992,6 +992,25 @@ class TlonChatRepo(
     }
 
     /**
+     * Fire markRead for every whom in [whoms] in parallel. Used by
+     * the long-press "Mark all read" affordance — bulk-clearing a
+     * backlog (typical right after a fresh-install pulls the ship's
+     * stale activity state) sequentially would take ~retry_budget × N
+     * seconds; parallel batches them under one second.
+     *
+     * markRead itself swallows transient errors and retries; this
+     * helper only ensures each whom gets its own attempt.
+     */
+    suspend fun markAllRead(whoms: Collection<String>) {
+        if (whoms.isEmpty()) return
+        kotlinx.coroutines.coroutineScope {
+            whoms.forEach { whom ->
+                launch { runCatching { markRead(whom) } }
+            }
+        }
+    }
+
+    /**
      * Revoke a token-based invite by deleting the token from
      * `admissions.tokens` — ships in `admissions.invited` all have
      * a token; the map maps ship → token.
@@ -2525,6 +2544,14 @@ class TlonChatRepo(
      */
     private suspend fun bootstrapContacts(channel: UrbitChannel) {
         val fresh = mutableListOf<ContactEntity>()
+        // Bootstrap stamps "now" when a contact has a status but the
+        // server didn't send a parseable mod-at. Without this fallback
+        // a fresh-install desktop (which never observed the live news
+        // event that set the real timestamp) would show every status
+        // ordered by ship-name only — recent updates buried at the
+        // bottom of the Statuses feed. Matches applyContactsNews's
+        // ?: System.currentTimeMillis() fallback.
+        val now = System.currentTimeMillis()
 
         runCatching { channel.scry("contacts", "/v1/all") }.getOrNull()?.let { body ->
             (body as? JsonObject)?.forEach { (ship, entry) ->
@@ -2533,8 +2560,8 @@ class TlonChatRepo(
                 // mod-at: "..."}; older ones emit the flat field map.
                 val wrapped = obj["contact"] as? JsonObject
                 val fields = wrapped ?: obj
-                val modAt = parseContactModAt(obj)
-                fresh.add(parseContact(ship, fields, modAt))
+                val parsed = parseContact(ship, fields, parseContactModAt(obj))
+                fresh.add(stampStatusFallback(parsed, now))
             }
         }
 
@@ -2542,8 +2569,8 @@ class TlonChatRepo(
             (body as? JsonObject)?.let { obj ->
                 val wrapped = obj["contact"] as? JsonObject
                 val fields = wrapped ?: obj
-                val modAt = parseContactModAt(obj)
-                fresh.add(parseContact(ourPatp, fields, modAt))
+                val parsed = parseContact(ourPatp, fields, parseContactModAt(obj))
+                fresh.add(stampStatusFallback(parsed, now))
             }
         }
 
@@ -2552,6 +2579,14 @@ class TlonChatRepo(
             db.contacts().upsertAll(merged)
         }
     }
+
+    private fun stampStatusFallback(
+        contact: ContactEntity,
+        fallbackMs: Long,
+    ): ContactEntity =
+        if (!contact.status.isNullOrBlank() && contact.statusUpdatedMs == null) {
+            contact.copy(statusUpdatedMs = fallbackMs)
+        } else contact
 
     /**
      * Apply a single peer update from %contacts /v1/news. Handles the
@@ -2650,11 +2685,22 @@ class TlonChatRepo(
     private fun parseContactModAt(envelope: JsonObject?): Long? {
         val raw = envelope?.get("mod-at").asStr()
             ?: return null
+        // %contacts serializes `mod-at` as the @da's underlying
+        // integer, hoon-style dot-grouped (e.g.
+        // "170.141.184.505.296...."). Earlier revisions stripped
+        // dots and called toLongOrNull, which silently overflowed
+        // on every real value (@da ≈ 1.7e38 vs Long.MAX_VALUE ≈
+        // 9.2e18) and returned null — meaning every bootstrapped
+        // contact ended up with statusUpdatedMs=null and the
+        // Statuses feed couldn't sort recent updates to the top.
         val digits = raw.replace(".", "")
         if (digits.isEmpty() || !digits.all { it.isDigit() }) return null
-        val value = digits.toLongOrNull() ?: return null
-        // Sanity-bound: 2020-01-01 .. 2100-01-01 in unix-ms.
-        return if (value in 1_577_836_800_000L..4_102_444_800_000L) value else null
+        val da = runCatching { java.math.BigInteger(digits) }.getOrNull()
+            ?: return null
+        val ms = UrbitTime.daToUnixMs(da) ?: return null
+        // Sanity-bound: 2020-01-01 .. 2100-01-01 in unix-ms — clips
+        // out fixture / debug values that decoded into nonsense.
+        return if (ms in 1_577_836_800_000L..4_102_444_800_000L) ms else null
     }
 
     /**

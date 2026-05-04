@@ -53,6 +53,27 @@ class UrbitTimeTest {
     }
 
     @Test
+    fun `daToUnixMs is the inverse of unixMsToDa`() {
+        // Round-trip: a real-world timestamp should survive the
+        // forward-then-back conversion exactly.
+        val ms = 1_777_055_041_699L
+        val da = UrbitTime.unixMsToDa(ms)
+        assertEquals(ms, UrbitTime.daToUnixMs(da))
+    }
+
+    @Test
+    fun `daToUnixMs at DA_UNIX_EPOCH returns zero`() {
+        val epoch = BigInteger("170141184475152167957503069145530368000")
+        assertEquals(0L, UrbitTime.daToUnixMs(epoch))
+    }
+
+    @Test
+    fun `daToUnixMs returns null for da before unix epoch`() {
+        val tooEarly = BigInteger.valueOf(1234)
+        assertEquals(null, UrbitTime.daToUnixMs(tooEarly))
+    }
+
+    @Test
     fun `dotAtom of daToUd undotted matches daToUd`() {
         // Both the hand-rolled dotAtom in UrbitIds and daToUd should
         // produce identical dot-grouping for the same numeric value.
