@@ -2753,39 +2753,12 @@ class TlonChatRepo(
     private suspend fun bootstrapGroups(channel: UrbitChannel) {
         val body = channel.scry("groups", "/v2/groups")
         val obj = body as? JsonObject ?: return
+        // Pure parse extracted to GroupsScryParser.kt for unit-test
+        // coverage of the wire-shape contract — including the
+        // iteration-order-as-ordinal invariant the home-list "host
+        // order" sort relies on.
+        val parsed = parseGroupsScry(obj)
 
-        val groups = mutableListOf<GroupEntity>()
-        val channelGroups = mutableListOf<ChannelGroupEntity>()
-
-        for ((flag, group) in obj) {
-            val groupObj = group as? JsonObject ?: continue
-            val meta = groupObj["meta"] as? JsonObject
-            groups += GroupEntity(
-                flag = flag,
-                title = meta?.get("title").asStr()
-                    ?.takeIf { it.isNotBlank() },
-                image = meta?.get("image").asStr()
-                    ?.takeIf { it.isNotBlank() },
-            )
-            val channels = groupObj["channels"] as? JsonObject ?: continue
-            // Capture iteration order as the host-defined ordinal —
-            // %groups serializes its `channels` map in the host's
-            // configured order, which is what users see in Tlon's
-            // own UI. The home list's "host order" sort uses this.
-            channels.entries.forEachIndexed { idx, (nest, channel) ->
-                val channelObj = channel as? JsonObject
-                val channelMeta = channelObj?.get("meta") as? JsonObject
-                val channelTitle = channelMeta?.get("title")
-                    .asStr()
-                    ?.takeIf { it.isNotBlank() }
-                channelGroups += ChannelGroupEntity(
-                    nest = nest,
-                    groupFlag = flag,
-                    title = channelTitle,
-                    ordinal = idx,
-                )
-            }
-        }
         // Reconcile: drop local rows the ship no longer reports.
         // Without this, groups the user left / hosts deleted while
         // Talon was offline linger in the home list forever.
@@ -2793,7 +2766,7 @@ class TlonChatRepo(
             existingGroups = db.groups().allGroups(),
             existingChannels = db.groups().allChannelGroups(),
             liveGroupFlags = obj.keys,
-            liveChannelNests = channelGroups.map { it.nest }.toSet(),
+            liveChannelNests = parsed.channelGroups.map { it.nest }.toSet(),
         )
         for (flag in plan.deletedGroupFlags) {
             db.groups().deleteChannelsForGroup(flag)
@@ -2803,8 +2776,10 @@ class TlonChatRepo(
             db.groups().deleteChannelGroup(nest)
         }
 
-        if (groups.isNotEmpty()) db.groups().upsertGroups(groups)
-        if (channelGroups.isNotEmpty()) db.groups().upsertChannelGroups(channelGroups)
+        if (parsed.groups.isNotEmpty()) db.groups().upsertGroups(parsed.groups)
+        if (parsed.channelGroups.isNotEmpty()) {
+            db.groups().upsertChannelGroups(parsed.channelGroups)
+        }
     }
 
     // ───────── clubs ─────────
