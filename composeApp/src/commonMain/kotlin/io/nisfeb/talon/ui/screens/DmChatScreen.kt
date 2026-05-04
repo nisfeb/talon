@@ -40,6 +40,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.NotificationsOff
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Search
@@ -490,6 +491,12 @@ fun DmChatScreen(
 
     // ── message action sheet state ──
     var actionTarget by remember { mutableStateOf<MessageEntity?>(null) }
+    // Long-press / right-click on any reaction chip surfaces the
+    // per-reactor breakdown. Set to the message's reactions list and
+    // the sheet renders; null = closed.
+    var reactionDetailsTarget by remember(whom) {
+        mutableStateOf<List<ReactionEntity>?>(null)
+    }
     var editing by remember { mutableStateOf<MessageEntity?>(null) }
     var confirmingDelete by remember { mutableStateOf<MessageEntity?>(null) }
     var pendingQuote by remember(whom) { mutableStateOf<MessageEntity?>(null) }
@@ -652,6 +659,28 @@ fun DmChatScreen(
                     },
                 )
             }
+            // Pinned-post banner — chat channels only, surfaces just
+            // above the message list when an admin has pinned a post.
+            // Subtle on purpose: surfaceVariant background, small pin
+            // icon, single-line preview. Tap → scroll to the message.
+            pinnedPostId?.let { pinId ->
+                PinnedPostBanner(
+                    whom = whom,
+                    postId = pinId,
+                    db = db,
+                    contactMap = contactMap,
+                    onTap = {
+                        val idx = displayRows.indexOfFirst {
+                            it is ChatListItem.Message && it.row.m.id == pinId
+                        }
+                        if (idx >= 0) {
+                            val reverseIdx = displayRows.size - 1 - idx
+                            scope.launch { listState.animateScrollToItem(reverseIdx) }
+                            flashMessageId = pinId
+                        }
+                    },
+                )
+            }
             Box(modifier = Modifier.weight(1f).fillMaxSize()) {
             // Empty-state placeholder. Triggers when the refresh has
             // finished and we still have no rows — usually a
@@ -687,6 +716,9 @@ fun DmChatScreen(
                             onLongPress = onLongPressMessage,
                             onOpenThread = onOpenThreadForMessage,
                             onReactionTap = onReactionForMessage,
+                            onReactionLongPress = { reactions ->
+                                reactionDetailsTarget = reactions
+                            },
                             onMentionTap = onMentionTap,
                             onLinkTap = onLinkTap,
                             onImageTap = currentOnOpenImage,
@@ -975,6 +1007,18 @@ fun DmChatScreen(
             }
         }
 
+        reactionDetailsTarget?.let { reactions ->
+            io.nisfeb.talon.ui.ReactionDetailsSheet(
+                reactions = reactions,
+                contactMap = contactMap,
+                onDismiss = { reactionDetailsTarget = null },
+                onOpenProfile = { ship ->
+                    reactionDetailsTarget = null
+                    profileSheetShip = ship
+                },
+            )
+        }
+
         profileSheetShip?.let { ship ->
             ContactProfileSheet(
                 ship = ship,
@@ -1194,6 +1238,10 @@ private fun MessageRow(
     onLongPress: (MessageEntity) -> Unit,
     onOpenThread: (MessageEntity) -> Unit,
     onReactionTap: (MessageEntity, List<ReactionEntity>, String) -> Unit,
+    /** Long-press / right-click on any reaction chip — surfaces the
+     *  per-reactor breakdown so the user can see who reacted with
+     *  what without long-pressing the message itself. */
+    onReactionLongPress: (List<ReactionEntity>) -> Unit,
     onMentionTap: (String) -> Unit,
     onLinkTap: (String) -> Unit,
     onImageTap: (String) -> Unit,
@@ -1340,6 +1388,7 @@ private fun MessageRow(
                             count = count,
                             mine = mine,
                             onClick = { onReactionTap(m, row.reactions, emoji) },
+                            onLongClick = { onReactionLongPress(row.reactions) },
                         )
                     }
                     if (row.replyCount > 0) {
@@ -1370,6 +1419,7 @@ private fun ReactionChip(
     count: Int,
     mine: Boolean,
     onClick: () -> Unit,
+    onLongClick: (() -> Unit)? = null,
 ) {
     val bg = if (mine)
         MaterialTheme.colorScheme.primaryContainer
@@ -1380,7 +1430,10 @@ private fun ReactionChip(
         modifier = Modifier
             .clip(RoundedCornerShape(12.dp))
             .background(bg)
-            .clickable(onClick = onClick)
+            .combinedClickableWithSecondary(
+                onClick = onClick,
+                onLongClick = onLongClick,
+            )
             .padding(horizontal = 10.dp, vertical = 4.dp),
     ) {
         Text(ReactionPalette.display(emoji), style = MaterialTheme.typography.bodyMedium)
@@ -1391,6 +1444,55 @@ private fun ReactionChip(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
+    }
+}
+
+/**
+ * Subtle pinned-post banner above the channel message list. Renders
+ * `surfaceVariant` instead of the loud `secondaryContainer` an earlier
+ * draft used (per user feedback "make it more subtle"); a small pin
+ * icon plus a one-line preview is enough to advertise that something
+ * is pinned without competing with the messages below.
+ */
+@Composable
+private fun PinnedPostBanner(
+    whom: String,
+    postId: String,
+    db: AppDatabase,
+    contactMap: ContactMap,
+    onTap: () -> Unit,
+) {
+    val message by remember(whom, postId) {
+        db.messages().streamOne(whom, postId)
+    }.collectAsState(initial = null)
+    val m = message ?: return
+    val preview = remember(m.id, m.contentJson) {
+        StoryCache.textFor(m.id, m.contentJson).take(140).replace('\n', ' ')
+    }
+    val author = remember(m.author, contactMap) { contactMap.displayName(m.author) }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .clickable(onClick = onTap)
+            .padding(horizontal = 16.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Icon(
+            imageVector = Icons.Filled.PushPin,
+            contentDescription = "Pinned",
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(14.dp),
+        )
+        Text(
+            "$author: $preview",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
+        )
     }
 }
 

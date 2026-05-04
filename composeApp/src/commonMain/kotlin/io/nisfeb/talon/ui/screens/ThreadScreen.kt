@@ -221,6 +221,9 @@ fun ThreadScreen(
     // as DmChatScreen.actionTarget. We keep `pendingDelete` for the
     // post-confirm flow the sheet kicks off.
     var actionTarget by remember(parentId) { mutableStateOf<MessageEntity?>(null) }
+    var reactionDetailsTarget by remember(parentId) {
+        mutableStateOf<List<ReactionEntity>?>(null)
+    }
     val onReactionForMessage: (MessageEntity, List<ReactionEntity>, String) -> Unit =
         remember(ourPatp, whom, repo) {
             { m, rs, emoji ->
@@ -310,6 +313,7 @@ fun ThreadScreen(
                         onCitationTap = onCitationTap,
                         onLongPress = { actionTarget = it },
                         onReactionTap = onReactionForMessage,
+                        onReactionLongPress = { reactionDetailsTarget = it },
                         onPollVote = onPollVoteHandler,
                         showHeader = true,
                         highlighted = true,
@@ -334,6 +338,7 @@ fun ThreadScreen(
                     onCitationTap = onCitationTap,
                     onLongPress = { actionTarget = it },
                     onReactionTap = onReactionForMessage,
+                    onReactionLongPress = { reactionDetailsTarget = it },
                     onPollVote = onPollVoteHandler,
                     showHeader = row.showHeader,
                     highlighted = false,
@@ -465,6 +470,14 @@ fun ThreadScreen(
         )
     }
 
+    reactionDetailsTarget?.let { reactions ->
+        io.nisfeb.talon.ui.ReactionDetailsSheet(
+            reactions = reactions,
+            contactMap = contactMap,
+            onDismiss = { reactionDetailsTarget = null },
+        )
+    }
+
     actionTarget?.let { target ->
         val isMine = target.author == ourPatp
         val isChannel = whom.startsWith("chat/")
@@ -507,6 +520,9 @@ private fun ThreadMessage(
      *  to toggle their own reaction. Same shape as DmChatScreen's
      *  onReactionTap so the handler logic can be shared. */
     onReactionTap: (MessageEntity, List<ReactionEntity>, String) -> Unit,
+    /** Long-press / right-click on a reaction chip → show the
+     *  per-reactor breakdown. */
+    onReactionLongPress: (List<ReactionEntity>) -> Unit,
     onPollVote: (MessageEntity, List<ReactionEntity>, String) -> Unit,
     showHeader: Boolean,
     highlighted: Boolean,
@@ -570,7 +586,10 @@ private fun ThreadMessage(
                                 if (mine) MaterialTheme.colorScheme.primaryContainer
                                 else MaterialTheme.colorScheme.surfaceVariant
                             )
-                            .clickable { onReactionTap(m, reactions, emoji) }
+                            .combinedClickableWithSecondary(
+                                onClick = { onReactionTap(m, reactions, emoji) },
+                                onLongClick = { onReactionLongPress(reactions) },
+                            )
                             .padding(horizontal = 10.dp, vertical = 4.dp),
                     ) {
                         Text(ReactionPalette.display(emoji), style = MaterialTheme.typography.bodyMedium)
