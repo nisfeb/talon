@@ -124,4 +124,31 @@ class DesktopUiSettingsTest {
             AccentSettings.isEnabled(AccentSettings(enabled = true), multiShip = false),
         )
     }
+
+    // ── group channel order ──────────────────────────────────────
+
+    @Test
+    fun `default groupChannelOrder is Recent`() {
+        kotlin.test.assertEquals(
+            GroupChannelOrder.Recent,
+            DesktopUiSettings(file).groupChannelOrder.value,
+        )
+    }
+
+    @Test
+    fun `setGroupChannelOrder persists across reload`() {
+        DesktopUiSettings(file).setGroupChannelOrder(GroupChannelOrder.HostOrder)
+        kotlin.test.assertEquals(
+            GroupChannelOrder.HostOrder,
+            DesktopUiSettings(file).groupChannelOrder.value,
+        )
+    }
+
+    @Test
+    fun `setGroupChannelOrder same-value is a no-op`() {
+        DesktopUiSettings(file).setGroupChannelOrder(GroupChannelOrder.Recent)
+        // Default is Recent; setting Recent again on a fresh file
+        // should not create the file (no persist needed).
+        assertFalse(file.exists())
+    }
 }
