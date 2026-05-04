@@ -1,5 +1,6 @@
 package io.nisfeb.talon.urbit
 
+import io.nisfeb.talon.util.Log
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -37,6 +38,8 @@ import javax.crypto.spec.SecretKeySpec
  * like the kotlinx-crypto project).
  */
 object S3Uploader {
+
+    private const val TAG = "S3Uploader"
 
     data class Credentials(
         val endpoint: String,       // e.g. "https://s3.us-east-1.amazonaws.com"
@@ -133,6 +136,16 @@ object S3Uploader {
 
         val presignedUrl = "$baseUrl?$canonicalQuery&X-Amz-Signature=$signature"
 
+        // Diagnostic: log the redacted URL + canonical request shape
+        // before sending so a 502/403 trace can be cross-checked
+        // against the AWS spec without reproducing locally. Strips
+        // the actual signature and access-key id; everything else is
+        // ship-public state already on the wire.
+        val redactedUrl = presignedUrl.replace(signature, "<sig>")
+            .replace(creds.accessKeyId, "<key>")
+        Log.i(TAG, "S3 PUT $redactedUrl  host=$host  bytes=${bytes.size}")
+        Log.i(TAG, "S3 canonicalRequest:\n$canonicalRequest")
+
         val requestBuilder = Request.Builder()
             .url(presignedUrl)
             .put(bytes.toRequestBody(contentType.toMediaType()))
@@ -148,6 +161,7 @@ object S3Uploader {
             .execute().use { resp ->
                 if (!resp.isSuccessful) {
                     val body = resp.body?.string().orEmpty()
+                    Log.w(TAG, "S3 PUT ${resp.code} response body: $body")
                     error("S3 PUT failed: HTTP ${resp.code}${if (body.isNotBlank()) " — $body" else ""}")
                 }
             }
