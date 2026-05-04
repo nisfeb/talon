@@ -42,6 +42,13 @@ fun buildHomeRows(
     expandedGroups: Set<String>,
     allUnreads: Map<String, Int>,
     groupOrderFlags: List<String> = emptyList(),
+    /** When [GroupChannelOrder.HostOrder], sort channels under each
+     *  group head by the host-defined ordinal (captured from the
+     *  %groups scry's iteration order). Default Recent keeps the
+     *  unread-first → most-recent → alpha cascade. Unread channels
+     *  always float to the top regardless of mode. */
+    groupChannelOrder: io.nisfeb.talon.ui.GroupChannelOrder =
+        io.nisfeb.talon.ui.GroupChannelOrder.Recent,
 ): List<HomeRow> {
     val byWhom = allConvs.associateBy { it.first.whom }
 
@@ -54,13 +61,23 @@ fun buildHomeRows(
         .filter { it.flag !in orderedFlagsSet }
         .sortedBy { (it.title ?: it.flag).lowercase() }
     val groups = orderedGroups + unorderedGroups
+    val ordinalByNest = contactMap.channelGroups.associate { it.nest to it.ordinal }
     if (groups.isNotEmpty()) {
         out += HomeRow.Header("Groups", "groups")
         for (g in groups) {
             val channels = contactMap.channelsOfGroup(g.flag)
             val sortedChannels = channels.sortedWith(
                 compareByDescending<String> { (allUnreads[it] ?: 0) > 0 }
-                    .thenByDescending { byWhom[it]?.first?.sentMs ?: 0L }
+                    .let { primary ->
+                        when (groupChannelOrder) {
+                            io.nisfeb.talon.ui.GroupChannelOrder.HostOrder ->
+                                primary.thenBy { ordinalByNest[it] ?: Int.MAX_VALUE }
+                            io.nisfeb.talon.ui.GroupChannelOrder.Recent ->
+                                primary.thenByDescending {
+                                    byWhom[it]?.first?.sentMs ?: 0L
+                                }
+                        }
+                    }
                     .thenBy { it }
             )
             val totalUnread = channels.sumOf { allUnreads[it] ?: 0 }
@@ -113,10 +130,13 @@ fun buildFolderRows(
     contactMap: ContactMap,
     expandedGroups: Set<String>,
     allUnreads: Map<String, Int>,
+    groupChannelOrder: io.nisfeb.talon.ui.GroupChannelOrder =
+        io.nisfeb.talon.ui.GroupChannelOrder.Recent,
 ): List<HomeRow> {
     if (members.isEmpty()) return emptyList()
     val byWhom = allConvs.associateBy { it.first.whom }
     val sorted = members.sortedBy { it.ordinal }
+    val ordinalByNest = contactMap.channelGroups.associate { it.nest to it.ordinal }
 
     val coveredByGroup = buildSet {
         for (m in sorted) {
@@ -135,7 +155,16 @@ fun buildFolderRows(
                 val channels = contactMap.channelsOfGroup(flag)
                 val sortedChannels = channels.sortedWith(
                     compareByDescending<String> { (allUnreads[it] ?: 0) > 0 }
-                        .thenByDescending { byWhom[it]?.first?.sentMs ?: 0L }
+                        .let { primary ->
+                            when (groupChannelOrder) {
+                                io.nisfeb.talon.ui.GroupChannelOrder.HostOrder ->
+                                    primary.thenBy { ordinalByNest[it] ?: Int.MAX_VALUE }
+                                io.nisfeb.talon.ui.GroupChannelOrder.Recent ->
+                                    primary.thenByDescending {
+                                        byWhom[it]?.first?.sentMs ?: 0L
+                                    }
+                            }
+                        }
                         .thenBy { it }
                 )
                 val totalUnread = channels.sumOf { allUnreads[it] ?: 0 }

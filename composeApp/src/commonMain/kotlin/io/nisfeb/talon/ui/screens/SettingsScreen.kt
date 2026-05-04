@@ -84,6 +84,7 @@ fun SettingsScreen(
     val themeMode by themePreference.mode.collectAsState()
     val hideComposerButtons by uiSettings.hideComposerButtons.collectAsState()
     val accentSettings by uiSettings.accentSettings.collectAsState()
+    val groupChannelOrder by uiSettings.groupChannelOrder.collectAsState()
     val accentEnabled = io.nisfeb.talon.ui.AccentSettings
         .isEnabled(accentSettings, multiShip)
     var customHexInput by remember(accentSettings.customHex) {
@@ -224,6 +225,37 @@ fun SettingsScreen(
                 }
             }
             Spacer(Modifier.height(4.dp))
+
+            Text(
+                "Home list",
+                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
+            )
+            Text(
+                "How channels sort under each group on the home list.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilterChip(
+                    selected = groupChannelOrder == io.nisfeb.talon.ui.GroupChannelOrder.Recent,
+                    onClick = {
+                        uiSettings.setGroupChannelOrder(
+                            io.nisfeb.talon.ui.GroupChannelOrder.Recent,
+                        )
+                    },
+                    label = { Text("Most recent") },
+                )
+                FilterChip(
+                    selected = groupChannelOrder == io.nisfeb.talon.ui.GroupChannelOrder.HostOrder,
+                    onClick = {
+                        uiSettings.setGroupChannelOrder(
+                            io.nisfeb.talon.ui.GroupChannelOrder.HostOrder,
+                        )
+                    },
+                    label = { Text("Host order") },
+                )
+            }
+            Spacer(Modifier.height(8.dp))
 
             Text(
                 "Composer",

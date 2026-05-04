@@ -791,6 +791,8 @@ fun App(
                             showSettings = false
                             loggedInShip = null
                         },
+                        groupChannelOrder = uiSettings.groupChannelOrder
+                            .collectAsState().value,
                     )
                 }
 

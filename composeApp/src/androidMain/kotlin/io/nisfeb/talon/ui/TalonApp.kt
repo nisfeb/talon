@@ -946,6 +946,8 @@ fun TalonApp(
                 // Android-only OEM-killer nudge banner. Desktop hosts
                 // pass null and the slot is hidden.
                 batteryBanner = { BatteryExemptionBanner() },
+                groupChannelOrder = app.uiSettings.groupChannelOrder
+                    .collectAsState().value,
                 modifier = mod,
             )
         }

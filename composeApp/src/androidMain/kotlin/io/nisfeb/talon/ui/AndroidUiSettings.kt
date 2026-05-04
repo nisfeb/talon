@@ -24,6 +24,10 @@ class AndroidUiSettings(context: Context) : UiSettings {
     override val accentSettings: StateFlow<AccentSettings> =
         _accentSettings.asStateFlow()
 
+    private val _groupChannelOrder = MutableStateFlow(loadGroupOrder())
+    override val groupChannelOrder: StateFlow<GroupChannelOrder> =
+        _groupChannelOrder.asStateFlow()
+
     override fun setHideComposerButtons(hidden: Boolean) {
         if (_hideComposerButtons.value == hidden) return
         prefs.edit().putBoolean(KEY_HIDE_COMPOSER_BUTTONS, hidden).apply()
@@ -51,6 +55,18 @@ class AndroidUiSettings(context: Context) : UiSettings {
         _accentSettings.value = settings
     }
 
+    override fun setGroupChannelOrder(order: GroupChannelOrder) {
+        if (_groupChannelOrder.value == order) return
+        prefs.edit().putString(KEY_GROUP_CHANNEL_ORDER, order.name).apply()
+        _groupChannelOrder.value = order
+    }
+
+    private fun loadGroupOrder(): GroupChannelOrder {
+        val name = prefs.getString(KEY_GROUP_CHANNEL_ORDER, null) ?: return GroupChannelOrder.Recent
+        return runCatching { GroupChannelOrder.valueOf(name) }
+            .getOrDefault(GroupChannelOrder.Recent)
+    }
+
     private fun loadAccent(): AccentSettings {
         val rawEnabled = prefs.getInt(KEY_ACCENT_ENABLED, -1)
         val enabled = when (rawEnabled) {
@@ -73,5 +89,6 @@ class AndroidUiSettings(context: Context) : UiSettings {
         private const val KEY_ACCENT_ENABLED = "accent_enabled"
         private const val KEY_ACCENT_MODE = "accent_mode"
         private const val KEY_ACCENT_HEX = "accent_hex"
+        private const val KEY_GROUP_CHANNEL_ORDER = "group_channel_order"
     }
 }

@@ -27,7 +27,20 @@ interface UiSettings {
      */
     val accentSettings: StateFlow<AccentSettings>
     fun setAccentSettings(settings: AccentSettings)
+
+    /**
+     * How channels nested under a group head sort in the home list.
+     * Default [GroupChannelOrder.Recent] keeps the historical
+     * "unread first, then most-recently-active" behavior. Switching
+     * to [GroupChannelOrder.HostOrder] sorts by the host-defined
+     * ordinal captured at bootstrap (ChannelGroupEntity.ordinal).
+     * Unread channels still float to the top in either mode.
+     */
+    val groupChannelOrder: StateFlow<GroupChannelOrder>
+    fun setGroupChannelOrder(order: GroupChannelOrder)
 }
+
+enum class GroupChannelOrder { Recent, HostOrder }
 
 /**
  * How the active ship's accent gets resolved to a single color.
@@ -64,6 +77,7 @@ data class AccentSettings(
 class InMemoryUiSettings(
     initialHide: Boolean = false,
     initialAccent: AccentSettings = AccentSettings(),
+    initialGroupOrder: GroupChannelOrder = GroupChannelOrder.Recent,
 ) : UiSettings {
     private val _hideComposerButtons = MutableStateFlow(initialHide)
     override val hideComposerButtons: StateFlow<Boolean> =
@@ -77,5 +91,12 @@ class InMemoryUiSettings(
         _accentSettings.asStateFlow()
     override fun setAccentSettings(settings: AccentSettings) {
         _accentSettings.value = settings
+    }
+
+    private val _groupChannelOrder = MutableStateFlow(initialGroupOrder)
+    override val groupChannelOrder: StateFlow<GroupChannelOrder> =
+        _groupChannelOrder.asStateFlow()
+    override fun setGroupChannelOrder(order: GroupChannelOrder) {
+        _groupChannelOrder.value = order
     }
 }

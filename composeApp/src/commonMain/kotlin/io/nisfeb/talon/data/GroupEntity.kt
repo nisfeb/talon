@@ -42,4 +42,14 @@ data class ChannelGroupEntity(
      * the feature's actual surface (one pinned post per channel).
      */
     val pinnedPostId: String? = null,
+    /**
+     * Host-defined channel ordinal within its group, captured from the
+     * iteration order of the `%groups /v2/groups` scry's `channels`
+     * map at bootstrap time. Lets the home list expose a "host order"
+     * sort option alongside "most recently active". Equal ordinals
+     * fall back to the existing alpha-by-nest tiebreaker. Default 0
+     * keeps pre-migration rows from jumping to the top until the
+     * next bootstrap fills them in.
+     */
+    val ordinal: Int = 0,
 )

@@ -151,6 +151,11 @@ fun DmListScreen(
      *  tests) leave it null. Replaces the previous expect/actual
      *  shim that put a no-op on every non-Android target. */
     batteryBanner: (@Composable () -> Unit)? = null,
+    /** How channels under each group head sort. Threaded through
+     *  from UiSettings so the user's "Recent vs host order" toggle
+     *  takes effect without a relaunch. */
+    groupChannelOrder: io.nisfeb.talon.ui.GroupChannelOrder =
+        io.nisfeb.talon.ui.GroupChannelOrder.Recent,
     modifier: Modifier = Modifier,
 ) {
     val scope = rememberCoroutineScope()
@@ -357,6 +362,7 @@ fun DmListScreen(
     val allUnreads = remember(rows) { rows.associate { it.first.whom to it.second } }
     val homeRows = remember(
         selectedFolderId, rows, groupOrders, contactMap, expandedGroups, allUnreads,
+        groupChannelOrder,
     ) {
         if (selectedFolderId != null) emptyList()
         else buildHomeRows(
@@ -365,6 +371,7 @@ fun DmListScreen(
             expandedGroups = expandedGroups,
             allUnreads = allUnreads,
             groupOrderFlags = groupOrders.map { it.flag },
+            groupChannelOrder = groupChannelOrder,
         )
     }
     // Snapshot the effective group order at this moment so the reorder
@@ -385,6 +392,7 @@ fun DmListScreen(
     // conversation rows, in the user's per-folder ordinal order.
     val folderRows = remember(
         selectedFolderId, rows, members, contactMap, expandedGroups, allUnreads,
+        groupChannelOrder,
     ) {
         val fid = selectedFolderId ?: return@remember emptyList<HomeRow>()
         val folderMembers = members.filter { it.folderId == fid }
@@ -394,6 +402,7 @@ fun DmListScreen(
             contactMap = contactMap,
             expandedGroups = expandedGroups,
             allUnreads = allUnreads,
+            groupChannelOrder = groupChannelOrder,
         )
     }
 

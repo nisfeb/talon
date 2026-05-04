@@ -48,7 +48,7 @@ fun createAppDatabase(context: Context, name: String): AppDatabase {
             MIGRATION_17_18, MIGRATION_18_19, MIGRATION_19_20,
             MIGRATION_20_21, MIGRATION_21_22, MIGRATION_22_23,
             MIGRATION_23_24, MIGRATION_24_25, MIGRATION_25_26,
-            MIGRATION_26_27, MIGRATION_27_28,
+            MIGRATION_26_27, MIGRATION_27_28, MIGRATION_28_29,
         )
         // dropAllTables = true preserves the pre-2.7 behaviour: when
         // Room can't find a migration path, drop everything and rebuild.
@@ -203,6 +203,19 @@ private val MIGRATION_27_28 = object : Migration(27, 28) {
         // already treats as the default. See MessageEntity.status
         // KDoc for the value contract.
         db.execSQL("ALTER TABLE messages ADD COLUMN status TEXT")
+    }
+}
+
+private val MIGRATION_28_29 = object : Migration(28, 29) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        // Host-defined channel order within each group. Pre-existing
+        // rows get 0 (the default), which keeps the alpha-by-nest
+        // tiebreaker the home list already uses; the next bootstrap
+        // populates real values from the %groups scry's iteration
+        // order. See ChannelGroupEntity.ordinal KDoc.
+        db.execSQL(
+            "ALTER TABLE channel_groups ADD COLUMN ordinal INTEGER NOT NULL DEFAULT 0",
+        )
     }
 }
 

@@ -2768,7 +2768,11 @@ class TlonChatRepo(
                     ?.takeIf { it.isNotBlank() },
             )
             val channels = groupObj["channels"] as? JsonObject ?: continue
-            for ((nest, channel) in channels) {
+            // Capture iteration order as the host-defined ordinal —
+            // %groups serializes its `channels` map in the host's
+            // configured order, which is what users see in Tlon's
+            // own UI. The home list's "host order" sort uses this.
+            channels.entries.forEachIndexed { idx, (nest, channel) ->
                 val channelObj = channel as? JsonObject
                 val channelMeta = channelObj?.get("meta") as? JsonObject
                 val channelTitle = channelMeta?.get("title")
@@ -2778,6 +2782,7 @@ class TlonChatRepo(
                     nest = nest,
                     groupFlag = flag,
                     title = channelTitle,
+                    ordinal = idx,
                 )
             }
         }

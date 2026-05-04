@@ -47,7 +47,7 @@ import androidx.room.RoomDatabaseConstructor
         WatchwordChatExcludeEntity::class,
         DailyDigestEntity::class,
     ],
-    version = 28,
+    version = 29,
     exportSchema = false,
 )
 @ConstructedBy(AppDatabaseConstructor::class)

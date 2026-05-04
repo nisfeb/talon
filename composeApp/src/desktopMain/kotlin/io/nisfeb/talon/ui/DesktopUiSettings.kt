@@ -29,6 +29,8 @@ class DesktopUiSettings(
         val accentEnabled: Boolean? = null,
         val accentMode: String = AccentMode.Profile.name,
         val accentCustomHex: String? = null,
+        // Channel ordering inside group dropdowns on the home list.
+        val groupChannelOrder: String = GroupChannelOrder.Recent.name,
     )
 
     private val initial = loadInitial()
@@ -47,6 +49,13 @@ class DesktopUiSettings(
     override val accentSettings: StateFlow<AccentSettings> =
         _accentSettings.asStateFlow()
 
+    private val _groupChannelOrder = MutableStateFlow(
+        runCatching { GroupChannelOrder.valueOf(initial.groupChannelOrder) }
+            .getOrDefault(GroupChannelOrder.Recent),
+    )
+    override val groupChannelOrder: StateFlow<GroupChannelOrder> =
+        _groupChannelOrder.asStateFlow()
+
     override fun setHideComposerButtons(hidden: Boolean) {
         if (_hideComposerButtons.value == hidden) return
         _hideComposerButtons.value = hidden
@@ -59,6 +68,12 @@ class DesktopUiSettings(
         persistCurrent()
     }
 
+    override fun setGroupChannelOrder(order: GroupChannelOrder) {
+        if (_groupChannelOrder.value == order) return
+        _groupChannelOrder.value = order
+        persistCurrent()
+    }
+
     private fun persistCurrent() {
         val accent = _accentSettings.value
         persist(
@@ -67,6 +82,7 @@ class DesktopUiSettings(
                 accentEnabled = accent.enabled,
                 accentMode = accent.mode.name,
                 accentCustomHex = accent.customHex,
+                groupChannelOrder = _groupChannelOrder.value.name,
             ),
         )
     }
