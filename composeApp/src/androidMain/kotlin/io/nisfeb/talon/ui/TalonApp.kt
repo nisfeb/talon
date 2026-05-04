@@ -697,6 +697,7 @@ fun TalonApp(
                     uiSettings = app.uiSettings,
                     multiShip = multiShip,
                     profileAccentPreview = profileAccentPreview,
+                    notificationHealth = app.notificationHealth,
                     onBack = { settingsOpen = false },
                     dailyDigestSettings = app.dailyDigestSettings,
                     onTestDigest = { app.dailyDigest.generateAndNotifyAsync("user_test") },

@@ -105,6 +105,12 @@ fun App(
     /** UI preferences (composer toggles). In-memory default; desktop
      *  passes a JSON-backed impl. */
     uiSettings: UiSettings = InMemoryUiSettings(),
+    /** Process-wide diagnostics for the Notification Health panel.
+     *  Single instance shared by all consumers (repo writes,
+     *  Settings reads, future relay reads). Defaults to a fresh
+     *  instance for tests. */
+    notificationHealth: io.nisfeb.talon.notify.NotificationHealth =
+        io.nisfeb.talon.notify.NotificationHealth(),
     /** Optional factory for the on-device search embedder. Desktop
      *  passes a DJL-ONNX-backed impl that powers smart search +
      *  important-message highlights. Null means no smart features
@@ -261,7 +267,13 @@ fun App(
                 }
             }
         }
-        val repo = remember { TlonChatRepo(db = db, settingsSync = settingsSync) }
+        val repo = remember {
+            TlonChatRepo(
+                db = db,
+                settingsSync = settingsSync,
+                notificationHealth = notificationHealth,
+            )
+        }
         // Per-ship menu-seen store. Constructed inside the
         // key(shipKey) block so a ship-switch starts collecting from
         // the new ship's persisted file (the host's createMenuSeen
@@ -464,6 +476,7 @@ fun App(
                         uiSettings = uiSettings,
                         multiShip = multiShip,
                         profileAccentPreview = profileAccent,
+                        notificationHealth = notificationHealth,
                         onBack = { showSettings = false },
                         dailyDigestSettings = dailyDigestSettings,
                         // onTestDigest stays null on desktop — Android

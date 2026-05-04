@@ -64,6 +64,11 @@ class TalonApplication : Application() {
         private set
     lateinit var repo: TlonChatRepo
         private set
+    /** Process-wide notification-delivery diagnostics. Single
+     *  instance shared with the per-ship repo so the Settings →
+     *  Notification Health panel surfaces accurate state. */
+    val notificationHealth: io.nisfeb.talon.notify.NotificationHealth =
+        io.nisfeb.talon.notify.NotificationHealth()
     lateinit var settingsSync: io.nisfeb.talon.urbit.SettingsSyncImpl
         private set
     lateinit var drafts: DraftStore
@@ -295,7 +300,11 @@ class TalonApplication : Application() {
                 watchwords.excludeChat(whom, excluded)
             },
         )
-        repo = TlonChatRepo(db, settingsSync = settingsSync)
+        repo = TlonChatRepo(
+            db = db,
+            settingsSync = settingsSync,
+            notificationHealth = notificationHealth,
+        )
         watchwords = io.nisfeb.talon.ai.Watchwords(
             db = db,
             ourPatpProvider = { ship.takeIf { it != "none" } ?: "" },

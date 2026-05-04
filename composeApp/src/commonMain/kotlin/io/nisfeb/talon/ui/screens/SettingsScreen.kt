@@ -69,6 +69,10 @@ fun SettingsScreen(
      *  Accent panel as a preview swatch for the Profile mode. Null
      *  when the user hasn't set a color on their own contact. */
     profileAccentPreview: androidx.compose.ui.graphics.Color? = null,
+    /** Process-wide notification health diagnostics. Optional —
+     *  call sites that pre-date the panel pass null and the section
+     *  doesn't render. */
+    notificationHealth: io.nisfeb.talon.notify.NotificationHealth? = null,
     onBack: () -> Unit,
     /** Optional daily-digest config + alarm controls. Android wires
      *  the JSON-prefs-backed impl that drives AlarmManager; desktop
@@ -256,6 +260,11 @@ fun SettingsScreen(
                 )
             }
             Spacer(Modifier.height(8.dp))
+
+            if (notificationHealth != null) {
+                NotificationHealthPanel(notificationHealth)
+                Spacer(Modifier.height(8.dp))
+            }
 
             Text(
                 "Composer",
@@ -631,6 +640,95 @@ private fun AccentSwatchRow(
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.weight(1f),
         )
+    }
+}
+
+@Composable
+private fun NotificationHealthPanel(
+    health: io.nisfeb.talon.notify.NotificationHealth,
+) {
+    val sseConnected by health.sseConnected.collectAsState()
+    val lastSseEvent by health.lastSseEventMs.collectAsState()
+    val lastReconcile by health.lastReconcileMs.collectAsState()
+    val forceReconnects by health.forceReconnects.collectAsState()
+    val recoveredEvents by health.recoveredEvents.collectAsState()
+
+    Text(
+        "Notification health",
+        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
+    )
+    Text(
+        "If something below looks wrong, real-time delivery may be " +
+            "degraded — restart Talon, check your network, or look " +
+            "at battery / background-app permissions.",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    Column(Modifier.padding(top = 4.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        HealthRow(
+            label = "Live channel",
+            value = if (sseConnected) "connected" else "reconnecting…",
+            highlight = !sseConnected,
+        )
+        HealthRow(
+            label = "Last event",
+            value = formatHealthAge(lastSseEvent),
+        )
+        HealthRow(
+            label = "Last sync",
+            value = formatHealthAge(lastReconcile),
+        )
+        if (forceReconnects > 0) {
+            HealthRow(
+                label = "Force-reconnects (this session)",
+                value = forceReconnects.toString(),
+                highlight = forceReconnects >= 3,
+            )
+        }
+        if (recoveredEvents > 0) {
+            HealthRow(
+                label = "Events recovered by sync",
+                value = recoveredEvents.toString(),
+            )
+        }
+    }
+}
+
+@Composable
+private fun HealthRow(
+    label: String,
+    value: String,
+    highlight: Boolean = false,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text(
+            label,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.weight(1f),
+        )
+        Text(
+            value,
+            style = MaterialTheme.typography.bodySmall,
+            color = if (highlight) MaterialTheme.colorScheme.error
+                else MaterialTheme.colorScheme.onSurface,
+        )
+    }
+}
+
+private fun formatHealthAge(ms: Long): String {
+    if (ms <= 0L) return "never"
+    val now = System.currentTimeMillis()
+    val ageMs = (now - ms).coerceAtLeast(0L)
+    return when {
+        ageMs < 60_000L -> "${ageMs / 1000}s ago"
+        ageMs < 3_600_000L -> "${ageMs / 60_000L}m ago"
+        ageMs < 24L * 3_600_000L -> "${ageMs / 3_600_000L}h ago"
+        else -> "${ageMs / (24L * 3_600_000L)}d ago"
     }
 }
 

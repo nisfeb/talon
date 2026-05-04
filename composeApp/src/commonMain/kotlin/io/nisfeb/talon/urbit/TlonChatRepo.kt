@@ -99,6 +99,15 @@ class TlonChatRepo(
      * `null` until a desktop %settings bridge is added in Stage F.
      */
     val settingsSync: SettingsSync? = null,
+    /**
+     * Diagnostics sink for the Notification Health panel. Repo
+     * writes SSE / reconcile / reconnect timestamps; UI reads them.
+     * Defaults to a fresh instance so test harnesses don't need to
+     * stand one up — the host should pass the app-wide instance so
+     * all surfaces see the same state.
+     */
+    val notificationHealth: io.nisfeb.talon.notify.NotificationHealth =
+        io.nisfeb.talon.notify.NotificationHealth(),
 ) {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -269,6 +278,8 @@ class TlonChatRepo(
         val ch = session.openChannel()
         channel = ch
         lastEventMs = System.currentTimeMillis()
+        notificationHealth.markSseConnected(true)
+        notificationHealth.markSseEvent(lastEventMs)
         // Pagination markers are per-(channel, ship). A new channel
         // means the ship may surface old history we previously couldn't
         // reach (e.g. backfill arrived during the disconnect). Drop the
@@ -297,6 +308,7 @@ class TlonChatRepo(
         runCatching { bootstrap(ch) }
             .onFailure { Log.e(TAG, "initPosts scry failed", it) }
         runCatching { bootstrapActivity(ch) }
+            .onSuccess { notificationHealth.markReconcileSuccess() }
             .onFailure { Log.e(TAG, "activity scry failed", it) }
         // Contacts / clubs / groups rarely churn — only scry them on
         // first run so reconnect storms don't pound the ship.
@@ -334,6 +346,7 @@ class TlonChatRepo(
         val collectJob = launch {
             ch.events().collect { event ->
                 lastEventMs = System.currentTimeMillis()
+                notificationHealth.markSseEvent(lastEventMs)
                 runCatching { applyEvent(event.body) }
                     .onFailure {
                         // Rethrow cancellation so structured-concurrency
@@ -355,6 +368,8 @@ class TlonChatRepo(
                 val idleMs = System.currentTimeMillis() - lastEventMs
                 if (idleMs > 90_000L) {
                     Log.w(TAG, "watchdog: ${idleMs}ms without event; force-reconnect")
+                    notificationHealth.incrementForceReconnects()
+                    notificationHealth.markSseConnected(false)
                     collectJob.cancel()
                     break
                 }
@@ -402,6 +417,7 @@ class TlonChatRepo(
             runCatching { bootstrap(ch) }
                 .onFailure { Log.w(TAG, "catchUp bootstrap failed", it) }
             runCatching { bootstrapActivity(ch) }
+                .onSuccess { notificationHealth.markReconcileSuccess() }
                 .onFailure { Log.w(TAG, "catchUp activity failed", it) }
         }
     }
@@ -409,6 +425,7 @@ class TlonChatRepo(
     fun stop() {
         started = false
         channel = null
+        notificationHealth.markSseConnected(false)
         scope.cancel()
         // Clear pagination markers so a future repo instance for the
         // same ship doesn't inherit stale "history exhausted" state.
