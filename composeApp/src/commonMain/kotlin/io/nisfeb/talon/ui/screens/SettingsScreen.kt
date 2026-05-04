@@ -1,7 +1,11 @@
 package io.nisfeb.talon.ui.screens
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -56,6 +60,15 @@ fun SettingsScreen(
     aiSettings: AiSettingsRepository,
     themePreference: ThemePreference,
     uiSettings: UiSettings,
+    /** Whether the user is logged into 2+ ships. Drives the
+     *  accent-color section's auto-default — multi-ship users land
+     *  with the toggle on so they don't lose the per-ship pip / send
+     *  tint they're used to. */
+    multiShip: Boolean = false,
+    /** Active ship's contact color (already parsed). Surfaced in the
+     *  Accent panel as a preview swatch for the Profile mode. Null
+     *  when the user hasn't set a color on their own contact. */
+    profileAccentPreview: androidx.compose.ui.graphics.Color? = null,
     onBack: () -> Unit,
     /** Optional daily-digest config + alarm controls. Android wires
      *  the JSON-prefs-backed impl that drives AlarmManager; desktop
@@ -70,6 +83,12 @@ fun SettingsScreen(
     val aiState by aiSettings.state.collectAsState()
     val themeMode by themePreference.mode.collectAsState()
     val hideComposerButtons by uiSettings.hideComposerButtons.collectAsState()
+    val accentSettings by uiSettings.accentSettings.collectAsState()
+    val accentEnabled = io.nisfeb.talon.ui.AccentSettings
+        .isEnabled(accentSettings, multiShip)
+    var customHexInput by remember(accentSettings.customHex) {
+        mutableStateOf(accentSettings.customHex.orEmpty())
+    }
 
     var provider by remember { mutableStateOf(aiState.provider) }
     var apiKey by remember { mutableStateOf(aiState.apiKey) }
@@ -117,6 +136,91 @@ fun SettingsScreen(
                         onClick = { themePreference.setMode(mode) },
                         label = { Text(mode.label()) },
                     )
+                }
+            }
+            Spacer(Modifier.height(8.dp))
+
+            // ── Accent color ────────────────────────────────────────
+            FeatureToggleRow(
+                label = "Custom accent color",
+                description = if (multiShip) {
+                    "Tints the send icon, focused text fields, and per-" +
+                        "ship pip. On for multi-ship users by default."
+                } else {
+                    "Tints the send icon, focused text fields, and " +
+                        "other primary-colored UI. Off keeps the brand " +
+                        "amber everywhere."
+                },
+                enabled = accentEnabled,
+                onChange = { on ->
+                    uiSettings.setAccentSettings(accentSettings.copy(enabled = on))
+                },
+            )
+            if (accentEnabled) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilterChip(
+                        selected = accentSettings.mode == io.nisfeb.talon.ui.AccentMode.Profile,
+                        onClick = {
+                            uiSettings.setAccentSettings(
+                                accentSettings.copy(mode = io.nisfeb.talon.ui.AccentMode.Profile),
+                            )
+                        },
+                        label = { Text("Profile color") },
+                    )
+                    FilterChip(
+                        selected = accentSettings.mode == io.nisfeb.talon.ui.AccentMode.Custom,
+                        onClick = {
+                            uiSettings.setAccentSettings(
+                                accentSettings.copy(mode = io.nisfeb.talon.ui.AccentMode.Custom),
+                            )
+                        },
+                        label = { Text("Custom hex") },
+                    )
+                }
+                when (accentSettings.mode) {
+                    io.nisfeb.talon.ui.AccentMode.Profile -> {
+                        AccentSwatchRow(
+                            label = "Pulled from your %contacts profile",
+                            color = profileAccentPreview,
+                            fallbackHint = "Set a color on your profile to customize.",
+                        )
+                    }
+                    io.nisfeb.talon.ui.AccentMode.Custom -> {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            OutlinedTextField(
+                                value = customHexInput,
+                                onValueChange = { customHexInput = it },
+                                placeholder = { Text("#RRGGBB") },
+                                singleLine = true,
+                                modifier = Modifier.weight(1f),
+                            )
+                            val previewColor = remember(customHexInput) {
+                                io.nisfeb.talon.ui.parseHexColor(customHexInput)
+                            }
+                            Box(
+                                modifier = Modifier
+                                    .size(40.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(
+                                        previewColor
+                                            ?: MaterialTheme.colorScheme.surfaceVariant,
+                                    ),
+                            )
+                            TextButton(
+                                enabled = previewColor != null &&
+                                    customHexInput != accentSettings.customHex,
+                                onClick = {
+                                    uiSettings.setAccentSettings(
+                                        accentSettings.copy(customHex = customHexInput),
+                                    )
+                                },
+                            ) { Text("Apply") }
+                        }
+                    }
+                    io.nisfeb.talon.ui.AccentMode.Brand -> Unit
                 }
             }
             Spacer(Modifier.height(4.dp))
@@ -469,6 +573,32 @@ private fun FeatureToggleRow(
             )
         }
         Switch(checked = enabled, onCheckedChange = onChange)
+    }
+}
+
+@Composable
+private fun AccentSwatchRow(
+    label: String,
+    color: androidx.compose.ui.graphics.Color?,
+    fallbackHint: String,
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Box(
+            modifier = Modifier
+                .size(32.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .background(color ?: MaterialTheme.colorScheme.surfaceVariant),
+        )
+        Text(
+            text = if (color != null) label else fallbackHint,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.weight(1f),
+        )
     }
 }
 

@@ -678,15 +678,24 @@ fun TalonApp(
                 modifier = mod,
             )
 
-            settingsOpen -> SettingsScreen(
-                aiSettings = app.aiSettings,
-                themePreference = app.themePreference,
-                uiSettings = app.uiSettings,
-                onBack = { settingsOpen = false },
-                dailyDigestSettings = app.dailyDigestSettings,
-                onTestDigest = { app.dailyDigest.generateAndNotifyAsync("user_test") },
-                modifier = mod,
-            )
+            settingsOpen -> {
+                val multiShip = remember { app.sessionStore.all().size >= 2 }
+                val ourPatp = app.session.shipName
+                val profileAccentPreview = ourPatp?.let { ship ->
+                    contactMap.contact(ship)?.color?.let(::parseHexColor)
+                }
+                SettingsScreen(
+                    aiSettings = app.aiSettings,
+                    themePreference = app.themePreference,
+                    uiSettings = app.uiSettings,
+                    multiShip = multiShip,
+                    profileAccentPreview = profileAccentPreview,
+                    onBack = { settingsOpen = false },
+                    dailyDigestSettings = app.dailyDigestSettings,
+                    onTestDigest = { app.dailyDigest.generateAndNotifyAsync("user_test") },
+                    modifier = mod,
+                )
+            }
 
             pendingShare != null -> ShareTargetScreen(
                 db = app.db,

@@ -21,23 +21,61 @@ class DesktopUiSettings(
     private val file: File = File(AppDirs.userData, "ui.json"),
 ) : UiSettings {
     @Serializable
-    private data class Persisted(val hideComposerButtons: Boolean = false)
+    private data class Persisted(
+        val hideComposerButtons: Boolean = false,
+        // Accent settings — `enabled` is nullable so we can tell
+        // "user never opted in" apart from "user explicitly off",
+        // matching the contract in [AccentSettings].
+        val accentEnabled: Boolean? = null,
+        val accentMode: String = AccentMode.Profile.name,
+        val accentCustomHex: String? = null,
+    )
 
-    private val _hideComposerButtons = MutableStateFlow(loadInitial())
+    private val initial = loadInitial()
+    private val _hideComposerButtons = MutableStateFlow(initial.hideComposerButtons)
     override val hideComposerButtons: StateFlow<Boolean> =
         _hideComposerButtons.asStateFlow()
 
+    private val _accentSettings = MutableStateFlow(
+        AccentSettings(
+            enabled = initial.accentEnabled,
+            mode = runCatching { AccentMode.valueOf(initial.accentMode) }
+                .getOrDefault(AccentMode.Profile),
+            customHex = initial.accentCustomHex,
+        ),
+    )
+    override val accentSettings: StateFlow<AccentSettings> =
+        _accentSettings.asStateFlow()
+
     override fun setHideComposerButtons(hidden: Boolean) {
         if (_hideComposerButtons.value == hidden) return
-        persist(Persisted(hidden))
         _hideComposerButtons.value = hidden
+        persistCurrent()
     }
 
-    private fun loadInitial(): Boolean {
-        if (!file.exists()) return false
+    override fun setAccentSettings(settings: AccentSettings) {
+        if (_accentSettings.value == settings) return
+        _accentSettings.value = settings
+        persistCurrent()
+    }
+
+    private fun persistCurrent() {
+        val accent = _accentSettings.value
+        persist(
+            Persisted(
+                hideComposerButtons = _hideComposerButtons.value,
+                accentEnabled = accent.enabled,
+                accentMode = accent.mode.name,
+                accentCustomHex = accent.customHex,
+            ),
+        )
+    }
+
+    private fun loadInitial(): Persisted {
+        if (!file.exists()) return Persisted()
         return runCatching {
-            JSON.decodeFromString<Persisted>(file.readText()).hideComposerButtons
-        }.getOrElse { false }
+            JSON.decodeFromString<Persisted>(file.readText())
+        }.getOrElse { Persisted() }
     }
 
     private fun persist(value: Persisted) {

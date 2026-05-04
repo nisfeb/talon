@@ -16,9 +16,12 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.core.content.ContextCompat
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.remember
+import io.nisfeb.talon.ui.AccentMode
+import io.nisfeb.talon.ui.AccentSettings
 import io.nisfeb.talon.ui.AndroidImageDownloader
 import io.nisfeb.talon.ui.LocalImageDownloader
 import io.nisfeb.talon.ui.TalonApp
+import io.nisfeb.talon.ui.parseHexColor
 import io.nisfeb.talon.ui.theme.TalonTheme
 import io.nisfeb.talon.ui.theme.ThemePreference
 
@@ -80,7 +83,33 @@ class MainActivity : ComponentActivity() {
             val imageDownloader = remember(app) {
                 AndroidImageDownloader(applicationContext, app.http)
             }
-            TalonTheme(darkTheme = darkTheme) {
+            // Resolve the user's chosen accent so the theme primary
+            // tints every primary-colored UI element uniformly. Same
+            // logic as commonMain's App.kt, scoped to the production
+            // Android app's TalonApplication graph.
+            val accentSettings by app.uiSettings.accentSettings.collectAsState()
+            val multiShip = remember(app) { app.sessionStore.all().size >= 2 }
+            val activeShip = app.session.shipName
+            val ownContacts by remember(app) {
+                app.db.contacts().stream()
+            }.collectAsState(initial = emptyList())
+            val profileAccent = remember(ownContacts, activeShip) {
+                if (activeShip == null) null
+                else ownContacts.firstOrNull { it.ship == activeShip }?.color
+                    ?.let(::parseHexColor)
+            }
+            val accentEnabled = AccentSettings
+                .isEnabled(accentSettings, multiShip)
+            val accentOverride = remember(accentEnabled, accentSettings, profileAccent) {
+                if (!accentEnabled) null
+                else when (accentSettings.mode) {
+                    AccentMode.Brand -> null
+                    AccentMode.Custom ->
+                        accentSettings.customHex?.let(::parseHexColor)
+                    AccentMode.Profile -> profileAccent
+                }
+            }
+            TalonTheme(darkTheme = darkTheme, accentOverride = accentOverride) {
                 CompositionLocalProvider(LocalImageDownloader provides imageDownloader) {
                     TalonApp(
                         initialOpenWhom = whom,

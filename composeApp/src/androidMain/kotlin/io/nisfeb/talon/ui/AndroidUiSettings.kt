@@ -20,13 +20,58 @@ class AndroidUiSettings(context: Context) : UiSettings {
     override val hideComposerButtons: StateFlow<Boolean> =
         _hideComposerButtons.asStateFlow()
 
+    private val _accentSettings = MutableStateFlow(loadAccent())
+    override val accentSettings: StateFlow<AccentSettings> =
+        _accentSettings.asStateFlow()
+
     override fun setHideComposerButtons(hidden: Boolean) {
         if (_hideComposerButtons.value == hidden) return
         prefs.edit().putBoolean(KEY_HIDE_COMPOSER_BUTTONS, hidden).apply()
         _hideComposerButtons.value = hidden
     }
 
+    override fun setAccentSettings(settings: AccentSettings) {
+        if (_accentSettings.value == settings) return
+        prefs.edit().apply {
+            // SharedPreferences has no nullable Boolean — we encode it
+            // as Int: -1 for null (never opted in), 0 for false, 1 for
+            // true. Matches the contract on AccentSettings.enabled.
+            putInt(
+                KEY_ACCENT_ENABLED,
+                when (settings.enabled) {
+                    null -> -1
+                    false -> 0
+                    true -> 1
+                },
+            )
+            putString(KEY_ACCENT_MODE, settings.mode.name)
+            if (settings.customHex == null) remove(KEY_ACCENT_HEX)
+            else putString(KEY_ACCENT_HEX, settings.customHex)
+        }.apply()
+        _accentSettings.value = settings
+    }
+
+    private fun loadAccent(): AccentSettings {
+        val rawEnabled = prefs.getInt(KEY_ACCENT_ENABLED, -1)
+        val enabled = when (rawEnabled) {
+            0 -> false
+            1 -> true
+            else -> null
+        }
+        val mode = runCatching {
+            AccentMode.valueOf(prefs.getString(KEY_ACCENT_MODE, null) ?: AccentMode.Profile.name)
+        }.getOrDefault(AccentMode.Profile)
+        return AccentSettings(
+            enabled = enabled,
+            mode = mode,
+            customHex = prefs.getString(KEY_ACCENT_HEX, null),
+        )
+    }
+
     private companion object {
         private const val KEY_HIDE_COMPOSER_BUTTONS = "hide_composer_buttons"
+        private const val KEY_ACCENT_ENABLED = "accent_enabled"
+        private const val KEY_ACCENT_MODE = "accent_mode"
+        private const val KEY_ACCENT_HEX = "accent_hex"
     }
 }

@@ -7,6 +7,7 @@ import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 
 // Brand palette — see DESIGN.md for the full rationale. Do not hardcode
 // these hexes in composables; always go through MaterialTheme.colorScheme.
@@ -71,10 +72,26 @@ private val DarkColors = darkColorScheme(
 @Composable
 fun TalonTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
+    /** When non-null, overrides `colorScheme.primary` (and its
+     *  `onPrimary` contrast pair) with the user's chosen accent.
+     *  null = use the brand palette unchanged.
+     *
+     *  Container variants (`primaryContainer` / `onPrimaryContainer`)
+     *  are intentionally left as the brand to avoid a fully-recomputed
+     *  tonal palette per accent — the FilterChip/IconButton surfaces
+     *  that lean on `primary` get the override; chip backgrounds and
+     *  larger primaryContainer fills stay brand-stable. */
+    accentOverride: Color? = null,
     content: @Composable () -> Unit,
 ) {
+    val base = if (darkTheme) DarkColors else LightColors
+    val effective = if (accentOverride == null) base else base.copy(
+        primary = accentOverride,
+        onPrimary = if (accentOverride.luminance() > 0.5f) Color(0xFF1C1917)
+        else Color(0xFFFFFFFF),
+    )
     MaterialTheme(
-        colorScheme = if (darkTheme) DarkColors else LightColors,
+        colorScheme = effective,
         typography = TalonTypography,
         content = content,
     )

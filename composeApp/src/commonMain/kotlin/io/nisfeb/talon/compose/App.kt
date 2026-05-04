@@ -15,6 +15,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import kotlinx.coroutines.launch
 import io.nisfeb.talon.ai.AiSettingsRepository
+import io.nisfeb.talon.ui.parseHexColor
 import io.nisfeb.talon.ai.InMemoryWatchwordsSyncSettings
 import io.nisfeb.talon.ai.WatchwordsSyncSettings
 import io.nisfeb.talon.notify.NoopNotifier
@@ -397,7 +398,48 @@ fun App(
             ThemePreference.Mode.Light -> false
             ThemePreference.Mode.Dark -> true
         }
-        TalonTheme(darkTheme = darkTheme) {
+
+        // Effective accent: drives `colorScheme.primary` for every
+        // primary-tinted surface (send icon, focused border, ship pip,
+        // FilterChip selected, etc). Single override-point so adding
+        // a new accent-using composable doesn't need a code change.
+        //
+        //   * stored Disabled or stored unset on a single-ship login
+        //     → null (brand palette stays).
+        //   * stored Enabled (or auto-enabled for multi-ship) and
+        //     mode = Profile → active ship's contact color.
+        //   * mode = Custom → user's hex.
+        //   * mode = Brand → null (explicit opt-out also stays brand).
+        val accentSettings by uiSettings.accentSettings.collectAsState()
+        val multiShip = remember(loggedInShip) {
+            sessionStore.all().size >= 2
+        }
+        // Pull active ship's profile color upfront so the accent
+        // computation is a pure expression below (no conditional
+        // composable calls).
+        val ownContactsList by remember(db) {
+            db.contacts().stream()
+        }.collectAsState(initial = emptyList<io.nisfeb.talon.data.ContactEntity>())
+        val activeShip = session.shipName ?: loggedInShip
+        val profileAccent = remember(ownContactsList, activeShip) {
+            if (activeShip == null) null
+            else ownContactsList.firstOrNull { it.ship == activeShip }?.color
+                ?.let(::parseHexColor)
+        }
+        val accentEnabled = io.nisfeb.talon.ui.AccentSettings
+            .isEnabled(accentSettings, multiShip)
+        val accentOverride: androidx.compose.ui.graphics.Color? = remember(
+            accentEnabled, accentSettings, profileAccent,
+        ) {
+            if (!accentEnabled) null
+            else when (accentSettings.mode) {
+                io.nisfeb.talon.ui.AccentMode.Brand -> null
+                io.nisfeb.talon.ui.AccentMode.Custom ->
+                    accentSettings.customHex?.let(::parseHexColor)
+                io.nisfeb.talon.ui.AccentMode.Profile -> profileAccent
+            }
+        }
+        TalonTheme(darkTheme = darkTheme, accentOverride = accentOverride) {
           androidx.compose.runtime.CompositionLocalProvider(
               io.nisfeb.talon.ui.LocalImageDownloader provides imageDownloader,
           ) {
@@ -420,6 +462,8 @@ fun App(
                         aiSettings = aiSettings,
                         themePreference = themePreference,
                         uiSettings = uiSettings,
+                        multiShip = multiShip,
+                        profileAccentPreview = profileAccent,
                         onBack = { showSettings = false },
                         dailyDigestSettings = dailyDigestSettings,
                         // onTestDigest stays null on desktop — Android

@@ -846,14 +846,12 @@ fun DmChatScreen(
                     onDismiss = { pendingQuote = null },
                 )
             }
-            // Send-button accent in the active ship's contact color.
-            // Peripheral cue against posting-as-the-wrong-ship in
-            // groups shared between multiple logged-in ships. Brand
-            // amber as fallback when the user hasn't set their own
-            // contact color. Hoisted here so the text composer and
-            // the voice-preview row share the same accent.
-            val sendAccent = io.nisfeb.talon.ui.rememberShipAccent(ourPatp, contactMap)
-                ?: MaterialTheme.colorScheme.primary
+            // Send-button + composer accent. Reads
+            // `colorScheme.primary` directly — App.kt overrides the
+            // theme primary with the user's chosen accent (per-ship
+            // contact color, custom hex, or brand) so this single
+            // value drives every primary-tinted surface uniformly.
+            val sendAccent = MaterialTheme.colorScheme.primary
             val pv = pendingVoice
             if (pv != null) {
                 VoicePreviewRow(
@@ -948,7 +946,6 @@ fun DmChatScreen(
                     placeholder = { Text("Message") },
                     enabled = canSend,
                     textStyle = MaterialTheme.typography.bodyMedium,
-                    colors = io.nisfeb.talon.ui.accentTextFieldColors(sendAccent),
                     modifier = Modifier
                         .weight(1f)
                         .onPreviewKeyEvent { e ->

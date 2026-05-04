@@ -67,4 +67,61 @@ class DesktopUiSettingsTest {
         val tmp = File(tmpDir, "ui.json.tmp")
         assertFalse(tmp.exists())
     }
+
+    // ── accent settings ──────────────────────────────────────────
+
+    @Test
+    fun `default accentSettings has enabled=null mode=Profile no hex`() {
+        val accent = DesktopUiSettings(file).accentSettings.value
+        kotlin.test.assertEquals(null, accent.enabled)
+        kotlin.test.assertEquals(AccentMode.Profile, accent.mode)
+        kotlin.test.assertEquals(null, accent.customHex)
+    }
+
+    @Test
+    fun `setAccentSettings persists across reload`() {
+        DesktopUiSettings(file).setAccentSettings(
+            AccentSettings(enabled = true, mode = AccentMode.Custom, customHex = "#FF00AA"),
+        )
+        val reloaded = DesktopUiSettings(file).accentSettings.value
+        kotlin.test.assertEquals(true, reloaded.enabled)
+        kotlin.test.assertEquals(AccentMode.Custom, reloaded.mode)
+        kotlin.test.assertEquals("#FF00AA", reloaded.customHex)
+    }
+
+    @Test
+    fun `setAccentSettings explicit-off survives the null-vs-false distinction`() {
+        // The user opting OUT must persist as Boolean false, not
+        // collapse back to null — otherwise a single-ship → multi-
+        // ship transition would silently flip the accent back on.
+        DesktopUiSettings(file).setAccentSettings(AccentSettings(enabled = false))
+        val reloaded = DesktopUiSettings(file).accentSettings.value
+        kotlin.test.assertEquals(false, reloaded.enabled)
+    }
+
+    @Test
+    fun `AccentSettings isEnabled defaults to multiShip when stored value unset`() {
+        kotlin.test.assertEquals(
+            true,
+            AccentSettings.isEnabled(AccentSettings(enabled = null), multiShip = true),
+        )
+        kotlin.test.assertEquals(
+            false,
+            AccentSettings.isEnabled(AccentSettings(enabled = null), multiShip = false),
+        )
+    }
+
+    @Test
+    fun `AccentSettings isEnabled honors explicit stored value over multiShip default`() {
+        // Multi-ship user who explicitly turned the accent off stays off.
+        kotlin.test.assertEquals(
+            false,
+            AccentSettings.isEnabled(AccentSettings(enabled = false), multiShip = true),
+        )
+        // Single-ship user who opted in stays on even though they're alone.
+        kotlin.test.assertEquals(
+            true,
+            AccentSettings.isEnabled(AccentSettings(enabled = true), multiShip = false),
+        )
+    }
 }
