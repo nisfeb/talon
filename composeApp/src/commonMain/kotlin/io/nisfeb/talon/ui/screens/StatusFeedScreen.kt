@@ -43,6 +43,7 @@ import androidx.compose.ui.unit.dp
 import io.nisfeb.talon.data.AppDatabase
 import io.nisfeb.talon.data.ContactEntity
 import io.nisfeb.talon.ui.Avatar
+import io.nisfeb.talon.ui.linkifyStatus
 import io.nisfeb.talon.urbit.TlonChatRepo
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
@@ -158,12 +159,22 @@ private fun SelfStatusRow(
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            Text(
-                status ?: "Tap to set a status",
-                style = MaterialTheme.typography.bodyMedium,
-                color = if (status != null) MaterialTheme.colorScheme.primary
-                    else MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            // Render the empty-state hint as plain text; only linkify
+            // when a real status is set (otherwise the placeholder text
+            // is sniffed for "no status yet" patterns and breaks).
+            if (status != null) {
+                Text(
+                    text = linkifyStatus(status),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            } else {
+                Text(
+                    "Tap to set a status",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
         Icon(
             Icons.Filled.Edit,
@@ -244,7 +255,7 @@ private fun StatusRow(c: ContactEntity, onClick: () -> Unit) {
             }
             c.status?.let {
                 Text(
-                    it,
+                    text = linkifyStatus(it),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.primary,
                 )

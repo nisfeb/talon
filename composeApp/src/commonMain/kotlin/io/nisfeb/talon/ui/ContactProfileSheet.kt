@@ -78,7 +78,7 @@ fun ContactProfileSheet(
             )
             if (!contact?.status.isNullOrBlank()) {
                 Text(
-                    contact!!.status!!,
+                    text = linkifyStatus(contact!!.status!!),
                     style = MaterialTheme.typography.bodyMedium.copy(
                         fontWeight = FontWeight.Medium,
                     ),
