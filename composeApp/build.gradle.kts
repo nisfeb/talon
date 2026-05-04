@@ -133,8 +133,8 @@ android {
         // matches what RELEASE.md already documents and opts us into
         // Android 15 behavior changes (16 KB page sizes, edge-to-edge).
         targetSdk = 35
-        versionCode = 39
-        versionName = "0.7.16"
+        versionCode = 40
+        versionName = "0.7.17"
     }
 
     signingConfigs {
