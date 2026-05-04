@@ -679,8 +679,15 @@ fun TalonApp(
             )
 
             settingsOpen -> {
-                val multiShip = remember { app.sessionStore.all().size >= 2 }
-                val ourPatp = app.session.shipName
+                // Observe via the app-level flows so a ship switch
+                // re-renders the panel with the new ship's preview.
+                // Reading `app.session.shipName` / `app.sessionStore
+                // .all()` directly looks like it works but doesn't —
+                // those are lateinit-mutated fields Compose can't
+                // track. Same trap fixed in MainActivity for the
+                // theme accent.
+                val multiShip = allShips.size >= 2
+                val ourPatp = loggedInShip
                 val profileAccentPreview = ourPatp?.let { ship ->
                     contactMap.contact(ship)?.color?.let(::parseHexColor)
                 }

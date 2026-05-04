@@ -87,15 +87,26 @@ class MainActivity : ComponentActivity() {
             // tints every primary-colored UI element uniformly. Same
             // logic as commonMain's App.kt, scoped to the production
             // Android app's TalonApplication graph.
+            //
+            // Critical: observe the ship via `app.activeShipFlow` and
+            // re-key the contacts stream on it. Reading `app.session
+            // .shipName` directly looks correct but doesn't trigger
+            // recomposition on ship switch — that field is a lateinit
+            // var reassigned in buildShipScoped, which Compose has no
+            // way to track. Same trap for `app.db`: caching the flow
+            // with `remember(app)` pinned the old per-ship database
+            // even after switchShip swapped the field. Both surfaced
+            // as "accent stays as the previous ship's color."
             val accentSettings by app.uiSettings.accentSettings.collectAsState()
-            val multiShip = remember(app) { app.sessionStore.all().size >= 2 }
-            val activeShip = app.session.shipName
-            val ownContacts by remember(app) {
+            val activeShipState by app.activeShipFlow.collectAsState()
+            val allShipsState by app.allShipsFlow.collectAsState()
+            val multiShip = allShipsState.size >= 2
+            val ownContacts by remember(activeShipState) {
                 app.db.contacts().stream()
             }.collectAsState(initial = emptyList())
-            val profileAccent = remember(ownContacts, activeShip) {
-                if (activeShip == null) null
-                else ownContacts.firstOrNull { it.ship == activeShip }?.color
+            val profileAccent = remember(ownContacts, activeShipState) {
+                val ship = activeShipState ?: return@remember null
+                ownContacts.firstOrNull { it.ship == ship }?.color
                     ?.let(::parseHexColor)
             }
             val accentEnabled = AccentSettings
