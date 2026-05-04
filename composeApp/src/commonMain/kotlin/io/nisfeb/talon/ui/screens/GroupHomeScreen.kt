@@ -2,6 +2,7 @@ package io.nisfeb.talon.ui.screens
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -19,14 +20,20 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.Logout
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -78,6 +85,11 @@ fun GroupHomeScreen(
     var joinError by remember { mutableStateOf<String?>(null) }
     var joinRequested by remember { mutableStateOf(false) }
 
+    var menuOpen by remember { mutableStateOf(false) }
+    var confirmLeave by remember { mutableStateOf(false) }
+    var leaving by remember { mutableStateOf(false) }
+    var leaveError by remember { mutableStateOf<String?>(null) }
+
     val title = group?.title ?: flag
     val isMember = group != null
 
@@ -113,6 +125,33 @@ fun GroupHomeScreen(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
                     )
+                }
+            }
+            // Overflow menu only makes sense for members — for
+            // non-members the screen's whole purpose is the join CTA.
+            if (isMember) {
+                Box {
+                    IconButton(onClick = { menuOpen = true }) {
+                        Icon(Icons.Filled.MoreVert, contentDescription = "More")
+                    }
+                    DropdownMenu(
+                        expanded = menuOpen,
+                        onDismissRequest = { menuOpen = false },
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text("Leave group") },
+                            leadingIcon = {
+                                Icon(
+                                    Icons.AutoMirrored.Filled.Logout,
+                                    contentDescription = null,
+                                )
+                            },
+                            onClick = {
+                                menuOpen = false
+                                confirmLeave = true
+                            },
+                        )
+                    }
                 }
             }
         }
@@ -206,6 +245,58 @@ fun GroupHomeScreen(
                 }
             }
         }
+    }
+
+    if (confirmLeave) {
+        AlertDialog(
+            onDismissRequest = { if (!leaving) confirmLeave = false },
+            title = { Text("Leave $title?") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        "You'll stop receiving messages from this group's channels. " +
+                            "You can rejoin later if it's public, or ask for a new invite.",
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    leaveError?.let {
+                        Text(
+                            it,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = !leaving,
+                    onClick = {
+                        leaving = true
+                        leaveError = null
+                        scope.launch {
+                            runCatching { repo.leaveGroup(flag) }
+                                .onSuccess {
+                                    leaving = false
+                                    confirmLeave = false
+                                    onBack()
+                                }
+                                .onFailure {
+                                    leaveError = it.message ?: it::class.simpleName
+                                    leaving = false
+                                }
+                        }
+                    },
+                ) {
+                    Text(if (leaving) "Leaving…" else "Leave")
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    enabled = !leaving,
+                    onClick = { confirmLeave = false },
+                ) { Text("Cancel") }
+            },
+        )
     }
 }
 

@@ -977,6 +977,21 @@ class TlonChatRepo(
     }
 
     /**
+     * Leave a group we're a member of. Mirrors tlon-apps'
+     * `leaveGroup`: poke %groups with `group-leave`, payload is the
+     * flag string. The ship side handles cleanup; channels and
+     * unreads drain via the next %activity / %channels delta.
+     */
+    suspend fun leaveGroup(flag: String) {
+        val ch = channel ?: error("not connected")
+        ch.poke(
+            app = "groups",
+            mark = "group-leave",
+            payload = JsonPrimitive(flag),
+        )
+    }
+
+    /**
      * Revoke a token-based invite by deleting the token from
      * `admissions.tokens` — ships in `admissions.invited` all have
      * a token; the map maps ship → token.

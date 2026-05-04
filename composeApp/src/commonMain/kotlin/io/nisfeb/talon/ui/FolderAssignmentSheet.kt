@@ -41,10 +41,17 @@ fun FolderAssignmentSheet(
     onToggle: (FolderEntity, Boolean) -> Unit,
     onCreateNew: (name: String) -> Unit,
     onDismiss: () -> Unit,
+    /** When non-null, renders a "Leave group" row at the bottom of
+     *  the sheet. Only the group long-press call site provides this;
+     *  per-conversation invocations leave it null. The lambda fires
+     *  AFTER the user confirms in the dialog, so the host doesn't
+     *  need to put up its own confirmation. */
+    onLeaveGroup: (() -> Unit)? = null,
 ) {
     val sheetState = rememberModalBottomSheetState()
     var creating by remember { mutableStateOf(false) }
     var newName by remember { mutableStateOf("") }
+    var confirmLeave by remember { mutableStateOf(false) }
 
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
         Column(
@@ -98,7 +105,45 @@ fun FolderAssignmentSheet(
                     newName = ""
                 },
             ) { Text("+ New folder") }
+
+            if (onLeaveGroup != null) {
+                HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+                TextButton(
+                    onClick = { confirmLeave = true },
+                ) {
+                    Text(
+                        "Leave group",
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+            }
         }
+    }
+
+    if (confirmLeave && onLeaveGroup != null) {
+        AlertDialog(
+            onDismissRequest = { confirmLeave = false },
+            title = { Text("Leave $conversationLabel?") },
+            text = {
+                Text(
+                    "You'll stop receiving messages from this group's channels. " +
+                        "You can rejoin later if it's public, or ask for a new invite.",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmLeave = false
+                    onLeaveGroup()
+                    onDismiss()
+                }) {
+                    Text("Leave", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmLeave = false }) { Text("Cancel") }
+            },
+        )
     }
 
     if (creating) {

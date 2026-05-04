@@ -1096,6 +1096,9 @@ fun DmListScreen(
                 }
             },
             onDismiss = { folderSheetGroup = null },
+            onLeaveGroup = {
+                scope.launch { runCatching { repo.leaveGroup(flag) } }
+            },
         )
     }
 
