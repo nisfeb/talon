@@ -91,6 +91,18 @@ fun SearchScreen(
         else db.contacts().search(escapedNeedle)
     }.collectAsState(initial = emptyList<ContactEntity>())
 
+    // Set of whoms the user has any activity with — used to flag a
+    // search result as "you've never DMed this person, tap to start"
+    // rather than letting them silently land on a 404'd empty chat.
+    // unreads has a row per chat the user has *received* activity for,
+    // so it's a cheap proxy for "this conversation exists on the ship".
+    val knownWhoms by remember {
+        db.unreads().stream()
+    }.collectAsState(initial = emptyList())
+    val activeWhomSet = remember(knownWhoms) {
+        knownWhoms.mapTo(hashSetOf()) { it.whom }
+    }
+
     val contactMap by remember {
         contactMapFlow(
             db.contacts().stream(),
@@ -130,9 +142,9 @@ fun SearchScreen(
         else runCatching { embedder.computeHighlights() }.getOrElse { emptyList() }
     }
 
-    androidx.compose.runtime.LaunchedEffect(semanticEnabled, embedder) {
-        if (semanticEnabled && embedder != null) embedder.start()
-    }
+    // Indexer start is owned by App.kt now — it kicks off as soon as
+    // any embedder-dependent feature is enabled (smart search / topic
+    // clusters / important messages), not on first SearchScreen mount.
 
     val results = if (smartMode) semanticResults.value else substringResults
 
@@ -235,7 +247,11 @@ fun SearchScreen(
                         key = { "person:${it.ship}" },
                         contentType = { "person" },
                     ) { p ->
-                        PersonRow(p) { onOpenConversation(p.ship) }
+                        PersonRow(
+                            contact = p,
+                            hasChatHistory = p.ship in activeWhomSet,
+                            onClick = { onOpenConversation(p.ship) },
+                        )
                         HorizontalDivider()
                     }
                 }
@@ -296,7 +312,11 @@ private fun SectionHeader(label: String) {
 }
 
 @Composable
-private fun PersonRow(contact: ContactEntity, onClick: () -> Unit) {
+private fun PersonRow(
+    contact: ContactEntity,
+    hasChatHistory: Boolean,
+    onClick: () -> Unit,
+) {
     val label = contact.nickname?.takeIf { it.isNotBlank() } ?: contact.ship
     Row(
         modifier = Modifier
@@ -321,9 +341,31 @@ private fun PersonRow(contact: ContactEntity, onClick: () -> Unit) {
                 style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
                 maxLines = 1,
             )
-            if (!contact.nickname.isNullOrBlank() && contact.nickname != contact.ship) {
-                Text(
+            // Subtitle: real patp when we showed a nickname above, or
+            // a "tap to start" hint when this contact has never shown
+            // up in unreads (so DmChatScreen wouldn't be picking up an
+            // existing conversation — first send creates the DM).
+            val showShipSubtitle =
+                !contact.nickname.isNullOrBlank() && contact.nickname != contact.ship
+            when {
+                showShipSubtitle -> Text(
                     contact.ship,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                )
+                !hasChatHistory -> Text(
+                    "Tap to start a DM",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                )
+            }
+            // If the contact has both a nickname AND no chat history,
+            // we still want the hint somewhere; tuck it under the patp.
+            if (showShipSubtitle && !hasChatHistory) {
+                Text(
+                    "Tap to start a DM",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,

@@ -652,9 +652,22 @@ fun DmChatScreen(
                     },
                 )
             }
+            Box(modifier = Modifier.weight(1f).fillMaxSize()) {
+            // Empty-state placeholder. Triggers when the refresh has
+            // finished and we still have no rows — usually a
+            // never-DMed peer where the ship has no writ history. We
+            // keep the composer enabled below; the first send creates
+            // the DM on the ship side, so "say hi" is the literal fix.
+            if (!refreshing && displayRows.isEmpty()) {
+                EmptyChatPlaceholder(
+                    label = contactMap.conversationLabel(whom),
+                    isDm = whom.startsWith("~"),
+                    modifier = Modifier.align(Alignment.Center).padding(horizontal = 24.dp),
+                )
+            }
             LazyColumn(
                 state = listState,
-                modifier = Modifier.weight(1f).fillMaxSize(),
+                modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
                 reverseLayout = true,
             ) {
@@ -686,6 +699,7 @@ fun DmChatScreen(
                     }
                 }
             }
+            } // close empty-state Box
             if (sendError != null) {
                 Text(
                     sendError!!,
@@ -1383,6 +1397,32 @@ private fun ReactionChip(
 }
 
 @Composable
+private fun EmptyChatPlaceholder(
+    label: String,
+    isDm: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier = modifier,
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Text(
+            "No messages yet",
+            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+        Text(
+            text = if (isDm) "Say hi to $label — your first message starts the DM."
+                else "Be the first to post in this channel.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+        )
+    }
+}
+
+@Composable
 private fun DateDividerRow(label: String) {
     Row(
         modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp),
@@ -1972,6 +2012,10 @@ private data class TopicClusterRow(
 private data class TopicsResult(
     val clusters: List<TopicClusterRow>,
     val fellBackToAllTime: Boolean,
+    /** Total embeddings indexed for this chat. Lets the empty-state
+     *  copy distinguish "indexer is still working / not enough chat
+     *  yet" from "index is fine, no clusters in this window". */
+    val embeddingCount: Int,
 )
 
 @OptIn(ExperimentalMaterial3Api::class, androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
@@ -1986,7 +2030,7 @@ private fun TopicsSheet(
     var window by remember(whom) { mutableStateOf(TopicWindow.Month) }
     var loading by remember(whom) { mutableStateOf(true) }
     var result by remember(whom) {
-        mutableStateOf(TopicsResult(emptyList(), fellBackToAllTime = false))
+        mutableStateOf(TopicsResult(emptyList(), fellBackToAllTime = false, embeddingCount = 0))
     }
 
     LaunchedEffect(whom, window) {
@@ -2034,12 +2078,26 @@ private fun TopicsSheet(
                     )
                     Text("Clustering…", style = MaterialTheme.typography.bodyMedium)
                 }
-                clusters.isEmpty() -> Text(
-                    "Not enough messages indexed for this chat yet. " +
-                        "Open Search and let smart search index your archive first.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                clusters.isEmpty() -> {
+                    // Empty state. Distinguish "indexer hasn't seen
+                    // enough chat yet" from "index is fine, this
+                    // window just doesn't cluster". The indexer
+                    // already runs in the background as soon as the
+                    // user enables this feature (see App.kt's
+                    // searchEmbedderClient LaunchedEffect), so we
+                    // never tell the user to go elsewhere to start it.
+                    val msg = if (result.embeddingCount < 6) {
+                        "Indexing your messages — this happens in the background. " +
+                            "Check back in a moment."
+                    } else {
+                        "No distinct topics in this window — try a longer time range."
+                    }
+                    Text(
+                        msg,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
                 else -> clusters.forEach { c ->
                     Row(
                         modifier = Modifier
@@ -2077,12 +2135,20 @@ private suspend fun buildTopicClusters(
     db: AppDatabase,
     windowMs: Long?,
 ): TopicsResult {
+    // Embedding count is independent of windowing — pull it once so
+    // the sheet can show the right empty-state copy regardless of
+    // which time window is selected.
+    val embeddingCount = db.embeddings().forWhom(whom).size
     val initial = clusterTopicsWithin(whom, db, windowMs)
     if (initial.isNotEmpty() || windowMs == null) {
-        return TopicsResult(initial, fellBackToAllTime = false)
+        return TopicsResult(initial, fellBackToAllTime = false, embeddingCount = embeddingCount)
     }
     val fallback = clusterTopicsWithin(whom, db, windowMs = null)
-    return TopicsResult(fallback, fellBackToAllTime = fallback.isNotEmpty())
+    return TopicsResult(
+        clusters = fallback,
+        fellBackToAllTime = fallback.isNotEmpty(),
+        embeddingCount = embeddingCount,
+    )
 }
 
 private suspend fun clusterTopicsWithin(

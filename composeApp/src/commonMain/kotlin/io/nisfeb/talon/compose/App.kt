@@ -273,6 +273,24 @@ fun App(
             createSearchEmbedderClient?.invoke(db)
         }
 
+        // Kick off the embedder index as soon as ANY feature that
+        // depends on it is enabled — smart search, topic clusters, or
+        // important-message highlights. Previously start() only ran
+        // when SearchScreen mounted, which meant the topic icon and
+        // highlights would render an empty / "go to Search to index"
+        // state until the user happened to open Search. start() is a
+        // no-op if already running, so flipping any toggle (or cold-
+        // launching with one already on) just wakes the indexer once.
+        val aiState by aiSettings.state.collectAsState()
+        LaunchedEffect(searchEmbedderClient, aiState.semanticSearchEnabled,
+            aiState.topicClustersEnabled, aiState.importantMessagesEnabled) {
+            val client = searchEmbedderClient ?: return@LaunchedEffect
+            val needsIndex = aiState.semanticSearchEnabled ||
+                aiState.topicClustersEnabled ||
+                aiState.importantMessagesEnabled
+            if (needsIndex) runCatching { client.start() }
+        }
+
         DisposableEffect(Unit) {
             onDispose {
                 runCatching { repo.stop() }
