@@ -29,9 +29,9 @@ class ChatStoryTest {
 
     @Test
     fun `empty input yields a single empty-inline verse`() {
-        // split('\n') on "" returns [""], so one verse survives; that
-        // matches the existing chat contract (don't drop empty sends
-        // silently — let the UI gate them).
+        // Empty input still produces one verse; UIs gate empty sends
+        // elsewhere. Without this the message would be all-empty and
+        // a downstream caller might crash on no inline.
         val story = chatTextToStory("")
         assertEquals(1, story.size)
     }
@@ -41,21 +41,40 @@ class ChatStoryTest {
         val story = chatTextToStory("hello")
         assertEquals(1, story.size)
         val inline = inlineOf(story[0].jsonObject)
-        // Last verse has NO break appended.
+        // No `break` — the verse holds a single text primitive.
         assertFalse(inline.any { (it as? JsonObject)?.containsKey("break") == true })
         assertEquals("hello", (inline[0] as JsonPrimitive).content)
     }
 
     @Test
-    fun `multi-line plain text gets a break on every verse except the last`() {
+    fun `single-newline-separated lines collapse into one verse with internal breaks`() {
+        // Soft line breaks (single \n) used to split into N verses,
+        // which rendered with a blank row on top of the column gap
+        // (visible double-spacing). Now they live inside one verse so
+        // each \n renders at line-height spacing.
         val story = chatTextToStory("one\ntwo\nthree")
-        assertEquals(3, story.size)
-        val hasBreak = { v: JsonObject ->
-            inlineOf(v).any { (it as? JsonObject)?.containsKey("break") == true }
-        }
-        assertTrue(hasBreak(story[0].jsonObject))
-        assertTrue(hasBreak(story[1].jsonObject))
-        assertFalse(hasBreak(story[2].jsonObject))
+        assertEquals(1, story.size)
+        val inline = inlineOf(story[0].jsonObject)
+        val texts = inline.filterIsInstance<JsonPrimitive>().map { it.content }
+        assertEquals(listOf("one", "two", "three"), texts)
+        val breakCount = inline.count { (it as? JsonObject)?.containsKey("break") == true }
+        assertEquals(2, breakCount)
+        // No trailing break — the renderer would otherwise draw a
+        // blank row beneath the last line.
+        assertFalse(
+            (inline.last() as? JsonObject)?.containsKey("break") == true,
+        )
+    }
+
+    @Test
+    fun `blank line creates a paragraph break — two verses`() {
+        // Double-newline = explicit paragraph gap. Each side becomes
+        // its own verse so StoryRenderer's column arrangement renders
+        // the gap on top of normal line spacing.
+        val story = chatTextToStory("one\n\ntwo")
+        assertEquals(2, story.size)
+        assertEquals("one", (inlineOf(story[0].jsonObject)[0] as JsonPrimitive).content)
+        assertEquals("two", (inlineOf(story[1].jsonObject)[0] as JsonPrimitive).content)
     }
 
     // ─── blockquote grouping ────────────────────────────────────

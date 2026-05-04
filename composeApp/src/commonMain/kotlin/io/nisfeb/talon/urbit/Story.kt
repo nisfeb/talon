@@ -159,7 +159,13 @@ object Story {
                 val rendered = buildAnnotatedString {
                     arr.forEach { renderInline(it, this) }
                 }
-                if (rendered.isNotEmpty()) out.addAll(splitForWidgetTags(rendered))
+                // Trim a trailing `break` (`\n`) from the verse so it
+                // doesn't render as a blank row on top of the column-
+                // arrangement gap. Older Talon clients (and anyone
+                // splitting one-line-per-verse) leave a stray `\n` at
+                // the end; without this trim they double-space.
+                val cleaned = trimEndBlanks(rendered)
+                if (cleaned.isNotEmpty()) out.addAll(splitForWidgetTags(cleaned))
             }
             obj["block"]?.let { block ->
                 val blockObj = block as? JsonObject ?: return@let
