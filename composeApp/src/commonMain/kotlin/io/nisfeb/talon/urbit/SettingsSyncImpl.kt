@@ -112,11 +112,11 @@ class SettingsSyncImpl(
             applyBucket(BUCKET_BOOKMARKS, deskMap[BUCKET_BOOKMARKS] as? JsonObject)
             applyBucket(BUCKET_BOOKMARK_FOLDERS, deskMap[BUCKET_BOOKMARK_FOLDERS] as? JsonObject)
             applyBucket(BUCKET_BOOKMARK_FOLDER_MEMBERS, deskMap[BUCKET_BOOKMARK_FOLDER_MEMBERS] as? JsonObject)
-            // AI settings: only applied if the local device has opted
-            // into sync — otherwise we respect the device's local key.
-            if (aiSettings.state.value.syncEnabled) {
-                applyBucket(BUCKET_AI_SETTINGS, deskMap[BUCKET_AI_SETTINGS] as? JsonObject)
-            }
+            // AI settings: per-feature toggles always apply (they
+            // follow the user across devices). applyAiEntry itself
+            // gates the cloud-key fields on local syncEnabled so the
+            // API key only travels with explicit consent.
+            applyBucket(BUCKET_AI_SETTINGS, deskMap[BUCKET_AI_SETTINGS] as? JsonObject)
             // Watchwords are unconditionally applied (mirrors live
             // subscribe semantics) so a fresh login hydrates the
             // ship's existing terms — without this, push works but
@@ -397,19 +397,30 @@ class SettingsSyncImpl(
     }
 
     /**
-     * Push the current AI settings to %settings. Call when user has
-     * opted into sync and we want to mirror provider/model/key/toggles
-     * to the ship.
+     * Push the current AI settings to %settings. Per-feature toggles
+     * (catchMeUp, emojiReact, dailyDigest, entityActions, semantic
+     * search, topic clusters, important messages) ALWAYS push — they
+     * are user preferences with no security cost and should follow
+     * the user across devices. Cloud-key fields (provider / apiKey /
+     * model / baseUrl) only push when the user has explicitly opted
+     * into sync via `syncEnabled`; the API key is service credential
+     * material and shipping it without consent leaks it to the ship.
+     *
+     * Toggling `syncEnabled` from on to off therefore overwrites the
+     * ship's entry with a feature-only blob, dropping the cloud-key
+     * fields without needing a separate clear path.
      */
-    suspend fun pushAiSettings() {
+    override suspend fun pushAiSettings() {
         val cfg = aiSettings.state.value
         pokePutEntry(
             BUCKET_AI_SETTINGS, AI_ENTRY,
             buildJsonObject {
-                put("provider", cfg.provider.name)
-                put("apiKey", cfg.apiKey)
-                cfg.model?.let { put("model", it) }
-                cfg.baseUrl?.let { put("baseUrl", it) }
+                if (cfg.syncEnabled) {
+                    put("provider", cfg.provider.name)
+                    put("apiKey", cfg.apiKey)
+                    cfg.model?.let { put("model", it) }
+                    cfg.baseUrl?.let { put("baseUrl", it) }
+                }
                 put("catchMeUpEnabled", cfg.catchMeUpEnabled)
                 put("emojiReactEnabled", cfg.emojiReactEnabled)
                 put("dailyDigestEnabled", cfg.dailyDigestEnabled)
@@ -421,7 +432,12 @@ class SettingsSyncImpl(
         )
     }
 
-    /** Nuke the ship's AI settings bucket — when user turns sync off. */
+    /**
+     * Nuke the ship's AI settings bucket. Used by callers that want
+     * to fully clear the user's AI prefs from the ship — pushAiSettings
+     * already drops the cloud-key fields on its own when syncEnabled
+     * flips off, so this is the harder reset.
+     */
     suspend fun clearAiSettingsOnShip() {
         val ch = channel ?: return
         val payload = buildJsonObject {
@@ -435,34 +451,44 @@ class SettingsSyncImpl(
     }
 
     private fun applyAiEntry(obj: JsonObject) {
-        val providerStr = obj["provider"].asStr() ?: return
-        val provider = runCatching { AiSettings.Provider.valueOf(providerStr) }
-            .getOrNull() ?: return
-        val apiKey = obj["apiKey"].asStr().orEmpty()
-        val model = obj["model"].asStr()
-        val baseUrl = obj["baseUrl"].asStr()
+        val current = aiSettings.state.value
         fun bool(key: String, default: Boolean) =
             obj[key].asText()?.toBooleanStrictOrNull() ?: default
-        // commonMain AiSettingsRepository takes the whole Config in
-        // applyRemote, vs production AiSettings's individual params.
-        // Build a Config preserving the remote keep-syncing flag.
-        val current = aiSettings.state.value
-        aiSettings.applyRemote(
-            AiSettings.Config(
-                provider = provider,
-                apiKey = apiKey,
-                model = model,
-                baseUrl = baseUrl,
-                catchMeUpEnabled = bool("catchMeUpEnabled", true),
-                emojiReactEnabled = bool("emojiReactEnabled", true),
-                dailyDigestEnabled = bool("dailyDigestEnabled", true),
-                entityActionsEnabled = bool("entityActionsEnabled", false),
-                semanticSearchEnabled = bool("semanticSearchEnabled", false),
-                topicClustersEnabled = bool("topicClustersEnabled", false),
-                importantMessagesEnabled = bool("importantMessagesEnabled", false),
-                syncEnabled = current.syncEnabled,
-            ),
+
+        // Per-feature toggles always apply — they're preferences,
+        // not credentials. Apply on top of `current` so any field
+        // missing from the wire entry preserves the local value.
+        val features = current.copy(
+            catchMeUpEnabled = bool("catchMeUpEnabled", current.catchMeUpEnabled),
+            emojiReactEnabled = bool("emojiReactEnabled", current.emojiReactEnabled),
+            dailyDigestEnabled = bool("dailyDigestEnabled", current.dailyDigestEnabled),
+            entityActionsEnabled = bool("entityActionsEnabled", current.entityActionsEnabled),
+            semanticSearchEnabled = bool("semanticSearchEnabled", current.semanticSearchEnabled),
+            topicClustersEnabled = bool("topicClustersEnabled", current.topicClustersEnabled),
+            importantMessagesEnabled = bool("importantMessagesEnabled", current.importantMessagesEnabled),
         )
+
+        // Cloud-key fields only apply when local sync is opted in —
+        // otherwise we respect the device's local key (or no-key).
+        // syncEnabled itself stays at the local value so the user's
+        // explicit consent on this device is the gate, not whatever
+        // a peer device wrote into the bucket.
+        val merged = if (current.syncEnabled) {
+            val providerStr = obj["provider"].asStr()
+            val provider = providerStr?.let {
+                runCatching { AiSettings.Provider.valueOf(it) }.getOrNull()
+            }
+            if (provider != null) {
+                features.copy(
+                    provider = provider,
+                    apiKey = obj["apiKey"].asStr().orEmpty(),
+                    model = obj["model"].asStr(),
+                    baseUrl = obj["baseUrl"].asStr(),
+                )
+            } else features
+        } else features
+
+        aiSettings.applyRemote(merged)
     }
 
     override suspend fun addBookmark(whom: String, postId: String, ts: Long) {

@@ -275,10 +275,20 @@ class SettingsSyncApplyBucketTest {
     // ── ai-settings ─────────────────────────────────────────────────
 
     @Test
-    fun `applyBucket AI_SETTINGS reads the config entry and updates the repo`() =
+    fun `applyBucket AI_SETTINGS pulls cloud-key fields when local sync is opted in`() =
         runBlocking {
-            // The bucket wraps the actual config under the AI_ENTRY key
-            // ("config"). Keys other than that are ignored.
+            // syncEnabled=true on the local device → the apply path
+            // honors the wire's provider/apiKey/model. Without the
+            // opt-in, the cloud-key fields stay local (covered by
+            // the next test).
+            aiSettings.applyRemote(
+                AiSettings.Config(
+                    provider = AiSettings.Provider.Anthropic,
+                    apiKey = "",
+                    model = null,
+                    syncEnabled = true,
+                ),
+            )
             val bucket = buildJsonObject {
                 put("config", buildJsonObject {
                     put("provider", "OpenAi")
@@ -296,6 +306,60 @@ class SettingsSyncApplyBucketTest {
             assertEquals("gpt-4", cfg.model)
             assertEquals(false, cfg.emojiReactEnabled)
             assertEquals(true, cfg.dailyDigestEnabled)
+        }
+
+    @Test
+    fun `applyBucket AI_SETTINGS applies feature toggles even when sync is off`() =
+        runBlocking {
+            // Per-feature toggles always sync — a peer device that
+            // turned on emoji-react should propagate to this device
+            // regardless of whether this device opted into key sync.
+            // The cloud-key fields, however, MUST NOT cross over
+            // without local consent (next test pins that).
+            val before = aiSettings.state.value
+            val bucket = buildJsonObject {
+                put("config", buildJsonObject {
+                    put("provider", "OpenAi")
+                    put("apiKey", "sk-secret")
+                    put("emojiReactEnabled", "false")
+                    put("topicClustersEnabled", "true")
+                })
+            }
+            sync.applyBucket(SettingsSyncImpl.BUCKET_AI_SETTINGS, bucket)
+
+            val cfg = aiSettings.state.value
+            assertEquals(false, cfg.emojiReactEnabled)
+            assertEquals(true, cfg.topicClustersEnabled)
+            // Cloud-key fields stayed at the prior local values —
+            // syncEnabled was off, so the wire's provider/apiKey
+            // never cross into local state.
+            assertEquals(before.provider, cfg.provider)
+            assertEquals(before.apiKey, cfg.apiKey)
+        }
+
+    @Test
+    fun `applyBucket AI_SETTINGS does not apply cloud-key fields when sync is off`() =
+        runBlocking {
+            // Sec-relevant invariant: a peer's API key must not be
+            // written into this device's local state unless the user
+            // explicitly opted into key sync on THIS device.
+            val before = aiSettings.state.value
+            assertEquals(false, before.syncEnabled)  // sanity: default
+            val bucket = buildJsonObject {
+                put("config", buildJsonObject {
+                    put("provider", "OpenAi")
+                    put("apiKey", "sk-secret-from-peer")
+                    put("model", "gpt-4")
+                    put("baseUrl", "https://example.com")
+                })
+            }
+            sync.applyBucket(SettingsSyncImpl.BUCKET_AI_SETTINGS, bucket)
+
+            val cfg = aiSettings.state.value
+            assertEquals(before.provider, cfg.provider)
+            assertEquals(before.apiKey, cfg.apiKey)
+            assertEquals(before.model, cfg.model)
+            assertEquals(before.baseUrl, cfg.baseUrl)
         }
 
     @Test
@@ -324,19 +388,36 @@ class SettingsSyncApplyBucketTest {
     }
 
     @Test
-    fun `applyBucket AI_SETTINGS skips entries with unknown provider`() = runBlocking {
-        val before = aiSettings.state.value
-        val bucket = buildJsonObject {
-            put("config", buildJsonObject {
-                put("provider", "NotARealProvider")
-                put("apiKey", "key")
-            })
-        }
-        sync.applyBucket(SettingsSyncImpl.BUCKET_AI_SETTINGS, bucket)
+    fun `applyBucket AI_SETTINGS with unknown provider keeps cloud-key fields local`() =
+        runBlocking {
+            // Even with sync opted in, an unparseable provider field
+            // means we can't reconstruct a Config — fall back to the
+            // local cloud-key state. Feature toggles still apply per
+            // the always-sync rule.
+            aiSettings.applyRemote(
+                AiSettings.Config(
+                    provider = AiSettings.Provider.Anthropic,
+                    apiKey = "local",
+                    model = null,
+                    syncEnabled = true,
+                ),
+            )
+            val before = aiSettings.state.value
+            val bucket = buildJsonObject {
+                put("config", buildJsonObject {
+                    put("provider", "NotARealProvider")
+                    put("apiKey", "key")
+                    put("emojiReactEnabled", "false")
+                })
+            }
+            sync.applyBucket(SettingsSyncImpl.BUCKET_AI_SETTINGS, bucket)
 
-        // Repo state must be untouched.
-        assertEquals(before, aiSettings.state.value)
-    }
+            val cfg = aiSettings.state.value
+            assertEquals(before.provider, cfg.provider)
+            assertEquals(before.apiKey, cfg.apiKey)
+            // Feature toggle from the bucket still landed.
+            assertEquals(false, cfg.emojiReactEnabled)
+        }
 
     // ── daily-digest ────────────────────────────────────────────────
 

@@ -198,19 +198,11 @@ class TalonApplication : Application() {
             receiverClass = io.nisfeb.talon.DigestAlarmReceiver::class.java,
         )
 
-        // Wire AI settings changes to %settings sync. Fires on every
-        // AiSettings mutation; SettingsSync checks syncEnabled and
-        // routes to the right behavior (push, no-op, or clear).
-        aiSettings.onStateChange = { cfg, transitionedOffSync ->
-            appScope.launch {
-                runCatching {
-                    when {
-                        transitionedOffSync -> settingsSync.clearAiSettingsOnShip()
-                        cfg.syncEnabled -> settingsSync.pushAiSettings()
-                    }
-                }
-            }
-        }
+        // AI settings sync is wired in commonMain App.kt — it pushes
+        // every mutation (per-feature toggles always; cloud-key
+        // fields gated on syncEnabled inside pushAiSettings) so both
+        // Android and Desktop relay through the same path. No need
+        // to bind onStateChange here.
 
         watchwords.onChange = { evt, transitionedOffSync ->
             appScope.launch {

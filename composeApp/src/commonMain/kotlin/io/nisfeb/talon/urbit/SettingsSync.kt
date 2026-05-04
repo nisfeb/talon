@@ -18,6 +18,14 @@ interface SettingsSync {
     suspend fun bootstrap()
     suspend fun applySettingsEvent(payload: JsonObject)
 
+    /**
+     * Push the current AI settings to %settings. Per-feature toggles
+     * always push; cloud-key fields push only when local syncEnabled
+     * is true (gated inside the impl). Default no-op for any future
+     * impl that doesn't support AI sync.
+     */
+    suspend fun pushAiSettings() {}
+
     // ───────── home-list reorder hooks ─────────
     // Called from DmListScreen drag callbacks. The Android impl writes
     // through to Room and (for the push variants) sends pokes to

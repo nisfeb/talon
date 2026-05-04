@@ -13,6 +13,7 @@ import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.launch
 import io.nisfeb.talon.ai.AiSettingsRepository
 import io.nisfeb.talon.ai.InMemoryWatchwordsSyncSettings
 import io.nisfeb.talon.ai.WatchwordsSyncSettings
@@ -329,6 +330,23 @@ fun App(
 
         if (loggedInShip != null && session.shipName != null) {
             LaunchedEffect(Unit) { repo.start(session) }
+
+            // Relay AI settings mutations to %settings on the active
+            // ship's SettingsSync. Per-feature toggles push every
+            // time; cloud-key fields are gated inside pushAiSettings
+            // on local syncEnabled. Re-binds when the active ship
+            // (and therefore settingsSync) switches; the latest bind
+            // wins, so older ships' instances stop receiving relays.
+            // Re-using onStateChange — single-listener model.
+            LaunchedEffect(settingsSync, aiSettings) {
+                val sink = settingsSync ?: return@LaunchedEffect
+                val scope = this
+                aiSettings.onStateChange = { _, _ ->
+                    scope.launch {
+                        runCatching { sink.pushAiSettings() }
+                    }
+                }
+            }
 
             // OS notifications for incoming messages. Watches the
             // per-conversation latest-message flow and fires a balloon
