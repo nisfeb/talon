@@ -1542,20 +1542,24 @@ private fun DateDividerRow(label: String) {
 
 @Composable
 private fun UnreadDividerRow() {
-    val amber = Color(0xFFFFB74D)
+    // Reads `colorScheme.primary` so the divider tint follows the
+    // user's chosen accent (Settings → Custom accent color). When the
+    // setting is off this resolves to the brand amber via the theme;
+    // when on, it picks up the profile color or custom hex.
+    val tint = MaterialTheme.colorScheme.primary
     Row(
         modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.Center,
     ) {
-        HorizontalDivider(modifier = Modifier.weight(1f), color = amber)
+        HorizontalDivider(modifier = Modifier.weight(1f), color = tint)
         Text(
             "New",
             style = MaterialTheme.typography.labelSmall,
-            color = amber,
+            color = tint,
             modifier = Modifier.padding(horizontal = 10.dp),
         )
-        HorizontalDivider(modifier = Modifier.weight(1f), color = amber)
+        HorizontalDivider(modifier = Modifier.weight(1f), color = tint)
     }
 }
 
