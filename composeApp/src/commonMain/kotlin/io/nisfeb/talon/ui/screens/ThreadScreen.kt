@@ -392,17 +392,19 @@ fun ThreadScreen(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            // Send-button accent in the active ship's contact color
+            // — peripheral cue against posting-as-the-wrong-ship in
+            // shared groups. Drives both the send icon tint and the
+            // text field's focused border. Brand amber as fallback.
+            val sendAccent = io.nisfeb.talon.ui.rememberShipAccent(ourPatp, contactMap)
+                ?: MaterialTheme.colorScheme.primary
             OutlinedTextField(
                 value = draft,
                 onValueChange = { draft = it },
                 placeholder = { Text("Reply") },
+                colors = io.nisfeb.talon.ui.accentTextFieldColors(sendAccent),
                 modifier = Modifier.weight(1f),
             )
-            // Send-button accent in the active ship's contact color
-            // — peripheral cue against posting-as-the-wrong-ship in
-            // shared groups. Brand amber as fallback.
-            val sendAccent = io.nisfeb.talon.ui.rememberShipAccent(ourPatp, contactMap)
-                ?: MaterialTheme.colorScheme.primary
             IconButton(
                 onClick = {
                     val body = draft.text.trim()

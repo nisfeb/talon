@@ -221,18 +221,20 @@ fun GalleryPostScreen(
                 .padding(horizontal = 8.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            // Send accent in the active ship's contact color —
+            // peripheral cue against wrong-ship posts. Drives both
+            // the send icon tint and the text field's focused
+            // border. Brand amber as fallback.
+            val sendAccent = io.nisfeb.talon.ui.rememberShipAccent(ourPatp, contactMap)
+                ?: MaterialTheme.colorScheme.primary
             OutlinedTextField(
                 value = replyText,
                 onValueChange = { replyText = it },
                 placeholder = { Text("Write a comment") },
+                colors = io.nisfeb.talon.ui.accentTextFieldColors(sendAccent),
                 modifier = Modifier.weight(1f),
                 enabled = !sending,
             )
-            // Send accent in the active ship's contact color —
-            // peripheral cue against wrong-ship posts. Brand amber
-            // as fallback.
-            val sendAccent = io.nisfeb.talon.ui.rememberShipAccent(ourPatp, contactMap)
-                ?: MaterialTheme.colorScheme.primary
             IconButton(
                 enabled = replyText.trim().isNotEmpty() && !sending,
                 onClick = {

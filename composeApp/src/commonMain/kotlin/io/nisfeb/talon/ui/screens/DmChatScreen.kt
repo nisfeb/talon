@@ -948,6 +948,7 @@ fun DmChatScreen(
                     placeholder = { Text("Message") },
                     enabled = canSend,
                     textStyle = MaterialTheme.typography.bodyMedium,
+                    colors = io.nisfeb.talon.ui.accentTextFieldColors(sendAccent),
                     modifier = Modifier
                         .weight(1f)
                         .onPreviewKeyEvent { e ->
