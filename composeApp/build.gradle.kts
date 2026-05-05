@@ -139,9 +139,10 @@ kotlin {
             implementation(kotlin("test"))
             implementation("com.squareup.okhttp3:mockwebserver:4.12.0")
             // Compose Multiplatform UI test runner — `runComposeUiTest`,
-            // `onNodeWithTag`, `performMouseInput`, etc. Used by the
-            // pointer-input regression guards (right-click handler
-            // dispatch, scaffold breakpoint behaviour).
+            // `onNodeWithText`, `onNodeWithTag`, `performMouseInput`,
+            // etc. Used by the pointer-input regression guards
+            // (right-click handler dispatch) and the layout breakpoint
+            // tests (ChatPaneScaffoldTest).
             implementation(compose.desktop.uiTestJUnit4)
         }
     }
