@@ -1037,22 +1037,22 @@ private fun RelayRegistrationPanel(config: RelayPanelConfig) {
                         scope.launch {
                             val endpoint = config.pushTokens.token()
                             if (endpoint == null) {
-                                // token() returns null both when no distributor
-                                // is installed AND when registration was just
-                                // kicked off (the endpoint URL arrives async
-                                // via TalonMessagingReceiver.onNewEndpoint).
-                                // Use diagnose() to tell the two cases apart
-                                // and give the user something actionable.
+                                // token() suspends up to 10s waiting for the
+                                // distributor's NEW_ENDPOINT broadcast. A null
+                                // return at this point means either no
+                                // distributor is installed, or the one we
+                                // chose didn't respond — both call for user
+                                // action, but the message should distinguish.
                                 val report = config.pushTokens.diagnose()
                                 status = if (report.byConnector.isEmpty()) {
                                     "No UnifiedPush distributor found. " +
                                         "Install ntfy, NextPush, or another " +
                                         "distributor app, then try again."
                                 } else {
-                                    "Asked ${report.byConnector.first()} for " +
-                                        "an endpoint. Wait a few seconds and " +
-                                        "tap Register again — the endpoint " +
-                                        "arrives via a background broadcast."
+                                    "${report.byConnector.first()} didn't " +
+                                        "deliver an endpoint within 10s. " +
+                                        "Open it once to wake it up, then " +
+                                        "try again."
                                 }
                                 working = false
                                 return@launch

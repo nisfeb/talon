@@ -3,8 +3,11 @@ package io.nisfeb.talon.notify
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
-import org.unifiedpush.android.connector.UnifiedPush
 import io.nisfeb.talon.util.Log
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withTimeoutOrNull
+import org.unifiedpush.android.connector.UnifiedPush
 
 /**
  * [PushTokenProvider] backed by UnifiedPush. Asks the user's local
@@ -56,11 +59,30 @@ class UnifiedPushTokenProvider(private val context: Context) : PushTokenProvider
         val saved = UnifiedPush.getSavedDistributor(context)
         val pick = saved?.takeIf { it in distributors } ?: distributors.first()
         Log.i(TAG, "registering with distributor=$pick (saved=$saved)")
-        runCatching {
+        val started = runCatching {
             if (saved != pick) UnifiedPush.saveDistributor(context, pick)
             UnifiedPush.registerApp(context, INSTANCE)
         }.onFailure { Log.w(TAG, "UnifiedPush register failed", it) }
-        return null
+        if (started.isFailure) return null
+
+        // Wait for the distributor to deliver the endpoint URL via
+        // its NEW_ENDPOINT broadcast → TalonMessagingReceiver →
+        // SharedPreferences. Without this the caller would have to
+        // tap Register a second time once the broadcast lands. 10s
+        // is long enough for ntfy / NextPush over a working network
+        // and short enough that a hung distributor isn't a UX brick
+        // (we still surface "not registered" if it times out).
+        val endpoint = withTimeoutOrNull(REGISTER_TIMEOUT_MS) {
+            TalonMessagingReceiver.endpointFlow(context)
+                .filterNotNull()
+                .first()
+        }
+        if (endpoint == null) {
+            Log.w(TAG, "endpoint did not arrive within ${REGISTER_TIMEOUT_MS}ms")
+        } else {
+            Log.i(TAG, "endpoint received: ${endpoint.take(48)}…")
+        }
+        return endpoint
     }
 
     fun unregister() {
@@ -136,5 +158,6 @@ class UnifiedPushTokenProvider(private val context: Context) : PushTokenProvider
         const val INSTANCE = "talon"
         private const val ACTION_REGISTER =
             "org.unifiedpush.android.distributor.REGISTER"
+        private const val REGISTER_TIMEOUT_MS = 10_000L
     }
 }

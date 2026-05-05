@@ -1,7 +1,11 @@
 package io.nisfeb.talon.notify
 
 import android.content.Context
+import android.content.SharedPreferences
 import io.nisfeb.talon.util.Log
+import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -107,6 +111,24 @@ class TalonMessagingReceiver : MessagingReceiver() {
         fun clearEndpoint(context: Context) {
             context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
                 .edit().remove(KEY_ENDPOINT).apply()
+        }
+
+        /**
+         * Stream of the cached endpoint URL, emitting the current
+         * value on subscription and again whenever
+         * [cacheEndpoint] / [clearEndpoint] runs (or any other
+         * write to the same prefs file). Lets the registration
+         * flow await the distributor's NEW_ENDPOINT broadcast
+         * without polling — see UnifiedPushTokenProvider.token().
+         */
+        fun endpointFlow(context: Context): Flow<String?> = callbackFlow {
+            val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            trySend(prefs.getString(KEY_ENDPOINT, null))
+            val listener = SharedPreferences.OnSharedPreferenceChangeListener { p, key ->
+                if (key == KEY_ENDPOINT) trySend(p.getString(KEY_ENDPOINT, null))
+            }
+            prefs.registerOnSharedPreferenceChangeListener(listener)
+            awaitClose { prefs.unregisterOnSharedPreferenceChangeListener(listener) }
         }
     }
 }
