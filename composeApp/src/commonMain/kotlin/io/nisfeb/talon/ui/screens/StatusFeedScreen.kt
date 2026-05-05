@@ -3,16 +3,12 @@ package io.nisfeb.talon.ui.screens
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.windowInsetsPadding
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Edit
@@ -26,17 +22,14 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
@@ -45,7 +38,6 @@ import io.nisfeb.talon.data.ContactEntity
 import io.nisfeb.talon.ui.Avatar
 import io.nisfeb.talon.ui.linkifyStatus
 import io.nisfeb.talon.urbit.TlonChatRepo
-import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -64,18 +56,6 @@ fun StatusFeedScreen(
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val contacts by remember {
-        db.contacts().streamStatusFeed()
-    }.collectAsState(initial = emptyList())
-    // Stream our own contact row so the header reflects edits made from
-    // this screen the moment the optimistic upsert lands.
-    val self by remember(ourPatp) {
-        db.contacts().streamOne(ourPatp)
-    }.collectAsState(initial = null)
-
-    val scope = rememberCoroutineScope()
-    var editing by remember { mutableStateOf(false) }
-
     Column(modifier = modifier.windowInsetsPadding(WindowInsets.safeDrawing)) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
@@ -91,48 +71,17 @@ fun StatusFeedScreen(
             )
         }
         HorizontalDivider()
-        SelfStatusRow(
-            self = self,
+        StatusFeedList(
+            db = db,
+            repo = repo,
             ourPatp = ourPatp,
-            onEdit = { editing = true },
-        )
-        HorizontalDivider()
-        if (contacts.isEmpty()) {
-            Text(
-                "No statuses yet. They'll show up here as your contacts update theirs.",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(24.dp),
-            )
-        } else {
-            LazyColumn(
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(vertical = 4.dp),
-            ) {
-                items(items = contacts, key = { it.ship }) { c ->
-                    StatusRow(c) { onOpenContact(c.ship) }
-                    HorizontalDivider()
-                }
-            }
-        }
-    }
-
-    if (editing) {
-        EditStatusDialog(
-            initial = self?.status.orEmpty(),
-            onDismiss = { editing = false },
-            onSave = { next ->
-                editing = false
-                scope.launch {
-                    runCatching { repo.updateProfile(status = next) }
-                }
-            },
+            onOpenContact = onOpenContact,
         )
     }
 }
 
 @Composable
-private fun SelfStatusRow(
+internal fun SelfStatusRow(
     self: ContactEntity?,
     ourPatp: String,
     onEdit: () -> Unit,
@@ -185,7 +134,7 @@ private fun SelfStatusRow(
 }
 
 @Composable
-private fun EditStatusDialog(
+internal fun EditStatusDialog(
     initial: String,
     onDismiss: () -> Unit,
     onSave: (String) -> Unit,
@@ -222,7 +171,7 @@ private fun EditStatusDialog(
 }
 
 @Composable
-private fun StatusRow(c: ContactEntity, onClick: () -> Unit) {
+internal fun StatusRow(c: ContactEntity, onClick: () -> Unit) {
     val label = c.nickname ?: c.ship
     val stamp = remember(c.statusUpdatedMs) {
         c.statusUpdatedMs?.let { formatRelative(it) }
