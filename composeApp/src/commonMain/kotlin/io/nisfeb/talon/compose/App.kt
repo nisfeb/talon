@@ -23,6 +23,7 @@ import io.nisfeb.talon.notify.Notifier
 import io.nisfeb.talon.data.AppDatabase
 import io.nisfeb.talon.ui.DraftStore
 import io.nisfeb.talon.ui.InMemoryUiSettings
+import io.nisfeb.talon.ui.ChatPaneScaffold
 import io.nisfeb.talon.ui.PlatformBackHandler
 import io.nisfeb.talon.ui.UiSettings
 import io.nisfeb.talon.ui.screens.DmChatScreen
@@ -490,6 +491,10 @@ fun App(
                 // session.shipName == null would render DmListScreen
                 // briefly before the recovery LaunchedEffect fires.
                 val ship = if (session.shipName != null) loggedInShip else null
+                // Modal / full-screen branches short-circuit first so they
+                // render at full width without entering ChatPaneScaffold.
+                // Only DmList + chat-detail screens (chat, thread, notebook,
+                // gallery) participate in the list/detail split.
                 when {
                     ship == null -> LoginScreen(
                         session = session,
@@ -642,216 +647,241 @@ fun App(
                         url = viewerImageUrl!!,
                         onClose = { viewerImageUrl = null },
                     )
-                    // Notebook channels (whom prefix "diary/").
-                    // Compose overlays the post viewer overlays the
-                    // list — same precedence as production.
-                    openChat?.startsWith("diary/") == true && notebookComposeOpen ->
-                        NotebookComposeScreen(
-                            repo = repo,
-                            whom = openChat!!,
-                            onBack = {
-                                notebookComposeOpen = false
-                                notebookEditPostId = null
+                    else -> {
+                        // List/detail surface. detailSlot is null when at
+                        // the list root (no openChat), which causes
+                        // ChatPaneScaffold to render DmListScreen full-width
+                        // on narrow windows and in the right pane on wide
+                        // windows (showing EmptyChatPane as placeholder).
+                        val detailSlot: (@Composable () -> Unit)? = when {
+                            // Notebook channels (whom prefix "diary/").
+                            // Compose overlays the post viewer overlays the
+                            // list — same precedence as production.
+                            openChat?.startsWith("diary/") == true && notebookComposeOpen -> ({
+                                NotebookComposeScreen(
+                                    repo = repo,
+                                    whom = openChat!!,
+                                    onBack = {
+                                        notebookComposeOpen = false
+                                        notebookEditPostId = null
+                                    },
+                                    onPosted = {
+                                        notebookComposeOpen = false
+                                        notebookEditPostId = null
+                                    },
+                                    editPostId = notebookEditPostId,
+                                    initialTitle = notebookEditTitle,
+                                    initialImage = notebookEditImage,
+                                    initialBody = notebookEditBody,
+                                    originalSentMs = notebookEditSentMs,
+                                )
+                            })
+                            openChat?.startsWith("diary/") == true && openNotebookPostId != null -> ({
+                                NotebookPostScreen(
+                                    db = db,
+                                    repo = repo,
+                                    ourPatp = ship,
+                                    whom = openChat!!,
+                                    postId = openNotebookPostId!!,
+                                    onBack = { openNotebookPostId = null },
+                                    onEdit = { title, image, body, sent ->
+                                        notebookEditPostId = openNotebookPostId
+                                        notebookEditTitle = title
+                                        notebookEditImage = image
+                                        notebookEditBody = body
+                                        notebookEditSentMs = sent
+                                        openNotebookPostId = null
+                                        notebookComposeOpen = true
+                                    },
+                                )
+                            })
+                            openChat?.startsWith("diary/") == true -> ({
+                                NotebookListScreen(
+                                    db = db,
+                                    repo = repo,
+                                    whom = openChat!!,
+                                    onBack = { openChat = null },
+                                    onOpenPost = { id -> openNotebookPostId = id },
+                                    onCompose = { notebookComposeOpen = true },
+                                )
+                            })
+                            // Gallery channels (whom prefix "heap/").
+                            openChat?.startsWith("heap/") == true && galleryComposeOpen -> ({
+                                GalleryComposeScreen(
+                                    repo = repo,
+                                    whom = openChat!!,
+                                    onBack = { galleryComposeOpen = false },
+                                    onPosted = { galleryComposeOpen = false },
+                                )
+                            })
+                            openChat?.startsWith("heap/") == true && openGalleryPostId != null -> ({
+                                GalleryPostScreen(
+                                    db = db,
+                                    repo = repo,
+                                    ourPatp = ship,
+                                    whom = openChat!!,
+                                    postId = openGalleryPostId!!,
+                                    onBack = { openGalleryPostId = null },
+                                )
+                            })
+                            openChat?.startsWith("heap/") == true -> ({
+                                GalleryGridScreen(
+                                    db = db,
+                                    repo = repo,
+                                    whom = openChat!!,
+                                    onBack = { openChat = null },
+                                    onOpenPost = { id -> openGalleryPostId = id },
+                                    onCompose = { galleryComposeOpen = true },
+                                )
+                            })
+                            openChat != null && openThreadParent != null -> ({
+                                ThreadScreen(
+                                    db = db,
+                                    repo = repo,
+                                    ourPatp = ship,
+                                    whom = openChat!!,
+                                    parentId = openThreadParent!!,
+                                    initialScrollReplyId = openThreadReplyAnchor,
+                                    onScrollConsumed = { openThreadReplyAnchor = null },
+                                    onBack = {
+                                        openThreadParent = null
+                                        openThreadReplyAnchor = null
+                                    },
+                                    onOpenConversation = { other ->
+                                        openThreadParent = null
+                                        openThreadReplyAnchor = null
+                                        openChat = other
+                                    },
+                                    onOpenImage = { url -> viewerImageUrl = url },
+                                )
+                            })
+                            openChat != null -> ({
+                                DmChatScreen(
+                                    db = db,
+                                    repo = repo,
+                                    drafts = drafts,
+                                    http = http,
+                                    aiSettings = aiSettings,
+                                    uiSettings = uiSettings,
+                                    ourPatp = ship,
+                                    whom = openChat!!,
+                                    onBack = { openChat = null },
+                                    onOpenThread = { parentId ->
+                                        openThreadReplyAnchor = null
+                                        openThreadParent = parentId
+                                    },
+                                    onOpenThreadAt = { parentId, replyAnchor ->
+                                        openThreadReplyAnchor = replyAnchor
+                                        openThreadParent = parentId
+                                    },
+                                    onOpenConversation = { other -> openChat = other },
+                                    onOpenImage = { url -> viewerImageUrl = url },
+                                    onOpenSelfProfile = { showSelfProfile = true },
+                                )
+                            })
+                            else -> null
+                        }
+                        ChatPaneScaffold(
+                            list = {
+                                DmListScreen(
+                                    db = db,
+                                    repo = repo,
+                                    drafts = drafts,
+                                    updateState = updateState,
+                                    menuSeen = menuSeen,
+                                    onOpenConversation = { whom -> openChat = whom },
+                                    onOpenSearch = { showSearch = true },
+                                    onNewMessage = { showNewDm = true },
+                                    onSignOut = {
+                                        // session.logout() already removes just
+                                        // the active ship's entry (UrbitSession.kt
+                                        // line 89). Adding sessionStore.clearAll()
+                                        // would wipe every other saved ship too,
+                                        // which is wrong for multi-ship setups
+                                        // and only worked under Path A by accident.
+                                        session.logout()
+                                        // Reset every navigation-state var so the
+                                        // next sign-in lands on DmList instead of
+                                        // a stale chat from the prior ship.
+                                        openChat = null
+                                        openThreadParent = null
+                                        openThreadReplyAnchor = null
+                                        viewerImageUrl = null
+                                        showSelfProfile = false
+                                        showSettings = false
+                                        loggedInShip = null
+                                    },
+                                    onOpenSelfProfile = { showSelfProfile = true },
+                                    onOpenStatusFeed = { showStatusFeed = true },
+                                    onOpenInvites = { showInvites = true },
+                                    onOpenBookmarks = { showBookmarks = true },
+                                    onOpenActivity = { showActivity = true },
+                                    onOpenWatchwords = { showWatchwords = true },
+                                    onOpenDigest = { showDailyDigest = true },
+                                    digestEnabled = dailyDigestSettings
+                                        ?.state
+                                        ?.collectAsState()
+                                        ?.value
+                                        ?.enabled
+                                        ?: false,
+                                    onOpenAdministration = { showGroupAdminList = true },
+                                    onOpenSettings = { showSettings = true },
+                                    activeShip = ship,
+                                    allShips = remember(loggedInShip) {
+                                        sessionStore.all().map { it.ship }
+                                    },
+                                    shipNicknames = run {
+                                        // Async lookup — replaces a runBlocking on the
+                                        // composing thread that stalled the first
+                                        // frame for N saved ships * one DB hit each.
+                                        val savedShips = remember(loggedInShip) {
+                                            sessionStore.all().map { it.ship }
+                                        }
+                                        val nicknames = remember(loggedInShip) {
+                                            mutableStateOf<Map<String, String>>(emptyMap())
+                                        }
+                                        LaunchedEffect(savedShips) {
+                                            val map = savedShips.mapNotNull { ship ->
+                                                val nick = runCatching {
+                                                    db.contacts().get(ship)?.nickname
+                                                }.getOrNull()
+                                                if (nick.isNullOrBlank()) null else ship to nick
+                                            }.toMap()
+                                            nicknames.value = map
+                                        }
+                                        nicknames.value
+                                    },
+                                    onSwitchShip = { newShip ->
+                                        sessionStore.setActive(newShip)
+                                        // Reset nav: previous ship's chat ids would
+                                        // otherwise be queried against the new ship's db.
+                                        openChat = null
+                                        openThreadParent = null
+                                        openThreadReplyAnchor = null
+                                        viewerImageUrl = null
+                                        showSelfProfile = false
+                                        showSettings = false
+                                        loggedInShip = newShip
+                                    },
+                                    onAddShip = {
+                                        // Drop to LoginScreen without signing the current
+                                        // ship out — its session entry stays in sessionStore
+                                        // so the drawer can switch back after the new login.
+                                        openChat = null
+                                        openThreadParent = null
+                                        openThreadReplyAnchor = null
+                                        viewerImageUrl = null
+                                        showSelfProfile = false
+                                        showSettings = false
+                                        loggedInShip = null
+                                    },
+                                    groupChannelOrder = uiSettings.groupChannelOrder
+                                        .collectAsState().value,
+                                )
                             },
-                            onPosted = {
-                                notebookComposeOpen = false
-                                notebookEditPostId = null
-                            },
-                            editPostId = notebookEditPostId,
-                            initialTitle = notebookEditTitle,
-                            initialImage = notebookEditImage,
-                            initialBody = notebookEditBody,
-                            originalSentMs = notebookEditSentMs,
+                            detail = detailSlot,
                         )
-                    openChat?.startsWith("diary/") == true && openNotebookPostId != null ->
-                        NotebookPostScreen(
-                            db = db,
-                            repo = repo,
-                            ourPatp = ship,
-                            whom = openChat!!,
-                            postId = openNotebookPostId!!,
-                            onBack = { openNotebookPostId = null },
-                            onEdit = { title, image, body, sent ->
-                                notebookEditPostId = openNotebookPostId
-                                notebookEditTitle = title
-                                notebookEditImage = image
-                                notebookEditBody = body
-                                notebookEditSentMs = sent
-                                openNotebookPostId = null
-                                notebookComposeOpen = true
-                            },
-                        )
-                    openChat?.startsWith("diary/") == true ->
-                        NotebookListScreen(
-                            db = db,
-                            repo = repo,
-                            whom = openChat!!,
-                            onBack = { openChat = null },
-                            onOpenPost = { id -> openNotebookPostId = id },
-                            onCompose = { notebookComposeOpen = true },
-                        )
-                    // Gallery channels (whom prefix "heap/").
-                    openChat?.startsWith("heap/") == true && galleryComposeOpen ->
-                        GalleryComposeScreen(
-                            repo = repo,
-                            whom = openChat!!,
-                            onBack = { galleryComposeOpen = false },
-                            onPosted = { galleryComposeOpen = false },
-                        )
-                    openChat?.startsWith("heap/") == true && openGalleryPostId != null ->
-                        GalleryPostScreen(
-                            db = db,
-                            repo = repo,
-                            ourPatp = ship,
-                            whom = openChat!!,
-                            postId = openGalleryPostId!!,
-                            onBack = { openGalleryPostId = null },
-                        )
-                    openChat?.startsWith("heap/") == true ->
-                        GalleryGridScreen(
-                            db = db,
-                            repo = repo,
-                            whom = openChat!!,
-                            onBack = { openChat = null },
-                            onOpenPost = { id -> openGalleryPostId = id },
-                            onCompose = { galleryComposeOpen = true },
-                        )
-                    openChat != null && openThreadParent != null -> ThreadScreen(
-                        db = db,
-                        repo = repo,
-                        ourPatp = ship,
-                        whom = openChat!!,
-                        parentId = openThreadParent!!,
-                        initialScrollReplyId = openThreadReplyAnchor,
-                        onScrollConsumed = { openThreadReplyAnchor = null },
-                        onBack = {
-                            openThreadParent = null
-                            openThreadReplyAnchor = null
-                        },
-                        onOpenConversation = { other ->
-                            openThreadParent = null
-                            openThreadReplyAnchor = null
-                            openChat = other
-                        },
-                        onOpenImage = { url -> viewerImageUrl = url },
-                    )
-                    openChat != null -> DmChatScreen(
-                        db = db,
-                        repo = repo,
-                        drafts = drafts,
-                        http = http,
-                        aiSettings = aiSettings,
-                        uiSettings = uiSettings,
-                        ourPatp = ship,
-                        whom = openChat!!,
-                        onBack = { openChat = null },
-                        onOpenThread = { parentId ->
-                            openThreadReplyAnchor = null
-                            openThreadParent = parentId
-                        },
-                        onOpenThreadAt = { parentId, replyAnchor ->
-                            openThreadReplyAnchor = replyAnchor
-                            openThreadParent = parentId
-                        },
-                        onOpenConversation = { other -> openChat = other },
-                        onOpenImage = { url -> viewerImageUrl = url },
-                        onOpenSelfProfile = { showSelfProfile = true },
-                    )
-                    else -> DmListScreen(
-                        db = db,
-                        repo = repo,
-                        drafts = drafts,
-                        updateState = updateState,
-                        menuSeen = menuSeen,
-                        onOpenConversation = { whom -> openChat = whom },
-                        onOpenSearch = { showSearch = true },
-                        onNewMessage = { showNewDm = true },
-                        onSignOut = {
-                            // session.logout() already removes just
-                            // the active ship's entry (UrbitSession.kt
-                            // line 89). Adding sessionStore.clearAll()
-                            // would wipe every other saved ship too,
-                            // which is wrong for multi-ship setups
-                            // and only worked under Path A by accident.
-                            session.logout()
-                            // Reset every navigation-state var so the
-                            // next sign-in lands on DmList instead of
-                            // a stale chat from the prior ship.
-                            openChat = null
-                            openThreadParent = null
-                            openThreadReplyAnchor = null
-                            viewerImageUrl = null
-                            showSelfProfile = false
-                            showSettings = false
-                            loggedInShip = null
-                        },
-                        onOpenSelfProfile = { showSelfProfile = true },
-                        onOpenStatusFeed = { showStatusFeed = true },
-                        onOpenInvites = { showInvites = true },
-                        onOpenBookmarks = { showBookmarks = true },
-                        onOpenActivity = { showActivity = true },
-                        onOpenWatchwords = { showWatchwords = true },
-                        onOpenDigest = { showDailyDigest = true },
-                        digestEnabled = dailyDigestSettings
-                            ?.state
-                            ?.collectAsState()
-                            ?.value
-                            ?.enabled
-                            ?: false,
-                        onOpenAdministration = { showGroupAdminList = true },
-                        onOpenSettings = { showSettings = true },
-                        activeShip = ship,
-                        allShips = remember(loggedInShip) {
-                            sessionStore.all().map { it.ship }
-                        },
-                        shipNicknames = run {
-                            // Async lookup — replaces a runBlocking on the
-                            // composing thread that stalled the first
-                            // frame for N saved ships * one DB hit each.
-                            val savedShips = remember(loggedInShip) {
-                                sessionStore.all().map { it.ship }
-                            }
-                            val nicknames = remember(loggedInShip) {
-                                mutableStateOf<Map<String, String>>(emptyMap())
-                            }
-                            LaunchedEffect(savedShips) {
-                                val map = savedShips.mapNotNull { ship ->
-                                    val nick = runCatching {
-                                        db.contacts().get(ship)?.nickname
-                                    }.getOrNull()
-                                    if (nick.isNullOrBlank()) null else ship to nick
-                                }.toMap()
-                                nicknames.value = map
-                            }
-                            nicknames.value
-                        },
-                        onSwitchShip = { newShip ->
-                            sessionStore.setActive(newShip)
-                            // Reset nav: previous ship's chat ids would
-                            // otherwise be queried against the new ship's db.
-                            openChat = null
-                            openThreadParent = null
-                            openThreadReplyAnchor = null
-                            viewerImageUrl = null
-                            showSelfProfile = false
-                            showSettings = false
-                            loggedInShip = newShip
-                        },
-                        onAddShip = {
-                            // Drop to LoginScreen without signing the current
-                            // ship out — its session entry stays in sessionStore
-                            // so the drawer can switch back after the new login.
-                            openChat = null
-                            openThreadParent = null
-                            openThreadReplyAnchor = null
-                            viewerImageUrl = null
-                            showSelfProfile = false
-                            showSettings = false
-                            loggedInShip = null
-                        },
-                        groupChannelOrder = uiSettings.groupChannelOrder
-                            .collectAsState().value,
-                    )
+                    }
                 }
 
                 // ContactProfileSheet rendered as an overlay so it
