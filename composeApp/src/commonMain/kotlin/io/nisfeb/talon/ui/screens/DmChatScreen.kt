@@ -44,6 +44,7 @@ import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.NotificationsOff
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Topic
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
@@ -183,6 +184,14 @@ fun DmChatScreen(
      *  voiceComposer mic button uses). When null the slash command
      *  surfaces a user-facing "tap the mic button" error. */
     onSlashMic: (() -> Unit)? = null,
+    /**
+     * Tap handler for the new info icon in the chat header. v1 routes
+     * this to the right pane on wide and to a full-screen
+     * [GroupInfoScreen] on compact. Caller decides — `DmChatScreen`
+     * just fires the lambda. Pass `null` from a caller that hasn't
+     * wired info yet (icon stays hidden).
+     */
+    onOpenGroupInfo: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val aiConfigured by aiSettings.state.collectAsState()
@@ -598,6 +607,11 @@ fun DmChatScreen(
                     style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
                     modifier = Modifier.weight(1f).padding(start = 4.dp),
                 )
+                if (onOpenGroupInfo != null && (whom.startsWith("chat/") || whom.startsWith("0v"))) {
+                    IconButton(onClick = onOpenGroupInfo) {
+                        Icon(Icons.Filled.Info, contentDescription = "Info")
+                    }
+                }
                 if (aiConfigured.topicClustersEnabled) {
                     IconButton(onClick = { topicsSheetOpen = true }) {
                         Icon(Icons.Filled.Topic, contentDescription = "Topics in this chat")
