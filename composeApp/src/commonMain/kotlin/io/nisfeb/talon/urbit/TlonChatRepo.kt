@@ -2802,7 +2802,13 @@ class TlonChatRepo(
         )
     }
 
-    private fun parseContact(
+    /**
+     * Visible to tests so the regression guard around the
+     * "every reinstall stamps statuses to now" bug can drive the
+     * full bootstrap-shape parse path. Production callers stay
+     * inside TlonChatRepo via applyContactsNews + bootstrapContacts.
+     */
+    internal fun parseContact(
         ship: String,
         fields: JsonObject,
         modAtMs: Long? = null,

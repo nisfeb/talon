@@ -150,6 +150,54 @@ class MergeContactStatusTest {
         }
 
     @Test
+    fun `bootstrap-shape entry without mod-at preserves existing — closes the parseContact loop`() =
+        runBlocking {
+            // The actual production bug: `bootstrapContacts` ran on
+            // every install. Tlon's `/v1/all` entries that lacked a
+            // server `mod-at` got pre-stamped with `now` BEFORE
+            // mergeContact ran, then mergeContact's "incoming non-null
+            // wins" branch overwrote the trustworthy existing value.
+            //
+            // The fix removed the pre-stamp. This test pins the
+            // post-fix invariant: walk the full bootstrap path
+            // (parseContact with no mod-at → mergeContact) and verify
+            // the existing timestamp survives. If a future change
+            // reintroduces pre-stamping anywhere in the bootstrap
+            // pipeline, this test fails because incoming becomes
+            // non-null and overwrites the seeded 100L.
+            db.contacts().upsert(
+                contact("~sampel", status = "hello", statusUpdatedMs = 100L),
+            )
+            // Mirror the wire shape of an entry from /v1/all:
+            //   {nickname: {type: text, value: ...},
+            //    bio: …, avatar: …, status: {type: text, value: "hello"},
+            //    color: …}
+            // No `mod-at` envelope on this entry.
+            val fields = kotlinx.serialization.json.buildJsonObject {
+                put(
+                    "status",
+                    kotlinx.serialization.json.buildJsonObject {
+                        put("type", kotlinx.serialization.json.JsonPrimitive("text"))
+                        put("value", kotlinx.serialization.json.JsonPrimitive("hello"))
+                    },
+                )
+            }
+            val parsed = repo.parseContact("~sampel", fields, modAtMs = null)
+            // Sanity: parseContact with no mod-at must produce null.
+            // If a future change synthesizes a stamp here, the bug
+            // recurs even before mergeContact gets a say — fail loud.
+            assertNull(
+                parsed.statusUpdatedMs,
+                "parseContact must NOT synthesize a timestamp when " +
+                    "modAtMs is null — that's how the v0.8.8 status-pip bug " +
+                    "got introduced in the first place.",
+            )
+            // Now walk the merge step; existing 100L must survive.
+            val merged = repo.mergeContact(parsed)
+            assertEquals(100L, merged.statusUpdatedMs)
+        }
+
+    @Test
     fun `nickname bio avatar still survive when incoming omits them`() = runBlocking {
         // Same merge function carries the other contact fields. Pin
         // the existing behaviour so a regression doesn't take those
