@@ -127,13 +127,31 @@ jobs:
             fi
           done
           SHA=$(sha256sum "$OUT_APK" | awk '{print $1}')
-          CHANGELOG="$(git log -1 --pretty=%B | tr '\n' ' ' | sed 's/"/\\"/g')"
-          sed -e "s|__VERSION_CODE__|$VERSION_CODE|" \
-              -e "s|__VERSION_NAME__|$VERSION_NAME|g" \
-              -e "s|__SHA256__|$SHA|" \
-              -e "s|__CHANGELOG__|$CHANGELOG|" \
-              -e "s|__MANDATORY__|false|" \
-              release/manifest-template.json > latest.json
+          # Build latest.json with jq instead of sed. The previous
+          # sed pipeline used `|` as substitution delimiter and choked
+          # on commit messages containing `|` (caught real on
+          # 0.9.0-rc1: `(list | chat | thread visible at once)`).
+          # Triple-escaping `\` / `"` / `&` / `|` through two cascaded
+          # sed runs is also fragile. jq knows how to escape JSON
+          # strings; let it do that job. Template still lives at
+          # release/manifest-template.json for readability — we just
+          # populate the placeholders structurally.
+          CHANGELOG="$(git log -1 --pretty=%B | tr '\n' ' ')"
+          jq -n \
+              --argjson versionCode "$VERSION_CODE" \
+              --arg     versionName "$VERSION_NAME" \
+              --arg     sha         "$SHA" \
+              --arg     changelog   "$CHANGELOG" \
+              '{
+                versionCode: $versionCode,
+                versionName: $versionName,
+                url: ("https://github.com/nisfeb/talon/releases/download/v"
+                      + $versionName + "/talon-" + $versionName + ".apk"),
+                sha256: $sha,
+                minSdk: 26,
+                changelog: $changelog,
+                mandatory: false
+              }' > latest.json
           # Newline-separated list of staged paths for the upload step.
           printf '%s\n' "${STAGED[@]}" > staged-apks.txt
           echo "apks_file=staged-apks.txt" >> $GITHUB_OUTPUT
