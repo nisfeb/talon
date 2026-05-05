@@ -28,6 +28,7 @@ actual abstract class AppDatabase : RoomDatabase() {
     actual abstract fun bookmarkFolders(): BookmarkFolderDao
     actual abstract fun watchwords(): WatchwordsDao
     actual abstract fun dailyDigests(): DailyDigestDao
+    actual abstract fun messageMedia(): MessageMediaDao
 }
 
 /**
@@ -49,6 +50,7 @@ fun createAppDatabase(context: Context, name: String): AppDatabase {
             MIGRATION_20_21, MIGRATION_21_22, MIGRATION_22_23,
             MIGRATION_23_24, MIGRATION_24_25, MIGRATION_25_26,
             MIGRATION_26_27, MIGRATION_27_28, MIGRATION_28_29,
+            MIGRATION_29_30,
         )
         // dropAllTables = true preserves the pre-2.7 behaviour: when
         // Room can't find a migration path, drop everything and rebuild.
@@ -215,6 +217,33 @@ private val MIGRATION_28_29 = object : Migration(28, 29) {
         // order. See ChannelGroupEntity.ordinal KDoc.
         db.execSQL(
             "ALTER TABLE channel_groups ADD COLUMN ordinal INTEGER NOT NULL DEFAULT 0",
+        )
+    }
+}
+
+private val MIGRATION_29_30 = object : Migration(29, 30) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        // Derived media index table. Empty after migration — the
+        // first launch on the new version runs a one-shot backfill
+        // that walks existing messages and re-derives rows. See
+        // MessageMediaEntity KDoc.
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS message_media (
+                whom TEXT NOT NULL,
+                messageId TEXT NOT NULL,
+                url TEXT NOT NULL,
+                category TEXT NOT NULL,
+                displayText TEXT,
+                sentMs INTEGER NOT NULL,
+                author TEXT NOT NULL,
+                PRIMARY KEY (whom, messageId, url)
+            )
+            """.trimIndent()
+        )
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS index_message_media_whom_category_sentMs " +
+                "ON message_media (whom, category, sentMs)"
         )
     }
 }

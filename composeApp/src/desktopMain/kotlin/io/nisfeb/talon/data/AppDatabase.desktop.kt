@@ -40,6 +40,7 @@ actual abstract class AppDatabase : RoomDatabase() {
     actual abstract fun bookmarkFolders(): BookmarkFolderDao
     actual abstract fun watchwords(): WatchwordsDao
     actual abstract fun dailyDigests(): DailyDigestDao
+    actual abstract fun messageMedia(): MessageMediaDao
 }
 
 /**
