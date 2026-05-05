@@ -47,6 +47,17 @@ interface UiSettings {
      */
     val chatPaneListFraction: StateFlow<Float>
     fun setChatPaneListFraction(value: Float)
+
+    /**
+     * Which surface the desktop / tablet-landscape rail has selected for
+     * the left pane. Default [RailTab.Chats]. Persists per ship across
+     * launches alongside the other UI prefs. Mobile (<840dp) ignores
+     * this value — the kebab menu drives mobile nav directly via the
+     * existing `showStatusFeed` / `showBookmarks` / `showActivity`
+     * flags. See `DesktopShell` for the wide-pane consumer.
+     */
+    val activeRailTab: StateFlow<RailTab>
+    fun setActiveRailTab(tab: RailTab)
 }
 
 enum class GroupChannelOrder { Recent, HostOrder }
@@ -88,6 +99,7 @@ class InMemoryUiSettings(
     initialAccent: AccentSettings = AccentSettings(),
     initialGroupOrder: GroupChannelOrder = GroupChannelOrder.Recent,
     initialChatPaneListFraction: Float = 0.30f,
+    initialActiveRailTab: RailTab = RailTab.Chats,
 ) : UiSettings {
     private val _hideComposerButtons = MutableStateFlow(initialHide)
     override val hideComposerButtons: StateFlow<Boolean> =
@@ -117,5 +129,12 @@ class InMemoryUiSettings(
         _chatPaneListFraction.asStateFlow()
     override fun setChatPaneListFraction(value: Float) {
         _chatPaneListFraction.value = value.coerceIn(0.20f, 0.50f)
+    }
+
+    private val _activeRailTab = MutableStateFlow(initialActiveRailTab)
+    override val activeRailTab: StateFlow<RailTab> =
+        _activeRailTab.asStateFlow()
+    override fun setActiveRailTab(tab: RailTab) {
+        _activeRailTab.value = tab
     }
 }

@@ -33,6 +33,7 @@ class DesktopUiSettings(
         val groupChannelOrder: String = GroupChannelOrder.Recent.name,
         // Fraction of total width given to the chat-list pane on wide windows.
         val chatPaneListFraction: Float = 0.30f,
+        val activeRailTab: String = RailTab.Chats.name,
     )
 
     private val initial = loadInitial()
@@ -64,6 +65,12 @@ class DesktopUiSettings(
     override val chatPaneListFraction: StateFlow<Float> =
         _chatPaneListFraction.asStateFlow()
 
+    private val _activeRailTab = MutableStateFlow(
+        railTabOrDefault(initial.activeRailTab),
+    )
+    override val activeRailTab: StateFlow<RailTab> =
+        _activeRailTab.asStateFlow()
+
     override fun setHideComposerButtons(hidden: Boolean) {
         if (_hideComposerButtons.value == hidden) return
         _hideComposerButtons.value = hidden
@@ -89,6 +96,12 @@ class DesktopUiSettings(
         persistCurrent()
     }
 
+    override fun setActiveRailTab(tab: RailTab) {
+        if (_activeRailTab.value == tab) return
+        _activeRailTab.value = tab
+        persistCurrent()
+    }
+
     private fun persistCurrent() {
         val accent = _accentSettings.value
         persist(
@@ -99,6 +112,7 @@ class DesktopUiSettings(
                 accentCustomHex = accent.customHex,
                 groupChannelOrder = _groupChannelOrder.value.name,
                 chatPaneListFraction = _chatPaneListFraction.value,
+                activeRailTab = _activeRailTab.value.name,
             ),
         )
     }

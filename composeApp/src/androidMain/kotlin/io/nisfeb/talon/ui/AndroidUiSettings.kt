@@ -34,6 +34,12 @@ class AndroidUiSettings(context: Context) : UiSettings {
     override val chatPaneListFraction: StateFlow<Float> =
         _chatPaneListFraction.asStateFlow()
 
+    private val _activeRailTab = MutableStateFlow(
+        railTabOrDefault(prefs.getString(KEY_ACTIVE_RAIL_TAB, null)),
+    )
+    override val activeRailTab: StateFlow<RailTab> =
+        _activeRailTab.asStateFlow()
+
     override fun setHideComposerButtons(hidden: Boolean) {
         if (_hideComposerButtons.value == hidden) return
         prefs.edit().putBoolean(KEY_HIDE_COMPOSER_BUTTONS, hidden).apply()
@@ -74,6 +80,12 @@ class AndroidUiSettings(context: Context) : UiSettings {
         _chatPaneListFraction.value = clamped
     }
 
+    override fun setActiveRailTab(tab: RailTab) {
+        if (_activeRailTab.value == tab) return
+        prefs.edit().putString(KEY_ACTIVE_RAIL_TAB, tab.name).apply()
+        _activeRailTab.value = tab
+    }
+
     private fun loadGroupOrder(): GroupChannelOrder {
         val name = prefs.getString(KEY_GROUP_CHANNEL_ORDER, null) ?: return GroupChannelOrder.Recent
         return runCatching { GroupChannelOrder.valueOf(name) }
@@ -104,5 +116,6 @@ class AndroidUiSettings(context: Context) : UiSettings {
         private const val KEY_ACCENT_HEX = "accent_hex"
         private const val KEY_GROUP_CHANNEL_ORDER = "group_channel_order"
         private const val KEY_CHAT_PANE_LIST_FRACTION = "chat_pane_list_fraction"
+        private const val KEY_ACTIVE_RAIL_TAB = "active_rail_tab"
     }
 }
