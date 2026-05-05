@@ -1037,9 +1037,23 @@ private fun RelayRegistrationPanel(config: RelayPanelConfig) {
                         scope.launch {
                             val endpoint = config.pushTokens.token()
                             if (endpoint == null) {
-                                status = "No UnifiedPush distributor found. " +
-                                    "Install ntfy, NextPush, or another " +
-                                    "distributor app, then try again."
+                                // token() returns null both when no distributor
+                                // is installed AND when registration was just
+                                // kicked off (the endpoint URL arrives async
+                                // via TalonMessagingReceiver.onNewEndpoint).
+                                // Use diagnose() to tell the two cases apart
+                                // and give the user something actionable.
+                                val report = config.pushTokens.diagnose()
+                                status = if (report.byConnector.isEmpty()) {
+                                    "No UnifiedPush distributor found. " +
+                                        "Install ntfy, NextPush, or another " +
+                                        "distributor app, then try again."
+                                } else {
+                                    "Asked ${report.byConnector.first()} for " +
+                                        "an endpoint. Wait a few seconds and " +
+                                        "tap Register again — the endpoint " +
+                                        "arrives via a background broadcast."
+                                }
                                 working = false
                                 return@launch
                             }

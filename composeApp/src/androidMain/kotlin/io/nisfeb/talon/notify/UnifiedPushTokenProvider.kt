@@ -44,14 +44,21 @@ class UnifiedPushTokenProvider(private val context: Context) : PushTokenProvider
             Log.i(TAG, "no UnifiedPush distributor installed")
             return null
         }
-        // tryUseCurrentOrDefaultDistributor picks one we've used
-        // before, or the first available. Returns true on success;
-        // we still won't have an endpoint synchronously — the
-        // distributor calls back via TalonMessagingReceiver.
+
+        // Decompiling connector 3.0.5 showed `tryUseDefaultDistributor`
+        // (and the "current or default" variant that delegates to it)
+        // shortcuts to `callback(false); return` when the context is
+        // not an Activity — which it never is for our Application-
+        // scoped UnifiedPushTokenProvider. The result was silent
+        // failure: no broadcast, no log, no endpoint. Side-step the
+        // helper entirely. saveDistributor + registerApp both accept
+        // any Context and produce the actual REGISTER broadcast.
+        val saved = UnifiedPush.getSavedDistributor(context)
+        val pick = saved?.takeIf { it in distributors } ?: distributors.first()
+        Log.i(TAG, "registering with distributor=$pick (saved=$saved)")
         runCatching {
-            UnifiedPush.tryUseCurrentOrDefaultDistributor(context) { ok ->
-                if (ok) UnifiedPush.registerApp(context, INSTANCE)
-            }
+            if (saved != pick) UnifiedPush.saveDistributor(context, pick)
+            UnifiedPush.registerApp(context, INSTANCE)
         }.onFailure { Log.w(TAG, "UnifiedPush register failed", it) }
         return null
     }
