@@ -151,4 +151,15 @@ class DesktopUiSettingsTest {
         // should not create the file (no persist needed).
         assertFalse(file.exists())
     }
+
+    // ── rail tab ─────────────────────────────────────────────────
+
+    @Test
+    fun `activeRailTab persists across instances`() {
+        DesktopUiSettings(file).setActiveRailTab(RailTab.Bookmarks)
+        kotlin.test.assertEquals(
+            RailTab.Bookmarks,
+            DesktopUiSettings(file).activeRailTab.value,
+        )
+    }
 }
