@@ -1,5 +1,6 @@
 package io.nisfeb.talon.ui
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -29,6 +30,7 @@ import androidx.compose.material3.rememberTooltipState
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 
@@ -122,24 +124,35 @@ private fun RailIconButton(
     val tint = if (isSelected) MaterialTheme.colorScheme.primary
         else MaterialTheme.colorScheme.onSurfaceVariant
     val label = railLabel(tab)
-    // material3 `TooltipBox` is commonMain-safe; it positions the
-    // popup relative to the anchor (the icon button), which is the
-    // conventional desktop pattern. A cursor-anchored variant would
-    // need `rememberCursorPositionProvider`, which lives in
-    // `ui-desktop` only — phase 5 can revisit with an
-    // expect/actual provider if we want it. The icon's
-    // `contentDescription` continues to feed screen readers.
-    TooltipBox(
-        positionProvider = TooltipDefaults.rememberPlainTooltipPositionProvider(),
-        tooltip = { PlainTooltip { Text(label) } },
-        state = rememberTooltipState(),
-    ) {
-        IconButton(onClick = onClick) {
-            Icon(
-                imageVector = railIcon(tab),
-                contentDescription = label,
-                tint = tint,
-            )
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Box(
+            modifier = Modifier
+                .width(3.dp)
+                .height(24.dp)
+                .background(
+                    if (isSelected) MaterialTheme.colorScheme.primary
+                    else Color.Transparent,
+                ),
+        )
+        // material3 `TooltipBox` is commonMain-safe; it positions the
+        // popup relative to the anchor (the icon button), which is the
+        // conventional desktop pattern. A cursor-anchored variant would
+        // need `rememberCursorPositionProvider`, which lives in
+        // `ui-desktop` only — phase 5 can revisit with an
+        // expect/actual provider if we want it. The icon's
+        // `contentDescription` continues to feed screen readers.
+        TooltipBox(
+            positionProvider = TooltipDefaults.rememberPlainTooltipPositionProvider(),
+            tooltip = { PlainTooltip { Text(label) } },
+            state = rememberTooltipState(),
+        ) {
+            IconButton(onClick = onClick) {
+                Icon(
+                    imageVector = railIcon(tab),
+                    contentDescription = label,
+                    tint = tint,
+                )
+            }
         }
     }
 }
