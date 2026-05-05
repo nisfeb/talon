@@ -64,6 +64,7 @@ import io.nisfeb.talon.ui.theme.InMemoryThemePreference
 import io.nisfeb.talon.ui.theme.TalonTheme
 import io.nisfeb.talon.ui.theme.ThemePreference
 import io.nisfeb.talon.update.UpdateState
+import io.nisfeb.talon.urbit.MediaBackfillWorker
 import io.nisfeb.talon.urbit.SessionStore
 import io.nisfeb.talon.urbit.SettingsSync
 import io.nisfeb.talon.urbit.TlonChatRepo
@@ -370,6 +371,14 @@ fun App(
                 aiState.topicClustersEnabled ||
                 aiState.importantMessagesEnabled
             if (needsIndex) runCatching { client.start() }
+        }
+
+        // Populate message_media for messages that pre-date Task 2.3's
+        // ingest hook. Skipped on fresh installs (nothing to backfill).
+        // Runs once per db instance; subsequent launches are no-ops.
+        LaunchedEffect(db) {
+            runCatching { MediaBackfillWorker.runIfNeeded(db) }
+                .onFailure { Log.w("MediaBackfill", "backfill failed: $it") }
         }
 
         DisposableEffect(Unit) {
