@@ -148,8 +148,8 @@ kotlin {
 // version inside derivePackageVersion and silently drifted — every
 // release between 0.7.14 and 0.7.23 shipped with stale .dmg/.msi/.deb
 // filenames because nobody updated both literals.
-val talonVersionCode = 58
-val talonVersionName = "0.8.5"
+val talonVersionCode = 59
+val talonVersionName = "0.8.6"
 
 android {
     namespace = "io.nisfeb.talon"

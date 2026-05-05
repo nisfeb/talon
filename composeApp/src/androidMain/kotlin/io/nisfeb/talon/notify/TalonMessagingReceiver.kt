@@ -81,13 +81,19 @@ class TalonMessagingReceiver : MessagingReceiver() {
         if (whom.isNullOrBlank()) return
         val title = patp ?: "Talon"
         val body = "New activity in $whom"
-        // postId stays null here — we don't know which message id to
-        // anchor the tap-intent on. The body of the chat opens at
-        // its newest message, which is what the user wants ~always.
+        // The relay sends the globally-unique post id as `id`
+        // (`<author>/<128-bit-id>` from the activity event's
+        // dm-post.key.id). Plumbing it through as `postId` makes the
+        // tap-intent anchor on that specific message via
+        // EXTRA_SCROLL_TO_MESSAGE rather than just opening the chat
+        // at its tail. Older relay builds emitted a numeric channel-
+        // local id which won't resolve to a real row — passing it
+        // anyway is harmless (MainActivity scrolls to "best effort"
+        // and falls back to the chat's newest message).
         io.nisfeb.talon.Notifications.showMessage(
             context = context,
             whom = whom,
-            postId = null,
+            postId = eventId?.takeIf { it.isNotBlank() },
             title = title,
             body = body,
             sentMs = System.currentTimeMillis(),

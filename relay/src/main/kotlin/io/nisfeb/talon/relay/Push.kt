@@ -38,19 +38,23 @@ class Push {
         .writeTimeout(10, TimeUnit.SECONDS)
         .build()
 
-    fun send(endpoint: String, patp: String, whom: String, eventId: Long) {
+    fun send(endpoint: String, patp: String, whom: String, postId: String) {
         // Hand-rolled JSON to avoid pulling kotlinx-serialization
         // through Push's hot path. The fields are all server-
-        // controlled: patp matches `~[a-z0-9-]+` and whom is one of
-        // {ship-patp, club-id (0v…), nest path}. Quote-escape is
-        // defensive for the nest case which can carry slashes.
+        // controlled: patp matches `~[a-z0-9-]+`, whom is one of
+        // {ship-patp, club-id (0v…), nest path}, and postId is the
+        // globally-unique `<author>/<128-bit-id>` from the activity
+        // event's dm-post.key.id (or chan-post / club-post equivalent).
+        // Quote-escape on whom is defensive for the nest case which
+        // can carry slashes; postId carries a forward slash by design
+        // so it's escaped too.
         val body = buildString {
             append("""{"event":"new-message","patp":"""")
             append(escape(patp))
             append("""","whom":"""")
             append(escape(whom))
             append("""","id":"""")
-            append(eventId)
+            append(escape(postId))
             append("\"}")
         }
         val req = Request.Builder()

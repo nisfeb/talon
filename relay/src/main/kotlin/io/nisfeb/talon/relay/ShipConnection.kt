@@ -215,9 +215,8 @@ class ShipConnection(
             log.warn("device $deviceId has no push endpoint; skipping")
             return
         }
-        val numericEventId = eventId?.toLongOrNull() ?: 0L
         log.info("push whom=$whom post=$postId")
-        push.send(endpoint = pushEndpoint, patp = patp, whom = whom, eventId = numericEventId)
+        push.send(endpoint = pushEndpoint, patp = patp, whom = whom, postId = postId)
         db.setLastEventId(shipRowId, deviceId, postId)
     }
 
