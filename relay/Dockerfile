@@ -1,6 +1,9 @@
 # Talon notification push relay — multi-stage Docker build.
 #
-# Build:   docker build -t talon-relay relay/
+# Build:   docker build -t talon-relay -f relay/Dockerfile .
+#          (run from repo root — the Gradle build needs gradlew,
+#          settings.gradle.kts, and libs.versions.toml at the top
+#          of the build context)
 # Run:     docker run -p 8080:8080 \
 #            -v $(pwd)/data:/data \
 #            -e RELAY_MASTER_SECRET=<32+ random chars> \

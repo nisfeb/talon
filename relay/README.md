@@ -51,9 +51,13 @@ The relay listens on `:8080` by default. Override with `RELAY_PORT`.
 
 ## Quick start (Docker)
 
+Build from the repo root — the Gradle wrapper, `settings.gradle.kts`,
+and `gradle/libs.versions.toml` all live above `relay/` and are
+needed for the build.
+
 ```bash
 mkdir -p data
-docker build -t talon-relay relay/
+docker build -t talon-relay -f relay/Dockerfile .
 docker run -d \
   --name talon-relay \
   -p 8080:8080 \
