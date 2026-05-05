@@ -714,11 +714,16 @@ fun TalonApp(
                     relayConfig = io.nisfeb.talon.ui.screens.RelayPanelConfig(
                         client = relayClient,
                         settings = app.relaySettings,
-                        // Push token provider: NoPushTokenProvider for
-                        // now. Swapped to a FirebaseMessaging-backed
-                        // impl once google-services.json is wired and
-                        // firebase-messaging is on the classpath.
-                        pushTokens = io.nisfeb.talon.notify.NoPushTokenProvider,
+                        // UnifiedPush — vendor-neutral push, no
+                        // Google. The provider asks the user's
+                        // installed distributor (ntfy / NextPush /
+                        // …) for an endpoint URL; the relay POSTs
+                        // to it. If no distributor is installed,
+                        // token() returns null and the panel
+                        // surfaces an "install one" message.
+                        pushTokens = remember(app) {
+                            io.nisfeb.talon.notify.UnifiedPushTokenProvider(app)
+                        },
                         activePatp = ourPatp,
                         activeShipUrl = activeShipUrl,
                     ),

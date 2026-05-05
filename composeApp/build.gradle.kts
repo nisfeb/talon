@@ -89,6 +89,11 @@ kotlin {
             // this is the Layer 3 reconcile path for users who
             // killed Talon out of their recents.
             implementation(libs.androidx.work.runtime.ktx)
+            // UnifiedPush connector — vendor-neutral push protocol.
+            // Talks to whatever distributor app the user has
+            // installed (ntfy / NextPush / Conversations / …) over
+            // local IPC. Zero Google / Play Services dependency.
+            implementation(libs.unifiedpush.connector)
         }
         val desktopMain by getting
         desktopMain.dependencies {

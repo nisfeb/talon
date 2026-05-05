@@ -92,6 +92,26 @@
         </receiver>
 
         <!--
+          UnifiedPush dispatch receiver. The user's chosen
+          distributor (ntfy / NextPush / Conversations / …) sends
+          these intents when (a) the relay POSTs a notification to
+          our endpoint URL, or (b) the distributor mints / revokes
+          the endpoint itself. Connector library handles the
+          transport details; we just override the four lifecycle
+          callbacks. See notify/TalonMessagingReceiver.kt.
+        -->
+        <receiver
+            android:name="io.nisfeb.talon.notify.TalonMessagingReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="org.unifiedpush.android.connector.MESSAGE" />
+                <action android:name="org.unifiedpush.android.connector.UNREGISTERED" />
+                <action android:name="org.unifiedpush.android.connector.NEW_ENDPOINT" />
+                <action android:name="org.unifiedpush.android.connector.REGISTRATION_FAILED" />
+            </intent-filter>
+        </receiver>
+
+        <!--
           Sideload distribution only — pairs with the
           REQUEST_INSTALL_PACKAGES permission above. UpdateInstaller
           uses this provider to mint a content:// URI for the
