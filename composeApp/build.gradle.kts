@@ -122,6 +122,15 @@ kotlin {
     }
 }
 
+// Single source of truth for the app version. `derivePackageVersion`
+// reads this same value, which keeps desktop installer filenames in
+// lockstep with the Android side. Earlier revisions hard-coded the
+// version inside derivePackageVersion and silently drifted — every
+// release between 0.7.14 and 0.7.23 shipped with stale .dmg/.msi/.deb
+// filenames because nobody updated both literals.
+val talonVersionCode = 47
+val talonVersionName = "0.7.24"
+
 android {
     namespace = "io.nisfeb.talon"
     compileSdk = 35
@@ -133,8 +142,8 @@ android {
         // matches what RELEASE.md already documents and opts us into
         // Android 15 behavior changes (16 KB page sizes, edge-to-edge).
         targetSdk = 35
-        versionCode = 46
-        versionName = "0.7.23"
+        versionCode = talonVersionCode
+        versionName = talonVersionName
     }
 
     signingConfigs {
@@ -274,16 +283,16 @@ compose.desktop {
 
 /**
  * Map "0.M.P → 1.M.P" so jpackage's MAJOR > 0 constraint is satisfied
- * while the project is still pre-1.0. Reads versionName from this
- * very file to stay in lockstep with the Android side. After the
- * project crosses 1.0 the map is straight identity.
+ * while the project is still pre-1.0. Reads `talonVersionName` (the
+ * same constant `android.defaultConfig.versionName` reads) so the
+ * Android APKs and desktop installers always agree. After the project
+ * crosses 1.0 the map is straight identity.
  */
 fun derivePackageVersion(): String {
-    val raw = "0.7.14"
-    val parts = raw.split(".")
+    val parts = talonVersionName.split(".")
     if (parts.size < 3) return "1.0.0"
     val major = parts[0].toIntOrNull() ?: return "1.0.0"
-    return if (major == 0) "1.${parts[1]}.${parts[2]}" else raw
+    return if (major == 0) "1.${parts[1]}.${parts[2]}" else talonVersionName
 }
 
 // Manual smoke task for the desktop notifier — emits a real native
