@@ -57,20 +57,37 @@ class TalonMessagingReceiver : MessagingReceiver() {
     }
 
     override fun onMessage(context: Context, message: PushMessage, instance: String) {
-        // Hint-only payload from the Talon relay. We don't render
-        // the message content from the push — pull it via SSE on
-        // wake. For now, post a generic "new message" notification
-        // with the conversation label so the user sees something
-        // immediately. Future: kick the SSE catchUp here so the
-        // tap-through opens the actual message.
+        // Hint-only payload from the Talon relay:
+        //   { "event": "new-message", "patp": "...", "whom": "...",
+        //     "id": "..." }
+        // We don't trust the body to carry actual message text — by
+        // design, only the whom + ship + id come through the relay.
+        // Post a generic "new message in <conversation>" so the
+        // user sees something immediately; the tap-intent opens
+        // MainActivity which restores the SSE channel and pulls
+        // real content into the chat.
         val parsed = runCatching {
             Json.parseToJsonElement(message.content.decodeToString()) as? JsonObject
         }.getOrNull()
         val whom = parsed?.get("whom")?.jsonPrimitive?.content
-        Log.i(TAG, "push received whom=$whom")
-        // TODO: route through the existing AndroidNotifier so the
-        // notification's tap-intent opens the right chat. For v1
-        // we just log — the SSE / WorkManager paths still post.
+        val patp = parsed?.get("patp")?.jsonPrimitive?.content
+        val eventId = parsed?.get("id")?.jsonPrimitive?.content
+        Log.i(TAG, "push received patp=$patp whom=$whom id=$eventId")
+
+        if (whom.isNullOrBlank()) return
+        val title = patp ?: "Talon"
+        val body = "New activity in $whom"
+        // postId stays null here — we don't know which message id to
+        // anchor the tap-intent on. The body of the chat opens at
+        // its newest message, which is what the user wants ~always.
+        io.nisfeb.talon.Notifications.showMessage(
+            context = context,
+            whom = whom,
+            postId = null,
+            title = title,
+            body = body,
+            sentMs = System.currentTimeMillis(),
+        )
     }
 
     companion object {
