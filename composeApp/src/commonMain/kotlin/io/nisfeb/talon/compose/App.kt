@@ -17,6 +17,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import kotlinx.coroutines.launch
 import io.nisfeb.talon.ai.AiSettingsRepository
@@ -32,6 +33,8 @@ import io.nisfeb.talon.ui.DesktopShell
 import io.nisfeb.talon.ui.ExpandedThreshold
 import io.nisfeb.talon.ui.PlatformBackHandler
 import io.nisfeb.talon.ui.RailTab
+import io.nisfeb.talon.ui.RightPaneContent
+import io.nisfeb.talon.ui.RightPaneHost
 import io.nisfeb.talon.ui.UiSettings
 import io.nisfeb.talon.ui.screens.ActivityList
 import io.nisfeb.talon.ui.screens.BookmarksList
@@ -47,9 +50,11 @@ import io.nisfeb.talon.ui.screens.GalleryPostScreen
 import io.nisfeb.talon.ui.screens.GroupAdminListScreen
 import io.nisfeb.talon.ui.screens.GroupAdminScreen
 import io.nisfeb.talon.ui.screens.GroupHomeScreen
+import io.nisfeb.talon.ui.screens.GroupInfoScreen
 import io.nisfeb.talon.ui.screens.GroupInvitesScreen
 import io.nisfeb.talon.ui.screens.ImageViewerScreen
 import io.nisfeb.talon.ui.screens.LoginScreen
+import io.nisfeb.talon.ui.screens.MediaListScreen
 import io.nisfeb.talon.ui.screens.NewDmScreen
 import io.nisfeb.talon.ui.screens.NotebookComposeScreen
 import io.nisfeb.talon.ui.screens.NotebookListScreen
@@ -65,6 +70,7 @@ import io.nisfeb.talon.ui.theme.TalonTheme
 import io.nisfeb.talon.ui.theme.ThemePreference
 import io.nisfeb.talon.update.UpdateState
 import io.nisfeb.talon.urbit.MediaBackfillWorker
+import io.nisfeb.talon.urbit.MediaCategory
 import io.nisfeb.talon.urbit.SessionStore
 import io.nisfeb.talon.urbit.SettingsSync
 import io.nisfeb.talon.urbit.TlonChatRepo
@@ -176,6 +182,8 @@ fun App(
     var viewerImageUrl by remember { mutableStateOf<String?>(null) }
     var openThreadParent by remember { mutableStateOf<String?>(null) }
     var openThreadReplyAnchor by remember { mutableStateOf<String?>(null) }
+    var groupInfoOpenFor by remember { mutableStateOf<String?>(null) }
+    var groupInfoDrilldown by remember { mutableStateOf<MediaCategory?>(null) }
     var showSelfProfile by remember { mutableStateOf(false) }
     var showStatusFeed by remember { mutableStateOf(false) }
     var showInvites by remember { mutableStateOf(false) }
@@ -260,6 +268,17 @@ fun App(
     PlatformBackHandler(enabled = openThreadParent != null) {
         openThreadParent = null
         openThreadReplyAnchor = null
+    }
+    // Group info / media drilldown back stack (mobile / compact only —
+    // wide windows render these in the right pane and dismiss via the
+    // pane's close button). Drilldown predicate is mutually exclusive
+    // with group-info so the right one fires regardless of registration
+    // order.
+    PlatformBackHandler(enabled = groupInfoDrilldown != null) {
+        groupInfoDrilldown = null
+    }
+    PlatformBackHandler(enabled = groupInfoOpenFor != null && groupInfoDrilldown == null) {
+        groupInfoOpenFor = null
     }
     PlatformBackHandler(enabled = viewerImageUrl != null) {
         viewerImageUrl = null
@@ -615,6 +634,31 @@ fun App(
                         if (expanded) uiSettings.setActiveRailTab(RailTab.Activity)
                         else showActivity = true
                     }
+                    // Right-pane content. Computed at render time from the
+                    // flat state vars; mutual exclusion is enforced at the
+                    // write sites (thread-open clears group-info and vice
+                    // versa). null means no fourth column on wide; on
+                    // compact the new outer-when branches handle the
+                    // full-screen render.
+                    val rightPaneContent: RightPaneContent? = when {
+                        openThreadParent != null && openChat != null -> RightPaneContent.Thread(
+                            whom = openChat!!,
+                            parentId = openThreadParent!!,
+                            replyAnchor = openThreadReplyAnchor,
+                        )
+                        groupInfoDrilldown != null && groupInfoOpenFor != null ->
+                            RightPaneContent.GroupInfoDrilldown(
+                                whom = groupInfoOpenFor!!,
+                                category = groupInfoDrilldown!!,
+                            )
+                        groupInfoOpenFor != null ->
+                            RightPaneContent.GroupInfo(whom = groupInfoOpenFor!!)
+                        else -> null
+                    }
+                    // Coroutine scope used by the right-pane onOpenMembers
+                    // bridge — resolving channel-nest → group-flag is a
+                    // suspend DAO call.
+                    val rightPaneScope = rememberCoroutineScope()
                     when {
                     ship == null -> LoginScreen(
                         session = session,
@@ -767,6 +811,67 @@ fun App(
                         url = viewerImageUrl!!,
                         onClose = { viewerImageUrl = null },
                     )
+                    // Compact-only group-info back stack. Order matters:
+                    // drilldown branch first so its back-arrow exits the
+                    // drilldown, leaving the user on group info instead of
+                    // dismissing both at once. Predicates are mutually
+                    // exclusive (drilldown-without-info isn't a state we
+                    // produce — opening a category requires info to be open).
+                    groupInfoDrilldown != null && groupInfoOpenFor != null && !expanded -> {
+                        MediaListScreen(
+                            db = db,
+                            whom = groupInfoOpenFor!!,
+                            category = groupInfoDrilldown!!,
+                            onBack = { groupInfoDrilldown = null },
+                            onOpenImage = { url -> viewerImageUrl = url },
+                        )
+                    }
+                    groupInfoOpenFor != null && !expanded -> {
+                        GroupInfoScreen(
+                            db = db,
+                            repo = repo,
+                            whom = groupInfoOpenFor!!,
+                            onBack = { groupInfoOpenFor = null },
+                            onOpenCategory = { groupInfoDrilldown = it },
+                            onOpenMembers = {
+                                val whom = groupInfoOpenFor
+                                if (whom != null) {
+                                    rightPaneScope.launch {
+                                        val flag = runCatching {
+                                            db.groups().channelGroupFor(whom)?.groupFlag
+                                        }.getOrNull()
+                                        if (flag != null) {
+                                            openGroupAdminFlag = flag
+                                        }
+                                    }
+                                }
+                            },
+                        )
+                    }
+                    // Compact-only thread. Wide windows render the thread
+                    // in the right pane next to the chat. Replaces the
+                    // detailSlot thread branch that lived here in Phase 2.
+                    openThreadParent != null && openChat != null && !expanded -> {
+                        ThreadScreen(
+                            db = db,
+                            repo = repo,
+                            ourPatp = ship,
+                            whom = openChat!!,
+                            parentId = openThreadParent!!,
+                            initialScrollReplyId = openThreadReplyAnchor,
+                            onScrollConsumed = { openThreadReplyAnchor = null },
+                            onBack = {
+                                openThreadParent = null
+                                openThreadReplyAnchor = null
+                            },
+                            onOpenConversation = { other ->
+                                openThreadParent = null
+                                openThreadReplyAnchor = null
+                                openChat = other
+                            },
+                            onOpenImage = { url -> viewerImageUrl = url },
+                        )
+                    }
                     else -> {
                         // List/detail surface. detailSlot is null when at
                         // the list root (no openChat), which causes
@@ -854,27 +959,12 @@ fun App(
                                     onCompose = { galleryComposeOpen = true },
                                 )
                             })
-                            openChat != null && openThreadParent != null -> ({
-                                ThreadScreen(
-                                    db = db,
-                                    repo = repo,
-                                    ourPatp = ship,
-                                    whom = openChat!!,
-                                    parentId = openThreadParent!!,
-                                    initialScrollReplyId = openThreadReplyAnchor,
-                                    onScrollConsumed = { openThreadReplyAnchor = null },
-                                    onBack = {
-                                        openThreadParent = null
-                                        openThreadReplyAnchor = null
-                                    },
-                                    onOpenConversation = { other ->
-                                        openThreadParent = null
-                                        openThreadReplyAnchor = null
-                                        openChat = other
-                                    },
-                                    onOpenImage = { url -> viewerImageUrl = url },
-                                )
-                            })
+                            // Thread no longer lives in detailSlot — it
+                            // renders in the right pane on wide and as a
+                            // dedicated outer-when branch on compact (see
+                            // below). DmChatScreen stays mounted underneath
+                            // so the chat list doesn't unmount when the
+                            // user opens a thread.
                             openChat != null -> ({
                                 DmChatScreen(
                                     db = db,
@@ -897,6 +987,13 @@ fun App(
                                     onOpenConversation = { other -> openChat = other },
                                     onOpenImage = { url -> viewerImageUrl = url },
                                     onOpenSelfProfile = { showSelfProfile = true },
+                                    onOpenGroupInfo = {
+                                        // Mutual exclusion: opening group info
+                                        // closes any open thread.
+                                        openThreadParent = null
+                                        openThreadReplyAnchor = null
+                                        groupInfoOpenFor = openChat
+                                    },
                                 )
                             })
                             else -> null
@@ -1044,6 +1141,46 @@ fun App(
                             detail = detailSlot,
                             listFraction = listFraction,
                             onListFractionChange = { uiSettings.setChatPaneListFraction(it) },
+                            rightSidebar = rightPaneContent?.let { content ->
+                                {
+                                    RightPaneHost(
+                                        content = content,
+                                        db = db,
+                                        repo = repo,
+                                        ourPatp = ship,
+                                        onClose = {
+                                            openThreadParent = null
+                                            openThreadReplyAnchor = null
+                                            groupInfoOpenFor = null
+                                            groupInfoDrilldown = null
+                                        },
+                                        onOpenCategory = { groupInfoDrilldown = it },
+                                        onLeaveCategoryDrilldown = { groupInfoDrilldown = null },
+                                        onOpenConversation = { other ->
+                                            openThreadParent = null
+                                            openThreadReplyAnchor = null
+                                            groupInfoOpenFor = null
+                                            groupInfoDrilldown = null
+                                            openChat = other
+                                        },
+                                        onOpenImage = { url -> viewerImageUrl = url },
+                                        onOpenMembers = { whom ->
+                                            // Resolve channel-nest → group-flag
+                                            // because GroupAdminScreen takes a
+                                            // group flag, not a whom. Async
+                                            // because the DAO call is suspend.
+                                            rightPaneScope.launch {
+                                                val flag = runCatching {
+                                                    db.groups().channelGroupFor(whom)?.groupFlag
+                                                }.getOrNull()
+                                                if (flag != null) {
+                                                    openGroupAdminFlag = flag
+                                                }
+                                            }
+                                        },
+                                    )
+                                }
+                            },
                         )
                     }
                     }
