@@ -552,13 +552,16 @@ fun App(
                             io.nisfeb.talon.ui.ShortcutAction.FocusSearch -> focusSearchRequest = true
                             is io.nisfeb.talon.ui.ShortcutAction.SwitchShip -> {
                                 sessionStore.all().getOrNull(action.index)?.ship?.let { targetShip ->
-                                    sessionStore.setActive(targetShip)
+                                    // Clear the previous ship's open chat before
+                                    // sessionStore.setActive so no frame renders with
+                                    // the new active ship but stale chat state.
                                     openChat = null
                                     openThreadParent = null
                                     openThreadReplyAnchor = null
                                     viewerImageUrl = null
                                     showSelfProfile = false
                                     showSettings = false
+                                    sessionStore.setActive(targetShip)
                                     loggedInShip = targetShip
                                 }
                             }
@@ -936,15 +939,16 @@ fun App(
                                         nicknames.value
                                     },
                                     onSwitchShip = { newShip ->
-                                        sessionStore.setActive(newShip)
-                                        // Reset nav: previous ship's chat ids would
-                                        // otherwise be queried against the new ship's db.
+                                        // Clear the previous ship's open chat before
+                                        // sessionStore.setActive so no frame renders with
+                                        // the new active ship but stale chat state.
                                         openChat = null
                                         openThreadParent = null
                                         openThreadReplyAnchor = null
                                         viewerImageUrl = null
                                         showSelfProfile = false
                                         showSettings = false
+                                        sessionStore.setActive(newShip)
                                         loggedInShip = newShip
                                     },
                                     onAddShip = {
