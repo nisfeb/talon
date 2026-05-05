@@ -21,7 +21,7 @@ Cost is not a constraint.
 ## Non-goals (this iteration)
 
 - iOS support (relay design accommodates it; client code doesn't yet target iOS).
-- Per-message E2EE for relay-borne pushes (we send hint-only payloads or trust FCM/APNS).
+- Per-message E2EE for relay-borne pushes (we send hint-only payloads, so message text never transits the relay).
 - Generalized "any-app" relay — this is purpose-built for Tlon's `%activity` agent.
 
 ---
@@ -43,7 +43,7 @@ Cost is not a constraint.
 | 11 | Desktop notification daemon absent / tray unsupported | Lost on this session | L4 health panel surfaces it |
 | 12 | Server-side: ship not running / unreachable | Cannot deliver | L4 health panel surfaces it |
 
-The honest summary: **reliable real-time push to a backgrounded mobile app, when the source-of-truth is a self-hosted Urbit ship that doesn't speak FCM, is not solvable with client-only logic**. Phase 1 (relay) is the only path that closes #1, #2, #5, #6, #10.
+The honest summary: **reliable real-time push to a backgrounded mobile app, when the source-of-truth is a self-hosted Urbit ship that doesn't speak any push protocol, is not solvable with client-only logic**. Phase 1 (relay → UnifiedPush) is the only path that closes #1, #2, #5, #6, #10.
 
 ---
 
@@ -60,9 +60,10 @@ An event makes it to the user as long as any one survives.
 └──────────────────────────────────────────────────────────────┘
 ┌──────────────────────────────────────────────────────────────┐
 │ Layer 2 — Push relay   (Phase 1, NEW — biggest leverage)    │
-│    Server connects to ship's SSE 24×7, fires FCM/APNS to    │
-│    device on each event. Survives app death, OOM, OEM       │
-│    aggression, reboot. The "never miss" guarantor.          │
+│    Server connects to ship's SSE 24×7, POSTs to each        │
+│    registered device's UnifiedPush distributor endpoint on  │
+│    each event. Survives app death, OOM, OEM aggression,     │
+│    reboot. Zero Google / FCM dep — UnifiedPush only.        │
 └──────────────────────────────────────────────────────────────┘
 ┌──────────────────────────────────────────────────────────────┐
 │ Layer 3 — Reconcile-on-everything   (Phase 2, EXTENDS L1)   │
@@ -106,25 +107,25 @@ Dedup: every push and every reconciled event carries the Urbit message id. The n
 
 ## Phase 1 — push relay (THE big one)
 
-A small server we (Talon) operate that opens its own SSE connection to each registered user's ship and fires FCM/APNS pushes when activity events arrive. This is what closes #1, #2, #4, #5, #6, #10 in the threat-model table.
+A small server we (Talon) operate that opens its own SSE connection to each registered user's ship and POSTs to each device's UnifiedPush distributor endpoint when activity events arrive. This is what closes #1, #2, #4, #5, #6, #10 in the threat-model table.
 
-### Server-side
+**Push transport: UnifiedPush, not FCM.** [unifiedpush.org](https://unifiedpush.org). Zero Google / Play Services dependency. The user installs a distributor app once (ntfy, NextPush, Conversations, …); the distributor holds one persistent connection and routes pushes to all UnifiedPush-aware apps. The relay treats the distributor's HTTPS endpoint URL as opaque — POST a JSON body, the distributor pushes to the device.
 
-- **Tech**: Go or Kotlin/JVM. Single-tenant friendly. Stateless event handlers, stateful per-user SSE connection pool.
-- **Storage**: Postgres or SQLite. Tables: `users`, `devices`, `last_event_id`. Per-user encrypted ship cookie (encryption key derived from a registration secret the device holds).
-- **Eventbus**: subscribes to each registered ship's `%activity` stream. On new event, looks up that user's registered devices, sends FCM/APNS push.
-- **Dedup**: tracks `last_event_id` per device. Resumes from there on relay restart.
-- **Idle kick**: if a user's ship hasn't sent any event in N minutes, do a cheap scry to verify the channel is still alive; reconnect on failure.
-- **Health endpoints**: `GET /health/<deviceId>` returns relay state + last event timestamp; the device polls this in the Settings → Notification Health panel.
+### Server-side (lives in `relay/`)
 
-### Client-side
+- **Tech**: Kotlin/JVM, Ktor 3 server, sqlite-jdbc. Single-tenant friendly.
+- **Storage**: SQLite. Tables: `devices`, `ships`, `last_event`. Per-row AES-GCM encrypted ship cookie keyed off `RELAY_MASTER_SECRET`.
+- **Eventbus**: subscribes to each registered ship's `%activity` stream via SSE on the user's behalf. On new event, looks up that user's registered devices, POSTs to each `pushEndpoint`.
+- **Dedup**: tracks `last_event_id` per `(ship, device)` pair. Resumes from there on relay restart.
+- **Reconnect**: exponential backoff (capped at 60s) when the SSE drops. A successful event resets the backoff.
+- **Health**: `GET /health/<deviceId>` returns the count of ships the relay is tracking for the device; the client's Settings → Notification Health panel polls this.
 
-- New `RelayClient` in `commonMain` owns:
-  - FCM/APNS/desktop-webhook token registration with the relay
-  - Re-registration on token rotation
-  - "Connected to relay" health flow
-- Android: `firebase-messaging` dependency. `MessagingService` receives the push and posts a notification using the same `Notifier` plumbing the in-app SSE path uses.
-- Desktop: relay uses a long-poll endpoint or WebSocket; a small headless tray helper consumes it. Makes desktop notifications work even when the main app is closed.
+### Client-side (lives in `composeApp/.../notify/`)
+
+- `RelayClient` (commonMain) — thin OkHttp wrapper over `POST /register`, `DELETE /devices/{id}`, `GET /health/{id}`. Stateless.
+- `RelaySettings` (interface + Android SharedPreferences + desktop JSON impls) — stores the endpoint URL (default `https://relay.nisfeb.com`) and the per-ship deviceId the relay assigned.
+- `PushTokenProvider` (interface) — yields the UnifiedPush distributor endpoint URL. Android impl asks the user's installed distributor for one; desktop falls through to a Noop until a desktop UnifiedPush story exists.
+- Android: `org.unifiedpush.android.connector` library + `MessagingReceiver` subclass. On push, post a notification using the same `Notifier` plumbing the in-app SSE path uses.
 - Notification dedup: each push payload carries the event id; when SSE later delivers the same event, the notifier dedup-checks by id.
 
 ### Hosting model
@@ -140,8 +141,8 @@ Three options. Recommendation: **C** (centralized default, self-hosted opt-in).
 
 ### Payload privacy
 
-- **(default) Hint-only**: push body is `{"event": "new-message", "whom": "<chat>"}`. Client wakes, pulls content via SSE. Content never transits FCM.
-- **Preview**: push body includes sender + first 100 chars. Faster (no second round-trip), but content goes through Google's servers.
+- **(only mode today) Hint-only**: push body is `{"event": "new-message", "patp": "...", "whom": "...", "id": "..."}`. Client wakes, pulls content via SSE. Message bodies never transit the relay or the distributor.
+- **Preview** (future option): push body includes sender + first 100 chars. Faster (no second round-trip) but text passes through whichever distributor the user picked. Trust pre-existing if they self-host their distributor; otherwise it depends on the distributor operator.
 
 User-configurable per-conversation. Default to hint-only.
 
@@ -209,33 +210,27 @@ Phase 1 is where "bulletproof" actually lives. 2/3/4 cap out at "very reliable w
 
 ---
 
-## User action items (Phase 1 prerequisites)
+## Decisions (Phase 1)
 
-These block code on Phase 1; we can ship 2/3/4/5 without them.
+All confirmed; nothing blocks the relay code.
 
-### 1. Hosting model
+### 1. Hosting model — **C** (centralized + self-hosted Docker)
 
-Pick A, B, or C from the table above. Recommendation: **C**.
+Talon-operated relay at `relay.nisfeb.com` is the default; users can override the endpoint to a self-hosted Docker container. Single image is the same in both cases.
 
-### 2. Firebase project
+### 2. Push transport — **UnifiedPush, no Firebase**
 
-- Create project at [console.firebase.google.com](https://console.firebase.google.com) named "Talon."
-- Enable Cloud Messaging.
-- Add an Android app with package name `io.nisfeb.talon`.
-- Download `google-services.json` and add it to the repo (gitignored — checked-in path is `composeApp/google-services.json` per Firebase plugin defaults).
-- Generate a Firebase Admin SDK service-account JSON (Project Settings → Service Accounts → Generate new private key). The relay needs this to send pushes. Store as a secret on the relay host; do NOT commit it.
+No Google Play Services dependency. Users install a UnifiedPush distributor app once (ntfy, NextPush, Conversations, …) and Talon registers with it locally. The relay POSTs to whatever endpoint the distributor minted.
 
-### 3. Push payload privacy
+### 3. Push payload privacy — **hint-only**
 
-Default to **hint-only** unless there's a reason not to.
+Body has `{event, patp, whom, id}`; no message text. Client pulls content via SSE on wake.
 
-### 4. Domain (only if A or C)
+### 4. Domain — `relay.nisfeb.com`
 
-Pick a subdomain you control. Suggestion: `relay.<your-domain>`.
+### 5. Trust model — Tlon-host-equivalent
 
-### 5. Trust model confirmation
-
-The relay needs each user's ship cookie (or `+code` from which it derives a cookie). We encrypt at rest with a per-user key derived from a registration secret only the device holds — relay-host compromise exposes ciphertext only, IF the device's secret isn't also compromised. This is the same trust model as Talon-the-app. Confirm.
+The relay encrypts each user's ship cookie at rest with a key derived from `RELAY_MASTER_SECRET`. SQLite-file leak alone yields ciphertext; full relay-host compromise (filesystem + memory) exposes cookies. Same threat model as a Tlon-hosted ship. The originally-proposed per-user-secret model would have required the device to be online to authorize each push (defeating the purpose of the relay) and was abandoned.
 
 ---
 
@@ -243,7 +238,7 @@ The relay needs each user's ship cookie (or `+code` from which it derives a cook
 
 - **Multi-ship users**: relay subscribes to N ships per user, sends pushes tagged with the ship. Client-side notifier surfaces which ship. Already handled by the per-ship pip in v0.7.18+.
 - **Network egress on relay**: SSE per ship is small but constant. ~1KB/min idle, spikes to ~10KB/event. 1000 active users ≈ 1GB/day egress. VPS-tier bandwidth swallows that easily.
-- **APNS for iOS**: APNS auth is a `.p8` cert + team ID + key ID. Trivial to add when iOS lands. Same data path.
+- **iOS push**: out of scope this iteration. UnifiedPush has no iOS distributor today. When iOS lands we'd need either Apple Push Notification Service (APNS, which means re-introducing a vendor-platform dep on Apple's side) or a workaround like silent-pull-from-relay over websockets.
 - **Relay restart hygiene**: on restart, replay missed events to each device by scrying `%activity` since the per-device `last_event_id`. Without this a deploy could lose events for connections that were mid-reconnect.
 
 ---

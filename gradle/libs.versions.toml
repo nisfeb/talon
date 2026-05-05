@@ -28,7 +28,6 @@ androidxWork = "2.10.0"
 # Ktor request log. Kept here so version bumps stay in one place.
 ktor = "3.0.3"
 sqliteJdbc = "3.46.1.0"
-firebaseAdmin = "9.4.1"
 slf4j = "2.0.16"
 
 [libraries]
@@ -91,7 +90,6 @@ ktor-serialization-kotlinx-json = { group = "io.ktor", name = "ktor-serializatio
 ktor-client-core = { group = "io.ktor", name = "ktor-client-core", version.ref = "ktor" }
 ktor-client-okhttp = { group = "io.ktor", name = "ktor-client-okhttp", version.ref = "ktor" }
 sqlite-jdbc = { group = "org.xerial", name = "sqlite-jdbc", version.ref = "sqliteJdbc" }
-firebase-admin = { group = "com.google.firebase", name = "firebase-admin", version.ref = "firebaseAdmin" }
 slf4j-simple = { group = "org.slf4j", name = "slf4j-simple", version.ref = "slf4j" }
 
 [plugins]

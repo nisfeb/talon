@@ -41,23 +41,25 @@ class Db(private val path: String) {
     // ───────── devices ─────────
 
     /**
-     * Upsert a device by its [deviceId]. Returns the FCM token
-     * stored under that id — used by the device to detect token
-     * rotations between registrations.
+     * Upsert a device by its [deviceId]. The [pushEndpoint] is the
+     * UnifiedPush distributor URL the device handed us at /register
+     * time; we POST to it when an event arrives. Distributor URLs
+     * rotate (the device may re-register after a distributor reset)
+     * — re-calling upsertDevice with the same id replaces in place.
      */
-    fun upsertDevice(deviceId: String, fcmToken: String, platform: String) {
+    fun upsertDevice(deviceId: String, pushEndpoint: String, platform: String) {
         connect().use { c ->
             c.prepareStatement(
                 """
-                INSERT INTO devices (id, fcm_token, platform, created_at)
+                INSERT INTO devices (id, push_endpoint, platform, created_at)
                 VALUES (?, ?, ?, strftime('%s', 'now') * 1000)
                 ON CONFLICT(id) DO UPDATE SET
-                  fcm_token = excluded.fcm_token,
+                  push_endpoint = excluded.push_endpoint,
                   platform = excluded.platform
                 """,
             ).use { ps ->
                 ps.setString(1, deviceId)
-                ps.setString(2, fcmToken)
+                ps.setString(2, pushEndpoint)
                 ps.setString(3, platform)
                 ps.executeUpdate()
             }
@@ -78,11 +80,11 @@ class Db(private val path: String) {
         }
     }
 
-    fun fcmTokenFor(deviceId: String): String? = connect().use { c ->
-        c.prepareStatement("SELECT fcm_token FROM devices WHERE id = ?").use { ps ->
+    fun pushEndpointFor(deviceId: String): String? = connect().use { c ->
+        c.prepareStatement("SELECT push_endpoint FROM devices WHERE id = ?").use { ps ->
             ps.setString(1, deviceId)
             ps.executeQuery().use { rs ->
-                if (rs.next()) rs.getString("fcm_token") else null
+                if (rs.next()) rs.getString("push_endpoint") else null
             }
         }
     }
@@ -203,7 +205,7 @@ class Db(private val path: String) {
         const val SCHEMA = """
             CREATE TABLE IF NOT EXISTS devices (
                 id TEXT PRIMARY KEY,
-                fcm_token TEXT NOT NULL,
+                push_endpoint TEXT NOT NULL,
                 platform TEXT NOT NULL,
                 created_at INTEGER NOT NULL
             );

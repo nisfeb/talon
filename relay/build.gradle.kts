@@ -4,10 +4,15 @@
 //
 // See docs/notifications-bulletproof.md for the design rationale.
 // In short: the relay maintains an SSE connection to each registered
-// user's ship 24×7, and dispatches FCM pushes when %activity events
-// arrive. This is the layer that survives OEM background-killing,
-// app force-stop, and process death — the things client-side code
-// can't recover from on its own.
+// user's ship 24×7, and POSTs to that user's UnifiedPush distributor
+// endpoint when %activity events arrive. This is the layer that
+// survives OEM background-killing, app force-stop, and process
+// death — the things client-side code can't recover from on its own.
+//
+// Zero Google dependency by design — no FCM, no Play Services. The
+// device registers with whatever UnifiedPush distributor it has
+// installed (ntfy, NextPush, Conversations, etc.) and hands us the
+// resulting HTTPS endpoint URL. We POST to it.
 
 plugins {
     alias(libs.plugins.kotlin.jvm)
@@ -44,9 +49,9 @@ dependencies {
     // the Docker volume mount story trivial.
     implementation(libs.sqlite.jdbc)
 
-    // FCM dispatch. Admin SDK pulls google-cloud-firestore + grpc
-    // transitively; ~30 MB but acceptable for a server-side artifact.
-    implementation(libs.firebase.admin)
+    // No Firebase / FCM. Push dispatch is plain HTTP POST to the
+    // UnifiedPush distributor endpoint each device registered with
+    // us — see Push.kt and https://unifiedpush.org for the protocol.
 
     // Slf4j-simple is the no-nonsense backend. Ktor logs go through
     // it; structured-logging is a follow-up if/when ops needs it.

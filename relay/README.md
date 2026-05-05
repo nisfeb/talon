@@ -1,8 +1,9 @@
 # Talon notification push relay
 
 Server-side companion to the Talon client that maintains a 24×7
-SSE connection to each registered user's Urbit ship and dispatches
-FCM pushes when `%activity` events arrive.
+SSE connection to each registered user's Urbit ship and POSTs to
+their UnifiedPush distributor endpoint when `%activity` events
+arrive.
 
 This is the layer that survives OEM background-killing, app force-
 stop, and process death — the things client-side code can't recover
@@ -15,10 +16,28 @@ full architecture.
 - ✅ Per-user encrypted credential storage (SQLite + AES-GCM)
 - ✅ Per-ship SSE consumer with exponential-backoff reconnect
 - ✅ Last-event-id cursor for restart-safe dedup
-- ⚠️ FCM dispatch — stubbed (logged) until `FIREBASE_CREDENTIALS_PATH`
-   is supplied and the firebase-admin reflective-init lights up.
-- ⏳ APNS dispatch — design accommodates it; not coded.
-- ⏳ Self-test endpoint — design doc Phase 4 item.
+- ✅ UnifiedPush dispatch — plain HTTP POST to the device's
+   distributor endpoint URL.
+- ⏳ Self-test endpoint — design-doc Phase 4 item.
+- ⏳ Per-row "transport" column for future non-UnifiedPush
+   delivery (e.g. desktop webhook). Schema reserves the field.
+
+## Push transport: UnifiedPush
+
+[UnifiedPush](https://unifiedpush.org) is a vendor-neutral push
+protocol. The user installs a *distributor* app once (ntfy,
+NextPush, Conversations, etc.); the distributor holds one
+persistent connection to its server, and apps register with it
+over local IPC. Every UnifiedPush-capable app on the device
+shares that one connection.
+
+For this relay, that means: the device hands us an HTTPS endpoint
+URL the distributor minted. We POST a JSON body to it; the
+distributor's server pushes it to the device.
+
+**Zero Google dependency.** No FCM, no Play Services. Self-hosters
+can run their own ntfy server next to the relay; users can pick
+any distributor on F-Droid.
 
 ## Quick start (local)
 
@@ -41,14 +60,10 @@ docker run -d \
   -v $(pwd)/data:/data \
   -e RELAY_MASTER_SECRET=$(openssl rand -hex 32) \
   -e RELAY_DB=/data/relay.db \
-  -e FIREBASE_CREDENTIALS_PATH=/data/firebase-admin.json \
-  -v $(pwd)/firebase-admin.json:/data/firebase-admin.json:ro \
   talon-relay
 ```
 
-`firebase-admin.json` is the service-account JSON downloaded from
-Firebase Console → Project Settings → Service Accounts. **Treat as
-secret** — anyone with this file can send pushes to your users.
+That's the whole deploy. No credentials files to mount.
 
 ## Required env
 
@@ -62,7 +77,6 @@ secret** — anyone with this file can send pushes to your users.
 |---|---|---|
 | `RELAY_PORT` | `8080` | HTTP port. |
 | `RELAY_DB` | `./relay.db` | SQLite file path. |
-| `FIREBASE_CREDENTIALS_PATH` | (unset) | Path to firebase-admin service-account JSON. When unset, push calls log instead of dispatching. |
 
 ## API
 
@@ -70,8 +84,8 @@ secret** — anyone with this file can send pushes to your users.
 
 ```json
 {
-  "platform": "android",
-  "pushToken": "<FCM token>",
+  "platform": "unifiedpush",
+  "pushEndpoint": "https://ntfy.sh/upXXXXXXXX",
   "deviceId": "",
   "shipUrl": "https://my-ship.example.com",
   "patp": "~sampel-palnet",
@@ -81,7 +95,7 @@ secret** — anyone with this file can send pushes to your users.
 
 `deviceId` is `""` on first registration; the relay mints one and
 returns it. Caller persists it locally and reuses it on
-re-registration (e.g. when the FCM token rotates).
+re-registration (e.g. when the distributor endpoint rotates).
 
 The `code` is consumed once during the login call and never
 persisted — only the resulting urbauth cookie is stored, encrypted
@@ -122,6 +136,5 @@ Tlon-hosted ship.
 This image is the same one Talon's centralized relay deploys. Self-
 hosting users get exactly what we run, just on their own host.
 
-The Talon client lets users point at any relay URL (including
-`localhost:8080` for local testing) — see `Settings → Notification
-Health → Relay endpoint` once the client surfaces the field.
+The Talon client lets users point at any relay URL — see Settings →
+Notification Health → Endpoint.

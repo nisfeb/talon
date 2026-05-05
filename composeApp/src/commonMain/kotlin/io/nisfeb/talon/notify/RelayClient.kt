@@ -27,7 +27,10 @@ class RelayClient(
     @Serializable
     private data class RegisterRequest(
         val platform: String,
-        val pushToken: String,
+        /** UnifiedPush distributor endpoint URL the local
+         *  distributor (ntfy / NextPush / …) handed the device.
+         *  Treated as opaque on the wire. */
+        val pushEndpoint: String,
         val deviceId: String,
         val shipUrl: String,
         val patp: String,
@@ -66,7 +69,7 @@ class RelayClient(
      */
     suspend fun register(
         platform: String,
-        pushToken: String,
+        pushEndpoint: String,
         existingDeviceId: String,
         shipUrl: String,
         patp: String,
@@ -75,7 +78,7 @@ class RelayClient(
         val body = JSON.encodeToString(
             RegisterRequest(
                 platform = platform,
-                pushToken = pushToken,
+                pushEndpoint = pushEndpoint,
                 deviceId = existingDeviceId,
                 shipUrl = shipUrl,
                 patp = patp,

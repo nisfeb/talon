@@ -200,11 +200,11 @@ class ShipConnection(
         val cursor = db.lastEventId(shipRowId, deviceId) ?: 0L
         if (numericEventId <= cursor) return
 
-        val fcmToken = db.fcmTokenFor(deviceId) ?: run {
-            log.warn("device $deviceId has no fcm token; skipping")
+        val pushEndpoint = db.pushEndpointFor(deviceId) ?: run {
+            log.warn("device $deviceId has no push endpoint; skipping")
             return
         }
-        push.send(fcmToken = fcmToken, patp = patp, whom = whom, eventId = numericEventId)
+        push.send(endpoint = pushEndpoint, patp = patp, whom = whom, eventId = numericEventId)
         db.setLastEventId(shipRowId, deviceId, numericEventId)
     }
 

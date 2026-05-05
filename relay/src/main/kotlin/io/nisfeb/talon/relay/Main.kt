@@ -11,18 +11,18 @@ import java.util.concurrent.TimeUnit
 /**
  * Talon notification push relay entry point.
  *
+ * Push transport is UnifiedPush — devices register with a local
+ * distributor (ntfy, NextPush, …) and hand us the resulting HTTPS
+ * endpoint URL. We POST to it. Zero Google dependency.
+ *
  * Required env:
- *   RELAY_MASTER_SECRET   — used to encrypt ship cookies at rest.
- *                           Rotate this and every cookie row goes
- *                           opaque; users must re-register.
+ *   RELAY_MASTER_SECRET   — encrypts ship cookies at rest. Rotate
+ *                           and every cookie row goes opaque; users
+ *                           must re-register.
  *
  * Optional env:
- *   RELAY_PORT            — default 8080.
- *   RELAY_DB              — sqlite path, default ./relay.db.
- *   FIREBASE_CREDENTIALS_PATH — admin SDK service-account JSON.
- *                           When unset, push calls are stubbed
- *                           (logged) so end-to-end SSE→relay
- *                           plumbing can be verified before FCM.
+ *   RELAY_PORT  — default 8080.
+ *   RELAY_DB    — sqlite path, default ./relay.db.
  */
 fun main() {
     val log = LoggerFactory.getLogger("Main")
@@ -30,10 +30,9 @@ fun main() {
     val dbPath = System.getenv("RELAY_DB") ?: "relay.db"
     val masterSecret = System.getenv("RELAY_MASTER_SECRET")
         ?: error("RELAY_MASTER_SECRET env var is required")
-    val firebaseCreds = System.getenv("FIREBASE_CREDENTIALS_PATH")
 
     val db = Db(dbPath).also { it.migrate() }
-    val push = Push(firebaseCreds)
+    val push = Push()
     val httpClient = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(0, TimeUnit.SECONDS)
@@ -41,7 +40,7 @@ fun main() {
         .build()
     val pool = ConnectionPool(db = db, push = push, masterSecret = masterSecret)
 
-    log.info("starting relay on :$port (db=$dbPath, fcm=${firebaseCreds != null})")
+    log.info("starting relay on :$port (db=$dbPath, transport=unifiedpush)")
     pool.startAll()
 
     val server = embeddedServer(Netty, port = port) {

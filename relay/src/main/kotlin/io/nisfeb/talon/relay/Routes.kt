@@ -21,15 +21,18 @@ import org.slf4j.LoggerFactory
 
 @Serializable
 data class RegisterRequest(
-    /** "android" or "desktop" — drives which push transport we use. */
+    /** "unifiedpush" today; reserved for future transports
+     *  (e.g. desktop webhook). Stored alongside the endpoint so a
+     *  future Push.kt can switch on it. */
     val platform: String,
-    /** FCM device token (Android) or future APNS / desktop-webhook
-     *  identifier. The relay treats it as opaque. */
-    val pushToken: String,
+    /** UnifiedPush distributor endpoint URL the device's local
+     *  distributor (ntfy, NextPush, etc.) handed it after registering.
+     *  The relay treats this as an opaque HTTPS URL — POST a JSON
+     *  body and the distributor routes it to the right device. */
+    val pushEndpoint: String,
     /** Device id minted by the client on first registration. Caller
-     *  reuses it on re-registration to update the FCM token without
-     *  re-creating the device row. Empty string = relay should mint
-     *  one and return it in the response. */
+     *  reuses it on re-registration to update the push endpoint
+     *  without creating a new row. Empty string = mint one. */
     val deviceId: String,
     /** Ship base URL, e.g. "https://my-ship.example.com" or the LAN
      *  IP you point Talon at. */
@@ -79,7 +82,9 @@ fun Application.installRoutes(
         post("/register") {
             val req = call.receive<RegisterRequest>()
             // Validate shape before attempting login.
-            if (!req.patp.startsWith("~") || req.shipUrl.isBlank() || req.code.isBlank()) {
+            if (!req.patp.startsWith("~") || req.shipUrl.isBlank() ||
+                req.code.isBlank() || req.pushEndpoint.isBlank()
+            ) {
                 call.respond(
                     HttpStatusCode.BadRequest,
                     RegisterResponse(deviceId = "", ok = false, error = "missing fields"),
@@ -96,7 +101,7 @@ fun Application.installRoutes(
             }
             // 2. Mint or reuse the device id.
             val deviceId = req.deviceId.ifBlank { newDeviceId() }
-            db.upsertDevice(deviceId, req.pushToken, req.platform)
+            db.upsertDevice(deviceId, req.pushEndpoint, req.platform)
             // 3. Encrypt + persist the cookie.
             val sealed = Crypto.seal(cookie, masterSecret)
             db.upsertShip(deviceId, req.patp, req.shipUrl, sealed)

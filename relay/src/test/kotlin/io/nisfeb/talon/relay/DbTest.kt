@@ -40,24 +40,24 @@ class DbTest {
     }
 
     @Test
-    fun `upsertDevice then fcmTokenFor returns the token`() {
-        db.upsertDevice("dev-1", "fcm-abc", "android")
-        assertEquals("fcm-abc", db.fcmTokenFor("dev-1"))
+    fun `upsertDevice then pushEndpointFor returns the endpoint`() {
+        db.upsertDevice("dev-1", "https://ntfy.sh/abc", "unifiedpush")
+        assertEquals("https://ntfy.sh/abc", db.pushEndpointFor("dev-1"))
     }
 
     @Test
-    fun `upsertDevice replaces token on conflict`() {
-        // FCM token rotation: same deviceId, different token. The
-        // old token must be replaced — pushing to a stale token
-        // burns server quota and never reaches the user.
-        db.upsertDevice("dev-1", "fcm-old", "android")
-        db.upsertDevice("dev-1", "fcm-new", "android")
-        assertEquals("fcm-new", db.fcmTokenFor("dev-1"))
+    fun `upsertDevice replaces endpoint on conflict`() {
+        // UnifiedPush distributor reset (or user switched
+        // distributors) → device re-registers with a new endpoint.
+        // Pushing to the stale URL just gets 410 Gone forever.
+        db.upsertDevice("dev-1", "https://ntfy.sh/old", "unifiedpush")
+        db.upsertDevice("dev-1", "https://ntfy.sh/new", "unifiedpush")
+        assertEquals("https://ntfy.sh/new", db.pushEndpointFor("dev-1"))
     }
 
     @Test
-    fun `fcmTokenFor unknown device returns null`() {
-        assertNull(db.fcmTokenFor("never-existed"))
+    fun `pushEndpointFor unknown device returns null`() {
+        assertNull(db.pushEndpointFor("never-existed"))
     }
 
     @Test
@@ -127,7 +127,7 @@ class DbTest {
         db.deleteDevice("dev-1")
 
         assertTrue(db.shipsForDevice("dev-1").isEmpty())
-        assertNull(db.fcmTokenFor("dev-1"))
+        assertNull(db.pushEndpointFor("dev-1"))
         assertNull(db.lastEventId(rowId, "dev-1"))
     }
 

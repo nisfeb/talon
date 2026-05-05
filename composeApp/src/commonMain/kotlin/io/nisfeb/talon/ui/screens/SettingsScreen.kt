@@ -961,16 +961,17 @@ private fun RelayRegistrationPanel(config: RelayPanelConfig) {
                         codePrompt = false
                         code = ""
                         scope.launch {
-                            val token = config.pushTokens.token()
-                            if (token == null) {
-                                status = "No push token available on this build " +
-                                    "(google-services.json not wired)."
+                            val endpoint = config.pushTokens.token()
+                            if (endpoint == null) {
+                                status = "No UnifiedPush distributor found. " +
+                                    "Install ntfy, NextPush, or another " +
+                                    "distributor app, then try again."
                                 working = false
                                 return@launch
                             }
                             val newId = config.client.register(
                                 platform = config.pushTokens.platform,
-                                pushToken = token,
+                                pushEndpoint = endpoint,
                                 existingDeviceId = config.settings.deviceIdFor(ship),
                                 shipUrl = shipUrl,
                                 patp = ship,
