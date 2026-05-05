@@ -146,6 +146,13 @@ fun DmListScreen(
     shipNicknames: Map<String, String> = emptyMap(),
     onSwitchShip: (String) -> Unit = {},
     onAddShip: () -> Unit = {},
+    /** Opens the ship-switcher drawer. The drawer itself lives at the
+     *  App.kt level (so it covers the whole window — rail + list +
+     *  detail) instead of inside this screen, where on the wide
+     *  split-pane layout it would only have covered the list pane and
+     *  leak its left-translated closed-state over the rail. Default
+     *  no-op for tests / hosts that don't wire a switcher. */
+    onOpenShipSwitcher: () -> Unit = {},
     /** Optional slot for the platform-specific battery-exemption nudge
      *  banner. Android wires it to a real Composable; desktop (and
      *  tests) leave it null. Replaces the previous expect/actual
@@ -500,27 +507,6 @@ fun DmListScreen(
         }
     }
 
-    val drawerState = androidx.compose.material3.rememberDrawerState(
-        initialValue = androidx.compose.material3.DrawerValue.Closed,
-    )
-    androidx.compose.material3.ModalNavigationDrawer(
-        drawerState = drawerState,
-        drawerContent = {
-            ShipSwitcherDrawer(
-                ships = allShips,
-                activeShip = activeShip,
-                nicknames = shipNicknames,
-                onPick = { ship ->
-                    scope.launch { drawerState.close() }
-                    onSwitchShip(ship)
-                },
-                onAdd = {
-                    scope.launch { drawerState.close() }
-                    onAddShip()
-                },
-            )
-        },
-    ) {
     Box(modifier = modifier.windowInsetsPadding(WindowInsets.safeDrawing)) {
     Column(modifier = Modifier.fillMaxSize()) {
         // Indeterminate progress strip while the repo is doing its
@@ -548,7 +534,7 @@ fun DmListScreen(
                 contentDescription = "Switch ship",
                 modifier = Modifier
                     .size(32.dp)
-                    .clickable { scope.launch { drawerState.open() } },
+                    .clickable { onOpenShipSwitcher() },
             )
             Text(
                 "Talon",
@@ -1101,7 +1087,6 @@ fun DmListScreen(
             )
         }
     }
-    } // ModalNavigationDrawer content
 
     folderSheetWhom?.let { whom ->
         val label = contactMap.conversationLabel(whom)
@@ -1255,7 +1240,7 @@ fun DmListScreen(
 }
 
 @Composable
-private fun ShipSwitcherDrawer(
+internal fun ShipSwitcherDrawer(
     ships: List<String>,
     activeShip: String?,
     nicknames: Map<String, String>,

@@ -611,10 +611,81 @@ fun App(
                 // session.shipName == null would render DmListScreen
                 // briefly before the recovery LaunchedEffect fires.
                 val ship = if (session.shipName != null) loggedInShip else null
+                // Ship-switcher drawer hoisted to App.kt level so it
+                // wraps the entire navigation tree below (LoginScreen +
+                // post-login screens + DesktopShell). Was previously
+                // inside DmListScreen, which on the wide split-pane
+                // layout scoped the drawer to the list pane only — its
+                // closed-state -drawer_width translation then overflowed
+                // the list pane's left edge and rendered over the rail
+                // at column 0-64, hiding the rail icons and leaking
+                // drawer content (brand mark + ship avatars).
+                val drawerScope = rememberCoroutineScope()
+                val drawerState = androidx.compose.material3.rememberDrawerState(
+                    initialValue = androidx.compose.material3.DrawerValue.Closed,
+                )
+                val allShipsList = remember(loggedInShip) {
+                    sessionStore.all().map { it.ship }
+                }
+                val shipNicknamesMap = run {
+                    val nicknames = remember(loggedInShip) {
+                        mutableStateOf<Map<String, String>>(emptyMap())
+                    }
+                    LaunchedEffect(allShipsList) {
+                        val map = allShipsList.mapNotNull { s ->
+                            val nick = runCatching { db.contacts().get(s)?.nickname }.getOrNull()
+                            if (nick.isNullOrBlank()) null else s to nick
+                        }.toMap()
+                        nicknames.value = map
+                    }
+                    nicknames.value
+                }
+                val switchShip: (String) -> Unit = { newShip ->
+                    openChat = null
+                    openThreadParent = null
+                    openThreadReplyAnchor = null
+                    viewerImageUrl = null
+                    showSelfProfile = false
+                    showSettings = false
+                    sessionStore.setActive(newShip)
+                    loggedInShip = newShip
+                }
+                val addShip: () -> Unit = {
+                    openChat = null
+                    openThreadParent = null
+                    openThreadReplyAnchor = null
+                    viewerImageUrl = null
+                    showSelfProfile = false
+                    showSettings = false
+                    loggedInShip = null
+                }
                 // Modal / full-screen branches short-circuit first so they
                 // render at full width without entering ChatPaneScaffold.
                 // Only DmList + chat-detail screens (chat, thread, notebook,
                 // gallery) participate in the list/detail split.
+                androidx.compose.material3.ModalNavigationDrawer(
+                    drawerState = drawerState,
+                    drawerContent = {
+                        // Empty drawer content when no ships are logged in
+                        // (LoginScreen path). The drawer trigger isn't
+                        // visible there anyway — this is just defensive.
+                        if (allShipsList.isNotEmpty()) {
+                            io.nisfeb.talon.ui.screens.ShipSwitcherDrawer(
+                                ships = allShipsList,
+                                activeShip = ship,
+                                nicknames = shipNicknamesMap,
+                                onPick = { picked ->
+                                    drawerScope.launch { drawerState.close() }
+                                    switchShip(picked)
+                                },
+                                onAdd = {
+                                    drawerScope.launch { drawerState.close() }
+                                    addShip()
+                                },
+                            )
+                        }
+                    },
+                ) {
                 BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
                     val expanded = maxWidth >= ExpandedThreshold
                     // Mirror DesktopShell's threshold so the kebab menu makes the right
@@ -1096,6 +1167,9 @@ fun App(
                                             showSettings = false
                                             loggedInShip = null
                                         },
+                                        onOpenShipSwitcher = {
+                                            drawerScope.launch { drawerState.open() }
+                                        },
                                         groupChannelOrder = uiSettings.groupChannelOrder
                                             .collectAsState().value,
                                         focusSearchRequest = focusSearchRequest,
@@ -1209,6 +1283,7 @@ fun App(
                     )
                 }
             }
+                } // ModalNavigationDrawer body
           }
         }
     }
