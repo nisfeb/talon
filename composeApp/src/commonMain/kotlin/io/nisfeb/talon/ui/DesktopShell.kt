@@ -88,9 +88,21 @@ fun DesktopShell(
                     onListFractionChange = onListFractionChange,
                 )
             }
-            // Phase 3: rightSidebar?.invoke() once we wire threads /
-            // files / links here. Today rightSidebar stays null and
-            // we don't render an empty fourth column.
+            // Right sidebar — Phase 3's thread / group-info / media-
+            // drilldown surface. Fixed 360dp width when present; when
+            // null we don't render an empty fourth column. The caller
+            // (App.kt) only supplies a non-null lambda when there's
+            // active content to show, so a no-content right pane never
+            // wastes screen real estate. Phase 2 reserved this slot in
+            // the API but didn't render it — Phase 3's App.kt wiring
+            // sent content here that was silently dropped on the floor
+            // until 0.10.0-rc4.
+            if (rightSidebar != null) {
+                androidx.compose.material3.VerticalDivider()
+                Box(modifier = Modifier.width(RIGHT_SIDEBAR_WIDTH).fillMaxHeight()) {
+                    rightSidebar()
+                }
+            }
         }
     }
 }
@@ -184,3 +196,4 @@ private fun railLabel(tab: RailTab): String = when (tab) {
 }
 
 private val RAIL_WIDTH = 64.dp
+private val RIGHT_SIDEBAR_WIDTH = 360.dp

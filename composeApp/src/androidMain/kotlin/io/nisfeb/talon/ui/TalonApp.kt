@@ -544,6 +544,45 @@ fun TalonApp(
         // still hold flows from the previous ship's DB and show its
         // data even after `app.db` has been rebuilt.
         androidx.compose.runtime.key(loggedInShip) {
+        // Ship-switcher drawer hoisted to TalonApp.kt level (mirroring
+        // App.kt's lift in 0.10.0-rc3) so the drawer's parent is the
+        // whole window. The previous home for this drawer was inside
+        // DmListScreen — fine for Android phones where there's no rail,
+        // but on Android tablet landscape (which uses DesktopShell's
+        // wide-pane layout) the drawer's closed-state -drawer_width
+        // translation overflowed the list pane and leaked over the
+        // rail. Lifting here makes Android consistent with desktop.
+        val drawerScope = rememberCoroutineScope()
+        val drawerState = androidx.compose.material3.rememberDrawerState(
+            initialValue = androidx.compose.material3.DrawerValue.Closed,
+        )
+        val shipNicknamesMap = app.shipProfiles.nicknames.collectAsState().value
+        androidx.compose.material3.ModalNavigationDrawer(
+            drawerState = drawerState,
+            drawerContent = {
+                if (allShips.isNotEmpty()) {
+                    io.nisfeb.talon.ui.screens.ShipSwitcherDrawer(
+                        ships = allShips,
+                        activeShip = loggedInShip,
+                        nicknames = shipNicknamesMap,
+                        onPick = { picked ->
+                            drawerScope.launch { drawerState.close() }
+                            if (picked != loggedInShip) {
+                                openWhom = null
+                                openThread = null
+                                searchOpen = false
+                                newDmOpen = false
+                                app.switchShip(picked)
+                            }
+                        },
+                        onAdd = {
+                            drawerScope.launch { drawerState.close() }
+                            addingAnotherShip = true
+                        },
+                    )
+                }
+            },
+        ) {
         when {
             addingAnotherShip -> LoginScreen(
                 session = app.session,
@@ -1003,6 +1042,9 @@ fun TalonApp(
                     }
                 },
                 onAddShip = { addingAnotherShip = true },
+                onOpenShipSwitcher = {
+                    drawerScope.launch { drawerState.open() }
+                },
                 // Android-only OEM-killer nudge banner. Desktop hosts
                 // pass null and the slot is hidden.
                 batteryBanner = { BatteryExemptionBanner() },
@@ -1011,6 +1053,7 @@ fun TalonApp(
                 modifier = mod,
             )
         }
+        } // ModalNavigationDrawer body
 
         // Profile sheet overlay — opened from the status feed, and from
         // any other screen that sets `profileSheetShip`.
