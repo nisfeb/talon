@@ -138,8 +138,24 @@ kotlin {
             implementation(libs.kotlinx.coroutines.test)
             implementation(kotlin("test"))
             implementation("com.squareup.okhttp3:mockwebserver:4.12.0")
+            // Compose Multiplatform UI test runner — `runComposeUiTest`,
+            // `onNodeWithTag`, `performMouseInput`, etc. Used by the
+            // pointer-input regression guards (right-click handler
+            // dispatch, scaffold breakpoint behaviour).
+            implementation(compose.desktop.uiTestJUnit4)
         }
     }
+}
+
+// Force the desktopTest worker JVM to headless mode. CI runners and
+// some local Linux dev installs ship a headless JDK with no
+// `libawt_xawt.so`; runComposeUiTest still initialises AWT and would
+// otherwise blow up with `Could not initialize class java.awt.Toolkit`.
+// The same flag is harmless on machines that DO have a graphical
+// AWT — Skiko's software renderer drives the test composition either
+// way.
+tasks.withType<Test>().configureEach {
+    jvmArgs("-Djava.awt.headless=true")
 }
 
 // Single source of truth for the app version. `derivePackageVersion`
@@ -148,8 +164,8 @@ kotlin {
 // version inside derivePackageVersion and silently drifted — every
 // release between 0.7.14 and 0.7.23 shipped with stale .dmg/.msi/.deb
 // filenames because nobody updated both literals.
-val talonVersionCode = 63
-val talonVersionName = "0.8.10"
+val talonVersionCode = 64
+val talonVersionName = "0.8.11"
 
 android {
     namespace = "io.nisfeb.talon"
