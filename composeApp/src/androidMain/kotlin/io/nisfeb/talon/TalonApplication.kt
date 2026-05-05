@@ -197,6 +197,13 @@ class TalonApplication : Application() {
         buildShipScoped(shipForInit)
         _activeShip.value = initialShip
 
+        // Phase-2 backstop: WorkManager fires `catchUp` every ~15
+        // minutes. Survives force-stop and Doze, which the
+        // foreground service doesn't. Idempotent (KEEP policy);
+        // calling on every cold start doesn't reset the schedule.
+        // The worker itself no-ops when no ship is bound.
+        CatchUpWorker.schedule(this)
+
         dailyDigest = io.nisfeb.talon.ai.DailyDigest(
             context = this,
             sessionStore = sessionStore,

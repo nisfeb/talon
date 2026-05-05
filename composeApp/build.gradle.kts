@@ -84,6 +84,11 @@ kotlin {
             implementation(libs.media3.ui)
             // Room KTX coroutine extensions used by the suspend DAOs.
             implementation(libs.androidx.room.ktx)
+            // WorkManager periodic catch-up worker — survives force-
+            // stop / app standby. The foreground service can't, so
+            // this is the Layer 3 reconcile path for users who
+            // killed Talon out of their recents.
+            implementation(libs.androidx.work.runtime.ktx)
         }
         val desktopMain by getting
         desktopMain.dependencies {
