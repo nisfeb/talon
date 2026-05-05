@@ -2095,22 +2095,65 @@ class TlonChatRepo(
         // The banner only ever reads order[0]; keeping just [postId]
         // matches behavior and dodges a full scry on every pin.
         val next = if (current == postId) return else listOf(postId)
+        Log.i(TAG, "pinPost nest=$nest post=$postId")
         ch.poke(
             app = "channels", mark = "channel-action-2",
             payload = channelAction(nest, channelOrderAction(next)),
         )
-        db.groups().setPinnedPostId(nest, postId)
+        ensureChannelGroupRow(nest)
+        val affected = db.groups().setPinnedPostId(nest, postId)
+        if (affected == 0) {
+            Log.w(TAG, "pinPost local UPDATE matched 0 rows for nest=$nest — channel_groups row missing despite ensureChannelGroupRow")
+        }
     }
 
     /** Unpin whatever is currently pinned in [nest]. */
     suspend fun unpinPost(nest: String) {
         require(nest.startsWith("chat/")) { "pin only supported on chat channels: $nest" }
         val ch = channel ?: error("not connected")
+        Log.i(TAG, "unpinPost nest=$nest")
         ch.poke(
             app = "channels", mark = "channel-action-2",
             payload = channelAction(nest, channelOrderAction(emptyList())),
         )
-        db.groups().setPinnedPostId(nest, null)
+        ensureChannelGroupRow(nest)
+        val affected = db.groups().setPinnedPostId(nest, null)
+        if (affected == 0) {
+            Log.w(TAG, "unpinPost local UPDATE matched 0 rows for nest=$nest — channel_groups row missing despite ensureChannelGroupRow")
+        }
+    }
+
+    /**
+     * Make sure a [channel_groups] row exists for [nest] before we try
+     * to update its `pinnedPostId`. Without this, a chat the user has
+     * been using but whose group bootstrap hadn't run / had partially
+     * failed would silently drop pin writes (UPDATE matches 0 rows).
+     *
+     * The row needs a `groupFlag`. We derive it from the nest itself —
+     * `chat/~host/group-name` maps to flag `~host/group-name`. That
+     * matches what %groups would have inserted; later bootstraps
+     * upsert by primary key so they overwrite this stub cleanly.
+     *
+     * Visible to tests so the regression guard around silent UPDATE
+     * no-ops can exercise this path without a live UrbitChannel.
+     */
+    internal suspend fun ensureChannelGroupRow(nest: String) {
+        val existing = db.groups().channelGroupFor(nest)
+        if (existing != null) return
+        val flag = nest.substringAfter("chat/", missingDelimiterValue = "")
+            .ifBlank { return }
+        Log.i(TAG, "ensureChannelGroupRow inserting stub for nest=$nest flag=$flag")
+        db.groups().upsertChannelGroups(
+            listOf(
+                io.nisfeb.talon.data.ChannelGroupEntity(
+                    nest = nest,
+                    groupFlag = flag,
+                    title = null,
+                    pinnedPostId = null,
+                    ordinal = 0,
+                )
+            )
+        )
     }
 
     // ───────── ingest ─────────
@@ -2457,8 +2500,14 @@ class TlonChatRepo(
             }
             is ChannelDeltaIntent.Reply ->
                 applyReplyIntent(nest, intent.parentId, intent.replyId, intent.inner)
-            is ChannelDeltaIntent.OrderUpdate ->
-                db.groups().setPinnedPostId(nest, intent.postIds.firstOrNull())
+            is ChannelDeltaIntent.OrderUpdate -> {
+                val pinId = intent.postIds.firstOrNull()
+                ensureChannelGroupRow(nest)
+                val affected = db.groups().setPinnedPostId(nest, pinId)
+                if (affected == 0) {
+                    Log.w(TAG, "OrderUpdate UPDATE matched 0 rows for nest=$nest pin=$pinId")
+                }
+            }
             is ChannelDeltaIntent.PendingPost,
             is ChannelDeltaIntent.Unknown -> Unit
         }
@@ -2858,13 +2907,18 @@ class TlonChatRepo(
     private suspend fun bootstrapChannelOrders(channel: UrbitChannel) {
         val body = channel.scry("channels", "/v5/channels")
         val obj = body as? JsonObject ?: return
+        var matched = 0
+        var missing = 0
         for ((nest, ch) in obj) {
             if (!nest.startsWith("chat/")) continue
             val chObj = ch as? JsonObject ?: continue
             val order = chObj["order"] as? kotlinx.serialization.json.JsonArray
             val pinned = order?.firstOrNull().asStr()?.replace(".", "")
-            db.groups().setPinnedPostId(nest, pinned)
+            ensureChannelGroupRow(nest)
+            val affected = db.groups().setPinnedPostId(nest, pinned)
+            if (affected == 0) missing++ else matched++
         }
+        Log.i(TAG, "bootstrapChannelOrders: matched=$matched missing-row=$missing")
     }
 
     /**

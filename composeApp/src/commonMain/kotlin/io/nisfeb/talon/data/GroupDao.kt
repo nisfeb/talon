@@ -48,8 +48,15 @@ interface GroupDao {
     @Query("DELETE FROM channel_groups WHERE nest = :nest")
     suspend fun deleteChannelGroup(nest: String)
 
+    /**
+     * Update the pinned-post slot on an existing channel_groups row.
+     * Returns the number of rows affected — `0` indicates the row
+     * doesn't exist yet (channel hasn't been bootstrapped via
+     * `%groups` or the live channel-add event), in which case the
+     * write is silently lost. Callers should log the zero case.
+     */
     @Query("UPDATE channel_groups SET pinnedPostId = :pinnedPostId WHERE nest = :nest")
-    suspend fun setPinnedPostId(nest: String, pinnedPostId: String?)
+    suspend fun setPinnedPostId(nest: String, pinnedPostId: String?): Int
 
     @Query("SELECT pinnedPostId FROM channel_groups WHERE nest = :nest LIMIT 1")
     fun streamPinnedPostId(nest: String): Flow<String?>
