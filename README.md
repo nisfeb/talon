@@ -42,6 +42,59 @@ don't need Java installed.
   dark / light / system theme, in-app updater (Android sideload),
   per-chat mute, folder organization.
 
+## Notifications (Android)
+
+For pushes that arrive when Talon's process has been killed by Android,
+force-stopped, or evicted by the dataSync background-cap. Without this,
+notifications still work *while Talon is running* — they just stop the
+moment Android decides to reclaim the foreground service. This setup
+plugs that gap.
+
+The architecture is server-relay-plus-distributor — your ship's chat
+events flow through a relay holding a 24×7 SSE connection, which POSTs
+to a per-device endpoint minted by a local push distributor app
+([UnifiedPush](https://unifiedpush.org)). No FCM, no Play Services.
+
+### Setup (~2 minutes)
+
+1. **Install ntfy from F-Droid** (or any other UnifiedPush distributor —
+   NextPush, Conversations, etc.). The Play Store build of ntfy strips
+   the UnifiedPush distributor; F-Droid's doesn't.
+
+   F-Droid → search "ntfy" → install.
+
+2. **Open ntfy once**, tap the ⋮ menu → Settings → scroll to the
+   **UnifiedPush** section → confirm the toggle is on. Default server
+   is `ntfy.sh`; leave that for now unless you self-host an ntfy server.
+
+3. **In Talon**: Settings → Notifications → **Push relay** section.
+   - Endpoint: `https://relay.nisfeb.com` (the relay I run; see below
+     to self-host instead)
+   - Tap **Save endpoint**, then **Register this device** → paste your
+     ship's `+code` → Register
+   - Status should jump to `Registered (deviceId=…)` within a second
+   - If it doesn't, tap **Diagnose distributor** for an inline report
+     of what's broken (PackageManager / connector / cached endpoint)
+
+That's it. Test by killing Talon (swipe from recents) and having
+someone DM you — push should arrive on the lock screen.
+
+### About the `+code`
+
+The relay needs your ship's `+code` to log in once and derive a session
+cookie. The `+code` is encrypted at rest (AES-GCM, key derived from a
+relay-side master secret via PBKDF2). Same trust model as any hosted
+ship — if you're not comfortable with this, self-host the relay below.
+
+### Self-host the relay
+
+The relay is a Kotlin/JVM service in [`relay/`](relay/). Single
+`docker build` from the repo root, `RELAY_MASTER_SECRET` env var,
+volume-mount `/data` for the SQLite store. Full deploy notes in
+[`relay/README.md`](relay/README.md). Behind nginx or Caddy with
+TLS — anything reachable over HTTPS works. Point Talon's endpoint
+field at your URL and you're off the operator path entirely.
+
 ## Need help / found a bug?
 
 File an issue at <https://github.com/nisfeb/talon/issues>. Please

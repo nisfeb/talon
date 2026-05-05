@@ -25,7 +25,7 @@ set -uo pipefail
 RULES=(
 $'/home/sneagan/\tmachine-specific home path\t^$'
 $'github\\.com/sneagan/\twrong github user (sneagan → nisfeb)\t^$'
-$'nisfeb\\.com\tpersonal infra hostname\t(^relay/|/notify/RelaySettings\\.kt$|/notify/DesktopRelaySettings\\.kt$|^docs/notifications-bulletproof\\.md$)'
+$'nisfeb\\.com\tpersonal infra hostname\t(^relay/|/notify/RelaySettings\\.kt$|/notify/DesktopRelaySettings\\.kt$|^docs/notifications-bulletproof\\.md$|^README\\.md$)'
 $'45\\.33\\.75\\.69\tpersonal IP address\t^$'
 $'@fastmail\\.com\tpersonal email address\t^$'
 $'~mister-botter-dozzod-nisfeb\tpersonal patp\t(/[a-zA-Z]*[Tt]est/|/fixtures/|^docs/superpowers/)'
