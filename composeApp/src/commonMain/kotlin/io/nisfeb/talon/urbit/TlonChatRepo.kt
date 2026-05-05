@@ -2716,14 +2716,6 @@ class TlonChatRepo(
      */
     private suspend fun bootstrapContacts(channel: UrbitChannel) {
         val fresh = mutableListOf<ContactEntity>()
-        // Bootstrap stamps "now" when a contact has a status but the
-        // server didn't send a parseable mod-at. Without this fallback
-        // a fresh-install desktop (which never observed the live news
-        // event that set the real timestamp) would show every status
-        // ordered by ship-name only — recent updates buried at the
-        // bottom of the Statuses feed. Matches applyContactsNews's
-        // ?: System.currentTimeMillis() fallback.
-        val now = System.currentTimeMillis()
 
         runCatching { channel.scry("contacts", "/v1/all") }.getOrNull()?.let { body ->
             (body as? JsonObject)?.forEach { (ship, entry) ->
@@ -2732,8 +2724,7 @@ class TlonChatRepo(
                 // mod-at: "..."}; older ones emit the flat field map.
                 val wrapped = obj["contact"] as? JsonObject
                 val fields = wrapped ?: obj
-                val parsed = parseContact(ship, fields, parseContactModAt(obj))
-                fresh.add(stampStatusFallback(parsed, now))
+                fresh.add(parseContact(ship, fields, parseContactModAt(obj)))
             }
         }
 
@@ -2741,8 +2732,7 @@ class TlonChatRepo(
             (body as? JsonObject)?.let { obj ->
                 val wrapped = obj["contact"] as? JsonObject
                 val fields = wrapped ?: obj
-                val parsed = parseContact(ourPatp, fields, parseContactModAt(obj))
-                fresh.add(stampStatusFallback(parsed, now))
+                fresh.add(parseContact(ourPatp, fields, parseContactModAt(obj)))
             }
         }
 
@@ -2751,14 +2741,6 @@ class TlonChatRepo(
             db.contacts().upsertAll(merged)
         }
     }
-
-    private fun stampStatusFallback(
-        contact: ContactEntity,
-        fallbackMs: Long,
-    ): ContactEntity =
-        if (!contact.status.isNullOrBlank() && contact.statusUpdatedMs == null) {
-            contact.copy(statusUpdatedMs = fallbackMs)
-        } else contact
 
     /**
      * Apply a single peer update from %contacts /v1/news. Handles the
@@ -2790,12 +2772,22 @@ class TlonChatRepo(
     /**
      * Merge an incoming contact record with what we already have. Keeps
      * avatar/bio/nickname intact when the incoming row doesn't supply
-     * them, and preserves `statusUpdatedMs` unless the caller passed a
-     * fresh, authoritative one via `parseContact`. Never stamps "now"
-     * during bulk ingest — that was hiding real timestamps behind a
-     * uniform value.
+     * them, and resolves `statusUpdatedMs` against the existing row so
+     * a re-bootstrap on app upgrade can't blow away timestamps we
+     * already trust.
+     *
+     * Resolution order, highest priority first:
+     *  1. Status was cleared → null.
+     *  2. Server gave us a fresh `mod-at` on this update → use it.
+     *  3. We already have a stored timestamp for this ship → keep it
+     *     (this is the upgrade-install path: don't relabel everyone
+     *     to "now" just because the ship's `/v1/all` didn't echo a
+     *     `mod-at` field).
+     *  4. First time we've seen this contact have a status, with
+     *     nothing on the wire to anchor it → stamp now so the feed
+     *     can sort recent updates above silent old entries.
      */
-    private suspend fun mergeContact(incoming: ContactEntity): ContactEntity {
+    internal suspend fun mergeContact(incoming: ContactEntity): ContactEntity {
         val existing = db.contacts().get(incoming.ship)
         return incoming.copy(
             nickname = incoming.nickname ?: existing?.nickname,
@@ -2804,7 +2796,8 @@ class TlonChatRepo(
             statusUpdatedMs = when {
                 incoming.status.isNullOrBlank() -> null
                 incoming.statusUpdatedMs != null -> incoming.statusUpdatedMs
-                else -> existing?.statusUpdatedMs
+                existing?.statusUpdatedMs != null -> existing.statusUpdatedMs
+                else -> System.currentTimeMillis()
             },
         )
     }
