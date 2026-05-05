@@ -72,6 +72,8 @@ private class DesktopAppGraph {
     val watchwordsSync: WatchwordsSyncSettings = DesktopWatchwordsSyncSettings()
     val themePreference: ThemePreference = DesktopThemePreference()
     val uiSettings: UiSettings = DesktopUiSettings()
+    val relaySettings: io.nisfeb.talon.notify.RelaySettings =
+        io.nisfeb.talon.notify.DesktopRelaySettings()
     val drafts: DraftStore = InMemoryDraftStore()
 
     init {
@@ -319,6 +321,7 @@ fun main() {
                 themePreference = graph.themePreference,
                 notifier = notifier,
                 uiSettings = graph.uiSettings,
+                relaySettings = graph.relaySettings,
                 createSearchEmbedderClient = { db ->
                     val embedder = io.nisfeb.talon.ai.DesktopEmbedder()
                     val indexer = io.nisfeb.talon.ai.DesktopEmbeddingIndexer(

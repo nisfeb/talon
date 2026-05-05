@@ -122,6 +122,17 @@ fun App(
      *  their platform-specific impl. */
     imageDownloader: io.nisfeb.talon.ui.ImageDownloader =
         io.nisfeb.talon.ui.NoopImageDownloader,
+    /** Persistent relay-registration state — endpoint URL + per-ship
+     *  device ids the relay assigned. In-memory default for tests;
+     *  desktop/Android pass JSON / SharedPrefs impls. */
+    relaySettings: io.nisfeb.talon.notify.RelaySettings =
+        io.nisfeb.talon.notify.InMemoryRelaySettings(),
+    /** Source of FCM/APNS/desktop-webhook push tokens. Defaults to
+     *  the NoPushTokenProvider so the relay panel renders a friendly
+     *  "no push token available on this build" message instead of
+     *  silently doing nothing. */
+    pushTokenProvider: io.nisfeb.talon.notify.PushTokenProvider =
+        io.nisfeb.talon.notify.NoPushTokenProvider,
     /** Per-ship factory for the menu-seen store. Called inside the
      *  `key(shipKey)` block so a ship-switch yields a fresh seen-
      *  state from that ship's persisted file (or SharedPreferences
@@ -470,19 +481,37 @@ fun App(
                         onLoggedIn = { loggedInShip = it },
                         notice = loginNotice,
                     )
-                    showSettings -> SettingsScreen(
-                        aiSettings = aiSettings,
-                        themePreference = themePreference,
-                        uiSettings = uiSettings,
-                        multiShip = multiShip,
-                        profileAccentPreview = profileAccent,
-                        notificationHealth = notificationHealth,
-                        onBack = { showSettings = false },
-                        dailyDigestSettings = dailyDigestSettings,
-                        // onTestDigest stays null on desktop — Android
-                        // wires it to dailyDigest.generateAndNotifyAsync
-                        // when the production MainActivity migrates here.
-                    )
+                    showSettings -> {
+                        val relayClient = remember(http) {
+                            io.nisfeb.talon.notify.RelayClient(
+                                http = http,
+                                endpoint = { relaySettings.endpoint.value },
+                            )
+                        }
+                        val activeShipUrl = remember(ship) {
+                            ship?.let { sessionStore.all().firstOrNull { it.ship == ship } }?.shipUrl
+                        }
+                        SettingsScreen(
+                            aiSettings = aiSettings,
+                            themePreference = themePreference,
+                            uiSettings = uiSettings,
+                            multiShip = multiShip,
+                            profileAccentPreview = profileAccent,
+                            notificationHealth = notificationHealth,
+                            relayConfig = io.nisfeb.talon.ui.screens.RelayPanelConfig(
+                                client = relayClient,
+                                settings = relaySettings,
+                                pushTokens = pushTokenProvider,
+                                activePatp = ship,
+                                activeShipUrl = activeShipUrl,
+                            ),
+                            onBack = { showSettings = false },
+                            dailyDigestSettings = dailyDigestSettings,
+                            // onTestDigest stays null on desktop — Android
+                            // wires it to dailyDigest.generateAndNotifyAsync
+                            // when the production MainActivity migrates here.
+                        )
+                    }
                     showSelfProfile -> ProfileEditScreen(
                         db = db,
                         repo = repo,

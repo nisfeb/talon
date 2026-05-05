@@ -34,7 +34,10 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.TextButton
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -73,6 +76,13 @@ fun SettingsScreen(
      *  call sites that pre-date the panel pass null and the section
      *  doesn't render. */
     notificationHealth: io.nisfeb.talon.notify.NotificationHealth? = null,
+    /** Optional relay-registration controls. When non-null, the
+     *  Notification Health panel grows a Push relay sub-panel that
+     *  lets the user register / unregister their device with a
+     *  notification relay. null hides the sub-panel — used by tests
+     *  and any host that hasn't wired RelayClient + RelaySettings
+     *  + PushTokenProvider. */
+    relayConfig: RelayPanelConfig? = null,
     onBack: () -> Unit,
     /** Optional daily-digest config + alarm controls. Android wires
      *  the JSON-prefs-backed impl that drives AlarmManager; desktop
@@ -263,6 +273,11 @@ fun SettingsScreen(
 
             if (notificationHealth != null) {
                 NotificationHealthPanel(notificationHealth)
+                Spacer(Modifier.height(8.dp))
+            }
+
+            if (relayConfig != null) {
+                RelayRegistrationPanel(relayConfig)
                 Spacer(Modifier.height(8.dp))
             }
 
@@ -729,6 +744,196 @@ private fun formatHealthAge(ms: Long): String {
         ageMs < 3_600_000L -> "${ageMs / 60_000L}m ago"
         ageMs < 24L * 3_600_000L -> "${ageMs / 3_600_000L}h ago"
         else -> "${ageMs / (24L * 3_600_000L)}d ago"
+    }
+}
+
+/**
+ * Plumbing the SettingsScreen needs to render the relay sub-panel.
+ * Hosts construct one of these from their app-graph singletons; the
+ * settings UI never reaches into the singletons directly so the
+ * panel stays testable from a fixture.
+ *
+ * `activePatp` + `activeShipUrl` come from the host's ship state —
+ * the relay registers `(device, ship)` pairs, so the panel needs
+ * to know which ship "this device" is registering on right now.
+ */
+data class RelayPanelConfig(
+    val client: io.nisfeb.talon.notify.RelayClient,
+    val settings: io.nisfeb.talon.notify.RelaySettings,
+    val pushTokens: io.nisfeb.talon.notify.PushTokenProvider,
+    val activePatp: String?,
+    val activeShipUrl: String?,
+)
+
+@Composable
+private fun RelayRegistrationPanel(config: RelayPanelConfig) {
+    val scope = rememberCoroutineScope()
+    val endpoint by config.settings.endpoint.collectAsState()
+    var endpointDraft by remember(endpoint) { mutableStateOf(endpoint) }
+
+    val deviceId = config.activePatp?.let { config.settings.deviceIdFor(it) }.orEmpty()
+    var working by remember(config.activePatp) { mutableStateOf(false) }
+    var status by remember(config.activePatp, deviceId) {
+        mutableStateOf(
+            if (deviceId.isNotBlank()) "Registered (deviceId=${deviceId.take(8)}…)"
+            else "Not registered with the relay yet.",
+        )
+    }
+    var codePrompt by remember(config.activePatp) { mutableStateOf(false) }
+    var code by remember { mutableStateOf("") }
+
+    Text(
+        "Push relay",
+        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
+    )
+    Text(
+        "Optional: register this device with a notification relay so " +
+            "pushes still arrive when Talon is killed by Android or " +
+            "force-stopped. The default endpoint is the Talon-operated " +
+            "host; self-host by pointing at your own.",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+
+    OutlinedTextField(
+        value = endpointDraft,
+        onValueChange = { endpointDraft = it },
+        label = { Text("Endpoint") },
+        singleLine = true,
+        modifier = Modifier.fillMaxWidth(),
+    )
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        TextButton(
+            enabled = endpointDraft.isNotBlank() && endpointDraft != endpoint,
+            onClick = { config.settings.setEndpoint(endpointDraft.trim()) },
+        ) { Text("Save endpoint") }
+    }
+
+    Text(
+        status,
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+
+    val ship = config.activePatp
+    val shipUrl = config.activeShipUrl
+    if (ship == null || shipUrl == null) {
+        Text(
+            "Sign in to a ship to register with the relay.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        return
+    }
+
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        if (deviceId.isBlank()) {
+            TextButton(
+                enabled = !working,
+                onClick = { codePrompt = true; code = "" },
+            ) { Text("Register this device") }
+        } else {
+            TextButton(
+                enabled = !working,
+                onClick = { codePrompt = true; code = "" },
+            ) { Text("Re-register (rotate token)") }
+            TextButton(
+                enabled = !working,
+                onClick = {
+                    working = true
+                    status = "Unregistering…"
+                    scope.launch {
+                        val ok = config.client.unregister(deviceId)
+                        if (ok) {
+                            config.settings.clearDeviceIdFor(ship)
+                            status = "Unregistered."
+                        } else {
+                            status = "Unregister failed; check your endpoint."
+                        }
+                        working = false
+                    }
+                },
+            ) {
+                Text(
+                    "Unregister",
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
+        }
+    }
+
+    if (codePrompt) {
+        AlertDialog(
+            onDismissRequest = { if (!working) codePrompt = false },
+            title = { Text("Register with relay") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        "Paste this ship's +code. The relay logs in once " +
+                            "to derive a session cookie, then forgets the " +
+                            "+code. See the design doc for full security " +
+                            "details.",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    OutlinedTextField(
+                        value = code,
+                        onValueChange = { code = it },
+                        label = { Text("+code") },
+                        singleLine = true,
+                        visualTransformation =
+                            androidx.compose.ui.text.input.PasswordVisualTransformation(),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = !working && code.isNotBlank(),
+                    onClick = {
+                        working = true
+                        status = "Registering…"
+                        val codeSnapshot = code
+                        codePrompt = false
+                        code = ""
+                        scope.launch {
+                            val token = config.pushTokens.token()
+                            if (token == null) {
+                                status = "No push token available on this build " +
+                                    "(google-services.json not wired)."
+                                working = false
+                                return@launch
+                            }
+                            val newId = config.client.register(
+                                platform = config.pushTokens.platform,
+                                pushToken = token,
+                                existingDeviceId = config.settings.deviceIdFor(ship),
+                                shipUrl = shipUrl,
+                                patp = ship,
+                                code = codeSnapshot,
+                            )
+                            if (newId != null) {
+                                config.settings.setDeviceIdFor(ship, newId)
+                                status = "Registered (deviceId=${newId.take(8)}…)"
+                            } else {
+                                status = "Registration failed. Check the endpoint, " +
+                                    "your +code, and that the ship is reachable from " +
+                                    "the relay."
+                            }
+                            working = false
+                        }
+                    },
+                ) { Text("Register") }
+            },
+            dismissButton = {
+                TextButton(
+                    enabled = !working,
+                    onClick = { codePrompt = false; code = "" },
+                ) { Text("Cancel") }
+            },
+        )
     }
 }
 

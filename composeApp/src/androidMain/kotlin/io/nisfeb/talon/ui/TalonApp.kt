@@ -691,6 +691,15 @@ fun TalonApp(
                 val profileAccentPreview = ourPatp?.let { ship ->
                     contactMap.contact(ship)?.color?.let(::parseHexColor)
                 }
+                val relayClient = remember(app) {
+                    io.nisfeb.talon.notify.RelayClient(
+                        http = app.http,
+                        endpoint = { app.relaySettings.endpoint.value },
+                    )
+                }
+                val activeShipUrl = remember(ourPatp) {
+                    ourPatp?.let { p -> app.sessionStore.all().firstOrNull { it.ship == p } }?.shipUrl
+                }
                 SettingsScreen(
                     aiSettings = app.aiSettings,
                     themePreference = app.themePreference,
@@ -698,6 +707,17 @@ fun TalonApp(
                     multiShip = multiShip,
                     profileAccentPreview = profileAccentPreview,
                     notificationHealth = app.notificationHealth,
+                    relayConfig = io.nisfeb.talon.ui.screens.RelayPanelConfig(
+                        client = relayClient,
+                        settings = app.relaySettings,
+                        // Push token provider: NoPushTokenProvider for
+                        // now. Swapped to a FirebaseMessaging-backed
+                        // impl once google-services.json is wired and
+                        // firebase-messaging is on the classpath.
+                        pushTokens = io.nisfeb.talon.notify.NoPushTokenProvider,
+                        activePatp = ourPatp,
+                        activeShipUrl = activeShipUrl,
+                    ),
                     onBack = { settingsOpen = false },
                     dailyDigestSettings = app.dailyDigestSettings,
                     onTestDigest = { app.dailyDigest.generateAndNotifyAsync("user_test") },

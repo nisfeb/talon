@@ -69,6 +69,13 @@ class TalonApplication : Application() {
      *  Notification Health panel surfaces accurate state. */
     val notificationHealth: io.nisfeb.talon.notify.NotificationHealth =
         io.nisfeb.talon.notify.NotificationHealth()
+    /** Persistent relay-registration state — endpoint URL and the
+     *  per-ship device ids the relay assigned at /register time.
+     *  Lives at the app level so a ship switch preserves the user's
+     *  endpoint config and looks up the right per-ship deviceId. */
+    val relaySettings: io.nisfeb.talon.notify.RelaySettings by lazy {
+        io.nisfeb.talon.notify.AndroidRelaySettings(this)
+    }
     lateinit var settingsSync: io.nisfeb.talon.urbit.SettingsSyncImpl
         private set
     lateinit var drafts: DraftStore
