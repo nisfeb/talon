@@ -337,11 +337,21 @@ class TlonChatRepo(
             runCatching { bootstrapActivity(ch) }
                 .onSuccess { notificationHealth.markReconcileSuccess() }
                 .onFailure { Log.e(TAG, "activity scry failed", it) }
-            // Contacts / clubs / groups rarely churn — only scry them on
-            // first run so reconnect storms don't pound the ship.
+            // Contacts re-scry on every connect, not just firstRun: when
+            // the SSE goes zombie during doze, status updates from other
+            // devices are silently lost. Re-subscribing on reconnect
+            // doesn't replay missed `%contacts /v1/news` events. Re-scry
+            // is a single round-trip with KB-of-payload, cheap relative
+            // to the alternative (status updates only become visible
+            // after a full app kill+relaunch).
+            runCatching { bootstrapContacts(ch) }
+                .onFailure { Log.e(TAG, "contacts scry failed", it) }
+            // Clubs / groups / channel orders still rarely churn enough
+            // to warrant rescrying every reconnect — and they have their
+            // own live subscriptions (`groups /v1/groups`, etc.) that do
+            // deliver create/edit events, so a missed reconnect window
+            // self-heals on the next event.
             if (firstRun) {
-                runCatching { bootstrapContacts(ch) }
-                    .onFailure { Log.e(TAG, "contacts scry failed", it) }
                 runCatching { bootstrapClubs(ch) }
                     .onFailure { Log.e(TAG, "clubs scry failed", it) }
                 runCatching { bootstrapGroups(ch) }
@@ -370,21 +380,18 @@ class TlonChatRepo(
             }
         }
 
-        // Settings sync — scries our desk and also subscribes so any
-        // other device's changes stream in. Only need to do this on
-        // firstRun; the subscription re-establishes automatically once
-        // we attach the new channel instance below.
-        // commonMain: skip entirely when no SettingsSync was supplied
-        // (e.g. desktop until %settings bridge is wired in Stage F).
+        // Settings sync — scries our desk and subscribes so changes
+        // from other devices stream in. Run on every connect, not just
+        // firstRun: an Urbit subscribe doesn't replay missed events, so
+        // any %settings change made on another device while this SSE
+        // was zombie (doze, screen off, network blip) would be silently
+        // lost forever — the watchdog at the bottom of this function
+        // restores the connection but not the missed payload, and the
+        // user only catches up on a full app kill+relaunch.
         settingsSync?.attach(ch)
         if (settingsSync != null) {
-            if (firstRun) {
-                runCatching { settingsSync.bootstrap() }
-                    .onFailure { Log.e(TAG, "settings bootstrap failed", it) }
-            } else {
-                runCatching { ch.subscribe("settings", "/desk/${SettingsSync.DESK}") }
-                    .onFailure { Log.e(TAG, "settings subscribe failed", it) }
-            }
+            runCatching { settingsSync.bootstrap() }
+                .onFailure { Log.e(TAG, "settings bootstrap failed", it) }
         }
 
         // Watchdog: if we don't see an event for 90s, the SSE is likely
