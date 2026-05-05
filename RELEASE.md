@@ -146,6 +146,22 @@ Run through this every tag. It's not automated — don't skip it.
 - [ ] Ctrl+1..9 switches ships when multiple are signed in.
 - [ ] Cmd+ variants on macOS work the same.
 
+**Desktop rail + secondary surfaces (≥0.9.0):**
+- [ ] Wide window (≥840dp): 64dp icon rail visible on the far left.
+- [ ] Rail has four icons (Chats, Statuses, Bookmarks, Activity) — hover shows a tooltip with the label.
+- [ ] Selected rail icon has a primary-colour pill on its left edge.
+- [ ] Tapping a rail icon swaps only the list pane; the chat detail pane stays.
+- [ ] Activity-tab → tap a row → opens the chat in the right pane (rail tab does NOT auto-switch back to Chats).
+- [ ] Bookmarks-tab → tap a bookmark → opens the chat in the right pane (same).
+- [ ] Statuses-tab → tap a contact → opens the contact profile (existing full-screen replace, same as today).
+- [ ] Kebab menu (more menu in chat list header) → "Statuses" item → on wide, flips rail to Statuses; on narrow, full-screen StatusFeedScreen with back arrow.
+- [ ] Resize wide → narrow: rail disappears, current rail tab is preserved but invisible; kebab menu still works.
+- [ ] Resize narrow → wide: rail re-appears with the previously-selected tab.
+- [ ] Quit + relaunch: same rail tab selected (per ship).
+- [ ] Switch ships (multi-ship users): rail tab preference is per-ship.
+- [ ] Tablet landscape (Android): same behaviour as desktop wide.
+- [ ] Tablet portrait (Android): rail not visible; kebab menu navigation as on phone.
+
 **Build artifacts:**
 - [ ] `./gradlew :composeApp:assembleRelease` produces signed APKs
   under `composeApp/build/outputs/apk/release/`. With ABI splits
