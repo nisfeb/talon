@@ -22,3 +22,7 @@ dependencyResolutionManagement {
 
 rootProject.name = "talon"
 include(":composeApp")
+// Notification push relay — JVM-only Ktor server. Lives in the
+// repo so the design doc, client, and server stay in lockstep.
+// Build with `./gradlew :relay:installDist` or `docker build relay/`.
+include(":relay")

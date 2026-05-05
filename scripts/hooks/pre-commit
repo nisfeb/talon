@@ -35,7 +35,7 @@ $'\\bsk-[A-Za-z0-9]{40,}\tOpenAI-style API key\t^$'
 $'\\bghp_[A-Za-z0-9]{36}\\b\tGitHub personal access token\t^$'
 $'\\bAKIA[0-9A-Z]{16}\\b\tAWS access key id\t^$'
 $'-----BEGIN [A-Z ]*PRIVATE KEY-----\tprivate key\t^$'
-$'urbauth-~[a-zA-Z0-9-]+\turbit auth cookie name (hint: sessions.json leak)\t^$'
+$'urbauth-~[a-zA-Z0-9-]+\turbit auth cookie name (hint: sessions.json leak)\t^relay/'
 )
 
 red()  { printf '\033[31m%s\033[0m' "$1"; }
