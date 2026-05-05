@@ -133,6 +133,12 @@ fun App(
      *  silently doing nothing. */
     pushTokenProvider: io.nisfeb.talon.notify.PushTokenProvider =
         io.nisfeb.talon.notify.NoPushTokenProvider,
+    /** OS-level system notification probe (battery / restriction /
+     *  permission status). Defaults to a no-op so desktop hosts and
+     *  tests don't have to wire one — Android passes
+     *  AndroidSystemNotificationProbe and gets the real signals. */
+    systemNotificationProbe: io.nisfeb.talon.notify.SystemNotificationProbe =
+        io.nisfeb.talon.notify.NoopSystemNotificationProbe,
     /** Per-ship factory for the menu-seen store. Called inside the
      *  `key(shipKey)` block so a ship-switch yields a fresh seen-
      *  state from that ship's persisted file (or SharedPreferences
@@ -498,6 +504,7 @@ fun App(
                             multiShip = multiShip,
                             profileAccentPreview = profileAccent,
                             notificationHealth = notificationHealth,
+                            systemNotificationProbe = systemNotificationProbe,
                             relayConfig = io.nisfeb.talon.ui.screens.RelayPanelConfig(
                                 client = relayClient,
                                 settings = relaySettings,

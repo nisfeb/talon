@@ -700,6 +700,9 @@ fun TalonApp(
                 val activeShipUrl = remember(ourPatp) {
                     ourPatp?.let { p -> app.sessionStore.all().firstOrNull { it.ship == p } }?.shipUrl
                 }
+                val systemProbe = remember(app) {
+                    io.nisfeb.talon.notify.AndroidSystemNotificationProbe(app)
+                }
                 SettingsScreen(
                     aiSettings = app.aiSettings,
                     themePreference = app.themePreference,
@@ -707,6 +710,7 @@ fun TalonApp(
                     multiShip = multiShip,
                     profileAccentPreview = profileAccentPreview,
                     notificationHealth = app.notificationHealth,
+                    systemNotificationProbe = systemProbe,
                     relayConfig = io.nisfeb.talon.ui.screens.RelayPanelConfig(
                         client = relayClient,
                         settings = app.relaySettings,

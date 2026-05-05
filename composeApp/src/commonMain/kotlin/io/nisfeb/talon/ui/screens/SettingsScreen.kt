@@ -76,6 +76,12 @@ fun SettingsScreen(
      *  call sites that pre-date the panel pass null and the section
      *  doesn't render. */
     notificationHealth: io.nisfeb.talon.notify.NotificationHealth? = null,
+    /** OS-level signals the panel surfaces alongside the relay /
+     *  SSE diagnostics. Defaults to NoopSystemNotificationProbe so
+     *  desktop / tests get a "n/a" rendering rather than missing
+     *  rows. */
+    systemNotificationProbe: io.nisfeb.talon.notify.SystemNotificationProbe =
+        io.nisfeb.talon.notify.NoopSystemNotificationProbe,
     /** Optional relay-registration controls. When non-null, the
      *  Notification Health panel grows a Push relay sub-panel that
      *  lets the user register / unregister their device with a
@@ -272,7 +278,10 @@ fun SettingsScreen(
             Spacer(Modifier.height(8.dp))
 
             if (notificationHealth != null) {
-                NotificationHealthPanel(notificationHealth)
+                NotificationHealthPanel(
+                    health = notificationHealth,
+                    probe = systemNotificationProbe,
+                )
                 Spacer(Modifier.height(8.dp))
             }
 
@@ -661,12 +670,18 @@ private fun AccentSwatchRow(
 @Composable
 private fun NotificationHealthPanel(
     health: io.nisfeb.talon.notify.NotificationHealth,
+    probe: io.nisfeb.talon.notify.SystemNotificationProbe,
 ) {
     val sseConnected by health.sseConnected.collectAsState()
     val lastSseEvent by health.lastSseEventMs.collectAsState()
     val lastReconcile by health.lastReconcileMs.collectAsState()
     val forceReconnects by health.forceReconnects.collectAsState()
     val recoveredEvents by health.recoveredEvents.collectAsState()
+    // Re-snapshot the OS state on every recomposition. Cheap (three
+    // syscalls); the user opening Settings is a deliberate "tell me
+    // what's wrong" moment, so a stale read here would defeat the
+    // panel's purpose.
+    val systemState = probe.snapshot()
 
     Text(
         "Notification health",
@@ -705,6 +720,53 @@ private fun NotificationHealthPanel(
                 label = "Events recovered by sync",
                 value = recoveredEvents.toString(),
             )
+        }
+        // OS-level signals — only render rows we actually got a
+        // value for. Each highlights when the value would silently
+        // drop notifications.
+        systemState.notificationsAllowed?.let { allowed ->
+            HealthRow(
+                label = "OS notifications",
+                value = if (allowed) "allowed" else "blocked — fix in Settings",
+                highlight = !allowed,
+            )
+        }
+        systemState.batteryOptimizationsExempt?.let { exempt ->
+            HealthRow(
+                label = "Battery optimization",
+                value = if (exempt) "exempt" else "throttled — fix in Settings",
+                highlight = !exempt,
+            )
+        }
+        systemState.backgroundRestricted?.let { restricted ->
+            HealthRow(
+                label = "Background activity",
+                value = if (restricted) "RESTRICTED — fix in Settings"
+                    else "allowed",
+                highlight = restricted,
+            )
+        }
+    }
+    // Fix-it buttons. Render only when there's something to fix
+    // AND the probe knows how to deeplink there.
+    val needsBatteryFix = systemState.batteryOptimizationsExempt == false
+    val needsAppDetails = systemState.notificationsAllowed == false ||
+        systemState.backgroundRestricted == true
+    if (needsBatteryFix || needsAppDetails) {
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.padding(top = 4.dp),
+        ) {
+            if (needsBatteryFix) {
+                TextButton(onClick = { probe.openBatteryOptimizationSettings() }) {
+                    Text("Fix battery")
+                }
+            }
+            if (needsAppDetails) {
+                TextButton(onClick = { probe.openAppDetailsSettings() }) {
+                    Text("App settings")
+                }
+            }
         }
     }
 }
