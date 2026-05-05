@@ -122,7 +122,7 @@ class DbTest {
             Crypto.Sealed("ct", "salt", "nonce"),
         )
         val rowId = db.shipsForDevice("dev-1").first().rowId
-        db.setLastEventId(rowId, "dev-1", 42L)
+        db.setLastEventId(rowId, "dev-1", "~sampel/post-42")
 
         db.deleteDevice("dev-1")
 
@@ -150,8 +150,9 @@ class DbTest {
             Crypto.Sealed("ct", "salt", "nonce"),
         )
         val rowId = db.shipsForDevice("dev-1").first().rowId
-        db.setLastEventId(rowId, "dev-1", 100L)
-        assertEquals(100L, db.lastEventId(rowId, "dev-1"))
+        val postId = "~sampel/170.141.184.507.950.225.626.766.249.310.733.526.368"
+        db.setLastEventId(rowId, "dev-1", postId)
+        assertEquals(postId, db.lastEventId(rowId, "dev-1"))
     }
 
     @Test
@@ -165,9 +166,9 @@ class DbTest {
             Crypto.Sealed("ct", "salt", "nonce"),
         )
         val rowId = db.shipsForDevice("dev-1").first().rowId
-        db.setLastEventId(rowId, "dev-1", 50L)
-        db.setLastEventId(rowId, "dev-1", 100L)
-        assertEquals(100L, db.lastEventId(rowId, "dev-1"))
+        db.setLastEventId(rowId, "dev-1", "~sampel/post-50")
+        db.setLastEventId(rowId, "dev-1", "~sampel/post-100")
+        assertEquals("~sampel/post-100", db.lastEventId(rowId, "dev-1"))
     }
 
     @Test

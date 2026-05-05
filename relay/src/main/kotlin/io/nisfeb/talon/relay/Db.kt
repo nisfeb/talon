@@ -32,7 +32,33 @@ class Db(private val path: String) {
 
     fun migrate() {
         connect().use { c ->
+            // The cursor column was originally INTEGER (the SSE
+            // channel-local event id, which resets on reconnect and
+            // therefore makes a useless dedup key). It's now TEXT,
+            // holding the globally-unique post id from the activity
+            // event itself. Detect the old layout via PRAGMA and
+            // drop the table — its rows are runtime-only state, so
+            // losing them just causes a brief replay-burst right
+            // after the upgrade.
+            val needsDropOldCursor = runCatching {
+                c.createStatement().use { s ->
+                    s.executeQuery("PRAGMA table_info(last_event)").use { rs ->
+                        var legacy = false
+                        while (rs.next()) {
+                            val name = rs.getString("name")
+                            val type = rs.getString("type")?.uppercase().orEmpty()
+                            if (name == "event_id" && type.contains("INT")) {
+                                legacy = true
+                            }
+                        }
+                        legacy
+                    }
+                }
+            }.getOrDefault(false)
             c.createStatement().use { s ->
+                if (needsDropOldCursor) {
+                    s.executeUpdate("DROP TABLE last_event")
+                }
                 s.executeUpdate(SCHEMA)
             }
         }
@@ -166,23 +192,25 @@ class Db(private val path: String) {
 
     // ───────── last-event cursor ─────────
 
-    /** Last `event-id` we successfully pushed for this (ship, device).
-     *  null when we've never pushed for the pair — the SSE consumer
-     *  starts from "now" in that case to avoid spamming a fresh
-     *  registration with backlog. */
-    fun lastEventId(shipRowId: Long, deviceId: String): Long? = connect().use { c ->
+    /** Last globally-unique post id we successfully pushed for this
+     *  (ship, device). Returns null when we've never pushed for the
+     *  pair. The id is the `dm-post.key.id` / `chan-post.key.id`
+     *  string from the %activity event — stable across SSE
+     *  reconnects, which is the property the previous INTEGER
+     *  channel-local cursor lacked. */
+    fun lastEventId(shipRowId: Long, deviceId: String): String? = connect().use { c ->
         c.prepareStatement(
             "SELECT event_id FROM last_event WHERE ship_id = ? AND device_id = ?",
         ).use { ps ->
             ps.setLong(1, shipRowId)
             ps.setString(2, deviceId)
             ps.executeQuery().use { rs ->
-                if (rs.next()) rs.getLong("event_id") else null
+                if (rs.next()) rs.getString("event_id") else null
             }
         }
     }
 
-    fun setLastEventId(shipRowId: Long, deviceId: String, eventId: Long) {
+    fun setLastEventId(shipRowId: Long, deviceId: String, eventId: String) {
         connect().use { c ->
             c.prepareStatement(
                 """
@@ -195,7 +223,7 @@ class Db(private val path: String) {
             ).use { ps ->
                 ps.setLong(1, shipRowId)
                 ps.setString(2, deviceId)
-                ps.setLong(3, eventId)
+                ps.setString(3, eventId)
                 ps.executeUpdate()
             }
         }
@@ -225,7 +253,7 @@ class Db(private val path: String) {
             CREATE TABLE IF NOT EXISTS last_event (
                 ship_id INTEGER NOT NULL,
                 device_id TEXT NOT NULL,
-                event_id INTEGER NOT NULL,
+                event_id TEXT NOT NULL,
                 updated_at INTEGER NOT NULL,
                 PRIMARY KEY(ship_id, device_id),
                 FOREIGN KEY(ship_id) REFERENCES ships(id),

@@ -39,6 +39,7 @@ class Push {
         .build()
 
     fun send(endpoint: String, patp: String, whom: String, eventId: Long) {
+        log.info("send entered: patp=$patp whom=$whom id=$eventId endpoint=${endpoint.take(48)}…")
         // Hand-rolled JSON to avoid pulling kotlinx-serialization
         // through Push's hot path. The fields are all server-
         // controlled: patp matches `~[a-z0-9-]+` and whom is one of
@@ -51,7 +52,7 @@ class Push {
             append(escape(whom))
             append("""","id":"""")
             append(eventId)
-            append("""""}""")
+            append("\"}")
         }
         val req = Request.Builder()
             .url(endpoint)
@@ -59,7 +60,9 @@ class Push {
             .build()
         try {
             http.newCall(req).execute().use { resp ->
-                if (!resp.isSuccessful) {
+                if (resp.isSuccessful) {
+                    log.info("push HTTP ${resp.code} → ${endpoint.take(64)}…")
+                } else {
                     // 410 Gone = UnifiedPush "endpoint expired,
                     // device must re-register." Surface the code so
                     // the caller can decide whether to mark the row
