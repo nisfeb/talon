@@ -28,6 +28,12 @@ class AndroidUiSettings(context: Context) : UiSettings {
     override val groupChannelOrder: StateFlow<GroupChannelOrder> =
         _groupChannelOrder.asStateFlow()
 
+    private val _chatPaneListFraction = MutableStateFlow(
+        prefs.getFloat(KEY_CHAT_PANE_LIST_FRACTION, 0.30f).coerceIn(0.20f, 0.50f),
+    )
+    override val chatPaneListFraction: StateFlow<Float> =
+        _chatPaneListFraction.asStateFlow()
+
     override fun setHideComposerButtons(hidden: Boolean) {
         if (_hideComposerButtons.value == hidden) return
         prefs.edit().putBoolean(KEY_HIDE_COMPOSER_BUTTONS, hidden).apply()
@@ -61,6 +67,13 @@ class AndroidUiSettings(context: Context) : UiSettings {
         _groupChannelOrder.value = order
     }
 
+    override fun setChatPaneListFraction(value: Float) {
+        val clamped = value.coerceIn(0.20f, 0.50f)
+        if (_chatPaneListFraction.value == clamped) return
+        prefs.edit().putFloat(KEY_CHAT_PANE_LIST_FRACTION, clamped).apply()
+        _chatPaneListFraction.value = clamped
+    }
+
     private fun loadGroupOrder(): GroupChannelOrder {
         val name = prefs.getString(KEY_GROUP_CHANNEL_ORDER, null) ?: return GroupChannelOrder.Recent
         return runCatching { GroupChannelOrder.valueOf(name) }
@@ -90,5 +103,6 @@ class AndroidUiSettings(context: Context) : UiSettings {
         private const val KEY_ACCENT_MODE = "accent_mode"
         private const val KEY_ACCENT_HEX = "accent_hex"
         private const val KEY_GROUP_CHANNEL_ORDER = "group_channel_order"
+        private const val KEY_CHAT_PANE_LIST_FRACTION = "chat_pane_list_fraction"
     }
 }

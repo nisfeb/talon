@@ -31,6 +31,8 @@ class DesktopUiSettings(
         val accentCustomHex: String? = null,
         // Channel ordering inside group dropdowns on the home list.
         val groupChannelOrder: String = GroupChannelOrder.Recent.name,
+        // Fraction of total width given to the chat-list pane on wide windows.
+        val chatPaneListFraction: Float = 0.30f,
     )
 
     private val initial = loadInitial()
@@ -56,6 +58,12 @@ class DesktopUiSettings(
     override val groupChannelOrder: StateFlow<GroupChannelOrder> =
         _groupChannelOrder.asStateFlow()
 
+    private val _chatPaneListFraction = MutableStateFlow(
+        initial.chatPaneListFraction.coerceIn(0.20f, 0.50f),
+    )
+    override val chatPaneListFraction: StateFlow<Float> =
+        _chatPaneListFraction.asStateFlow()
+
     override fun setHideComposerButtons(hidden: Boolean) {
         if (_hideComposerButtons.value == hidden) return
         _hideComposerButtons.value = hidden
@@ -74,6 +82,13 @@ class DesktopUiSettings(
         persistCurrent()
     }
 
+    override fun setChatPaneListFraction(value: Float) {
+        val clamped = value.coerceIn(0.20f, 0.50f)
+        if (_chatPaneListFraction.value == clamped) return
+        _chatPaneListFraction.value = clamped
+        persistCurrent()
+    }
+
     private fun persistCurrent() {
         val accent = _accentSettings.value
         persist(
@@ -83,6 +98,7 @@ class DesktopUiSettings(
                 accentMode = accent.mode.name,
                 accentCustomHex = accent.customHex,
                 groupChannelOrder = _groupChannelOrder.value.name,
+                chatPaneListFraction = _chatPaneListFraction.value,
             ),
         )
     }

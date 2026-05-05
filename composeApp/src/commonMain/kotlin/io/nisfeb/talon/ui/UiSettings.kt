@@ -38,6 +38,15 @@ interface UiSettings {
      */
     val groupChannelOrder: StateFlow<GroupChannelOrder>
     fun setGroupChannelOrder(order: GroupChannelOrder)
+
+    /**
+     * Ratio of total width given to the chat-list pane on wide
+     * windows (≥840dp). Clamped to 0.20–0.50 at the setter; corrupt
+     * values from disk get normalised on next write. See
+     * [io.nisfeb.talon.ui.ChatPaneScaffold] / `DEFAULT_LIST_FRACTION`.
+     */
+    val chatPaneListFraction: StateFlow<Float>
+    fun setChatPaneListFraction(value: Float)
 }
 
 enum class GroupChannelOrder { Recent, HostOrder }
@@ -78,6 +87,7 @@ class InMemoryUiSettings(
     initialHide: Boolean = false,
     initialAccent: AccentSettings = AccentSettings(),
     initialGroupOrder: GroupChannelOrder = GroupChannelOrder.Recent,
+    initialChatPaneListFraction: Float = 0.30f,
 ) : UiSettings {
     private val _hideComposerButtons = MutableStateFlow(initialHide)
     override val hideComposerButtons: StateFlow<Boolean> =
@@ -98,5 +108,14 @@ class InMemoryUiSettings(
         _groupChannelOrder.asStateFlow()
     override fun setGroupChannelOrder(order: GroupChannelOrder) {
         _groupChannelOrder.value = order
+    }
+
+    private val _chatPaneListFraction = MutableStateFlow(
+        initialChatPaneListFraction.coerceIn(0.20f, 0.50f),
+    )
+    override val chatPaneListFraction: StateFlow<Float> =
+        _chatPaneListFraction.asStateFlow()
+    override fun setChatPaneListFraction(value: Float) {
+        _chatPaneListFraction.value = value.coerceIn(0.20f, 0.50f)
     }
 }
