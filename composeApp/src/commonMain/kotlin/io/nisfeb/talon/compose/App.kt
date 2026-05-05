@@ -807,6 +807,7 @@ fun App(
                             })
                             else -> null
                         }
+                        val listFraction by uiSettings.chatPaneListFraction.collectAsState()
                         ChatPaneScaffold(
                             list = {
                                 DmListScreen(
@@ -906,6 +907,8 @@ fun App(
                                 )
                             },
                             detail = detailSlot,
+                            listFraction = listFraction,
+                            onListFractionChange = { uiSettings.setChatPaneListFraction(it) },
                         )
                     }
                 }
