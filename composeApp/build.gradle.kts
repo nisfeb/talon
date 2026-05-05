@@ -148,8 +148,8 @@ kotlin {
 // version inside derivePackageVersion and silently drifted — every
 // release between 0.7.14 and 0.7.23 shipped with stale .dmg/.msi/.deb
 // filenames because nobody updated both literals.
-val talonVersionCode = 59
-val talonVersionName = "0.8.6"
+val talonVersionCode = 60
+val talonVersionName = "0.8.7"
 
 android {
     namespace = "io.nisfeb.talon"
@@ -468,11 +468,10 @@ val slimReleaseDistributable = tasks.register("slimReleaseDistributable") {
 
         // Material Icons Extended ships every Material icon (~11k
         // class files, 37 MB on desktop). Android R8 strips the
-        // unused ones; jpackage has no equivalent step. We only use
-        // 11 icons from this JAR (the rest come from the small
-        // material-icons-core JAR we leave alone). Keep just those
-        // class files plus the manifest. Sources of truth for the
-        // keep list:
+        // unused ones; jpackage has no equivalent step. The rest of
+        // the icons we use come from the small material-icons-core
+        // JAR we leave alone. Keep just these classes plus the
+        // manifest. Sources of truth for the keep list:
         //   grep -rhoE 'Icons\.(AutoMirrored\.)?(Filled|Outlined|Rounded|Sharp|TwoTone)\.[A-Za-z0-9_]+' \
         //     --include='*.kt' composeApp/src | sort -u
         // and verify each one against the contents of the
@@ -480,6 +479,7 @@ val slimReleaseDistributable = tasks.register("slimReleaseDistributable") {
         // does NOT belong in this list.
         // CI guard further down catches drift.
         val iconsExtendedKeep = setOf(
+            "androidx/compose/material/icons/automirrored/filled/LogoutKt.class",
             "androidx/compose/material/icons/filled/AttachFileKt.class",
             "androidx/compose/material/icons/filled/DownloadKt.class",
             "androidx/compose/material/icons/filled/DragHandleKt.class",
@@ -489,6 +489,7 @@ val slimReleaseDistributable = tasks.register("slimReleaseDistributable") {
             "androidx/compose/material/icons/filled/MicKt.class",
             "androidx/compose/material/icons/filled/NotificationsOffKt.class",
             "androidx/compose/material/icons/filled/PauseKt.class",
+            "androidx/compose/material/icons/filled/PushPinKt.class",
             "androidx/compose/material/icons/filled/ScheduleKt.class",
             "androidx/compose/material/icons/filled/StopKt.class",
             "androidx/compose/material/icons/filled/TopicKt.class",
