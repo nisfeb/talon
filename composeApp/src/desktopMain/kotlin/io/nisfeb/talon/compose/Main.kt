@@ -74,6 +74,8 @@ private class DesktopAppGraph {
     val uiSettings: UiSettings = DesktopUiSettings()
     val relaySettings: io.nisfeb.talon.notify.RelaySettings =
         io.nisfeb.talon.notify.DesktopRelaySettings()
+    val lastOpenChatStore: io.nisfeb.talon.notify.LastOpenChatStore =
+        io.nisfeb.talon.notify.DesktopLastOpenChatStore()
     val drafts: DraftStore = InMemoryDraftStore()
 
     init {
@@ -353,6 +355,7 @@ fun main() {
                     createMenuSeen = { ship ->
                         io.nisfeb.talon.ui.DesktopMenuSeenStore(ship = ship)
                     },
+                    lastOpenChatStore = graph.lastOpenChatStore,
                 )
             }
         }

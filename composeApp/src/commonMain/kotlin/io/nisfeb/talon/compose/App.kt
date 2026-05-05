@@ -146,6 +146,11 @@ fun App(
      *  on Android). Defaults to NoopMenuSeenStore for tests. */
     createMenuSeen: (ship: String) -> io.nisfeb.talon.ui.MenuSeenStore =
         { io.nisfeb.talon.ui.NoopMenuSeenStore },
+    /** Per-ship "what chat was open last" memory. Wide windows seed
+     *  the right pane from this so the user lands back on their
+     *  conversation instead of an empty pane. Default Noop for tests. */
+    lastOpenChatStore: io.nisfeb.talon.notify.LastOpenChatStore =
+        io.nisfeb.talon.notify.NoopLastOpenChatStore,
 ) {
     // Derive the initial logged-in ship from sessionStore.active()
     // (the joined SavedSession) rather than activeShip() (just the
@@ -198,6 +203,27 @@ fun App(
     var loginNotice by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(loggedInShip) {
         if (loggedInShip != null) loginNotice = null
+    }
+
+    // Seed openChat from the store when we (re)land on a ship — so
+    // wide windows restore the user's last conversation instead of
+    // showing an empty right pane. Must be AFTER `var openChat` and
+    // keyed on loggedInShip so a ship-switch seeds the new ship's entry.
+    val seedChat by lastOpenChatStore.state.collectAsState()
+    LaunchedEffect(loggedInShip) {
+        if (openChat == null && loggedInShip != null) {
+            seedChat[loggedInShip]?.let { openChat = it }
+        }
+    }
+
+    // Mirror openChat flips back into the store so the next launch / ship
+    // switch can restore them. We deliberately don't clear on null so
+    // "user backed out of a chat" doesn't erase the persisted entry —
+    // they get restored to the same chat on the next launch.
+    LaunchedEffect(openChat, loggedInShip) {
+        val ship = loggedInShip ?: return@LaunchedEffect
+        val whom = openChat
+        if (whom != null) lastOpenChatStore.set(ship, whom)
     }
 
     // BackHandlers live outside the key block so they observe the

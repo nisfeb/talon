@@ -184,6 +184,29 @@ fun TalonApp(
     var galleryComposeOpen by remember { mutableStateOf(false) }
     var openGroupFlag by remember { mutableStateOf<String?>(null) }
 
+    // Per-ship persistent store for the last-open conversation.
+    // `remember(app)` keeps the same SharedPreferences-backed instance
+    // across recompositions so the read happens once and the same
+    // object is reused for all subsequent set() calls.
+    val lastOpenChatStore = remember(app) {
+        io.nisfeb.talon.notify.AndroidLastOpenChatStore(app)
+    }
+    val lastOpenChatState by lastOpenChatStore.state.collectAsState()
+    // Seed openWhom from persisted store on first composition or ship
+    // switch, so wide-screen / tablet layouts restore the last chat.
+    LaunchedEffect(loggedInShip) {
+        if (openWhom == null && loggedInShip != null) {
+            lastOpenChatState[loggedInShip]?.let { openWhom = it }
+        }
+    }
+    // Mirror openWhom flips back into the store. Intentionally skips
+    // null so backing out of a chat doesn't erase the persisted entry.
+    LaunchedEffect(openWhom, loggedInShip) {
+        val ship = loggedInShip ?: return@LaunchedEffect
+        val whom = openWhom
+        if (whom != null) lastOpenChatStore.set(ship, whom)
+    }
+
     // Single entry point for "open this conversation target" clicks.
     // `group:<flag>` (from citation taps) opens a lightweight
     // GroupHomeScreen — a member sees the channel list, a non-member
