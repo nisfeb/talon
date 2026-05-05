@@ -497,6 +497,19 @@ fun DmListScreen(
     ) {
     Box(modifier = modifier.windowInsetsPadding(WindowInsets.safeDrawing)) {
     Column(modifier = Modifier.fillMaxSize()) {
+        // Indeterminate progress strip while the repo is doing its
+        // first-run bootstrap (init-posts + activity scries on a
+        // freshly-opened ship). Without it, the 10-30s of silent
+        // network work on a fresh `~/.config/Talon` reads as a hung
+        // app — the user has no way to tell "still loading" from
+        // "your ship has no chats." Disappears as soon as the
+        // bootstrap completes (success or error).
+        val bootstrapping by repo.bootstrapping.collectAsState()
+        if (bootstrapping) {
+            androidx.compose.material3.LinearProgressIndicator(
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
         Row(
             modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
             verticalAlignment = Alignment.CenterVertically,

@@ -147,6 +147,17 @@ class TlonChatRepo(
     private val adminGroupsMutex = Mutex()
 
     /**
+     * True while the first-run bootstrap (init-posts + activity scries
+     * + contacts/clubs/groups scries) is in flight. UI surfaces this
+     * as a progress bar so the 10-30s of silence on a fresh start
+     * doesn't feel like the app has hung. Flipped to false when
+     * bootstrap completes or errors out — the SSE event loop continues
+     * running either way.
+     */
+    private val _bootstrapping = MutableStateFlow(false)
+    val bootstrapping: StateFlow<Boolean> = _bootstrapping.asStateFlow()
+
+    /**
      * The chat the user is currently viewing, if any. Used to suppress
      * unread-badge bumps for that whom — if they're looking at it,
      * any new messages are effectively already read. Set from UI
@@ -304,23 +315,31 @@ class TlonChatRepo(
             .onFailure { Log.e(TAG, "groups subscribe failed", it) }
 
         // Re-scry init-posts + activity every reconnect so we catch up on
-        // anything that landed while the stream was down.
-        runCatching { bootstrap(ch) }
-            .onFailure { Log.e(TAG, "initPosts scry failed", it) }
-        runCatching { bootstrapActivity(ch) }
-            .onSuccess { notificationHealth.markReconcileSuccess() }
-            .onFailure { Log.e(TAG, "activity scry failed", it) }
-        // Contacts / clubs / groups rarely churn — only scry them on
-        // first run so reconnect storms don't pound the ship.
-        if (firstRun) {
-            runCatching { bootstrapContacts(ch) }
-                .onFailure { Log.e(TAG, "contacts scry failed", it) }
-            runCatching { bootstrapClubs(ch) }
-                .onFailure { Log.e(TAG, "clubs scry failed", it) }
-            runCatching { bootstrapGroups(ch) }
-                .onFailure { Log.e(TAG, "groups scry failed", it) }
-            runCatching { bootstrapChannelOrders(ch) }
-                .onFailure { Log.e(TAG, "channel orders scry failed", it) }
+        // anything that landed while the stream was down. The
+        // `_bootstrapping` flag drives a top-of-screen progress bar so
+        // a 30-second silent fetch on first launch doesn't read as
+        // "the app has hung."
+        if (firstRun) _bootstrapping.value = true
+        try {
+            runCatching { bootstrap(ch) }
+                .onFailure { Log.e(TAG, "initPosts scry failed", it) }
+            runCatching { bootstrapActivity(ch) }
+                .onSuccess { notificationHealth.markReconcileSuccess() }
+                .onFailure { Log.e(TAG, "activity scry failed", it) }
+            // Contacts / clubs / groups rarely churn — only scry them on
+            // first run so reconnect storms don't pound the ship.
+            if (firstRun) {
+                runCatching { bootstrapContacts(ch) }
+                    .onFailure { Log.e(TAG, "contacts scry failed", it) }
+                runCatching { bootstrapClubs(ch) }
+                    .onFailure { Log.e(TAG, "clubs scry failed", it) }
+                runCatching { bootstrapGroups(ch) }
+                    .onFailure { Log.e(TAG, "groups scry failed", it) }
+                runCatching { bootstrapChannelOrders(ch) }
+                    .onFailure { Log.e(TAG, "channel orders scry failed", it) }
+            }
+        } finally {
+            if (firstRun) _bootstrapping.value = false
         }
 
         // Settings sync — scries our desk and also subscribes so any
@@ -2066,7 +2085,27 @@ class TlonChatRepo(
 
     private suspend fun bootstrap(channel: UrbitChannel) {
         val body = channel.scry("groups-ui", "/v6/init-posts/50/50")
-        val obj = body as? JsonObject ?: return
+        val obj = body as? JsonObject
+        if (obj == null) {
+            // Used to silently `return` here. Real ships have returned
+            // a non-JsonObject response in the wild (~ricsul-bilwyt
+            // running an older Tlon hoon, etc.) and the empty UI was
+            // indistinguishable from "ship genuinely has no chats."
+            // Surface it.
+            Log.w(
+                TAG,
+                "init-posts scry returned non-object: ${body::class.simpleName} " +
+                    "preview=${body.toString().take(200)}",
+            )
+            return
+        }
+        val chatPeers = (obj["chat"] as? JsonObject)?.size ?: 0
+        val channelNests = (obj["channels"] as? JsonObject)?.size ?: 0
+        Log.i(
+            TAG,
+            "init-posts scry: chat-peers=$chatPeers channel-nests=$channelNests " +
+                "top-keys=${obj.keys}",
+        )
 
         val messages = mutableListOf<MessageEntity>()
         val reactions = mutableListOf<ReactionEntity>()
@@ -2081,6 +2120,10 @@ class TlonChatRepo(
                 ingestPost(nest, post, messages, reactions)
             }
         }
+        Log.i(
+            TAG,
+            "init-posts ingested: messages=${messages.size} reactions=${reactions.size}",
+        )
 
         if (messages.isNotEmpty()) db.messages().upsertAll(messages)
         if (reactions.isNotEmpty()) db.reactions().upsertAll(reactions)
@@ -2413,7 +2456,15 @@ class TlonChatRepo(
 
     private suspend fun bootstrapActivity(channel: UrbitChannel) {
         val body = channel.scry("activity", "/v4/activity")
-        val obj = body as? JsonObject ?: return
+        val obj = body as? JsonObject
+        if (obj == null) {
+            Log.w(
+                TAG,
+                "activity scry returned non-object: ${body::class.simpleName} " +
+                    "preview=${body.toString().take(200)}",
+            )
+            return
+        }
         val focused = openWhom
         val rows = obj.entries.mapNotNull { (sourceKey, summary) ->
             toUnread(sourceKey, summary as? JsonObject ?: return@mapNotNull null)
@@ -2422,6 +2473,10 @@ class TlonChatRepo(
             // doesn't re-bump the badge while the user is still looking.
             if (row.whom == focused) row.copy(count = 0, notifyCount = 0) else row
         }
+        Log.i(
+            TAG,
+            "activity scry: total-keys=${obj.size} unread-rows=${rows.size}",
+        )
         if (rows.isNotEmpty()) db.unreads().upsertAll(rows)
     }
 
