@@ -27,13 +27,17 @@ import io.nisfeb.talon.notify.Notifier
 import io.nisfeb.talon.data.AppDatabase
 import io.nisfeb.talon.ui.DraftStore
 import io.nisfeb.talon.ui.InMemoryUiSettings
-import io.nisfeb.talon.ui.ChatPaneScaffold
+import io.nisfeb.talon.ui.DesktopShell
 import io.nisfeb.talon.ui.PlatformBackHandler
+import io.nisfeb.talon.ui.RailTab
 import io.nisfeb.talon.ui.UiSettings
+import io.nisfeb.talon.ui.screens.ActivityList
+import io.nisfeb.talon.ui.screens.BookmarksList
 import io.nisfeb.talon.ui.screens.DmChatScreen
 import io.nisfeb.talon.ui.screens.DmListScreen
 import io.nisfeb.talon.ui.screens.ActivityFeedScreen
 import io.nisfeb.talon.ui.screens.BookmarksScreen
+import io.nisfeb.talon.ui.screens.StatusFeedList
 import io.nisfeb.talon.ui.screens.DailyDigestScreen
 import io.nisfeb.talon.ui.screens.GalleryComposeScreen
 import io.nisfeb.talon.ui.screens.GalleryGridScreen
@@ -868,109 +872,145 @@ fun App(
                             else -> null
                         }
                         val listFraction by uiSettings.chatPaneListFraction.collectAsState()
-                        ChatPaneScaffold(
-                            list = {
-                                DmListScreen(
+                        val activeRailTab by uiSettings.activeRailTab.collectAsState()
+                        val railListSlot: @Composable () -> Unit = {
+                            when (activeRailTab) {
+                                RailTab.Chats -> {
+                                    DmListScreen(
+                                        db = db,
+                                        repo = repo,
+                                        drafts = drafts,
+                                        updateState = updateState,
+                                        menuSeen = menuSeen,
+                                        onOpenConversation = { whom -> openChat = whom },
+                                        onOpenSearch = { showSearch = true },
+                                        onNewMessage = { showNewDm = true },
+                                        onSignOut = {
+                                            // session.logout() already removes just
+                                            // the active ship's entry (UrbitSession.kt
+                                            // line 89). Adding sessionStore.clearAll()
+                                            // would wipe every other saved ship too,
+                                            // which is wrong for multi-ship setups
+                                            // and only worked under Path A by accident.
+                                            session.logout()
+                                            // Reset every navigation-state var so the
+                                            // next sign-in lands on DmList instead of
+                                            // a stale chat from the prior ship.
+                                            openChat = null
+                                            openThreadParent = null
+                                            openThreadReplyAnchor = null
+                                            viewerImageUrl = null
+                                            showSelfProfile = false
+                                            showSettings = false
+                                            loggedInShip = null
+                                        },
+                                        onOpenSelfProfile = { showSelfProfile = true },
+                                        onOpenStatusFeed = { showStatusFeed = true },
+                                        onOpenInvites = { showInvites = true },
+                                        onOpenBookmarks = { showBookmarks = true },
+                                        onOpenActivity = { showActivity = true },
+                                        onOpenWatchwords = { showWatchwords = true },
+                                        onOpenDigest = { showDailyDigest = true },
+                                        digestEnabled = dailyDigestSettings
+                                            ?.state
+                                            ?.collectAsState()
+                                            ?.value
+                                            ?.enabled
+                                            ?: false,
+                                        onOpenAdministration = { showGroupAdminList = true },
+                                        onOpenSettings = { showSettings = true },
+                                        activeShip = ship,
+                                        allShips = remember(loggedInShip) {
+                                            sessionStore.all().map { it.ship }
+                                        },
+                                        shipNicknames = run {
+                                            // Async lookup — replaces a runBlocking on the
+                                            // composing thread that stalled the first
+                                            // frame for N saved ships * one DB hit each.
+                                            val savedShips = remember(loggedInShip) {
+                                                sessionStore.all().map { it.ship }
+                                            }
+                                            val nicknames = remember(loggedInShip) {
+                                                mutableStateOf<Map<String, String>>(emptyMap())
+                                            }
+                                            LaunchedEffect(savedShips) {
+                                                val map = savedShips.mapNotNull { ship ->
+                                                    val nick = runCatching {
+                                                        db.contacts().get(ship)?.nickname
+                                                    }.getOrNull()
+                                                    if (nick.isNullOrBlank()) null else ship to nick
+                                                }.toMap()
+                                                nicknames.value = map
+                                            }
+                                            nicknames.value
+                                        },
+                                        onSwitchShip = { newShip ->
+                                            // Clear the previous ship's open chat before
+                                            // sessionStore.setActive so no frame renders with
+                                            // the new active ship but stale chat state.
+                                            openChat = null
+                                            openThreadParent = null
+                                            openThreadReplyAnchor = null
+                                            viewerImageUrl = null
+                                            showSelfProfile = false
+                                            showSettings = false
+                                            sessionStore.setActive(newShip)
+                                            loggedInShip = newShip
+                                        },
+                                        onAddShip = {
+                                            // Drop to LoginScreen without signing the current
+                                            // ship out — its session entry stays in sessionStore
+                                            // so the drawer can switch back after the new login.
+                                            openChat = null
+                                            openThreadParent = null
+                                            openThreadReplyAnchor = null
+                                            viewerImageUrl = null
+                                            showSelfProfile = false
+                                            showSettings = false
+                                            loggedInShip = null
+                                        },
+                                        groupChannelOrder = uiSettings.groupChannelOrder
+                                            .collectAsState().value,
+                                        focusSearchRequest = focusSearchRequest,
+                                        onFocusSearchHandled = { focusSearchRequest = false },
+                                        showNewDmRequest = showNewDmRequest,
+                                        onShowNewDmHandled = { showNewDmRequest = false },
+                                    )
+                                }
+                                RailTab.Statuses -> StatusFeedList(
                                     db = db,
                                     repo = repo,
-                                    drafts = drafts,
-                                    updateState = updateState,
-                                    menuSeen = menuSeen,
-                                    onOpenConversation = { whom -> openChat = whom },
-                                    onOpenSearch = { showSearch = true },
-                                    onNewMessage = { showNewDm = true },
-                                    onSignOut = {
-                                        // session.logout() already removes just
-                                        // the active ship's entry (UrbitSession.kt
-                                        // line 89). Adding sessionStore.clearAll()
-                                        // would wipe every other saved ship too,
-                                        // which is wrong for multi-ship setups
-                                        // and only worked under Path A by accident.
-                                        session.logout()
-                                        // Reset every navigation-state var so the
-                                        // next sign-in lands on DmList instead of
-                                        // a stale chat from the prior ship.
-                                        openChat = null
-                                        openThreadParent = null
-                                        openThreadReplyAnchor = null
-                                        viewerImageUrl = null
-                                        showSelfProfile = false
-                                        showSettings = false
-                                        loggedInShip = null
-                                    },
-                                    onOpenSelfProfile = { showSelfProfile = true },
-                                    onOpenStatusFeed = { showStatusFeed = true },
-                                    onOpenInvites = { showInvites = true },
-                                    onOpenBookmarks = { showBookmarks = true },
-                                    onOpenActivity = { showActivity = true },
-                                    onOpenWatchwords = { showWatchwords = true },
-                                    onOpenDigest = { showDailyDigest = true },
-                                    digestEnabled = dailyDigestSettings
-                                        ?.state
-                                        ?.collectAsState()
-                                        ?.value
-                                        ?.enabled
-                                        ?: false,
-                                    onOpenAdministration = { showGroupAdminList = true },
-                                    onOpenSettings = { showSettings = true },
-                                    activeShip = ship,
-                                    allShips = remember(loggedInShip) {
-                                        sessionStore.all().map { it.ship }
-                                    },
-                                    shipNicknames = run {
-                                        // Async lookup — replaces a runBlocking on the
-                                        // composing thread that stalled the first
-                                        // frame for N saved ships * one DB hit each.
-                                        val savedShips = remember(loggedInShip) {
-                                            sessionStore.all().map { it.ship }
-                                        }
-                                        val nicknames = remember(loggedInShip) {
-                                            mutableStateOf<Map<String, String>>(emptyMap())
-                                        }
-                                        LaunchedEffect(savedShips) {
-                                            val map = savedShips.mapNotNull { ship ->
-                                                val nick = runCatching {
-                                                    db.contacts().get(ship)?.nickname
-                                                }.getOrNull()
-                                                if (nick.isNullOrBlank()) null else ship to nick
-                                            }.toMap()
-                                            nicknames.value = map
-                                        }
-                                        nicknames.value
-                                    },
-                                    onSwitchShip = { newShip ->
-                                        // Clear the previous ship's open chat before
-                                        // sessionStore.setActive so no frame renders with
-                                        // the new active ship but stale chat state.
-                                        openChat = null
-                                        openThreadParent = null
-                                        openThreadReplyAnchor = null
-                                        viewerImageUrl = null
-                                        showSelfProfile = false
-                                        showSettings = false
-                                        sessionStore.setActive(newShip)
-                                        loggedInShip = newShip
-                                    },
-                                    onAddShip = {
-                                        // Drop to LoginScreen without signing the current
-                                        // ship out — its session entry stays in sessionStore
-                                        // so the drawer can switch back after the new login.
-                                        openChat = null
-                                        openThreadParent = null
-                                        openThreadReplyAnchor = null
-                                        viewerImageUrl = null
-                                        showSelfProfile = false
-                                        showSettings = false
-                                        loggedInShip = null
-                                    },
-                                    groupChannelOrder = uiSettings.groupChannelOrder
-                                        .collectAsState().value,
-                                    focusSearchRequest = focusSearchRequest,
-                                    onFocusSearchHandled = { focusSearchRequest = false },
-                                    showNewDmRequest = showNewDmRequest,
-                                    onShowNewDmHandled = { showNewDmRequest = false },
+                                    ourPatp = ship,
+                                    onOpenContact = { other -> profileSheetShip = other },
                                 )
-                            },
+                                RailTab.Bookmarks -> BookmarksList(
+                                    db = db,
+                                    repo = repo,
+                                    onOpenConversation = { other ->
+                                        showBookmarks = false
+                                        openChat = other
+                                    },
+                                )
+                                RailTab.Activity -> ActivityList(
+                                    db = db,
+                                    repo = repo,
+                                    onOpenConversation = { other ->
+                                        showActivity = false
+                                        openChat = other
+                                    },
+                                    onOpenReply = { whomTarget, parentId, replyId ->
+                                        showActivity = false
+                                        openChat = whomTarget
+                                        openThreadParent = parentId
+                                        openThreadReplyAnchor = replyId
+                                    },
+                                )
+                            }
+                        }
+                        DesktopShell(
+                            activeRailTab = activeRailTab,
+                            onSelectRailTab = { uiSettings.setActiveRailTab(it) },
+                            list = railListSlot,
                             detail = detailSlot,
                             listFraction = listFraction,
                             onListFractionChange = { uiSettings.setChatPaneListFraction(it) },
