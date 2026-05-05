@@ -1,6 +1,8 @@
 package io.nisfeb.talon.urbit
 
+import io.nisfeb.talon.data.MessageDao
 import io.nisfeb.talon.data.MessageEntity
+import io.nisfeb.talon.data.MessageMediaDao
 import io.nisfeb.talon.data.ReactionEntity
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -170,3 +172,76 @@ internal fun mergeBlobIntoContent(
 }
 
 private val empty = IngestedPost(emptyList(), emptyList(), emptyList())
+
+// ───────── media-index sync ─────────
+//
+// Three small wrappers around the message-write paths that also keep the
+// derived `message_media` index (queried by group-info media drilldowns)
+// in sync. The contract is: every place TlonChatRepo persists or
+// soft-deletes a [MessageEntity] goes through one of these helpers
+// instead of touching [MessageDao] directly. This avoids drift between
+// the canonical message rows and the derived index.
+//
+// MediaClassifier.extractMedia returns the rows that *should* exist for
+// a given message (based on URLs / image blocks in its story). It
+// returns emptyList() for soft-deleted messages, so passing a
+// soft-deleted entity here also wipes its media rows correctly.
+//
+// replaceForMessage is delete-then-insert inside a @Transaction, so it
+// handles the edit case (rows change shape on edit) without us needing
+// to diff old vs new.
+
+/**
+ * Upsert a single message + sync its media-index rows. Use instead of
+ * `messages.upsert(...)` whenever the row is being created or its
+ * content/isDeleted state can change.
+ */
+internal suspend fun MessageDao.upsertWithMedia(
+    media: MessageMediaDao,
+    message: MessageEntity,
+) {
+    upsert(message)
+    media.replaceForMessage(
+        whom = message.whom,
+        messageId = message.id,
+        rows = MediaClassifier.extractMedia(message),
+    )
+}
+
+/**
+ * Upsert a batch of messages + sync each one's media-index rows.
+ * `replaceForMessage` is per-message so a partial-batch fixup can't
+ * leave the index out of sync with one message but in sync with
+ * another.
+ */
+internal suspend fun MessageDao.upsertAllWithMedia(
+    media: MessageMediaDao,
+    messages: List<MessageEntity>,
+) {
+    if (messages.isEmpty()) return
+    upsertAll(messages)
+    for (m in messages) {
+        media.replaceForMessage(
+            whom = m.whom,
+            messageId = m.id,
+            rows = MediaClassifier.extractMedia(m),
+        )
+    }
+}
+
+/**
+ * Soft-delete one message + wipe its media-index rows. We pass an
+ * empty list rather than re-extracting because the row's isDeleted
+ * flag isn't yet flipped at the in-memory level when callers reach
+ * here, and extractMedia keys off the entity's own isDeleted. Empty
+ * list is the unambiguous "this message contributes no media"
+ * signal.
+ */
+internal suspend fun MessageDao.softDeleteWithMedia(
+    media: MessageMediaDao,
+    whom: String,
+    id: String,
+) {
+    softDelete(whom, id)
+    media.replaceForMessage(whom = whom, messageId = id, rows = emptyList())
+}

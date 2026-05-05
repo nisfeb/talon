@@ -36,6 +36,21 @@ interface MessageMediaDao {
     @Query("DELETE FROM message_media WHERE whom = :whom AND messageId = :id")
     suspend fun deleteForMessage(whom: String, id: String)
 
+    /**
+     * Wipe media rows for local optimistic-twin messages keyed on
+     * (whom, author, sentMs). Mirrors `MessageDao.reapLocalTwin` so
+     * the derived index doesn't accumulate orphan rows for messages
+     * we've replaced with their server-echoed versions.
+     */
+    @Query("""
+        DELETE FROM message_media
+        WHERE whom = :whom
+          AND author = :author
+          AND sentMs = :sentMs
+          AND messageId LIKE 'local_%'
+    """)
+    suspend fun reapLocalTwinMedia(whom: String, author: String, sentMs: Long)
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertAll(rows: List<MessageMediaEntity>)
 

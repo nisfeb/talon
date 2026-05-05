@@ -234,12 +234,14 @@ class TlonChatRepo(
             var dropped = 0
             for (op in ops) when (op) {
                 is DedupeOp.Rename -> {
-                    db.messages().upsert(op.to)
+                    db.messages().upsertWithMedia(db.messageMedia(), op.to)
                     db.messages().hardDelete(op.from.whom, op.from.id)
+                    db.messageMedia().deleteForMessage(op.from.whom, op.from.id)
                     renamed++
                 }
                 is DedupeOp.Drop -> {
                     db.messages().hardDelete(op.whom, op.dottedId)
+                    db.messageMedia().deleteForMessage(op.whom, op.dottedId)
                     dropped++
                 }
             }
@@ -642,7 +644,10 @@ class TlonChatRepo(
             whom.startsWith("diary/") ||
             whom.startsWith("heap/")
         val initialStatus = if (isChannel) "pending" else null
-        db.messages().upsert(toEntity(whom, id, essay).copy(status = initialStatus))
+        db.messages().upsertWithMedia(
+            db.messageMedia(),
+            toEntity(whom, id, essay).copy(status = initialStatus),
+        )
         val pokeId = when {
             whom.startsWith("~") -> ch.poke(
                 app = "chat", mark = "chat-dm-action-2",
@@ -1346,7 +1351,7 @@ class TlonChatRepo(
         val id = seal["id"].asStr() ?: return null
         val essay = body["essay"] as? JsonObject ?: return null
         val entity = toEntity(nest, id, essay)
-        db.messages().upsert(entity)
+        db.messages().upsertWithMedia(db.messageMedia(), entity)
         (seal["reacts"] as? JsonObject)?.let { reacts ->
             db.reactions().clearForPost(nest, id)
             val rx = reacts.entries.mapNotNull { (author, emoji) ->
@@ -1404,7 +1409,7 @@ class TlonChatRepo(
         val messages = mutableListOf<MessageEntity>()
         val reactions = mutableListOf<ReactionEntity>()
         ingestPost(whom, post, messages, reactions)
-        if (messages.isNotEmpty()) db.messages().upsertAll(messages)
+        if (messages.isNotEmpty()) db.messages().upsertAllWithMedia(db.messageMedia(), messages)
         if (reactions.isNotEmpty()) db.reactions().upsertAll(reactions)
     }
 
@@ -1424,7 +1429,7 @@ class TlonChatRepo(
             ?: return null
         val essay = body["reply-essay"] as? JsonObject ?: return null
         val entity = toReplyEntity(nest, parentId, id, essay)
-        db.messages().upsert(entity)
+        db.messages().upsertWithMedia(db.messageMedia(), entity)
         return entity
     }
 
@@ -1508,7 +1513,7 @@ class TlonChatRepo(
         val messages = mutableListOf<MessageEntity>()
         val reactions = mutableListOf<ReactionEntity>()
         posts.forEach { (_, post) -> ingestPost(whom, post, messages, reactions) }
-        if (messages.isNotEmpty()) db.messages().upsertAll(messages)
+        if (messages.isNotEmpty()) db.messages().upsertAllWithMedia(db.messageMedia(), messages)
         if (reactions.isNotEmpty()) db.reactions().upsertAll(reactions)
         // Clean up stale optimistic-insert rows for channels whose id
         // format we'd gotten wrong in earlier builds. One-shot; no-op
@@ -1580,7 +1585,7 @@ class TlonChatRepo(
             val messages = mutableListOf<MessageEntity>()
             val reactions = mutableListOf<ReactionEntity>()
             posts.forEach { (_, post) -> ingestPost(whom, post, messages, reactions) }
-            if (messages.isNotEmpty()) db.messages().upsertAll(messages)
+            if (messages.isNotEmpty()) db.messages().upsertAllWithMedia(db.messageMedia(), messages)
             if (reactions.isNotEmpty()) db.reactions().upsertAll(reactions)
         }
 
@@ -1873,7 +1878,7 @@ class TlonChatRepo(
             // whether the SSE echo arrives. The DM/club `del`
             // round-trip has been unreliable across mark drift and
             // we'd previously regressed by trusting it.
-            db.messages().softDelete(whom, postId)
+            db.messages().softDeleteWithMedia(db.messageMedia(), whom, postId)
             db.reactions().clearForPost(whom, postId)
             db.watchwords().clearHitsForPost(whom, postId)
         }
@@ -1965,8 +1970,9 @@ class TlonChatRepo(
                     app = "chat", mark = "chat-dm-action-2",
                     payload = dmAction(whom, parentId, replyDelta(replyId, replyEssay)),
                 )
-                db.messages().upsert(
-                    toReplyEntity(whom, parentId, replyId, replyEssay)
+                db.messages().upsertWithMedia(
+                    db.messageMedia(),
+                    toReplyEntity(whom, parentId, replyId, replyEssay),
                 )
             }
             whom.startsWith("0v") -> {
@@ -1974,8 +1980,9 @@ class TlonChatRepo(
                     app = "chat", mark = "chat-club-action-2",
                     payload = clubAction(whom, parentId, replyDelta(replyId, replyEssay)),
                 )
-                db.messages().upsert(
-                    toReplyEntity(whom, parentId, replyId, replyEssay)
+                db.messages().upsertWithMedia(
+                    db.messageMedia(),
+                    toReplyEntity(whom, parentId, replyId, replyEssay),
                 )
             }
             whom.startsWith("chat/") ||
@@ -2000,9 +2007,10 @@ class TlonChatRepo(
                 // track the pokeId so the SSE listener can flip → failed
                 // on a NACK. Server echo reaps the local twin which
                 // implicitly clears the indicator.
-                db.messages().upsert(
+                db.messages().upsertWithMedia(
+                    db.messageMedia(),
                     toReplyEntity(whom, parentId, replyId, replyEssay)
-                        .copy(status = "pending")
+                        .copy(status = "pending"),
                 )
                 val pokeId = ch.poke(
                     app = "channels", mark = "channel-action-2", payload = payload,
@@ -2232,7 +2240,7 @@ class TlonChatRepo(
             "init-posts ingested: messages=${messages.size} reactions=${reactions.size}",
         )
 
-        if (messages.isNotEmpty()) db.messages().upsertAll(messages)
+        if (messages.isNotEmpty()) db.messages().upsertAllWithMedia(db.messageMedia(), messages)
         if (reactions.isNotEmpty()) db.reactions().upsertAll(reactions)
     }
 
@@ -2398,12 +2406,12 @@ class TlonChatRepo(
         (response["add"] as? JsonObject)?.let { add ->
             val essay = add["essay"] as? JsonObject ?: return@let
             val entity = toEntity(whom, id, essay)
-            db.messages().upsert(entity)
+            db.messages().upsertWithMedia(db.messageMedia(), entity)
             if (entity.author != ourPatp) messageListener?.invoke(entity, false)
             return
         }
         response["del"]?.let {
-            db.messages().softDelete(whom, id)
+            db.messages().softDeleteWithMedia(db.messageMedia(), whom, id)
             db.reactions().clearForPost(whom, id)
             db.watchwords().clearHitsForPost(whom, id)
             return
@@ -2438,7 +2446,7 @@ class TlonChatRepo(
         (delta["add"] as? JsonObject)?.let { add ->
             val replyEssay = add["reply-essay"] as? JsonObject ?: return@let
             val entity = toReplyEntity(whom, parentId, replyId, replyEssay)
-            db.messages().upsert(entity)
+            db.messages().upsertWithMedia(db.messageMedia(), entity)
             if (entity.author != ourPatp) {
                 val parent = db.messages().getOne(whom, parentId)
                 val replyToUs = parent?.author == ourPatp
@@ -2447,7 +2455,7 @@ class TlonChatRepo(
             return
         }
         delta["del"]?.let {
-            db.messages().softDelete(whom, replyId)
+            db.messages().softDeleteWithMedia(db.messageMedia(), whom, replyId)
             db.reactions().clearForPost(whom, replyId)
             db.watchwords().clearHitsForPost(whom, replyId)
             return
@@ -2473,20 +2481,21 @@ class TlonChatRepo(
                 intent.posts.forEach { (_, post) ->
                     ingestPost(nest, post, messages, reactions)
                 }
-                if (messages.isNotEmpty()) db.messages().upsertAll(messages)
+                if (messages.isNotEmpty()) db.messages().upsertAllWithMedia(db.messageMedia(), messages)
                 if (reactions.isNotEmpty()) db.reactions().upsertAll(reactions)
             }
             is ChannelDeltaIntent.PostSet -> {
                 val msgs = mutableListOf<MessageEntity>()
                 val rx = mutableListOf<ReactionEntity>()
                 ingestPost(nest, intent.post, msgs, rx)
-                db.messages().upsertAll(msgs)
+                db.messages().upsertAllWithMedia(db.messageMedia(), msgs)
                 if (rx.isNotEmpty()) {
                     db.reactions().clearForPost(nest, intent.id)
                     db.reactions().upsertAll(rx)
                 }
                 msgs.firstOrNull { it.id == intent.id && it.author == ourPatp }?.let {
                     db.messages().reapLocalTwin(nest, ourPatp, it.sentMs)
+                    db.messageMedia().reapLocalTwinMedia(nest, ourPatp, it.sentMs)
                 }
                 msgs.firstOrNull { it.id == intent.id && it.parentId == null }
                     ?.takeIf { it.author != ourPatp }
@@ -2498,7 +2507,7 @@ class TlonChatRepo(
                     is ChannelDeltaIntent.PostDeleted -> intent.id
                     else -> return
                 }
-                db.messages().softDelete(nest, id)
+                db.messages().softDeleteWithMedia(db.messageMedia(), nest, id)
                 db.reactions().clearForPost(nest, id)
                 db.watchwords().clearHitsForPost(nest, id)
             }
@@ -2512,7 +2521,7 @@ class TlonChatRepo(
             }
             is ChannelDeltaIntent.PostEssay -> {
                 val entity = toEntity(nest, intent.id, intent.essay)
-                db.messages().upsert(entity)
+                db.messages().upsertWithMedia(db.messageMedia(), entity)
                 // Edits don't trigger a notification.
             }
             is ChannelDeltaIntent.Reply ->
@@ -2539,9 +2548,10 @@ class TlonChatRepo(
         when (inner) {
             is ReplyIntent.Upsert -> {
                 val entity = toReplyEntity(whom, parentId, replyId, inner.replyEssay)
-                db.messages().upsert(entity)
+                db.messages().upsertWithMedia(db.messageMedia(), entity)
                 if (entity.author == ourPatp) {
                     db.messages().reapLocalTwin(whom, ourPatp, entity.sentMs)
+                    db.messageMedia().reapLocalTwinMedia(whom, ourPatp, entity.sentMs)
                 } else {
                     val parent = db.messages().getOne(whom, parentId)
                     val replyToUs = parent?.author == ourPatp
@@ -2549,7 +2559,7 @@ class TlonChatRepo(
                 }
             }
             is ReplyIntent.Tombstone, is ReplyIntent.Deleted -> {
-                db.messages().softDelete(whom, replyId)
+                db.messages().softDeleteWithMedia(db.messageMedia(), whom, replyId)
                 db.reactions().clearForPost(whom, replyId)
                 db.watchwords().clearHitsForPost(whom, replyId)
             }
@@ -3028,7 +3038,7 @@ class TlonChatRepo(
         // Process tombstones inline — soft-delete so stale rows from
         // earlier scries disappear on re-ingest.
         result.tombstones.forEach { id ->
-            db.messages().softDelete(whom, id)
+            db.messages().softDeleteWithMedia(db.messageMedia(), whom, id)
             db.reactions().clearForPost(whom, id)
             db.watchwords().clearHitsForPost(whom, id)
         }
