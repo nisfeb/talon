@@ -317,11 +317,22 @@ class TlonChatRepo(
         // Re-scry init-posts + activity every reconnect so we catch up on
         // anything that landed while the stream was down. The
         // `_bootstrapping` flag drives a top-of-screen progress bar so
-        // a 30-second silent fetch on first launch doesn't read as
+        // the silent fetch on first launch doesn't read as
         // "the app has hung."
+        //
+        // Two-stage history load: a small 10-per-source scry runs
+        // synchronously (fast first paint, ~1-2s on a busy ship) and
+        // counts as "bootstrapping done" the moment it lands. The
+        // larger 50-per-source scry runs in the background after,
+        // reactively upserting older history into the same tables —
+        // the UI is interactive throughout. Without this, a heavy
+        // ship's full init-posts payload took 30+ seconds and either
+        // timed out the scry or left the user staring at a progress
+        // bar with no idea if anything was happening. See `bootstrap`
+        // for the count semantics.
         if (firstRun) _bootstrapping.value = true
         try {
-            runCatching { bootstrap(ch) }
+            runCatching { bootstrap(ch, count = INITIAL_PAGE_COUNT) }
                 .onFailure { Log.e(TAG, "initPosts scry failed", it) }
             runCatching { bootstrapActivity(ch) }
                 .onSuccess { notificationHealth.markReconcileSuccess() }
@@ -340,6 +351,23 @@ class TlonChatRepo(
             }
         } finally {
             if (firstRun) _bootstrapping.value = false
+        }
+
+        // Stage two: deep history fill-out. Fires on firstRun only —
+        // reconnects already pulled the same window via the small
+        // scry above, and the bigger one would just re-download the
+        // same data. Run on the session scope so a stop()/teardown
+        // cancels it cleanly, and so the SSE collect job below
+        // (the next thing this function does) starts immediately
+        // rather than waiting on a network call we don't need to
+        // complete before showing the UI.
+        if (firstRun) {
+            launch {
+                Log.i(TAG, "deep-history scry starting (count=$DEEP_PAGE_COUNT)")
+                runCatching { bootstrap(ch, count = DEEP_PAGE_COUNT) }
+                    .onSuccess { Log.i(TAG, "deep-history scry complete") }
+                    .onFailure { Log.w(TAG, "deep-history scry failed", it) }
+            }
         }
 
         // Settings sync — scries our desk and also subscribes so any
@@ -433,7 +461,11 @@ class TlonChatRepo(
     fun catchUp() {
         val ch = channel ?: return
         scope.launch {
-            runCatching { bootstrap(ch) }
+            // catchUp pulls just the recent slice — anything older was
+            // already covered by the deep-history scry on the original
+            // bootstrap. Smaller page = lower bandwidth on every wake
+            // / network-change tick.
+            runCatching { bootstrap(ch, count = INITIAL_PAGE_COUNT) }
                 .onFailure { Log.w(TAG, "catchUp bootstrap failed", it) }
             runCatching { bootstrapActivity(ch) }
                 .onSuccess { notificationHealth.markReconcileSuccess() }
@@ -2083,18 +2115,23 @@ class TlonChatRepo(
 
     // ───────── ingest ─────────
 
-    private suspend fun bootstrap(channel: UrbitChannel) {
-        // The init-posts scry is the heaviest single call we make — 50
-        // recent posts × every chat the user is in. On a busy ship
-        // (hundreds of chats, lots of media references inflating the
-        // JSON) the gzip-decompressed body can take well over the
-        // default 30s RPC budget to finish streaming, even on a fast
-        // home connection. Saw this in the wild on a user's
-        // ~ricsul-bilwyt with a deep chat history: the body started
-        // arriving but the stream timed out mid-decompress, taking
-        // bootstrap with it. 180s is generous; the operation only
-        // runs once per session anyway.
-        val body = channel.scry("groups-ui", "/v6/init-posts/50/50", BOOTSTRAP_TIMEOUT_SECS)
+    /**
+     * Pull the user's recent post history off the ship.
+     *
+     * `count` controls how many entries the `groups-ui /init-posts/N/N`
+     * scry returns per source — 10 for the fast first-paint pass, 50
+     * for the deep follow-up fill. The two are upserted into the same
+     * tables; the second pass overwrites/augments the first, so the UI
+     * gracefully gains older history without flickering or losing
+     * scroll position. Caller controls the timeout via
+     * [BOOTSTRAP_TIMEOUT_SECS] — heavy ships need it.
+     */
+    private suspend fun bootstrap(channel: UrbitChannel, count: Int) {
+        val body = channel.scry(
+            "groups-ui",
+            "/v6/init-posts/$count/$count",
+            BOOTSTRAP_TIMEOUT_SECS,
+        )
         val obj = body as? JsonObject
         if (obj == null) {
             // Used to silently `return` here. Real ships have returned
@@ -2113,8 +2150,8 @@ class TlonChatRepo(
         val channelNests = (obj["channels"] as? JsonObject)?.size ?: 0
         Log.i(
             TAG,
-            "init-posts scry: chat-peers=$chatPeers channel-nests=$channelNests " +
-                "top-keys=${obj.keys}",
+            "init-posts scry (count=$count): chat-peers=$chatPeers " +
+                "channel-nests=$channelNests top-keys=${obj.keys}",
         )
 
         val messages = mutableListOf<MessageEntity>()
@@ -3024,6 +3061,14 @@ class TlonChatRepo(
         // ordinary RPCs keep the tighter default so a hung poke
         // doesn't spin for that long.
         private const val BOOTSTRAP_TIMEOUT_SECS = 180L
+        // Two-stage bootstrap (see runSessionOnce). Fast pass runs in
+        // the foreground and unblocks first paint; deep pass fills
+        // older history in the background. 10 + 50 mirrors what Tlon's
+        // own UI does on web — 10 is enough to render every chat's
+        // most-recent state, 50 covers the typical scrollback depth
+        // a user would expect "to be there already" on open.
+        private const val INITIAL_PAGE_COUNT = 10
+        private const val DEEP_PAGE_COUNT = 50
         // Coalesce rapid forceReconnect requests within this window so
         // a doubled lifecycle ON_START doesn't tear down the channel
         // mid-bootstrap. See [forceReconnect].
