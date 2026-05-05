@@ -880,6 +880,80 @@ private fun RelayRegistrationPanel(config: RelayPanelConfig) {
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
 
+    var diagnoseReport by remember {
+        mutableStateOf<io.nisfeb.talon.notify.DistributorReport?>(null)
+    }
+    TextButton(
+        enabled = !working,
+        onClick = {
+            scope.launch {
+                diagnoseReport = config.pushTokens.diagnose()
+            }
+        },
+    ) { Text("Diagnose distributor") }
+
+    diagnoseReport?.let { report ->
+        Column(
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Text(
+                "PackageManager.queryBroadcastReceivers (${report.byPackageManager.size}):",
+                style = MaterialTheme.typography.labelSmall.copy(
+                    fontWeight = FontWeight.SemiBold,
+                ),
+            )
+            if (report.byPackageManager.isEmpty()) {
+                Text(
+                    "  (none — visibility / queries mismatch)",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            } else {
+                report.byPackageManager.forEach {
+                    Text(
+                        "  $it",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            Text(
+                "UnifiedPush.getDistributors (${report.byConnector.size}):",
+                style = MaterialTheme.typography.labelSmall.copy(
+                    fontWeight = FontWeight.SemiBold,
+                ),
+            )
+            if (report.byConnector.isEmpty()) {
+                Text(
+                    "  (none)",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            } else {
+                report.byConnector.forEach {
+                    Text(
+                        "  $it",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            Text(
+                "Cached endpoint: ${report.cachedEndpoint ?: "(none)"}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            if (report.note.isNotBlank()) {
+                Text(
+                    report.note,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
+        }
+    }
+
     val ship = config.activePatp
     val shipUrl = config.activeShipUrl
     if (ship == null || shipUrl == null) {

@@ -85,3 +85,10 @@
 -keep class org.unifiedpush.android.distributor.** { *; }
 -keep class * extends org.unifiedpush.android.connector.MessagingReceiver { *; }
 -dontwarn org.unifiedpush.android.**
+
+# Keep our own notify package intact so the Diagnose surface and
+# associated data classes don't get inlined / renamed away. This
+# was added because rc2 logged nothing from UnifiedPushTokenProvider
+# in release — likely because R8 inlined the whole class into the
+# call site and stripped the Log.i along the way.
+-keep class io.nisfeb.talon.notify.** { *; }

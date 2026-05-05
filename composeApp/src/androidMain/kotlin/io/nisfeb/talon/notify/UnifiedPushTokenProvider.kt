@@ -1,6 +1,8 @@
 package io.nisfeb.talon.notify
 
 import android.content.Context
+import android.content.Intent
+import android.content.pm.PackageManager
 import org.unifiedpush.android.connector.UnifiedPush
 import io.nisfeb.talon.util.Log
 
@@ -59,11 +61,73 @@ class UnifiedPushTokenProvider(private val context: Context) : PushTokenProvider
         TalonMessagingReceiver.clearEndpoint(context)
     }
 
+    override suspend fun diagnose(): DistributorReport {
+        // Two parallel queries against the same manifest action. They
+        // should agree — disagreement is the diagnostic signal.
+        //
+        // Path 1: ask the platform directly. Anything in this list is
+        // a receiver Talon's UID can observe via `<queries>` and
+        // package visibility.
+        val pmList = runCatching {
+            val intent = Intent(ACTION_REGISTER)
+            @Suppress("QueryPermissionsNeeded")
+            context.packageManager.queryBroadcastReceivers(intent, 0)
+        }.getOrDefault(emptyList())
+        val pmDescriptions = pmList.map { ri ->
+            val pkg = ri.activityInfo?.packageName ?: "?"
+            val cls = ri.activityInfo?.name?.substringAfterLast('.') ?: "?"
+            val exported = ri.activityInfo?.exported == true
+            "$pkg/$cls exported=$exported"
+        }
+
+        // Path 2: ask the connector library. It runs the same query
+        // then strips non-exported receivers from foreign packages,
+        // and excludes Talon-as-distributor when an embedded FCM
+        // distributor isn't a fit.
+        val connectorList = runCatching { UnifiedPush.getDistributors(context) }
+            .getOrDefault(emptyList())
+
+        val cached = TalonMessagingReceiver.cachedEndpoint(context)
+        val cachedPreview = cached?.take(48)?.let { "$it…" }
+
+        val note = buildString {
+            if (pmList.isEmpty()) {
+                append("PackageManager returned 0 — Talon's <queries> block ")
+                append("doesn't match any installed receiver, OR no app is ")
+                append("registering as a distributor right now.")
+            } else if (connectorList.isEmpty() && pmList.isNotEmpty()) {
+                append("PackageManager sees ${pmList.size} receiver(s) but ")
+                append("the connector kept 0 — every visible receiver is ")
+                append("exported=false. Install a real distributor like ")
+                append("ntfy / NextPush; the receivers above are private to ")
+                append("their owner apps.")
+            } else if (connectorList.size > 1) {
+                append("Multiple distributors visible. Talon will pick the ")
+                append("first one the connector returns; uninstall the ones ")
+                append("you don't want.")
+            }
+        }
+
+        Log.i(
+            TAG,
+            "diagnose: pm=${pmList.size} connector=${connectorList.size} " +
+                "cached=${cached != null}",
+        )
+        return DistributorReport(
+            byPackageManager = pmDescriptions,
+            byConnector = connectorList,
+            cachedEndpoint = cachedPreview,
+            note = note,
+        )
+    }
+
     companion object {
         private const val TAG = "UnifiedPushTokenProvider"
         /** UnifiedPush "instance" — opaque per-app id. We only need
          *  one (Talon doesn't multiplex multiple notification
          *  streams) so a static value is fine. */
         const val INSTANCE = "talon"
+        private const val ACTION_REGISTER =
+            "org.unifiedpush.android.distributor.REGISTER"
     }
 }
