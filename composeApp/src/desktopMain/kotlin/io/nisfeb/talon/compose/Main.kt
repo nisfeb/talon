@@ -308,42 +308,53 @@ fun main() {
             title = "Talon",
             icon = iconPainter,
         ) {
-            App(
-                http = graph.http,
-                sessionStore = graph.sessionStore,
-                aiSettings = graph.aiSettings,
-                createDb = graph.createDb,
-                drafts = graph.drafts,
-                updateState = graph.updateState,
-                createSettingsSync = graph.createSettingsSync,
-                dailyDigestSettings = graph.dailyDigestSettings,
-                watchwordsSync = graph.watchwordsSync,
-                themePreference = graph.themePreference,
-                notifier = notifier,
-                uiSettings = graph.uiSettings,
-                relaySettings = graph.relaySettings,
-                createSearchEmbedderClient = { db ->
-                    val embedder = io.nisfeb.talon.ai.DesktopEmbedder()
-                    val indexer = io.nisfeb.talon.ai.DesktopEmbeddingIndexer(
-                        db = db,
-                        embedder = embedder,
-                    )
-                    io.nisfeb.talon.ai.DesktopSearchEmbedderClient(
-                        db = db,
-                        embedder = embedder,
-                        indexer = indexer,
-                    )
-                },
-                imageDownloader = io.nisfeb.talon.ui.DesktopImageDownloader(
+            // Override Compose's default desktop UriHandler. The
+            // default delegates to java.awt.Desktop.browse, which
+            // throws on Wayland-only Linux setups (Hyprland, Sway,
+            // Omarchy, …) and can crash the window when the
+            // exception escapes a click callback. DesktopUriHandler
+            // shells out to xdg-open / open / rundll32 directly.
+            androidx.compose.runtime.CompositionLocalProvider(
+                androidx.compose.ui.platform.LocalUriHandler provides
+                    io.nisfeb.talon.ui.DesktopUriHandler,
+            ) {
+                App(
                     http = graph.http,
-                ),
-                // Per-ship factory: App's key(shipKey) block calls
-                // this on each switch so the JSON file for the
-                // active ship is loaded fresh.
-                createMenuSeen = { ship ->
-                    io.nisfeb.talon.ui.DesktopMenuSeenStore(ship = ship)
-                },
-            )
+                    sessionStore = graph.sessionStore,
+                    aiSettings = graph.aiSettings,
+                    createDb = graph.createDb,
+                    drafts = graph.drafts,
+                    updateState = graph.updateState,
+                    createSettingsSync = graph.createSettingsSync,
+                    dailyDigestSettings = graph.dailyDigestSettings,
+                    watchwordsSync = graph.watchwordsSync,
+                    themePreference = graph.themePreference,
+                    notifier = notifier,
+                    uiSettings = graph.uiSettings,
+                    relaySettings = graph.relaySettings,
+                    createSearchEmbedderClient = { db ->
+                        val embedder = io.nisfeb.talon.ai.DesktopEmbedder()
+                        val indexer = io.nisfeb.talon.ai.DesktopEmbeddingIndexer(
+                            db = db,
+                            embedder = embedder,
+                        )
+                        io.nisfeb.talon.ai.DesktopSearchEmbedderClient(
+                            db = db,
+                            embedder = embedder,
+                            indexer = indexer,
+                        )
+                    },
+                    imageDownloader = io.nisfeb.talon.ui.DesktopImageDownloader(
+                        http = graph.http,
+                    ),
+                    // Per-ship factory: App's key(shipKey) block calls
+                    // this on each switch so the JSON file for the
+                    // active ship is loaded fresh.
+                    createMenuSeen = { ship ->
+                        io.nisfeb.talon.ui.DesktopMenuSeenStore(ship = ship)
+                    },
+                )
+            }
         }
     }
 }
