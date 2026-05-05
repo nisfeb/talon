@@ -346,18 +346,28 @@ class TlonChatRepo(
             // after a full app kill+relaunch).
             runCatching { bootstrapContacts(ch) }
                 .onFailure { Log.e(TAG, "contacts scry failed", it) }
-            // Clubs / groups / channel orders still rarely churn enough
-            // to warrant rescrying every reconnect — and they have their
-            // own live subscriptions (`groups /v1/groups`, etc.) that do
-            // deliver create/edit events, so a missed reconnect window
-            // self-heals on the next event.
+            // Channel orders re-scry on every connect: pin / unpin events
+            // ride the same `OrderUpdate` SSE intent that other %channels
+            // events do, but if the SSE is zombie when the poke arrives
+            // the event is lost — `ch.subscribe("channels", "/v4")` on
+            // reconnect doesn't replay it. Without this, a pin set on
+            // another device while mobile is dozing stays invisible
+            // until a full app kill+relaunch. One scry of /v5/channels,
+            // idempotent UPDATEs.
+            runCatching { bootstrapChannelOrders(ch) }
+                .onFailure { Log.e(TAG, "channel orders scry failed", it) }
+            // Clubs / groups still rarely churn enough to warrant
+            // rescrying every reconnect — and they have their own live
+            // subscriptions (`groups /v1/groups`, `chat /v4` for clubs)
+            // that deliver create/edit events. If similar reconnect
+            // windows turn out to silently drop those too, ungate them
+            // here following the same pattern as contacts / settings /
+            // channel orders.
             if (firstRun) {
                 runCatching { bootstrapClubs(ch) }
                     .onFailure { Log.e(TAG, "clubs scry failed", it) }
                 runCatching { bootstrapGroups(ch) }
                     .onFailure { Log.e(TAG, "groups scry failed", it) }
-                runCatching { bootstrapChannelOrders(ch) }
-                    .onFailure { Log.e(TAG, "channel orders scry failed", it) }
             }
         } finally {
             if (firstRun) _bootstrapping.value = false
