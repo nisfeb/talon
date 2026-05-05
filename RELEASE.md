@@ -132,6 +132,20 @@ Run through this every tag. It's not automated — don't skip it.
 - [ ] Watch `adb logcat -s TlonChatRepo` — no `poke nack` lines should
   appear during normal use.
 
+**Desktop split-pane smoke (≥0.9.0):**
+- [ ] Wide window (≥840dp): chat list left, chat detail right.
+- [ ] Drag handle resizes panes; range clamps at ~20% / ~50%.
+- [ ] Quit + relaunch: same chat selected on the right pane.
+- [ ] Resize narrow (<840dp): collapses to stacked nav, current chat preserved.
+- [ ] Tablet landscape (Android): split-pane visible.
+- [ ] Tablet portrait (Android): stacked nav.
+- [ ] Ctrl+K opens search screen.
+- [ ] Ctrl+N opens new-DM dialog.
+- [ ] Esc closes thread → chat → settings, in that order. Final Esc is no-op.
+- [ ] Ctrl+, opens Settings.
+- [ ] Ctrl+1..9 switches ships when multiple are signed in.
+- [ ] Cmd+ variants on macOS work the same.
+
 **Build artifacts:**
 - [ ] `./gradlew :composeApp:assembleRelease` produces signed APKs
   under `composeApp/build/outputs/apk/release/`. With ABI splits
