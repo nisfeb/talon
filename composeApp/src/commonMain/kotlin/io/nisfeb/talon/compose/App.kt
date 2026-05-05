@@ -2,6 +2,7 @@ package io.nisfeb.talon.compose
 
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Surface
 import androidx.compose.ui.Modifier
@@ -28,6 +29,7 @@ import io.nisfeb.talon.data.AppDatabase
 import io.nisfeb.talon.ui.DraftStore
 import io.nisfeb.talon.ui.InMemoryUiSettings
 import io.nisfeb.talon.ui.DesktopShell
+import io.nisfeb.talon.ui.ExpandedThreshold
 import io.nisfeb.talon.ui.PlatformBackHandler
 import io.nisfeb.talon.ui.RailTab
 import io.nisfeb.talon.ui.UiSettings
@@ -585,7 +587,26 @@ fun App(
                 // render at full width without entering ChatPaneScaffold.
                 // Only DmList + chat-detail screens (chat, thread, notebook,
                 // gallery) participate in the list/detail split.
-                when {
+                BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+                    val expanded = maxWidth >= ExpandedThreshold
+                    // Mirror DesktopShell's threshold so the kebab menu makes the right
+                    // navigation move at this breakpoint. Mobile / compact (<840dp):
+                    // flip the existing show* flag (full-screen replace, with back
+                    // arrow). Wide (>=840dp): switch the rail tab instead — the rail is
+                    // visible so no full-screen replace is needed.
+                    val onOpenStatusFeed: () -> Unit = {
+                        if (expanded) uiSettings.setActiveRailTab(RailTab.Statuses)
+                        else showStatusFeed = true
+                    }
+                    val onOpenBookmarks: () -> Unit = {
+                        if (expanded) uiSettings.setActiveRailTab(RailTab.Bookmarks)
+                        else showBookmarks = true
+                    }
+                    val onOpenActivity: () -> Unit = {
+                        if (expanded) uiSettings.setActiveRailTab(RailTab.Activity)
+                        else showActivity = true
+                    }
+                    when {
                     ship == null -> LoginScreen(
                         session = session,
                         onLoggedIn = { loggedInShip = it },
@@ -905,10 +926,10 @@ fun App(
                                             loggedInShip = null
                                         },
                                         onOpenSelfProfile = { showSelfProfile = true },
-                                        onOpenStatusFeed = { showStatusFeed = true },
+                                        onOpenStatusFeed = onOpenStatusFeed,
                                         onOpenInvites = { showInvites = true },
-                                        onOpenBookmarks = { showBookmarks = true },
-                                        onOpenActivity = { showActivity = true },
+                                        onOpenBookmarks = onOpenBookmarks,
+                                        onOpenActivity = onOpenActivity,
                                         onOpenWatchwords = { showWatchwords = true },
                                         onOpenDigest = { showDailyDigest = true },
                                         digestEnabled = dailyDigestSettings
@@ -1015,6 +1036,7 @@ fun App(
                             listFraction = listFraction,
                             onListFractionChange = { uiSettings.setChatPaneListFraction(it) },
                         )
+                    }
                     }
                 }
 
