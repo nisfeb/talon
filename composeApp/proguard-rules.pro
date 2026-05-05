@@ -72,3 +72,16 @@
 # (we shipped a release where OpenRouter keys silently routed to
 # Anthropic for exactly this reason).
 -keep enum io.nisfeb.talon.** { *; }
+
+# UnifiedPush connector library 3.0.5 ships an empty proguard.txt
+# (verified: `unzip -p connector-3.0.5.aar proguard.txt` is 0 bytes).
+# In release, R8 renames its internal classes and `getDistributors()`
+# silently returns empty — Talon's notification settings then claim
+# "no distributor" even when ntfy is installed and configured. Keep
+# the whole connector + distributor protocol packages intact, plus
+# any subclass of MessagingReceiver in our own code, since the
+# distributor IPC handshake names them by reflection.
+-keep class org.unifiedpush.android.connector.** { *; }
+-keep class org.unifiedpush.android.distributor.** { *; }
+-keep class * extends org.unifiedpush.android.connector.MessagingReceiver { *; }
+-dontwarn org.unifiedpush.android.**
