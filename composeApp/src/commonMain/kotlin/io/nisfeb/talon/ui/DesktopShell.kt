@@ -72,7 +72,15 @@ fun DesktopShell(
                 activeTab = activeRailTab,
                 onSelect = onSelectRailTab,
             )
-            Box(modifier = Modifier.fillMaxHeight().fillMaxSize()) {
+            // weight(1f) so the scaffold fills the remaining width AFTER
+            // the rail's 64dp. fillMaxSize() here used to draw the
+            // scaffold over the rail (Row siblings overlap when they
+            // don't share width via weight) — symptom: the ship-switcher
+            // drawer inside DmListScreen poked through where the rail
+            // should be, and the rail icons only appeared once the
+            // drawer was open and its panel happened to clip against
+            // the list-pane bounds.
+            Box(modifier = Modifier.weight(1f).fillMaxHeight()) {
                 ChatPaneScaffold(
                     list = list,
                     detail = detail,
