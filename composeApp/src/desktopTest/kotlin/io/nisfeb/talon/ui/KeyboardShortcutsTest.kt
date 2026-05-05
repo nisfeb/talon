@@ -66,30 +66,10 @@ class KeyboardShortcutsTest {
         assertNull(keyEventToShortcut(ctrlKeyDown(Key.K), isMacHost = true))
     }
 
-    // Hardcode the AWT virtual key codes for the keys we test.
-    // Compose's Key.keyCode packing has changed between versions
-    // (high-bits vs low-bits) so deriving them at runtime is fragile;
-    // a small lookup table is stable across upgrades.
-    private val awtCodeFor: Map<Key, Int> = mapOf(
-        Key.K to java.awt.event.KeyEvent.VK_K,
-        Key.N to java.awt.event.KeyEvent.VK_N,
-        Key.Comma to java.awt.event.KeyEvent.VK_COMMA,
-        Key.Escape to java.awt.event.KeyEvent.VK_ESCAPE,
-        Key.One to java.awt.event.KeyEvent.VK_1,
-        Key.Two to java.awt.event.KeyEvent.VK_2,
-        Key.Three to java.awt.event.KeyEvent.VK_3,
-        Key.Four to java.awt.event.KeyEvent.VK_4,
-        Key.Five to java.awt.event.KeyEvent.VK_5,
-        Key.Six to java.awt.event.KeyEvent.VK_6,
-        Key.Seven to java.awt.event.KeyEvent.VK_7,
-        Key.Eight to java.awt.event.KeyEvent.VK_8,
-        Key.Nine to java.awt.event.KeyEvent.VK_9,
-    )
-
-    // Use the CMP 1.7 desktop KeyEvent factory (key: Long, type: Int,
-    // codePoint: Int, isAltPressed, isCtrlPressed, isMetaPressed,
-    // isShiftPressed, nativeEvent). Requires @OptIn(InternalComposeUiApi)
-    // declared at file scope above.
+    // Use the CMP 1.7 desktop KeyEvent factory. The old approach of wrapping
+    // java.awt.event.KeyEvent no longer works — in CMP 1.7 KeyEvent is backed
+    // by InternalKeyEvent (Skiko), not AWT directly. The factory requires
+    // @OptIn(InternalComposeUiApi) declared at file scope above.
     private fun makeEvent(
         key: Key,
         isCtrl: Boolean = false,
