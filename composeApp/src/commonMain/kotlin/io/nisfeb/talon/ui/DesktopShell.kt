@@ -14,11 +14,18 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Star
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.PlainTooltip
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TooltipBox
+import androidx.compose.material3.TooltipDefaults
+import androidx.compose.material3.rememberTooltipState
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -105,6 +112,7 @@ private fun DesktopRail(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun RailIconButton(
     tab: RailTab,
@@ -113,12 +121,26 @@ private fun RailIconButton(
 ) {
     val tint = if (isSelected) MaterialTheme.colorScheme.primary
         else MaterialTheme.colorScheme.onSurfaceVariant
-    IconButton(onClick = onClick) {
-        Icon(
-            imageVector = railIcon(tab),
-            contentDescription = railLabel(tab),
-            tint = tint,
-        )
+    val label = railLabel(tab)
+    // material3 `TooltipBox` is commonMain-safe; it positions the
+    // popup relative to the anchor (the icon button), which is the
+    // conventional desktop pattern. A cursor-anchored variant would
+    // need `rememberCursorPositionProvider`, which lives in
+    // `ui-desktop` only — phase 5 can revisit with an
+    // expect/actual provider if we want it. The icon's
+    // `contentDescription` continues to feed screen readers.
+    TooltipBox(
+        positionProvider = TooltipDefaults.rememberPlainTooltipPositionProvider(),
+        tooltip = { PlainTooltip { Text(label) } },
+        state = rememberTooltipState(),
+    ) {
+        IconButton(onClick = onClick) {
+            Icon(
+                imageVector = railIcon(tab),
+                contentDescription = label,
+                tint = tint,
+            )
+        }
     }
 }
 
@@ -128,9 +150,9 @@ private fun railIcon(tab: RailTab): ImageVector = when (tab) {
     // strip on Android. (Android phones won't render the rail anyway,
     // but the tablet build does.)
     RailTab.Chats -> Icons.Filled.Home
-    RailTab.Statuses -> Icons.Filled.Notifications
+    RailTab.Statuses -> Icons.Filled.Person
     RailTab.Bookmarks -> Icons.Filled.Star
-    RailTab.Activity -> Icons.Filled.Notifications  // placeholder — pick distinct in 3.2
+    RailTab.Activity -> Icons.Filled.Notifications
 }
 
 private fun railLabel(tab: RailTab): String = when (tab) {
