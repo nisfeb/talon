@@ -162,6 +162,28 @@ Run through this every tag. It's not automated — don't skip it.
 - [ ] Tablet landscape (Android): same behaviour as desktop wide.
 - [ ] Tablet portrait (Android): rail not visible; kebab menu navigation as on phone.
 
+**Right column — threads + group info + media drilldowns (≥0.10.0):**
+- [ ] Wide window, group chat: tap info icon in chat header → group info opens in right column.
+- [ ] Wide window, DM chat: no info icon visible.
+- [ ] Wide window, club chat: info icon visible.
+- [ ] Wide window: tap a thread reply → thread opens in right column; chat detail stays.
+- [ ] Wide window: open group info, then open a thread → group info closes, thread takes its place.
+- [ ] Wide window: open thread, then tap info icon → thread closes, group info takes its place.
+- [ ] Group info pane: only categories with count > 0 render in the stats grid.
+- [ ] Group info pane: tapping a category swaps the right pane to the drilldown list (header changes to "Photos" / "Videos" / etc., X closes back to group info).
+- [ ] Group info pane: mute toggle reads + writes per-chat notify level.
+- [ ] Group info pane: View members (N) opens the existing GroupAdminScreen.
+- [ ] Group info pane: Leave group leaves the chat.
+- [ ] Drilldown — Photos: tap a row → image viewer opens.
+- [ ] Drilldown — Links: tap a row → URL opens in system browser.
+- [ ] Drilldown — Voice: voice-message rows show "🎙 Voice Ns" labels and play via the system handler.
+- [ ] Mobile (<840dp): tap info icon → full-screen GroupInfoScreen.
+- [ ] Mobile: tap a category → full-screen MediaListScreen; back returns to GroupInfoScreen.
+- [ ] Mobile: thread replies still go to full-screen ThreadScreen with back arrow (unchanged from prior versions).
+- [ ] Backfill: install over an existing 0.9.x install with chat history → group info shows correct counts within seconds (live updates).
+- [ ] Cold open of a fresh group with one shared image: count appears on first render.
+- [ ] New message arrives while group info is open: count increments live.
+
 **Build artifacts:**
 - [ ] `./gradlew :composeApp:assembleRelease` produces signed APKs
   under `composeApp/build/outputs/apk/release/`. With ABI splits
