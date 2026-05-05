@@ -180,27 +180,13 @@ class ShipConnection(
         // Ack the SSE event so the channel doesn't backfill on reconnect.
         eventId?.let { ackEvent(channelId, it) }
 
-        // Diagnostic: log every event envelope we receive so it's
-        // possible to tell "subscription is dead" from "subscription
-        // works but the filter rejected" without having to rebuild
-        // the relay each time. The log is truncated; full events go
-        // through the existing parsing path below.
-        log.info("SSE event id=$eventId body=${body.toString().take(300)}")
-
         // Tlon wraps events as {response, json: {...inner...}} on the
-        // "channel" wire shape. We dig into json.activity to find new-
-        // message events. Rare envelopes that don't match are ignored
-        // silently — it's a generic stream and we only care about a
-        // narrow slice.
+        // "channel" wire shape. Most events on the stream aren't
+        // notification-triggers (activity-summary diffs, ack frames,
+        // muted-thread updates) — silent early-return is intentional.
         val response = body["response"]?.jsonPrimitive?.contentOrNull
-        if (response != "diff" && response != "subscribe") {
-            log.info("  skip: response=$response not in (diff, subscribe)")
-            return
-        }
-        val json = body["json"]?.jsonObject ?: run {
-            log.info("  skip: missing json field")
-            return
-        }
+        if (response != "diff" && response != "subscribe") return
+        val json = body["json"]?.jsonObject ?: return
 
         // %activity /v4 envelope shape:
         //   { add: { source: { dm | club | channel: {...} },
@@ -208,50 +194,29 @@ class ShipConnection(
         // The `notified` flag lives inside `event`, not on `add` itself
         // — earlier revisions read `add.notified` and silently dropped
         // every real notification because that field doesn't exist.
-        val add = json["add"]?.jsonObject ?: run {
-            log.info("  skip: json.add missing (keys=${json.keys})")
-            return
-        }
-        val sourceObj = add["source"]?.jsonObject ?: run {
-            log.info("  skip: add.source missing")
-            return
-        }
-        val whom = extractWhom(sourceObj) ?: run {
-            log.info("  skip: source unmatched (keys=${sourceObj.keys})")
-            return
-        }
-        val event = add["event"]?.jsonObject ?: run {
-            log.info("  skip: add.event missing (whom=$whom)")
-            return
-        }
+        val add = json["add"]?.jsonObject ?: return
+        val sourceObj = add["source"]?.jsonObject ?: return
+        val whom = extractWhom(sourceObj) ?: return
+        val event = add["event"]?.jsonObject ?: return
         val notify = (event["notified"] as? JsonPrimitive)?.booleanOrNull == true
-        if (!notify) {
-            log.info("  skip: whom=$whom notified=false")
-            return
-        }
+        if (!notify) return
         // Globally-unique post id. dm-post / chan-post / club-post
         // all wrap the same key.id shape: "<author>/<128-bit-id>".
         // Using this as the dedup cursor instead of the SSE event id
         // means a reconnect-and-replay won't re-push events we
         // already delivered (the SSE event id resets to 1 on every
         // channel open).
-        val postId = extractPostId(event) ?: run {
-            log.info("  skip: no post id in event (keys=${event.keys})")
-            return
-        }
-        log.info("  → push whom=$whom post=$postId")
+        val postId = extractPostId(event) ?: return
 
         val cursor = db.lastEventId(shipRowId, deviceId)
-        if (cursor == postId) {
-            log.info("  skip: cursor matches postId, already pushed")
-            return
-        }
+        if (cursor == postId) return
 
         val pushEndpoint = db.pushEndpointFor(deviceId) ?: run {
             log.warn("device $deviceId has no push endpoint; skipping")
             return
         }
         val numericEventId = eventId?.toLongOrNull() ?: 0L
+        log.info("push whom=$whom post=$postId")
         push.send(endpoint = pushEndpoint, patp = patp, whom = whom, eventId = numericEventId)
         db.setLastEventId(shipRowId, deviceId, postId)
     }
