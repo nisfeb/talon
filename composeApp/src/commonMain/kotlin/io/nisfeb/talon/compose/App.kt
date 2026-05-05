@@ -1,9 +1,13 @@
 package io.nisfeb.talon.compose
 
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Surface
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -203,6 +207,19 @@ fun App(
     var loginNotice by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(loggedInShip) {
         if (loggedInShip != null) loginNotice = null
+    }
+
+    // Keyboard-shortcut request flags. Hoisted outside key() so the
+    // onPreviewKeyEvent handler (on the Surface inside key()) can flip
+    // them, and DmListScreen (also inside key()) can consume them.
+    var focusSearchRequest by remember { mutableStateOf(false) }
+    var showNewDmRequest by remember { mutableStateOf(false) }
+
+    // Used by the onPreviewKeyEvent handler to pick the right modifier
+    // key (Cmd on macOS, Ctrl everywhere else).
+    val isMacHost = remember {
+        val osName = System.getProperty("os.name") ?: ""
+        "mac" in osName.lowercase() || "darwin" in osName.lowercase()
     }
 
     // Seed openChat from the store when we (re)land on a ship — so
@@ -508,7 +525,47 @@ fun App(
           androidx.compose.runtime.CompositionLocalProvider(
               io.nisfeb.talon.ui.LocalImageDownloader provides imageDownloader,
           ) {
-            Surface(modifier = Modifier.fillMaxSize()) {
+            val rootFocusRequester = remember { FocusRequester() }
+            LaunchedEffect(Unit) { rootFocusRequester.requestFocus() }
+            Surface(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .focusRequester(rootFocusRequester)
+                    .focusable()
+                    .onPreviewKeyEvent { event ->
+                        val action = io.nisfeb.talon.ui.keyEventToShortcut(event, isMacHost = isMacHost)
+                            ?: return@onPreviewKeyEvent false
+                        when (action) {
+                            io.nisfeb.talon.ui.ShortcutAction.Back -> {
+                                when {
+                                    openThreadParent != null -> {
+                                        openThreadParent = null
+                                        openThreadReplyAnchor = null
+                                    }
+                                    openChat != null -> openChat = null
+                                    showSettings -> showSettings = false
+                                    else -> return@onPreviewKeyEvent false
+                                }
+                            }
+                            io.nisfeb.talon.ui.ShortcutAction.OpenSettings -> showSettings = true
+                            io.nisfeb.talon.ui.ShortcutAction.NewDm -> showNewDmRequest = true
+                            io.nisfeb.talon.ui.ShortcutAction.FocusSearch -> focusSearchRequest = true
+                            is io.nisfeb.talon.ui.ShortcutAction.SwitchShip -> {
+                                sessionStore.all().getOrNull(action.index)?.ship?.let { targetShip ->
+                                    sessionStore.setActive(targetShip)
+                                    openChat = null
+                                    openThreadParent = null
+                                    openThreadReplyAnchor = null
+                                    viewerImageUrl = null
+                                    showSelfProfile = false
+                                    showSettings = false
+                                    loggedInShip = targetShip
+                                }
+                            }
+                        }
+                        true
+                    },
+            ) {
                 // Effective ship: the session's actual restored state.
                 // Using session.shipName instead of loggedInShip avoids
                 // the one-frame flash of a stale DmListScreen during
@@ -904,6 +961,10 @@ fun App(
                                     },
                                     groupChannelOrder = uiSettings.groupChannelOrder
                                         .collectAsState().value,
+                                    focusSearchRequest = focusSearchRequest,
+                                    onFocusSearchHandled = { focusSearchRequest = false },
+                                    showNewDmRequest = showNewDmRequest,
+                                    onShowNewDmHandled = { showNewDmRequest = false },
                                 )
                             },
                             detail = detailSlot,

@@ -156,6 +156,16 @@ fun DmListScreen(
      *  takes effect without a relaunch. */
     groupChannelOrder: io.nisfeb.talon.ui.GroupChannelOrder =
         io.nisfeb.talon.ui.GroupChannelOrder.Recent,
+    /** When set to true by a keyboard-shortcut handler upstream, open
+     *  the search screen and reset the flag. DmListScreen has no
+     *  inline search field — Ctrl+K navigates to the full SearchScreen
+     *  via [onOpenSearch]. */
+    focusSearchRequest: Boolean = false,
+    onFocusSearchHandled: () -> Unit = {},
+    /** When set to true by a keyboard-shortcut handler upstream, open
+     *  the New-DM dialog and reset the flag. */
+    showNewDmRequest: Boolean = false,
+    onShowNewDmHandled: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val scope = rememberCoroutineScope()
@@ -285,6 +295,22 @@ fun DmListScreen(
     // on the row picks up the drag) and the long-press action sheet is
     // suppressed. When off, long-press opens the action sheet as normal.
     var editMode by remember { mutableStateOf(false) }
+
+    // Keyboard-shortcut request handlers. focusSearchRequest navigates to
+    // the full SearchScreen (no inline search field exists here). showNewDmRequest
+    // opens the New-DM dialog via the existing onNewMessage callback.
+    LaunchedEffect(focusSearchRequest) {
+        if (focusSearchRequest) {
+            onOpenSearch()
+            onFocusSearchHandled()
+        }
+    }
+    LaunchedEffect(showNewDmRequest) {
+        if (showNewDmRequest) {
+            onNewMessage()
+            onShowNewDmHandled()
+        }
+    }
 
     val membersByWhom = remember(members) {
         members.groupBy(FolderMemberEntity::whom) { it.folderId }
