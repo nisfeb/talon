@@ -2084,7 +2084,17 @@ class TlonChatRepo(
     // ───────── ingest ─────────
 
     private suspend fun bootstrap(channel: UrbitChannel) {
-        val body = channel.scry("groups-ui", "/v6/init-posts/50/50")
+        // The init-posts scry is the heaviest single call we make — 50
+        // recent posts × every chat the user is in. On a busy ship
+        // (hundreds of chats, lots of media references inflating the
+        // JSON) the gzip-decompressed body can take well over the
+        // default 30s RPC budget to finish streaming, even on a fast
+        // home connection. Saw this in the wild on a user's
+        // ~ricsul-bilwyt with a deep chat history: the body started
+        // arriving but the stream timed out mid-decompress, taking
+        // bootstrap with it. 180s is generous; the operation only
+        // runs once per session anyway.
+        val body = channel.scry("groups-ui", "/v6/init-posts/50/50", BOOTSTRAP_TIMEOUT_SECS)
         val obj = body as? JsonObject
         if (obj == null) {
             // Used to silently `return` here. Real ships have returned
@@ -2455,7 +2465,11 @@ class TlonChatRepo(
     // ───────── activity / unreads ─────────
 
     private suspend fun bootstrapActivity(channel: UrbitChannel) {
-        val body = channel.scry("activity", "/v4/activity")
+        // Activity scry covers every conversation's unread state — also
+        // grows with chat count. Same generous timeout as init-posts
+        // (see [BOOTSTRAP_TIMEOUT_SECS]). Far less common to hit but
+        // the budget is cheap.
+        val body = channel.scry("activity", "/v4/activity", BOOTSTRAP_TIMEOUT_SECS)
         val obj = body as? JsonObject
         if (obj == null) {
             Log.w(
@@ -3004,6 +3018,12 @@ class TlonChatRepo(
         // 5 minutes — refresh on screen entry if older, instant paint
         // from cache within the window.
         private const val ADMIN_CACHE_TTL_MS = 5L * 60_000L
+        // Heavy first-run scries (init-posts, full activity bootstrap)
+        // can stream for well over UrbitChannel.RPC_TIMEOUT_SECS (30s)
+        // on busy ships. Use a 3-minute budget for those calls only —
+        // ordinary RPCs keep the tighter default so a hung poke
+        // doesn't spin for that long.
+        private const val BOOTSTRAP_TIMEOUT_SECS = 180L
         // Coalesce rapid forceReconnect requests within this window so
         // a doubled lifecycle ON_START doesn't tear down the channel
         // mid-bootstrap. See [forceReconnect].
