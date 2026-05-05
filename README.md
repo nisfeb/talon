@@ -88,12 +88,118 @@ ship — if you're not comfortable with this, self-host the relay below.
 
 ### Self-host the relay
 
-The relay is a Kotlin/JVM service in [`relay/`](relay/). Single
-`docker build` from the repo root, `RELAY_MASTER_SECRET` env var,
-volume-mount `/data` for the SQLite store. Full deploy notes in
-[`relay/README.md`](relay/README.md). Behind nginx or Caddy with
-TLS — anything reachable over HTTPS works. Point Talon's endpoint
-field at your URL and you're off the operator path entirely.
+The relay is a Kotlin/JVM service in [`relay/`](relay/). Anything that
+can run a Docker container behind HTTPS will do — a $5 VPS is plenty.
+
+You'll need:
+
+- Docker
+- A domain pointing at the host (`A` record, e.g. `relay.example.com`)
+- A reverse proxy fronting it for TLS (nginx + Let's Encrypt below;
+  Caddy works equally well)
+
+#### 1. Build the image
+
+```bash
+git clone https://github.com/nisfeb/talon.git
+cd talon
+docker build -t talon-relay -f relay/Dockerfile .
+```
+
+The build runs from the repo root because the Gradle wrapper +
+version catalog live above `relay/`.
+
+#### 2. Mint a master secret
+
+This is the AES-GCM key derivation source. Treat it like a password
+manager root key — back it up offline. Rotating it invalidates every
+ship `+code` already stored, so every user will have to re-register.
+
+```bash
+sudo mkdir -p /var/lib/talon-relay/data
+openssl rand -hex 32 | sudo tee /var/lib/talon-relay/master-secret > /dev/null
+sudo chmod 600 /var/lib/talon-relay/master-secret
+sudo chown -R 1000:1000 /var/lib/talon-relay/data    # uid 1000 = the in-container relay user
+```
+
+#### 3. Run as a systemd unit
+
+```ini
+# /etc/systemd/system/talon-relay.service
+[Unit]
+Description=Talon notification relay
+After=docker.service network-online.target
+Requires=docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+Restart=always
+RestartSec=5
+ExecStartPre=-/usr/bin/docker rm -f talon-relay
+ExecStart=/bin/bash -c "/usr/bin/docker run --rm --name talon-relay \
+  -p 127.0.0.1:8090:8080 \
+  -v /var/lib/talon-relay/data:/data \
+  -e RELAY_MASTER_SECRET=$(cat /var/lib/talon-relay/master-secret) \
+  -e RELAY_DB=/data/relay.db \
+  talon-relay"
+ExecStop=/usr/bin/docker stop talon-relay
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Bind to `127.0.0.1:8090` (or any unused localhost port) — nginx will
+front it. Then:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now talon-relay
+sudo systemctl status talon-relay
+```
+
+#### 4. nginx + TLS
+
+```nginx
+# /etc/nginx/sites-available/talon-relay
+server {
+    listen 80;
+    server_name relay.example.com;
+
+    location / {
+        proxy_pass http://127.0.0.1:8090;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_http_version 1.1;
+        # SSE-friendly: ship-side connections idle for minutes between events
+        proxy_buffering off;
+        proxy_read_timeout 24h;
+        proxy_send_timeout 24h;
+    }
+}
+```
+
+```bash
+sudo ln -s /etc/nginx/sites-available/talon-relay /etc/nginx/sites-enabled/
+sudo nginx -t && sudo systemctl reload nginx
+sudo certbot --nginx -d relay.example.com --redirect    # mints + auto-renews
+```
+
+#### 5. Verify
+
+```bash
+curl https://relay.example.com/
+# {"relay":"talon","status":"ok"}
+```
+
+In Talon: Settings → Notifications → Push relay → set Endpoint to
+`https://relay.example.com` → Save → Register → paste `+code`.
+
+`sudo journalctl -u talon-relay -f` shows live registration / push
+activity. `sudo journalctl -u talon-relay | grep "push whom"` is the
+"how often is this thing actually pushing" view.
 
 ## Need help / found a bug?
 
