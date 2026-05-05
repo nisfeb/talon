@@ -382,20 +382,29 @@ fun App(
             // per-conversation latest-message flow and fires a balloon
             // when a whom's latest id changes to something authored by
             // someone other than us, AND the chat isn't currently open,
-            // AND the chat isn't muted. The first emission seeds the
-            // baseline so we don't notify for every existing chat at
-            // app startup. Decision logic lives in
+            // AND the chat isn't muted. Decision logic lives in
             // [diffNewMessageNotifications] — kept pure and unit-tested
             // so the seeding behavior can't silently regress.
+            //
+            // Notifications are suppressed while [TlonChatRepo.bootstrapping]
+            // is true — otherwise a fresh ship-keyed DB plus a long
+            // initial scry produces a notification per backfilled
+            // message (a horrible "Talon-DOSes-your-tray" experience
+            // we shipped in 0.8.1). The baseline is still kept current
+            // during bootstrap so the next post-bootstrap emission
+            // diffs against the loaded snapshot, not against empty.
             LaunchedEffect(notifier, loggedInShip) {
                 var lastSeenIds: Map<String, String> = emptyMap()
                 var seeded = false
                 kotlinx.coroutines.flow.combine(
                     db.messages().conversationLatest(),
                     db.notifyPrefs().streamMutedWhoms(),
-                ) { rows, muted -> rows to muted.toHashSet() }
-                    .collect { (rows, muted) ->
-                        if (!seeded) {
+                    repo.bootstrapping,
+                ) { rows, muted, bootstrapping ->
+                    Triple(rows, muted.toHashSet(), bootstrapping)
+                }
+                    .collect { (rows, muted, bootstrapping) ->
+                        if (bootstrapping || !seeded) {
                             lastSeenIds = io.nisfeb.talon.notify
                                 .seedNewMessageBaseline(rows)
                             seeded = true
