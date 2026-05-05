@@ -152,9 +152,8 @@ kotlin {
 // some local Linux dev installs ship a headless JDK with no
 // `libawt_xawt.so`; runComposeUiTest still initialises AWT and would
 // otherwise blow up with `Could not initialize class java.awt.Toolkit`.
-// The same flag is harmless on machines that DO have a graphical
-// AWT — Skiko's software renderer drives the test composition either
-// way.
+// Skiko's software renderer drives the test composition either way —
+// headless satisfies AWT's thread checks without requiring X11.
 tasks.withType<Test>().configureEach {
     jvmArgs("-Djava.awt.headless=true")
 }
