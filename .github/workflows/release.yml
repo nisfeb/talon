@@ -19,8 +19,13 @@ jobs:
       - id: parse
         run: |
           TAG="${GITHUB_REF#refs/tags/v}"
-          VERSION_CODE=$(grep 'versionCode = ' composeApp/build.gradle.kts | head -1 | grep -oE '[0-9]+')
-          VERSION_NAME=$(grep 'versionName = ' composeApp/build.gradle.kts | head -1 | grep -oE '"[^"]+"' | tr -d '"')
+          # Match the val declarations (`talonVersionCode`,
+          # `talonVersionName`) rather than the `defaultConfig`
+          # assignments — the latter use the val identifiers and
+          # have no literal to extract. This regex bug masqueraded
+          # as a tag mismatch on v0.7.24's release run.
+          VERSION_CODE=$(grep 'talonVersionCode = ' composeApp/build.gradle.kts | head -1 | grep -oE '[0-9]+')
+          VERSION_NAME=$(grep 'talonVersionName = ' composeApp/build.gradle.kts | head -1 | grep -oE '"[^"]+"' | tr -d '"')
           if [ "$TAG" != "$VERSION_NAME" ]; then
             echo "::error::Tag (v$TAG) does not match versionName ($VERSION_NAME) in build.gradle.kts"
             exit 1
@@ -267,5 +272,10 @@ jobs:
         with:
           files: release-files/*
           generate_release_notes: true
+          # Tags like v0.8.0-rc1 / v1.0.0-beta2 publish as GitHub
+          # pre-releases. The in-app updater hits releases/latest,
+          # which excludes pre-releases — so existing stable users
+          # don't get auto-prompted to install RC builds.
+          prerelease: ${{ contains(github.ref_name, '-rc') || contains(github.ref_name, '-beta') || contains(github.ref_name, '-alpha') }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

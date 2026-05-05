@@ -93,7 +93,17 @@ kotlin {
             // Talks to whatever distributor app the user has
             // installed (ntfy / NextPush / Conversations / …) over
             // local IPC. Zero Google / Play Services dependency.
-            implementation(libs.unifiedpush.connector)
+            //
+            // Tink is excluded because the connector pulls it in for
+            // RFC 8291 app-level webpush encryption — which we don't
+            // use (our payloads are hint-only, the relay never carries
+            // message content). Tink also drags in `protobuf-java`,
+            // which collides with MediaPipe's `protobuf-javalite` at
+            // packaging time. Dropping it here avoids the duplicate-
+            // class explosion.
+            implementation("org.unifiedpush.android:connector:${libs.versions.unifiedpush.get()}") {
+                exclude(group = "com.google.crypto.tink")
+            }
         }
         val desktopMain by getting
         desktopMain.dependencies {
@@ -138,8 +148,8 @@ kotlin {
 // version inside derivePackageVersion and silently drifted — every
 // release between 0.7.14 and 0.7.23 shipped with stale .dmg/.msi/.deb
 // filenames because nobody updated both literals.
-val talonVersionCode = 47
-val talonVersionName = "0.7.24"
+val talonVersionCode = 48
+val talonVersionName = "0.8.0-rc1"
 
 android {
     namespace = "io.nisfeb.talon"
@@ -297,12 +307,18 @@ compose.desktop {
  * same constant `android.defaultConfig.versionName` reads) so the
  * Android APKs and desktop installers always agree. After the project
  * crosses 1.0 the map is straight identity.
+ *
+ * jpackage also requires strict NUM.NUM.NUM in the version string, so
+ * any pre-release suffix on the patch component (e.g. "0-rc1") gets
+ * stripped before joining. Android `versionName` keeps the full string
+ * — only the desktop installer sees the truncated form.
  */
 fun derivePackageVersion(): String {
     val parts = talonVersionName.split(".")
     if (parts.size < 3) return "1.0.0"
     val major = parts[0].toIntOrNull() ?: return "1.0.0"
-    return if (major == 0) "1.${parts[1]}.${parts[2]}" else talonVersionName
+    val patch = parts[2].substringBefore('-')
+    return if (major == 0) "1.${parts[1]}.$patch" else "${parts[0]}.${parts[1]}.$patch"
 }
 
 // Manual smoke task for the desktop notifier — emits a real native
