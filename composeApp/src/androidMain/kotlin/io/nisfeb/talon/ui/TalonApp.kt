@@ -1105,6 +1105,7 @@ fun TalonApp(
             searchOpen -> SearchScreen(
                 db = app.db,
                 aiSettings = app.aiSettings,
+                uiSettings = app.uiSettings,
                 embedder = app.searchEmbedderClient,
                 // searchOpen stays true under the chat/thread so back
                 // pops back to the highlights/results list instead of

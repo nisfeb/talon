@@ -71,6 +71,18 @@ interface UiSettings {
      * read-side flow only.
      */
     val railVisibility: StateFlow<Map<RailItem, Boolean>>
+
+    /**
+     * Per-device "use smart search by default" preference. Drives the
+     * Search screen's smart-mode chip selection so it persists across
+     * navigation. Independent of [io.nisfeb.talon.ai.AiSettings.Feature.SemanticSearch]
+     * — that flag controls whether the feature is *available* (and
+     * runs the indexer); this one tracks whether the user wants it
+     * *active for their searches*. Only meaningful when the AI flag is
+     * on; the chip is hidden otherwise.
+     */
+    val smartSearchPreferred: StateFlow<Boolean>
+    fun setSmartSearchPreferred(preferred: Boolean)
 }
 
 enum class GroupChannelOrder { Recent, HostOrder }
@@ -114,6 +126,7 @@ class InMemoryUiSettings(
     initialChatPaneListFraction: Float = 0.30f,
     initialActiveRailTab: RailTab = RailTab.Chats,
     initialRailVisibility: Map<RailItem, Boolean> = emptyMap(),
+    initialSmartSearchPreferred: Boolean = false,
 ) : UiSettings {
     private val _hideComposerButtons = MutableStateFlow(initialHide)
     override val hideComposerButtons: StateFlow<Boolean> =
@@ -164,5 +177,12 @@ class InMemoryUiSettings(
         _railVisibility.value = _railVisibility.value.toMutableMap().apply {
             if (visible) remove(item) else this[item] = false
         }
+    }
+
+    private val _smartSearchPreferred = MutableStateFlow(initialSmartSearchPreferred)
+    override val smartSearchPreferred: StateFlow<Boolean> =
+        _smartSearchPreferred.asStateFlow()
+    override fun setSmartSearchPreferred(preferred: Boolean) {
+        _smartSearchPreferred.value = preferred
     }
 }

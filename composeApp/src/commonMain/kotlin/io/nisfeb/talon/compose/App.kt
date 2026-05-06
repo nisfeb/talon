@@ -913,6 +913,7 @@ fun App(
                     showSearch -> SearchScreen(
                         db = db,
                         aiSettings = aiSettings,
+                        uiSettings = uiSettings,
                         embedder = searchEmbedderClient,
                         onBack = { showSearch = false },
                         onOpenConversation = { other ->

@@ -67,6 +67,12 @@ class AndroidUiSettings(
     override val activeRailTab: StateFlow<RailTab> =
         _activeRailTab.asStateFlow()
 
+    private val _smartSearchPreferred = MutableStateFlow(
+        prefs.getBoolean(KEY_SMART_SEARCH_PREFERRED, false),
+    )
+    override val smartSearchPreferred: StateFlow<Boolean> =
+        _smartSearchPreferred.asStateFlow()
+
     // Tracks the active ship's [AppDatabase]. Updated by [rebindDb]
     // from TalonApplication.buildShipScoped on every ship switch so
     // [railVisibility] re-subscribes to the new ship's table.
@@ -144,6 +150,12 @@ class AndroidUiSettings(
         _activeRailTab.value = tab
     }
 
+    override fun setSmartSearchPreferred(preferred: Boolean) {
+        if (_smartSearchPreferred.value == preferred) return
+        prefs.edit().putBoolean(KEY_SMART_SEARCH_PREFERRED, preferred).apply()
+        _smartSearchPreferred.value = preferred
+    }
+
     private fun loadGroupOrder(): GroupChannelOrder {
         val name = prefs.getString(KEY_GROUP_CHANNEL_ORDER, null) ?: return GroupChannelOrder.Recent
         return runCatching { GroupChannelOrder.valueOf(name) }
@@ -175,5 +187,6 @@ class AndroidUiSettings(
         private const val KEY_GROUP_CHANNEL_ORDER = "group_channel_order"
         private const val KEY_CHAT_PANE_LIST_FRACTION = "chat_pane_list_fraction"
         private const val KEY_ACTIVE_RAIL_TAB = "active_rail_tab"
+        private const val KEY_SMART_SEARCH_PREFERRED = "smart_search_preferred"
     }
 }

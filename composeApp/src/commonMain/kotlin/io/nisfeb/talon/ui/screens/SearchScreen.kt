@@ -49,6 +49,7 @@ import java.util.Locale
 fun SearchScreen(
     db: AppDatabase,
     aiSettings: io.nisfeb.talon.ai.AiSettingsRepository,
+    uiSettings: io.nisfeb.talon.ui.UiSettings,
     onOpenConversation: (whom: String) -> Unit,
     onOpenMessage: (whom: String, postId: String, parentId: String?) -> Unit,
     onBack: () -> Unit,
@@ -112,14 +113,18 @@ fun SearchScreen(
         )
     }.collectAsState(initial = ContactMap.EMPTY)
 
-    // The chip drives [AiSettings.Feature.SemanticSearch] directly so
-    // the user's choice persists across navigation (the previous
-    // screen-local var smartMode reset to false on every mount, which
-    // looked like a regression — toggle the chip, leave Search, come
-    // back, chip is off again). Show the chip whenever the platform
-    // can do smart search; selected state is the persistent flag.
-    val smartChipAvailable = embedder != null
-    val smartMode = embedder != null && aiState.semanticSearchEnabled
+    // The chip surfaces a per-search-session preference — "for my
+    // searches, default to smart-mode (semantic) or substring".
+    // Persists in UiSettings so leaving Search and coming back keeps
+    // the user's last choice. Independent of
+    // AiSettings.Feature.SemanticSearch — that flag controls whether
+    // the feature is *available* (Settings screen) and whether the
+    // indexer runs; this UiSettings preference picks which mode the
+    // chip starts in. Toggling the chip OFF gives a literal-text
+    // search without disabling smart search globally.
+    val semanticEnabled = embedder != null && aiState.semanticSearchEnabled
+    val smartPreferred by uiSettings.smartSearchPreferred.collectAsState()
+    val smartMode = semanticEnabled && smartPreferred
     val highlightsEnabled = embedder != null && aiState.importantMessagesEnabled
 
     val indexProgress by (embedder?.progress?.collectAsState()
@@ -168,12 +173,14 @@ fun SearchScreen(
                 modifier = Modifier.fillMaxWidth().padding(start = 4.dp),
             )
         }
-        // Smart-mode toggle + index status. Render whenever the
-        // platform supplies an embedder (Android on-device ML, desktop
-        // DJL). Toggling the chip flips AiSettings.SemanticSearch so
-        // the choice survives navigation, and App.kt's LaunchedEffect
-        // wakes the indexer the moment the flag goes true.
-        if (smartChipAvailable) {
+        // Smart-mode toggle + index status. Visible only when the
+        // feature is enabled in Settings (so the indexer is also
+        // running). Toggling the chip flips the per-device
+        // smart-search preference — independent of the AI feature
+        // flag, so a user with smart search on globally can still pick
+        // substring for any individual search without disabling the
+        // indexer.
+        if (semanticEnabled) {
             Row(
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -181,12 +188,7 @@ fun SearchScreen(
             ) {
                 FilterChip(
                     selected = smartMode,
-                    onClick = {
-                        aiSettings.setFeature(
-                            io.nisfeb.talon.ai.AiSettings.Feature.SemanticSearch,
-                            !smartMode,
-                        )
-                    },
+                    onClick = { uiSettings.setSmartSearchPreferred(!smartPreferred) },
                     label = { Text(if (smartMode) "✨ Smart on" else "✨ Smart") },
                 )
                 if (smartMode) {

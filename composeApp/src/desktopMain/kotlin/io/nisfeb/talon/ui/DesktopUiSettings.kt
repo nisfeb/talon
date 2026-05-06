@@ -46,6 +46,7 @@ class DesktopUiSettings(
         // Fraction of total width given to the chat-list pane on wide windows.
         val chatPaneListFraction: Float = 0.30f,
         val activeRailTab: String = RailTab.Chats.name,
+        val smartSearchPreferred: Boolean = false,
     )
 
     private val initial = loadInitial()
@@ -82,6 +83,10 @@ class DesktopUiSettings(
     )
     override val activeRailTab: StateFlow<RailTab> =
         _activeRailTab.asStateFlow()
+
+    private val _smartSearchPreferred = MutableStateFlow(initial.smartSearchPreferred)
+    override val smartSearchPreferred: StateFlow<Boolean> =
+        _smartSearchPreferred.asStateFlow()
 
     // Read-only projection of the per-ship rail_item_prefs table.
     // Sparse — only rows the user has explicitly hidden. Eager so the
@@ -128,6 +133,12 @@ class DesktopUiSettings(
         persistCurrent()
     }
 
+    override fun setSmartSearchPreferred(preferred: Boolean) {
+        if (_smartSearchPreferred.value == preferred) return
+        _smartSearchPreferred.value = preferred
+        persistCurrent()
+    }
+
     private fun persistCurrent() {
         val accent = _accentSettings.value
         persist(
@@ -139,6 +150,7 @@ class DesktopUiSettings(
                 groupChannelOrder = _groupChannelOrder.value.name,
                 chatPaneListFraction = _chatPaneListFraction.value,
                 activeRailTab = _activeRailTab.value.name,
+                smartSearchPreferred = _smartSearchPreferred.value,
             ),
         )
     }
