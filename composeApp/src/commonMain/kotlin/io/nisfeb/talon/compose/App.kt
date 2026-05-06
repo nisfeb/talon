@@ -1151,6 +1151,19 @@ fun App(
                                 visible && gateOk
                             }
                         }
+                        val kebabItems: Set<RailItem> = remember(expanded, enabledItems) {
+                            if (expanded) {
+                                // Wide: kebab is the overflow tray. Show only items NOT on
+                                // the rail. Chats is always on the rail (and wouldn't make
+                                // sense in the kebab anyway), so the difference is the
+                                // pane-tab + modal items the user has hidden.
+                                RailItem.entries.filter { it !in enabledItems }.toSet()
+                            } else {
+                                // Compact: rail not visible. Kebab shows everything so
+                                // mobile users always reach every destination.
+                                RailItem.entries.toSet()
+                            }
+                        }
                         val onRailItemClicked: (RailItem) -> Unit = { item ->
                             item.toRailTab()?.let { tab ->
                                 uiSettings.setActiveRailTab(tab)
@@ -1200,6 +1213,7 @@ fun App(
                                             loggedInShip = null
                                         },
                                         onOpenSelfProfile = { showSelfProfile = true },
+                                        kebabItems = kebabItems,
                                         onOpenStatusFeed = onOpenStatusFeed,
                                         onOpenInvites = { showInvites = true },
                                         onOpenBookmarks = onOpenBookmarks,
