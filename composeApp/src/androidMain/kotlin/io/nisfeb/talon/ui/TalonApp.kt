@@ -47,6 +47,7 @@ import io.nisfeb.talon.ui.ContactProfileSheet
 import io.nisfeb.talon.ui.screens.ImageViewerScreen
 import io.nisfeb.talon.ui.screens.LoginScreen
 import io.nisfeb.talon.ui.screens.SettingsScreen
+import io.nisfeb.talon.ui.screens.SidebarSettingsScreen
 import io.nisfeb.talon.ui.screens.NewDmScreen
 import io.nisfeb.talon.ui.screens.ProfileEditScreen
 import io.nisfeb.talon.ui.screens.SearchScreen
@@ -174,6 +175,7 @@ fun TalonApp(
     // arrived from a notification tap, so route straight there.
     var digestOpen by remember { mutableStateOf(initialOpenDigest != null) }
     var settingsOpen by remember { mutableStateOf(false) }
+    var sidebarSettingsOpen by remember { mutableStateOf(false) }
     var adminListOpen by remember { mutableStateOf(false) }
     var adminGroupFlag by remember { mutableStateOf<String?>(null) }
     var invitesOpen by remember { mutableStateOf(false) }
@@ -545,6 +547,7 @@ fun TalonApp(
         BackHandler(enabled = watchwordsOpen) { watchwordsOpen = false }
         BackHandler(enabled = digestOpen) { digestOpen = false }
         BackHandler(enabled = settingsOpen) { settingsOpen = false }
+        BackHandler(enabled = sidebarSettingsOpen) { sidebarSettingsOpen = false }
         BackHandler(enabled = adminGroupFlag != null) { adminGroupFlag = null }
         BackHandler(enabled = adminListOpen && adminGroupFlag == null) {
             adminListOpen = false
@@ -870,6 +873,18 @@ fun TalonApp(
                     onBack = { settingsOpen = false },
                     dailyDigestSettings = app.dailyDigestSettings,
                     onTestDigest = { app.dailyDigest.generateAndNotifyAsync("user_test") },
+                    onOpenSidebarSettings = { sidebarSettingsOpen = true },
+                    modifier = mod,
+                )
+            }
+
+            sidebarSettingsOpen -> {
+                SidebarSettingsScreen(
+                    repo = app.repo,
+                    uiSettings = app.uiSettings,
+                    dailyDigestEnabled = app.dailyDigestSettings.state
+                        .collectAsState().value.enabled,
+                    onBack = { sidebarSettingsOpen = false },
                     modifier = mod,
                 )
             }

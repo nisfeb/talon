@@ -1,6 +1,7 @@
 package io.nisfeb.talon.ui.screens
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
@@ -20,6 +21,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
@@ -98,6 +100,10 @@ fun SettingsScreen(
     /** Optional Android-only "Test now" handler that fires the digest
      *  immediately. When null the button isn't rendered. */
     onTestDigest: (() -> Unit)? = null,
+    /** Opens the dedicated Sidebar visibility screen — lets the user
+     *  toggle which rail items show. Defaults to no-op for callers
+     *  that haven't wired the sub-screen yet. */
+    onOpenSidebarSettings: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val aiState by aiSettings.state.collectAsState()
@@ -276,6 +282,34 @@ fun SettingsScreen(
                 )
             }
             Spacer(Modifier.height(8.dp))
+
+            // ── Sidebar visibility ─────────────────────────────────
+            // Drills into SidebarSettingsScreen where the user toggles
+            // which rail items show. Inline here so it sits next to
+            // the other home/rail personalisation rows.
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable(onClick = onOpenSidebarSettings)
+                    .padding(vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Sidebar", style = MaterialTheme.typography.bodyLarge)
+                    Text(
+                        "Choose what shows in the rail.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Icon(
+                    Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Spacer(Modifier.height(4.dp))
 
             if (notificationHealth != null) {
                 NotificationHealthPanel(

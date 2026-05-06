@@ -65,6 +65,7 @@ import io.nisfeb.talon.ui.screens.NotebookPostScreen
 import io.nisfeb.talon.ui.screens.ProfileEditScreen
 import io.nisfeb.talon.ui.screens.SearchScreen
 import io.nisfeb.talon.ui.screens.SettingsScreen
+import io.nisfeb.talon.ui.screens.SidebarSettingsScreen
 import io.nisfeb.talon.ui.screens.StatusFeedScreen
 import io.nisfeb.talon.ui.screens.ThreadScreen
 import io.nisfeb.talon.ui.screens.WatchwordsScreen
@@ -184,6 +185,7 @@ fun App(
     // and repo.start crashes on session.ourPatp ("not logged in").
     var loggedInShip by remember { mutableStateOf(sessionStore.active()?.ship) }
     var showSettings by remember { mutableStateOf(false) }
+    var showSidebarSettings by remember { mutableStateOf(false) }
     var openChat by remember { mutableStateOf<String?>(null) }
     var viewerImageUrl by remember { mutableStateOf<String?>(null) }
     // Multi-image viewer state — set by the photo / gif drilldown
@@ -379,6 +381,9 @@ fun App(
     ) { openGalleryPostId = null }
     PlatformBackHandler(enabled = showSettings) {
         showSettings = false
+    }
+    PlatformBackHandler(enabled = showSidebarSettings) {
+        showSidebarSettings = false
     }
 
     // Ship-scoped graph. Re-keyed on (loggedInShip ?: "__loggedout__")
@@ -663,6 +668,7 @@ fun App(
                                     viewerImageList = null
                                     showSelfProfile = false
                                     showSettings = false
+                                    showSidebarSettings = false
                                     sessionStore.setActive(targetShip)
                                     loggedInShip = targetShip
                                 }
@@ -834,6 +840,20 @@ fun App(
                             // onTestDigest stays null on desktop — Android
                             // wires it to dailyDigest.generateAndNotifyAsync
                             // when the production MainActivity migrates here.
+                            onOpenSidebarSettings = { showSidebarSettings = true },
+                        )
+                    }
+                    showSidebarSettings -> {
+                        val dailyDigestEnabled = dailyDigestSettings
+                            ?.state
+                            ?.collectAsState()
+                            ?.value
+                            ?.enabled == true
+                        SidebarSettingsScreen(
+                            repo = repo,
+                            uiSettings = uiSettings,
+                            dailyDigestEnabled = dailyDigestEnabled,
+                            onBack = { showSidebarSettings = false },
                         )
                     }
                     showSelfProfile -> ProfileEditScreen(
