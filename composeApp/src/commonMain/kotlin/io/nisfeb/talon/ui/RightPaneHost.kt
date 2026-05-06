@@ -42,6 +42,7 @@ fun RightPaneHost(
     db: AppDatabase,
     repo: TlonChatRepo,
     http: okhttp3.OkHttpClient,
+    drafts: DraftStore,
     ourPatp: String,
     onClose: () -> Unit,
     onOpenCategory: (MediaCategory) -> Unit,
@@ -80,6 +81,8 @@ fun RightPaneHost(
                 is RightPaneContent.Thread -> ThreadList(
                     db = db,
                     repo = repo,
+                    http = http,
+                    drafts = drafts,
                     ourPatp = ourPatp,
                     whom = content.whom,
                     parentId = content.parentId,

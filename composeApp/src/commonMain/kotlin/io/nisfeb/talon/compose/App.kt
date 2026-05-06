@@ -1065,6 +1065,8 @@ fun App(
                         ThreadScreen(
                             db = db,
                             repo = repo,
+                            http = http,
+                            drafts = drafts,
                             ourPatp = ship,
                             whom = openChat!!,
                             parentId = openThreadParent!!,
@@ -1451,6 +1453,7 @@ fun App(
                                         db = db,
                                         repo = repo,
                                         http = http,
+                                        drafts = drafts,
                                         ourPatp = ship,
                                         onClose = { closeRightPaneAction() },
                                         onOpenCategory = { openCategoryAction(it) },

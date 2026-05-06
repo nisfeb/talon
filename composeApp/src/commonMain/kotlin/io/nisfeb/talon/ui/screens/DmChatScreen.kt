@@ -204,13 +204,7 @@ fun DmChatScreen(
     var catchUpError by remember(whom) { mutableStateOf<String?>(null) }
     var aiEmojiWorking by remember { mutableStateOf(false) }
     var topicsSheetOpen by remember(whom) { mutableStateOf(false) }
-    var pendingVoice by remember(whom) { mutableStateOf<PendingVoice?>(null) }
-    DisposableEffect(whom) {
-        onDispose {
-            pendingVoice?.let { java.io.File(it.path).delete() }
-            pendingVoice = null
-        }
-    }
+    val composerState = io.nisfeb.talon.ui.rememberComposerState(whom, drafts)
     val rows by remember(whom) {
         var prevByMsgId: Map<String, DisplayRow> = emptyMap()
         kotlinx.coroutines.flow.combine(
@@ -442,89 +436,6 @@ fun DmChatScreen(
     }
 
     val scope = rememberCoroutineScope()
-    var draft by remember(whom) { mutableStateOf(TextFieldValue(drafts.load(whom))) }
-    // Persist the latest draft.text on every TextField edit through
-    // [updateDraft] (called from each OutlinedTextField.onValueChange
-    // and from the doSend / onPickAndSendImage / etc. clear paths).
-    // The previous LaunchedEffect(draft.text)-based save was load-
-    // bearing for save-on-keystroke but raced with dispose: backspacing
-    // the last char and immediately navigating away unmounted the
-    // screen before the LaunchedEffect re-fired with text="" — the
-    // last persisted value stayed as the not-yet-empty text and the
-    // DM list kept advertising "Draft: …". Calling drafts.save inline
-    // makes the write a synchronous side-effect of the keystroke, no
-    // recomposition window in the middle.
-    val updateDraft: (TextFieldValue) -> Unit = remember(whom) {
-        { next ->
-            draft = next
-            drafts.save(whom, next.text)
-        }
-    }
-    // Belt-and-suspenders flush: if the screen is disposed (back
-    // navigation, ship switch, etc.) without ever firing onValueChange
-    // for the cleared state, persist the current draft text once more
-    // so the DM list and the next mount agree.
-    DisposableEffect(whom) {
-        onDispose {
-            drafts.save(whom, draft.text)
-        }
-    }
-    var sendError by remember(whom) { mutableStateOf<String?>(null) }
-    var uploading by remember { mutableStateOf(false) }
-
-    val pickImage = rememberImagePicker()
-    val pickAnyFile = io.nisfeb.talon.util.rememberAnyFilePicker()
-    val onPickAndSendImage: () -> Unit = {
-        scope.launch {
-            val picked = pickImage() ?: return@launch
-            uploading = true
-            sendError = null
-            runCatching {
-                val dims = decodeImageDimensions(picked.bytes)
-                val hostedUrl = repo.uploadImage(picked.bytes, picked.mimeType, picked.displayName)
-                repo.sendImage(
-                    whom = whom,
-                    src = hostedUrl,
-                    width = dims?.first ?: 0,
-                    height = dims?.second ?: 0,
-                    alt = picked.displayName,
-                )
-                // Image-attach is treated as a send action, even
-                // though the user may have typed unrelated text in
-                // the composer first. Clear the draft so the DM list
-                // doesn't keep advertising "Draft: …" after the
-                // attach succeeded — same expectation as tapping the
-                // text Send button. Mirrored in onPickAndSendFile and
-                // the voice onSend below.
-                draft = TextFieldValue("")
-                drafts.clear(whom)
-            }.onFailure { err ->
-                sendError = "image failed: ${err.message ?: err::class.simpleName}"
-            }
-            uploading = false
-        }
-    }
-    // Non-image file attach. Uploads via the same memex/storage path
-    // used by images and posts the resulting URL as a plain message —
-    // Tlon clients render a bare URL as a link preview, so the
-    // recipient gets a clickable card. Keeps us out of needing a
-    // dedicated file-message JSON shape.
-    val onPickAndSendFile: () -> Unit = {
-        scope.launch {
-            val picked = pickAnyFile() ?: return@launch
-            uploading = true
-            sendError = null
-            runCatching {
-                val hostedUrl = repo.uploadImage(picked.bytes, picked.mimeType, picked.displayName)
-                repo.send(whom, hostedUrl)
-                draft = TextFieldValue("")
-                drafts.clear(whom)
-            }.onFailure { err ->
-                sendError = "file failed: ${err.message ?: err::class.simpleName}"
-            }
-            uploading = false
-        }
-    }
 
     // ── message action sheet state ──
     var actionTarget by remember { mutableStateOf<MessageEntity?>(null) }
@@ -536,7 +447,6 @@ fun DmChatScreen(
     }
     var editing by remember { mutableStateOf<MessageEntity?>(null) }
     var confirmingDelete by remember { mutableStateOf<MessageEntity?>(null) }
-    var pendingQuote by remember(whom) { mutableStateOf<MessageEntity?>(null) }
 
     val canSend = remember(whom) {
         whom.startsWith("~") || whom.startsWith("0v") || whom.startsWith("chat/")
@@ -552,17 +462,35 @@ fun DmChatScreen(
         contactList.forEach { set.add(it.ship) }
         set.toList()
     }
-    val mention = detectMentionQuery(draft.text, draft.selection.start)
-    val suggestions = remember(mention, allShips, contactMap) {
-        mention?.let { (q, _) -> suggestionsFor(q, contactMap, allShips) } ?: emptyList()
-    }
-    val emojiQuery = detectEmojiQuery(draft.text, draft.selection.start)
-    val emojiSuggestions = remember(emojiQuery) {
-        emojiQuery?.let { (q, _) -> EmojiCatalog.search(q, limit = 6) } ?: emptyList()
-    }
-    val slashTrigger = detectSlashTrigger(draft.text, draft.selection.start)
-    val slashSuggestions = remember(slashTrigger) {
-        slashTrigger?.let { filterSlashCommands(it.query) } ?: emptyList()
+
+    // DM dispatch: top-level posts via repo.send / repo.sendImage,
+    // quotes via repo.sendQuote.
+    val dmStrategy = remember(repo, whom) {
+        object : io.nisfeb.talon.ui.ChatSendStrategy {
+            override suspend fun sendText(text: String) { repo.send(whom, text) }
+            override suspend fun sendImage(
+                src: String,
+                width: Int,
+                height: Int,
+                alt: String,
+            ) {
+                repo.sendImage(
+                    whom = whom,
+                    src = src,
+                    width = width,
+                    height = height,
+                    alt = alt,
+                )
+            }
+            override val supportsQuote: Boolean = true
+            override suspend fun sendQuote(
+                body: String,
+                quoteWhom: String,
+                quoteId: String,
+            ) {
+                repo.sendQuote(whom, body, quoteWhom, quoteId)
+            }
+        }
     }
 
     var profileSheetShip by remember { mutableStateOf<String?>(null) }
@@ -616,7 +544,7 @@ fun DmChatScreen(
                         if (mineSame) repo.unreact(m.whom, m.id)
                         else repo.react(m.whom, m.id, emoji)
                     }.onFailure {
-                        sendError = "react failed: ${it.message ?: it::class.simpleName}"
+                        composerState.sendError = "react failed: ${it.message ?: it::class.simpleName}"
                     }
                 }
                 Unit
@@ -670,7 +598,7 @@ fun DmChatScreen(
                         onSelect = { level ->
                             scope.launch {
                                 runCatching { repo.settingsSync?.setNotifyLevel(whom, level) }
-                                    .onFailure { sendError = "notify failed: ${it.message ?: it::class.simpleName}" }
+                                    .onFailure { composerState.sendError = "notify failed: ${it.message ?: it::class.simpleName}" }
                             }
                         },
                         onToggleWatchwordExclude = {
@@ -678,7 +606,7 @@ fun DmChatScreen(
                                 runCatching {
                                     repo.settingsSync?.setWatchwordExclude(whom, !isExcludedFromWatchwords)
                                 }.onFailure {
-                                    sendError = "watchword toggle failed: ${it.message ?: it::class.simpleName}"
+                                    composerState.sendError = "watchword toggle failed: ${it.message ?: it::class.simpleName}"
                                 }
                             }
                         },
@@ -793,309 +721,36 @@ fun DmChatScreen(
                 }
             }
             } // close empty-state Box
-            if (sendError != null) {
-                Text(
-                    sendError!!,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.error,
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
-                )
-            }
-            if (slashSuggestions.isNotEmpty() && slashTrigger != null) {
-                SlashPicker(
-                    suggestions = slashSuggestions,
-                    onPick = { spec ->
-                        val newText = "/${spec.name} "
-                        updateDraft(
-                            TextFieldValue(
-                                text = newText,
-                                selection = TextRange(newText.length),
-                            ),
-                        )
-                    },
-                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                )
-            }
-            if (emojiSuggestions.isNotEmpty() && emojiQuery != null) {
-                EmojiPickerDropdown(
-                    suggestions = emojiSuggestions,
-                    onPick = { entry ->
-                        val (_, colonIdx) = emojiQuery
-                        val caret = draft.selection.start
-                        val before = draft.text.substring(0, colonIdx)
-                        val after = draft.text.substring(caret)
-                        val inserted = "${entry.glyph} "
-                        val newText = before + inserted + after
-                        val newCaret = before.length + inserted.length
-                        updateDraft(
-                            TextFieldValue(
-                                text = newText,
-                                selection = TextRange(newCaret),
-                            ),
-                        )
-                    },
-                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                )
-            }
-            if (suggestions.isNotEmpty() && mention != null) {
-                MentionPicker(
-                    suggestions = suggestions,
-                    onPick = { ship ->
-                        val (_, atIdx) = mention
-                        val caret = draft.selection.start
-                        val before = draft.text.substring(0, atIdx)
-                        val after = draft.text.substring(caret)
-                        val inserted = "$ship "
-                        val newText = before + inserted + after
-                        val newCaret = before.length + inserted.length
-                        updateDraft(
-                            TextFieldValue(
-                                text = newText,
-                                selection = TextRange(newCaret),
-                            ),
-                        )
-                    },
-                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                )
-            }
-            val doSend: () -> Boolean = {
-                val body = draft.text.trim()
-                val quote = pendingQuote
-                // Allow a bare quote with no body so users can react to a
-                // message by quoting it without adding text.
-                val canEmit = (body.isNotEmpty() || quote != null) && canSend
-                if (!canEmit) {
-                    false
-                } else {
-                    // Intercept the UI-dispatched commands (pickers /
-                    // recorder) before runCommand. The autocomplete
-                    // surfaces /img /file /mic; without this branch
-                    // they'd be silently swallowed by runCommand's
-                    // `Handled` fallthrough. Quoted sends bypass —
-                    // a quote is a structured payload, not text the
-                    // command runner is meant to interpret.
-                    val firstWord = body.lowercase().substringBefore(' ')
-                    val handledInUi = when {
-                        quote != null -> false
-                        firstWord == "/img" -> {
-                            onPickAndSendImage()
-                            true
-                        }
-                        firstWord == "/file" -> {
-                            onPickAndSendFile()
-                            true
-                        }
-                        firstWord == "/mic" -> {
-                            if (onSlashMic != null) {
-                                onSlashMic()
-                            } else {
-                                sendError =
-                                    "/mic: tap the mic button instead — slash trigger isn't wired here"
-                            }
-                            true
-                        }
-                        else -> false
-                    }
-                    draft = TextFieldValue("")
-                    drafts.clear(whom)
-                    sendError = null
-                    // Capture the baseline SYNCHRONOUSLY before the
-                    // optimistic upsert can race the LaunchedEffect.
-                    // rc10's fix put the snapshot inside
-                    // LaunchedEffect(forceBottomTick), but on a fast
-                    // local DB the upsert lands before the effect
-                    // runs — so baseline gets stamped post-upsert
-                    // (rows.size already grew), the catch-up
-                    // condition `rowsSize > baseline` never holds,
-                    // and the user's message lands below the fold.
-                    // Setting it here pins the pre-send count.
+            io.nisfeb.talon.ui.ChatComposer(
+                state = composerState,
+                db = db,
+                repo = repo,
+                http = http,
+                drafts = drafts,
+                whom = whom,
+                contactMap = contactMap,
+                allShips = allShips,
+                canSend = canSend,
+                hideComposerButtons = hideComposerButtons,
+                placeholder = "Message",
+                locationProvider = locationProvider,
+                voiceComposer = voiceComposer,
+                voicePlayer = voicePlayer,
+                onSlashMic = onSlashMic,
+                onBeforeLocalEcho = {
+                    // Capture the row count synchronously BEFORE the
+                    // optimistic upsert can land, then bump the
+                    // force-bottom tick. The self-send-scroll
+                    // heuristic uses these to detect "the user just
+                    // sent" and snap to bottom regardless of how far
+                    // up they had scrolled. Setting the baseline here
+                    // (vs. inside a LaunchedEffect) is load-bearing —
+                    // see decideAutoScroll's docs and the rc23 fix.
                     pendingSendBaselineSize = rows.size
                     forceBottomTick += 1
-                    pendingQuote = null
-                    if (!handledInUi) scope.launch {
-                        runCatching {
-                            val cmd = if (quote == null) {
-                                runCommand(
-                                    rawText = body,
-                                    repo = repo,
-                                    http = http,
-                                    locationProvider = locationProvider,
-                                    toast = { msg -> sendError = msg },
-                                )
-                            } else CommandResult.NotACommand
-                            when (cmd) {
-                                is CommandResult.Send -> repo.send(whom, cmd.body)
-                                is CommandResult.Handled -> {}
-                                is CommandResult.Error -> sendError = cmd.message
-                                is CommandResult.NotACommand -> {
-                                    if (quote != null) {
-                                        repo.sendQuote(whom, body, quote.whom, quote.id)
-                                    } else {
-                                        repo.send(whom, body)
-                                    }
-                                }
-                            }
-                        }.onFailure { err ->
-                            Log.e("DmChatScreen", "send failed", err)
-                            sendError = "send failed: ${err.message ?: err::class.simpleName}"
-                        }
-                    }
-                    true
-                }
-            }
-            pendingQuote?.let { q ->
-                QuotePreviewRow(
-                    target = q,
-                    contactMap = contactMap,
-                    onDismiss = { pendingQuote = null },
-                )
-            }
-            // Send-button + composer accent. Reads
-            // `colorScheme.primary` directly — App.kt overrides the
-            // theme primary with the user's chosen accent (per-ship
-            // contact color, custom hex, or brand) so this single
-            // value drives every primary-tinted surface uniformly.
-            val sendAccent = MaterialTheme.colorScheme.primary
-            val pv = pendingVoice
-            if (pv != null) {
-                VoicePreviewRow(
-                    pending = pv,
-                    sending = uploading,
-                    sendAccent = sendAccent,
-                    voicePlayer = voicePlayer,
-                    onCancel = {
-                        java.io.File(pv.path).delete()
-                        pendingVoice = null
-                    },
-                    onSend = {
-                        uploading = true
-                        sendError = null
-                        pendingVoice = null
-                        // Same draft-clear rationale as
-                        // onPickAndSendImage / onPickAndSendFile: the
-                        // user finalized a send, so the composer's
-                        // textual draft (likely orphaned) shouldn't
-                        // keep showing up in the DM list.
-                        draft = TextFieldValue("")
-                        drafts.clear(whom)
-                        scope.launch {
-                            runCatching {
-                                val file = java.io.File(pv.path)
-                                val bytes = file.readBytes()
-                                val hostedUrl = repo.uploadImage(
-                                    bytes = bytes,
-                                    contentType = "audio/mp4",
-                                    fileName = file.name,
-                                )
-                                val seconds = (pv.durationMs / 1000L).coerceAtLeast(1L)
-                                val label = "🎙 Voice ${seconds}s"
-                                repo.send(whom, "[$label]($hostedUrl)")
-                                file.delete()
-                            }.onFailure { err ->
-                                Log.e("DmChatScreen", "voice send failed", err)
-                                sendError = "voice send failed: ${err.message ?: err::class.simpleName}"
-                            }
-                            uploading = false
-                        }
-                    },
-                )
-                return@Column
-            }
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 4.dp, vertical = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(2.dp),
-            ) {
-                if (!hideComposerButtons) {
-                    IconButton(
-                        onClick = onPickAndSendImage,
-                        enabled = canSend && !uploading,
-                        modifier = Modifier.size(36.dp),
-                    ) {
-                        if (uploading) {
-                            CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
-                        } else {
-                            Icon(
-                                Icons.Filled.Image,
-                                contentDescription = "Attach image",
-                                modifier = Modifier.size(22.dp),
-                            )
-                        }
-                    }
-                    IconButton(
-                        onClick = onPickAndSendFile,
-                        enabled = canSend && !uploading,
-                        modifier = Modifier.size(36.dp),
-                    ) {
-                        Icon(
-                            Icons.Filled.AttachFile,
-                            contentDescription = "Attach file",
-                            modifier = Modifier.size(22.dp),
-                        )
-                    }
-                    if (voiceComposer != null) {
-                        voiceComposer(
-                            canSend && !uploading,
-                            { path, durationMs ->
-                                pendingVoice = PendingVoice(path, durationMs)
-                            },
-                        )
-                    }
-                }
-                OutlinedTextField(
-                    value = draft,
-                    onValueChange = updateDraft,
-                    placeholder = { Text("Message") },
-                    enabled = canSend,
-                    textStyle = MaterialTheme.typography.bodyMedium,
-                    visualTransformation = io.nisfeb.talon.ui.EmojiVisualTransformation,
-                    modifier = Modifier
-                        .weight(1f)
-                        .onPreviewKeyEvent { e ->
-                            if (e.type != KeyEventType.KeyDown || e.key != Key.Enter) {
-                                return@onPreviewKeyEvent false
-                            }
-                            if (e.isShiftPressed) {
-                                // OutlinedTextField on CMP Desktop doesn't
-                                // insert a newline on Shift+Enter from a
-                                // hardware keyboard — bake it in here so the
-                                // composer behaves like every other chat
-                                // client. Replaces the current selection
-                                // with "\n" and parks the caret after it.
-                                val cur = draft
-                                val start = cur.selection.start
-                                val end = cur.selection.end
-                                val newText = cur.text.substring(0, start) +
-                                    "\n" +
-                                    cur.text.substring(end)
-                                updateDraft(
-                                    cur.copy(
-                                        text = newText,
-                                        selection = TextRange(start + 1),
-                                    ),
-                                )
-                                return@onPreviewKeyEvent true
-                            }
-                            doSend()
-                            true
-                        },
-                )
-                IconButton(
-                    onClick = { doSend() },
-                    enabled = canSend && draft.text.isNotBlank(),
-                    modifier = Modifier.size(36.dp),
-                ) {
-                    Icon(
-                        Icons.AutoMirrored.Filled.Send,
-                        contentDescription = "Send",
-                        modifier = Modifier.size(22.dp),
-                        tint = if (canSend && draft.text.isNotBlank()) sendAccent
-                        else LocalContentColor.current,
-                    )
-                }
-            }
+                },
+                strategy = dmStrategy,
+            )
         }
 
         reactionDetailsTarget?.let { reactions ->
@@ -1156,7 +811,7 @@ fun DmChatScreen(
                     actionTarget = null
                     scope.launch {
                         runCatching { repo.react(whom, target.id, emoji) }
-                            .onFailure { sendError = "react failed: ${it.message ?: it::class.simpleName}" }
+                            .onFailure { composerState.sendError = "react failed: ${it.message ?: it::class.simpleName}" }
                     }
                 },
                 onReply = {
@@ -1165,7 +820,7 @@ fun DmChatScreen(
                 },
                 onQuote = {
                     actionTarget = null
-                    pendingQuote = target
+                    composerState.pendingQuote = target
                 },
                 canQuote = whom.startsWith("chat/") && target.parentId == null,
                 onCopy = {
@@ -1204,7 +859,7 @@ fun DmChatScreen(
                             if (wasPinned) repo.unpinPost(whom)
                             else repo.pinPost(whom, target.id)
                         }.onFailure {
-                            sendError = "pin failed: ${it.message ?: it::class.simpleName}"
+                            composerState.sendError = "pin failed: ${it.message ?: it::class.simpleName}"
                         }
                     }
                 },
@@ -1222,13 +877,13 @@ fun DmChatScreen(
                             if (code != null) {
                                 runCatching { repo.react(whom, target.id, code) }
                                     .onFailure {
-                                        sendError = "react failed: ${it.message ?: it::class.simpleName}"
+                                        composerState.sendError = "react failed: ${it.message ?: it::class.simpleName}"
                                     }
                             } else {
-                                sendError = "AI didn't return a known reaction"
+                                composerState.sendError = "AI didn't return a known reaction"
                             }
                         }.onFailure {
-                            sendError = "AI react failed: ${it.message ?: it::class.simpleName}"
+                            composerState.sendError = "AI react failed: ${it.message ?: it::class.simpleName}"
                         }
                         aiEmojiWorking = false
                         actionTarget = null
@@ -1246,7 +901,7 @@ fun DmChatScreen(
                 editing = null
                 scope.launch {
                     runCatching { repo.edit(whom, target.id, newText, target.sentMs) }
-                        .onFailure { sendError = "edit failed: ${it.message ?: it::class.simpleName}" }
+                        .onFailure { composerState.sendError = "edit failed: ${it.message ?: it::class.simpleName}" }
                 }
             },
         )
@@ -1291,7 +946,7 @@ fun DmChatScreen(
                     confirmingDelete = null
                     scope.launch {
                         runCatching { repo.delete(whom, toDelete.id, toDelete.parentId) }
-                            .onFailure { sendError = "delete failed: ${it.message ?: it::class.simpleName}" }
+                            .onFailure { composerState.sendError = "delete failed: ${it.message ?: it::class.simpleName}" }
                     }
                 }) { Text("Delete") }
             },
@@ -1806,128 +1461,6 @@ private fun dividerLabel(ms: Long): String {
 //  - windowInsetsPadding(WindowInsets.navigationBars) kept — no-ops on
 //    desktop but harmless.
 
-/** Recorded-but-unsent voice clip, waiting on user review. */
-private data class PendingVoice(val path: String, val durationMs: Long)
-
-// Minimal review row that replaces the composer while a recording
-// is staged. Diverges from production: production uses ExoPlayer
-// for inline playback; commonMain skips that step and only offers
-// Cancel / Send. A future Stage F follow-up can layer in a
-// platform-actual audio playback shim if users want it back.
-@Composable
-private fun QuotePreviewRow(
-    target: MessageEntity,
-    contactMap: ContactMap,
-    onDismiss: () -> Unit,
-) {
-    val author = remember(target.author, contactMap) { contactMap.displayName(target.author) }
-    val preview = remember(target.id, target.contentJson) {
-        StoryCache.textFor(target.id, target.contentJson)
-            .replace('\n', ' ')
-            .take(160)
-    }
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(IntrinsicSize.Min)
-            .background(MaterialTheme.colorScheme.surfaceVariant)
-            .padding(horizontal = 12.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        Box(
-            modifier = Modifier
-                .width(3.dp)
-                .fillMaxHeight()
-                .background(MaterialTheme.colorScheme.primary),
-        )
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                "Quoting $author",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.primary,
-            )
-            Text(
-                preview.ifBlank { "(attachment)" },
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 2,
-            )
-        }
-        IconButton(onClick = onDismiss, modifier = Modifier.size(28.dp)) {
-            Icon(
-                imageVector = Icons.Filled.Close,
-                contentDescription = "Cancel quote",
-                modifier = Modifier.size(18.dp),
-            )
-        }
-    }
-}
-
-@Composable
-private fun VoicePreviewRow(
-    pending: PendingVoice,
-    sending: Boolean,
-    voicePlayer: (@Composable (path: String, sending: Boolean) -> Unit)?,
-    onCancel: () -> Unit,
-    onSend: () -> Unit,
-    sendAccent: androidx.compose.ui.graphics.Color,
-) {
-    val seconds = (pending.durationMs / 1000L).coerceAtLeast(1L)
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 4.dp, vertical = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
-    ) {
-        // Platform-supplied play/pause control. When null (desktop),
-        // the row falls back to a "preview not available" hint.
-        if (voicePlayer != null) {
-            voicePlayer(pending.path, sending)
-        }
-        val label = if (voicePlayer != null) "🎙 ${seconds}s"
-        else "🎙 ${seconds}s recorded — preview not available, tap send when ready"
-        Text(
-            label,
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier
-                .weight(1f)
-                .padding(horizontal = 8.dp),
-        )
-        IconButton(
-            onClick = onCancel,
-            enabled = !sending,
-            modifier = Modifier.size(36.dp),
-        ) {
-            Icon(
-                Icons.Filled.Close,
-                contentDescription = "Discard recording",
-                modifier = Modifier.size(22.dp),
-            )
-        }
-        IconButton(
-            onClick = onSend,
-            enabled = !sending,
-            modifier = Modifier.size(36.dp),
-        ) {
-            if (sending) {
-                CircularProgressIndicator(
-                    strokeWidth = 2.dp,
-                    modifier = Modifier.size(20.dp),
-                )
-            } else {
-                Icon(
-                    Icons.AutoMirrored.Filled.Send,
-                    contentDescription = "Send recording",
-                    modifier = Modifier.size(22.dp),
-                    tint = if (!sending) sendAccent else LocalContentColor.current,
-                )
-            }
-        }
-    }
-}
 
 @Composable
 private fun CatchMeUpBanner(

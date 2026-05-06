@@ -999,19 +999,45 @@ fun TalonApp(
                 modifier = mod,
             )
 
-            openThread != null && openWhom != null -> ThreadScreen(
-                db = app.db,
-                repo = app.repo,
-                ourPatp = loggedInShip ?: "",
-                whom = openWhom!!,
-                parentId = openThread!!,
-                initialScrollReplyId = pendingThreadAnchor,
-                onScrollConsumed = { pendingThreadAnchor = null },
-                onBack = { openThread = null },
-                onOpenConversation = openConversation,
-                onOpenImage = { viewerImageUrl = it },
-                modifier = mod,
-            )
+            openThread != null && openWhom != null -> {
+                val threadLocationProvider = rememberLocationProvider()
+                // Each thread gets its own /mic ↔ recorder bridge.
+                // Re-keyed on (whom, parent) so opening a different
+                // thread starts a fresh trigger.
+                val threadMicTrigger = remember(openWhom, openThread) {
+                    kotlinx.coroutines.flow.MutableSharedFlow<Unit>(
+                        extraBufferCapacity = 1,
+                    )
+                }
+                ThreadScreen(
+                    db = app.db,
+                    repo = app.repo,
+                    http = app.http,
+                    drafts = app.drafts,
+                    ourPatp = loggedInShip ?: "",
+                    whom = openWhom!!,
+                    parentId = openThread!!,
+                    initialScrollReplyId = pendingThreadAnchor,
+                    onScrollConsumed = { pendingThreadAnchor = null },
+                    onBack = { openThread = null },
+                    onOpenConversation = openConversation,
+                    onOpenImage = { viewerImageUrl = it },
+                    voiceComposer = { enabled, onRecorded ->
+                        VoiceRecordButton(
+                            enabled = enabled,
+                            onRecorded = onRecorded,
+                            modifier = Modifier,
+                            externalTrigger = threadMicTrigger,
+                        )
+                    },
+                    onSlashMic = { threadMicTrigger.tryEmit(Unit) },
+                    locationProvider = threadLocationProvider,
+                    voicePlayer = { path, sending ->
+                        VoicePreviewPlayButton(path = path, enabled = !sending)
+                    },
+                    modifier = mod,
+                )
+            }
 
             openWhom != null && openWhom!!.startsWith("diary/") -> when {
                 notebookComposeOpen -> NotebookComposeScreen(

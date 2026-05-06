@@ -55,15 +55,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.input.key.Key
-import androidx.compose.ui.input.key.KeyEventType
-import androidx.compose.ui.input.key.isShiftPressed
-import androidx.compose.ui.input.key.key
-import androidx.compose.ui.input.key.onPreviewKeyEvent
-import androidx.compose.ui.input.key.type
-import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import io.nisfeb.talon.data.AppDatabase
 import io.nisfeb.talon.data.MessageEntity
@@ -72,15 +64,10 @@ import io.nisfeb.talon.ui.CiteResolver
 import io.nisfeb.talon.ui.ContactMap
 import io.nisfeb.talon.ui.EmojiCatalog
 import io.nisfeb.talon.ui.LocalCiteResolver
-import io.nisfeb.talon.ui.EmojiPickerDropdown
-import io.nisfeb.talon.ui.MentionPicker
 import io.nisfeb.talon.ui.ReactionPalette
 import io.nisfeb.talon.ui.StoryRenderer
 import io.nisfeb.talon.ui.combinedClickableWithSecondary
 import io.nisfeb.talon.ui.contactMapFlow
-import io.nisfeb.talon.ui.detectEmojiQuery
-import io.nisfeb.talon.ui.detectMentionQuery
-import io.nisfeb.talon.ui.suggestionsFor
 import io.nisfeb.talon.urbit.StoryCache
 import io.nisfeb.talon.urbit.TlonChatRepo
 import io.nisfeb.talon.util.Log
@@ -105,6 +92,8 @@ import java.util.Locale
 fun ThreadList(
     db: AppDatabase,
     repo: TlonChatRepo,
+    http: okhttp3.OkHttpClient,
+    drafts: io.nisfeb.talon.ui.DraftStore,
     ourPatp: String,
     whom: String,
     parentId: String,
@@ -112,6 +101,17 @@ fun ThreadList(
     onScrollConsumed: () -> Unit = {},
     onOpenConversation: (whom: String) -> Unit,
     onOpenImage: (url: String) -> Unit,
+    /** Android-only platform widget slots forwarded to the composer.
+     *  Desktop passes null; the composer surface degrades gracefully
+     *  (no mic button, no /loc, no inline voice playback). */
+    voiceComposer: (@Composable (
+        enabled: Boolean,
+        onRecorded: (path: String, durationMs: Long) -> Unit,
+    ) -> Unit)? = null,
+    voicePlayer: (@Composable (path: String, sending: Boolean) -> Unit)? = null,
+    locationProvider: io.nisfeb.talon.ui.LocationProvider? = null,
+    onSlashMic: (() -> Unit)? = null,
+    hideComposerButtons: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     val parent by remember(whom, parentId) {
@@ -199,12 +199,12 @@ fun ThreadList(
     }
 
     val scope = rememberCoroutineScope()
-    var draft by remember(parentId) { mutableStateOf(TextFieldValue("")) }
-    var sendError by remember(parentId) { mutableStateOf<String?>(null) }
-    val emojiQuery = detectEmojiQuery(draft.text, draft.selection.start)
-    val emojiSuggestions = remember(emojiQuery) {
-        emojiQuery?.let { (q, _) -> EmojiCatalog.search(q, limit = 6) } ?: emptyList()
-    }
+    // Thread drafts are scoped per (whom, parentId) so reply input
+    // doesn't share state with the main chat composer or with other
+    // threads in the same channel. The composer treats the namespaced
+    // string as its draft key — that's all the screen passes to it.
+    val threadDraftKey = remember(whom, parentId) { "thread:$whom#$parentId" }
+    val composerState = io.nisfeb.talon.ui.rememberComposerState(threadDraftKey, drafts)
 
     val contactList by remember {
         db.contacts().stream()
@@ -216,9 +216,39 @@ fun ThreadList(
         contactList.forEach { set.add(it.ship) }
         set.toList()
     }
-    val mention = detectMentionQuery(draft.text, draft.selection.start)
-    val mentionSuggestions = remember(mention, allShips, contactMap) {
-        mention?.let { (q, _) -> suggestionsFor(q, contactMap, allShips) } ?: emptyList()
+
+    // Reply payloads use the same wire shapes as the main composer
+    // for plain text. Threads have no structured replyImage on the
+    // wire today, so an attached image embeds its hosted URL as
+    // markdown — Tlon clients render bare URLs to images inline, so
+    // the recipient still sees the image. Quote-into-thread is also
+    // not on the wire (`replyQuote` doesn't exist), so the strategy
+    // declines and the composer falls back to plain text.
+    val threadStrategy = remember(repo, whom, parentId) {
+        object : io.nisfeb.talon.ui.ChatSendStrategy {
+            override suspend fun sendText(text: String) {
+                repo.reply(whom, parentId, text)
+            }
+            override suspend fun sendImage(
+                src: String,
+                width: Int,
+                height: Int,
+                alt: String,
+            ) {
+                repo.reply(whom, parentId, "[$alt]($src)")
+            }
+            override val supportsQuote: Boolean = false
+            override suspend fun sendQuote(
+                body: String,
+                quoteWhom: String,
+                quoteId: String,
+            ) {
+                error("thread strategy doesn't support quote")
+            }
+        }
+    }
+    val canSend = remember(whom) {
+        whom.startsWith("~") || whom.startsWith("0v") || whom.startsWith("chat/")
     }
     var pendingDelete by remember(parentId) { mutableStateOf<MessageEntity?>(null) }
     // Long-press on any thread message opens this sheet — same role
@@ -242,7 +272,7 @@ fun ThreadList(
                         if (mineSame) repo.unreact(whom, m.id)
                         else repo.react(whom, m.id, emoji)
                     }.onFailure {
-                        sendError = "react failed: ${it.message ?: it::class.simpleName}"
+                        composerState.sendError = "react failed: ${it.message ?: it::class.simpleName}"
                     }
                 }
                 Unit
@@ -342,114 +372,24 @@ fun ThreadList(
             }
         }
         HorizontalDivider()
-        if (emojiSuggestions.isNotEmpty() && emojiQuery != null) {
-            EmojiPickerDropdown(
-                suggestions = emojiSuggestions,
-                onPick = { entry ->
-                    val (_, colonIdx) = emojiQuery
-                    val caret = draft.selection.start
-                    val before = draft.text.substring(0, colonIdx)
-                    val after = draft.text.substring(caret)
-                    val inserted = "${entry.glyph} "
-                    val newText = before + inserted + after
-                    val newCaret = before.length + inserted.length
-                    draft = TextFieldValue(
-                        text = newText,
-                        selection = TextRange(newCaret),
-                    )
-                },
-                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-            )
-        }
-        if (mentionSuggestions.isNotEmpty() && mention != null) {
-            MentionPicker(
-                suggestions = mentionSuggestions,
-                onPick = { ship ->
-                    val (_, atIdx) = mention
-                    val caret = draft.selection.start
-                    val before = draft.text.substring(0, atIdx)
-                    val after = draft.text.substring(caret)
-                    val inserted = "$ship "
-                    val newText = before + inserted + after
-                    val newCaret = before.length + inserted.length
-                    draft = TextFieldValue(
-                        text = newText,
-                        selection = TextRange(newCaret),
-                    )
-                },
-                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-            )
-        }
-        if (sendError != null) {
-            Text(
-                sendError!!,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.error,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
-            )
-        }
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            // Send-button accent. App.kt drives the theme primary
-            // with the user's chosen accent, so reading
-            // colorScheme.primary here gives the same value the
-            // text field's focus ring already uses by default.
-            val sendAccent = MaterialTheme.colorScheme.primary
-            val doSend: () -> Unit = {
-                val body = draft.text.trim()
-                if (body.isNotEmpty()) {
-                    draft = TextFieldValue("")
-                    sendError = null
-                    scope.launch {
-                        runCatching { repo.reply(whom, parentId, body) }
-                            .onFailure { err ->
-                                sendError = "reply failed: ${err.message ?: err::class.simpleName}"
-                            }
-                    }
-                }
-            }
-            OutlinedTextField(
-                value = draft,
-                onValueChange = { draft = it },
-                placeholder = { Text("Reply") },
-                visualTransformation = io.nisfeb.talon.ui.EmojiVisualTransformation,
-                modifier = Modifier
-                    .weight(1f)
-                    .onPreviewKeyEvent { e ->
-                        if (e.type != KeyEventType.KeyDown || e.key != Key.Enter) {
-                            return@onPreviewKeyEvent false
-                        }
-                        if (e.isShiftPressed) {
-                            val cur = draft
-                            val start = cur.selection.start
-                            val end = cur.selection.end
-                            val newText = cur.text.substring(0, start) +
-                                "\n" +
-                                cur.text.substring(end)
-                            draft = cur.copy(
-                                text = newText,
-                                selection = TextRange(start + 1),
-                            )
-                            return@onPreviewKeyEvent true
-                        }
-                        doSend()
-                        true
-                    },
-            )
-            IconButton(
-                onClick = doSend,
-                enabled = draft.text.isNotBlank(),
-            ) {
-                Icon(
-                    Icons.AutoMirrored.Filled.Send,
-                    contentDescription = "Send",
-                    tint = if (draft.text.isNotBlank()) sendAccent
-                    else LocalContentColor.current,
-                )
-            }
-        }
+        io.nisfeb.talon.ui.ChatComposer(
+            state = composerState,
+            db = db,
+            repo = repo,
+            http = http,
+            drafts = drafts,
+            whom = threadDraftKey,
+            contactMap = contactMap,
+            allShips = allShips,
+            canSend = canSend,
+            hideComposerButtons = hideComposerButtons,
+            placeholder = "Reply",
+            locationProvider = locationProvider,
+            voiceComposer = voiceComposer,
+            voicePlayer = voicePlayer,
+            onSlashMic = onSlashMic,
+            strategy = threadStrategy,
+        )
     }
 
     pendingDelete?.let { target ->
@@ -471,7 +411,7 @@ fun ThreadList(
                         runCatching {
                             repo.delete(whom, t.id, parentId = t.parentId)
                         }.onFailure {
-                            sendError = "delete failed: ${it.message ?: it::class.simpleName}"
+                            composerState.sendError = "delete failed: ${it.message ?: it::class.simpleName}"
                         }
                     }
                 }) {
@@ -510,7 +450,7 @@ fun ThreadList(
                 scope.launch {
                     runCatching { repo.react(whom, target.id, code) }
                         .onFailure {
-                            sendError = "react failed: ${it.message ?: it::class.simpleName}"
+                            composerState.sendError = "react failed: ${it.message ?: it::class.simpleName}"
                         }
                 }
             },
