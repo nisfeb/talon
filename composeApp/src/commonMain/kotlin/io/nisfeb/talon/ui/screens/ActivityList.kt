@@ -61,25 +61,37 @@ fun ActivityList(
         )
     }.collectAsState(initial = ContactMap.EMPTY)
 
-    var items by remember { mutableStateOf<List<TlonChatRepo.ActivityFeedItem>>(emptyList()) }
-    var loading by remember { mutableStateOf(true) }
+    // Bind to the repo's cached StateFlow so re-mounts (rail-tab
+    // switching, navigating in and out of Activity) render instantly
+    // from last-known-good. Null = never loaded; non-null (incl.
+    // empty list) = at least one fetch has completed.
+    val cached by repo.activityFeedFlow.collectAsState()
+    val items = cached ?: emptyList()
+    var refreshing by remember { mutableStateOf(cached == null) }
     var error by remember { mutableStateOf<String?>(null) }
 
+    // Always kick a background refresh on mount. With the cache in
+    // place this isn't blocking — UI shows last-known immediately and
+    // upgrades when the fetch lands. Errors only surface if there's
+    // nothing cached to fall back on.
     LaunchedEffect(Unit) {
+        refreshing = true
         runCatching { repo.fetchActivityFeed() }
-            .onSuccess { items = it }
             .onFailure { error = it.message ?: it::class.simpleName }
-        loading = false
+        refreshing = false
     }
 
     Column(modifier = modifier) {
         when {
-            loading -> Row(
+            // First-ever load (no cache yet) — show the spinner.
+            cached == null && refreshing -> Row(
                 modifier = Modifier.fillMaxWidth().padding(24.dp),
                 horizontalArrangement = Arrangement.Center,
             ) { CircularProgressIndicator() }
 
-            error != null -> Text(
+            // Error AND nothing cached to render. If we have cached
+            // data, swallow the error silently — stale > broken.
+            cached == null && error != null -> Text(
                 "Couldn't load activity: $error",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.error,

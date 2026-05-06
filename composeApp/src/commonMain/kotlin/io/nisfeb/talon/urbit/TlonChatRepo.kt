@@ -1273,11 +1273,29 @@ class TlonChatRepo(
         val parentPostId: String? = null,
     )
 
+    /**
+     * Process-singleton cache of the activity feed. Null = never
+     * loaded; non-null = last successful fetch. UI binds to this
+     * StateFlow so reopening the Activity view shows instantly,
+     * and a background fetchActivityFeed() refresh updates the
+     * cache without flashing a spinner. Cleared automatically on
+     * ship switch (TlonChatRepo is per-ship — a new repo means a
+     * fresh empty StateFlow).
+     */
+    private val _activityFeed = MutableStateFlow<List<ActivityFeedItem>?>(null)
+    val activityFeedFlow: StateFlow<List<ActivityFeedItem>?> = _activityFeed.asStateFlow()
+
     suspend fun fetchActivityFeed(): List<ActivityFeedItem> {
         val ch = channel ?: error("not connected")
         val body = ch.scry("activity", "/v5/feed/init/30") as? JsonObject
-            ?: return emptyList()
-        val all = body["all"] as? JsonArray ?: return emptyList()
+            ?: run {
+                _activityFeed.value = emptyList()
+                return emptyList()
+            }
+        val all = body["all"] as? JsonArray ?: run {
+            _activityFeed.value = emptyList()
+            return emptyList()
+        }
         val items = mutableListOf<ActivityFeedItem>()
         for (bundleEl in all) {
             val bundle = bundleEl as? JsonObject ?: continue
@@ -1338,7 +1356,9 @@ class TlonChatRepo(
                 )
             }
         }
-        return items.sortedByDescending { it.sentMs }
+        val sorted = items.sortedByDescending { it.sentMs }
+        _activityFeed.value = sorted
+        return sorted
     }
 
     /** Try a couple of sources to get a unix-ms timestamp for an event. */
