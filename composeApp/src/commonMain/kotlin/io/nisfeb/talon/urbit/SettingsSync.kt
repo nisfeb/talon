@@ -51,6 +51,11 @@ interface SettingsSync {
 
     suspend fun setNotifyLevel(whom: String, level: String) {}
 
+    // ───────── rail visibility ─────────
+    // Toggles whether a RailItem is visible on the desktop sidebar.
+    // Default no-op for tests / hosts that don't sync.
+    suspend fun setRailItemVisibility(item: io.nisfeb.talon.ui.RailItem, visible: Boolean) {}
+
     // ───────── watchwords mutations ─────────
     // Toggles whether a chat is excluded from watchword scanning. The
     // Android impl routes through Watchwords.excludeChat so backfill /
