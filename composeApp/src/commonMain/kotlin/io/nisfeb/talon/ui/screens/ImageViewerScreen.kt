@@ -1,16 +1,20 @@
 package io.nisfeb.talon.ui.screens
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.rememberTransformableState
 import androidx.compose.foundation.gestures.transformable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
@@ -144,6 +148,35 @@ fun ImageViewerScreen(
                         }
                     },
                 )
+            }
+            // Swipe-to-navigate. Only active when un-zoomed — once
+            // scale > 1f the user's horizontal drag is panning within
+            // the image, so we hand off to the transformable state.
+            // Re-keyed on (urls.size, scale) so that zoom-in then
+            // zoom-out flips swipe back on without restarting the
+            // viewer. Threshold (60.dp converted to px) is the same
+            // ballpark as the system's edge-back gesture, tuned by
+            // feel — short enough that a quick flick goes through,
+            // long enough that an accidental drag while reading
+            // doesn't.
+            .pointerInput(urls.size, scale) {
+                if (scale > 1f) return@pointerInput
+                val thresholdPx = 60.dp.toPx()
+                var totalDrag = 0f
+                detectHorizontalDragGestures(
+                    onDragStart = { totalDrag = 0f },
+                    onDragEnd = {
+                        when {
+                            totalDrag > thresholdPx -> goPrev()
+                            totalDrag < -thresholdPx -> goNext()
+                        }
+                        totalDrag = 0f
+                    },
+                    onDragCancel = { totalDrag = 0f },
+                    onHorizontalDrag = { _, dragAmount ->
+                        totalDrag += dragAmount
+                    },
+                )
             },
     ) {
         AsyncImage(
@@ -196,11 +229,16 @@ fun ImageViewerScreen(
         }
 
         // Top action row: close left, "n of N" centre when multi,
-        // download right.
+        // download right. Inset-pad first so the icons sit below the
+        // status bar / camera notch on Android — without this they
+        // overlapped the system clock at the top of the screen.
+        // Desktop has no system bar so the inset resolves to zero
+        // there and the layout is unchanged.
         Row(
             modifier = Modifier
                 .align(Alignment.TopCenter)
                 .fillMaxWidth()
+                .windowInsetsPadding(WindowInsets.safeDrawing)
                 .padding(8.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
