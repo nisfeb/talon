@@ -12,6 +12,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -82,6 +83,17 @@ fun ActivityList(
     }
 
     Column(modifier = modifier) {
+        // Thin progress bar above the list while a background refresh
+        // is in flight AND we already have cached content to show
+        // underneath. The first-ever load uses the centered spinner
+        // below — this indicator is for "you're seeing slightly stale
+        // data, fresh is on the way." Hides itself the moment the
+        // refresh completes.
+        if (refreshing && cached != null) {
+            LinearProgressIndicator(
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
         when {
             // First-ever load (no cache yet) — show the spinner.
             cached == null && refreshing -> Row(
