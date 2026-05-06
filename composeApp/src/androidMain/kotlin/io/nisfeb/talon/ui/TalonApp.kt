@@ -23,6 +23,7 @@ import io.nisfeb.talon.Notifications
 import io.nisfeb.talon.ShareIntent
 import io.nisfeb.talon.TalonApplication
 import io.nisfeb.talon.TalonSyncService
+import io.nisfeb.talon.ui.RailItem
 import io.nisfeb.talon.ui.BatteryExemptionBanner
 import io.nisfeb.talon.ui.CalendarLauncher
 import io.nisfeb.talon.ui.EntityActionChips
@@ -1165,6 +1166,7 @@ fun TalonApp(
                 batteryBanner = { BatteryExemptionBanner() },
                 groupChannelOrder = app.uiSettings.groupChannelOrder
                     .collectAsState().value,
+                kebabItems = RailItem.entries.toSet(),
                 modifier = mod,
             )
         }
