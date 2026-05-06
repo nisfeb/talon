@@ -184,6 +184,23 @@ Run through this every tag. It's not automated — don't skip it.
 - [ ] Cold open of a fresh group with one shared image: count appears on first render.
 - [ ] New message arrives while group info is open: count increments live.
 
+**Customizable rail items (≥0.11.0):**
+- [ ] Wide window: rail shows all 10 items by default (Chats, Statuses, Bookmarks, Activity, My profile, Watchwords, Today's brief — when digest enabled, Administration, Invites, Settings).
+- [ ] Today's brief icon hides automatically when daily digest is disabled.
+- [ ] Tap rail icon for a list-pane item (Statuses / Bookmarks / Activity) → list pane swaps; chat detail stays.
+- [ ] Tap rail icon for a modal item (Settings / Profile / etc.) → corresponding screen opens full-screen.
+- [ ] Selected pill highlights only the active pane-tab item; modal items never get the pill.
+- [ ] Open Settings → Sidebar → toggles for each item. Chats row is always-on (badge "On"). Today's brief row is greyed out + explainer when digest is disabled.
+- [ ] Toggle an item off in Sidebar settings → its rail icon disappears within a frame.
+- [ ] Toggled-off item appears in the kebab dropdown.
+- [ ] Toggle back on → rail icon reappears, kebab item disappears.
+- [ ] All items toggled off (except Chats which is always-on): rail still renders Chats; kebab on wide collapses to "Sign out" + every other item.
+- [ ] Sign out always present in kebab regardless of any toggle state.
+- [ ] Cross-device sync: toggle off on desktop → mobile's kebab shows the item within seconds (via %settings rebroadcast). Verify with mobile app open during the toggle.
+- [ ] Multi-ship: toggling on Ship A doesn't affect Ship B's rail (per-ship sync — each ship has its own %settings).
+- [ ] Compact (mobile / narrow desktop): kebab shows every item regardless of rail visibility.
+- [ ] Mobile-only path: open Sidebar settings → toggle items → switch to desktop later → rail reflects the mobile-set visibility.
+
 **Build artifacts:**
 - [ ] `./gradlew :composeApp:assembleRelease` produces signed APKs
   under `composeApp/build/outputs/apk/release/`. With ABI splits
