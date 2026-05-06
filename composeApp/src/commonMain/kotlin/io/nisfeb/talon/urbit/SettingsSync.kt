@@ -26,6 +26,17 @@ interface SettingsSync {
      */
     suspend fun pushAiSettings() {}
 
+    /**
+     * Push the current daily-digest schedule to %settings. Default
+     * no-op for hosts that don't sync the digest bucket.
+     */
+    suspend fun pushDailyDigest(state: io.nisfeb.talon.ai.DailyDigestSettings.State) {}
+
+    /** Nuke the ship's daily-digest bucket. Used when the user
+     *  transitions sync off and we need to drop their schedule from
+     *  the ship-side store. Default no-op. */
+    suspend fun clearDailyDigestOnShip() {}
+
     // ───────── home-list reorder hooks ─────────
     // Called from DmListScreen drag callbacks. The Android impl writes
     // through to Room and (for the push variants) sends pokes to

@@ -131,10 +131,34 @@ class SettingsSyncImpl(
             applyBucket(BUCKET_DAILY_DIGEST, deskMap[BUCKET_DAILY_DIGEST] as? JsonObject)
         }
 
+        // Per-bucket recovery: catch buckets that aren't on the ship
+        // even though other buckets are. The 0.11.0-rc8 era ran for
+        // months with Android's aiSettings.onStateChange unwired —
+        // every phone-side AI feature toggle stayed local, so the
+        // ship's ai-settings bucket was empty for affected users
+        // even though their daily-digest / group-orders / etc. were
+        // populated. Without per-bucket recovery a fresh desktop
+        // install would inherit the gap forever. The pushes are
+        // idempotent (put-entry is upsert), and they only fire when
+        // the ship is missing the bucket, so we don't overwrite a
+        // peer device's good state with ours.
+        if ((deskMap?.get(BUCKET_AI_SETTINGS) as? JsonObject).isNullOrEmpty()) {
+            Log.i(TAG, "ship missing ai-settings bucket — seeding from local")
+            runCatching { pushAiSettings() }
+                .onFailure { Log.w(TAG, "ai-settings seed push failed", it) }
+        }
+        if ((deskMap?.get(BUCKET_DAILY_DIGEST) as? JsonObject).isNullOrEmpty()) {
+            Log.i(TAG, "ship missing daily-digest bucket — seeding from local")
+            runCatching { pushDailyDigest(dailyDigestSettings.state.value) }
+                .onFailure { Log.w(TAG, "daily-digest seed push failed", it) }
+        }
+
         // Subscribe for live updates from other devices.
         runCatching { ch.subscribe("settings", "/desk/$DESK") }
             .onFailure { Log.w(TAG, "subscribe failed", it) }
     }
+
+    private fun JsonObject?.isNullOrEmpty(): Boolean = this == null || this.isEmpty()
 
     /** First-time setup: push whatever's in Room to the ship. */
     private suspend fun seedFromLocal() {
@@ -680,14 +704,14 @@ class SettingsSyncImpl(
      * Push the entire DailyDigest state to %settings. Three entries:
      * enabled, hourOfDay, minuteOfDay.
      */
-    suspend fun pushDailyDigest(state: io.nisfeb.talon.ai.DailyDigestSettings.State) {
+    override suspend fun pushDailyDigest(state: io.nisfeb.talon.ai.DailyDigestSettings.State) {
         pokePutEntry(BUCKET_DAILY_DIGEST, "enabled", JsonPrimitive(state.enabled))
         pokePutEntry(BUCKET_DAILY_DIGEST, "hourOfDay", JsonPrimitive(state.hourOfDay))
         pokePutEntry(BUCKET_DAILY_DIGEST, "minuteOfDay", JsonPrimitive(state.minuteOfDay))
     }
 
     /** Nuke the daily-digest bucket on the ship (sync just turned off). */
-    suspend fun clearDailyDigestOnShip() {
+    override suspend fun clearDailyDigestOnShip() {
         val ch = channel ?: return
         runCatching {
             ch.poke("settings", "settings-event", buildJsonObject {

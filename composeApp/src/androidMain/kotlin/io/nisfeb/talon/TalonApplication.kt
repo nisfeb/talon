@@ -231,11 +231,20 @@ class TalonApplication : Application() {
             receiverClass = io.nisfeb.talon.DigestAlarmReceiver::class.java,
         )
 
-        // AI settings sync is wired in commonMain App.kt — it pushes
-        // every mutation (per-feature toggles always; cloud-key
-        // fields gated on syncEnabled inside pushAiSettings) so both
-        // Android and Desktop relay through the same path. No need
-        // to bind onStateChange here.
+        // AI settings push hook. Originally meant to ride on a
+        // commonMain App.kt LaunchedEffect — but Android calls
+        // TalonApp.kt, not App.kt, so the wiring never ran here. Every
+        // AI feature toggle the phone made stayed local, and a fresh
+        // desktop install would scry the ship and find nothing to
+        // pull. Bind it explicitly. settingsSync is `lateinit var` and
+        // the lambda re-resolves it on every fire, so a ship switch
+        // (which rebuilds settingsSync inside buildShipScoped) just
+        // routes pushes to the active ship.
+        aiSettings.onStateChange = { _, _ ->
+            appScope.launch {
+                runCatching { settingsSync.pushAiSettings() }
+            }
+        }
 
         watchwords.onChange = { evt, transitionedOffSync ->
             appScope.launch {

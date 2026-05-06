@@ -522,12 +522,39 @@ fun App(
             // (and therefore settingsSync) switches; the latest bind
             // wins, so older ships' instances stop receiving relays.
             // Re-using onStateChange — single-listener model.
+            //
+            // Note: Android calls TalonApp.kt instead of App.kt, so
+            // this LaunchedEffect never runs there. The Android
+            // aiSettings.onStateChange binding lives in
+            // TalonApplication.onCreate. Don't move it here without
+            // also fixing that path.
             LaunchedEffect(settingsSync, aiSettings) {
                 val sink = settingsSync ?: return@LaunchedEffect
                 val scope = this
                 aiSettings.onStateChange = { _, _ ->
                     scope.launch {
                         runCatching { sink.pushAiSettings() }
+                    }
+                }
+            }
+
+            // Relay daily-digest schedule changes the same way. Was
+            // missing on desktop — TalonApplication wires
+            // dailyDigestSettings.onChange for Android, but desktop
+            // had no equivalent, so a desktop user changing the
+            // schedule would never push to the ship. The user
+            // reported "settings not syncing to new installs" and
+            // this was one of the gaps.
+            LaunchedEffect(settingsSync, dailyDigestSettings) {
+                val sink = settingsSync ?: return@LaunchedEffect
+                val ds = dailyDigestSettings ?: return@LaunchedEffect
+                val scope = this
+                ds.onChange = { _, transitionedOffSync ->
+                    scope.launch {
+                        runCatching {
+                            if (transitionedOffSync) sink.clearDailyDigestOnShip()
+                            else sink.pushDailyDigest(ds.state.value)
+                        }
                     }
                 }
             }
