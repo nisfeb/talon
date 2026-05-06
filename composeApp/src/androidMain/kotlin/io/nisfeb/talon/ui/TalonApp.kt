@@ -1194,12 +1194,18 @@ fun TalonApp(
         } // ModalNavigationDrawer body
 
         // Profile sheet overlay — opened from the status feed, and from
-        // any other screen that sets `profileSheetShip`.
+        // any other screen that sets `profileSheetShip`. Reads the
+        // live contact entity directly: contactMap suppresses status-
+        // only emissions for perf, so the map's snapshot can be stale
+        // for the status / bio fields the sheet displays.
         profileSheetShip?.let { ship ->
+            val freshContact by remember(ship) {
+                app.db.contacts().streamOne(ship)
+            }.collectAsState(initial = null)
             ContactProfileSheet(
                 ship = ship,
                 self = ship == (loggedInShip ?: ""),
-                contact = contactMap.contact(ship),
+                contact = freshContact,
                 onMessage = {
                     profileSheetShip = null
                     statusFeedOpen = false

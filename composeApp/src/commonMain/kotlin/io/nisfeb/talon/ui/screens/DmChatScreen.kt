@@ -1086,10 +1086,18 @@ fun DmChatScreen(
         }
 
         profileSheetShip?.let { ship ->
+            // Pull the live entity rather than reading from contactMap:
+            // the upstream contactMap flow now suppresses status-only
+            // emissions for perf, so contactMap.contact(ship)?.status
+            // can be stale by minutes. The profile sheet is the one
+            // surface that wants fresh status / bio.
+            val freshContact by remember(ship) {
+                db.contacts().streamOne(ship)
+            }.collectAsState(initial = null)
             ContactProfileSheet(
                 ship = ship,
                 self = ship == ourPatp,
-                contact = contactMap.contact(ship),
+                contact = freshContact,
                 onMessage = {
                     profileSheetShip = null
                     currentOnOpenConversation(ship)

@@ -223,12 +223,12 @@ fun DmListScreen(
     // entities (not just counts) so the Mentions tab can render rows
     // for whoms even when the local messages cache hasn't yet seen
     // them — e.g. a reply-mention on a notebook post or a new chat
-    // we haven't opened. Filtering to notifyCount > 0 here keeps the
-    // downstream derivations small.
+    // we haven't opened. SQL-side `notifyCount > 0` filter keeps the
+    // wire shape small and stops re-emitting on unrelated unread-only
+    // updates that don't touch the mention set.
     val mentionUnreads by remember {
-        db.unreads().stream()
+        db.unreads().streamWithMentions()
             .distinctUntilChanged()
-            .map { list -> list.filter { it.notifyCount > 0 } }
             .flowOn(Dispatchers.Default)
     }.collectAsState(initial = emptyList<UnreadEntity>())
     val mentionCounts = remember(mentionUnreads) {

@@ -95,6 +95,20 @@ data class ContactMap(
 
 /**
  * Combine every directory DAO flow into one ContactMap flow.
+ *
+ * Status updates land via %contacts /v1/news roughly every minute on
+ * an active network. They change `status` + `statusUpdatedMs` but
+ * none of the fields ContactMap actually uses (ship, nickname,
+ * avatarUrl, color). The default `distinctUntilChanged()` would still
+ * pass those re-emissions through because the entity equals differs,
+ * which then rebuilds ContactMap and recomposes every consumer
+ * (DmListScreen, every chat row's avatar/label, etc.) for nothing.
+ *
+ * The custom equivalence below treats two contact lists as equal
+ * when their *display* projection matches — status / bio / mod-at
+ * differences pass silently. Consumers that need fresh status (only
+ * ContactProfileSheet today) read directly from
+ * [io.nisfeb.talon.data.ContactDao.streamOne].
  */
 fun contactMapFlow(
     contactsFlow: Flow<List<ContactEntity>>,
@@ -102,7 +116,7 @@ fun contactMapFlow(
     groupsFlow: Flow<List<GroupEntity>>,
     channelGroupsFlow: Flow<List<ChannelGroupEntity>>,
 ): Flow<ContactMap> = combine(
-    contactsFlow.distinctUntilChanged(),
+    contactsFlow.distinctUntilChanged(::sameContactDisplay),
     clubsFlow.distinctUntilChanged(),
     groupsFlow.distinctUntilChanged(),
     channelGroupsFlow.distinctUntilChanged(),
@@ -114,3 +128,20 @@ fun contactMapFlow(
     // via associateBy/groupBy on every input tick was the single
     // biggest non-Main-thread allocation cost during login.
     .conflate()
+
+private fun sameContactDisplay(a: List<ContactEntity>, b: List<ContactEntity>): Boolean {
+    if (a === b) return true
+    if (a.size != b.size) return false
+    for (i in a.indices) {
+        val x = a[i]
+        val y = b[i]
+        if (x.ship != y.ship ||
+            x.nickname != y.nickname ||
+            x.avatarUrl != y.avatarUrl ||
+            x.color != y.color
+        ) {
+            return false
+        }
+    }
+    return true
+}
