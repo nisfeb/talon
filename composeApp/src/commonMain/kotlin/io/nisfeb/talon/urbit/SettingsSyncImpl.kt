@@ -100,7 +100,12 @@ class SettingsSyncImpl(
      * don't survive this. Subscribe afterward so live changes flow in.
      */
     override suspend fun bootstrap() {
-        val ch = channel ?: return
+        val ch = channel
+        if (ch == null) {
+            Log.w(TAG, "bootstrap skipped: channel not attached")
+            return
+        }
+        Log.i(TAG, "bootstrap starting")
         val body = runCatching { ch.scry("settings", "/desk/$DESK") }
             .onFailure { Log.w(TAG, "bootstrap scry failed", it) }
             .getOrNull() as? JsonObject
@@ -108,6 +113,12 @@ class SettingsSyncImpl(
         // Ship returns { "desk": { <bucket>: { <entry>: <value> } } }
         // or the inner desk map directly. Handle both.
         val deskMap = (body?.get("desk") as? JsonObject) ?: body
+
+        val bucketSummary = deskMap?.entries?.joinToString(",") { (k, v) ->
+            val size = (v as? JsonObject)?.size ?: 0
+            "$k=$size"
+        } ?: "<no desk>"
+        Log.i(TAG, "bootstrap scry returned buckets: $bucketSummary")
 
         val hasAnyBucket = deskMap != null && deskMap.keys.any {
             (deskMap[it] as? JsonObject)?.isNotEmpty() == true
@@ -168,6 +179,7 @@ class SettingsSyncImpl(
         // Subscribe for live updates from other devices.
         runCatching { ch.subscribe("settings", "/desk/$DESK") }
             .onFailure { Log.w(TAG, "subscribe failed", it) }
+        Log.i(TAG, "bootstrap done")
     }
 
     private fun JsonObject?.isNullOrEmpty(): Boolean = bucketIsMissingOrEmpty(this)
