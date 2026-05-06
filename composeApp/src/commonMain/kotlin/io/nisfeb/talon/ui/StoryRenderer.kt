@@ -163,13 +163,13 @@ fun StoryRenderer(
 
                     if (!hasSpans && !hasAnnotations) {
                         Text(
-                            part.text.text,
+                            part.text.text.applyEmojiSpans(),
                             style = MaterialTheme.typography.bodyMedium,
                         )
                     } else {
                         val layout = remember { mutableStateOf<TextLayoutResult?>(null) }
                         Text(
-                            text = part.text,
+                            text = part.text.applyEmojiSpans(),
                             style = MaterialTheme.typography.bodyMedium,
                             onTextLayout = { layout.value = it },
                             modifier = if (hasAnnotations) {

@@ -395,6 +395,7 @@ fun ThreadList(
                 value = draft,
                 onValueChange = { draft = it },
                 placeholder = { Text("Reply") },
+                visualTransformation = io.nisfeb.talon.ui.EmojiVisualTransformation,
                 modifier = Modifier.weight(1f),
             )
             IconButton(

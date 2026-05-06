@@ -88,6 +88,7 @@ import io.nisfeb.talon.data.MessageEntity
 import io.nisfeb.talon.data.UnreadEntity
 import io.nisfeb.talon.ui.Avatar
 import io.nisfeb.talon.ui.ContactMap
+import io.nisfeb.talon.ui.applyEmojiSpans
 import io.nisfeb.talon.ui.FolderAssignmentSheet
 import io.nisfeb.talon.ui.RailItem
 import io.nisfeb.talon.ui.UpdateBanner
@@ -1671,7 +1672,7 @@ private fun ConversationRow(
                 )
             } else if (preview.isNotEmpty()) {
                 Text(
-                    preview,
+                    preview.applyEmojiSpans(),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
@@ -2004,7 +2005,7 @@ private fun GroupChannelRow(
                 )
             } else if (!preview.isNullOrEmpty() && timestamp != null) {
                 Text(
-                    "${authorLabel ?: ""} · $timestamp · $preview",
+                    "${authorLabel ?: ""} · $timestamp · $preview".applyEmojiSpans(),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,

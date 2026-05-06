@@ -1026,6 +1026,7 @@ fun DmChatScreen(
                     placeholder = { Text("Message") },
                     enabled = canSend,
                     textStyle = MaterialTheme.typography.bodyMedium,
+                    visualTransformation = io.nisfeb.talon.ui.EmojiVisualTransformation,
                     modifier = Modifier
                         .weight(1f)
                         .onPreviewKeyEvent { e ->
