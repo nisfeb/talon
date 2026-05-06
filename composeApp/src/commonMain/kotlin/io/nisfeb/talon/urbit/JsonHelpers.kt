@@ -3,6 +3,7 @@ package io.nisfeb.talon.urbit
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.longOrNull
 
@@ -36,3 +37,7 @@ internal fun JsonElement?.asLong(): Long? =
 /** Int value if this is a numeric primitive, else null. */
 internal fun JsonElement?.asInt(): Int? =
     (this as? JsonPrimitive)?.intOrNull
+
+/** Boolean value if this is a boolean primitive, else null. */
+internal fun JsonElement?.asBool(): Boolean? =
+    (this as? JsonPrimitive)?.booleanOrNull

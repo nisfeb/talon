@@ -12,6 +12,9 @@ import io.nisfeb.talon.data.FolderEntity
 import io.nisfeb.talon.data.FolderMemberEntity
 import io.nisfeb.talon.data.GroupOrderEntity
 import io.nisfeb.talon.data.NotifyPreferenceEntity
+import io.nisfeb.talon.data.RailItemPrefEntity
+import io.nisfeb.talon.ui.RailItem
+import io.nisfeb.talon.ui.railItemOrNull
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.serialization.json.booleanOrNull
@@ -61,6 +64,7 @@ class SettingsSyncImpl(
         const val BUCKET_FOLDERS = "folders"
         const val BUCKET_FOLDER_MEMBERS = "folder-members"
         const val BUCKET_NOTIFY_PREFS = "notify-prefs"
+        const val BUCKET_RAIL_ITEMS = "rail-items"
         const val BUCKET_BOOKMARKS = "bookmarks"
         const val BUCKET_BOOKMARK_FOLDERS = "bookmark-folders"
         const val BUCKET_BOOKMARK_FOLDER_MEMBERS = "bookmark-folder-members"
@@ -109,6 +113,7 @@ class SettingsSyncImpl(
             applyBucket(BUCKET_FOLDERS, deskMap[BUCKET_FOLDERS] as? JsonObject)
             applyBucket(BUCKET_FOLDER_MEMBERS, deskMap[BUCKET_FOLDER_MEMBERS] as? JsonObject)
             applyBucket(BUCKET_NOTIFY_PREFS, deskMap[BUCKET_NOTIFY_PREFS] as? JsonObject)
+            applyBucket(BUCKET_RAIL_ITEMS, deskMap[BUCKET_RAIL_ITEMS] as? JsonObject)
             applyBucket(BUCKET_BOOKMARKS, deskMap[BUCKET_BOOKMARKS] as? JsonObject)
             applyBucket(BUCKET_BOOKMARK_FOLDERS, deskMap[BUCKET_BOOKMARK_FOLDERS] as? JsonObject)
             applyBucket(BUCKET_BOOKMARK_FOLDER_MEMBERS, deskMap[BUCKET_BOOKMARK_FOLDER_MEMBERS] as? JsonObject)
@@ -589,6 +594,21 @@ class SettingsSyncImpl(
         )
     }
 
+    override suspend fun setRailItemVisibility(item: RailItem, visible: Boolean) {
+        if (visible) {
+            // Default-visible items are absent from the table + bucket;
+            // deleting restores the default.
+            db.railItemPrefs().delete(item.name)
+            pokeDelEntry(BUCKET_RAIL_ITEMS, item.name)
+        } else {
+            db.railItemPrefs().upsert(RailItemPrefEntity(item.name, visible = false))
+            pokePutEntry(
+                BUCKET_RAIL_ITEMS, item.name,
+                buildJsonObject { put("visible", false) },
+            )
+        }
+    }
+
     override suspend fun setWatchwordExclude(whom: String, excluded: Boolean) {
         // Routes through Watchwords.excludeChat (Android-only) so the
         // local DB write + onChange → %settings push fire correctly.
@@ -747,6 +767,18 @@ class SettingsSyncImpl(
                 }
                 db.notifyPrefs().replaceAll(list)
             }
+            BUCKET_RAIL_ITEMS -> {
+                val rows = entries.orEmpty().mapNotNull { (k, v) ->
+                    val item = railItemOrNull(k) ?: return@mapNotNull null
+                    val visible = (unwrap(v) as? JsonObject)?.get("visible").asBool()
+                        ?: return@mapNotNull null
+                    // Skip explicit `true` entries — absence is the default and
+                    // we don't want stale `true` rows to drift the read site.
+                    if (visible) return@mapNotNull null
+                    RailItemPrefEntity(item.name, visible = false)
+                }
+                db.railItemPrefs().replaceAll(rows)
+            }
             BUCKET_BOOKMARKS -> {
                 val list = entries.orEmpty().mapNotNull { (k, v) ->
                     val (whom, postId) = parseBookmarkKey(k) ?: return@mapNotNull null
@@ -874,6 +906,15 @@ class SettingsSyncImpl(
                     .asStr() ?: return
                 db.notifyPrefs().upsert(NotifyPreferenceEntity(entry, level))
             }
+            BUCKET_RAIL_ITEMS -> {
+                val item = railItemOrNull(entry) ?: return
+                val visible = (unwrapped as? JsonObject)?.get("visible").asBool() ?: return
+                if (visible) {
+                    db.railItemPrefs().delete(item.name)
+                } else {
+                    db.railItemPrefs().upsert(RailItemPrefEntity(item.name, visible = false))
+                }
+            }
             BUCKET_BOOKMARKS -> {
                 val (whom, postId) = parseBookmarkKey(entry) ?: return
                 val ts = (unwrapped as? JsonObject)?.get("ts")
@@ -972,6 +1013,7 @@ class SettingsSyncImpl(
                 db.folders().removeMember(folderId, whom)
             }
             BUCKET_NOTIFY_PREFS -> db.notifyPrefs().clear(entry)
+            BUCKET_RAIL_ITEMS -> db.railItemPrefs().delete(entry)
             BUCKET_BOOKMARKS -> {
                 val (whom, postId) = parseBookmarkKey(entry) ?: return
                 db.bookmarks().remove(whom, postId)
@@ -1021,6 +1063,7 @@ class SettingsSyncImpl(
             BUCKET_FOLDERS -> db.folders().replaceAll(emptyList())
             BUCKET_FOLDER_MEMBERS -> db.folders().replaceAllMembers(emptyList())
             BUCKET_NOTIFY_PREFS -> db.notifyPrefs().replaceAll(emptyList())
+            BUCKET_RAIL_ITEMS -> db.railItemPrefs().replaceAll(emptyList())
             BUCKET_BOOKMARKS -> db.bookmarks().replaceAll(emptyList())
             BUCKET_BOOKMARK_FOLDERS -> db.bookmarkFolders().replaceAll(emptyList())
             BUCKET_BOOKMARK_FOLDER_MEMBERS -> db.bookmarkFolders().replaceAllMembers(emptyList())
