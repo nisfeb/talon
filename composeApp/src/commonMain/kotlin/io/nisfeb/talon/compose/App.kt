@@ -31,9 +31,11 @@ import io.nisfeb.talon.ui.DraftStore
 import io.nisfeb.talon.ui.InMemoryUiSettings
 import io.nisfeb.talon.ui.DesktopShell
 import io.nisfeb.talon.ui.ExpandedThreshold
+import io.nisfeb.talon.ui.MenuBadges
 import io.nisfeb.talon.ui.PlatformBackHandler
 import io.nisfeb.talon.ui.RailItem
 import io.nisfeb.talon.ui.RailTab
+import io.nisfeb.talon.ui.invitesSnapshot
 import io.nisfeb.talon.ui.isVisible
 import io.nisfeb.talon.ui.RightPaneContent
 import io.nisfeb.talon.ui.RightPaneState
@@ -1198,6 +1200,43 @@ fun App(
                                 RailItem.entries.toSet()
                             }
                         }
+                        // Per-ship freshness for rail badges. Mirrors the
+                        // computations DmListScreen does for its kebab pip;
+                        // we read the same flows here so the rail can paint
+                        // a dot on Statuses / TodaysBrief / Invites without
+                        // threading every data source down through DmListScreen.
+                        // Two `collectAsState` subscriptions on the same Room
+                        // queries is the trade-off — cheap, and lets each
+                        // call site stay self-contained.
+                        val menuSeenState by menuSeen.state.collectAsState()
+                        val railPendingInvites = repo.invitesFlow.collectAsState().value
+                            ?: emptyList()
+                        val railLatestDigest by remember(db, ship) {
+                            db.dailyDigests().streamLatestForShip(ship ?: "")
+                        }.collectAsState(initial = null)
+                        val railStatusFeed by remember(db) {
+                            db.contacts().streamStatusFeed()
+                        }.collectAsState(initial = emptyList())
+                        val railInvitesSnapshot = remember(railPendingInvites) {
+                            invitesSnapshot(railPendingInvites.map { it.flag })
+                        }
+                        val menuBadges = remember(
+                            railLatestDigest, railStatusFeed, railPendingInvites,
+                            railInvitesSnapshot, menuSeenState, ship,
+                        ) {
+                            MenuBadges(
+                                statusesFresh = railStatusFeed.any { c ->
+                                    (c.statusUpdatedMs ?: 0L) > menuSeenState.lastSeenStatusesMs &&
+                                        !c.status.isNullOrBlank() &&
+                                        c.ship != ship
+                                },
+                                digestFresh = railLatestDigest?.dateLocal?.let {
+                                    it != menuSeenState.lastSeenDigestDate
+                                } == true,
+                                invitesPending = railPendingInvites.isNotEmpty() &&
+                                    railInvitesSnapshot != menuSeenState.lastSeenInvitesSnapshot,
+                            )
+                        }
                         val onRailItemClicked: (RailItem) -> Unit = { item ->
                             item.toRailTab()?.let { tab ->
                                 uiSettings.setActiveRailTab(tab)
@@ -1359,6 +1398,7 @@ fun App(
                             detail = detailSlot,
                             listFraction = listFraction,
                             onListFractionChange = { uiSettings.setChatPaneListFraction(it) },
+                            menuBadges = menuBadges,
                             rightSidebar = rightPaneContent?.let { content ->
                                 {
                                     RightPaneHost(

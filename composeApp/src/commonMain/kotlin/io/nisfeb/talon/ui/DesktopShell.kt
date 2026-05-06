@@ -10,8 +10,11 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.Build
@@ -36,6 +39,7 @@ import androidx.compose.material3.rememberTooltipState
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
@@ -65,6 +69,7 @@ fun DesktopShell(
     listFraction: Float,
     onListFractionChange: (Float) -> Unit,
     rightSidebar: (@Composable () -> Unit)? = null,
+    menuBadges: MenuBadges = MenuBadges(),
     modifier: Modifier = Modifier,
 ) {
     BoxWithConstraints(modifier = modifier.fillMaxSize()) {
@@ -79,6 +84,7 @@ fun DesktopShell(
                 activeTab = activeRailTab,
                 enabledItems = enabledItems,
                 onItemClicked = onItemClicked,
+                menuBadges = menuBadges,
             )
             // weight(1f) so the scaffold fills the remaining width AFTER
             // the rail's 64dp. fillMaxSize() here used to draw the
@@ -120,6 +126,7 @@ private fun DesktopRail(
     activeTab: RailTab,
     enabledItems: List<RailItem>,
     onItemClicked: (RailItem) -> Unit,
+    menuBadges: MenuBadges,
     modifier: Modifier = Modifier,
 ) {
     Surface(
@@ -136,6 +143,7 @@ private fun DesktopRail(
                 RailIconButton(
                     item = item,
                     isSelected = isSelected,
+                    showBadge = menuBadges.forItem(item),
                     onClick = { onItemClicked(item) },
                 )
                 Spacer(Modifier.height(4.dp))
@@ -149,6 +157,7 @@ private fun DesktopRail(
 private fun RailIconButton(
     item: RailItem,
     isSelected: Boolean,
+    showBadge: Boolean,
     onClick: () -> Unit,
 ) {
     val tint = if (isSelected) MaterialTheme.colorScheme.primary
@@ -176,12 +185,30 @@ private fun RailIconButton(
             tooltip = { PlainTooltip { Text(label) } },
             state = rememberTooltipState(),
         ) {
-            IconButton(onClick = onClick) {
-                Icon(
-                    imageVector = railIcon(item),
-                    contentDescription = label,
-                    tint = tint,
-                )
+            Box {
+                IconButton(onClick = onClick) {
+                    Icon(
+                        imageVector = railIcon(item),
+                        contentDescription = label,
+                        tint = tint,
+                    )
+                }
+                if (showBadge) {
+                    // 8dp dot on the icon's top-right corner. The
+                    // IconButton is 48dp; the icon glyph is 24dp
+                    // centered. Offsetting from TopEnd by (-12,12)
+                    // nestles the dot on the icon corner instead of
+                    // the button's outer edge, matching the kebab
+                    // badge's visual weight.
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .offset(x = (-12).dp, y = 12.dp)
+                            .size(8.dp)
+                            .clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.primary),
+                    )
+                }
             }
         }
     }
