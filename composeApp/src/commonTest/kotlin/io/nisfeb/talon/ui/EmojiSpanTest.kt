@@ -173,4 +173,48 @@ class EmojiSpanTest {
         val out = "hello, world! (1+2=3)".applyEmojiSpans()
         assertEquals(0, out.spanStyles.size)
     }
+
+    // The next four pin specific codepoints inside each minor emoji
+    // range. The mutation tester surfaced them as gaps — without a
+    // test that pins a codepoint per range, flipping the range's
+    // `true` to `false` would never fail a test.
+
+    @Test
+    fun `applyEmojiSpans tags codepoints in the misc-technical range`() {
+        // ⏰ U+23F0 (alarm clock) — falls inside 0x2300..0x23FF.
+        val out = "⏰".applyEmojiSpans()
+        assertEquals(1, out.spanStyles.size)
+        assertEquals(0, out.spanStyles[0].start)
+        assertEquals(1, out.spanStyles[0].end)
+        assertEquals(EmojiFontFamily, out.spanStyles[0].item.fontFamily)
+    }
+
+    @Test
+    fun `applyEmojiSpans tags codepoints in the misc-symbols-and-arrows range`() {
+        // ⭐ U+2B50 (star) — falls inside 0x2B00..0x2BFF.
+        val out = "⭐".applyEmojiSpans()
+        assertEquals(1, out.spanStyles.size)
+        assertEquals(EmojiFontFamily, out.spanStyles[0].item.fontFamily)
+    }
+
+    @Test
+    fun `applyEmojiSpans tags regional indicator codepoints (flag halves)`() {
+        // U+1F1FA (regional indicator U) is a supplementary-plane
+        // codepoint, so it serializes as a 2-char surrogate pair.
+        // Inside 0x1F1E6..0x1F1FF.
+        val text = "🇺"  // == String(intArrayOf(0x1F1FA), 0, 1)
+        val out = text.applyEmojiSpans()
+        assertEquals(1, out.spanStyles.size)
+        assertEquals(0, out.spanStyles[0].start)
+        assertEquals(2, out.spanStyles[0].end)
+    }
+
+    @Test
+    fun `applyEmojiSpans tags combining-keycap codepoints`() {
+        // U+20E3 (combining enclosing keycap) — used by keycap-style
+        // emojis like 1️⃣. Inside 0x20E0..0x20FF.
+        val out = "⃣".applyEmojiSpans()
+        assertEquals(1, out.spanStyles.size)
+        assertEquals(EmojiFontFamily, out.spanStyles[0].item.fontFamily)
+    }
 }

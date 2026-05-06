@@ -211,4 +211,70 @@ class FuzzTest {
             assertEquals(flag, target.flag)
         }
     }
+
+    // ─── activity feed parser (rc14) ──────────────────────────
+
+    @Test
+    fun `parseActivityFeedBody never throws on arbitrary JSON`() {
+        Fuzz.run(ITERATIONS, SEED) { rnd, _ ->
+            val input = Fuzz.randomJsonObject(rnd, depth = 4)
+            TlonChatRepo.parseActivityFeedBody(input)
+        }
+    }
+
+    @Test
+    fun `parseActivityFeedBody never throws on null body`() {
+        // Null is the only "off-shape" the public API can hand us
+        // (the `as? JsonObject` cast at the call site filters out
+        // arrays / primitives before we get here). Pin it.
+        TlonChatRepo.parseActivityFeedBody(null)
+    }
+
+    @Test
+    fun `parseActivityFeedBody output is sorted newest-first by sentMs`() {
+        Fuzz.run(ITERATIONS, SEED) { rnd, _ ->
+            val input = Fuzz.randomJsonObject(rnd, depth = 4)
+            val items = TlonChatRepo.parseActivityFeedBody(input)
+            for (i in 1 until items.size) {
+                assertTrue(
+                    "items must be sorted by sentMs DESC; " +
+                        "items[${i - 1}]=${items[i - 1].sentMs}, items[$i]=${items[i].sentMs}",
+                    items[i - 1].sentMs >= items[i].sentMs,
+                )
+            }
+        }
+    }
+
+    @Test
+    fun `parseActivityFeedBody emits non-negative sentMs for every item`() {
+        // Mid-broken inputs sometimes produce nonsense times — the
+        // fallback path returns 0L. Negative would mean a parsing
+        // bug that snuck signed math in.
+        Fuzz.run(ITERATIONS, SEED) { rnd, _ ->
+            val input = Fuzz.randomJsonObject(rnd, depth = 4)
+            val items = TlonChatRepo.parseActivityFeedBody(input)
+            for (item in items) {
+                assertTrue("sentMs must be >= 0; got ${item.sentMs}", item.sentMs >= 0)
+            }
+        }
+    }
+
+    @Test
+    fun `parseActivityEventTimeMs never throws on arbitrary strings`() {
+        Fuzz.run(ITERATIONS, SEED) { rnd, _ ->
+            val time = Fuzz.randomString(rnd, 50)
+            val event = Fuzz.randomJsonObject(rnd, depth = 2)
+            TlonChatRepo.parseActivityEventTimeMs(time, event)
+        }
+    }
+
+    @Test
+    fun `parseActivityEventTimeMs result is always non-negative`() {
+        Fuzz.run(ITERATIONS, SEED) { rnd, _ ->
+            val time = Fuzz.randomString(rnd, 50)
+            val event = Fuzz.randomJsonObject(rnd, depth = 2)
+            val ms = TlonChatRepo.parseActivityEventTimeMs(time, event)
+            assertTrue("got $ms for time=$time", ms >= 0)
+        }
+    }
 }

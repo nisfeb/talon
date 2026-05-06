@@ -2,6 +2,7 @@ package io.nisfeb.talon.ui
 
 import io.nisfeb.talon.data.ContactEntity
 import kotlin.test.Test
+import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
@@ -127,5 +128,93 @@ class ContactsTest {
         val a = listOf(base(nickname = null))
         val b = listOf(base(nickname = "zod"))
         assertFalse(sameContactDisplay(a, b))
+    }
+
+    // ---- conversationLabel surface — channel whom prefixing -----
+
+    @Test
+    fun `conversationLabel for channel with non-blank group title prefixes the group name`() {
+        // The mutation tester surfaced that the `if (!groupTitle.isNullOrBlank())`
+        // branch was flipping unobserved. Pin the happy path: a channel
+        // whom resolves to "Group · #channel-slug".
+        val nest = "chat/~zod/test-channel"
+        val groupFlag = "~zod/group-flag"
+        val map = io.nisfeb.talon.ui.ContactMap(
+            contacts = emptyList(),
+            clubs = emptyList(),
+            groups = listOf(
+                io.nisfeb.talon.data.GroupEntity(
+                    flag = groupFlag,
+                    title = "My Group",
+                    image = null,
+                ),
+            ),
+            channelGroups = listOf(
+                io.nisfeb.talon.data.ChannelGroupEntity(
+                    nest = nest,
+                    groupFlag = groupFlag,
+                    title = null,
+                    pinnedPostId = null,
+                    ordinal = 0,
+                ),
+            ),
+        )
+        assertTrue(map.conversationLabel(nest).contains("My Group"))
+        assertTrue(map.conversationLabel(nest).contains("#test-channel"))
+    }
+
+    @Test
+    fun `conversationLabel for channel without group title falls back to channel only`() {
+        // The other side of the !isNullOrBlank branch: when the group
+        // title is missing, only the channel name renders. Pinning
+        // both sides of the if/else.
+        val nest = "chat/~zod/orphan-channel"
+        val map = io.nisfeb.talon.ui.ContactMap(
+            contacts = emptyList(),
+            clubs = emptyList(),
+            groups = emptyList(),
+            channelGroups = listOf(
+                io.nisfeb.talon.data.ChannelGroupEntity(
+                    nest = nest,
+                    groupFlag = "~zod/missing",
+                    title = null,
+                    pinnedPostId = null,
+                    ordinal = 0,
+                ),
+            ),
+        )
+        // No "·" separator means the group prefix wasn't injected.
+        val label = map.conversationLabel(nest)
+        assertEquals("#orphan-channel", label)
+    }
+
+    @Test
+    fun `conversationLabel for channel with blank group title falls back to channel only`() {
+        // Edge case: groupTitle is the empty string. Should be
+        // treated the same as null — no prefix.
+        val nest = "chat/~zod/some-channel"
+        val groupFlag = "~zod/blank-titled-group"
+        val map = io.nisfeb.talon.ui.ContactMap(
+            contacts = emptyList(),
+            clubs = emptyList(),
+            groups = listOf(
+                io.nisfeb.talon.data.GroupEntity(
+                    flag = groupFlag,
+                    title = "",
+                    image = null,
+                ),
+            ),
+            channelGroups = listOf(
+                io.nisfeb.talon.data.ChannelGroupEntity(
+                    nest = nest,
+                    groupFlag = groupFlag,
+                    title = null,
+                    pinnedPostId = null,
+                    ordinal = 0,
+                ),
+            ),
+        )
+        val label = map.conversationLabel(nest)
+        assertEquals("#some-channel", label)
     }
 }

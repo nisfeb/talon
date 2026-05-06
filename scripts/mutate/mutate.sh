@@ -50,6 +50,13 @@ DEFAULT_TARGETS=(
     "composeApp/src/commonMain/kotlin/io/nisfeb/talon/ai/DailyDigestPrompt.kt"
     "composeApp/src/commonMain/kotlin/io/nisfeb/talon/ai/DailyDigestSelector.kt"
     "composeApp/src/commonMain/kotlin/io/nisfeb/talon/ai/WatchwordSanitizer.kt"
+    # Pure helpers added during the rc1-rc20 stretch. Each has range
+    # checks / threshold comparisons / loop conditions worth mutating.
+    "composeApp/src/commonMain/kotlin/io/nisfeb/talon/ui/RailItem.kt"
+    "composeApp/src/commonMain/kotlin/io/nisfeb/talon/ui/Contacts.kt"
+    "composeApp/src/commonMain/kotlin/io/nisfeb/talon/ui/EmojiSpan.kt"
+    "composeApp/src/commonMain/kotlin/io/nisfeb/talon/ui/ChatScrollHeuristic.kt"
+    "composeApp/src/commonMain/kotlin/io/nisfeb/talon/ui/ImageViewerSwipe.kt"
 )
 
 TARGETS=("${@:-${DEFAULT_TARGETS[@]}}")

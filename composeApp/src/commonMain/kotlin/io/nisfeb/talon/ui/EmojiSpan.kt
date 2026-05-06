@@ -28,13 +28,15 @@ import androidx.compose.ui.text.input.VisualTransformation
  */
 
 private fun isEmojiCodepoint(cp: Int): Boolean = when {
-    cp in 0x1F000..0x1FFFF -> true       // Supplementary pictographs (most modern emojis)
+    // Supplementary pictographs — most modern emojis. This range
+    // also subsumes regional indicators 0x1F1E6..0x1F1FF (flag
+    // halves), so no separate branch for them.
+    cp in 0x1F000..0x1FFFF -> true
     cp in 0x2600..0x27BF -> true         // Misc Symbols + Dingbats (☀️ ✂️ etc.)
     cp in 0x2300..0x23FF -> true         // Misc technical (⏰ ⌚ etc.)
     cp in 0x2B00..0x2BFF -> true         // Misc Symbols and Arrows (⭐ etc.)
     cp == 0x200D -> true                 // ZWJ — joiner inside compound emoji
     cp in 0xFE00..0xFE0F -> true         // Variation selectors (text vs emoji presentation)
-    cp in 0x1F1E6..0x1F1FF -> true       // Regional indicator symbols (flag halves)
     cp in 0x20E0..0x20FF -> true         // Combining marks for keycap-style emojis
     else -> false
 }
