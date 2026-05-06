@@ -89,6 +89,7 @@ import io.nisfeb.talon.data.UnreadEntity
 import io.nisfeb.talon.ui.Avatar
 import io.nisfeb.talon.ui.ContactMap
 import io.nisfeb.talon.ui.FolderAssignmentSheet
+import io.nisfeb.talon.ui.RailItem
 import io.nisfeb.talon.ui.UpdateBanner
 import io.nisfeb.talon.ui.contactMapFlow
 import io.nisfeb.talon.update.UpdateStatus
@@ -136,6 +137,15 @@ fun DmListScreen(
     onOpenAdministration: () -> Unit = {},
     onOpenInvites: () -> Unit = {},
     onOpenSettings: () -> Unit,
+    /**
+     * Items the kebab dropdown should show. App.kt computes this:
+     *  - On wide windows: items NOT on the rail (the rail is the
+     *    primary surface, the kebab is the overflow tray).
+     *  - On compact windows: every item (the rail isn't visible).
+     * Sign out is rendered separately and isn't a [RailItem]; it
+     * always appears as the final entry in the dropdown.
+     */
+    kebabItems: Set<RailItem> = RailItem.entries.toSet(),
     /** Every ship the user is logged in with. The switcher drawer
      *  lists them and the header badge shows the active one when the
      *  list has more than one entry. */
@@ -633,46 +643,56 @@ fun DmListScreen(
                     expanded = menuOpen,
                     onDismissRequest = { menuOpen = false },
                 ) {
-                    DropdownMenuItem(
-                        text = { Text("My profile") },
-                        onClick = {
-                            menuOpen = false
-                            onOpenSelfProfile()
-                        },
-                    )
-                    DropdownMenuItem(
-                        text = { Text("Statuses") },
-                        trailingIcon = {
-                            if (hasFreshStatuses) MenuBadgeDot()
-                        },
-                        onClick = {
-                            menuOpen = false
-                            menuSeen.markStatusesSeenAt(System.currentTimeMillis())
-                            onOpenStatusFeed()
-                        },
-                    )
-                    DropdownMenuItem(
-                        text = { Text("Bookmarks") },
-                        onClick = {
-                            menuOpen = false
-                            onOpenBookmarks()
-                        },
-                    )
-                    DropdownMenuItem(
-                        text = { Text("Activity") },
-                        onClick = {
-                            menuOpen = false
-                            onOpenActivity()
-                        },
-                    )
-                    DropdownMenuItem(
-                        text = { Text("Watchwords") },
-                        onClick = {
-                            menuOpen = false
-                            onOpenWatchwords()
-                        },
-                    )
-                    if (digestEnabled) {
+                    if (RailItem.Profile in kebabItems) {
+                        DropdownMenuItem(
+                            text = { Text("My profile") },
+                            onClick = {
+                                menuOpen = false
+                                onOpenSelfProfile()
+                            },
+                        )
+                    }
+                    if (RailItem.Statuses in kebabItems) {
+                        DropdownMenuItem(
+                            text = { Text("Statuses") },
+                            trailingIcon = {
+                                if (hasFreshStatuses) MenuBadgeDot()
+                            },
+                            onClick = {
+                                menuOpen = false
+                                menuSeen.markStatusesSeenAt(System.currentTimeMillis())
+                                onOpenStatusFeed()
+                            },
+                        )
+                    }
+                    if (RailItem.Bookmarks in kebabItems) {
+                        DropdownMenuItem(
+                            text = { Text("Bookmarks") },
+                            onClick = {
+                                menuOpen = false
+                                onOpenBookmarks()
+                            },
+                        )
+                    }
+                    if (RailItem.Activity in kebabItems) {
+                        DropdownMenuItem(
+                            text = { Text("Activity") },
+                            onClick = {
+                                menuOpen = false
+                                onOpenActivity()
+                            },
+                        )
+                    }
+                    if (RailItem.Watchwords in kebabItems) {
+                        DropdownMenuItem(
+                            text = { Text("Watchwords") },
+                            onClick = {
+                                menuOpen = false
+                                onOpenWatchwords()
+                            },
+                        )
+                    }
+                    if (RailItem.TodaysBrief in kebabItems && digestEnabled) {
                         DropdownMenuItem(
                             text = { Text("Today's brief") },
                             trailingIcon = {
@@ -687,31 +707,39 @@ fun DmListScreen(
                             },
                         )
                     }
-                    DropdownMenuItem(
-                        text = { Text("Administration") },
-                        onClick = {
-                            menuOpen = false
-                            onOpenAdministration()
-                        },
-                    )
-                    DropdownMenuItem(
-                        text = { Text("Invites") },
-                        trailingIcon = {
-                            if (hasPendingInvites) MenuBadgeDot()
-                        },
-                        onClick = {
-                            menuOpen = false
-                            menuSeen.markInvitesSeen(invitesSnapshot)
-                            onOpenInvites()
-                        },
-                    )
-                    DropdownMenuItem(
-                        text = { Text("Settings") },
-                        onClick = {
-                            menuOpen = false
-                            onOpenSettings()
-                        },
-                    )
+                    if (RailItem.Administration in kebabItems) {
+                        DropdownMenuItem(
+                            text = { Text("Administration") },
+                            onClick = {
+                                menuOpen = false
+                                onOpenAdministration()
+                            },
+                        )
+                    }
+                    if (RailItem.Invites in kebabItems) {
+                        DropdownMenuItem(
+                            text = { Text("Invites") },
+                            trailingIcon = {
+                                if (hasPendingInvites) MenuBadgeDot()
+                            },
+                            onClick = {
+                                menuOpen = false
+                                menuSeen.markInvitesSeen(invitesSnapshot)
+                                onOpenInvites()
+                            },
+                        )
+                    }
+                    if (RailItem.Settings in kebabItems) {
+                        DropdownMenuItem(
+                            text = { Text("Settings") },
+                            onClick = {
+                                menuOpen = false
+                                onOpenSettings()
+                            },
+                        )
+                    }
+                    // Sign out is always rendered last, never gated by kebabItems —
+                    // it's not a RailItem and never lives on the rail.
                     DropdownMenuItem(
                         text = { Text("Sign out") },
                         onClick = {
