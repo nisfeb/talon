@@ -7,6 +7,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 
@@ -20,10 +21,22 @@ import kotlinx.coroutines.flow.stateIn
  * (`rail_item_prefs` table) rather than SharedPreferences so it can
  * sync via %settings. Mutation goes through
  * `SettingsSyncImpl.setRailItemVisibility`.
+ *
+ * Per-ship retargetting: unlike desktop (which builds a fresh
+ * UiSettings per ship inside the composable's `key` block via
+ * `createUiSettings`), Android holds a single process-wide
+ * [AndroidUiSettings] in [TalonApplication]. Ship-switch rebuilds the
+ * underlying [AppDatabase], so [rebindDb] retargets the
+ * `railVisibility` flow to the new ship's `rail_item_prefs` table.
+ * The other fields are SharedPreferences-backed and per-DEVICE — they
+ * don't need retargetting. Keeping the instance stable means
+ * subscribers outside the `key(loggedInShip)` subtree (e.g.
+ * MainActivity reading accentSettings for the system theme) don't get
+ * orphaned on switch.
  */
 class AndroidUiSettings(
     context: Context,
-    db: AppDatabase,
+    initialDb: AppDatabase,
     scope: CoroutineScope,
 ) : UiSettings {
     private val prefs = context.getSharedPreferences("talon.ui", Context.MODE_PRIVATE)
@@ -54,12 +67,29 @@ class AndroidUiSettings(
     override val activeRailTab: StateFlow<RailTab> =
         _activeRailTab.asStateFlow()
 
+    // Tracks the active ship's [AppDatabase]. Updated by [rebindDb]
+    // from TalonApplication.buildShipScoped on every ship switch so
+    // [railVisibility] re-subscribes to the new ship's table.
+    private val dbFlow = MutableStateFlow(initialDb)
+
+    /**
+     * Retarget [railVisibility] at [db]. Called by
+     * `TalonApplication.buildShipScoped` after a ship switch rebuilds
+     * the per-ship [AppDatabase]. Cheap — `flatMapLatest` cancels the
+     * old DAO subscription and starts the new one on the same scope.
+     */
+    fun rebindDb(db: AppDatabase) {
+        dbFlow.value = db
+    }
+
     // Read-only projection of the per-ship rail_item_prefs table.
     // Sparse — only rows the user has explicitly hidden. Eager so the
     // flow stays subscribed for the lifetime of [scope] and the first
     // composition collect doesn't pay a fresh DAO subscribe.
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
     override val railVisibility: StateFlow<Map<RailItem, Boolean>> =
-        db.railItemPrefs().streamAll()
+        dbFlow
+            .flatMapLatest { db -> db.railItemPrefs().streamAll() }
             .map { rows ->
                 rows.mapNotNull { row ->
                     val item = railItemOrNull(row.itemName) ?: return@mapNotNull null

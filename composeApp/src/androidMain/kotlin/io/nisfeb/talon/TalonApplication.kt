@@ -197,14 +197,16 @@ class TalonApplication : Application() {
         // login screen before anyone touches these values.
         val shipForInit = initialShip ?: "none"
         buildShipScoped(shipForInit)
-        // Now that `db` is set, build the process-wide UiSettings.
-        // railVisibility is bound to this ship's rail_item_prefs table;
-        // a future task will re-thread per-ship so a ship switch
-        // refreshes the flow. Other fields are SharedPreferences-backed
-        // and survive ship switches as-is.
+        // Process-wide UiSettings. railVisibility is per-ship and
+        // retargetted by AndroidUiSettings.rebindDb on every ship
+        // switch (see buildShipScoped); other fields are SharedPrefs-
+        // backed and survive switches as-is. The instance itself is
+        // kept stable so subscribers outside the keyed subtree (e.g.
+        // MainActivity's theme accentSettings collect) don't get
+        // orphaned.
         uiSettings = io.nisfeb.talon.ui.AndroidUiSettings(
             context = this,
-            db = db,
+            initialDb = db,
             scope = appScope,
         )
         _activeShip.value = initialShip
@@ -344,6 +346,15 @@ class TalonApplication : Application() {
         searchEmbedderClient = io.nisfeb.talon.ai.AndroidSearchEmbedderClient(
             db, embedder, embeddingIndexer,
         )
+
+        // Retarget the process-wide AndroidUiSettings.railVisibility
+        // flow at the new ship's rail_item_prefs table. Skipped on the
+        // first call from onCreate — uiSettings is not yet initialized
+        // there; it's built right after the first buildShipScoped
+        // returns (with `initialDb = db`).
+        if (::uiSettings.isInitialized) {
+            (uiSettings as? io.nisfeb.talon.ui.AndroidUiSettings)?.rebindDb(db)
+        }
 
         if (priorDb != null || priorIndexer != null) {
             scheduleShipScopedTeardown(priorDb, priorIndexer)
