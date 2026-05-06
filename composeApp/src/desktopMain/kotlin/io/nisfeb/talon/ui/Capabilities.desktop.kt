@@ -2,6 +2,12 @@ package io.nisfeb.talon.ui
 
 actual val isDailyDigestSupported: Boolean = false
 actual val isVoiceMessagesSupported: Boolean = false
+
+actual val platformLabel: String = run {
+    val os = System.getProperty("os.name") ?: "Desktop"
+    val ver = System.getProperty("os.version") ?: ""
+    if (ver.isBlank()) "Desktop ($os)" else "Desktop ($os $ver)"
+}
 // Smart search + important-message highlights via DJL ONNX in
 // desktopMain/.../ai/DesktopEmbedder.kt. Model + tokenizer download
 // on first use (~30 MB cached at ~/.djl.ai/cache/). The other

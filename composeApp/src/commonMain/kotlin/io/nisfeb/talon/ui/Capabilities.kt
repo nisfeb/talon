@@ -14,6 +14,14 @@ expect val isVoiceMessagesSupported: Boolean
 expect val isOnDeviceAiSupported: Boolean
 
 /**
+ * Short human-readable name for the host platform — surfaced in the
+ * About panel so the user can see at a glance which build they're on.
+ * Android returns "Android"; desktop returns the os.name (e.g. "Linux",
+ * "Mac OS X", "Windows 11").
+ */
+expect val platformLabel: String
+
+/**
  * Per-feature supported predicate. The [isOnDeviceAiSupported] flag
  * gates whether the on-device-AI section of SettingsScreen renders
  * at all; this finer predicate then hides individual toggles whose

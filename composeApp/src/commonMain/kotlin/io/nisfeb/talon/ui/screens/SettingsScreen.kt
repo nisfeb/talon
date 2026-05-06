@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.windowInsetsPadding
@@ -529,7 +530,73 @@ fun SettingsScreen(
                     onTestDigest = onTestDigest,
                 )
             }
+
+            Spacer(Modifier.height(16.dp))
+            HorizontalDivider()
+            Spacer(Modifier.height(8.dp))
+            AboutSection()
         }
+    }
+}
+
+@Composable
+private fun AboutSection() {
+    val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
+    Text(
+        "About",
+        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
+    )
+    Text(
+        "Talon — Compose Multiplatform Urbit chat client.",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    Spacer(Modifier.height(8.dp))
+
+    AboutRow(
+        label = "Version",
+        value = "${io.nisfeb.talon.TalonBuild.versionName} " +
+            "(build ${io.nisfeb.talon.TalonBuild.versionCode})",
+    )
+    AboutRow(
+        label = "Platform",
+        value = io.nisfeb.talon.ui.platformLabel,
+    )
+    AboutRow(
+        label = "Source",
+        value = "github.com/nisfeb/talon",
+    )
+
+    Spacer(Modifier.height(8.dp))
+    OutlinedButton(
+        onClick = {
+            clipboard.setText(
+                androidx.compose.ui.text.AnnotatedString(
+                    "Talon ${io.nisfeb.talon.TalonBuild.versionName} " +
+                        "(build ${io.nisfeb.talon.TalonBuild.versionCode}) " +
+                        "· ${io.nisfeb.talon.ui.platformLabel}",
+                ),
+            )
+        },
+    ) { Text("Copy version info") }
+}
+
+@Composable
+private fun AboutRow(label: String, value: String) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            label,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.width(96.dp),
+        )
+        Text(
+            value,
+            style = MaterialTheme.typography.bodyMedium,
+        )
     }
 }
 
