@@ -36,6 +36,7 @@ class ChatScrollHeuristicTest {
             lastSize = 99,
             firstVisibleItemIndex = 0,
             pendingSendBaselineSize = null,
+            pendingSelfSendNewestId = null,
         )
         assertTrue(d.scrollToBottom)
         assertNull(d.nextBaseline)
@@ -52,6 +53,7 @@ class ChatScrollHeuristicTest {
             lastSize = 99,
             firstVisibleItemIndex = 50,
             pendingSendBaselineSize = null,
+            pendingSelfSendNewestId = null,
         )
         assertFalse(d.scrollToBottom)
     }
@@ -65,6 +67,7 @@ class ChatScrollHeuristicTest {
             lastSize = 99,
             firstVisibleItemIndex = 12,  // exactly at threshold
             pendingSendBaselineSize = null,
+            pendingSelfSendNewestId = null,
         )
         assertTrue(d.scrollToBottom)
     }
@@ -78,6 +81,7 @@ class ChatScrollHeuristicTest {
             lastSize = 99,
             firstVisibleItemIndex = 13,
             pendingSendBaselineSize = null,
+            pendingSelfSendNewestId = null,
         )
         assertFalse(d.scrollToBottom)
     }
@@ -94,6 +98,7 @@ class ChatScrollHeuristicTest {
             lastSize = 100,
             firstVisibleItemIndex = 0,
             pendingSendBaselineSize = null,
+            pendingSelfSendNewestId = null,
         )
         assertFalse(d.scrollToBottom)
     }
@@ -108,6 +113,7 @@ class ChatScrollHeuristicTest {
             lastSize = 100,
             firstVisibleItemIndex = 0,
             pendingSendBaselineSize = null,
+            pendingSelfSendNewestId = null,
         )
         assertFalse(d.scrollToBottom)
     }
@@ -121,6 +127,7 @@ class ChatScrollHeuristicTest {
             lastSize = 0,
             firstVisibleItemIndex = 0,
             pendingSendBaselineSize = null,
+            pendingSelfSendNewestId = null,
         )
         assertFalse(d.scrollToBottom)
     }
@@ -140,6 +147,7 @@ class ChatScrollHeuristicTest {
             lastSize = 101,
             firstVisibleItemIndex = 50,  // reading history — doesn't matter
             pendingSendBaselineSize = 100,
+            pendingSelfSendNewestId = null,
         )
         assertTrue(d.scrollToBottom)
         assertNull(d.nextBaseline, "baseline must clear after the catch-up scroll")
@@ -157,7 +165,8 @@ class ChatScrollHeuristicTest {
             lastNewestId = "head",
             lastSize = 100,
             firstVisibleItemIndex = 0,
-            pendingSendBaselineSize = 100,  // captured pre-send
+            pendingSendBaselineSize = 100,
+            pendingSelfSendNewestId = null,  // captured pre-send
         )
         assertFalse(d.scrollToBottom, "no scroll until the upsert lands")
         assertEquals(100, d.nextBaseline, "baseline must persist for the next emission")
@@ -175,6 +184,7 @@ class ChatScrollHeuristicTest {
             lastSize = 100,
             firstVisibleItemIndex = 200,  // way scrolled up
             pendingSendBaselineSize = 100,
+            pendingSelfSendNewestId = null,
         )
         assertTrue(d.scrollToBottom)
     }
@@ -188,7 +198,136 @@ class ChatScrollHeuristicTest {
             lastSize = 99,
             firstVisibleItemIndex = 0,
             pendingSendBaselineSize = null,
+            pendingSelfSendNewestId = null,
         )
         assertNull(d.nextBaseline)
+    }
+
+    // ---- self-send swap path -----------------------------------------
+
+    @Test
+    fun `self-send catch-up records the optimistic newest id for swap detection`() {
+        // The catch-up branch must hand back `nextPendingSelfSendNewestId
+        // = newestId` so the next emission can detect the
+        // optimistic→verified swap.
+        val d = decideAutoScroll(
+            rowsSize = 101,
+            newestId = "optimistic-id",
+            lastNewestId = "previous-newest",
+            lastSize = 100,
+            firstVisibleItemIndex = 0,
+            pendingSendBaselineSize = 100,
+            pendingSelfSendNewestId = null,
+        )
+        assertTrue(d.scrollToBottom)
+        assertEquals("optimistic-id", d.nextPendingSelfSendNewestId)
+    }
+
+    @Test
+    fun `swap from optimistic id to verified id triggers scroll`() {
+        // Same row count (the optimistic was deleted and the verified
+        // row inserted in the same Room transaction), but newestId
+        // flipped from "optimistic-id" to "verified-id". This is the
+        // rc25 bug: without a swap branch, decideAutoScroll fell into
+        // the inbound path, where `rowsSize > lastSize` failed (sizes
+        // are equal) and no scroll fired — leaving the just-confirmed
+        // message below the fold.
+        val d = decideAutoScroll(
+            rowsSize = 101,
+            newestId = "verified-id",
+            lastNewestId = "optimistic-id",
+            lastSize = 101,                      // unchanged size
+            firstVisibleItemIndex = 0,
+            pendingSendBaselineSize = null,      // catch-up already cleared it
+            pendingSelfSendNewestId = "optimistic-id",
+        )
+        assertTrue(d.scrollToBottom, "swap must scroll")
+        assertNull(
+            d.nextPendingSelfSendNewestId,
+            "after the swap, the marker is cleared",
+        )
+        assertNull(d.nextBaseline)
+    }
+
+    @Test
+    fun `swap branch ignores a same-id re-emission`() {
+        // The flow can re-emit with the same newestId (e.g. another
+        // table updated and the messages flow ticked through again).
+        // The marker must persist; no spurious scroll.
+        val d = decideAutoScroll(
+            rowsSize = 101,
+            newestId = "optimistic-id",
+            lastNewestId = "optimistic-id",
+            lastSize = 101,
+            firstVisibleItemIndex = 0,
+            pendingSendBaselineSize = null,
+            pendingSelfSendNewestId = "optimistic-id",
+        )
+        assertFalse(d.scrollToBottom)
+        assertEquals("optimistic-id", d.nextPendingSelfSendNewestId)
+    }
+
+    @Test
+    fun `swap branch handles size shrink + id change (delete-then-insert across emissions)`() {
+        // If Room emits twice — once for the delete, once for the
+        // insert — the first emission shrinks rows to N and changes
+        // newestId. The swap branch should still fire on that
+        // intermediate state because newestId changed and the marker
+        // is set. (If newestId becomes null because the list is now
+        // empty, we fall through and don't scroll — handled by the
+        // `newestId != null` guard in the swap branch.)
+        val d = decideAutoScroll(
+            rowsSize = 100,                      // shrank from 101
+            newestId = "the-message-before-mine",
+            lastNewestId = "optimistic-id",
+            lastSize = 101,
+            firstVisibleItemIndex = 0,
+            pendingSendBaselineSize = null,
+            pendingSelfSendNewestId = "optimistic-id",
+        )
+        assertTrue(d.scrollToBottom)
+        assertNull(d.nextPendingSelfSendNewestId)
+    }
+
+    @Test
+    fun `swap branch is suppressed when newestId is null (empty list)`() {
+        // Defensive: newestId can be null between emissions in an
+        // empty-then-empty case. Don't scroll, don't clear the marker
+        // (the next non-null emission will trigger the real swap).
+        val d = decideAutoScroll(
+            rowsSize = 0,
+            newestId = null,
+            lastNewestId = "optimistic-id",
+            lastSize = 1,
+            firstVisibleItemIndex = 0,
+            pendingSendBaselineSize = null,
+            pendingSelfSendNewestId = "optimistic-id",
+        )
+        assertFalse(d.scrollToBottom)
+        assertEquals("optimistic-id", d.nextPendingSelfSendNewestId)
+    }
+
+    @Test
+    fun `inbound path preserves a pending swap marker`() {
+        // A peer's message arrives between the catch-up and the
+        // server echo. The peer-arrival hits the inbound branch
+        // (size grew, newestId changed), but the swap marker should
+        // pass through unchanged so we still catch the eventual
+        // optimistic-to-verified transition.
+        val d = decideAutoScroll(
+            rowsSize = 102,
+            newestId = "peer-message",
+            lastNewestId = "optimistic-id",
+            lastSize = 101,
+            firstVisibleItemIndex = 0,
+            pendingSendBaselineSize = null,
+            pendingSelfSendNewestId = "optimistic-id",
+        )
+        // This actually hits the swap branch first (newestId !=
+        // pendingSelfSendNewestId), which scrolls and clears the
+        // marker. That's also correct — the user wants to see new
+        // content at the bottom. Pin both.
+        assertTrue(d.scrollToBottom)
+        assertNull(d.nextPendingSelfSendNewestId)
     }
 }

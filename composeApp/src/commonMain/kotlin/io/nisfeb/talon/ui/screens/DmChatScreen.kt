@@ -347,6 +347,9 @@ fun DmChatScreen(
     // composer), not here, because the upsert is fast enough on a
     // local DB to race a LaunchedEffect-deferred snapshot.
     var pendingSendBaselineSize by remember(whom) { mutableStateOf<Int?>(null) }
+    // Tracks the optimistic row's id between catch-up scroll and
+    // the server-echo swap. See decideAutoScroll's swap branch.
+    var pendingSelfSendNewestId by remember(whom) { mutableStateOf<String?>(null) }
     LaunchedEffect(forceBottomTick) {
         if (forceBottomTick > 0 && rows.isNotEmpty()) {
             listState.scrollToItem(0)
@@ -370,22 +373,28 @@ fun DmChatScreen(
     }
     var lastNewestId by remember(whom) { mutableStateOf<String?>(newestMessageId(rows)) }
     var lastSize by remember(whom) { mutableStateOf(rows.size) }
-    LaunchedEffect(rows.size) {
-        val newestId = newestMessageId(rows)
-        // Pure decision in `decideAutoScroll` (ChatScrollHeuristic.kt).
-        // Logic-tested in commonTest; this composable just routes
-        // inputs and applies the result.
+    // Re-key on `(rows.size, newestMessageId(rows))` so the swap
+    // emission — same size, different newest — also fires this
+    // effect. rc25's "verified row jumps below fold" bug was: the
+    // effect was keyed on rows.size alone, so a swap that didn't
+    // change size (optimistic deleted + verified inserted in the
+    // same Room transaction → one emission, size unchanged) never
+    // re-ran the decision.
+    val newestIdNow = newestMessageId(rows)
+    LaunchedEffect(rows.size, newestIdNow) {
         val decision = io.nisfeb.talon.ui.decideAutoScroll(
             rowsSize = rows.size,
-            newestId = newestId,
+            newestId = newestIdNow,
             lastNewestId = lastNewestId,
             lastSize = lastSize,
             firstVisibleItemIndex = listState.firstVisibleItemIndex,
             pendingSendBaselineSize = pendingSendBaselineSize,
+            pendingSelfSendNewestId = pendingSelfSendNewestId,
         )
-        lastNewestId = newestId
+        lastNewestId = newestIdNow
         lastSize = rows.size
         pendingSendBaselineSize = decision.nextBaseline
+        pendingSelfSendNewestId = decision.nextPendingSelfSendNewestId
         if (decision.scrollToBottom) {
             listState.scrollToItem(0)
         }
@@ -638,7 +647,8 @@ fun DmChatScreen(
                 // no-ops for them. DMs (`~ship`) likewise have no
                 // group-info concept in v1 (architecture is chat-shape-
                 // aware so club + DM support is additive later).
-                if (onOpenGroupInfo != null && whom.startsWith("chat/")) {
+                val hasInfoPane = onOpenGroupInfo != null && whom.startsWith("chat/")
+                if (hasInfoPane) {
                     IconButton(onClick = onOpenGroupInfo) {
                         Icon(Icons.Filled.Info, contentDescription = "Info")
                     }
@@ -648,26 +658,32 @@ fun DmChatScreen(
                         Icon(Icons.Filled.Topic, contentDescription = "Topics in this chat")
                     }
                 }
-                NotifyLevelDropdown(
-                    level = notifyLevel,
-                    enabled = repo.settingsSync != null,
-                    isExcludedFromWatchwords = isExcludedFromWatchwords,
-                    onSelect = { level ->
-                        scope.launch {
-                            runCatching { repo.settingsSync?.setNotifyLevel(whom, level) }
-                                .onFailure { sendError = "notify failed: ${it.message ?: it::class.simpleName}" }
-                        }
-                    },
-                    onToggleWatchwordExclude = {
-                        scope.launch {
-                            runCatching {
-                                repo.settingsSync?.setWatchwordExclude(whom, !isExcludedFromWatchwords)
-                            }.onFailure {
-                                sendError = "watchword toggle failed: ${it.message ?: it::class.simpleName}"
+                // For group channels, the Info pane already exposes the
+                // notification settings — duplicating the dropdown in
+                // the header is just clutter. DMs / clubs have no Info
+                // pane, so the dropdown stays in the header for them.
+                if (!hasInfoPane) {
+                    NotifyLevelDropdown(
+                        level = notifyLevel,
+                        enabled = repo.settingsSync != null,
+                        isExcludedFromWatchwords = isExcludedFromWatchwords,
+                        onSelect = { level ->
+                            scope.launch {
+                                runCatching { repo.settingsSync?.setNotifyLevel(whom, level) }
+                                    .onFailure { sendError = "notify failed: ${it.message ?: it::class.simpleName}" }
                             }
-                        }
-                    },
-                )
+                        },
+                        onToggleWatchwordExclude = {
+                            scope.launch {
+                                runCatching {
+                                    repo.settingsSync?.setWatchwordExclude(whom, !isExcludedFromWatchwords)
+                                }.onFailure {
+                                    sendError = "watchword toggle failed: ${it.message ?: it::class.simpleName}"
+                                }
+                            }
+                        },
+                    )
+                }
             }
             HorizontalDivider()
             if (refreshing && rows.isEmpty()) {
