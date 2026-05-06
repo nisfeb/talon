@@ -131,6 +131,13 @@ fun TalonApp(
      *  picker and dispatch [pendingShare] straight to this whom. */
     pendingShareTarget: String? = null,
     onShareConsumed: () -> Unit = {},
+    /** Called once TalonApp has consumed an `initialOpen*` /
+     *  `initialScroll*` / `initialThread*` / `initialOpenDigest`
+     *  param. MainActivity uses this to clear its source mutable
+     *  state so re-tapping the same notification re-routes —
+     *  without it the param value never changes on the second tap
+     *  and the LaunchedEffect below doesn't re-fire. */
+    onDeepLinkConsumed: () -> Unit = {},
 ) {
     val app = LocalContext.current.applicationContext as TalonApplication
     val context = LocalContext.current
@@ -151,6 +158,13 @@ fun TalonApp(
     val allShips by app.allShipsFlow.collectAsState()
     val loggedInShip = activeShip
     var addingAnotherShip by remember { mutableStateOf(false) }
+    // Locally-owned navigation state. Initial values from the
+    // notification-tap intent (or null on a normal cold launch). The
+    // LaunchedEffect below routes any LATER param updates from
+    // MainActivity (onNewIntent re-fires consumeIntent), which a
+    // plain `remember { mutableStateOf(initialX) }` would silently
+    // ignore — that was the rc23-era "tap a notification, nothing
+    // happens" bug.
     var openWhom by remember { mutableStateOf<String?>(initialOpenWhom) }
     // Scroll target is consumed once the chat screen actually uses it,
     // so navigating back and reopening doesn't re-snap to the same msg.
@@ -180,6 +194,45 @@ fun TalonApp(
     var adminGroupFlag by remember { mutableStateOf<String?>(null) }
     var invitesOpen by remember { mutableStateOf(false) }
     var profileSheetShip by remember { mutableStateOf<String?>(null) }
+
+    // Re-route on every deep-link delivery from MainActivity. The keys
+    // here match every initial* param TalonApp accepts. When any of
+    // them flips to a non-null value (notification tap → onNewIntent
+    // → MainActivity.consumeIntent → state changes → recompose), this
+    // effect picks it up and updates the local navigation state.
+    // After applying, we tell MainActivity to clear the source state
+    // so re-tapping the same notification (which carries the same
+    // param value) re-fires the effect.
+    LaunchedEffect(
+        initialOpenWhom,
+        initialScrollMessageId,
+        initialOpenThread,
+        initialThreadAnchor,
+        initialOpenDigest,
+    ) {
+        var consumed = false
+        if (initialOpenWhom != null) {
+            openWhom = initialOpenWhom
+            consumed = true
+        }
+        if (initialScrollMessageId != null) {
+            pendingScrollMessageId = initialScrollMessageId
+            consumed = true
+        }
+        if (initialOpenThread != null) {
+            openThread = initialOpenThread
+            consumed = true
+        }
+        if (initialThreadAnchor != null) {
+            pendingThreadAnchor = initialThreadAnchor
+            consumed = true
+        }
+        if (initialOpenDigest != null) {
+            digestOpen = true
+            consumed = true
+        }
+        if (consumed) onDeepLinkConsumed()
+    }
     // Phase 3 right-pane state — Android phone always renders these as
     // full-screen replaces (no DesktopShell on phone). Tablet landscape
     // gets the wide-pane right-column rendering via App.kt's path; this

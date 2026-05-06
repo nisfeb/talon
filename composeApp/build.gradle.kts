@@ -164,8 +164,8 @@ tasks.withType<Test>().configureEach {
 // version inside derivePackageVersion and silently drifted — every
 // release between 0.7.14 and 0.7.23 shipped with stale .dmg/.msi/.deb
 // filenames because nobody updated both literals.
-val talonVersionCode = 99
-val talonVersionName = "0.11.0-rc23"
+val talonVersionCode = 100
+val talonVersionName = "0.11.0-rc24"
 
 android {
     namespace = "io.nisfeb.talon"

@@ -134,6 +134,18 @@ class MainActivity : ComponentActivity() {
                             pendingShare.value = null
                             pendingShareTarget.value = null
                         },
+                        // Clear the deep-link state after TalonApp
+                        // routes. Without this, the second tap on the
+                        // same notification has nothing new to react
+                        // to (param value unchanged → LaunchedEffect
+                        // doesn't refire) and silently no-ops.
+                        onDeepLinkConsumed = {
+                            deepLinkWhom.value = null
+                            deepLinkMessageId.value = null
+                            deepLinkThreadParent.value = null
+                            deepLinkThreadAnchor.value = null
+                            deepLinkOpenDigest.value = null
+                        },
                     )
                 }
             }
