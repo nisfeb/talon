@@ -45,7 +45,11 @@ fun EmojiPickerDropdown(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
-                    Text(e.glyph, style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        e.glyph,
+                        fontFamily = EmojiFontFamily,
+                        style = MaterialTheme.typography.titleMedium,
+                    )
                     Text(
                         e.shortcode,
                         style = MaterialTheme.typography.bodyMedium,

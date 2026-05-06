@@ -101,6 +101,7 @@ fun ReactionDetailsSheet(
                     }
                     Text(
                         ReactionPalette.display(r.emoji),
+                        fontFamily = EmojiFontFamily,
                         style = MaterialTheme.typography.titleLarge,
                     )
                 }

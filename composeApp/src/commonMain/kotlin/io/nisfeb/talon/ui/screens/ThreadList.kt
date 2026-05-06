@@ -581,7 +581,11 @@ private fun ThreadMessage(
                             )
                             .padding(horizontal = 10.dp, vertical = 4.dp),
                     ) {
-                        Text(ReactionPalette.display(emoji), style = MaterialTheme.typography.bodyMedium)
+                        Text(
+                            ReactionPalette.display(emoji),
+                            fontFamily = io.nisfeb.talon.ui.EmojiFontFamily,
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
                         if (count > 1) {
                             Text(
                                 " $count",
@@ -666,6 +670,7 @@ private fun ThreadActionSheet(
                     val glyph = ReactionPalette.display(code)
                     Text(
                         glyph,
+                        fontFamily = io.nisfeb.talon.ui.EmojiFontFamily,
                         style = MaterialTheme.typography.headlineSmall,
                         modifier = Modifier
                             .clip(RoundedCornerShape(8.dp))
@@ -694,6 +699,7 @@ private fun ThreadActionSheet(
                         results.forEach { entry ->
                             Text(
                                 entry.glyph,
+                                fontFamily = io.nisfeb.talon.ui.EmojiFontFamily,
                                 style = MaterialTheme.typography.headlineSmall,
                                 modifier = Modifier
                                     .clip(RoundedCornerShape(8.dp))
