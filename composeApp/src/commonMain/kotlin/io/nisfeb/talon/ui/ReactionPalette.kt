@@ -1,9 +1,12 @@
 package io.nisfeb.talon.ui
 
 /**
- * Minimal v1 reaction palette. Tlon's wire format is a shortcode like
- * ":+1:" or a URL-escaped form like "%2B1" — we send and store the
- * shortcode and map to a display character only at render time.
+ * Minimal v1 reaction palette. Tlon migrated reactions from shortcodes
+ * to unicode glyphs in 2025, so the wire format is now a unicode
+ * string like "👍". TlonChatRepo.react() normalizes shortcodes to
+ * glyphs before sending and before the optimistic local upsert; the
+ * picker map below is also used as a fallback display() table for any
+ * legacy shortcode rows that remain in the local DB.
  */
 object ReactionPalette {
 
