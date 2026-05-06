@@ -813,6 +813,27 @@ fun App(
                         onLoggedIn = { loggedInShip = it },
                         notice = loginNotice,
                     )
+                    // Sidebar settings drills out of Settings; both flags
+                    // are true while the user is in Sidebar. Order this
+                    // branch BEFORE `showSettings` so the deeper screen
+                    // wins. Back from Sidebar clears `showSidebarSettings`
+                    // and falls through to the next branch — `showSettings`
+                    // — which renders Settings, giving the user a
+                    // breadcrumb pop instead of a full unwind to the
+                    // chat list.
+                    showSidebarSettings -> {
+                        val dailyDigestEnabled = dailyDigestSettings
+                            ?.state
+                            ?.collectAsState()
+                            ?.value
+                            ?.enabled == true
+                        SidebarSettingsScreen(
+                            repo = repo,
+                            uiSettings = uiSettings,
+                            dailyDigestEnabled = dailyDigestEnabled,
+                            onBack = { showSidebarSettings = false },
+                        )
+                    }
                     showSettings -> {
                         val relayClient = remember(http) {
                             io.nisfeb.talon.notify.RelayClient(
@@ -844,19 +865,6 @@ fun App(
                             // wires it to dailyDigest.generateAndNotifyAsync
                             // when the production MainActivity migrates here.
                             onOpenSidebarSettings = { showSidebarSettings = true },
-                        )
-                    }
-                    showSidebarSettings -> {
-                        val dailyDigestEnabled = dailyDigestSettings
-                            ?.state
-                            ?.collectAsState()
-                            ?.value
-                            ?.enabled == true
-                        SidebarSettingsScreen(
-                            repo = repo,
-                            uiSettings = uiSettings,
-                            dailyDigestEnabled = dailyDigestEnabled,
-                            onBack = { showSidebarSettings = false },
                         )
                     }
                     showSelfProfile -> ProfileEditScreen(

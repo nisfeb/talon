@@ -627,7 +627,17 @@ fun DmListScreen(
             // the ellipsis itself. When true, the user has *something*
             // worth opening the menu for; the per-item dots inside
             // tell them which entry.
-            val anyMenuBadge = hasFreshDigest || hasFreshStatuses || hasPendingInvites
+            //
+            // Each freshness signal is gated by kebabItems membership
+            // — Phase 4 lets the user move items to the rail, and a
+            // fresh signal for an item that's NOT in the kebab
+            // shouldn't pip the kebab (the user reaches it via the
+            // rail instead). The rail itself doesn't carry badges
+            // today; that's a separate follow-up.
+            val anyMenuBadge =
+                (hasFreshDigest && RailItem.TodaysBrief in kebabItems) ||
+                (hasFreshStatuses && RailItem.Statuses in kebabItems) ||
+                (hasPendingInvites && RailItem.Invites in kebabItems)
             Box {
                 IconButton(onClick = { menuOpen = true }) {
                     Box {

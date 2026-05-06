@@ -599,6 +599,7 @@ fun TalonApp(
             adminListOpen -> "AdminList"
             invitesOpen -> "Invites"
             openGroupFlag != null -> "GroupHome($openGroupFlag)"
+            sidebarSettingsOpen -> "SidebarSettings"
             settingsOpen -> "Settings"
             pendingShare != null -> "ShareTarget"
             openThread != null && openWhom != null -> "Thread($openWhom/$openThread)"
@@ -821,6 +822,21 @@ fun TalonApp(
                 modifier = mod,
             )
 
+            // Sidebar settings drills out of Settings; both flags
+            // are true while the user is in Sidebar. Order this
+            // branch BEFORE `settingsOpen` so the deeper screen
+            // wins (mirrors App.kt's same fix).
+            sidebarSettingsOpen -> {
+                SidebarSettingsScreen(
+                    repo = app.repo,
+                    uiSettings = app.uiSettings,
+                    dailyDigestEnabled = app.dailyDigestSettings.state
+                        .collectAsState().value.enabled,
+                    onBack = { sidebarSettingsOpen = false },
+                    modifier = mod,
+                )
+            }
+
             settingsOpen -> {
                 // Observe via the app-level flows so a ship switch
                 // re-renders the panel with the new ship's preview.
@@ -874,17 +890,6 @@ fun TalonApp(
                     dailyDigestSettings = app.dailyDigestSettings,
                     onTestDigest = { app.dailyDigest.generateAndNotifyAsync("user_test") },
                     onOpenSidebarSettings = { sidebarSettingsOpen = true },
-                    modifier = mod,
-                )
-            }
-
-            sidebarSettingsOpen -> {
-                SidebarSettingsScreen(
-                    repo = app.repo,
-                    uiSettings = app.uiSettings,
-                    dailyDigestEnabled = app.dailyDigestSettings.state
-                        .collectAsState().value.enabled,
-                    onBack = { sidebarSettingsOpen = false },
                     modifier = mod,
                 )
             }
