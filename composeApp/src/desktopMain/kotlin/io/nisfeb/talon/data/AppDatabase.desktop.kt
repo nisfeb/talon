@@ -41,6 +41,7 @@ actual abstract class AppDatabase : RoomDatabase() {
     actual abstract fun watchwords(): WatchwordsDao
     actual abstract fun dailyDigests(): DailyDigestDao
     actual abstract fun messageMedia(): MessageMediaDao
+    actual abstract fun railItemPrefs(): RailItemPrefDao
 }
 
 /**

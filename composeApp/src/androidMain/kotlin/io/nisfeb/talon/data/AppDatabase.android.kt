@@ -29,6 +29,7 @@ actual abstract class AppDatabase : RoomDatabase() {
     actual abstract fun watchwords(): WatchwordsDao
     actual abstract fun dailyDigests(): DailyDigestDao
     actual abstract fun messageMedia(): MessageMediaDao
+    actual abstract fun railItemPrefs(): RailItemPrefDao
 }
 
 /**
@@ -50,7 +51,7 @@ fun createAppDatabase(context: Context, name: String): AppDatabase {
             MIGRATION_20_21, MIGRATION_21_22, MIGRATION_22_23,
             MIGRATION_23_24, MIGRATION_24_25, MIGRATION_25_26,
             MIGRATION_26_27, MIGRATION_27_28, MIGRATION_28_29,
-            MIGRATION_29_30,
+            MIGRATION_29_30, MIGRATION_30_31,
         )
         // dropAllTables = true preserves the pre-2.7 behaviour: when
         // Room can't find a migration path, drop everything and rebuild.
@@ -244,6 +245,19 @@ private val MIGRATION_29_30 = object : Migration(29, 30) {
         db.execSQL(
             "CREATE INDEX IF NOT EXISTS index_message_media_whom_category_sentMs " +
                 "ON message_media (whom, category, sentMs)"
+        )
+    }
+}
+
+private val MIGRATION_30_31 = object : Migration(30, 31) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS rail_item_prefs (
+                itemName TEXT NOT NULL PRIMARY KEY,
+                visible INTEGER NOT NULL
+            )
+            """.trimIndent()
         )
     }
 }

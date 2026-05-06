@@ -47,8 +47,9 @@ import androidx.room.RoomDatabaseConstructor
         WatchwordChatExcludeEntity::class,
         DailyDigestEntity::class,
         MessageMediaEntity::class,
+        RailItemPrefEntity::class,
     ],
-    version = 30,
+    version = 31,
     exportSchema = false,
 )
 @ConstructedBy(AppDatabaseConstructor::class)
@@ -69,6 +70,7 @@ expect abstract class AppDatabase : RoomDatabase {
     abstract fun watchwords(): WatchwordsDao
     abstract fun dailyDigests(): DailyDigestDao
     abstract fun messageMedia(): MessageMediaDao
+    abstract fun railItemPrefs(): RailItemPrefDao
 }
 
 /**
