@@ -13,9 +13,15 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AccountCircle
+import androidx.compose.material.icons.filled.Build
+import androidx.compose.material.icons.filled.DateRange
+import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -52,7 +58,8 @@ import androidx.compose.ui.unit.dp
 @Composable
 fun DesktopShell(
     activeRailTab: RailTab,
-    onSelectRailTab: (RailTab) -> Unit,
+    enabledItems: List<RailItem>,
+    onItemClicked: (RailItem) -> Unit,
     list: @Composable () -> Unit,
     detail: (@Composable () -> Unit)?,
     listFraction: Float,
@@ -70,7 +77,8 @@ fun DesktopShell(
         Row(modifier = Modifier.fillMaxSize()) {
             DesktopRail(
                 activeTab = activeRailTab,
-                onSelect = onSelectRailTab,
+                enabledItems = enabledItems,
+                onItemClicked = onItemClicked,
             )
             // weight(1f) so the scaffold fills the remaining width AFTER
             // the rail's 64dp. fillMaxSize() here used to draw the
@@ -110,7 +118,8 @@ fun DesktopShell(
 @Composable
 private fun DesktopRail(
     activeTab: RailTab,
-    onSelect: (RailTab) -> Unit,
+    enabledItems: List<RailItem>,
+    onItemClicked: (RailItem) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Surface(
@@ -122,11 +131,12 @@ private fun DesktopRail(
             horizontalAlignment = Alignment.CenterHorizontally,
             modifier = Modifier.fillMaxHeight().padding(vertical = 8.dp),
         ) {
-            for (tab in RailTab.entries) {
+            for (item in enabledItems) {
+                val isSelected = item.isPaneTab && item.toRailTab() == activeTab
                 RailIconButton(
-                    tab = tab,
-                    isSelected = tab == activeTab,
-                    onClick = { onSelect(tab) },
+                    item = item,
+                    isSelected = isSelected,
+                    onClick = { onItemClicked(item) },
                 )
                 Spacer(Modifier.height(4.dp))
             }
@@ -137,13 +147,13 @@ private fun DesktopRail(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun RailIconButton(
-    tab: RailTab,
+    item: RailItem,
     isSelected: Boolean,
     onClick: () -> Unit,
 ) {
     val tint = if (isSelected) MaterialTheme.colorScheme.primary
         else MaterialTheme.colorScheme.onSurfaceVariant
-    val label = railLabel(tab)
+    val label = railLabel(item)
     Row(verticalAlignment = Alignment.CenterVertically) {
         Box(
             modifier = Modifier
@@ -168,7 +178,7 @@ private fun RailIconButton(
         ) {
             IconButton(onClick = onClick) {
                 Icon(
-                    imageVector = railIcon(tab),
+                    imageVector = railIcon(item),
                     contentDescription = label,
                     tint = tint,
                 )
@@ -177,22 +187,33 @@ private fun RailIconButton(
     }
 }
 
-private fun railIcon(tab: RailTab): ImageVector = when (tab) {
-    // All four icons live in material-icons-core (always shipped) so
-    // they're outside the slim-task's keep-list and don't risk an R8
-    // strip on Android. (Android phones won't render the rail anyway,
-    // but the tablet build does.)
-    RailTab.Chats -> Icons.Filled.Home
-    RailTab.Statuses -> Icons.Filled.Person
-    RailTab.Bookmarks -> Icons.Filled.Star
-    RailTab.Activity -> Icons.Filled.Notifications
+private fun railIcon(item: RailItem): ImageVector = when (item) {
+    // All icons resolve to material-icons-core (verified by
+    // unzipping the core jar at plan-write time). Safe with the
+    // slim-jar strip; auditIconKeepList catches any drift.
+    RailItem.Chats -> Icons.Filled.Home
+    RailItem.Statuses -> Icons.Filled.Person
+    RailItem.Bookmarks -> Icons.Filled.Star
+    RailItem.Activity -> Icons.Filled.Notifications
+    RailItem.Profile -> Icons.Filled.AccountCircle
+    RailItem.Watchwords -> Icons.Filled.Search
+    RailItem.TodaysBrief -> Icons.Filled.DateRange
+    RailItem.Administration -> Icons.Filled.Build
+    RailItem.Invites -> Icons.Filled.Email
+    RailItem.Settings -> Icons.Filled.Settings
 }
 
-private fun railLabel(tab: RailTab): String = when (tab) {
-    RailTab.Chats -> "Chats"
-    RailTab.Statuses -> "Statuses"
-    RailTab.Bookmarks -> "Bookmarks"
-    RailTab.Activity -> "Activity"
+private fun railLabel(item: RailItem): String = when (item) {
+    RailItem.Chats -> "Chats"
+    RailItem.Statuses -> "Statuses"
+    RailItem.Bookmarks -> "Bookmarks"
+    RailItem.Activity -> "Activity"
+    RailItem.Profile -> "My profile"
+    RailItem.Watchwords -> "Watchwords"
+    RailItem.TodaysBrief -> "Today's brief"
+    RailItem.Administration -> "Administration"
+    RailItem.Invites -> "Invites"
+    RailItem.Settings -> "Settings"
 }
 
 private val RAIL_WIDTH = 64.dp

@@ -22,7 +22,8 @@ class DesktopShellTest {
             Box(Modifier.size(width = 600.dp, height = 800.dp)) {
                 DesktopShell(
                     activeRailTab = RailTab.Chats,
-                    onSelectRailTab = {},
+                    enabledItems = RailItem.entries.toList(),
+                    onItemClicked = {},
                     list = { Text("LIST") },
                     detail = { Text("DETAIL") },
                     listFraction = 0.30f,
@@ -40,12 +41,13 @@ class DesktopShellTest {
 
     @OptIn(ExperimentalTestApi::class)
     @Test
-    fun `wide window renders rail with all four icons`() = runComposeUiTest {
+    fun `wide window renders rail with all icons`() = runComposeUiTest {
         setContent {
             Box(Modifier.size(width = 1200.dp, height = 800.dp)) {
                 DesktopShell(
                     activeRailTab = RailTab.Chats,
-                    onSelectRailTab = {},
+                    enabledItems = RailItem.entries.toList(),
+                    onItemClicked = {},
                     list = { Text("LIST") },
                     detail = { Text("DETAIL") },
                     listFraction = 0.30f,
@@ -57,20 +59,22 @@ class DesktopShellTest {
         onNodeWithContentDescription("Statuses").assertExists()
         onNodeWithContentDescription("Bookmarks").assertExists()
         onNodeWithContentDescription("Activity").assertExists()
+        onNodeWithContentDescription("Settings").assertExists()
         onNodeWithText("LIST").assertExists()
         onNodeWithText("DETAIL").assertExists()
     }
 
     @OptIn(ExperimentalTestApi::class)
     @Test
-    fun `tapping a rail icon fires onSelectRailTab with the tapped tab`() =
+    fun `tapping a rail icon fires onItemClicked with the tapped item`() =
         runComposeUiTest {
-            var lastSelected: RailTab? = null
+            var lastClicked: RailItem? = null
             setContent {
                 Box(Modifier.size(width = 1200.dp, height = 800.dp)) {
                     DesktopShell(
                         activeRailTab = RailTab.Chats,
-                        onSelectRailTab = { lastSelected = it },
+                        enabledItems = RailItem.entries.toList(),
+                        onItemClicked = { lastClicked = it },
                         list = { Text("LIST") },
                         detail = null,
                         listFraction = 0.30f,
@@ -79,7 +83,7 @@ class DesktopShellTest {
                 }
             }
             onNodeWithContentDescription("Bookmarks").performClick()
-            assertEquals(RailTab.Bookmarks, lastSelected)
+            assertEquals(RailItem.Bookmarks, lastClicked)
         }
 
     @OptIn(ExperimentalTestApi::class)
@@ -93,7 +97,8 @@ class DesktopShellTest {
                 Box(Modifier.size(width = 1200.dp, height = 800.dp)) {
                     DesktopShell(
                         activeRailTab = RailTab.Chats,
-                        onSelectRailTab = {},
+                        enabledItems = RailItem.entries.toList(),
+                        onItemClicked = {},
                         list = { Text("LIST") },
                         detail = { Text("DETAIL") },
                         listFraction = 0.30f,
@@ -105,4 +110,69 @@ class DesktopShellTest {
             onNodeWithText("LIST").assertExists()
             onNodeWithText("DETAIL").assertExists()
         }
+
+    @OptIn(ExperimentalTestApi::class)
+    @Test
+    fun `rail renders only enabled items`() = runComposeUiTest {
+        setContent {
+            Box(Modifier.size(width = 1200.dp, height = 800.dp)) {
+                DesktopShell(
+                    activeRailTab = RailTab.Chats,
+                    enabledItems = listOf(RailItem.Chats, RailItem.Bookmarks),
+                    onItemClicked = {},
+                    list = { Text("LIST") },
+                    detail = { Text("DETAIL") },
+                    listFraction = 0.30f,
+                    onListFractionChange = {},
+                )
+            }
+        }
+        onNodeWithContentDescription("Chats").assertExists()
+        onNodeWithContentDescription("Bookmarks").assertExists()
+        onNodeWithContentDescription("Statuses").assertDoesNotExist()
+        onNodeWithContentDescription("Activity").assertDoesNotExist()
+        onNodeWithContentDescription("Settings").assertDoesNotExist()
+    }
+
+    @OptIn(ExperimentalTestApi::class)
+    @Test
+    fun `clicking a modal item fires onItemClicked with the right enum`() = runComposeUiTest {
+        var clicked: RailItem? = null
+        setContent {
+            Box(Modifier.size(width = 1200.dp, height = 800.dp)) {
+                DesktopShell(
+                    activeRailTab = RailTab.Chats,
+                    enabledItems = listOf(RailItem.Chats, RailItem.Settings),
+                    onItemClicked = { clicked = it },
+                    list = { Text("LIST") },
+                    detail = { Text("DETAIL") },
+                    listFraction = 0.30f,
+                    onListFractionChange = {},
+                )
+            }
+        }
+        onNodeWithContentDescription("Settings").performClick()
+        assertEquals(RailItem.Settings, clicked)
+    }
+
+    @OptIn(ExperimentalTestApi::class)
+    @Test
+    fun `clicking a pane-tab item fires onItemClicked with the right enum`() = runComposeUiTest {
+        var clicked: RailItem? = null
+        setContent {
+            Box(Modifier.size(width = 1200.dp, height = 800.dp)) {
+                DesktopShell(
+                    activeRailTab = RailTab.Chats,
+                    enabledItems = RailItem.entries.toList(),
+                    onItemClicked = { clicked = it },
+                    list = { Text("LIST") },
+                    detail = { Text("DETAIL") },
+                    listFraction = 0.30f,
+                    onListFractionChange = {},
+                )
+            }
+        }
+        onNodeWithContentDescription("Bookmarks").performClick()
+        assertEquals(RailItem.Bookmarks, clicked)
+    }
 }

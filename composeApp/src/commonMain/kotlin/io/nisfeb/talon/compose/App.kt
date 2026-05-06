@@ -32,6 +32,7 @@ import io.nisfeb.talon.ui.InMemoryUiSettings
 import io.nisfeb.talon.ui.DesktopShell
 import io.nisfeb.talon.ui.ExpandedThreshold
 import io.nisfeb.talon.ui.PlatformBackHandler
+import io.nisfeb.talon.ui.RailItem
 import io.nisfeb.talon.ui.RailTab
 import io.nisfeb.talon.ui.RightPaneContent
 import io.nisfeb.talon.ui.RightPaneState
@@ -1137,6 +1138,33 @@ fun App(
                         }
                         val listFraction by uiSettings.chatPaneListFraction.collectAsState()
                         val activeRailTab by uiSettings.activeRailTab.collectAsState()
+                        val railVisibility by uiSettings.railVisibility.collectAsState()
+                        val dailyDigestEnabled = dailyDigestSettings
+                            ?.state
+                            ?.collectAsState()
+                            ?.value
+                            ?.enabled == true
+                        val enabledItems: List<RailItem> = remember(railVisibility, dailyDigestEnabled) {
+                            RailItem.entries.filter { item ->
+                                val visible = railVisibility[item] ?: true
+                                val gateOk = item != RailItem.TodaysBrief || dailyDigestEnabled
+                                visible && gateOk
+                            }
+                        }
+                        val onRailItemClicked: (RailItem) -> Unit = { item ->
+                            item.toRailTab()?.let { tab ->
+                                uiSettings.setActiveRailTab(tab)
+                            } ?: when (item) {
+                                RailItem.Profile -> showSelfProfile = true
+                                RailItem.Watchwords -> showWatchwords = true
+                                RailItem.TodaysBrief -> showDailyDigest = true
+                                RailItem.Administration -> showGroupAdminList = true
+                                RailItem.Invites -> showInvites = true
+                                RailItem.Settings -> showSettings = true
+                                // pane tabs handled above; never reaches here
+                                RailItem.Chats, RailItem.Statuses, RailItem.Bookmarks, RailItem.Activity -> Unit
+                            }
+                        }
                         val railListSlot: @Composable () -> Unit = {
                             when (activeRailTab) {
                                 RailTab.Chats -> {
@@ -1178,12 +1206,7 @@ fun App(
                                         onOpenActivity = onOpenActivity,
                                         onOpenWatchwords = { showWatchwords = true },
                                         onOpenDigest = { showDailyDigest = true },
-                                        digestEnabled = dailyDigestSettings
-                                            ?.state
-                                            ?.collectAsState()
-                                            ?.value
-                                            ?.enabled
-                                            ?: false,
+                                        digestEnabled = dailyDigestEnabled,
                                         onOpenAdministration = { showGroupAdminList = true },
                                         onOpenSettings = { showSettings = true },
                                         activeShip = ship,
@@ -1279,7 +1302,8 @@ fun App(
                         }
                         DesktopShell(
                             activeRailTab = activeRailTab,
-                            onSelectRailTab = { uiSettings.setActiveRailTab(it) },
+                            enabledItems = enabledItems,
+                            onItemClicked = onRailItemClicked,
                             list = railListSlot,
                             detail = detailSlot,
                             listFraction = listFraction,
