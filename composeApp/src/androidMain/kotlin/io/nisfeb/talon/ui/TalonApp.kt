@@ -161,6 +161,9 @@ fun TalonApp(
     var searchOpen by remember { mutableStateOf(false) }
     var newDmOpen by remember { mutableStateOf(false) }
     var viewerImageUrl by remember { mutableStateOf<String?>(null) }
+    var viewerImageList by remember {
+        mutableStateOf<io.nisfeb.talon.ui.screens.ViewerImageList?>(null)
+    }
     var editingProfile by remember { mutableStateOf(false) }
     var statusFeedOpen by remember { mutableStateOf(false) }
     var bookmarksOpen by remember { mutableStateOf(false) }
@@ -567,7 +570,10 @@ fun TalonApp(
         BackHandler(enabled = openThread == null && openWhom != null) { openWhom = null }
         // Registered last so it wins over the chat handler when an
         // image is opened from inside a chat.
-        BackHandler(enabled = viewerImageUrl != null) { viewerImageUrl = null }
+        BackHandler(enabled = viewerImageList != null) { viewerImageList = null }
+        BackHandler(enabled = viewerImageUrl != null && viewerImageList == null) {
+            viewerImageUrl = null
+        }
 
         // Trace every screen swap so we can correlate logcat with
         // visual artifacts. Names the branch the when-block will
@@ -693,8 +699,15 @@ fun TalonApp(
                 },
             )
 
+            viewerImageList != null -> ImageViewerScreen(
+                urls = viewerImageList!!.urls,
+                initialIndex = viewerImageList!!.initialIndex,
+                onClose = { viewerImageList = null },
+                modifier = mod,
+            )
+
             viewerImageUrl != null -> ImageViewerScreen(
-                url = viewerImageUrl!!,
+                urls = listOf(viewerImageUrl!!),
                 onClose = { viewerImageUrl = null },
                 modifier = mod,
             )
@@ -879,7 +892,10 @@ fun TalonApp(
                 whom = groupInfoOpenFor!!,
                 category = groupInfoDrilldown!!,
                 onBack = { closeDrilldownAction() },
-                onOpenImage = { url -> viewerImageUrl = url },
+                onOpenImageList = { urls, idx ->
+                    viewerImageList = io.nisfeb.talon.ui.screens
+                        .ViewerImageList(urls, idx)
+                },
                 modifier = mod,
             )
 

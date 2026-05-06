@@ -28,7 +28,7 @@ fun MediaListScreen(
     whom: String,
     category: MediaCategory,
     onBack: () -> Unit,
-    onOpenImage: (url: String) -> Unit,
+    onOpenImageList: (urls: List<String>, initialIndex: Int) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Column(modifier = modifier.windowInsetsPadding(WindowInsets.safeDrawing)) {
@@ -50,7 +50,7 @@ fun MediaListScreen(
             db = db,
             whom = whom,
             category = category,
-            onOpenImage = onOpenImage,
+            onOpenImageList = onOpenImageList,
         )
     }
 }

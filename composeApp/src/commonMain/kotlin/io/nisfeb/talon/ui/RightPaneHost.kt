@@ -47,6 +47,7 @@ fun RightPaneHost(
     onLeaveCategoryDrilldown: () -> Unit,
     onOpenConversation: (whom: String) -> Unit,
     onOpenImage: (url: String) -> Unit,
+    onOpenImageList: (urls: List<String>, initialIndex: Int) -> Unit,
     onOpenMembers: (whom: String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -96,7 +97,7 @@ fun RightPaneHost(
                     db = db,
                     whom = content.whom,
                     category = content.category,
-                    onOpenImage = onOpenImage,
+                    onOpenImageList = onOpenImageList,
                 )
             }
         }

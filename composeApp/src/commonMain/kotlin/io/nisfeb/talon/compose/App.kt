@@ -182,6 +182,14 @@ fun App(
     var showSettings by remember { mutableStateOf(false) }
     var openChat by remember { mutableStateOf<String?>(null) }
     var viewerImageUrl by remember { mutableStateOf<String?>(null) }
+    // Multi-image viewer state — set by the photo / gif drilldown
+    // (MediaListPane) so the viewer's prev/next + arrow-key
+    // navigation can step through the list. Single-image flows (chat
+    // row tap, gallery, notebook) keep using viewerImageUrl above and
+    // wrap into a singleton list at the call site.
+    var viewerImageList by remember {
+        mutableStateOf<io.nisfeb.talon.ui.screens.ViewerImageList?>(null)
+    }
     var openThreadParent by remember { mutableStateOf<String?>(null) }
     var openThreadReplyAnchor by remember { mutableStateOf<String?>(null) }
     var groupInfoOpenFor by remember { mutableStateOf<String?>(null) }
@@ -324,7 +332,10 @@ fun App(
     PlatformBackHandler(enabled = groupInfoOpenFor != null && groupInfoDrilldown == null) {
         groupInfoOpenFor = null
     }
-    PlatformBackHandler(enabled = viewerImageUrl != null) {
+    PlatformBackHandler(enabled = viewerImageList != null) {
+        viewerImageList = null
+    }
+    PlatformBackHandler(enabled = viewerImageUrl != null && viewerImageList == null) {
         viewerImageUrl = null
     }
     PlatformBackHandler(enabled = showSelfProfile) {
@@ -636,6 +647,7 @@ fun App(
                                     openChat = null
                                     switchShipAction()
                                     viewerImageUrl = null
+                                    viewerImageList = null
                                     showSelfProfile = false
                                     showSettings = false
                                     sessionStore.setActive(targetShip)
@@ -687,6 +699,7 @@ fun App(
                     openChat = null
                     switchShipAction()
                     viewerImageUrl = null
+                    viewerImageList = null
                     showSelfProfile = false
                     showSettings = false
                     sessionStore.setActive(newShip)
@@ -696,6 +709,7 @@ fun App(
                     openChat = null
                     switchShipAction()
                     viewerImageUrl = null
+                    viewerImageList = null
                     showSelfProfile = false
                     showSettings = false
                     loggedInShip = null
@@ -919,8 +933,13 @@ fun App(
                             openChat = nest
                         },
                     )
+                    viewerImageList != null -> ImageViewerScreen(
+                        urls = viewerImageList!!.urls,
+                        initialIndex = viewerImageList!!.initialIndex,
+                        onClose = { viewerImageList = null },
+                    )
                     viewerImageUrl != null -> ImageViewerScreen(
-                        url = viewerImageUrl!!,
+                        urls = listOf(viewerImageUrl!!),
                         onClose = { viewerImageUrl = null },
                     )
                     // Compact-only group-info back stack. Order matters:
@@ -935,7 +954,10 @@ fun App(
                             whom = groupInfoOpenFor!!,
                             category = groupInfoDrilldown!!,
                             onBack = { closeDrilldownAction() },
-                            onOpenImage = { url -> viewerImageUrl = url },
+                            onOpenImageList = { urls, idx ->
+                                viewerImageList = io.nisfeb.talon.ui.screens
+                                    .ViewerImageList(urls, idx)
+                            },
                         )
                     }
                     groupInfoOpenFor != null && !expanded -> {
@@ -1132,6 +1154,7 @@ fun App(
                                             openChat = null
                                             switchShipAction()
                                             viewerImageUrl = null
+                                            viewerImageList = null
                                             showSelfProfile = false
                                             showSettings = false
                                             loggedInShip = null
@@ -1183,6 +1206,7 @@ fun App(
                                             openChat = null
                                             switchShipAction()
                                             viewerImageUrl = null
+                                            viewerImageList = null
                                             showSelfProfile = false
                                             showSettings = false
                                             sessionStore.setActive(newShip)
@@ -1195,6 +1219,7 @@ fun App(
                                             openChat = null
                                             switchShipAction()
                                             viewerImageUrl = null
+                                            viewerImageList = null
                                             showSelfProfile = false
                                             showSettings = false
                                             loggedInShip = null
@@ -1262,6 +1287,10 @@ fun App(
                                             openChat = other
                                         },
                                         onOpenImage = { url -> viewerImageUrl = url },
+                                        onOpenImageList = { urls, idx ->
+                                            viewerImageList = io.nisfeb.talon.ui.screens
+                                                .ViewerImageList(urls, idx)
+                                        },
                                         onOpenMembers = { whom ->
                                             // Resolve channel-nest → group-flag
                                             // because GroupAdminScreen takes a

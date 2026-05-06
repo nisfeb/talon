@@ -10,16 +10,22 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Snackbar
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -27,8 +33,16 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.focusable
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
@@ -38,15 +52,41 @@ import io.nisfeb.talon.ui.SaveResult
 import kotlinx.coroutines.launch
 
 /**
- * Fullscreen image viewer with pinch-to-zoom + pan. Single image for
- * v1; swiping between images in a conversation can come later.
+ * State holder for the multi-image viewer mode (the photo / gif
+ * drilldown in GroupInfoPane). Single-image callers don't need this —
+ * they call [ImageViewerScreen] directly with `urls = listOf(theUrl)`.
+ */
+data class ViewerImageList(val urls: List<String>, val initialIndex: Int = 0)
+
+/**
+ * Fullscreen image viewer with pinch-to-zoom + pan, plus prev/next
+ * navigation when called with multiple [urls]. Arrow keys (Left /
+ * Right) and the on-screen prev/next buttons step between images;
+ * the buttons hide when [urls] has a single entry.
+ *
+ * Single-image callers (chat row tap, notebook post, gallery post)
+ * pass `urls = listOf(theUrl)` and skip [initialIndex].
  */
 @Composable
 fun ImageViewerScreen(
-    url: String,
+    urls: List<String>,
     onClose: () -> Unit,
     modifier: Modifier = Modifier,
+    initialIndex: Int = 0,
 ) {
+    if (urls.isEmpty()) {
+        // Defensive: an empty list with no URL would render a black
+        // void with no way out. Treat as "close immediately".
+        LaunchedEffect(Unit) { onClose() }
+        return
+    }
+    var index by remember(urls) {
+        mutableStateOf(initialIndex.coerceIn(0, urls.size - 1))
+    }
+    val url = urls[index]
+    // Reset zoom + pan whenever we step to a different image so the
+    // next image starts unzoomed regardless of how the previous was
+    // viewed.
     var scale by remember(url) { mutableStateOf(1f) }
     var offsetX by remember(url) { mutableStateOf(0f) }
     var offsetY by remember(url) { mutableStateOf(0f) }
@@ -68,10 +108,32 @@ fun ImageViewerScreen(
     val scope = rememberCoroutineScope()
     var saving by remember(url) { mutableStateOf(false) }
 
+    val multi = urls.size > 1
+    val hasPrev = multi && index > 0
+    val hasNext = multi && index < urls.size - 1
+    fun goPrev() { if (hasPrev) index -= 1 }
+    fun goNext() { if (hasNext) index += 1 }
+
+    // Focus requester so the Box receives key events on desktop. The
+    // requestFocus() in LaunchedEffect runs after first composition.
+    val focusRequester = remember { FocusRequester() }
+    LaunchedEffect(Unit) { runCatching { focusRequester.requestFocus() } }
+
     Box(
         modifier = modifier
             .fillMaxSize()
             .background(Color.Black)
+            .focusRequester(focusRequester)
+            .focusable()
+            .onKeyEvent { ev ->
+                if (ev.type != KeyEventType.KeyDown) return@onKeyEvent false
+                when (ev.key) {
+                    Key.DirectionLeft -> { goPrev(); true }
+                    Key.DirectionRight -> { goNext(); true }
+                    Key.Escape -> { onClose(); true }
+                    else -> false
+                }
+            }
             .pointerInput(url) {
                 detectTapGestures(
                     onDoubleTap = {
@@ -99,13 +161,42 @@ fun ImageViewerScreen(
                 .transformable(state = transform),
         )
 
-        // Top action row: close on the left, download on the right.
-        // The download button hides when the active downloader is
-        // NoopImageDownloader so platforms without a save backend
-        // wired don't surface a button that won't do anything. We
-        // detect the noop by sniffing a probe save call's
-        // SaveResult.Unsupported — but that requires an actual call,
-        // so instead the renderer compares against the singleton.
+        // Prev / next buttons. Hidden when only a single image is
+        // open. Disabled-but-visible at the ends so the user gets
+        // feedback that they're at the boundary.
+        if (multi) {
+            IconButton(
+                onClick = ::goPrev,
+                enabled = hasPrev,
+                modifier = Modifier
+                    .align(Alignment.CenterStart)
+                    .padding(start = 8.dp)
+                    .size(48.dp),
+                colors = IconButtonDefaults.iconButtonColors(
+                    contentColor = Color.White,
+                    disabledContentColor = Color.White.copy(alpha = 0.3f),
+                ),
+            ) {
+                Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, contentDescription = "Previous image")
+            }
+            IconButton(
+                onClick = ::goNext,
+                enabled = hasNext,
+                modifier = Modifier
+                    .align(Alignment.CenterEnd)
+                    .padding(end = 8.dp)
+                    .size(48.dp),
+                colors = IconButtonDefaults.iconButtonColors(
+                    contentColor = Color.White,
+                    disabledContentColor = Color.White.copy(alpha = 0.3f),
+                ),
+            ) {
+                Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = "Next image")
+            }
+        }
+
+        // Top action row: close left, "n of N" centre when multi,
+        // download right.
         Row(
             modifier = Modifier
                 .align(Alignment.TopCenter)
@@ -121,6 +212,13 @@ fun ImageViewerScreen(
                 ),
             ) {
                 Icon(Icons.Filled.Close, contentDescription = "Close")
+            }
+            if (multi) {
+                Text(
+                    "${index + 1} / ${urls.size}",
+                    color = Color.White,
+                    style = MaterialTheme.typography.labelMedium,
+                )
             }
             if (downloader !== io.nisfeb.talon.ui.NoopImageDownloader) {
                 IconButton(
@@ -145,6 +243,11 @@ fun ImageViewerScreen(
                 ) {
                     Icon(Icons.Filled.Download, contentDescription = "Download")
                 }
+            } else {
+                // Spacer so the n-of-N text stays centred even when
+                // download is hidden — matches the original
+                // SpaceBetween-with-three-children layout.
+                androidx.compose.foundation.layout.Spacer(Modifier.size(48.dp))
             }
         }
 
