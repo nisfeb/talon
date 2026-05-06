@@ -164,8 +164,8 @@ tasks.withType<Test>().configureEach {
 // version inside derivePackageVersion and silently drifted — every
 // release between 0.7.14 and 0.7.23 shipped with stale .dmg/.msi/.deb
 // filenames because nobody updated both literals.
-val talonVersionCode = 71
-val talonVersionName = "0.10.0-rc4"
+val talonVersionCode = 72
+val talonVersionName = "0.10.0-rc5"
 
 android {
     namespace = "io.nisfeb.talon"
@@ -505,6 +505,7 @@ val slimReleaseDistributable = tasks.register("slimReleaseDistributable") {
             "androidx/compose/material/icons/filled/MicKt.class",
             "androidx/compose/material/icons/filled/NotificationsOffKt.class",
             "androidx/compose/material/icons/filled/PauseKt.class",
+            "androidx/compose/material/icons/filled/PeopleKt.class",
             "androidx/compose/material/icons/filled/PushPinKt.class",
             "androidx/compose/material/icons/filled/ScheduleKt.class",
             "androidx/compose/material/icons/filled/StopKt.class",
