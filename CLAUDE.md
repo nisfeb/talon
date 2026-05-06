@@ -106,6 +106,23 @@ that's the gap to be aware of when shipping Android-specific changes.
   Gradle task, which strips non-host native libs and the unused
   Material Icons Extended classes)
 
+## Releasing — let CI ship, don't `gh release create`
+
+The full ship workflow is bump version → commit → tag → push tag.
+That triggers `.github/workflows/release.yml`, which signs APKs with
+the real release keystore, builds the desktop matrix, generates
+`latest.json`, and publishes the GitHub Release. Local builds are
+debug-signed because `RELEASE_KEYSTORE_PROPS` isn't set in dev envs;
+uploading them via `gh release create` puts mismatched-cert artifacts
+on the same release and breaks the in-app upgrade path with a generic
+"App not installed" error. rc27/28/29 all shipped this way before the
+mistake was caught — see RELEASE.md "CI publishes the release" for
+the post-mortem.
+
+Local `assembleRelease` / `build-appimage.sh` are for smoke testing
+the build still works before pushing the tag. Do not upload their
+output.
+
 ## Notification path (desktop)
 
 `SystemNotifier` (desktopMain) shells out to `notify-send` → `gdbus`

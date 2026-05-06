@@ -6,6 +6,36 @@
   Each tagged push runs the CI matrix in `.github/workflows/release.yml`
   and publishes Android `.apk`, Linux `.deb` + `.AppImage`, macOS
   `.dmg`, and Windows `.msi` artifacts.
+
+## CI publishes the release. Do not upload artifacts manually.
+
+The full ship workflow is **bump version → commit → tag → push tag**.
+That triggers `.github/workflows/release.yml`, which:
+
+- Builds Android APKs **release-signed** with the keystore in
+  `secrets.RELEASE_KEYSTORE_BASE64` and uploads them as
+  `talon-VERSION.apk` (universal) plus per-ABI splits.
+- Builds the desktop matrix (`.deb` / `.dmg` / `.msi` / `.AppImage`).
+- Generates `latest.json` for the in-app updater.
+- Creates the GitHub Release and attaches everything via
+  `softprops/action-gh-release`.
+
+**Never run `gh release create ... .apk ... .AppImage` from your
+laptop.** A locally-built APK is signed with your *debug* keystore
+(no `RELEASE_KEYSTORE_PROPS` env var on a dev machine), so uploading
+it alongside CI's release-signed APK gives the release two sets of
+artifacts with mismatched signing certs. Users who installed the
+debug-signed copy can never upgrade to a release-signed one without
+uninstalling first — the OS rejects the install with a generic "App
+not installed" error. rc27/rc28/rc29 all shipped this way; the
+post-mortem cleanup deleted the debug-signed duplicates.
+
+If a tag is pushed but CI didn't trigger (e.g. a typo'd tag name), fix
+the tag and re-push. Do not paper over with a manual upload.
+
+The `dist/Talon-x86_64.AppImage` you build locally is for **smoke
+testing**, not for shipping. CI runs `scripts/build-appimage.sh` itself
+on the `ubuntu-latest` runner alongside the `.deb` job.
 - Android APK is signed with a real release keystore (kept outside
   the repo, decoded on the runner from the `RELEASE_KEYSTORE_BASE64`
   secret). Once you've installed a release-signed build, future
@@ -201,10 +231,17 @@ Run through this every tag. It's not automated — don't skip it.
 - [ ] Compact (mobile / narrow desktop): kebab shows every item regardless of rail visibility.
 - [ ] Mobile-only path: open Sidebar settings → toggle items → switch to desktop later → rail reflects the mobile-set visibility.
 
-**Build artifacts:**
-- [ ] `./gradlew :composeApp:assembleRelease` produces signed APKs
-  under `composeApp/build/outputs/apk/release/`. With ABI splits
-  enabled, you get four artifacts:
+**Build artifacts (local smoke tests — CI ships the real ones):**
+
+These commands build the same artifacts CI builds, but with your
+*debug* keystore (no `RELEASE_KEYSTORE_PROPS` env var locally). Use
+them to verify a tagged build will produce installable output before
+pushing the tag. Don't upload them anywhere — see "CI publishes the
+release" above.
+
+- [ ] `./gradlew :composeApp:assembleRelease` produces APKs under
+  `composeApp/build/outputs/apk/release/`. With ABI splits enabled,
+  you get four artifacts:
   `composeApp-arm64-v8a-release.apk` (~25 MB),
   `composeApp-armeabi-v7a-release.apk` (~20 MB),
   `composeApp-x86_64-release.apk` (~18 MB), and
@@ -224,6 +261,11 @@ Run through this every tag. It's not automated — don't skip it.
 - [ ] `./gradlew :composeApp:packageReleaseDeb` (Linux),
   `packageReleaseDmg` (macOS), `packageReleaseMsi` (Windows) — each
   runs only on its host OS via CI matrix.
+
+After the smoke is green, push the tag and let CI publish. Verify the
+release page lists exactly the CI artifacts (no `composeApp-*-release.apk`
+filenames — those are the gradle defaults, which CI renames to
+`talon-VERSION-ABI.apk`).
 
 **Legal:**
 - [ ] Privacy policy URL reachable.
