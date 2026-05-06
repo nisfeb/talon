@@ -225,7 +225,12 @@ fun ThreadList(
     val onReactionForMessage: (MessageEntity, List<ReactionEntity>, String) -> Unit =
         remember(ourPatp, whom, repo) {
             { m, rs, emoji ->
-                val mineSame = rs.any { it.author == ourPatp && it.emoji == emoji }
+                // Compare on glyph: outbound reactions are normalized to
+                // unicode in TlonChatRepo.react(), so the DB row for our
+                // own reaction is a glyph even when the picker hands us
+                // a shortcode.
+                val ours = ReactionPalette.display(emoji)
+                val mineSame = rs.any { it.author == ourPatp && it.emoji == ours }
                 scope.launch {
                     runCatching {
                         if (mineSame) repo.unreact(whom, m.id)
