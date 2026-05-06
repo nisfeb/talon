@@ -47,5 +47,19 @@ fun railItemOrNull(name: String?): RailItem? {
  * Read-site helper: default-visible if not in the map. The Map is
  * sparse — only contains rows for items the user has explicitly
  * hidden.
+ *
+ * [RailItem.Chats] is enforced always-visible regardless of the
+ * map's state. The Settings sub-page already gates the toggle for
+ * Chats (renders an "On" badge instead of a Switch), but the
+ * underlying state isn't otherwise prevented from holding
+ * `Chats=false` — direct DB tampering, a forward-compat scenario
+ * where another client renamed Chats and pushed `Chats=false`,
+ * or a bug elsewhere could otherwise strand the user with no rail
+ * icon for the chat list and no kebab "Chats" entry to fall back
+ * to. Forcing the invariant here means both the rail filter and
+ * the Settings UI can never show Chats as hidden.
  */
-fun Map<RailItem, Boolean>.isVisible(item: RailItem): Boolean = this[item] ?: true
+fun Map<RailItem, Boolean>.isVisible(item: RailItem): Boolean {
+    if (item == RailItem.Chats) return true
+    return this[item] ?: true
+}

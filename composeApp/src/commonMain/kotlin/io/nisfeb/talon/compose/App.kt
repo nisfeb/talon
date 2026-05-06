@@ -34,6 +34,7 @@ import io.nisfeb.talon.ui.ExpandedThreshold
 import io.nisfeb.talon.ui.PlatformBackHandler
 import io.nisfeb.talon.ui.RailItem
 import io.nisfeb.talon.ui.RailTab
+import io.nisfeb.talon.ui.isVisible
 import io.nisfeb.talon.ui.RightPaneContent
 import io.nisfeb.talon.ui.RightPaneState
 import io.nisfeb.talon.ui.RightPaneStateReducer
@@ -721,6 +722,7 @@ fun App(
                     viewerImageList = null
                     showSelfProfile = false
                     showSettings = false
+                    showSidebarSettings = false
                     sessionStore.setActive(newShip)
                     loggedInShip = newShip
                 }
@@ -731,6 +733,7 @@ fun App(
                     viewerImageList = null
                     showSelfProfile = false
                     showSettings = false
+                    showSidebarSettings = false
                     loggedInShip = null
                 }
                 // Modal / full-screen branches short-circuit first so they
@@ -1166,7 +1169,10 @@ fun App(
                             ?.enabled == true
                         val enabledItems: List<RailItem> = remember(railVisibility, dailyDigestEnabled) {
                             RailItem.entries.filter { item ->
-                                val visible = railVisibility[item] ?: true
+                                // Map.isVisible enforces the Chats always-on invariant
+                                // (regardless of map state) and falls back to true
+                                // for absent entries.
+                                val visible = railVisibility.isVisible(item)
                                 val gateOk = item != RailItem.TodaysBrief || dailyDigestEnabled
                                 visible && gateOk
                             }
@@ -1230,6 +1236,7 @@ fun App(
                                             viewerImageList = null
                                             showSelfProfile = false
                                             showSettings = false
+                                            showSidebarSettings = false
                                             loggedInShip = null
                                         },
                                         onOpenSelfProfile = { showSelfProfile = true },
@@ -1278,6 +1285,7 @@ fun App(
                                             viewerImageList = null
                                             showSelfProfile = false
                                             showSettings = false
+                                            showSidebarSettings = false
                                             sessionStore.setActive(newShip)
                                             loggedInShip = newShip
                                         },
@@ -1291,6 +1299,7 @@ fun App(
                                             viewerImageList = null
                                             showSelfProfile = false
                                             showSettings = false
+                                            showSidebarSettings = false
                                             loggedInShip = null
                                         },
                                         onOpenShipSwitcher = {
