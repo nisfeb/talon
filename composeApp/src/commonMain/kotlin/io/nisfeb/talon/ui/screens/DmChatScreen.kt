@@ -338,9 +338,19 @@ fun DmChatScreen(
     }
 
     var forceBottomTick by remember(whom) { mutableStateOf(0) }
+    // When the user sends, doSend increments forceBottomTick. The
+    // first scroll happens against the rows we have NOW (still the
+    // pre-send list); the optimistic upsert lands a moment later and
+    // prepends a new row at index 0, which under reverseLayout shifts
+    // the visible position and leaves the user's own message just
+    // below the fold. Capture the current row count at tick time and
+    // re-snap once rows actually grows past it — that's the snapshot
+    // pendingSendBaselineSize tracks.
+    var pendingSendBaselineSize by remember(whom) { mutableStateOf<Int?>(null) }
     LaunchedEffect(forceBottomTick) {
         if (forceBottomTick > 0 && rows.isNotEmpty()) {
             listState.scrollToItem(0)
+            pendingSendBaselineSize = rows.size
         }
     }
 
@@ -367,6 +377,18 @@ fun DmChatScreen(
             newestId != null && newestId != lastNewestId && rows.size > lastSize
         lastNewestId = newestId
         lastSize = rows.size
+        // Self-send catch-up: if the user just sent (forceBottomTick
+        // captured a baseline) and rows has now grown past that
+        // snapshot, the optimistic upsert has landed — snap to the
+        // new bottom unconditionally, regardless of where the user
+        // happened to be. They explicitly hit send; their message
+        // belongs in view.
+        val baseline = pendingSendBaselineSize
+        if (baseline != null && rows.size > baseline) {
+            listState.scrollToItem(0)
+            pendingSendBaselineSize = null
+            return@LaunchedEffect
+        }
         if (gotNewerHead && listState.firstVisibleItemIndex <= 12) {
             listState.scrollToItem(0)
         }
