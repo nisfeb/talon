@@ -1,6 +1,7 @@
 package io.nisfeb.talon.data
 
 import androidx.room.Entity
+import androidx.compose.runtime.Immutable
 import androidx.room.PrimaryKey
 
 /**
@@ -10,6 +11,7 @@ import androidx.room.PrimaryKey
  * sparse the same way — a "show on rail" toggle deletes the row
  * + the `%settings` entry; "hide" upserts both.
  */
+@Immutable
 @Entity(tableName = "rail_item_prefs")
 data class RailItemPrefEntity(
     @PrimaryKey val itemName: String,   // RailItem.name

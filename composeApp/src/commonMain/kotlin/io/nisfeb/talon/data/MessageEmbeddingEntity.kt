@@ -1,6 +1,7 @@
 package io.nisfeb.talon.data
 
 import androidx.room.Entity
+import androidx.compose.runtime.Immutable
 
 /**
  * On-device sentence embedding for a single message, used by semantic
@@ -13,6 +14,7 @@ import androidx.room.Entity
  * row is hard-deleted; ride-along soft-deletes leave the embedding in
  * place since we still want the row searchable from history.
  */
+@Immutable
 @Entity(tableName = "message_embeddings", primaryKeys = ["whom", "id"])
 data class MessageEmbeddingEntity(
     val whom: String,

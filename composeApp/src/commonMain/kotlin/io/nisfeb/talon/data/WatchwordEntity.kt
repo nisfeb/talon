@@ -1,10 +1,12 @@
 package io.nisfeb.talon.data
 
 import androidx.room.Entity
+import androidx.compose.runtime.Immutable
 import androidx.room.Index
 import androidx.room.PrimaryKey
 
 /** One user-defined watchword term. */
+@Immutable
 @Entity(
     tableName = "watchwords",
     indices = [Index(value = ["term"], unique = true)],
@@ -28,6 +30,7 @@ data class WatchwordEntity(
  * intentional, since the per-term feed view shows each term's hits
  * independently.
  */
+@Immutable
 @Entity(
     tableName = "watchword_hits",
     primaryKeys = ["term", "whom", "postId"],
@@ -46,6 +49,7 @@ data class WatchwordHitEntity(
 )
 
 /** Chat that should never produce watchword hits, regardless of which terms match. */
+@Immutable
 @Entity(tableName = "watchword_chat_excludes")
 data class WatchwordChatExcludeEntity(
     @PrimaryKey val whom: String,

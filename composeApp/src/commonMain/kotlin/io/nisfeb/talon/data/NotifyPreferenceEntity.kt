@@ -1,6 +1,7 @@
 package io.nisfeb.talon.data
 
 import androidx.room.Entity
+import androidx.compose.runtime.Immutable
 import androidx.room.PrimaryKey
 
 /**
@@ -14,6 +15,7 @@ import androidx.room.PrimaryKey
  *   "mentions" — only when we're @-mentioned in the content
  *   "none"     — never notify (messages still sync)
  */
+@Immutable
 @Entity(tableName = "notify_preferences")
 data class NotifyPreferenceEntity(
     @PrimaryKey val whom: String,

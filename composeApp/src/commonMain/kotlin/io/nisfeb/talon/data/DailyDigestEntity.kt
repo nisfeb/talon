@@ -1,6 +1,7 @@
 package io.nisfeb.talon.data
 
 import androidx.room.Entity
+import androidx.compose.runtime.Immutable
 import kotlinx.serialization.Serializable
 
 /**
@@ -8,6 +9,7 @@ import kotlinx.serialization.Serializable
  * ship at the user-configured time. Overwritten on re-fire — see
  * spec §Persistence.
  */
+@Immutable
 @Entity(
     tableName = "daily_digests",
     primaryKeys = ["ship", "dateLocal"],

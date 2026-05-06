@@ -1,6 +1,7 @@
 package io.nisfeb.talon.data
 
 import androidx.room.Entity
+import androidx.compose.runtime.Immutable
 import androidx.room.Index
 
 /**
@@ -22,6 +23,7 @@ import androidx.room.Index
  * slice. Queries it covers — chat stream, replies, reply counts,
  * latestFor, oldestIdFor, newestIdFor — all read in index order.
  */
+@Immutable
 @Entity(
     tableName = "messages",
     primaryKeys = ["whom", "id"],

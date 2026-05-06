@@ -1,6 +1,7 @@
 package io.nisfeb.talon.data
 
 import androidx.room.Entity
+import androidx.compose.runtime.Immutable
 import androidx.room.PrimaryKey
 
 /**
@@ -9,6 +10,7 @@ import androidx.room.PrimaryKey
  * back to alphabetical. `ordinal` is rewritten in bulk on each
  * reorder (no fractional indexing).
  */
+@Immutable
 @Entity(tableName = "group_orders")
 data class GroupOrderEntity(
     @PrimaryKey val flag: String,

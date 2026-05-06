@@ -302,20 +302,24 @@ class TlonChatRepo(
 
         // Subscribe to all streams we care about. Failures here don't
         // skip the event-loop — a partial subscribe set still delivers
-        // whatever the server accepted.
-        runCatching { ch.subscribe("chat", "/v4") }
-            .onFailure { Log.e(TAG, "chat subscribe failed", it) }
-        runCatching { ch.subscribe("channels", "/v4") }
-            .onFailure { Log.e(TAG, "channels subscribe failed", it) }
-        runCatching { ch.subscribe("activity", "/v4") }
-            .onFailure { Log.e(TAG, "activity subscribe failed", it) }
-        runCatching { ch.subscribe("contacts", "/v1/news") }
-            .onFailure { Log.e(TAG, "contacts subscribe failed", it) }
-        // Groups live-updates: catches new channels added to existing
-        // groups, meta edits, etc. Without this, channel-add is only
-        // picked up on reconnect (bootstrap re-scry).
-        runCatching { ch.subscribe("groups", "/v1/groups") }
-            .onFailure { Log.e(TAG, "groups subscribe failed", it) }
+        // whatever the server accepted. Run in parallel: each is one
+        // round-trip and they're independent, so the serial form was
+        // 5× the wall time for no reason.
+        // Groups subscribe catches new channels added to existing
+        // groups + meta edits — without it, channel-add is only picked
+        // up on reconnect (bootstrap re-scry).
+        listOf(
+            "chat" to "/v4",
+            "channels" to "/v4",
+            "activity" to "/v4",
+            "contacts" to "/v1/news",
+            "groups" to "/v1/groups",
+        ).map { (app, path) ->
+            async {
+                runCatching { ch.subscribe(app, path) }
+                    .onFailure { Log.e(TAG, "$app subscribe failed", it) }
+            }
+        }.awaitAll()
 
         // Re-scry init-posts + activity every reconnect so we catch up on
         // anything that landed while the stream was down. The
@@ -335,43 +339,53 @@ class TlonChatRepo(
         // for the count semantics.
         if (firstRun) _bootstrapping.value = true
         try {
-            runCatching { bootstrap(ch, count = INITIAL_PAGE_COUNT) }
-                .onFailure { Log.e(TAG, "initPosts scry failed", it) }
-            runCatching { bootstrapActivity(ch) }
-                .onSuccess { notificationHealth.markReconcileSuccess() }
-                .onFailure { Log.e(TAG, "activity scry failed", it) }
-            // Contacts re-scry on every connect, not just firstRun: when
-            // the SSE goes zombie during doze, status updates from other
-            // devices are silently lost. Re-subscribing on reconnect
-            // doesn't replay missed `%contacts /v1/news` events. Re-scry
-            // is a single round-trip with KB-of-payload, cheap relative
-            // to the alternative (status updates only become visible
-            // after a full app kill+relaunch).
-            runCatching { bootstrapContacts(ch) }
-                .onFailure { Log.e(TAG, "contacts scry failed", it) }
-            // Channel orders re-scry on every connect: pin / unpin events
-            // ride the same `OrderUpdate` SSE intent that other %channels
-            // events do, but if the SSE is zombie when the poke arrives
-            // the event is lost — `ch.subscribe("channels", "/v4")` on
-            // reconnect doesn't replay it. Without this, a pin set on
-            // another device while mobile is dozing stays invisible
-            // until a full app kill+relaunch. One scry of /v5/channels,
-            // idempotent UPDATEs.
-            runCatching { bootstrapChannelOrders(ch) }
-                .onFailure { Log.e(TAG, "channel orders scry failed", it) }
-            // Clubs / groups still rarely churn enough to warrant
-            // rescrying every reconnect — and they have their own live
-            // subscriptions (`groups /v1/groups`, `chat /v4` for clubs)
-            // that deliver create/edit events. If similar reconnect
-            // windows turn out to silently drop those too, ungate them
-            // here following the same pattern as contacts / settings /
-            // channel orders.
-            if (firstRun) {
-                runCatching { bootstrapClubs(ch) }
-                    .onFailure { Log.e(TAG, "clubs scry failed", it) }
-                runCatching { bootstrapGroups(ch) }
-                    .onFailure { Log.e(TAG, "groups scry failed", it) }
+            // Parallel-fan-out the bootstrap scries — each is a network
+            // round-trip and they write to disjoint tables, so running
+            // them serially burned 4× wall time for no reason. Failures
+            // are caught per-job so a slow one doesn't poison the rest.
+            //
+            // - initPosts: chat/channel history + reactions
+            // - activity: unread + notify counts → also marks reconcile
+            //   success on notificationHealth
+            // - contacts: status / nickname / color updates that the
+            //   live %contacts /v1/news subscribe doesn't replay on
+            //   reconnect
+            // - channel orders: pin/unpin state, same reconnect-replay
+            //   gap as contacts
+            //
+            // Clubs / groups stay in a firstRun-only branch (their
+            // %groups /v1/groups + %chat /v4 subscriptions cover edits
+            // adequately on reconnect).
+            val initJob = async {
+                runCatching { bootstrap(ch, count = INITIAL_PAGE_COUNT) }
+                    .onFailure { Log.e(TAG, "initPosts scry failed", it) }
             }
+            val activityJob = async {
+                runCatching { bootstrapActivity(ch) }
+                    .onSuccess { notificationHealth.markReconcileSuccess() }
+                    .onFailure { Log.e(TAG, "activity scry failed", it) }
+            }
+            val contactsJob = async {
+                runCatching { bootstrapContacts(ch) }
+                    .onFailure { Log.e(TAG, "contacts scry failed", it) }
+            }
+            val ordersJob = async {
+                runCatching { bootstrapChannelOrders(ch) }
+                    .onFailure { Log.e(TAG, "channel orders scry failed", it) }
+            }
+            val firstRunJobs = if (firstRun) {
+                listOf(
+                    async {
+                        runCatching { bootstrapClubs(ch) }
+                            .onFailure { Log.e(TAG, "clubs scry failed", it) }
+                    },
+                    async {
+                        runCatching { bootstrapGroups(ch) }
+                            .onFailure { Log.e(TAG, "groups scry failed", it) }
+                    },
+                )
+            } else emptyList()
+            (listOf(initJob, activityJob, contactsJob, ordersJob) + firstRunJobs).awaitAll()
         } finally {
             if (firstRun) _bootstrapping.value = false
         }
@@ -2752,26 +2766,30 @@ class TlonChatRepo(
      * like `{type: 'text', value: 'Alice'}`. We pluck just nickname, bio
      * and avatar for the UI.
      */
-    private suspend fun bootstrapContacts(channel: UrbitChannel) {
+    private suspend fun bootstrapContacts(channel: UrbitChannel) = coroutineScope {
+        // /v1/all (every known peer) and /v1/self (our own contact card)
+        // are independent network round-trips. Run them in parallel so
+        // the whole bootstrap doesn't pay both serially.
+        val allJob = async { runCatching { channel.scry("contacts", "/v1/all") }.getOrNull() }
+        val selfJob = async { runCatching { channel.scry("contacts", "/v1/self") }.getOrNull() }
+        val allBody = allJob.await()
+        val selfBody = selfJob.await()
+
         val fresh = mutableListOf<ContactEntity>()
 
-        runCatching { channel.scry("contacts", "/v1/all") }.getOrNull()?.let { body ->
-            (body as? JsonObject)?.forEach { (ship, entry) ->
-                val obj = entry as? JsonObject ?: return@forEach
-                // Newer ships wrap each entry as {contact: {...fields},
-                // mod-at: "..."}; older ones emit the flat field map.
-                val wrapped = obj["contact"] as? JsonObject
-                val fields = wrapped ?: obj
-                fresh.add(parseContact(ship, fields, parseContactModAt(obj)))
-            }
+        (allBody as? JsonObject)?.forEach { (ship, entry) ->
+            val obj = entry as? JsonObject ?: return@forEach
+            // Newer ships wrap each entry as {contact: {...fields},
+            // mod-at: "..."}; older ones emit the flat field map.
+            val wrapped = obj["contact"] as? JsonObject
+            val fields = wrapped ?: obj
+            fresh.add(parseContact(ship, fields, parseContactModAt(obj)))
         }
 
-        runCatching { channel.scry("contacts", "/v1/self") }.getOrNull()?.let { body ->
-            (body as? JsonObject)?.let { obj ->
-                val wrapped = obj["contact"] as? JsonObject
-                val fields = wrapped ?: obj
-                fresh.add(parseContact(ourPatp, fields, parseContactModAt(obj)))
-            }
+        (selfBody as? JsonObject)?.let { obj ->
+            val wrapped = obj["contact"] as? JsonObject
+            val fields = wrapped ?: obj
+            fresh.add(parseContact(ourPatp, fields, parseContactModAt(obj)))
         }
 
         if (fresh.isNotEmpty()) {

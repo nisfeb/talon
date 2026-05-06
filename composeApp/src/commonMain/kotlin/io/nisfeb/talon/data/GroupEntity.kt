@@ -1,6 +1,7 @@
 package io.nisfeb.talon.data
 
 import androidx.room.Entity
+import androidx.compose.runtime.Immutable
 import androidx.room.Index
 import androidx.room.PrimaryKey
 
@@ -9,6 +10,7 @@ import androidx.room.PrimaryKey
  * (S3-hosted avatar) or a hex color string (tint fallback); callers
  * decide how to treat it based on shape.
  */
+@Immutable
 @Entity(tableName = "groups")
 data class GroupEntity(
     @PrimaryKey val flag: String,
@@ -26,6 +28,7 @@ data class GroupEntity(
  * each call scanned the whole channel_groups table (hundreds of rows
  * for an active user).
  */
+@Immutable
 @Entity(
     tableName = "channel_groups",
     indices = [Index(value = ["groupFlag"])],

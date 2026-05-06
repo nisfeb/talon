@@ -1,12 +1,14 @@
 package io.nisfeb.talon.data
 
 import androidx.room.Entity
+import androidx.compose.runtime.Immutable
 
 /**
  * Local bookmark on a specific post. Purely local — not synced to
  * Urbit. Keyed on (whom, postId) so the same message can't be
  * double-bookmarked.
  */
+@Immutable
 @Entity(tableName = "bookmarks", primaryKeys = ["whom", "postId"])
 data class BookmarkEntity(
     val whom: String,

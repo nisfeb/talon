@@ -1,6 +1,7 @@
 package io.nisfeb.talon.data
 
 import androidx.room.Entity
+import androidx.compose.runtime.Immutable
 import androidx.room.Index
 import androidx.room.PrimaryKey
 
@@ -9,6 +10,7 @@ import androidx.room.PrimaryKey
  * not synced to Urbit. Named "folder" rather than "group" to avoid
  * conflating with the %groups agent's first-class groups concept.
  */
+@Immutable
 @Entity(tableName = "folders")
 data class FolderEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
@@ -26,6 +28,7 @@ data class FolderEntity(
  * group-kind member renders as a collapsible header in the folder
  * view, with all of its channels nested underneath.
  */
+@Immutable
 @Entity(
     tableName = "folder_members",
     primaryKeys = ["folderId", "whom"],

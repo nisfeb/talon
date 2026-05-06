@@ -1,6 +1,7 @@
 package io.nisfeb.talon.data
 
 import androidx.room.Entity
+import androidx.compose.runtime.Immutable
 import androidx.room.Index
 
 /**
@@ -19,6 +20,7 @@ import androidx.room.Index
  * and the per-category drilldown (`WHERE whom AND category ORDER BY
  * sentMs DESC`).
  */
+@Immutable
 @Entity(
     tableName = "message_media",
     primaryKeys = ["whom", "messageId", "url"],

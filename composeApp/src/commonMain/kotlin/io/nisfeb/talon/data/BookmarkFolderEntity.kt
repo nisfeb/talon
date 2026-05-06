@@ -1,6 +1,7 @@
 package io.nisfeb.talon.data
 
 import androidx.room.Entity
+import androidx.compose.runtime.Immutable
 import androidx.room.Index
 import androidx.room.PrimaryKey
 
@@ -12,6 +13,7 @@ import androidx.room.PrimaryKey
  * Synced to %settings under bucket `bookmark-folders` so the
  * grouping survives a reinstall and follows the user across devices.
  */
+@Immutable
 @Entity(tableName = "bookmark_folders")
 data class BookmarkFolderEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
@@ -26,6 +28,7 @@ data class BookmarkFolderEntity(
  * dedupes; the (whom, postId) index speeds up "which folders is this
  * bookmark in?" lookups, mirroring the conversation folder pattern.
  */
+@Immutable
 @Entity(
     tableName = "bookmark_folder_members",
     primaryKeys = ["folderId", "whom", "postId"],
