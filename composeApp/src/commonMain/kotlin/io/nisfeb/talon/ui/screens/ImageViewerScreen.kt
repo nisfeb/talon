@@ -166,9 +166,19 @@ fun ImageViewerScreen(
                 detectHorizontalDragGestures(
                     onDragStart = { totalDrag = 0f },
                     onDragEnd = {
-                        when {
-                            totalDrag > thresholdPx -> goPrev()
-                            totalDrag < -thresholdPx -> goNext()
+                        // Pure decision in `decideSwipeAction`
+                        // (ImageViewerSwipe.kt). Logic-tested in
+                        // commonTest; we just route the result here.
+                        when (
+                            io.nisfeb.talon.ui.decideSwipeAction(
+                                totalDrag = totalDrag,
+                                thresholdPx = thresholdPx,
+                                scale = scale,
+                            )
+                        ) {
+                            io.nisfeb.talon.ui.SwipeAction.Previous -> goPrev()
+                            io.nisfeb.talon.ui.SwipeAction.Next -> goNext()
+                            io.nisfeb.talon.ui.SwipeAction.None -> Unit
                         }
                         totalDrag = 0f
                     },

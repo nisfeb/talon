@@ -59,6 +59,18 @@ class SettingsSyncImpl(
 
     companion object {
         private const val TAG = "SettingsSync"
+
+        /**
+         * Per-bucket recovery decision used by [bootstrap]. Returns
+         * true when the ship's bucket is either missing entirely or
+         * present but empty — i.e., when this device should seed the
+         * bucket from its local state rather than treat the ship as
+         * authoritative. `internal` so tests can pin the rc9 recovery
+         * contract that fixed Android's silent-don't-sync AI bucket.
+         */
+        internal fun bucketIsMissingOrEmpty(bucket: JsonObject?): Boolean =
+            bucket == null || bucket.isEmpty()
+
         const val DESK = "talon"
         const val BUCKET_GROUP_ORDERS = "group-orders"
         const val BUCKET_FOLDERS = "folders"
@@ -158,7 +170,7 @@ class SettingsSyncImpl(
             .onFailure { Log.w(TAG, "subscribe failed", it) }
     }
 
-    private fun JsonObject?.isNullOrEmpty(): Boolean = this == null || this.isEmpty()
+    private fun JsonObject?.isNullOrEmpty(): Boolean = bucketIsMissingOrEmpty(this)
 
     /** First-time setup: push whatever's in Room to the ship. */
     private suspend fun seedFromLocal() {

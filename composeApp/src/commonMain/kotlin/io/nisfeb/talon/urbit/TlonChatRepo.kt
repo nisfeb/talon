@@ -1288,77 +1288,9 @@ class TlonChatRepo(
     suspend fun fetchActivityFeed(): List<ActivityFeedItem> {
         val ch = channel ?: error("not connected")
         val body = ch.scry("activity", "/v5/feed/init/30") as? JsonObject
-            ?: run {
-                _activityFeed.value = emptyList()
-                return emptyList()
-            }
-        val all = body["all"] as? JsonArray ?: run {
-            _activityFeed.value = emptyList()
-            return emptyList()
-        }
-        val items = mutableListOf<ActivityFeedItem>()
-        for (bundleEl in all) {
-            val bundle = bundleEl as? JsonObject ?: continue
-            val sourceKey = bundle["source-key"].asStr()
-            val sourceWhom = sourceKey?.let { sourceKeyToWhom(it) }
-            val title = when {
-                sourceWhom == null -> sourceKey ?: "activity"
-                sourceWhom.startsWith("~") -> sourceWhom
-                sourceWhom.startsWith("chat/") -> "#" + sourceWhom.substringAfterLast('/')
-                else -> sourceWhom
-            }
-            val events = bundle["events"] as? JsonArray ?: continue
-            for (e in events) {
-                val wrap = e as? JsonObject ?: continue
-                val inner = wrap["event"] as? JsonObject ?: continue
-                val tag = inner.keys.firstOrNull() ?: continue
-                val eventObj = inner[tag] as? JsonObject ?: continue
-
-                val label = when (tag) {
-                    "post-mention", "dm-post-mention" -> "Mentioned you"
-                    "reply-mention", "dm-reply-mention" -> "Mentioned you in a reply"
-                    "reply", "dm-reply" -> "Replied"
-                    "post", "dm-post" -> "Posted"
-                    "dm-invite" -> "Invited you to a DM"
-                    "group-ask" -> "Requested group access"
-                    "group-invite" -> "Invited you to a group"
-                    else -> tag
-                }
-                val author = eventObj["mention-author"].asStr()
-                    ?: eventObj["author"].asStr()
-                    ?: (eventObj["key"] as? JsonObject)?.get("id").asStr()
-                        ?.substringBefore('/')
-                val content = eventObj["content"]?.let { it.toString() }
-                val timeStr = wrap["time"].asStr() ?: ""
-                val sentMs = parseEventTimeMs(timeStr, eventObj)
-
-                // Post + parent ids power tap-to-deep-link into the
-                // exact reply / chat scroll-to. Pulled out into the
-                // pure parseActivityEventTarget helper so wire-shape
-                // drift surfaces in tests.
-                val target = parseActivityEventTarget(tag, eventObj)
-
-                // Normalize ids to the format our DB uses for the
-                // resolved whom — channel tables key on bare `<da>`,
-                // DMs/clubs on `~author/<da>`. Without this, channel
-                // thread deep-links can never find the parent locally.
-                items.add(
-                    ActivityFeedItem(
-                        kind = label,
-                        author = author,
-                        whom = sourceWhom,
-                        contentJson = content,
-                        sentMs = sentMs,
-                        title = title,
-                        postId = canonicalPostIdForWhom(sourceWhom, target.postId),
-                        parentPostId = canonicalPostIdForWhom(sourceWhom, target.parentPostId),
-                    )
-                )
-            }
-        }
-        val sorted = items.sortedByDescending { it.sentMs }
-        _activityFeed.value = sorted
-        return sorted
+        val items = parseActivityFeedBody(body)
+        _activityFeed.value = items
+        return items
     }
 
     /** Try a couple of sources to get a unix-ms timestamp for an event. */
@@ -3181,6 +3113,87 @@ class TlonChatRepo(
     companion object {
         private const val TAG = "TlonChatRepo"
         private val JSON_MEDIA_TYPE = "application/json".toMediaType()
+
+        /**
+         * Pure parser for the `%activity /v5/feed/init/30` scry
+         * response. Returns the parsed feed items in newest-first
+         * order. `internal` so the test source set can drive
+         * wire-shape variants (null body, missing `all`, malformed
+         * bundles) without spinning up a fake UrbitChannel.
+         *
+         * Robustness contract:
+         *   - null / non-JsonObject body → empty list
+         *   - missing or non-Array `all` → empty list
+         *   - any individual bundle / event with the wrong shape is
+         *     skipped (not an error); the rest of the feed renders
+         */
+        internal fun parseActivityFeedBody(body: JsonObject?): List<ActivityFeedItem> {
+            if (body == null) return emptyList()
+            val all = body["all"] as? JsonArray ?: return emptyList()
+            val items = mutableListOf<ActivityFeedItem>()
+            for (bundleEl in all) {
+                val bundle = bundleEl as? JsonObject ?: continue
+                val sourceKey = bundle["source-key"].asStr()
+                val sourceWhom = sourceKey?.let { sourceKeyToWhom(it) }
+                val title = when {
+                    sourceWhom == null -> sourceKey ?: "activity"
+                    sourceWhom.startsWith("~") -> sourceWhom
+                    sourceWhom.startsWith("chat/") -> "#" + sourceWhom.substringAfterLast('/')
+                    else -> sourceWhom
+                }
+                val events = bundle["events"] as? JsonArray ?: continue
+                for (e in events) {
+                    val wrap = e as? JsonObject ?: continue
+                    val inner = wrap["event"] as? JsonObject ?: continue
+                    val tag = inner.keys.firstOrNull() ?: continue
+                    val eventObj = inner[tag] as? JsonObject ?: continue
+
+                    val label = when (tag) {
+                        "post-mention", "dm-post-mention" -> "Mentioned you"
+                        "reply-mention", "dm-reply-mention" -> "Mentioned you in a reply"
+                        "reply", "dm-reply" -> "Replied"
+                        "post", "dm-post" -> "Posted"
+                        "dm-invite" -> "Invited you to a DM"
+                        "group-ask" -> "Requested group access"
+                        "group-invite" -> "Invited you to a group"
+                        else -> tag
+                    }
+                    val author = eventObj["mention-author"].asStr()
+                        ?: eventObj["author"].asStr()
+                        ?: (eventObj["key"] as? JsonObject)?.get("id").asStr()
+                            ?.substringBefore('/')
+                    val content = eventObj["content"]?.let { it.toString() }
+                    val timeStr = wrap["time"].asStr() ?: ""
+                    val sentMs = parseActivityEventTimeMs(timeStr, eventObj)
+                    val target = parseActivityEventTarget(tag, eventObj)
+                    items.add(
+                        ActivityFeedItem(
+                            kind = label,
+                            author = author,
+                            whom = sourceWhom,
+                            contentJson = content,
+                            sentMs = sentMs,
+                            title = title,
+                            postId = canonicalPostIdForWhom(sourceWhom, target.postId),
+                            parentPostId = canonicalPostIdForWhom(sourceWhom, target.parentPostId),
+                        )
+                    )
+                }
+            }
+            return items.sortedByDescending { it.sentMs }
+        }
+
+        /** Pure event-time parser hoisted out of the instance method
+         *  so the companion's [parseActivityFeedBody] can call it. */
+        internal fun parseActivityEventTimeMs(timeStr: String, eventObj: JsonObject): Long {
+            val keyTime = (eventObj["key"] as? JsonObject)?.get("time").asStr()
+            val raw = keyTime ?: timeStr
+            return runCatching {
+                val digits = raw.replace(".", "")
+                if (digits.all { it.isDigit() }) digits.toLong() else 0L
+            }.getOrDefault(0L)
+        }
+
         // 5 minutes — refresh on screen entry if older, instant paint
         // from cache within the window.
         private const val ADMIN_CACHE_TTL_MS = 5L * 60_000L

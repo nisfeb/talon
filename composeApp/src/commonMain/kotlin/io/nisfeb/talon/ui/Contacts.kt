@@ -129,7 +129,10 @@ fun contactMapFlow(
     // biggest non-Main-thread allocation cost during login.
     .conflate()
 
-private fun sameContactDisplay(a: List<ContactEntity>, b: List<ContactEntity>): Boolean {
+// `internal` so the test source set can drive the predicate without
+// bringing up a full Room DAO. Behaviour pinned in
+// commonTest/.../ContactsTest.kt.
+internal fun sameContactDisplay(a: List<ContactEntity>, b: List<ContactEntity>): Boolean {
     if (a === b) return true
     if (a.size != b.size) return false
     for (i in a.indices) {

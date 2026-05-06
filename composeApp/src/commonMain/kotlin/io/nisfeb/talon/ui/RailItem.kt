@@ -65,6 +65,21 @@ fun Map<RailItem, Boolean>.isVisible(item: RailItem): Boolean {
 }
 
 /**
+ * Project a sparse `rail_item_prefs` row stream into the dense
+ * `Map<RailItem, Boolean>` shape consumers expect. Pulled out of
+ * [io.nisfeb.talon.ui.AndroidUiSettings] / [io.nisfeb.talon.ui.DesktopUiSettings]
+ * so the projection logic — and only the projection logic — has a
+ * test (RailVisibilityProjectionTest). Unknown `itemName` values
+ * are dropped silently so a future enum rename can't crash the read.
+ */
+fun railVisibilityFromRows(
+    rows: List<io.nisfeb.talon.data.RailItemPrefEntity>,
+): Map<RailItem, Boolean> = rows.mapNotNull { row ->
+    val item = railItemOrNull(row.itemName) ?: return@mapNotNull null
+    item to row.visible
+}.toMap()
+
+/**
  * Sanitize a (possibly stale) saved rail order against the current
  * [RailItem.entries]. Future enum additions get appended at their
  * declaration position so users on older configs see new items the

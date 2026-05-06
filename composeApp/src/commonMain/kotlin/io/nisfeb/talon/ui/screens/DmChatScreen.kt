@@ -373,23 +373,21 @@ fun DmChatScreen(
     var lastSize by remember(whom) { mutableStateOf(rows.size) }
     LaunchedEffect(rows.size) {
         val newestId = newestMessageId(rows)
-        val gotNewerHead =
-            newestId != null && newestId != lastNewestId && rows.size > lastSize
+        // Pure decision in `decideAutoScroll` (ChatScrollHeuristic.kt).
+        // Logic-tested in commonTest; this composable just routes
+        // inputs and applies the result.
+        val decision = io.nisfeb.talon.ui.decideAutoScroll(
+            rowsSize = rows.size,
+            newestId = newestId,
+            lastNewestId = lastNewestId,
+            lastSize = lastSize,
+            firstVisibleItemIndex = listState.firstVisibleItemIndex,
+            pendingSendBaselineSize = pendingSendBaselineSize,
+        )
         lastNewestId = newestId
         lastSize = rows.size
-        // Self-send catch-up: if the user just sent (forceBottomTick
-        // captured a baseline) and rows has now grown past that
-        // snapshot, the optimistic upsert has landed — snap to the
-        // new bottom unconditionally, regardless of where the user
-        // happened to be. They explicitly hit send; their message
-        // belongs in view.
-        val baseline = pendingSendBaselineSize
-        if (baseline != null && rows.size > baseline) {
-            listState.scrollToItem(0)
-            pendingSendBaselineSize = null
-            return@LaunchedEffect
-        }
-        if (gotNewerHead && listState.firstVisibleItemIndex <= 12) {
+        pendingSendBaselineSize = decision.nextBaseline
+        if (decision.scrollToBottom) {
             listState.scrollToItem(0)
         }
     }

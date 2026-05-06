@@ -101,12 +101,7 @@ class AndroidUiSettings(
     override val railVisibility: StateFlow<Map<RailItem, Boolean>> =
         dbFlow
             .flatMapLatest { db -> db.railItemPrefs().streamAll() }
-            .map { rows ->
-                rows.mapNotNull { row ->
-                    val item = railItemOrNull(row.itemName) ?: return@mapNotNull null
-                    item to row.visible
-                }.toMap()
-            }
+            .map(::railVisibilityFromRows)
             .stateIn(scope, SharingStarted.Eagerly, emptyMap())
 
     override fun setHideComposerButtons(hidden: Boolean) {

@@ -4,7 +4,10 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.Text
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.SemanticsNodeInteraction
+import androidx.compose.ui.test.getBoundsInRoot
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -12,6 +15,7 @@ import androidx.compose.ui.test.runComposeUiTest
 import androidx.compose.ui.unit.dp
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 
 class DesktopShellTest {
 
@@ -175,4 +179,58 @@ class DesktopShellTest {
         onNodeWithContentDescription("Bookmarks").performClick()
         assertEquals(RailItem.Bookmarks, clicked)
     }
+
+    @OptIn(ExperimentalTestApi::class)
+    @Test
+    fun `rail renders icons in the order of enabledItems`() = runComposeUiTest {
+        // Pin the rc19 contract: the rail follows the user's
+        // configured RailItemOrder (passed in as `enabledItems`),
+        // not the enum's declaration order. Caller wins.
+        val order = listOf(
+            RailItem.Settings,
+            RailItem.Chats,
+            RailItem.Profile,
+            RailItem.Bookmarks,
+        )
+        setContent {
+            Box(Modifier.size(width = 1200.dp, height = 800.dp)) {
+                DesktopShell(
+                    activeRailTab = RailTab.Chats,
+                    enabledItems = order,
+                    onItemClicked = {},
+                    list = { Text("LIST") },
+                    detail = { Text("DETAIL") },
+                    listFraction = 0.30f,
+                    onListFractionChange = {},
+                )
+            }
+        }
+        // Look at vertical bounds of each rail icon. With reverseLayout
+        // off (default), the topmost rendered icon has the smallest
+        // `top`. Sort our rail items by their `top` and assert the
+        // order matches what we passed in.
+        val orderedTops: List<Pair<RailItem, Float>> = order.map { item ->
+            item to onNodeWithContentDescription(railLabel(item))
+                .getBoundsInRoot().top.value
+        }
+        // Ascending top → ascending list position.
+        val sortedByTop = orderedTops.sortedBy { it.second }.map { it.first }
+        assertEquals(order, sortedByTop, "rail icons should render top-down in enabledItems order")
+    }
+}
+
+/** Local mirror of DesktopShell's private `railLabel(item)` so the
+ *  test can find each icon by its contentDescription. Must stay in
+ *  sync with the impl. */
+private fun railLabel(item: RailItem): String = when (item) {
+    RailItem.Chats -> "Chats"
+    RailItem.Statuses -> "Statuses"
+    RailItem.Bookmarks -> "Bookmarks"
+    RailItem.Activity -> "Activity"
+    RailItem.Profile -> "My profile"
+    RailItem.Watchwords -> "Watchwords"
+    RailItem.TodaysBrief -> "Today's brief"
+    RailItem.Administration -> "Administration"
+    RailItem.Invites -> "Invites"
+    RailItem.Settings -> "Settings"
 }
