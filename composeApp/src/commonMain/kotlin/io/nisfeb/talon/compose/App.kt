@@ -1238,6 +1238,20 @@ fun App(
                             )
                         }
                         val onRailItemClicked: (RailItem) -> Unit = { item ->
+                            // Clear the rail badge for items that show
+                            // freshness signals — rail clicks were missing
+                            // the markXSeen calls the kebab paths in
+                            // DmListScreen already had, so the dot lingered
+                            // until the user opened the kebab.
+                            when (item) {
+                                RailItem.Statuses ->
+                                    menuSeen.markStatusesSeenAt(System.currentTimeMillis())
+                                RailItem.TodaysBrief ->
+                                    railLatestDigest?.dateLocal?.let { menuSeen.markDigestSeen(it) }
+                                RailItem.Invites ->
+                                    menuSeen.markInvitesSeen(railInvitesSnapshot)
+                                else -> Unit
+                            }
                             item.toRailTab()?.let { tab ->
                                 uiSettings.setActiveRailTab(tab)
                             } ?: when (item) {

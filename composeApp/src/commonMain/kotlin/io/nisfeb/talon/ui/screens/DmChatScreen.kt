@@ -1007,14 +1007,32 @@ fun DmChatScreen(
                     modifier = Modifier
                         .weight(1f)
                         .onPreviewKeyEvent { e ->
-                            if (
-                                e.type == KeyEventType.KeyDown &&
-                                e.key == Key.Enter &&
-                                !e.isShiftPressed
-                            ) {
-                                doSend()
-                                true
-                            } else false
+                            if (e.type != KeyEventType.KeyDown || e.key != Key.Enter) {
+                                return@onPreviewKeyEvent false
+                            }
+                            if (e.isShiftPressed) {
+                                // OutlinedTextField on CMP Desktop doesn't
+                                // insert a newline on Shift+Enter from a
+                                // hardware keyboard — bake it in here so the
+                                // composer behaves like every other chat
+                                // client. Replaces the current selection
+                                // with "\n" and parks the caret after it.
+                                val cur = draft
+                                val start = cur.selection.start
+                                val end = cur.selection.end
+                                val newText = cur.text.substring(0, start) +
+                                    "\n" +
+                                    cur.text.substring(end)
+                                updateDraft(
+                                    cur.copy(
+                                        text = newText,
+                                        selection = TextRange(start + 1),
+                                    ),
+                                )
+                                return@onPreviewKeyEvent true
+                            }
+                            doSend()
+                            true
                         },
                 )
                 IconButton(
