@@ -164,8 +164,8 @@ tasks.withType<Test>().configureEach {
 // version inside derivePackageVersion and silently drifted — every
 // release between 0.7.14 and 0.7.23 shipped with stale .dmg/.msi/.deb
 // filenames because nobody updated both literals.
-val talonVersionCode = 75
-val talonVersionName = "0.10.0-rc8"
+val talonVersionCode = 76
+val talonVersionName = "0.10.0-rc9"
 
 android {
     namespace = "io.nisfeb.talon"
@@ -425,6 +425,14 @@ val slimReleaseDistributable = tasks.register("slimReleaseDistributable") {
     dependsOn("createReleaseDistributable")
     val distDirProvider = layout.buildDirectory.dir("compose/binaries/main-release/app/Talon")
     outputs.dir(distDirProvider)
+    // Capture the keep-list into a local val at configuration time so
+    // the doLast closure's serialized form holds a Set<String> value
+    // instead of a free-variable reference to the script-level val
+    // (which the configuration cache rejects as a "Gradle script
+    // object reference"). Lifting iconsExtendedKeep to script scope
+    // for the audit task to share broke the slim task's previously-
+    // local capture.
+    val keep: Set<String> = iconsExtendedKeep
     doLast {
         // All helpers inlined inside doLast so the configuration
         // cache doesn't have to serialize a reference back to the
@@ -531,9 +539,9 @@ val slimReleaseDistributable = tasks.register("slimReleaseDistributable") {
             // a typo or upstream rename surfaces here, not as a
             // ClassNotFoundException at runtime.
             val present = ZipFile(jar).use { zf ->
-                iconsExtendedKeep.filter { zf.getEntry(it) != null }.toSet()
+                keep.filter { zf.getEntry(it) != null }.toSet()
             }
-            val missing = iconsExtendedKeep - present
+            val missing = keep - present
             check(missing.isEmpty()) {
                 "icons-extended slim: keep-list entries not found in ${jar.name}: $missing"
             }
@@ -541,7 +549,7 @@ val slimReleaseDistributable = tasks.register("slimReleaseDistributable") {
                 when {
                     entry.endsWith("/") -> true
                     entry == "META-INF/MANIFEST.MF" -> true
-                    entry.endsWith(".class") -> entry in iconsExtendedKeep
+                    entry.endsWith(".class") -> entry in keep
                     else -> false
                 }
             }
