@@ -878,7 +878,7 @@ class SettingsSyncImpl(
         }
     }
 
-    private suspend fun applyEntry(bucket: String, entry: String, value: JsonElement) {
+    internal suspend fun applyEntry(bucket: String, entry: String, value: JsonElement) {
         val unwrapped = unwrap(value)
         when (bucket) {
             BUCKET_GROUP_ORDERS -> {
@@ -1000,7 +1000,7 @@ class SettingsSyncImpl(
         }
     }
 
-    private suspend fun removeEntry(bucket: String, entry: String) {
+    internal suspend fun removeEntry(bucket: String, entry: String) {
         when (bucket) {
             BUCKET_GROUP_ORDERS -> db.groupOrders().remove(entry)
             BUCKET_FOLDERS -> {
@@ -1057,7 +1057,7 @@ class SettingsSyncImpl(
         }
     }
 
-    private suspend fun clearBucketLocally(bucket: String) {
+    internal suspend fun clearBucketLocally(bucket: String) {
         when (bucket) {
             BUCKET_GROUP_ORDERS -> db.groupOrders().replaceAll(emptyList())
             BUCKET_FOLDERS -> db.folders().replaceAll(emptyList())
