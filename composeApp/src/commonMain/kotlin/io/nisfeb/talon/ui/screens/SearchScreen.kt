@@ -112,12 +112,14 @@ fun SearchScreen(
         )
     }.collectAsState(initial = ContactMap.EMPTY)
 
-    // Smart-mode + highlights are gated on BOTH the user enabling the
-    // feature AND the platform supplying an embedder. Desktop never
-    // satisfies the second condition; Android targets do once the
-    // embedder cluster lives in androidMain.
-    val semanticEnabled = embedder != null && aiState.semanticSearchEnabled
-    var smartMode by remember(semanticEnabled) { mutableStateOf(false) }
+    // The chip drives [AiSettings.Feature.SemanticSearch] directly so
+    // the user's choice persists across navigation (the previous
+    // screen-local var smartMode reset to false on every mount, which
+    // looked like a regression — toggle the chip, leave Search, come
+    // back, chip is off again). Show the chip whenever the platform
+    // can do smart search; selected state is the persistent flag.
+    val smartChipAvailable = embedder != null
+    val smartMode = embedder != null && aiState.semanticSearchEnabled
     val highlightsEnabled = embedder != null && aiState.importantMessagesEnabled
 
     val indexProgress by (embedder?.progress?.collectAsState()
@@ -166,10 +168,12 @@ fun SearchScreen(
                 modifier = Modifier.fillMaxWidth().padding(start = 4.dp),
             )
         }
-        // Smart-mode toggle + index status. Render only when an
-        // embedder is provided (Android with on-device ML) AND the
-        // user enabled semantic search in settings.
-        if (semanticEnabled) {
+        // Smart-mode toggle + index status. Render whenever the
+        // platform supplies an embedder (Android on-device ML, desktop
+        // DJL). Toggling the chip flips AiSettings.SemanticSearch so
+        // the choice survives navigation, and App.kt's LaunchedEffect
+        // wakes the indexer the moment the flag goes true.
+        if (smartChipAvailable) {
             Row(
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -177,7 +181,12 @@ fun SearchScreen(
             ) {
                 FilterChip(
                     selected = smartMode,
-                    onClick = { smartMode = !smartMode },
+                    onClick = {
+                        aiSettings.setFeature(
+                            io.nisfeb.talon.ai.AiSettings.Feature.SemanticSearch,
+                            !smartMode,
+                        )
+                    },
                     label = { Text(if (smartMode) "✨ Smart on" else "✨ Smart") },
                 )
                 if (smartMode) {
