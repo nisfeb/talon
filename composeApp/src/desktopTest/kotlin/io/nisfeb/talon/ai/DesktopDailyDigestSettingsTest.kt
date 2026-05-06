@@ -43,9 +43,11 @@ class DesktopDailyDigestSettingsTest {
 
     @Test
     fun `default state when file does not exist`() {
+        // Default-on so a fresh install fires the morning brief
+        // without an explicit opt-in.
         val store = DesktopDailyDigestSettings(file)
         val state = store.state.value
-        assertFalse(state.enabled)
+        assertTrue(state.enabled)
         assertEquals(6, state.hourOfDay)
         assertEquals(0, state.minuteOfDay)
         assertFalse(file.exists(), "default state must not write a file")
@@ -53,11 +55,13 @@ class DesktopDailyDigestSettingsTest {
 
     @Test
     fun `setEnabled persists and survives reload`() {
-        DesktopDailyDigestSettings(file).setEnabled(true)
+        // Explicit-off must round-trip across restarts so users who
+        // chose no morning brief keep that choice.
+        DesktopDailyDigestSettings(file).setEnabled(false)
         assertTrue(file.exists())
 
         val reloaded = DesktopDailyDigestSettings(file)
-        assertTrue(reloaded.state.value.enabled)
+        assertFalse(reloaded.state.value.enabled)
     }
 
     @Test
@@ -72,11 +76,13 @@ class DesktopDailyDigestSettingsTest {
 
     @Test
     fun `corrupt file falls back to defaults instead of crashing`() {
+        // Corrupt file is treated like an absent one — fall back to
+        // the on-by-default behavior.
         file.writeText("{ this is not valid json")
 
         val store = DesktopDailyDigestSettings(file)
         val state = store.state.value
-        assertFalse(state.enabled)
+        assertTrue(state.enabled)
         assertEquals(6, state.hourOfDay)
         assertEquals(0, state.minuteOfDay)
     }
@@ -90,10 +96,11 @@ class DesktopDailyDigestSettingsTest {
 
     @Test
     fun `setEnabled fires onChange with Toggled and pushBack=false`() {
+        // Default is true now; toggle to false to observe the change.
         val store = DesktopDailyDigestSettings(file)
         val changes = mutableListOf<Pair<DailyDigestSettings.Change, Boolean>>()
         store.onChange = { kind, pushBack -> changes.add(kind to pushBack) }
-        store.setEnabled(true)
+        store.setEnabled(false)
         assertEquals(1, changes.size)
         assertEquals(DailyDigestSettings.Change.Toggled, changes[0].first)
         assertFalse(changes[0].second)
@@ -101,10 +108,11 @@ class DesktopDailyDigestSettingsTest {
 
     @Test
     fun `setEnabled with same value does not fire onChange or rewrite file`() {
+        // Default is true now — re-setting true is the no-op path.
         val store = DesktopDailyDigestSettings(file)
         var fired = 0
         store.onChange = { _, _ -> fired++ }
-        store.setEnabled(false)  // already false
+        store.setEnabled(true)  // already true
         assertEquals(0, fired)
         assertFalse(file.exists(), "no-op setEnabled must not touch disk")
     }

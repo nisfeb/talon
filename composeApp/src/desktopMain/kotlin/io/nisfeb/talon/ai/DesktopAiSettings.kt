@@ -107,14 +107,17 @@ class DesktopAiSettings : AiSettingsRepository {
         apiKey = "",
         model = null,
         baseUrl = null,
+        // Defaults match AiSettings.Config — true across the board so
+        // a fresh install starts with the full feature set enabled.
+        // Capability flags hide unsupported features per-platform.
         catchMeUpEnabled = true,
         emojiReactEnabled = true,
         dailyDigestEnabled = true,
-        entityActionsEnabled = false,
-        semanticSearchEnabled = false,
-        topicClustersEnabled = false,
-        importantMessagesEnabled = false,
-        syncEnabled = false,
+        entityActionsEnabled = true,
+        semanticSearchEnabled = true,
+        topicClustersEnabled = true,
+        importantMessagesEnabled = true,
+        syncEnabled = true,
     )
 
     private companion object {

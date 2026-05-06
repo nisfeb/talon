@@ -27,14 +27,21 @@ object AiSettings {
         val apiKey: String,
         val model: String?,
         val baseUrl: String? = null,
+        // All feature toggles default to true so a fresh install
+        // starts with the full feature set on. Capability flags still
+        // hide what a platform can't run (e.g. EntityActions on
+        // desktop). Users who explicitly disable a feature keep that
+        // choice across upgrades — applyRemote / setFeature persist
+        // the explicit value, so the new defaults only apply when
+        // the SharedPreferences key is absent.
         val catchMeUpEnabled: Boolean = true,
         val emojiReactEnabled: Boolean = true,
         val dailyDigestEnabled: Boolean = true,
-        val entityActionsEnabled: Boolean = false,
-        val semanticSearchEnabled: Boolean = false,
-        val topicClustersEnabled: Boolean = false,
-        val importantMessagesEnabled: Boolean = false,
-        val syncEnabled: Boolean = false,
+        val entityActionsEnabled: Boolean = true,
+        val semanticSearchEnabled: Boolean = true,
+        val topicClustersEnabled: Boolean = true,
+        val importantMessagesEnabled: Boolean = true,
+        val syncEnabled: Boolean = true,
     ) {
         fun hasKey(): Boolean = apiKey.isNotBlank()
     }

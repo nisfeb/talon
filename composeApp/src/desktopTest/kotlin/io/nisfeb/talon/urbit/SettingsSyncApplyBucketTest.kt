@@ -316,6 +316,9 @@ class SettingsSyncApplyBucketTest {
             // regardless of whether this device opted into key sync.
             // The cloud-key fields, however, MUST NOT cross over
             // without local consent (next test pins that).
+            // Default syncEnabled is true; flip off explicitly to
+            // exercise the gate.
+            aiSettings.setSyncEnabled(false)
             val before = aiSettings.state.value
             val bucket = buildJsonObject {
                 put("config", buildJsonObject {
@@ -343,8 +346,11 @@ class SettingsSyncApplyBucketTest {
             // Sec-relevant invariant: a peer's API key must not be
             // written into this device's local state unless the user
             // explicitly opted into key sync on THIS device.
+            // Default syncEnabled is true; flip off to exercise the
+            // gate the test is checking.
+            aiSettings.setSyncEnabled(false)
             val before = aiSettings.state.value
-            assertEquals(false, before.syncEnabled)  // sanity: default
+            assertEquals(false, before.syncEnabled)
             val bucket = buildJsonObject {
                 put("config", buildJsonObject {
                     put("provider", "OpenAi")
@@ -715,7 +721,9 @@ internal class FakeAiSettings : AiSettingsRepository {
         baseUrl: String?,
     ) { /* unused */ }
     override fun setFeature(feature: AiSettings.Feature, enabled: Boolean) {}
-    override fun setSyncEnabled(enabled: Boolean) {}
+    override fun setSyncEnabled(enabled: Boolean) {
+        _state.value = _state.value.copy(syncEnabled = enabled)
+    }
     override fun applyRemote(config: AiSettings.Config) {
         _state.value = config
     }

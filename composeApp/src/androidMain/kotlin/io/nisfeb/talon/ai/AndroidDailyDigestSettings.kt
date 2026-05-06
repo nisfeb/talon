@@ -59,7 +59,11 @@ class AndroidDailyDigestSettings(context: Context) : DailyDigestSettings {
     }
 
     private fun read(): DailyDigestSettings.State = DailyDigestSettings.State(
-        enabled = prefs.getBoolean(KEY_ENABLED, false),
+        // Default-on so a fresh install fires the morning brief at
+        // 6:00 without the user having to flip it on every reinstall.
+        // Explicit-off survives because SharedPreferences only returns
+        // the default when the key is absent.
+        enabled = prefs.getBoolean(KEY_ENABLED, true),
         hourOfDay = prefs.getInt(KEY_HOUR, 6),
         minuteOfDay = prefs.getInt(KEY_MINUTE, 0),
     )

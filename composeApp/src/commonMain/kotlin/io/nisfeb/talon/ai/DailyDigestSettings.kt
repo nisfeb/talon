@@ -18,7 +18,11 @@ import kotlinx.coroutines.flow.StateFlow
 interface DailyDigestSettings {
 
     data class State(
-        val enabled: Boolean = false,
+        // Default-on so a fresh install starts with the morning brief
+        // wired up at 6:00 without an explicit opt-in. Concrete impls
+        // (AndroidDailyDigestSettings) match this default — explicit
+        // user-off persists across reinstalls.
+        val enabled: Boolean = true,
         val hourOfDay: Int = 6,
         val minuteOfDay: Int = 0,
     )

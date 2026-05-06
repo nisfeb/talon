@@ -126,14 +126,18 @@ class AndroidAiSettings(context: Context) : AiSettingsRepository {
             apiKey = key,
             model = model,
             baseUrl = baseUrl,
+            // Defaults match AiSettings.Config — true across the
+            // board so a fresh install starts with everything on.
+            // Explicit-off survives because SharedPreferences only
+            // returns the default when the key is absent.
             catchMeUpEnabled = prefs.getBoolean(AiSettings.Feature.CatchMeUp.key, true),
             emojiReactEnabled = prefs.getBoolean(AiSettings.Feature.EmojiReact.key, true),
             dailyDigestEnabled = prefs.getBoolean(AiSettings.Feature.DailyDigest.key, true),
-            entityActionsEnabled = prefs.getBoolean(AiSettings.Feature.EntityActions.key, false),
-            semanticSearchEnabled = prefs.getBoolean(AiSettings.Feature.SemanticSearch.key, false),
-            topicClustersEnabled = prefs.getBoolean(AiSettings.Feature.TopicClusters.key, false),
-            importantMessagesEnabled = prefs.getBoolean(AiSettings.Feature.ImportantMessages.key, false),
-            syncEnabled = prefs.getBoolean(KEY_SYNC, false),
+            entityActionsEnabled = prefs.getBoolean(AiSettings.Feature.EntityActions.key, true),
+            semanticSearchEnabled = prefs.getBoolean(AiSettings.Feature.SemanticSearch.key, true),
+            topicClustersEnabled = prefs.getBoolean(AiSettings.Feature.TopicClusters.key, true),
+            importantMessagesEnabled = prefs.getBoolean(AiSettings.Feature.ImportantMessages.key, true),
+            syncEnabled = prefs.getBoolean(KEY_SYNC, true),
         )
     }
 

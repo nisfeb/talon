@@ -24,7 +24,10 @@ class DesktopDailyDigestSettings(
 ) : DailyDigestSettings {
     @Serializable
     private data class Persisted(
-        val enabled: Boolean = false,
+        // Matches DailyDigestSettings.State default — true so a fresh
+        // install (or a partial JSON parse) lands on the morning brief
+        // already wired up.
+        val enabled: Boolean = true,
         val hourOfDay: Int = 6,
         val minuteOfDay: Int = 0,
     )
