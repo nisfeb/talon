@@ -41,6 +41,7 @@ fun RightPaneHost(
     content: RightPaneContent,
     db: AppDatabase,
     repo: TlonChatRepo,
+    http: okhttp3.OkHttpClient,
     ourPatp: String,
     onClose: () -> Unit,
     onOpenCategory: (MediaCategory) -> Unit,
@@ -95,6 +96,8 @@ fun RightPaneHost(
                 )
                 is RightPaneContent.GroupInfoDrilldown -> MediaListPane(
                     db = db,
+                    repo = repo,
+                    http = http,
                     whom = content.whom,
                     category = content.category,
                     onOpenImageList = onOpenImageList,

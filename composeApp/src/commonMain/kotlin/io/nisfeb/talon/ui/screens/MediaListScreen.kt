@@ -21,10 +21,13 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import io.nisfeb.talon.data.AppDatabase
 import io.nisfeb.talon.urbit.MediaCategory
+import io.nisfeb.talon.urbit.TlonChatRepo
 
 @Composable
 fun MediaListScreen(
     db: AppDatabase,
+    repo: TlonChatRepo,
+    http: okhttp3.OkHttpClient,
     whom: String,
     category: MediaCategory,
     onBack: () -> Unit,
@@ -48,6 +51,8 @@ fun MediaListScreen(
         HorizontalDivider()
         MediaListPane(
             db = db,
+            repo = repo,
+            http = http,
             whom = whom,
             category = category,
             onOpenImageList = onOpenImageList,

@@ -1025,6 +1025,8 @@ fun App(
                     groupInfoDrilldown != null && groupInfoOpenFor != null && !expanded -> {
                         MediaListScreen(
                             db = db,
+                            repo = repo,
+                            http = http,
                             whom = groupInfoOpenFor!!,
                             category = groupInfoDrilldown!!,
                             onBack = { closeDrilldownAction() },
@@ -1448,6 +1450,7 @@ fun App(
                                         content = content,
                                         db = db,
                                         repo = repo,
+                                        http = http,
                                         ourPatp = ship,
                                         onClose = { closeRightPaneAction() },
                                         onOpenCategory = { openCategoryAction(it) },

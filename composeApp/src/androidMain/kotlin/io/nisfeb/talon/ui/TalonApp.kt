@@ -910,6 +910,8 @@ fun TalonApp(
             // back-press returns to GroupInfoScreen, not the chat.
             groupInfoDrilldown != null && groupInfoOpenFor != null -> MediaListScreen(
                 db = app.db,
+                repo = app.repo,
+                http = app.http,
                 whom = groupInfoOpenFor!!,
                 category = groupInfoDrilldown!!,
                 onBack = { closeDrilldownAction() },
