@@ -73,6 +73,11 @@ class AndroidUiSettings(
     override val smartSearchPreferred: StateFlow<Boolean> =
         _smartSearchPreferred.asStateFlow()
 
+    private val _railItemOrder = MutableStateFlow(
+        sanitizeRailItemOrder(loadRailItemOrder(prefs)),
+    )
+    override val railItemOrder: StateFlow<List<RailItem>> = _railItemOrder.asStateFlow()
+
     // Tracks the active ship's [AppDatabase]. Updated by [rebindDb]
     // from TalonApplication.buildShipScoped on every ship switch so
     // [railVisibility] re-subscribes to the new ship's table.
@@ -156,10 +161,24 @@ class AndroidUiSettings(
         _smartSearchPreferred.value = preferred
     }
 
+    override fun setRailItemOrder(items: List<RailItem>) {
+        val sanitized = sanitizeRailItemOrder(items)
+        if (_railItemOrder.value == sanitized) return
+        prefs.edit()
+            .putString(KEY_RAIL_ITEM_ORDER, sanitized.joinToString(",") { it.name })
+            .apply()
+        _railItemOrder.value = sanitized
+    }
+
     private fun loadGroupOrder(): GroupChannelOrder {
         val name = prefs.getString(KEY_GROUP_CHANNEL_ORDER, null) ?: return GroupChannelOrder.Recent
         return runCatching { GroupChannelOrder.valueOf(name) }
             .getOrDefault(GroupChannelOrder.Recent)
+    }
+
+    private fun loadRailItemOrder(prefs: android.content.SharedPreferences): List<RailItem> {
+        val raw = prefs.getString(KEY_RAIL_ITEM_ORDER, null) ?: return RailItem.entries
+        return raw.split(",").mapNotNull { railItemOrNull(it.trim()) }
     }
 
     private fun loadAccent(): AccentSettings {
@@ -188,5 +207,6 @@ class AndroidUiSettings(
         private const val KEY_CHAT_PANE_LIST_FRACTION = "chat_pane_list_fraction"
         private const val KEY_ACTIVE_RAIL_TAB = "active_rail_tab"
         private const val KEY_SMART_SEARCH_PREFERRED = "smart_search_preferred"
+        private const val KEY_RAIL_ITEM_ORDER = "rail_item_order"
     }
 }

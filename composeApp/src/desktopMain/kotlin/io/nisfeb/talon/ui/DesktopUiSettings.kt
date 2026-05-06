@@ -47,6 +47,7 @@ class DesktopUiSettings(
         val chatPaneListFraction: Float = 0.30f,
         val activeRailTab: String = RailTab.Chats.name,
         val smartSearchPreferred: Boolean = false,
+        val railItemOrder: List<String> = emptyList(),
     )
 
     private val initial = loadInitial()
@@ -87,6 +88,13 @@ class DesktopUiSettings(
     private val _smartSearchPreferred = MutableStateFlow(initial.smartSearchPreferred)
     override val smartSearchPreferred: StateFlow<Boolean> =
         _smartSearchPreferred.asStateFlow()
+
+    private val _railItemOrder = MutableStateFlow(
+        sanitizeRailItemOrder(
+            initial.railItemOrder.mapNotNull { railItemOrNull(it) },
+        ),
+    )
+    override val railItemOrder: StateFlow<List<RailItem>> = _railItemOrder.asStateFlow()
 
     // Read-only projection of the per-ship rail_item_prefs table.
     // Sparse — only rows the user has explicitly hidden. Eager so the
@@ -139,6 +147,13 @@ class DesktopUiSettings(
         persistCurrent()
     }
 
+    override fun setRailItemOrder(items: List<RailItem>) {
+        val sanitized = sanitizeRailItemOrder(items)
+        if (_railItemOrder.value == sanitized) return
+        _railItemOrder.value = sanitized
+        persistCurrent()
+    }
+
     private fun persistCurrent() {
         val accent = _accentSettings.value
         persist(
@@ -151,6 +166,7 @@ class DesktopUiSettings(
                 chatPaneListFraction = _chatPaneListFraction.value,
                 activeRailTab = _activeRailTab.value.name,
                 smartSearchPreferred = _smartSearchPreferred.value,
+                railItemOrder = _railItemOrder.value.map { it.name },
             ),
         )
     }

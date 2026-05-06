@@ -1200,13 +1200,14 @@ fun App(
                         val listFraction by uiSettings.chatPaneListFraction.collectAsState()
                         val activeRailTab by uiSettings.activeRailTab.collectAsState()
                         val railVisibility by uiSettings.railVisibility.collectAsState()
+                        val railItemOrder by uiSettings.railItemOrder.collectAsState()
                         val dailyDigestEnabled = dailyDigestSettings
                             ?.state
                             ?.collectAsState()
                             ?.value
                             ?.enabled == true
-                        val enabledItems: List<RailItem> = remember(railVisibility, dailyDigestEnabled) {
-                            RailItem.entries.filter { item ->
+                        val enabledItems: List<RailItem> = remember(railVisibility, railItemOrder, dailyDigestEnabled) {
+                            railItemOrder.filter { item ->
                                 // Map.isVisible enforces the Chats always-on invariant
                                 // (regardless of map state) and falls back to true
                                 // for absent entries.

@@ -83,6 +83,23 @@ interface UiSettings {
      */
     val smartSearchPreferred: StateFlow<Boolean>
     fun setSmartSearchPreferred(preferred: Boolean)
+
+    /**
+     * Per-device preferred order of rail items. Drives both the
+     * desktop rail rendering and the kebab overflow ordering. Stored
+     * locally rather than via %settings — putting it in `rail_item_prefs`
+     * would bump the DB version and risk wiping desktop data through
+     * `fallbackToDestructiveMigration`. The trade-off: each device
+     * configures its own rail order. Visibility still syncs.
+     *
+     * Default = [RailItem.entries] in declaration order. Returns a
+     * sanitized list — exactly the set of [RailItem] values, no
+     * duplicates, in the user's preferred sequence. New enum values
+     * added in future versions get appended at their declaration
+     * position so they show up without forcing the user to reset.
+     */
+    val railItemOrder: StateFlow<List<RailItem>>
+    fun setRailItemOrder(items: List<RailItem>)
 }
 
 enum class GroupChannelOrder { Recent, HostOrder }
@@ -127,6 +144,7 @@ class InMemoryUiSettings(
     initialActiveRailTab: RailTab = RailTab.Chats,
     initialRailVisibility: Map<RailItem, Boolean> = emptyMap(),
     initialSmartSearchPreferred: Boolean = false,
+    initialRailItemOrder: List<RailItem> = RailItem.entries,
 ) : UiSettings {
     private val _hideComposerButtons = MutableStateFlow(initialHide)
     override val hideComposerButtons: StateFlow<Boolean> =
@@ -184,5 +202,11 @@ class InMemoryUiSettings(
         _smartSearchPreferred.asStateFlow()
     override fun setSmartSearchPreferred(preferred: Boolean) {
         _smartSearchPreferred.value = preferred
+    }
+
+    private val _railItemOrder = MutableStateFlow(sanitizeRailItemOrder(initialRailItemOrder))
+    override val railItemOrder: StateFlow<List<RailItem>> = _railItemOrder.asStateFlow()
+    override fun setRailItemOrder(items: List<RailItem>) {
+        _railItemOrder.value = sanitizeRailItemOrder(items)
     }
 }

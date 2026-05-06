@@ -63,3 +63,21 @@ fun Map<RailItem, Boolean>.isVisible(item: RailItem): Boolean {
     if (item == RailItem.Chats) return true
     return this[item] ?: true
 }
+
+/**
+ * Sanitize a (possibly stale) saved rail order against the current
+ * [RailItem.entries]. Future enum additions get appended at their
+ * declaration position so users on older configs see new items the
+ * first time they upgrade — no manual reset. Removed values are
+ * dropped silently. Duplicates collapse. Result is always exactly
+ * the current [RailItem] universe in some order.
+ */
+fun sanitizeRailItemOrder(saved: List<RailItem>): List<RailItem> {
+    val seen = LinkedHashSet<RailItem>(saved.size)
+    for (item in saved) seen.add(item)  // de-dup, preserve order
+    val universe = RailItem.entries
+    val result = ArrayList<RailItem>(universe.size)
+    for (item in seen) if (item in universe) result.add(item)
+    for (item in universe) if (item !in result) result.add(item)
+    return result
+}
