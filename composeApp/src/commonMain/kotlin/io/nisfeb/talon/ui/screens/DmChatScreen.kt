@@ -338,19 +338,18 @@ fun DmChatScreen(
     }
 
     var forceBottomTick by remember(whom) { mutableStateOf(0) }
-    // When the user sends, doSend increments forceBottomTick. The
-    // first scroll happens against the rows we have NOW (still the
-    // pre-send list); the optimistic upsert lands a moment later and
-    // prepends a new row at index 0, which under reverseLayout shifts
-    // the visible position and leaves the user's own message just
-    // below the fold. Capture the current row count at tick time and
-    // re-snap once rows actually grows past it — that's the snapshot
-    // pendingSendBaselineSize tracks.
+    // pendingSendBaselineSize: the row count captured at the moment
+    // doSend fires, BEFORE the optimistic upsert lands. The
+    // LaunchedEffect(rows.size) below uses it to detect "the user
+    // just sent — once rows grows past this baseline, snap to bottom
+    // unconditionally so their own message can't end up below the
+    // fold". The baseline is set inside doSend (see the send
+    // composer), not here, because the upsert is fast enough on a
+    // local DB to race a LaunchedEffect-deferred snapshot.
     var pendingSendBaselineSize by remember(whom) { mutableStateOf<Int?>(null) }
     LaunchedEffect(forceBottomTick) {
         if (forceBottomTick > 0 && rows.isNotEmpty()) {
             listState.scrollToItem(0)
-            pendingSendBaselineSize = rows.size
         }
     }
 
@@ -884,6 +883,17 @@ fun DmChatScreen(
                     draft = TextFieldValue("")
                     drafts.clear(whom)
                     sendError = null
+                    // Capture the baseline SYNCHRONOUSLY before the
+                    // optimistic upsert can race the LaunchedEffect.
+                    // rc10's fix put the snapshot inside
+                    // LaunchedEffect(forceBottomTick), but on a fast
+                    // local DB the upsert lands before the effect
+                    // runs — so baseline gets stamped post-upsert
+                    // (rows.size already grew), the catch-up
+                    // condition `rowsSize > baseline` never holds,
+                    // and the user's message lands below the fold.
+                    // Setting it here pins the pre-send count.
+                    pendingSendBaselineSize = rows.size
                     forceBottomTick += 1
                     pendingQuote = null
                     if (!handledInUi) scope.launch {
