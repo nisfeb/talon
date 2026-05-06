@@ -1,9 +1,6 @@
 package io.nisfeb.talon.compose
 
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.painter.BitmapPainter
 import androidx.compose.ui.graphics.toComposeImageBitmap
 import androidx.compose.ui.window.MenuBar
@@ -250,11 +247,15 @@ fun main() {
     }
 
     application {
-        // visible: false hides the window without tearing down the
-        // composition or the rest of the dependency graph (SSE keeps
-        // running, notifications keep firing). The user reopens via
-        // the tray menu's "Show Talon" item or fully exits via "Quit".
-        var windowVisible by remember { mutableStateOf(true) }
+        // Close button = quit. Earlier revisions hid the window
+        // and kept SSE / repo / db running in the background under
+        // the assumption a tray icon kept the app reachable. That's
+        // the chat-client convention (Slack, Discord, Telegram). It
+        // breaks down on Wayland tile WMs (Hyprland, Sway, Omarchy)
+        // where there's typically no visible system tray, leaving
+        // the app running invisibly with no way back. Quit-on-close
+        // matches what the user expects from a window's X button;
+        // the tray's "Quit" stays as a redundant exit affordance.
         val windowState = rememberWindowState()
         val trayState = rememberTrayState()
         // Tray icon for OS notifications + show/quit menu. iconPainter
@@ -279,16 +280,13 @@ fun main() {
             icon = trayIconPainter,
             state = trayState,
             tooltip = "Talon",
-            // Primary click on the tray icon (Linux/Windows) reopens
-            // the window if it's been minimized to tray. macOS tray
-            // primary-click usually opens the menu instead.
+            // Primary click on the tray icon (Linux/Windows) un-
+            // minimizes the window if it's been minimized.
             onAction = {
-                windowVisible = true
                 windowState.isMinimized = false
             },
             menu = {
                 Item("Show Talon", onClick = {
-                    windowVisible = true
                     windowState.isMinimized = false
                 })
                 Item("Quit", onClick = quitToOs)
@@ -310,12 +308,9 @@ fun main() {
             )
         }
         Window(
-            // Minimize to tray instead of quitting. SSE / repo / db all
-            // keep running so notifications continue firing while the
-            // window is hidden. The tray menu's "Quit" is the only path
-            // that fully exits the JVM.
-            onCloseRequest = { windowVisible = false },
-            visible = windowVisible,
+            // Close button = full quit. See the comment above
+            // application { } for why we don't minimize-to-tray here.
+            onCloseRequest = quitToOs,
             state = windowState,
             title = "Talon",
             icon = iconPainter,
