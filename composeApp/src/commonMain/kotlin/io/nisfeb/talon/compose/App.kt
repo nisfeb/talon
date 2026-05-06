@@ -122,9 +122,12 @@ fun App(
      *  platforms (Android composeApp) get the no-op default until
      *  their notification stories port. */
     notifier: Notifier = NoopNotifier,
-    /** UI preferences (composer toggles). In-memory default; desktop
-     *  passes a JSON-backed impl. */
-    uiSettings: UiSettings = InMemoryUiSettings(),
+    /** Per-ship UiSettings factory. Called inside the `key(shipKey)`
+     *  block so the rail-visibility flow (sourced from the per-ship
+     *  `rail_item_prefs` Room table) reflects the active ship. Default
+     *  ignores the db arg and hands back an in-memory instance for
+     *  tests. */
+    createUiSettings: (AppDatabase) -> UiSettings = { InMemoryUiSettings() },
     /** Process-wide diagnostics for the Notification Health panel.
      *  Single instance shared by all consumers (repo writes,
      *  Settings reads, future relay reads). Defaults to a fresh
@@ -390,6 +393,15 @@ fun App(
         // home list keeps showing the prior ship's DMs after switch.
         val db = remember { createDb(shipKey) }
         val settingsSync = remember { createSettingsSync?.invoke(db) }
+        // Per-ship UiSettings. railVisibility's read-flow is sourced
+        // from the active ship's rail_item_prefs Room table, so this
+        // also has to rebuild on ship switch — otherwise the rail
+        // would render the prior ship's hidden-item set after a
+        // switch. The other fields (accent, hideComposerButtons, etc.)
+        // are per-device and are still served from the same desktop
+        // JSON file / SharedPreferences regardless of which db is
+        // passed; the impls just don't read those fields from db.
+        val uiSettings = remember { createUiSettings(db) }
         // tryRestore() pulls the saved ship's cookie + baseUrl into
         // this fresh UrbitSession on first composition. After login,
         // sessionStore has the new entry; the next re-key picks it up.

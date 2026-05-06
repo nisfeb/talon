@@ -58,6 +58,19 @@ interface UiSettings {
      */
     val activeRailTab: StateFlow<RailTab>
     fun setActiveRailTab(tab: RailTab)
+
+    /**
+     * Visibility overrides for [RailItem]s. Sparse Map — only contains
+     * rows for items the user has explicitly hidden. Read sites should
+     * use [Map.isVisible] (in `RailItem.kt`) which defaults absent
+     * items to true.
+     *
+     * Mutation goes through [io.nisfeb.talon.urbit.SettingsSync]'s
+     * `setRailItemVisibility` (which writes the underlying Room table
+     * + pokes %settings for cross-device sync). UiSettings exposes the
+     * read-side flow only.
+     */
+    val railVisibility: StateFlow<Map<RailItem, Boolean>>
 }
 
 enum class GroupChannelOrder { Recent, HostOrder }
@@ -100,6 +113,7 @@ class InMemoryUiSettings(
     initialGroupOrder: GroupChannelOrder = GroupChannelOrder.Recent,
     initialChatPaneListFraction: Float = 0.30f,
     initialActiveRailTab: RailTab = RailTab.Chats,
+    initialRailVisibility: Map<RailItem, Boolean> = emptyMap(),
 ) : UiSettings {
     private val _hideComposerButtons = MutableStateFlow(initialHide)
     override val hideComposerButtons: StateFlow<Boolean> =
@@ -136,5 +150,19 @@ class InMemoryUiSettings(
         _activeRailTab.asStateFlow()
     override fun setActiveRailTab(tab: RailTab) {
         _activeRailTab.value = tab
+    }
+
+    // Test-only mutator. The interface intentionally has no setter for
+    // [railVisibility] — production mutation goes through
+    // SettingsSyncImpl.setRailItemVisibility which writes the Room
+    // table directly. This non-override helper lets unit tests exercise
+    // the read-flow without standing up a full DAO.
+    private val _railVisibility = MutableStateFlow(initialRailVisibility)
+    override val railVisibility: StateFlow<Map<RailItem, Boolean>> =
+        _railVisibility.asStateFlow()
+    fun setRailVisibility(item: RailItem, visible: Boolean) {
+        _railVisibility.value = _railVisibility.value.toMutableMap().apply {
+            if (visible) remove(item) else this[item] = false
+        }
     }
 }

@@ -145,7 +145,9 @@ class TalonApplication : Application() {
         sessionStore = io.nisfeb.talon.urbit.AndroidSessionStore(this)
         aiSettings = io.nisfeb.talon.ai.AndroidAiSettings(this)
         dailyDigestSettings = io.nisfeb.talon.ai.AndroidDailyDigestSettings(this)
-        uiSettings = io.nisfeb.talon.ui.AndroidUiSettings(this)
+        // uiSettings is constructed below once buildShipScoped has set
+        // up the per-ship `db` field — AndroidUiSettings derives its
+        // railVisibility flow from the rail_item_prefs Room table.
         themePreference = io.nisfeb.talon.ui.theme.AndroidThemePreference(this)
         shipProfiles = ShipProfileStore(this)
         aiClient = AiClient(settingsProvider = { aiSettings.state.value })
@@ -195,6 +197,16 @@ class TalonApplication : Application() {
         // login screen before anyone touches these values.
         val shipForInit = initialShip ?: "none"
         buildShipScoped(shipForInit)
+        // Now that `db` is set, build the process-wide UiSettings.
+        // railVisibility is bound to this ship's rail_item_prefs table;
+        // a future task will re-thread per-ship so a ship switch
+        // refreshes the flow. Other fields are SharedPreferences-backed
+        // and survive ship switches as-is.
+        uiSettings = io.nisfeb.talon.ui.AndroidUiSettings(
+            context = this,
+            db = db,
+            scope = appScope,
+        )
         _activeShip.value = initialShip
 
         // Phase-2 backstop: WorkManager fires `catchUp` every ~15

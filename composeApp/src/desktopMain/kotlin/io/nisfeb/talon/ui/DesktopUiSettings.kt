@@ -1,9 +1,14 @@
 package io.nisfeb.talon.ui
 
+import io.nisfeb.talon.data.AppDatabase
 import io.nisfeb.talon.util.AppDirs
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -16,9 +21,16 @@ import java.nio.file.StandardCopyOption
  * per-process settings files in the user-data dir. Atomic-move write
  * so a JVM crash mid-write can't truncate the file to an unparseable
  * state.
+ *
+ * [railVisibility] is the exception — its rows live in the per-ship
+ * Room database (sparse `rail_item_prefs` table) so they can sync via
+ * %settings. The flow here is a read-only projection of that table.
+ * Mutation goes through `SettingsSyncImpl.setRailItemVisibility`.
  */
 class DesktopUiSettings(
     private val file: File = File(AppDirs.userData, "ui.json"),
+    private val db: AppDatabase,
+    private val scope: CoroutineScope,
 ) : UiSettings {
     @Serializable
     private data class Persisted(
@@ -70,6 +82,20 @@ class DesktopUiSettings(
     )
     override val activeRailTab: StateFlow<RailTab> =
         _activeRailTab.asStateFlow()
+
+    // Read-only projection of the per-ship rail_item_prefs table.
+    // Sparse — only rows the user has explicitly hidden. Eager so the
+    // flow stays subscribed for the lifetime of [scope] and the first
+    // composition collect doesn't pay a fresh DAO subscribe.
+    override val railVisibility: StateFlow<Map<RailItem, Boolean>> =
+        db.railItemPrefs().streamAll()
+            .map { rows ->
+                rows.mapNotNull { row ->
+                    val item = railItemOrNull(row.itemName) ?: return@mapNotNull null
+                    item to row.visible
+                }.toMap()
+            }
+            .stateIn(scope, SharingStarted.Eagerly, emptyMap())
 
     override fun setHideComposerButtons(hidden: Boolean) {
         if (_hideComposerButtons.value == hidden) return

@@ -71,12 +71,13 @@ private class DesktopAppGraph {
     val dailyDigestSettings: DailyDigestSettings = DesktopDailyDigestSettings()
     val watchwordsSync: WatchwordsSyncSettings = DesktopWatchwordsSyncSettings()
     val themePreference: ThemePreference = DesktopThemePreference()
-    val uiSettings: UiSettings = DesktopUiSettings()
     val relaySettings: io.nisfeb.talon.notify.RelaySettings =
         io.nisfeb.talon.notify.DesktopRelaySettings()
     val lastOpenChatStore: io.nisfeb.talon.notify.LastOpenChatStore =
         io.nisfeb.talon.notify.DesktopLastOpenChatStore()
     val drafts: DraftStore = InMemoryDraftStore()
+
+    private val updateScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     init {
         // Eager smoke-test open against the ship we'll first land on,
@@ -87,6 +88,16 @@ private class DesktopAppGraph {
         // reopens the same file moments later.
         val probe = createAppDatabase(sessionStore.activeShip() ?: "__loggedout__")
         runCatching { probe.close() }
+    }
+
+    // Per-ship UiSettings factory. App.kt invokes this inside its
+    // key(shipKey) block so the rail-visibility flow is bound to the
+    // active ship's `rail_item_prefs` Room table — without per-ship
+    // construction the flow would either be stuck on the first ship's
+    // DB or contend with the App composition's per-ship handle on the
+    // same SQLite file.
+    val createUiSettings: (AppDatabase) -> UiSettings = { db ->
+        DesktopUiSettings(db = db, scope = updateScope)
     }
 
     // Tracks the currently-mounted db so window-close shutdown can
@@ -109,7 +120,6 @@ private class DesktopAppGraph {
         )
     }
 
-    private val updateScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     val updateState: UpdateState = UpdateState(
         scope = updateScope,
         runtime = StaticUpdateRuntime(),
@@ -332,7 +342,7 @@ fun main() {
                     watchwordsSync = graph.watchwordsSync,
                     themePreference = graph.themePreference,
                     notifier = notifier,
-                    uiSettings = graph.uiSettings,
+                    createUiSettings = graph.createUiSettings,
                     relaySettings = graph.relaySettings,
                     createSearchEmbedderClient = { db ->
                         val embedder = io.nisfeb.talon.ai.DesktopEmbedder()
