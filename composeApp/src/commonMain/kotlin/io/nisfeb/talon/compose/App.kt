@@ -34,6 +34,8 @@ import io.nisfeb.talon.ui.ExpandedThreshold
 import io.nisfeb.talon.ui.PlatformBackHandler
 import io.nisfeb.talon.ui.RailTab
 import io.nisfeb.talon.ui.RightPaneContent
+import io.nisfeb.talon.ui.RightPaneState
+import io.nisfeb.talon.ui.RightPaneStateReducer
 import io.nisfeb.talon.ui.RightPaneHost
 import io.nisfeb.talon.ui.UiSettings
 import io.nisfeb.talon.ui.screens.ActivityList
@@ -184,6 +186,48 @@ fun App(
     var openThreadReplyAnchor by remember { mutableStateOf<String?>(null) }
     var groupInfoOpenFor by remember { mutableStateOf<String?>(null) }
     var groupInfoDrilldown by remember { mutableStateOf<MediaCategory?>(null) }
+    // Right-pane state mutators — delegate to RightPaneStateReducer
+    // so the mutual-exclusion rules (opening a thread closes group
+    // info, switching ships clears everything, etc.) live in one
+    // tested place. Adding a new transition is a one-touch reducer
+    // change + one helper here, not a 7-site grep + write-site
+    // update — that scattering pattern leaked three classes of
+    // state-mutex bugs through the rc6 audit.
+    val rightPaneSnapshot: () -> RightPaneState = {
+        RightPaneState(
+            openThreadParent = openThreadParent,
+            openThreadReplyAnchor = openThreadReplyAnchor,
+            groupInfoOpenFor = groupInfoOpenFor,
+            groupInfoDrilldown = groupInfoDrilldown,
+        )
+    }
+    val applyRightPaneState: (RightPaneState) -> Unit = { next ->
+        openThreadParent = next.openThreadParent
+        openThreadReplyAnchor = next.openThreadReplyAnchor
+        groupInfoOpenFor = next.groupInfoOpenFor
+        groupInfoDrilldown = next.groupInfoDrilldown
+    }
+    val openThreadAction: (parentId: String, anchor: String?) -> Unit = { p, a ->
+        applyRightPaneState(RightPaneStateReducer.openThread(rightPaneSnapshot(), p, a))
+    }
+    val openGroupInfoAction: (whom: String) -> Unit = { w ->
+        applyRightPaneState(RightPaneStateReducer.openGroupInfo(rightPaneSnapshot(), w))
+    }
+    val openCategoryAction: (MediaCategory) -> Unit = { c ->
+        applyRightPaneState(RightPaneStateReducer.openCategory(rightPaneSnapshot(), c))
+    }
+    val closeDrilldownAction: () -> Unit = {
+        applyRightPaneState(RightPaneStateReducer.closeDrilldown(rightPaneSnapshot()))
+    }
+    val closeRightPaneAction: () -> Unit = {
+        applyRightPaneState(RightPaneStateReducer.closeRightPane(rightPaneSnapshot()))
+    }
+    val openConversationAction: () -> Unit = {
+        applyRightPaneState(RightPaneStateReducer.openConversation(rightPaneSnapshot()))
+    }
+    val switchShipAction: () -> Unit = {
+        applyRightPaneState(RightPaneStateReducer.switchShip(rightPaneSnapshot()))
+    }
     var showSelfProfile by remember { mutableStateOf(false) }
     var showStatusFeed by remember { mutableStateOf(false) }
     var showInvites by remember { mutableStateOf(false) }
@@ -590,10 +634,7 @@ fun App(
                                     // sessionStore.setActive so no frame renders with
                                     // the new active ship but stale chat state.
                                     openChat = null
-                                    openThreadParent = null
-                                    openThreadReplyAnchor = null
-                                    groupInfoOpenFor = null
-                                    groupInfoDrilldown = null
+                                    switchShipAction()
                                     viewerImageUrl = null
                                     showSelfProfile = false
                                     showSettings = false
@@ -644,10 +685,7 @@ fun App(
                 }
                 val switchShip: (String) -> Unit = { newShip ->
                     openChat = null
-                    openThreadParent = null
-                    openThreadReplyAnchor = null
-                    groupInfoOpenFor = null
-                    groupInfoDrilldown = null
+                    switchShipAction()
                     viewerImageUrl = null
                     showSelfProfile = false
                     showSettings = false
@@ -656,10 +694,7 @@ fun App(
                 }
                 val addShip: () -> Unit = {
                     openChat = null
-                    openThreadParent = null
-                    openThreadReplyAnchor = null
-                    groupInfoOpenFor = null
-                    groupInfoDrilldown = null
+                    switchShipAction()
                     viewerImageUrl = null
                     showSelfProfile = false
                     showSettings = false
@@ -899,7 +934,7 @@ fun App(
                             db = db,
                             whom = groupInfoOpenFor!!,
                             category = groupInfoDrilldown!!,
-                            onBack = { groupInfoDrilldown = null },
+                            onBack = { closeDrilldownAction() },
                             onOpenImage = { url -> viewerImageUrl = url },
                         )
                     }
@@ -908,8 +943,8 @@ fun App(
                             db = db,
                             repo = repo,
                             whom = groupInfoOpenFor!!,
-                            onBack = { groupInfoOpenFor = null },
-                            onOpenCategory = { groupInfoDrilldown = it },
+                            onBack = { closeRightPaneAction() },
+                            onOpenCategory = { openCategoryAction(it) },
                             onOpenMembers = {
                                 val whom = groupInfoOpenFor
                                 if (whom != null) {
@@ -937,13 +972,9 @@ fun App(
                             parentId = openThreadParent!!,
                             initialScrollReplyId = openThreadReplyAnchor,
                             onScrollConsumed = { openThreadReplyAnchor = null },
-                            onBack = {
-                                openThreadParent = null
-                                openThreadReplyAnchor = null
-                            },
+                            onBack = { closeRightPaneAction() },
                             onOpenConversation = { other ->
-                                openThreadParent = null
-                                openThreadReplyAnchor = null
+                                openConversationAction()
                                 openChat = other
                             },
                             onOpenImage = { url -> viewerImageUrl = url },
@@ -1053,39 +1084,18 @@ fun App(
                                     ourPatp = ship,
                                     whom = openChat!!,
                                     onBack = { openChat = null },
-                                    onOpenThread = { parentId ->
-                                        // Mutual exclusion: opening a thread closes
-                                        // any open group-info pane / drilldown so the
-                                        // right pane shows the thread, not a stale
-                                        // GroupInfo for the same chat.
-                                        groupInfoOpenFor = null
-                                        groupInfoDrilldown = null
-                                        openThreadReplyAnchor = null
-                                        openThreadParent = parentId
-                                    },
+                                    onOpenThread = { parentId -> openThreadAction(parentId, null) },
                                     onOpenThreadAt = { parentId, replyAnchor ->
-                                        groupInfoOpenFor = null
-                                        groupInfoDrilldown = null
-                                        openThreadReplyAnchor = replyAnchor
-                                        openThreadParent = parentId
+                                        openThreadAction(parentId, replyAnchor)
                                     },
                                     onOpenConversation = { other ->
-                                        // Switching chats invalidates any thread or
-                                        // group-info anchored to the previous chat.
-                                        openThreadParent = null
-                                        openThreadReplyAnchor = null
-                                        groupInfoOpenFor = null
-                                        groupInfoDrilldown = null
+                                        openConversationAction()
                                         openChat = other
                                     },
                                     onOpenImage = { url -> viewerImageUrl = url },
                                     onOpenSelfProfile = { showSelfProfile = true },
                                     onOpenGroupInfo = {
-                                        // Mutual exclusion: opening group info
-                                        // closes any open thread.
-                                        openThreadParent = null
-                                        openThreadReplyAnchor = null
-                                        groupInfoOpenFor = openChat
+                                        openChat?.let { openGroupInfoAction(it) }
                                     },
                                 )
                             })
@@ -1103,13 +1113,7 @@ fun App(
                                         updateState = updateState,
                                         menuSeen = menuSeen,
                                         onOpenConversation = { whom ->
-                                            // Tapping a chat row invalidates any
-                                            // right-pane content anchored to the
-                                            // previous open chat.
-                                            openThreadParent = null
-                                            openThreadReplyAnchor = null
-                                            groupInfoOpenFor = null
-                                            groupInfoDrilldown = null
+                                            openConversationAction()
                                             openChat = whom
                                         },
                                         onOpenSearch = { showSearch = true },
@@ -1126,10 +1130,7 @@ fun App(
                                             // next sign-in lands on DmList instead of
                                             // a stale chat from the prior ship.
                                             openChat = null
-                                            openThreadParent = null
-                                            openThreadReplyAnchor = null
-                                            groupInfoOpenFor = null
-                                            groupInfoDrilldown = null
+                                            switchShipAction()
                                             viewerImageUrl = null
                                             showSelfProfile = false
                                             showSettings = false
@@ -1180,10 +1181,7 @@ fun App(
                                             // sessionStore.setActive so no frame renders with
                                             // the new active ship but stale chat state.
                                             openChat = null
-                                            openThreadParent = null
-                                            openThreadReplyAnchor = null
-                                            groupInfoOpenFor = null
-                                            groupInfoDrilldown = null
+                                            switchShipAction()
                                             viewerImageUrl = null
                                             showSelfProfile = false
                                             showSettings = false
@@ -1195,10 +1193,7 @@ fun App(
                                             // ship out — its session entry stays in sessionStore
                                             // so the drawer can switch back after the new login.
                                             openChat = null
-                                            openThreadParent = null
-                                            openThreadReplyAnchor = null
-                                            groupInfoOpenFor = null
-                                            groupInfoDrilldown = null
+                                            switchShipAction()
                                             viewerImageUrl = null
                                             showSelfProfile = false
                                             showSettings = false
@@ -1259,19 +1254,11 @@ fun App(
                                         db = db,
                                         repo = repo,
                                         ourPatp = ship,
-                                        onClose = {
-                                            openThreadParent = null
-                                            openThreadReplyAnchor = null
-                                            groupInfoOpenFor = null
-                                            groupInfoDrilldown = null
-                                        },
-                                        onOpenCategory = { groupInfoDrilldown = it },
-                                        onLeaveCategoryDrilldown = { groupInfoDrilldown = null },
+                                        onClose = { closeRightPaneAction() },
+                                        onOpenCategory = { openCategoryAction(it) },
+                                        onLeaveCategoryDrilldown = { closeDrilldownAction() },
                                         onOpenConversation = { other ->
-                                            openThreadParent = null
-                                            openThreadReplyAnchor = null
-                                            groupInfoOpenFor = null
-                                            groupInfoDrilldown = null
+                                            openConversationAction()
                                             openChat = other
                                         },
                                         onOpenImage = { url -> viewerImageUrl = url },
