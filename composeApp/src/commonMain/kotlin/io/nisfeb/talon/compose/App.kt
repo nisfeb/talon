@@ -592,6 +592,8 @@ fun App(
                                     openChat = null
                                     openThreadParent = null
                                     openThreadReplyAnchor = null
+                                    groupInfoOpenFor = null
+                                    groupInfoDrilldown = null
                                     viewerImageUrl = null
                                     showSelfProfile = false
                                     showSettings = false
@@ -644,6 +646,8 @@ fun App(
                     openChat = null
                     openThreadParent = null
                     openThreadReplyAnchor = null
+                    groupInfoOpenFor = null
+                    groupInfoDrilldown = null
                     viewerImageUrl = null
                     showSelfProfile = false
                     showSettings = false
@@ -654,6 +658,8 @@ fun App(
                     openChat = null
                     openThreadParent = null
                     openThreadReplyAnchor = null
+                    groupInfoOpenFor = null
+                    groupInfoDrilldown = null
                     viewerImageUrl = null
                     showSelfProfile = false
                     showSettings = false
@@ -1048,14 +1054,30 @@ fun App(
                                     whom = openChat!!,
                                     onBack = { openChat = null },
                                     onOpenThread = { parentId ->
+                                        // Mutual exclusion: opening a thread closes
+                                        // any open group-info pane / drilldown so the
+                                        // right pane shows the thread, not a stale
+                                        // GroupInfo for the same chat.
+                                        groupInfoOpenFor = null
+                                        groupInfoDrilldown = null
                                         openThreadReplyAnchor = null
                                         openThreadParent = parentId
                                     },
                                     onOpenThreadAt = { parentId, replyAnchor ->
+                                        groupInfoOpenFor = null
+                                        groupInfoDrilldown = null
                                         openThreadReplyAnchor = replyAnchor
                                         openThreadParent = parentId
                                     },
-                                    onOpenConversation = { other -> openChat = other },
+                                    onOpenConversation = { other ->
+                                        // Switching chats invalidates any thread or
+                                        // group-info anchored to the previous chat.
+                                        openThreadParent = null
+                                        openThreadReplyAnchor = null
+                                        groupInfoOpenFor = null
+                                        groupInfoDrilldown = null
+                                        openChat = other
+                                    },
                                     onOpenImage = { url -> viewerImageUrl = url },
                                     onOpenSelfProfile = { showSelfProfile = true },
                                     onOpenGroupInfo = {
@@ -1080,7 +1102,16 @@ fun App(
                                         drafts = drafts,
                                         updateState = updateState,
                                         menuSeen = menuSeen,
-                                        onOpenConversation = { whom -> openChat = whom },
+                                        onOpenConversation = { whom ->
+                                            // Tapping a chat row invalidates any
+                                            // right-pane content anchored to the
+                                            // previous open chat.
+                                            openThreadParent = null
+                                            openThreadReplyAnchor = null
+                                            groupInfoOpenFor = null
+                                            groupInfoDrilldown = null
+                                            openChat = whom
+                                        },
                                         onOpenSearch = { showSearch = true },
                                         onNewMessage = { showNewDm = true },
                                         onSignOut = {
@@ -1097,6 +1128,8 @@ fun App(
                                             openChat = null
                                             openThreadParent = null
                                             openThreadReplyAnchor = null
+                                            groupInfoOpenFor = null
+                                            groupInfoDrilldown = null
                                             viewerImageUrl = null
                                             showSelfProfile = false
                                             showSettings = false
@@ -1149,6 +1182,8 @@ fun App(
                                             openChat = null
                                             openThreadParent = null
                                             openThreadReplyAnchor = null
+                                            groupInfoOpenFor = null
+                                            groupInfoDrilldown = null
                                             viewerImageUrl = null
                                             showSelfProfile = false
                                             showSettings = false
@@ -1162,6 +1197,8 @@ fun App(
                                             openChat = null
                                             openThreadParent = null
                                             openThreadReplyAnchor = null
+                                            groupInfoOpenFor = null
+                                            groupInfoDrilldown = null
                                             viewerImageUrl = null
                                             showSelfProfile = false
                                             showSettings = false

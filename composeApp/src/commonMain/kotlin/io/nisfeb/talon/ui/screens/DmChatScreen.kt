@@ -607,7 +607,14 @@ fun DmChatScreen(
                     style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
                     modifier = Modifier.weight(1f).padding(start = 4.dp),
                 )
-                if (onOpenGroupInfo != null && (whom.startsWith("chat/") || whom.startsWith("0v"))) {
+                // Group/channel chats only for v1 — clubs (`0v...`) don't
+                // map to a single group flag, so GroupInfoPane's "View
+                // members" handler (which resolves channel-nest →
+                // group-flag via `db.groups().channelGroupFor`) silently
+                // no-ops for them. DMs (`~ship`) likewise have no
+                // group-info concept in v1 (architecture is chat-shape-
+                // aware so club + DM support is additive later).
+                if (onOpenGroupInfo != null && whom.startsWith("chat/")) {
                     IconButton(onClick = onOpenGroupInfo) {
                         Icon(Icons.Filled.Info, contentDescription = "Info")
                     }

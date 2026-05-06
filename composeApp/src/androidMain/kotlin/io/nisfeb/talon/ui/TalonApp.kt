@@ -62,9 +62,12 @@ import io.nisfeb.talon.ui.screens.NotebookListScreen
 import io.nisfeb.talon.ui.screens.NotebookPostScreen
 import io.nisfeb.talon.ui.screens.BookmarksScreen
 import io.nisfeb.talon.ui.screens.DailyDigestScreen
+import io.nisfeb.talon.ui.screens.GroupInfoScreen
+import io.nisfeb.talon.ui.screens.MediaListScreen
 import io.nisfeb.talon.ui.screens.StatusFeedScreen
 import io.nisfeb.talon.ui.screens.ThreadScreen
 import io.nisfeb.talon.ui.screens.WatchwordsScreen
+import io.nisfeb.talon.urbit.MediaCategory
 import kotlinx.coroutines.launch
 
 /** Cheap substring test — Story mention spans serialize as {"ship":"~patp"}. */
@@ -169,6 +172,13 @@ fun TalonApp(
     var adminGroupFlag by remember { mutableStateOf<String?>(null) }
     var invitesOpen by remember { mutableStateOf(false) }
     var profileSheetShip by remember { mutableStateOf<String?>(null) }
+    // Phase 3 right-pane state — Android phone always renders these as
+    // full-screen replaces (no DesktopShell on phone). Tablet landscape
+    // gets the wide-pane right-column rendering via App.kt's path; this
+    // file is the phone-only entry. groupInfoDrilldown is sub-state of
+    // groupInfoOpenFor — both null = pane closed.
+    var groupInfoOpenFor by remember { mutableStateOf<String?>(null) }
+    var groupInfoDrilldown by remember { mutableStateOf<MediaCategory?>(null) }
     // Notebook / gallery drill-down state. openWhom picks the channel;
     // these pick the particular post / compose view within it.
     var openNotebookPostId by remember { mutableStateOf<String?>(null) }
@@ -212,9 +222,15 @@ fun TalonApp(
     // GroupHomeScreen — a member sees the channel list, a non-member
     // sees a Join CTA. Other targets route to the usual `openWhom`.
     val openConversation: (String) -> Unit = { target ->
+        // Switching to a different conversation invalidates any
+        // right-pane content (thread / group-info / media drilldown)
+        // anchored to the previous chat.
+        openThread = null
+        pendingThreadAnchor = null
+        groupInfoOpenFor = null
+        groupInfoDrilldown = null
         if (target.startsWith("group:")) {
             openGroupFlag = target.removePrefix("group:")
-            openThread = null
         } else {
             openWhom = target
         }
@@ -502,6 +518,15 @@ fun TalonApp(
         BackHandler(enabled = searchOpen) { searchOpen = false }
         BackHandler(enabled = newDmOpen) { newDmOpen = false }
         BackHandler(enabled = openThread != null) { openThread = null }
+        // Phase 3 right-pane back-stack — drilldown above group-info so
+        // back from a media list returns to the group-info pane, not
+        // straight to the chat.
+        BackHandler(enabled = groupInfoDrilldown != null) {
+            groupInfoDrilldown = null
+        }
+        BackHandler(enabled = groupInfoOpenFor != null && groupInfoDrilldown == null) {
+            groupInfoOpenFor = null
+        }
         BackHandler(enabled = openThread == null && openWhom != null) { openWhom = null }
         // Registered last so it wins over the chat handler when an
         // image is opened from inside a chat.
@@ -519,6 +544,8 @@ fun TalonApp(
             statusFeedOpen -> "StatusFeed"
             bookmarksOpen -> "Bookmarks"
             activityOpen -> "Activity"
+            groupInfoDrilldown != null -> "MediaList"
+            groupInfoOpenFor != null -> "GroupInfo"
             watchwordsOpen -> "Watchwords"
             digestOpen -> "Today's brief"
             adminGroupFlag != null -> "GroupAdmin($adminGroupFlag)"
@@ -570,6 +597,9 @@ fun TalonApp(
                             if (picked != loggedInShip) {
                                 openWhom = null
                                 openThread = null
+                                pendingThreadAnchor = null
+                                groupInfoOpenFor = null
+                                groupInfoDrilldown = null
                                 searchOpen = false
                                 newDmOpen = false
                                 app.switchShip(picked)
@@ -808,6 +838,41 @@ fun TalonApp(
                 modifier = mod,
             )
 
+            // Phase 3 right-pane on phone: drilldown takes priority so
+            // back-press returns to GroupInfoScreen, not the chat.
+            groupInfoDrilldown != null && groupInfoOpenFor != null -> MediaListScreen(
+                db = app.db,
+                whom = groupInfoOpenFor!!,
+                category = groupInfoDrilldown!!,
+                onBack = { groupInfoDrilldown = null },
+                onOpenImage = { url -> viewerImageUrl = url },
+                modifier = mod,
+            )
+
+            groupInfoOpenFor != null -> GroupInfoScreen(
+                db = app.db,
+                repo = app.repo,
+                whom = groupInfoOpenFor!!,
+                onBack = { groupInfoOpenFor = null },
+                onOpenCategory = { groupInfoDrilldown = it },
+                onOpenMembers = {
+                    // Resolve channel-nest → group-flag because
+                    // GroupAdminScreen takes a flag, not a whom.
+                    val whom = groupInfoOpenFor
+                    if (whom != null) {
+                        appScope.launch {
+                            val flag = runCatching {
+                                app.db.groups().channelGroupFor(whom)?.groupFlag
+                            }.getOrNull()
+                            if (flag != null) {
+                                adminGroupFlag = flag
+                            }
+                        }
+                    }
+                },
+                modifier = mod,
+            )
+
             openThread != null && openWhom != null -> ThreadScreen(
                 db = app.db,
                 repo = app.repo,
@@ -923,12 +988,27 @@ fun TalonApp(
                     initialScrollMessageId = pendingScrollMessageId,
                     onScrollConsumed = { pendingScrollMessageId = null },
                     onBack = { openWhom = null },
-                    onOpenThread = { openThread = it },
+                    onOpenThread = {
+                        // Mutual exclusion: opening a thread closes any
+                        // open group-info pane / drilldown.
+                        groupInfoOpenFor = null
+                        groupInfoDrilldown = null
+                        openThread = it
+                    },
                     onOpenThreadAt = { parent, anchor ->
+                        groupInfoOpenFor = null
+                        groupInfoDrilldown = null
                         pendingThreadAnchor = anchor
                         openThread = parent
                     },
                     onOpenConversation = openConversation,
+                    onOpenGroupInfo = {
+                        // Mutual exclusion: opening group info closes
+                        // any open thread.
+                        openThread = null
+                        pendingThreadAnchor = null
+                        groupInfoOpenFor = openWhom
+                    },
                     onOpenImage = { viewerImageUrl = it },
                     onOpenSelfProfile = { editingProfile = true },
                     // Android-only platform widgets — desktop hosts pass null
@@ -1026,6 +1106,9 @@ fun TalonApp(
                     TalonSyncService.stop(context)
                     openWhom = null
                     openThread = null
+                    pendingThreadAnchor = null
+                    groupInfoOpenFor = null
+                    groupInfoDrilldown = null
                     searchOpen = false
                     newDmOpen = false
                 },
@@ -1036,6 +1119,9 @@ fun TalonApp(
                     if (ship != loggedInShip) {
                         openWhom = null
                         openThread = null
+                        pendingThreadAnchor = null
+                        groupInfoOpenFor = null
+                        groupInfoDrilldown = null
                         searchOpen = false
                         newDmOpen = false
                         app.switchShip(ship)
