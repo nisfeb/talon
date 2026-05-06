@@ -25,42 +25,51 @@ class DesktopWatchwordsSyncSettingsTest {
     }
 
     @Test
-    fun `default false when file does not exist`() {
+    fun `default true when file does not exist`() {
+        // Watchwords sync defaults on so new users mirror across
+        // devices without an opt-in step. The file only appears once
+        // the user explicitly toggles — absent file means "untouched,
+        // use default".
         val store = DesktopWatchwordsSyncSettings(file)
-        assertFalse(store.enabled.value)
+        assertTrue(store.enabled.value)
         assertFalse(file.exists(), "default state must not write a file")
     }
 
     @Test
     fun `setEnabled persists and survives reload`() {
-        DesktopWatchwordsSyncSettings(file).setEnabled(true)
+        // Explicit-off must round-trip across restarts so users who
+        // chose local-only watchwords keep that choice.
+        DesktopWatchwordsSyncSettings(file).setEnabled(false)
         assertTrue(file.exists())
 
         val reloaded = DesktopWatchwordsSyncSettings(file)
-        assertTrue(reloaded.enabled.value)
+        assertFalse(reloaded.enabled.value)
     }
 
     @Test
     fun `setEnabled with same value is a no-op and does not touch disk`() {
-        // Default is false. Setting to false again should not write.
-        DesktopWatchwordsSyncSettings(file).setEnabled(false)
+        // Default is true. Setting to true again should not write.
+        DesktopWatchwordsSyncSettings(file).setEnabled(true)
         assertFalse(file.exists())
     }
 
     @Test
     fun `setEnabled toggle flips state both directions`() {
         val store = DesktopWatchwordsSyncSettings(file)
-        store.setEnabled(true)
-        assertTrue(store.enabled.value)
         store.setEnabled(false)
         assertFalse(store.enabled.value)
+        store.setEnabled(true)
+        assertTrue(store.enabled.value)
     }
 
     @Test
-    fun `corrupt file falls back to false`() {
+    fun `corrupt file falls back to default`() {
+        // Corrupt file is treated like an absent one — fall back to
+        // the on-by-default behavior rather than silently leaving the
+        // user with sync off.
         file.writeText("{this is not valid json}")
         val store = DesktopWatchwordsSyncSettings(file)
-        assertFalse(store.enabled.value)
+        assertTrue(store.enabled.value)
     }
 
     @Test

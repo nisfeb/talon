@@ -95,6 +95,12 @@ fun GroupInfoPane(
 
     val notifyPref by remember(whom) { db.notifyPrefs().stream(whom) }
         .collectAsState(initial = null)
+    val excludedWhoms by remember {
+        db.watchwords().streamExcludes()
+    }.collectAsState(initial = emptyList())
+    val isExcludedFromWatchwords = remember(excludedWhoms, whom) {
+        excludedWhoms.any { it.whom == whom }
+    }
     val countsList by remember(whom) {
         db.messageMedia().streamCounts(whom)
     }.collectAsState(initial = emptyList())
@@ -128,32 +134,85 @@ fun GroupInfoPane(
         }
 
         item {
-            // Mute toggle row. Talon's notify-level enum is
-            // ALL/MENTIONS/NONE; "muted" means NONE, "default" means
-            // MENTIONS (the standard Tlon-equivalent for chats).
+            // Notification level — full set, since the chat header's
+            // dropdown is hidden whenever this pane is available
+            // (rc26). Three levels:
+            //   ALL       — every message in the channel
+            //   MENTIONS  — only when our patp is referenced (default)
+            //   NONE      — muted; nothing surfaces
+            // Plus a watchword-exclusion toggle so chats the user
+            // doesn't want scanned for watchword hits can opt out
+            // even when the level is ALL/MENTIONS.
             val level = notifyPref?.level ?: NotifyLevel.DEFAULT
-            val muted = level == NotifyLevel.NONE
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Icon(
-                    if (muted) Icons.Filled.NotificationsOff else Icons.Filled.Notifications,
-                    contentDescription = null,
-                )
-                Spacer(Modifier.size(12.dp))
-                Text("Mute", modifier = Modifier.weight(1f))
-                Switch(
-                    checked = muted,
-                    onCheckedChange = { newMuted ->
+            val canMutate = repo.settingsSync != null
+            Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        if (level == NotifyLevel.NONE) Icons.Filled.NotificationsOff
+                        else Icons.Filled.Notifications,
+                        contentDescription = null,
+                    )
+                    Spacer(Modifier.size(12.dp))
+                    Text(
+                        "Notifications",
+                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
+                    )
+                }
+                Spacer(Modifier.height(8.dp))
+                NotifyLevelOption(
+                    label = "All messages",
+                    selected = level == NotifyLevel.ALL,
+                    enabled = canMutate,
+                    onClick = {
                         scope.launch {
-                            val next = if (newMuted) NotifyLevel.NONE else NotifyLevel.DEFAULT
-                            runCatching { repo.settingsSync?.setNotifyLevel(whom, next) }
+                            runCatching { repo.settingsSync?.setNotifyLevel(whom, NotifyLevel.ALL) }
                         }
                     },
                 )
+                NotifyLevelOption(
+                    label = "Mentions only",
+                    selected = level == NotifyLevel.MENTIONS || level == NotifyLevel.DEFAULT,
+                    enabled = canMutate,
+                    onClick = {
+                        scope.launch {
+                            runCatching {
+                                repo.settingsSync?.setNotifyLevel(whom, NotifyLevel.MENTIONS)
+                            }
+                        }
+                    },
+                )
+                NotifyLevelOption(
+                    label = "Off",
+                    selected = level == NotifyLevel.NONE,
+                    enabled = canMutate,
+                    onClick = {
+                        scope.launch {
+                            runCatching { repo.settingsSync?.setNotifyLevel(whom, NotifyLevel.NONE) }
+                        }
+                    },
+                )
+                Spacer(Modifier.height(4.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        "Exclude from watchwords",
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Switch(
+                        checked = isExcludedFromWatchwords,
+                        enabled = canMutate,
+                        onCheckedChange = { exclude ->
+                            scope.launch {
+                                runCatching {
+                                    repo.settingsSync?.setWatchwordExclude(whom, exclude)
+                                }
+                            }
+                        },
+                    )
+                }
             }
             HorizontalDivider()
         }
@@ -287,5 +346,34 @@ private fun StatCell(
             Text(count.toString(), style = MaterialTheme.typography.titleMedium)
             Text(emoji, style = MaterialTheme.typography.titleSmall)
         }
+    }
+}
+
+/**
+ * One row in the notification-level picker. Compact text + checkmark
+ * affordance — matches the in-pane style and stays narrow enough for
+ * the 360-dp right column on desktop.
+ */
+@Composable
+private fun NotifyLevelOption(
+    label: String,
+    selected: Boolean,
+    enabled: Boolean,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            if (selected) "✓ $label" else label,
+            style = MaterialTheme.typography.bodyMedium,
+            color = if (selected) MaterialTheme.colorScheme.primary
+                    else MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.weight(1f),
+        )
     }
 }

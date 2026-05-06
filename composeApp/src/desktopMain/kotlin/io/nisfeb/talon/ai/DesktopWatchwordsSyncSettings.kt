@@ -16,12 +16,18 @@ import java.nio.file.StandardCopyOption
  * to daily_digest.json in the platform user-data dir. Atomic writes
  * (temp + ATOMIC_MOVE) so a JVM crash mid-write can't truncate the
  * file to an unparseable state.
+ *
+ * Default is `true` (sync enabled). The file only exists once the
+ * user has explicitly toggled — so an absent or corrupt file falls
+ * back to the new default and the user gets cross-device watchwords
+ * out of the box. Users who explicitly toggled off keep that choice
+ * because the file persists with `enabled = false`.
  */
 class DesktopWatchwordsSyncSettings(
     private val file: File = File(AppDirs.userData, "watchwords_sync.json"),
 ) : WatchwordsSyncSettings {
     @Serializable
-    private data class Persisted(val enabled: Boolean = false)
+    private data class Persisted(val enabled: Boolean = true)
 
     private val _enabled = MutableStateFlow(loadInitial())
     override val enabled: StateFlow<Boolean> = _enabled.asStateFlow()
@@ -33,10 +39,10 @@ class DesktopWatchwordsSyncSettings(
     }
 
     private fun loadInitial(): Boolean {
-        if (!file.exists()) return false
+        if (!file.exists()) return true
         return runCatching {
             JSON.decodeFromString<Persisted>(file.readText()).enabled
-        }.getOrElse { false }
+        }.getOrElse { true }
     }
 
     private fun persist(value: Boolean) {

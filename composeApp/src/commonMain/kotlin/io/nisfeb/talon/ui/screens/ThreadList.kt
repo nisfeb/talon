@@ -55,6 +55,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.isShiftPressed
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.TextFieldValue
@@ -391,17 +397,9 @@ fun ThreadList(
             // colorScheme.primary here gives the same value the
             // text field's focus ring already uses by default.
             val sendAccent = MaterialTheme.colorScheme.primary
-            OutlinedTextField(
-                value = draft,
-                onValueChange = { draft = it },
-                placeholder = { Text("Reply") },
-                visualTransformation = io.nisfeb.talon.ui.EmojiVisualTransformation,
-                modifier = Modifier.weight(1f),
-            )
-            IconButton(
-                onClick = {
-                    val body = draft.text.trim()
-                    if (body.isEmpty()) return@IconButton
+            val doSend: () -> Unit = {
+                val body = draft.text.trim()
+                if (body.isNotEmpty()) {
                     draft = TextFieldValue("")
                     sendError = null
                     scope.launch {
@@ -410,7 +408,38 @@ fun ThreadList(
                                 sendError = "reply failed: ${err.message ?: err::class.simpleName}"
                             }
                     }
-                },
+                }
+            }
+            OutlinedTextField(
+                value = draft,
+                onValueChange = { draft = it },
+                placeholder = { Text("Reply") },
+                visualTransformation = io.nisfeb.talon.ui.EmojiVisualTransformation,
+                modifier = Modifier
+                    .weight(1f)
+                    .onPreviewKeyEvent { e ->
+                        if (e.type != KeyEventType.KeyDown || e.key != Key.Enter) {
+                            return@onPreviewKeyEvent false
+                        }
+                        if (e.isShiftPressed) {
+                            val cur = draft
+                            val start = cur.selection.start
+                            val end = cur.selection.end
+                            val newText = cur.text.substring(0, start) +
+                                "\n" +
+                                cur.text.substring(end)
+                            draft = cur.copy(
+                                text = newText,
+                                selection = TextRange(start + 1),
+                            )
+                            return@onPreviewKeyEvent true
+                        }
+                        doSend()
+                        true
+                    },
+            )
+            IconButton(
+                onClick = doSend,
                 enabled = draft.text.isNotBlank(),
             ) {
                 Icon(

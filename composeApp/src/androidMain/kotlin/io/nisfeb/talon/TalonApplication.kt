@@ -102,8 +102,13 @@ class TalonApplication : Application() {
         getSharedPreferences("talon_watchwords", MODE_PRIVATE)
     }
 
+    // Default true: new installs and existing users who never touched
+    // the toggle should mirror watchwords across devices out of the
+    // box. Users who explicitly turned it off keep the off setting
+    // because SharedPreferences only returns the default when the key
+    // is absent.
     private val _watchwordsSyncEnabled by lazy {
-        MutableStateFlow(watchwordsPrefs.getBoolean(KEY_WATCHWORDS_SYNC, false))
+        MutableStateFlow(watchwordsPrefs.getBoolean(KEY_WATCHWORDS_SYNC, true))
     }
     val watchwordsSyncEnabled: StateFlow<Boolean>
         get() = _watchwordsSyncEnabled.asStateFlow()

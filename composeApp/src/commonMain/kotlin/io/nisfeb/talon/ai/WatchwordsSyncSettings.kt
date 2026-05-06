@@ -18,7 +18,7 @@ interface WatchwordsSyncSettings {
     fun setEnabled(value: Boolean)
 }
 
-class InMemoryWatchwordsSyncSettings(initial: Boolean = false) : WatchwordsSyncSettings {
+class InMemoryWatchwordsSyncSettings(initial: Boolean = true) : WatchwordsSyncSettings {
     private val _enabled = MutableStateFlow(initial)
     override val enabled: StateFlow<Boolean> = _enabled.asStateFlow()
     override fun setEnabled(value: Boolean) {
