@@ -33,6 +33,7 @@ import io.nisfeb.talon.data.GroupEntity
 import io.nisfeb.talon.data.MessageEntity
 import io.nisfeb.talon.data.ReactionEntity
 import io.nisfeb.talon.data.UnreadEntity
+import io.nisfeb.talon.ui.ReactionPalette
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -1779,13 +1780,23 @@ class TlonChatRepo(
         return StorageConfig(bucket, region, publicUrlBase, service)
     }
 
-    /** Add or replace our reaction on a post. `emoji` is a raw shortcode. */
+    /**
+     * Add or replace our reaction on a post. The caller may pass either
+     * a shortcode (`:+1:`) or a unicode glyph (`👍`); we normalize to a
+     * glyph here because Tlon migrated reactions away from shortcodes
+     * to unicode in 2025 — every other Tlon client now sends glyphs on
+     * the wire, so emitting a shortcode would fragment reaction
+     * grouping (a `:+1:` from us and a `👍` from web Tlon become two
+     * separate chips). `ReactionPalette.display` is shortcode→glyph
+     * with a passthrough fallback, so glyphs in stay glyphs out.
+     */
     suspend fun react(whom: String, postId: String, emoji: String) {
         val ch = channel ?: error("not connected")
+        val glyph = ReactionPalette.display(emoji)
         val delta = buildJsonObject {
             put("add-react", buildJsonObject {
                 put("author", ourPatp)
-                put("react", emoji)
+                put("react", glyph)
             })
         }
         when {
@@ -1812,15 +1823,15 @@ class TlonChatRepo(
                             // local optimistic upsert sticks, and
                             // other devices never see the vote).
                             put("ship", ourPatp)
-                            put("react", emoji)
+                            put("react", glyph)
                         })
                     })
                 }),
             )
             else -> error("unsupported whom: $whom")
         }
-        db.reactions().upsert(ReactionEntity(whom, postId, ourPatp, emoji))
-        runCatching { db.reactionUsage().bump(emoji) }
+        db.reactions().upsert(ReactionEntity(whom, postId, ourPatp, glyph))
+        runCatching { db.reactionUsage().bump(glyph) }
     }
 
     /** Remove our reaction from a post. */
