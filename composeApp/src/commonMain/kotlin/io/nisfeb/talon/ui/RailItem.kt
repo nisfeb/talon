@@ -1,0 +1,51 @@
+package io.nisfeb.talon.ui
+
+/**
+ * Every clickable entry on the desktop rail. Superset of [RailTab]:
+ * pane-tab items (Chats / Statuses / Bookmarks / Activity) still swap
+ * the left pane via the existing activeRailTab plumbing; modal items
+ * fire the same kebab handlers they always have.
+ *
+ * Order is canonical (declaration order). Reorder UI is deferred —
+ * see the spec's "Out of scope" section.
+ *
+ * Sign out is intentionally not a RailItem — it's destructive and
+ * stays exclusively in the kebab dropdown.
+ */
+enum class RailItem(val isPaneTab: Boolean) {
+    Chats(true),
+    Statuses(true),
+    Bookmarks(true),
+    Activity(true),
+    Profile(false),
+    Watchwords(false),
+    TodaysBrief(false),
+    Administration(false),
+    Invites(false),
+    Settings(false),
+    ;
+
+    /**
+     * Maps a pane-tab item to its [RailTab] counterpart for the
+     * existing activeRailTab plumbing. Returns null for modal items
+     * (which don't have a "selected" state).
+     */
+    fun toRailTab(): RailTab? = if (isPaneTab) RailTab.valueOf(name) else null
+}
+
+/**
+ * Persistence helper. [RailItem.valueOf] throws on unknown names; this
+ * version returns null on any parse failure so a future enum rename
+ * doesn't blow up rows / wire entries that pre-date the change.
+ */
+fun railItemOrNull(name: String?): RailItem? {
+    if (name.isNullOrBlank()) return null
+    return runCatching { RailItem.valueOf(name) }.getOrNull()
+}
+
+/**
+ * Read-site helper: default-visible if not in the map. The Map is
+ * sparse — only contains rows for items the user has explicitly
+ * hidden.
+ */
+fun Map<RailItem, Boolean>.isVisible(item: RailItem): Boolean = this[item] ?: true
