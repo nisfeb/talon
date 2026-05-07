@@ -85,6 +85,14 @@ class SettingsSyncImpl(
         const val BUCKET_WATCHWORD_EXCLUDES = "watchword-excludes"
         const val BUCKET_DAILY_DIGEST = "daily-digest"
         private const val AI_ENTRY = "config"
+
+        // Wire schema version for the ai-settings entry. v1 (no
+        // marker) is everything written before rc33 — treated as
+        // legacy because the rc8-era Android push gap silently
+        // seeded defaults to the ship that then overwrote post-rc30
+        // local default-true values on every fresh install. v2
+        // entries are explicit user writes from rc33+ and authoritative.
+        private const val AI_SCHEMA_V2 = 2
     }
 
     @Volatile private var channel: UrbitChannel? = null
@@ -169,6 +177,23 @@ class SettingsSyncImpl(
             Log.i(TAG, "ship missing ai-settings bucket — seeding from local")
             runCatching { pushAiSettings() }
                 .onFailure { Log.w(TAG, "ai-settings seed push failed", it) }
+        } else {
+            // Schema upgrade: if the ship's entry is legacy (no
+            // schemaVersion), re-push from local so the bucket gets
+            // stamped v2. applyAiEntry already discarded the legacy
+            // toggle values and kept local defaults, so this push
+            // codifies the just-applied state on the ship.
+            // Idempotent — once the entry is v2, this branch is a
+            // no-op on every subsequent bootstrap.
+            val aiEntry = (deskMap?.get(BUCKET_AI_SETTINGS) as? JsonObject)?.get(AI_ENTRY)
+            val legacy = (aiEntry as? JsonObject)?.let {
+                (it["schemaVersion"].asInt() ?: 0) < AI_SCHEMA_V2
+            } ?: false
+            if (legacy) {
+                Log.i(TAG, "ship has legacy ai-settings entry — upgrading to schemaVersion=$AI_SCHEMA_V2")
+                runCatching { pushAiSettings() }
+                    .onFailure { Log.w(TAG, "ai-settings upgrade push failed", it) }
+            }
         }
         if ((deskMap?.get(BUCKET_DAILY_DIGEST) as? JsonObject).isNullOrEmpty()) {
             Log.i(TAG, "ship missing daily-digest bucket — seeding from local")
@@ -468,6 +493,10 @@ class SettingsSyncImpl(
         pokePutEntry(
             BUCKET_AI_SETTINGS, AI_ENTRY,
             buildJsonObject {
+                // Stamp v2 so applyAiEntry on a peer device knows
+                // these toggle values are an explicit write, not a
+                // legacy seed from the rc8-era recovery path.
+                put("schemaVersion", AI_SCHEMA_V2)
                 if (cfg.syncEnabled) {
                     put("provider", cfg.provider.name)
                     put("apiKey", cfg.apiKey)
@@ -508,18 +537,37 @@ class SettingsSyncImpl(
         fun bool(key: String, default: Boolean) =
             obj[key].asText()?.toBooleanStrictOrNull() ?: default
 
-        // Per-feature toggles always apply — they're preferences,
-        // not credentials. Apply on top of `current` so any field
-        // missing from the wire entry preserves the local value.
-        val features = current.copy(
-            catchMeUpEnabled = bool("catchMeUpEnabled", current.catchMeUpEnabled),
-            emojiReactEnabled = bool("emojiReactEnabled", current.emojiReactEnabled),
-            dailyDigestEnabled = bool("dailyDigestEnabled", current.dailyDigestEnabled),
-            entityActionsEnabled = bool("entityActionsEnabled", current.entityActionsEnabled),
-            semanticSearchEnabled = bool("semanticSearchEnabled", current.semanticSearchEnabled),
-            topicClustersEnabled = bool("topicClustersEnabled", current.topicClustersEnabled),
-            importantMessagesEnabled = bool("importantMessagesEnabled", current.importantMessagesEnabled),
-        )
+        // Schema version gate. Entries written by rc33+ carry
+        // `schemaVersion: 2`; everything before that is legacy data
+        // that may be stale (the rc8-era bug had Android's
+        // `aiSettings.onStateChange` unwired, so feature-toggle
+        // pushes silently dropped, and the bucket-empty recovery
+        // path then seeded defaults — which were FALSE for the four
+        // on-device features pre-rc30 — to the ship). Every fresh
+        // install since has been pulling those stale defaults back
+        // down and overwriting the rc30 default-true local state.
+        // For legacy entries we ignore feature toggles entirely
+        // (local defaults win) and trust only the explicit
+        // schemaVersion=2 writes a user has made on a post-rc33
+        // device. Cloud-key fields stay on the same wire-or-local
+        // path because they're already gated on local syncEnabled.
+        val schemaVersion = obj["schemaVersion"].asInt() ?: 0
+        Log.i(TAG, "applyAiEntry schemaVersion=$schemaVersion obj=$obj")
+
+        val features = if (schemaVersion >= AI_SCHEMA_V2) {
+            current.copy(
+                catchMeUpEnabled = bool("catchMeUpEnabled", current.catchMeUpEnabled),
+                emojiReactEnabled = bool("emojiReactEnabled", current.emojiReactEnabled),
+                dailyDigestEnabled = bool("dailyDigestEnabled", current.dailyDigestEnabled),
+                entityActionsEnabled = bool("entityActionsEnabled", current.entityActionsEnabled),
+                semanticSearchEnabled = bool("semanticSearchEnabled", current.semanticSearchEnabled),
+                topicClustersEnabled = bool("topicClustersEnabled", current.topicClustersEnabled),
+                importantMessagesEnabled = bool("importantMessagesEnabled", current.importantMessagesEnabled),
+            )
+        } else {
+            Log.i(TAG, "applyAiEntry ignoring legacy feature toggles; keeping local defaults")
+            current
+        }
 
         // Cloud-key fields only apply when local sync is opted in —
         // otherwise we respect the device's local key (or no-key).

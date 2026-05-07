@@ -291,6 +291,7 @@ class SettingsSyncApplyBucketTest {
             )
             val bucket = buildJsonObject {
                 put("config", buildJsonObject {
+                    put("schemaVersion", 2)
                     put("provider", "OpenAi")
                     put("apiKey", "sk-secret")
                     put("model", "gpt-4")
@@ -322,6 +323,7 @@ class SettingsSyncApplyBucketTest {
             val before = aiSettings.state.value
             val bucket = buildJsonObject {
                 put("config", buildJsonObject {
+                    put("schemaVersion", 2)
                     put("provider", "OpenAi")
                     put("apiKey", "sk-secret")
                     put("emojiReactEnabled", "false")
@@ -411,6 +413,7 @@ class SettingsSyncApplyBucketTest {
             val before = aiSettings.state.value
             val bucket = buildJsonObject {
                 put("config", buildJsonObject {
+                    put("schemaVersion", 2)
                     put("provider", "NotARealProvider")
                     put("apiKey", "key")
                     put("emojiReactEnabled", "false")
@@ -423,6 +426,41 @@ class SettingsSyncApplyBucketTest {
             assertEquals(before.apiKey, cfg.apiKey)
             // Feature toggle from the bucket still landed.
             assertEquals(false, cfg.emojiReactEnabled)
+        }
+
+    @Test
+    fun `applyBucket AI_SETTINGS ignores legacy v1 feature toggles and keeps local defaults`() =
+        runBlocking {
+            // Schema-version gate (rc33+): an entry without
+            // `schemaVersion: 2` is treated as legacy data — most
+            // likely written by the rc8-era recovery path that
+            // seeded the ship's bucket with default-FALSE values for
+            // the on-device AI features. Without this gate, every
+            // fresh install of an rc30+ build would dutifully pull
+            // those legacy FALSEs back down and clobber the rc30
+            // default-TRUE state. The user observed exactly this
+            // pattern across rc27/28/29/30 — toggles flipped on,
+            // reinstall, toggles back off.
+            val localDefaults = aiSettings.state.value
+            assertEquals(true, localDefaults.entityActionsEnabled)
+            assertEquals(true, localDefaults.semanticSearchEnabled)
+            val legacyBucket = buildJsonObject {
+                put("config", buildJsonObject {
+                    // Note: no `schemaVersion` key. Mirrors the wire
+                    // shape pushed by every rc before rc33.
+                    put("entityActionsEnabled", false)
+                    put("semanticSearchEnabled", false)
+                    put("topicClustersEnabled", false)
+                    put("importantMessagesEnabled", false)
+                })
+            }
+            sync.applyBucket(SettingsSyncImpl.BUCKET_AI_SETTINGS, legacyBucket)
+
+            val cfg = aiSettings.state.value
+            assertEquals(true, cfg.entityActionsEnabled)
+            assertEquals(true, cfg.semanticSearchEnabled)
+            assertEquals(true, cfg.topicClustersEnabled)
+            assertEquals(true, cfg.importantMessagesEnabled)
         }
 
     // ── daily-digest ────────────────────────────────────────────────
