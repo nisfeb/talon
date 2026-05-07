@@ -37,6 +37,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.isCtrlPressed
+import androidx.compose.ui.input.key.isMetaPressed
 import androidx.compose.ui.input.key.isShiftPressed
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
@@ -213,6 +215,39 @@ fun ChatComposer(
         }
     }
 
+    // Common upload path used by drag-drop, clipboard paste, and the
+    // existing image / file picker buttons. Image-shaped MIME goes
+    // through strategy.sendImage so the recipient gets a structured
+    // image post (where the surface supports it); everything else
+    // posts the bare URL the way the file button does. Clears the
+    // draft afterwards for the same reason the picker buttons do —
+    // the user finalized a send, the textual draft is orphaned.
+    val uploadAndSend: (DroppedFile) -> Unit = { file ->
+        scope.launch {
+            state.uploading = true
+            state.sendError = null
+            runCatching {
+                val hostedUrl = repo.uploadImage(file.bytes, file.mimeType, file.name)
+                if (file.isImage) {
+                    val dims = decodeImageDimensions(file.bytes)
+                    strategy.sendImage(
+                        src = hostedUrl,
+                        width = dims?.first ?: 0,
+                        height = dims?.second ?: 0,
+                        alt = file.name,
+                    )
+                } else {
+                    strategy.sendText(hostedUrl)
+                }
+                state.draft = TextFieldValue("")
+                drafts.clear(whom)
+            }.onFailure { err ->
+                state.sendError = "upload failed: ${err.message ?: err::class.simpleName}"
+            }
+            state.uploading = false
+        }
+    }
+
     val updateDraft: (TextFieldValue) -> Unit = { next ->
         state.draft = next
         drafts.save(whom, next.text)
@@ -238,7 +273,13 @@ fun ChatComposer(
         slashTrigger?.let { filterSlashCommands(it.query) } ?: emptyList()
     }
 
-    Column(modifier = Modifier.fillMaxWidth()) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .fileDropTarget(enabled = canSend && !state.uploading) { files ->
+                files.forEach(uploadAndSend)
+            },
+    ) {
         if (state.sendError != null) {
             Text(
                 state.sendError!!,
@@ -485,9 +526,26 @@ fun ChatComposer(
                 modifier = Modifier
                     .weight(1f)
                     .onPreviewKeyEvent { e ->
-                        if (e.type != KeyEventType.KeyDown || e.key != Key.Enter) {
+                        if (e.type != KeyEventType.KeyDown) {
                             return@onPreviewKeyEvent false
                         }
+                        // Ctrl+V (or Cmd+V on macOS) — if the
+                        // clipboard holds an image, intercept the
+                        // paste, upload + send, and consume the
+                        // event so the text field doesn't ALSO try
+                        // to paste (which would insert garbage like
+                        // the file path or nothing). Plain text
+                        // paste falls through normally.
+                        val pasteCombo = e.key == Key.V &&
+                            (e.isCtrlPressed || e.isMetaPressed)
+                        if (pasteCombo && canSend && !state.uploading) {
+                            val img = readClipboardImageOrNull()
+                            if (img != null) {
+                                uploadAndSend(img)
+                                return@onPreviewKeyEvent true
+                            }
+                        }
+                        if (e.key != Key.Enter) return@onPreviewKeyEvent false
                         if (e.isShiftPressed) {
                             // OutlinedTextField on CMP Desktop doesn't
                             // insert a newline on Shift+Enter from a
