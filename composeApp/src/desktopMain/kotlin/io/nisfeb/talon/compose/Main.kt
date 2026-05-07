@@ -282,19 +282,41 @@ fun main() {
             }.apply { isDaemon = true; name = "Talon-shutdown" }.start()
             exitApplication()
         }
+        // Bring-to-front routine — used by tray click and the "Show
+        // Talon" menu entry. Un-minimizing alone leaves the window
+        // behind whatever the user was looking at; toFront + focus
+        // request is what actually surfaces it. The AWT lookup runs
+        // off the main thread because Compose owns the EDT and we
+        // don't want to deadlock waiting for a frame swap.
+        val showAndFocus: () -> Unit = {
+            windowState.isMinimized = false
+            // SwingUtilities ensures the toFront/requestFocus calls
+            // land on the EDT regardless of caller. Without this the
+            // first tray click after launch sometimes no-ops on
+            // Linux WMs (Hyprland, Sway) that drop focus requests
+            // from non-EDT threads.
+            javax.swing.SwingUtilities.invokeLater {
+                java.awt.Frame.getFrames()
+                    .firstOrNull { it.title == "Talon" }
+                    ?.let { frame ->
+                        if (!frame.isVisible) frame.isVisible = true
+                        frame.extendedState = java.awt.Frame.NORMAL
+                        frame.toFront()
+                        frame.requestFocus()
+                    }
+            }
+        }
         Tray(
             icon = trayIconPainter,
             state = trayState,
             tooltip = "Talon",
-            // Primary click on the tray icon (Linux/Windows) un-
-            // minimizes the window if it's been minimized.
-            onAction = {
-                windowState.isMinimized = false
-            },
+            // Primary click on the tray icon brings Talon to front +
+            // focuses it. Previously only un-minimized, which left
+            // the window stacked behind whatever the user was
+            // looking at — defeating the whole point of clicking.
+            onAction = showAndFocus,
             menu = {
-                Item("Show Talon", onClick = {
-                    windowState.isMinimized = false
-                })
+                Item("Show Talon", onClick = showAndFocus)
                 Item("Quit", onClick = quitToOs)
             },
         )
