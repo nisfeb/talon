@@ -1197,6 +1197,7 @@ fun App(
                                     onOpenGroupInfo = {
                                         openChat?.let { openGroupInfoAction(it) }
                                     },
+                                    searchEmbedder = searchEmbedderClient,
                                 )
                             })
                             else -> null

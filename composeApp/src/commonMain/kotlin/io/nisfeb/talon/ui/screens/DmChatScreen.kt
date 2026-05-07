@@ -192,6 +192,10 @@ fun DmChatScreen(
      * wired info yet (icon stays hidden).
      */
     onOpenGroupInfo: (() -> Unit)? = null,
+    /** Optional embedder client. When non-null the topic-clusters
+     *  empty state surfaces live indexer progress instead of the
+     *  generic "check back" placeholder. */
+    searchEmbedder: io.nisfeb.talon.ai.SearchEmbedderClient? = null,
     modifier: Modifier = Modifier,
 ) {
     val aiConfigured by aiSettings.state.collectAsState()
@@ -960,6 +964,7 @@ fun DmChatScreen(
         TopicsSheet(
             whom = whom,
             db = db,
+            searchEmbedder = searchEmbedder,
             onDismiss = { topicsSheetOpen = false },
             onTapMessage = { msgId, parentId ->
                 topicsSheetOpen = false
@@ -1765,6 +1770,7 @@ private data class TopicsResult(
 private fun TopicsSheet(
     whom: String,
     db: AppDatabase,
+    searchEmbedder: io.nisfeb.talon.ai.SearchEmbedderClient?,
     onDismiss: () -> Unit,
     onTapMessage: (id: String, parentId: String?) -> Unit,
 ) {
@@ -1775,7 +1781,14 @@ private fun TopicsSheet(
         mutableStateOf(TopicsResult(emptyList(), fellBackToAllTime = false, embeddingCount = 0))
     }
 
-    LaunchedEffect(whom, window) {
+    // Re-cluster every time the indexer makes progress so the empty
+    // state actually moves on its own — the previous "check back in
+    // a moment" copy lied because the sheet only re-ran when the
+    // user changed window. Now we recompute as embeddings land.
+    val indexProgress by (searchEmbedder?.progress?.collectAsState()
+        ?: remember { mutableStateOf(io.nisfeb.talon.ai.IndexProgress()) })
+
+    LaunchedEffect(whom, window, indexProgress.indexed) {
         loading = true
         result = withContext(Dispatchers.Default) {
             buildTopicClusters(whom, db, window.ms)
@@ -1821,24 +1834,28 @@ private fun TopicsSheet(
                     Text("Clustering…", style = MaterialTheme.typography.bodyMedium)
                 }
                 clusters.isEmpty() -> {
-                    // Empty state. Distinguish "indexer hasn't seen
-                    // enough chat yet" from "index is fine, this
-                    // window just doesn't cluster". The indexer
-                    // already runs in the background as soon as the
-                    // user enables this feature (see App.kt's
-                    // searchEmbedderClient LaunchedEffect), so we
-                    // never tell the user to go elsewhere to start it.
-                    val msg = if (result.embeddingCount < 6) {
-                        "Indexing your messages — this happens in the background. " +
-                            "Check back in a moment."
+                    // Empty state — surface real indexer state when
+                    // embeddings are still landing. The previous
+                    // "check back in a moment" copy lied: the sheet
+                    // only re-ran when the user changed window, so
+                    // even if the indexer made progress while the
+                    // sheet was open, the message stayed there
+                    // forever. Now we re-key on indexProgress.indexed
+                    // (above) so each new batch retriggers
+                    // buildTopicClusters, and the copy below shows
+                    // the live counter / running flag.
+                    if (result.embeddingCount < 6) {
+                        IndexerStatusRow(
+                            progress = indexProgress,
+                            embeddedHere = result.embeddingCount,
+                        )
                     } else {
-                        "No distinct topics in this window — try a longer time range."
+                        Text(
+                            "No distinct topics in this window — try a longer time range.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
                     }
-                    Text(
-                        msg,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
                 }
                 else -> clusters.forEach { c ->
                     Row(
@@ -1868,6 +1885,62 @@ private fun TopicsSheet(
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun IndexerStatusRow(
+    progress: io.nisfeb.talon.ai.IndexProgress,
+    embeddedHere: Int,
+) {
+    // Three states the user actually cares about:
+    //  - running with a counter (indexing in motion)
+    //  - finished but this chat hasn't accumulated enough yet
+    //    (e.g. brand new chat, sparse history)
+    //  - never started or zero progress for too long (likely
+    //    embedder failure — surface a hint rather than spinning)
+    val running = progress.running
+    val total = progress.total
+    val indexed = progress.indexed
+    val pct = if (total > 0) (indexed * 100 / total).coerceIn(0, 100) else 0
+
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            if (running) {
+                CircularProgressIndicator(
+                    strokeWidth = 2.dp,
+                    modifier = Modifier.size(14.dp),
+                )
+            }
+            val headline = when {
+                running && total > 0 -> "Indexing — $indexed / $total ($pct%)"
+                running -> "Indexing — starting up"
+                indexed == 0 && total == 0 ->
+                    "Indexer hasn't started yet."
+                else -> "Indexing complete — $indexed messages embedded."
+            }
+            Text(headline, style = MaterialTheme.typography.bodyMedium)
+        }
+        val sub = when {
+            embeddedHere == 0 ->
+                "This chat needs at least 6 indexed messages before topics can be " +
+                    "built. None have been embedded for this conversation yet."
+            embeddedHere < 6 ->
+                "This chat has $embeddedHere indexed message" +
+                    (if (embeddedHere == 1) "" else "s") +
+                    "; topics need 6. Wait for indexing or send more in this chat."
+            else -> ""
+        }
+        if (sub.isNotEmpty()) {
+            Text(
+                sub,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
 }

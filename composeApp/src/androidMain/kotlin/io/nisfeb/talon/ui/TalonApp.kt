@@ -1148,6 +1148,7 @@ fun TalonApp(
                     },
                     onOpenImage = { viewerImageUrl = it },
                     onOpenSelfProfile = { editingProfile = true },
+                    searchEmbedder = app.searchEmbedderClient,
                     // Android-only platform widgets — desktop hosts pass null
                     // and the screen degrades gracefully. Wired via
                     // composable slots so commonMain has no Android deps.
