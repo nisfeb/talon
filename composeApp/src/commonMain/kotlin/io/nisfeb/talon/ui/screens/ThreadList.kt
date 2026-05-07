@@ -440,6 +440,7 @@ fun ThreadList(
     actionTarget?.let { target ->
         val isMine = target.author == ourPatp
         val isChannel = whom.startsWith("chat/")
+        val clipboardManager = androidx.compose.ui.platform.LocalClipboardManager.current
         ThreadActionSheet(
             db = db,
             ourPatp = ourPatp,
@@ -453,6 +454,17 @@ fun ThreadList(
                             composerState.sendError = "react failed: ${it.message ?: it::class.simpleName}"
                         }
                 }
+            },
+            onCopy = {
+                actionTarget = null
+                val text = StoryCache.textFor(target.id, target.contentJson)
+                clipboardManager.setText(androidx.compose.ui.text.AnnotatedString(text))
+            },
+            onCopyMarkdown = {
+                actionTarget = null
+                val md = io.nisfeb.talon.urbit.RawMarkdown
+                    .fromStoryJson(target.contentJson)
+                clipboardManager.setText(androidx.compose.ui.text.AnnotatedString(md))
             },
             onDelete = {
                 actionTarget = null
@@ -596,6 +608,8 @@ private fun ThreadActionSheet(
     canDelete: Boolean,
     onDismiss: () -> Unit,
     onPickReaction: (String) -> Unit,
+    onCopy: () -> Unit,
+    onCopyMarkdown: () -> Unit,
     onDelete: () -> Unit,
 ) {
     val sheetState = rememberModalBottomSheetState()
@@ -681,8 +695,10 @@ private fun ThreadActionSheet(
                 }
             }
 
+            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+            TextButton(onClick = onCopy) { Text("Copy text") }
+            TextButton(onClick = onCopyMarkdown) { Text("Copy as Markdown") }
             if (canDelete) {
-                HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()

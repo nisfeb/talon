@@ -842,6 +842,17 @@ fun DmChatScreen(
                     val text = StoryCache.textFor(target.id, target.contentJson)
                     clipboardManager.setText(AnnotatedString(text))
                 },
+                onCopyMarkdown = {
+                    actionTarget = null
+                    // Inverse of Markdown.parseInlines + MarkdownBlocks.toStory —
+                    // hands back the source the user typed (or close
+                    // to it). Use this when forwarding / quoting /
+                    // archiving where formatting matters; the
+                    // existing onCopy stays for plain-text previews.
+                    val md = io.nisfeb.talon.urbit.RawMarkdown
+                        .fromStoryJson(target.contentJson)
+                    clipboardManager.setText(AnnotatedString(md))
+                },
                 onToggleBookmark = {
                     actionTarget = null
                     // Only reached when canBookmark == true; settingsSync is non-null.
@@ -1604,6 +1615,11 @@ private fun MessageActionSheet(
     onQuote: () -> Unit,
     canQuote: Boolean,
     onCopy: () -> Unit,
+    /** Copy preserving markdown — the source the author typed. The
+     *  plain [onCopy] above flattens to text for paste-into-anywhere
+     *  use; this one is for forwarding / archiving / quoting where
+     *  formatting matters. */
+    onCopyMarkdown: () -> Unit,
     onToggleBookmark: () -> Unit,
     onEdit: () -> Unit,
     onDelete: () -> Unit,
@@ -1714,6 +1730,7 @@ private fun MessageActionSheet(
             }
             HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
             TextButton(onClick = onCopy) { Text("Copy text") }
+            TextButton(onClick = onCopyMarkdown) { Text("Copy as Markdown") }
             if (canBookmark) {
                 TextButton(onClick = onToggleBookmark) {
                     Text(if (isBookmarked) "Remove bookmark" else "Bookmark")
