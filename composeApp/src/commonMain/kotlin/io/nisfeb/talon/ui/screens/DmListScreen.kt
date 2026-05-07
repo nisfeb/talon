@@ -1624,11 +1624,12 @@ private fun ConversationRow(
             onLongClick = { onLongClick(m.whom) },
         )
     }
+    val density = io.nisfeb.talon.ui.LocalChatDensity.current
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .then(rowClickModifier)
-            .padding(horizontal = 16.dp, vertical = 12.dp),
+            .padding(horizontal = 16.dp, vertical = density.listRowVertical),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {

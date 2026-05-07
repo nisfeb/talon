@@ -111,6 +111,16 @@ interface UiSettings {
      */
     val powerFeaturesEnabled: StateFlow<Boolean>
     fun setPowerFeaturesEnabled(enabled: Boolean)
+
+    /**
+     * Per-device density preference for chat-list and message-row
+     * surfaces. Drives [ChatDensity] via [LocalChatDensity]. Stored
+     * locally; not synced via %settings (matches the accent /
+     * composer-buttons pattern — cosmetic prefs stay where the user
+     * set them).
+     */
+    val density: StateFlow<Density>
+    fun setDensity(mode: Density)
 }
 
 enum class GroupChannelOrder { Recent, HostOrder }
@@ -225,5 +235,11 @@ class InMemoryUiSettings(
     override val powerFeaturesEnabled: StateFlow<Boolean> = _powerFeaturesEnabled.asStateFlow()
     override fun setPowerFeaturesEnabled(enabled: Boolean) {
         _powerFeaturesEnabled.value = enabled
+    }
+
+    private val _density = MutableStateFlow(Density.Comfortable)
+    override val density: StateFlow<Density> = _density.asStateFlow()
+    override fun setDensity(mode: Density) {
+        _density.value = mode
     }
 }

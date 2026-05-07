@@ -79,6 +79,9 @@ class AndroidUiSettings(
     override val powerFeaturesEnabled: StateFlow<Boolean> =
         _powerFeaturesEnabled.asStateFlow()
 
+    private val _density = MutableStateFlow(loadDensity())
+    override val density: StateFlow<Density> = _density.asStateFlow()
+
     private val _railItemOrder = MutableStateFlow(
         sanitizeRailItemOrder(loadRailItemOrder(prefs)),
     )
@@ -162,6 +165,17 @@ class AndroidUiSettings(
         _powerFeaturesEnabled.value = enabled
     }
 
+    override fun setDensity(mode: Density) {
+        if (_density.value == mode) return
+        prefs.edit().putString(KEY_DENSITY, mode.name).apply()
+        _density.value = mode
+    }
+
+    private fun loadDensity(): Density {
+        val raw = prefs.getString(KEY_DENSITY, null) ?: return Density.Comfortable
+        return runCatching { Density.valueOf(raw) }.getOrDefault(Density.Comfortable)
+    }
+
     override fun setSmartSearchPreferred(preferred: Boolean) {
         if (_smartSearchPreferred.value == preferred) return
         prefs.edit().putBoolean(KEY_SMART_SEARCH_PREFERRED, preferred).apply()
@@ -215,6 +229,7 @@ class AndroidUiSettings(
         private const val KEY_ACTIVE_RAIL_TAB = "active_rail_tab"
         private const val KEY_SMART_SEARCH_PREFERRED = "smart_search_preferred"
         private const val KEY_POWER_FEATURES = "power_features_enabled"
+        private const val KEY_DENSITY = "density"
         private const val KEY_RAIL_ITEM_ORDER = "rail_item_order"
     }
 }

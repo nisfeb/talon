@@ -49,6 +49,7 @@ class DesktopUiSettings(
         val smartSearchPreferred: Boolean = false,
         val railItemOrder: List<String> = emptyList(),
         val powerFeaturesEnabled: Boolean = false,
+        val density: String = Density.Comfortable.name,
     )
 
     private val initial = loadInitial()
@@ -93,6 +94,12 @@ class DesktopUiSettings(
     private val _powerFeaturesEnabled = MutableStateFlow(initial.powerFeaturesEnabled)
     override val powerFeaturesEnabled: StateFlow<Boolean> =
         _powerFeaturesEnabled.asStateFlow()
+
+    private val _density = MutableStateFlow(
+        runCatching { Density.valueOf(initial.density) }
+            .getOrDefault(Density.Comfortable),
+    )
+    override val density: StateFlow<Density> = _density.asStateFlow()
 
     private val _railItemOrder = MutableStateFlow(
         sanitizeRailItemOrder(
@@ -153,6 +160,12 @@ class DesktopUiSettings(
         persistCurrent()
     }
 
+    override fun setDensity(mode: Density) {
+        if (_density.value == mode) return
+        _density.value = mode
+        persistCurrent()
+    }
+
     override fun setRailItemOrder(items: List<RailItem>) {
         val sanitized = sanitizeRailItemOrder(items)
         if (_railItemOrder.value == sanitized) return
@@ -174,6 +187,7 @@ class DesktopUiSettings(
                 smartSearchPreferred = _smartSearchPreferred.value,
                 railItemOrder = _railItemOrder.value.map { it.name },
                 powerFeaturesEnabled = _powerFeaturesEnabled.value,
+                density = _density.value.name,
             ),
         )
     }

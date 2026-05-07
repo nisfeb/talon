@@ -631,6 +631,10 @@ fun App(
         //   * mode = Brand → null (explicit opt-out also stays brand).
         val accentSettings by uiSettings.accentSettings.collectAsState()
         val powerFeaturesEnabled by uiSettings.powerFeaturesEnabled.collectAsState()
+        val densityMode by uiSettings.density.collectAsState()
+        val chatDensity = remember(densityMode) {
+            io.nisfeb.talon.ui.ChatDensity.forMode(densityMode)
+        }
         val multiShip = remember(loggedInShip) {
             sessionStore.all().size >= 2
         }
@@ -662,6 +666,7 @@ fun App(
         TalonTheme(darkTheme = darkTheme, accentOverride = accentOverride) {
           androidx.compose.runtime.CompositionLocalProvider(
               io.nisfeb.talon.ui.LocalImageDownloader provides imageDownloader,
+              io.nisfeb.talon.ui.LocalChatDensity provides chatDensity,
           ) {
             val rootFocusRequester = remember { FocusRequester() }
             LaunchedEffect(Unit) { rootFocusRequester.requestFocus() }

@@ -111,6 +111,7 @@ fun SettingsScreen(
     val themeMode by themePreference.mode.collectAsState()
     val hideComposerButtons by uiSettings.hideComposerButtons.collectAsState()
     val powerFeaturesEnabled by uiSettings.powerFeaturesEnabled.collectAsState()
+    val density by uiSettings.density.collectAsState()
     val accentSettings by uiSettings.accentSettings.collectAsState()
     val groupChannelOrder by uiSettings.groupChannelOrder.collectAsState()
     val accentEnabled = io.nisfeb.talon.ui.AccentSettings
@@ -164,6 +165,25 @@ fun SettingsScreen(
                         selected = themeMode == mode,
                         onClick = { themePreference.setMode(mode) },
                         label = { Text(mode.label()) },
+                    )
+                }
+            }
+            Spacer(Modifier.height(8.dp))
+
+            // ── Density ─────────────────────────────────────────────
+            Text("Density", style = MaterialTheme.typography.bodyMedium)
+            Text(
+                "Tightens or loosens chat-list rows, message spacing, and " +
+                    "bubble padding. Per-device.",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                io.nisfeb.talon.ui.Density.entries.forEach { mode ->
+                    FilterChip(
+                        selected = density == mode,
+                        onClick = { uiSettings.setDensity(mode) },
+                        label = { Text(mode.name) },
                     )
                 }
             }
