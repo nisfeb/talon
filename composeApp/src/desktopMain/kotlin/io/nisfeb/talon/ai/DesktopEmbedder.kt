@@ -65,8 +65,25 @@ class DesktopEmbedder {
             val out = l2Normalize(raw)
             if (clientDim == 0) clientDim = out.size
             out
-        }.onFailure { Log.w(TAG, "embed failed: ${it.message}") }
-            .getOrNull()
+        }.onFailure { err ->
+            // Walk the cause chain — DJL / OnnxRuntime errors arrive
+            // wrapped in ExceptionInInitializerError → InstantiationError
+            // and the root cause is what tells us whether it's a
+            // missing native, glibc mismatch, JNI extraction failure,
+            // etc. Logging just `it.message` was leaving the actual
+            // problem invisible (null on the wrapper). Stack traces
+            // for the wrapper + each cause go to stderr; the journal
+            // captures both.
+            Log.w(TAG, "embed failed: ${err::class.simpleName}: ${err.message}")
+            var cause: Throwable? = err.cause
+            var depth = 0
+            while (cause != null && depth < 5) {
+                Log.w(TAG, "  caused by: ${cause::class.simpleName}: ${cause.message}")
+                cause = cause.cause
+                depth++
+            }
+            err.printStackTrace()
+        }.getOrNull()
     }
 
     /** Output dimensionality. 0 until the first successful [embed]. */
