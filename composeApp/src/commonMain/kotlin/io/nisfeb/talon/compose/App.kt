@@ -664,9 +664,27 @@ fun App(
             }
         }
         TalonTheme(darkTheme = darkTheme, accentOverride = accentOverride) {
+          // Scale the whole app's `sp`-based sizes by the active
+          // density's font multiplier. Compose computes pixel sizes
+          // for sp values as `sp * density * fontScale`, so
+          // multiplying `fontScale` by 0.90 / 1.0 / 1.12 globally
+          // scales every Text without touching individual styles.
+          // We deliberately do NOT scale `density` itself because
+          // that would shrink/grow icons + image previews + Dp-based
+          // gaps that aren't part of the density story (the rail,
+          // image viewer, etc.); per-component dp values stay under
+          // explicit `LocalChatDensity.current` reads.
+          val baseDensity = androidx.compose.ui.platform.LocalDensity.current
+          val scaledDensity = remember(baseDensity, chatDensity) {
+              androidx.compose.ui.unit.Density(
+                  density = baseDensity.density,
+                  fontScale = baseDensity.fontScale * chatDensity.fontScaleMultiplier,
+              )
+          }
           androidx.compose.runtime.CompositionLocalProvider(
               io.nisfeb.talon.ui.LocalImageDownloader provides imageDownloader,
               io.nisfeb.talon.ui.LocalChatDensity provides chatDensity,
+              androidx.compose.ui.platform.LocalDensity provides scaledDensity,
           ) {
             val rootFocusRequester = remember { FocusRequester() }
             LaunchedEffect(Unit) { rootFocusRequester.requestFocus() }

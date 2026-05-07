@@ -36,6 +36,14 @@ data class ChatDensity(
     val messageSpacing: Dp,
     /** Padding inside a message bubble (around the text content). */
     val bubblePadding: Dp,
+    /** Avatar size in chat-list rows. */
+    val listAvatarSize: Dp,
+    /** Multiplier applied to the app's `LocalDensity.fontScale` so
+     *  text + icons sized in `sp` scale across the whole app. 1.0 =
+     *  current size; <1.0 shrinks; >1.0 grows. The Comfortable value
+     *  is exactly 1.0 so existing users see no change unless they
+     *  pick a different mode. */
+    val fontScaleMultiplier: Float,
 ) {
     companion object {
         val Compact = ChatDensity(
@@ -43,18 +51,24 @@ data class ChatDensity(
             listRowVertical = 6.dp,
             messageSpacing = 4.dp,
             bubblePadding = 6.dp,
+            listAvatarSize = 36.dp,
+            fontScaleMultiplier = 0.90f,
         )
         val Comfortable = ChatDensity(
             mode = Density.Comfortable,
-            listRowVertical = 10.dp,
+            listRowVertical = 12.dp,
             messageSpacing = 8.dp,
             bubblePadding = 10.dp,
+            listAvatarSize = 44.dp,
+            fontScaleMultiplier = 1.0f,
         )
         val Cozy = ChatDensity(
             mode = Density.Cozy,
-            listRowVertical = 14.dp,
+            listRowVertical = 16.dp,
             messageSpacing = 12.dp,
             bubblePadding = 14.dp,
+            listAvatarSize = 52.dp,
+            fontScaleMultiplier = 1.12f,
         )
 
         fun forMode(mode: Density): ChatDensity = when (mode) {

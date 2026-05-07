@@ -1637,7 +1637,7 @@ private fun ConversationRow(
             label = title,
             url = contactMap.conversationAvatar(m.whom),
             colorHex = contactMap.conversationColor(m.whom),
-            size = 44.dp,
+            size = density.listAvatarSize,
         )
         Column(
             modifier = Modifier.weight(1f),

@@ -309,12 +309,13 @@ fun ThreadList(
     }
 
     CompositionLocalProvider(LocalCiteResolver provides citeResolver) {
+    val chatDensity = io.nisfeb.talon.ui.LocalChatDensity.current
     Column(modifier = modifier) {
         LazyColumn(
             state = listState,
             modifier = Modifier.weight(1f).fillMaxSize(),
             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
+            verticalArrangement = Arrangement.spacedBy(chatDensity.messageSpacing),
         ) {
             val onPollVoteHandler: (MessageEntity, List<ReactionEntity>, String) -> Unit =
                 { msg, rs, emoji ->
