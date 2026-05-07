@@ -345,18 +345,20 @@ fun main() {
                     notifier = notifier,
                     createUiSettings = graph.createUiSettings,
                     relaySettings = graph.relaySettings,
-                    createSearchEmbedderClient = { db ->
-                        val embedder = io.nisfeb.talon.ai.DesktopEmbedder()
-                        val indexer = io.nisfeb.talon.ai.DesktopEmbeddingIndexer(
-                            db = db,
-                            embedder = embedder,
-                        )
-                        io.nisfeb.talon.ai.DesktopSearchEmbedderClient(
-                            db = db,
-                            embedder = embedder,
-                            indexer = indexer,
-                        )
-                    },
+                    createSearchEmbedderClient = if (io.nisfeb.talon.ui.isOnDeviceAiSupported) {
+                        { db ->
+                            val embedder = io.nisfeb.talon.ai.DesktopEmbedder()
+                            val indexer = io.nisfeb.talon.ai.DesktopEmbeddingIndexer(
+                                db = db,
+                                embedder = embedder,
+                            )
+                            io.nisfeb.talon.ai.DesktopSearchEmbedderClient(
+                                db = db,
+                                embedder = embedder,
+                                indexer = indexer,
+                            )
+                        }
+                    } else null,
                     imageDownloader = io.nisfeb.talon.ui.DesktopImageDownloader(
                         http = graph.http,
                     ),
