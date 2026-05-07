@@ -179,6 +179,12 @@ private fun showStartupError(title: String, body: String) {
 }
 
 fun main() {
+    // Single-instance guard. Must be the first call so we exit before
+    // racing the existing Talon on DJL native extraction, SQLite open,
+    // SSE channel, etc. See SingleInstance.kt for the full post-mortem
+    // of what 10 simultaneous Talons did to one user's machine.
+    SingleInstance.acquireOrExit()
+
     // Construct the dependency graph BEFORE entering application { … }.
     // application's body composes on the AWT EDT; building the graph
     // there means the SQLite smoke-test's runBlocking parks the EDT
