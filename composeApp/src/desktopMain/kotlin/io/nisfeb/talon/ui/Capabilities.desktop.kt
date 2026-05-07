@@ -8,24 +8,23 @@ actual val platformLabel: String = run {
     val ver = System.getProperty("os.version") ?: ""
     if (ver.isBlank()) "Desktop ($os)" else "Desktop ($os $ver)"
 }
-// Smart search + important-message highlights via DJL ONNX in
-// desktopMain/.../ai/DesktopEmbedder.kt. Model + tokenizer download
-// on first use (~30 MB cached at ~/.djl.ai/cache/). The other
-// on-device AI features (entity extraction chips) still need ML Kit
-// — keep them off until/unless that ports.
-actual val isOnDeviceAiSupported: Boolean = true
+// On-device AI shut off on desktop. The HuggingFace Rust tokenizers
+// JNI native lib (pulled in by DJL's OnnxRuntime engine for sentence
+// embedding) SIGSEGVs in libstdc++ codecvt against modern Linux
+// distros — confirmed reproduction on a user's Mageia/OpenMandriva
+// host with libstdc++ 6.0.34. Until DJL ships a Rust JNI built
+// against a newer libstdc++ ABI (or we swap to a non-Rust tokenizer),
+// shipping the embedder would only give the user "Indexing forever"
+// or a hard JVM abort. Off everywhere on desktop is honest.
+//
+// Pre-condition history that got us here:
+// - Slim task was stripping `native/lib/tokenizers.properties` from
+//   the tokenizers JAR — fixed in the same rc.
+// - Model URL pointed at the PyTorch zoo while the engine is
+//   OnnxRuntime — fixed (now `ai.djl.huggingface.onnxruntime`).
+// - Even with both fixed, the Rust tokenizer crashes on first use.
+actual val isOnDeviceAiSupported: Boolean = false
 
 actual fun isOnDeviceAiFeatureSupported(
-    feature: io.nisfeb.talon.ai.AiSettings.Feature,
-): Boolean = when (feature) {
-    // Sentence embedder is the prerequisite for both — wired today.
-    io.nisfeb.talon.ai.AiSettings.Feature.SemanticSearch -> true
-    io.nisfeb.talon.ai.AiSettings.Feature.ImportantMessages -> true
-    // Topics also rides the embedder — kMeansAssign + chat-topic
-    // clustering work the same way on both platforms.
-    io.nisfeb.talon.ai.AiSettings.Feature.TopicClusters -> true
-    // ML Kit Entity Extraction has no desktop port yet.
-    io.nisfeb.talon.ai.AiSettings.Feature.EntityActions -> false
-    // Cloud-key features are filtered out before this is consulted.
-    else -> true
-}
+    @Suppress("UNUSED_PARAMETER") feature: io.nisfeb.talon.ai.AiSettings.Feature,
+): Boolean = false

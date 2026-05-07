@@ -91,13 +91,16 @@ class DesktopEmbedder {
 
     companion object {
         private const val TAG = "DesktopEmbedder"
-        // DJL URL syntax: djl://<engine>/<sentence-transformers id>.
-        // Resolves to the bundled ONNX export hosted at
-        // huggingface.co/sentence-transformers/all-MiniLM-L6-v2.
-        // Updates flow through model-zoo metadata; pin via the engine
-        // version in libs.versions.toml.
+        // DJL zoo URL → engine mapping. The earlier value pointed at
+        // `ai.djl.huggingface.pytorch/...` which downloads the PyTorch
+        // checkpoint (`.pt`); paired with the OnnxRuntime engine, the
+        // model loader then crashes with "FileNotFoundException:
+        // .onnx file not found in: <cache dir>" because there's no
+        // ONNX export in the PyTorch zoo entry. The correct zoo for
+        // OnnxRuntime is `ai.djl.huggingface.onnxruntime`, which
+        // ships pre-converted ONNX exports of the same models.
         private const val MODEL_URL =
-            "djl://ai.djl.huggingface.pytorch/sentence-transformers/all-MiniLM-L6-v2"
+            "djl://ai.djl.huggingface.onnxruntime/sentence-transformers/all-MiniLM-L6-v2"
 
         private fun l2Normalize(v: FloatArray): FloatArray {
             var sumSq = 0f

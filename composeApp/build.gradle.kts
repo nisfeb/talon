@@ -175,8 +175,8 @@ tasks.withType<Test>().configureEach {
 // version inside derivePackageVersion and silently drifted — every
 // release between 0.7.14 and 0.7.23 shipped with stale .dmg/.msi/.deb
 // filenames because nobody updated both literals.
-val talonVersionCode = 111
-val talonVersionName = "0.11.0-rc36"
+val talonVersionCode = 112
+val talonVersionName = "0.11.0-rc37"
 
 // Surface the gradle-side version constants to commonMain code via a
 // generated Kotlin source file. Without this, the About section in
@@ -567,8 +567,22 @@ val slimReleaseDistributable = tasks.register("slimReleaseDistributable") {
         libApp.listFiles { _, n -> n.startsWith("tokenizers-") && n.endsWith(".jar") }
             ?.forEach { jar ->
                 slimJarInPlace(jar) { entry ->
-                    !entry.startsWith("native/lib/") ||
-                        entry.startsWith("native/lib/$tokKeep/")
+                    // Top-level files in native/lib/ (no platform
+                    // subdir) are NOT platform natives — they include
+                    // `native/lib/tokenizers.properties` which the
+                    // Rust engine reads at static-init time. Stripping
+                    // it makes OrtNDManager init fail with
+                    // "AssertionError: No tokenizers version found in
+                    // property file" → "Could not initialize class
+                    // ai.djl.onnxruntime.engine.OrtNDManager" → every
+                    // embed call returns null and the indexer never
+                    // produces an embedding. Keep top-level files;
+                    // only strip platform subdirs that don't match
+                    // the host.
+                    if (!entry.startsWith("native/lib/")) return@slimJarInPlace true
+                    val rel = entry.removePrefix("native/lib/")
+                    if (!rel.contains("/")) return@slimJarInPlace true
+                    entry.startsWith("native/lib/$tokKeep/")
                 }
             }
 

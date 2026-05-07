@@ -585,7 +585,17 @@ fun DmChatScreen(
                         Icon(Icons.Filled.Info, contentDescription = "Info")
                     }
                 }
-                if (aiConfigured.topicClustersEnabled) {
+                // Hide the topic icon entirely on platforms where the
+                // on-device embedder isn't supported — otherwise the
+                // user gets an icon that opens a sheet stuck saying
+                // "Indexer hasn't started yet" forever. The flag also
+                // gates Settings rendering, so feature stays
+                // discoverable on platforms that do support it.
+                if (aiConfigured.topicClustersEnabled &&
+                    io.nisfeb.talon.ui.isOnDeviceAiFeatureSupported(
+                        io.nisfeb.talon.ai.AiSettings.Feature.TopicClusters,
+                    )
+                ) {
                     IconButton(onClick = { topicsSheetOpen = true }) {
                         Icon(Icons.Filled.Topic, contentDescription = "Topics in this chat")
                     }
