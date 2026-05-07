@@ -76,20 +76,38 @@ fun SearchScreen(
         value = trimmed
     }
 
-    // Escape once per debounced needle, not twice per keystroke.
-    val escapedNeedle = remember(debouncedTrimmed) {
-        if (debouncedTrimmed.length < 2) ""
-        else io.nisfeb.talon.data.escapeLikeNeedle(debouncedTrimmed)
+    // Parse the query into operators + free-text needle. The DAO's
+    // searchFiltered method takes nullable params so the conditional
+    // SQL plan unfilters legs the user didn't supply.
+    val filter = remember(debouncedTrimmed) {
+        io.nisfeb.talon.ui.parseSearchFilter(debouncedTrimmed, System.currentTimeMillis())
+    }
+    val escapedNeedle = remember(filter) {
+        if (filter.needle.length < 2) null
+        else io.nisfeb.talon.data.escapeLikeNeedle(filter.needle)
     }
 
-    val substringResults by remember(debouncedTrimmed, escapedNeedle) {
-        if (debouncedTrimmed.length < 2) flowOf(emptyList())
-        else db.messages().search(escapedNeedle)
+    val substringResults by remember(filter, escapedNeedle) {
+        if (filter.isTrivial) flowOf(emptyList())
+        else db.messages().searchFiltered(
+            needle = escapedNeedle,
+            fromShip = filter.fromShip,
+            inWhom = filter.inWhom,
+            sinceMs = filter.sinceMs,
+            hasImage = if (filter.hasImage) 1 else 0,
+            hasLink = if (filter.hasLink) 1 else 0,
+        )
     }.collectAsState(initial = emptyList<MessageEntity>())
 
-    val people by remember(debouncedTrimmed, escapedNeedle) {
-        if (debouncedTrimmed.length < 2) flowOf(emptyList())
-        else db.contacts().search(escapedNeedle)
+    // People search runs against the keyword text only — operators
+    // like since: / from: / has: have no analog for contacts.
+    val peopleEscapedNeedle = remember(filter) {
+        if (filter.needle.length < 2) ""
+        else io.nisfeb.talon.data.escapeLikeNeedle(filter.needle)
+    }
+    val people by remember(peopleEscapedNeedle) {
+        if (peopleEscapedNeedle.isEmpty()) flowOf(emptyList())
+        else db.contacts().search(peopleEscapedNeedle)
     }.collectAsState(initial = emptyList<ContactEntity>())
 
     // Set of whoms the user has any activity with — used to flag a
@@ -167,12 +185,21 @@ fun SearchScreen(
                 value = query,
                 onValueChange = { query = it },
                 placeholder = {
-                    Text(if (smartMode) "Search by meaning" else "Search messages")
+                    Text(
+                        if (smartMode) "Search by meaning"
+                        else "Search · try from:~ship since:1w has:image",
+                    )
                 },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth().padding(start = 4.dp),
             )
         }
+        // Chip strip showing the parsed operators. Surfaces what the
+        // parser actually understood so the user notices typos
+        // (`fromm:~ship` falls back to keyword text and no chip
+        // appears) and confirms the active filters before scrolling
+        // results.
+        ParsedFilterChips(filter)
         // Smart-mode toggle + index status. Visible only when the
         // feature is enabled in Settings (so the indexer is also
         // running). Toggling the chip flips the per-device
@@ -382,6 +409,35 @@ private fun PersonRow(
                     maxLines = 1,
                 )
             }
+        }
+    }
+}
+
+/** Render an AssistChip for each operator the parser recognized.
+ *  Hidden entirely when the user typed only free-text — chip strip
+ *  shouldn't take screen real estate when there's nothing to show. */
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+private fun ParsedFilterChips(filter: io.nisfeb.talon.ui.SearchFilter) {
+    val chips = buildList {
+        filter.fromShip?.let { add("from $it") }
+        filter.inWhom?.let { add("in $it") }
+        filter.sinceMs?.let { _ -> add("since (parsed)") }
+        if (filter.hasImage) add("has image")
+        if (filter.hasLink) add("has link")
+    }
+    if (chips.isEmpty()) return
+    androidx.compose.foundation.layout.FlowRow(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        chips.forEach { label ->
+            androidx.compose.material3.AssistChip(
+                onClick = {},
+                label = { Text(label, style = MaterialTheme.typography.labelSmall) },
+            )
         }
     }
 }

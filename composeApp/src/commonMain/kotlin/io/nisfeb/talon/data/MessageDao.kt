@@ -195,6 +195,61 @@ abstract class MessageDao {
     abstract fun search(needle: String): Flow<List<MessageEntity>>
 
     /**
+     * Search with the operator-aware shape parsed by
+     * [io.nisfeb.talon.ui.parseSearchFilter]. Each filter value is
+     * NULL-checked at the SQL level so callers pass NULL for
+     * "operator absent" — the conditional plan is the same query,
+     * just unfilters the unused legs. Boolean flags use 0/1 for the
+     * same reason: SQLite doesn't have a real Boolean.
+     *
+     * `hasImage` covers Photo / Gif / Video together (the user just
+     * wants "messages with an image-shaped attachment"). `hasLink`
+     * covers Link.
+     *
+     * Limit 100 mirrors the existing [search] cap so a worst-case
+     * query stays bounded.
+     */
+    @Query("""
+        SELECT * FROM messages m
+        WHERE m.isDeleted = 0
+          AND (
+            :needle IS NULL
+            OR m.contentJson LIKE '%' || :needle || '%' ESCAPE '\' COLLATE NOCASE
+          )
+          AND (:fromShip IS NULL OR m.author = :fromShip)
+          AND (:inWhom IS NULL OR m.whom = :inWhom)
+          AND (:sinceMs IS NULL OR m.sentMs >= :sinceMs)
+          AND (
+            :hasImage = 0
+            OR EXISTS (
+              SELECT 1 FROM message_media mm
+              WHERE mm.whom = m.whom
+                AND mm.messageId = m.id
+                AND mm.category IN ('Photo', 'Gif', 'Video')
+            )
+          )
+          AND (
+            :hasLink = 0
+            OR EXISTS (
+              SELECT 1 FROM message_media mm
+              WHERE mm.whom = m.whom
+                AND mm.messageId = m.id
+                AND mm.category = 'Link'
+            )
+          )
+        ORDER BY m.sentMs DESC
+        LIMIT 100
+    """)
+    abstract fun searchFiltered(
+        needle: String?,
+        fromShip: String?,
+        inWhom: String?,
+        sinceMs: Long?,
+        hasImage: Int,
+        hasLink: Int,
+    ): Flow<List<MessageEntity>>
+
+    /**
      * Backfill candidates for [Watchwords.runBackfill]. The LIKE
      * pre-filter on contentJson narrows candidates without parsing
      * JSON; callers verify each survivor against the rendered plain
