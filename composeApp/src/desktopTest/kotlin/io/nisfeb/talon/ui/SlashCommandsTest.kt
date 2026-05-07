@@ -53,8 +53,12 @@ class SlashCommandsTest {
         tmpDir.deleteRecursively()
     }
 
-    private fun run(text: String, locationProvider: LocationProvider? = null): CommandResult =
-        runBlocking { runCommand(text, repo, http, locationProvider) }
+    private fun run(
+        text: String,
+        locationProvider: LocationProvider? = null,
+        powerFeaturesEnabled: Boolean = false,
+    ): CommandResult =
+        runBlocking { runCommand(text, repo, http, locationProvider, powerFeaturesEnabled) }
 
     // ── routing ─────────────────────────────────────────────────────
 
@@ -281,5 +285,52 @@ class SlashCommandsTest {
         val r = filterSlashCommands("a")
         assertNull(r.firstOrNull { it.name.startsWith("a") })
         assertNotNull(r.firstOrNull { it.name.contains("a") })
+    }
+
+    // ── /poke ───────────────────────────────────────────────────────
+
+    @Test
+    fun `poke is rejected when power features disabled`() {
+        // Default off. Even with valid args, the gate stops the call
+        // from reaching the channel — no accidental pokes when the
+        // user hasn't explicitly opted in.
+        val r = run("/poke chat chat-action {}", powerFeaturesEnabled = false)
+        assertTrue(r is CommandResult.Error)
+        assertTrue((r as CommandResult.Error).message.contains("Power features"))
+    }
+
+    @Test
+    fun `poke with too few args is a usage Error`() {
+        val r = run("/poke chat", powerFeaturesEnabled = true)
+        assertTrue(r is CommandResult.Error)
+        assertTrue((r as CommandResult.Error).message.contains("usage"))
+    }
+
+    @Test
+    fun `poke with malformed JSON returns a JSON Error not a connection error`() {
+        // Tests we validate the noun BEFORE attempting to poke. The
+        // repo here has no channel attached; if we let the call
+        // through it'd throw "not connected" instead of telling the
+        // user their JSON is bad.
+        // Note: kotlinx-serialization parses bare tokens like "notjson"
+        // as a string primitive, so the noun fixture has to be
+        // structurally broken (unbalanced brace) to fail.
+        val r = run("/poke chat chat-action {oops", powerFeaturesEnabled = true)
+        assertTrue(r is CommandResult.Error)
+        val msg = (r as CommandResult.Error).message
+        assertTrue(msg.contains("JSON"), "expected JSON error, got: $msg")
+    }
+
+    @Test
+    fun `poke surfaces channel-not-connected as Error not crash`() {
+        // Repo with no attached channel → pokeRaw throws "not
+        // connected". runPoke should catch and return Error rather
+        // than crashing the composer.
+        val r = run("/poke chat chat-action {\"a\":1}", powerFeaturesEnabled = true)
+        assertTrue(r is CommandResult.Error)
+        assertTrue(
+            (r as CommandResult.Error).message.contains("failed"),
+            "expected wrapped failure message, got: ${r.message}",
+        )
     }
 }

@@ -51,6 +51,7 @@ fun RightPaneHost(
     onOpenImage: (url: String) -> Unit,
     onOpenImageList: (urls: List<String>, initialIndex: Int) -> Unit,
     onOpenMembers: (whom: String) -> Unit,
+    powerFeaturesEnabled: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     Column(modifier = modifier.fillMaxSize()) {
@@ -89,6 +90,7 @@ fun RightPaneHost(
                     initialScrollReplyId = content.replyAnchor,
                     onOpenConversation = onOpenConversation,
                     onOpenImage = onOpenImage,
+                    powerFeaturesEnabled = powerFeaturesEnabled,
                 )
                 is RightPaneContent.GroupInfo -> GroupInfoPane(
                     db = db,

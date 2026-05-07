@@ -48,6 +48,7 @@ class DesktopUiSettings(
         val activeRailTab: String = RailTab.Chats.name,
         val smartSearchPreferred: Boolean = false,
         val railItemOrder: List<String> = emptyList(),
+        val powerFeaturesEnabled: Boolean = false,
     )
 
     private val initial = loadInitial()
@@ -88,6 +89,10 @@ class DesktopUiSettings(
     private val _smartSearchPreferred = MutableStateFlow(initial.smartSearchPreferred)
     override val smartSearchPreferred: StateFlow<Boolean> =
         _smartSearchPreferred.asStateFlow()
+
+    private val _powerFeaturesEnabled = MutableStateFlow(initial.powerFeaturesEnabled)
+    override val powerFeaturesEnabled: StateFlow<Boolean> =
+        _powerFeaturesEnabled.asStateFlow()
 
     private val _railItemOrder = MutableStateFlow(
         sanitizeRailItemOrder(
@@ -142,6 +147,12 @@ class DesktopUiSettings(
         persistCurrent()
     }
 
+    override fun setPowerFeaturesEnabled(enabled: Boolean) {
+        if (_powerFeaturesEnabled.value == enabled) return
+        _powerFeaturesEnabled.value = enabled
+        persistCurrent()
+    }
+
     override fun setRailItemOrder(items: List<RailItem>) {
         val sanitized = sanitizeRailItemOrder(items)
         if (_railItemOrder.value == sanitized) return
@@ -162,6 +173,7 @@ class DesktopUiSettings(
                 activeRailTab = _activeRailTab.value.name,
                 smartSearchPreferred = _smartSearchPreferred.value,
                 railItemOrder = _railItemOrder.value.map { it.name },
+                powerFeaturesEnabled = _powerFeaturesEnabled.value,
             ),
         )
     }

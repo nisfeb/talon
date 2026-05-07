@@ -200,6 +200,7 @@ fun DmChatScreen(
 ) {
     val aiConfigured by aiSettings.state.collectAsState()
     val hideComposerButtons by uiSettings.hideComposerButtons.collectAsState()
+    val powerFeaturesEnabled by uiSettings.powerFeaturesEnabled.collectAsState()
     val aiFeatures = remember(aiSettings) {
         AiFeatures(AiClient { aiSettings.state.value })
     }
@@ -751,6 +752,7 @@ fun DmChatScreen(
                 voiceComposer = voiceComposer,
                 voicePlayer = voicePlayer,
                 onSlashMic = onSlashMic,
+                powerFeaturesEnabled = powerFeaturesEnabled,
                 onBeforeLocalEcho = {
                     // Capture the row count synchronously BEFORE the
                     // optimistic upsert can land, then bump the

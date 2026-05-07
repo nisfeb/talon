@@ -1035,6 +1035,7 @@ fun TalonApp(
                     voicePlayer = { path, sending ->
                         VoicePreviewPlayButton(path = path, enabled = !sending)
                     },
+                    powerFeaturesEnabled = app.uiSettings.powerFeaturesEnabled.collectAsState().value,
                     modifier = mod,
                 )
             }

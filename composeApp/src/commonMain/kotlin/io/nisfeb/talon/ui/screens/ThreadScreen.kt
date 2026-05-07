@@ -54,6 +54,7 @@ fun ThreadScreen(
     locationProvider: LocationProvider? = null,
     onSlashMic: (() -> Unit)? = null,
     hideComposerButtons: Boolean = false,
+    powerFeaturesEnabled: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     Column(modifier = modifier.windowInsetsPadding(WindowInsets.safeDrawing)) {
@@ -88,6 +89,7 @@ fun ThreadScreen(
             locationProvider = locationProvider,
             onSlashMic = onSlashMic,
             hideComposerButtons = hideComposerButtons,
+            powerFeaturesEnabled = powerFeaturesEnabled,
             modifier = Modifier.weight(1f).fillMaxSize(),
         )
     }

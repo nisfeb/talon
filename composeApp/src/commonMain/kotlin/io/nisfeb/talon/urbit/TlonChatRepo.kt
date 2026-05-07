@@ -528,6 +528,25 @@ class TlonChatRepo(
         postContent(whom, textToStory(text))
 
     /**
+     * Power-user escape hatch: poke an arbitrary agent on this ship
+     * with a raw JSON payload. Used by the `/poke` slash command,
+     * gated upstream by the per-device power-features toggle.
+     *
+     * Throws if the channel isn't open. Caller is expected to
+     * `runCatching` and surface failures via the composer's error
+     * line — bad payloads can crash a receiving agent, but they
+     * can't corrupt our local state.
+     */
+    suspend fun pokeRaw(
+        app: String,
+        mark: String,
+        payload: kotlinx.serialization.json.JsonElement,
+    ): Long {
+        val ch = channel ?: error("not connected")
+        return ch.poke(app = app, mark = mark, payload = payload)
+    }
+
+    /**
      * Send a message quoting another post. Prepends a cite block to
      * the user's text (which can be empty) so recipients see the
      * quoted post above the new message. Currently only supported

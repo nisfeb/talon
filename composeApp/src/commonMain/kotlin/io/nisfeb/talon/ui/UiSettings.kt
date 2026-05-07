@@ -100,6 +100,17 @@ interface UiSettings {
      */
     val railItemOrder: StateFlow<List<RailItem>>
     fun setRailItemOrder(items: List<RailItem>)
+
+    /**
+     * Per-device power-user opt-in. Off by default; flipping on
+     * surfaces advanced surfaces that can poke arbitrary agents on
+     * the user's ship — currently the `/poke <app> <mark> <noun>`
+     * slash command. Per-device (not synced) so a toggle on phone
+     * doesn't grant the same surface on desktop without explicit
+     * consent on each device.
+     */
+    val powerFeaturesEnabled: StateFlow<Boolean>
+    fun setPowerFeaturesEnabled(enabled: Boolean)
 }
 
 enum class GroupChannelOrder { Recent, HostOrder }
@@ -208,5 +219,11 @@ class InMemoryUiSettings(
     override val railItemOrder: StateFlow<List<RailItem>> = _railItemOrder.asStateFlow()
     override fun setRailItemOrder(items: List<RailItem>) {
         _railItemOrder.value = sanitizeRailItemOrder(items)
+    }
+
+    private val _powerFeaturesEnabled = MutableStateFlow(false)
+    override val powerFeaturesEnabled: StateFlow<Boolean> = _powerFeaturesEnabled.asStateFlow()
+    override fun setPowerFeaturesEnabled(enabled: Boolean) {
+        _powerFeaturesEnabled.value = enabled
     }
 }

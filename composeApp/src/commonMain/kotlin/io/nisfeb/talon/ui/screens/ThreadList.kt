@@ -112,6 +112,7 @@ fun ThreadList(
     locationProvider: io.nisfeb.talon.ui.LocationProvider? = null,
     onSlashMic: (() -> Unit)? = null,
     hideComposerButtons: Boolean = false,
+    powerFeaturesEnabled: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     val parent by remember(whom, parentId) {
@@ -388,6 +389,7 @@ fun ThreadList(
             voiceComposer = voiceComposer,
             voicePlayer = voicePlayer,
             onSlashMic = onSlashMic,
+            powerFeaturesEnabled = powerFeaturesEnabled,
             strategy = threadStrategy,
         )
     }

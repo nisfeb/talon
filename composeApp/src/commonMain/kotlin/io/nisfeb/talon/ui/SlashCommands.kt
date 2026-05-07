@@ -88,6 +88,12 @@ val SLASH_COMMANDS: List<SlashCommandSpec> = listOf(
         synopsis = "/tz <time> [zone]",
         description = "Share a time across zones — everyone sees it localized",
     ),
+    SlashCommandSpec(
+        name = "poke",
+        synopsis = "/poke <app> <mark> <json>",
+        description = "Power user: poke an agent on your ship with raw JSON. " +
+            "Off by default — enable in Settings → Power features.",
+    ),
 )
 
 /**
@@ -128,6 +134,10 @@ suspend fun runCommand(
     repo: TlonChatRepo,
     http: okhttp3.OkHttpClient,
     locationProvider: LocationProvider? = null,
+    /** Per-device opt-in (UiSettings.powerFeaturesEnabled). When
+     *  false, /poke returns an error directing the user to flip the
+     *  toggle. Other commands are unaffected. */
+    powerFeaturesEnabled: Boolean = false,
     toast: (String) -> Unit = {},
 ): CommandResult {
     val parsed = parseSlash(rawText) ?: return CommandResult.NotACommand
@@ -139,6 +149,7 @@ suspend fun runCommand(
         "nick" -> runNick(parsed.args, repo, toast)
         "pet" -> runPet(parsed.args, repo, toast)
         "poll" -> runPoll(parsed.args)
+        "poke" -> runPoke(parsed.args, repo, powerFeaturesEnabled, toast)
         "talk" -> runTalk(parsed.args)
         "tz" -> runTz(parsed.args)
         // UI-dispatched commands — DmChatScreen intercepts before this
@@ -146,6 +157,41 @@ suspend fun runCommand(
         // don't fire if someone routes a stale invocation through.
         "img", "file", "mic" -> CommandResult.Handled
         else -> CommandResult.Error("unknown command: /${parsed.cmd}")
+    }
+}
+
+// ─────────── /poke ───────────
+
+private suspend fun runPoke(
+    args: List<String>,
+    repo: TlonChatRepo,
+    powerFeaturesEnabled: Boolean,
+    toast: (String) -> Unit,
+): CommandResult {
+    if (!powerFeaturesEnabled) {
+        return CommandResult.Error(
+            "/poke is off — enable Settings → Power features to use this",
+        )
+    }
+    if (args.size < 3) {
+        return CommandResult.Error("/poke usage: /poke <app> <mark> <json>")
+    }
+    val app = args[0]
+    val mark = args[1]
+    val payloadRaw = args.drop(2).joinToString(" ").trim()
+    val payload = runCatching {
+        kotlinx.serialization.json.Json.parseToJsonElement(payloadRaw)
+    }.getOrElse {
+        return CommandResult.Error(
+            "/poke: payload must be valid JSON (got: ${it.message ?: "parse failed"})",
+        )
+    }
+    return runCatching {
+        repo.pokeRaw(app, mark, payload)
+        toast("/poke %$app · $mark sent")
+        CommandResult.Handled as CommandResult
+    }.getOrElse { err ->
+        CommandResult.Error("/poke failed: ${err.message ?: err::class.simpleName}")
     }
 }
 

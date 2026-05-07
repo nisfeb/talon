@@ -73,6 +73,12 @@ class AndroidUiSettings(
     override val smartSearchPreferred: StateFlow<Boolean> =
         _smartSearchPreferred.asStateFlow()
 
+    private val _powerFeaturesEnabled = MutableStateFlow(
+        prefs.getBoolean(KEY_POWER_FEATURES, false),
+    )
+    override val powerFeaturesEnabled: StateFlow<Boolean> =
+        _powerFeaturesEnabled.asStateFlow()
+
     private val _railItemOrder = MutableStateFlow(
         sanitizeRailItemOrder(loadRailItemOrder(prefs)),
     )
@@ -150,6 +156,12 @@ class AndroidUiSettings(
         _activeRailTab.value = tab
     }
 
+    override fun setPowerFeaturesEnabled(enabled: Boolean) {
+        if (_powerFeaturesEnabled.value == enabled) return
+        prefs.edit().putBoolean(KEY_POWER_FEATURES, enabled).apply()
+        _powerFeaturesEnabled.value = enabled
+    }
+
     override fun setSmartSearchPreferred(preferred: Boolean) {
         if (_smartSearchPreferred.value == preferred) return
         prefs.edit().putBoolean(KEY_SMART_SEARCH_PREFERRED, preferred).apply()
@@ -202,6 +214,7 @@ class AndroidUiSettings(
         private const val KEY_CHAT_PANE_LIST_FRACTION = "chat_pane_list_fraction"
         private const val KEY_ACTIVE_RAIL_TAB = "active_rail_tab"
         private const val KEY_SMART_SEARCH_PREFERRED = "smart_search_preferred"
+        private const val KEY_POWER_FEATURES = "power_features_enabled"
         private const val KEY_RAIL_ITEM_ORDER = "rail_item_order"
     }
 }

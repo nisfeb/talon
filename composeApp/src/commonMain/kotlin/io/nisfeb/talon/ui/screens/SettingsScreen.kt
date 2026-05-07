@@ -110,6 +110,7 @@ fun SettingsScreen(
     val aiState by aiSettings.state.collectAsState()
     val themeMode by themePreference.mode.collectAsState()
     val hideComposerButtons by uiSettings.hideComposerButtons.collectAsState()
+    val powerFeaturesEnabled by uiSettings.powerFeaturesEnabled.collectAsState()
     val accentSettings by uiSettings.accentSettings.collectAsState()
     val groupChannelOrder by uiSettings.groupChannelOrder.collectAsState()
     val accentEnabled = io.nisfeb.talon.ui.AccentSettings
@@ -335,6 +336,16 @@ fun SettingsScreen(
                     "Useful when you mostly send plain text and want a tighter input row.",
                 enabled = hideComposerButtons,
                 onChange = { uiSettings.setHideComposerButtons(it) },
+            )
+            Spacer(Modifier.height(4.dp))
+
+            FeatureToggleRow(
+                label = "Power features",
+                description = "Unlocks `/poke <app> <mark> <json>` from any composer — " +
+                    "send arbitrary pokes to agents on your ship. Per-device opt-in; " +
+                    "leaving this on multiple devices grants the same surface on each.",
+                enabled = powerFeaturesEnabled,
+                onChange = { uiSettings.setPowerFeaturesEnabled(it) },
             )
             Spacer(Modifier.height(4.dp))
 

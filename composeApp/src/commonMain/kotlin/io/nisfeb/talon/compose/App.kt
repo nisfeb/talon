@@ -630,6 +630,7 @@ fun App(
         //   * mode = Custom → user's hex.
         //   * mode = Brand → null (explicit opt-out also stays brand).
         val accentSettings by uiSettings.accentSettings.collectAsState()
+        val powerFeaturesEnabled by uiSettings.powerFeaturesEnabled.collectAsState()
         val multiShip = remember(loggedInShip) {
             sessionStore.all().size >= 2
         }
@@ -1078,6 +1079,7 @@ fun App(
                                 openChat = other
                             },
                             onOpenImage = { url -> viewerImageUrl = url },
+                            powerFeaturesEnabled = powerFeaturesEnabled,
                         )
                     }
                     else -> {
@@ -1482,6 +1484,7 @@ fun App(
                                                 }
                                             }
                                         },
+                                        powerFeaturesEnabled = powerFeaturesEnabled,
                                     )
                                 }
                             },

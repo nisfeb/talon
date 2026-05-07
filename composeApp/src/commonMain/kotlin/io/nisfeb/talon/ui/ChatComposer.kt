@@ -143,6 +143,11 @@ fun ChatComposer(
      *  desktop has no recorder and the composer surfaces a
      *  user-facing "tap the mic button" error. */
     onSlashMic: (() -> Unit)? = null,
+    /** Per-device opt-in for the `/poke` advanced surface. Defaults
+     *  off; off → /poke returns "enable in Settings" instead of
+     *  poking. Caller threads `uiSettings.powerFeaturesEnabled`
+     *  through. */
+    powerFeaturesEnabled: Boolean = false,
     /** Caller-side hook fired right before the optimistic upsert
      *  lands. DM uses this to capture its scroll baseline + bump
      *  the force-bottom tick so its self-send-scroll heuristic sees
@@ -346,6 +351,7 @@ fun ChatComposer(
                             repo = repo,
                             http = http,
                             locationProvider = locationProvider,
+                            powerFeaturesEnabled = powerFeaturesEnabled,
                             toast = { msg -> state.sendError = msg },
                         )
                     } else CommandResult.NotACommand
