@@ -105,6 +105,10 @@ fun SettingsScreen(
      *  toggle which rail items show. Defaults to no-op for callers
      *  that haven't wired the sub-screen yet. */
     onOpenSidebarSettings: () -> Unit = {},
+    /** Opens the login-handoff QR generator. Defaults to no-op so
+     *  hosts that haven't wired the share screen yet (tests, older
+     *  call sites) don't render the row. */
+    onOpenShareLoginQr: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val aiState by aiSettings.state.collectAsState()
@@ -321,6 +325,34 @@ fun SettingsScreen(
                     Text("Sidebar", style = MaterialTheme.typography.bodyLarge)
                     Text(
                         "Choose what shows in the rail.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Icon(
+                    Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Spacer(Modifier.height(4.dp))
+
+            // ── Login QR generator ─────────────────────────────────
+            // Lets the user build a `talon://login?...` QR for someone
+            // else (assisted onboarding flow). Generation works on
+            // every platform; scanning lives on Android via ZXing.
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable(onClick = onOpenShareLoginQr)
+                    .padding(vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Login QR generator", style = MaterialTheme.typography.bodyLarge)
+                    Text(
+                        "Build a scannable QR with a ship URL + +code for handoff.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )

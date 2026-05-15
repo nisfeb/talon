@@ -194,7 +194,19 @@ fun TalonApp(
     var adminGroupFlag by remember { mutableStateOf<String?>(null) }
     var invitesOpen by remember { mutableStateOf(false) }
     var profileSheetShip by remember { mutableStateOf<String?>(null) }
+    /** Login-handoff QR generator. Reachable from the LoginScreen
+     *  "Generate QR for someone" link (pre-login) and from settings
+     *  once a ship is logged in. State is local because the screen
+     *  is short-lived and doesn't need to survive ship switches. */
+    var shareLoginQrOpen by remember { mutableStateOf(false) }
 
+    // Phase 3 right-pane state — Android phone always renders these as
+    // full-screen replaces (no DesktopShell on phone). Tablet landscape
+    // gets the wide-pane right-column rendering via App.kt's path; this
+    // file is the phone-only entry. groupInfoDrilldown is sub-state of
+    // groupInfoOpenFor — both null = pane closed.
+    var groupInfoOpenFor by remember { mutableStateOf<String?>(null) }
+    var groupInfoDrilldown by remember { mutableStateOf<MediaCategory?>(null) }
     // Re-route on every deep-link delivery from MainActivity. The keys
     // here match every initial* param TalonApp accepts. When any of
     // them flips to a non-null value (notification tap → onNewIntent
@@ -211,6 +223,31 @@ fun TalonApp(
         initialOpenDigest,
     ) {
         var consumed = false
+        // A chat-targeted deep-link must clear any modal pane that
+        // would render BEFORE the chat in the render-when block —
+        // otherwise the user lands on (say) StatusFeed even though
+        // openWhom was updated, because StatusFeed's branch matches
+        // first. See the render when at "statusFeedOpen ->" et al.
+        val chatTargeted = initialOpenWhom != null ||
+            initialOpenThread != null ||
+            initialScrollMessageId != null
+        if (chatTargeted) {
+            statusFeedOpen = false
+            bookmarksOpen = false
+            activityOpen = false
+            watchwordsOpen = false
+            digestOpen = false
+            settingsOpen = false
+            sidebarSettingsOpen = false
+            adminListOpen = false
+            adminGroupFlag = null
+            invitesOpen = false
+            searchOpen = false
+            newDmOpen = false
+            editingProfile = false
+            groupInfoOpenFor = null
+            groupInfoDrilldown = null
+        }
         if (initialOpenWhom != null) {
             openWhom = initialOpenWhom
             consumed = true
@@ -233,13 +270,6 @@ fun TalonApp(
         }
         if (consumed) onDeepLinkConsumed()
     }
-    // Phase 3 right-pane state — Android phone always renders these as
-    // full-screen replaces (no DesktopShell on phone). Tablet landscape
-    // gets the wide-pane right-column rendering via App.kt's path; this
-    // file is the phone-only entry. groupInfoDrilldown is sub-state of
-    // groupInfoOpenFor — both null = pane closed.
-    var groupInfoOpenFor by remember { mutableStateOf<String?>(null) }
-    var groupInfoDrilldown by remember { mutableStateOf<MediaCategory?>(null) }
     // Right-pane state mutators — delegate to RightPaneStateReducer
     // so the mutual-exclusion rules live in one tested place. See
     // App.kt's matching block for the rationale (rc6 audit caught
@@ -606,6 +636,7 @@ fun TalonApp(
             adminListOpen = false
         }
         BackHandler(enabled = invitesOpen) { invitesOpen = false }
+        BackHandler(enabled = shareLoginQrOpen) { shareLoginQrOpen = false }
         BackHandler(enabled = notebookComposeOpen) { notebookComposeOpen = false }
         BackHandler(enabled = openNotebookPostId != null) { openNotebookPostId = null }
         BackHandler(enabled = galleryComposeOpen) { galleryComposeOpen = false }
@@ -712,6 +743,10 @@ fun TalonApp(
             },
         ) {
         when {
+            shareLoginQrOpen -> io.nisfeb.talon.ui.screens.LoginQrShareScreen(
+                onBack = { shareLoginQrOpen = false },
+            )
+
             addingAnotherShip -> LoginScreen(
                 session = app.session,
                 onLoggedIn = { ship ->
@@ -734,6 +769,10 @@ fun TalonApp(
                         onFill = onFill,
                     )
                 },
+                qrScanIntegration = { onResult ->
+                    rememberQrLoginScanLauncher(onResult)
+                },
+                onOpenShareQr = { shareLoginQrOpen = true },
             )
 
             loggedInShip == null -> LoginScreen(
@@ -755,6 +794,10 @@ fun TalonApp(
                         onFill = onFill,
                     )
                 },
+                qrScanIntegration = { onResult ->
+                    rememberQrLoginScanLauncher(onResult)
+                },
+                onOpenShareQr = { shareLoginQrOpen = true },
             )
 
             viewerImageList != null -> ImageViewerScreen(
@@ -792,8 +835,9 @@ fun TalonApp(
             bookmarksOpen -> BookmarksScreen(
                 db = app.db,
                 repo = app.repo,
-                onOpenConversation = { whom ->
+                onOpenConversation = { whom, postId ->
                     bookmarksOpen = false
+                    pendingScrollMessageId = postId
                     openWhom = whom
                 },
                 onBack = { bookmarksOpen = false },
@@ -943,6 +987,7 @@ fun TalonApp(
                     dailyDigestSettings = app.dailyDigestSettings,
                     onTestDigest = { app.dailyDigest.generateAndNotifyAsync("user_test") },
                     onOpenSidebarSettings = { sidebarSettingsOpen = true },
+                    onOpenShareLoginQr = { shareLoginQrOpen = true },
                     modifier = mod,
                 )
             }

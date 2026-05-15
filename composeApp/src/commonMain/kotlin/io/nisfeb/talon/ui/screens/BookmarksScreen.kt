@@ -4,6 +4,7 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
 import io.nisfeb.talon.ui.combinedClickableWithSecondary
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
@@ -16,6 +17,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
@@ -34,6 +37,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import io.nisfeb.talon.data.AppDatabase
@@ -52,7 +57,7 @@ import java.util.Locale
 fun BookmarksScreen(
     db: AppDatabase,
     repo: TlonChatRepo,
-    onOpenConversation: (whom: String) -> Unit,
+    onOpenConversation: (whom: String, postId: String?) -> Unit,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -211,42 +216,70 @@ internal fun BookmarkRow(
     b: BookmarkedMessage,
     contactMap: ContactMap,
     onClick: () -> Unit,
-    onLongClick: () -> Unit,
+    onAssignToFolder: () -> Unit,
 ) {
-    val body = remember(b.id, b.contentJson) {
-        StoryCache.textFor(b.id, b.contentJson).replace('\n', ' ')
+    val fullBody = remember(b.id, b.contentJson) {
+        StoryCache.textFor(b.id, b.contentJson)
     }
+    val body = remember(fullBody) { fullBody.replace('\n', ' ') }
     val title = remember(b.whom, contactMap) { contactMap.conversationLabel(b.whom) }
     val authorLabel = remember(b.author, contactMap) { contactMap.displayName(b.author) }
     val sentStamp = remember(b.sentMs) { DATE_FORMAT.format(Date(b.sentMs)) }
     val avatar = remember(b.whom, contactMap) { contactMap.conversationAvatar(b.whom) }
+    val clipboard = LocalClipboardManager.current
+    var menuOpen by remember(b.id, b.whom) { mutableStateOf(false) }
 
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .combinedClickableWithSecondary(onClick = onClick, onLongClick = onLongClick)
-            .padding(horizontal = 16.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.Top,
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        Avatar(label = title, url = avatar, size = 40.dp)
-        Column(
-            modifier = Modifier.weight(1f),
-            verticalArrangement = Arrangement.spacedBy(2.dp),
+    Box(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .combinedClickableWithSecondary(
+                    onClick = onClick,
+                    onLongClick = { menuOpen = true },
+                )
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.Top,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Text(
-                title,
-                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
+            Avatar(label = title, url = avatar, size = 40.dp)
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                Text(
+                    title,
+                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
+                )
+                Text(
+                    "$authorLabel · $sentStamp",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text(
+                    body,
+                    style = MaterialTheme.typography.bodyMedium,
+                    maxLines = 3,
+                )
+            }
+        }
+        DropdownMenu(
+            expanded = menuOpen,
+            onDismissRequest = { menuOpen = false },
+        ) {
+            DropdownMenuItem(
+                text = { Text("Copy text") },
+                enabled = fullBody.isNotEmpty(),
+                onClick = {
+                    clipboard.setText(AnnotatedString(fullBody))
+                    menuOpen = false
+                },
             )
-            Text(
-                "$authorLabel · $sentStamp",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Text(
-                body,
-                style = MaterialTheme.typography.bodyMedium,
-                maxLines = 3,
+            DropdownMenuItem(
+                text = { Text("Add to folder…") },
+                onClick = {
+                    menuOpen = false
+                    onAssignToFolder()
+                },
             )
         }
     }

@@ -89,6 +89,17 @@ kotlin {
             // Embedder used by SemanticSearch + EmbeddingIndexer.
             implementation(libs.mlkit.entity.extraction)
             implementation(libs.mediapipe.tasks.text)
+            // ZXing scanner Activity for the LoginScreen "Scan QR"
+            // button. Pure FOSS; works on degoogled Android (GrapheneOS,
+            // LineageOS without GApps) since it doesn't depend on Play
+            // Services. Brings a captured-image preview Activity that
+            // the LoginScreen launches via ScanContract.
+            implementation(libs.zxing.android.embedded)
+            // ZXing core for the QR *generator* (LoginQrShareScreen).
+            // Shared logic with the desktop generator — both targets
+            // run the same `QrCodeWriter` and render the boolean
+            // matrix through a common Compose Canvas drawer.
+            implementation(libs.zxing.core)
             // ExoPlayer powers MediaPlayerInline (inline audio/video
             // for chat attachments) and the voice preview row.
             implementation(libs.media3.exoplayer)
@@ -129,6 +140,11 @@ kotlin {
             implementation(libs.djl.api)
             implementation(libs.djl.onnxruntime.engine)
             implementation(libs.djl.huggingface.tokenizers)
+            // ZXing core for the QR *generator* — same dep as on Android,
+            // pure JVM, draws via Compose Canvas through the shared
+            // QrCodeImage composable. No scanner on desktop (the user
+            // is already at a keyboard; manual login is the fast path).
+            implementation(libs.zxing.core)
         }
         // commonTest carries shared kotlin.test assertions. Tests
         // here are picked up by both desktopTest and (when wired)
@@ -175,8 +191,8 @@ tasks.withType<Test>().configureEach {
 // version inside derivePackageVersion and silently drifted — every
 // release between 0.7.14 and 0.7.23 shipped with stale .dmg/.msi/.deb
 // filenames because nobody updated both literals.
-val talonVersionCode = 121
-val talonVersionName = "0.11.0"
+val talonVersionCode = 122
+val talonVersionName = "0.11.1"
 
 // Surface the gradle-side version constants to commonMain code via a
 // generated Kotlin source file. Without this, the About section in

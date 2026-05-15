@@ -15,7 +15,14 @@ import java.util.concurrent.atomic.AtomicReference
  *   so the user's notification daemon (GNOME Shell, dunst, mako, KDE
  *   Plasma) renders it natively — appears in notification history,
  *   honors theme, respects Do Not Disturb.
- * - macOS: shells out to `osascript`. Real Notification Center toasts.
+ * - macOS: delegates to [trayFallback], which routes via AWT TrayIcon
+ *   → NSUserNotificationCenter. This attributes the notification to
+ *   the running .app bundle (Talon.app when launched from the DMG), so
+ *   the Talon icon appears next to the message. The previous
+ *   `osascript display notification` path was attributed to Script
+ *   Editor / osascript and showed the wrong icon — Apple tightened
+ *   that path years ago and it can't be customized without bundling
+ *   a third-party helper (terminal-notifier).
  * - Windows: delegates straight to [trayFallback]. Java 9+ wraps
  *   [java.awt.TrayIcon.displayMessage] onto native ITaskbarList3
  *   toasts on Windows 10/11, so the AWT path is already correct there.
@@ -33,7 +40,7 @@ class SystemNotifier(
     private val trayFallback: (String, String) -> Unit,
 ) : Notifier {
 
-    private enum class Backend { LINUX_NOTIFY_SEND, LINUX_GDBUS, MACOS_OSASCRIPT, FALLBACK }
+    private enum class Backend { LINUX_NOTIFY_SEND, LINUX_GDBUS, FALLBACK }
 
     @Volatile
     private var backend: Backend = pickInitialBackend()
@@ -61,7 +68,6 @@ class SystemNotifier(
             when (backend) {
                 Backend.LINUX_NOTIFY_SEND -> notifyNotifySend(title, body)
                 Backend.LINUX_GDBUS -> notifyGdbus(title, body)
-                Backend.MACOS_OSASCRIPT -> notifyOsaScript(title, body)
                 Backend.FALLBACK -> return false
             }
             true
@@ -79,7 +85,10 @@ class SystemNotifier(
         val osName = System.getProperty("os.name").lowercase()
         return when {
             "linux" in osName -> Backend.LINUX_NOTIFY_SEND
-            "mac" in osName -> Backend.MACOS_OSASCRIPT
+            // macOS and Windows go straight to trayFallback. The AWT
+            // TrayIcon route on macOS attributes notifications to
+            // Talon.app (icon + name correct); Windows TrayIcon maps
+            // to ITaskbarList3 toasts natively.
             else -> Backend.FALLBACK
         }
     }
@@ -125,20 +134,6 @@ class SystemNotifier(
             )
         )
     }
-
-    private fun notifyOsaScript(title: String, body: String) {
-        val script = buildString {
-            append("display notification \"")
-            append(escapeAppleScript(body))
-            append("\" with title \"")
-            append(escapeAppleScript(title))
-            append("\"")
-        }
-        spawn(listOf("osascript", "-e", script))
-    }
-
-    private fun escapeAppleScript(s: String): String =
-        s.replace("\\", "\\\\").replace("\"", "\\\"")
 
     private fun spawn(args: List<String>) {
         ProcessBuilder(args)

@@ -81,6 +81,18 @@ abstract class MessageDao {
     """)
     abstract suspend fun latestFor(whom: String, count: Int): List<MessageEntity>
 
+    /** Newest N messages (top-level OR replies) for a conversation, newest
+     *  first. Used by the Mentions tab's true-mention filter — %activity's
+     *  notify-count includes reply mentions, so the scan needs to cover
+     *  the thread tree, not just top-level posts. */
+    @Query("""
+        SELECT * FROM messages
+        WHERE whom = :whom AND isDeleted = 0
+        ORDER BY sentMs DESC
+        LIMIT :count
+    """)
+    abstract suspend fun latestAnyFor(whom: String, count: Int): List<MessageEntity>
+
     /** Newest non-deleted top-level post id for a conversation (refresh cursor). */
     @Query("""
         SELECT id FROM messages

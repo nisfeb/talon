@@ -2,6 +2,7 @@ package io.nisfeb.talon.ui
 
 actual val isDailyDigestSupported: Boolean = false
 actual val isVoiceMessagesSupported: Boolean = false
+actual val isQrLoginScanSupported: Boolean = false
 
 actual val platformLabel: String = run {
     val os = System.getProperty("os.name") ?: "Desktop"

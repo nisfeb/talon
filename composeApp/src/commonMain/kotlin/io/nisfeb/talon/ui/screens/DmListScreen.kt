@@ -94,6 +94,7 @@ import io.nisfeb.talon.ui.RailItem
 import io.nisfeb.talon.ui.UpdateBanner
 import io.nisfeb.talon.ui.contactMapFlow
 import io.nisfeb.talon.update.UpdateStatus
+import io.nisfeb.talon.ai.DailyDigestMentionMatcher
 import io.nisfeb.talon.urbit.StoryCache
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.combine
@@ -227,11 +228,44 @@ fun DmListScreen(
     // we haven't opened. SQL-side `notifyCount > 0` filter keeps the
     // wire shape small and stops re-emitting on unrelated unread-only
     // updates that don't touch the mention set.
-    val mentionUnreads by remember {
+    val notifyUnreads by remember {
         db.unreads().streamWithMentions()
             .distinctUntilChanged()
             .flowOn(Dispatchers.Default)
     }.collectAsState(initial = emptyList<UnreadEntity>())
+
+    // True-mention filter: %activity's `notify-count` covers both
+    // @-mentions and replies to our own posts. Users only want true
+    // @-mentions in the Mentions tab, so filter `notifyUnreads` down
+    // to whoms whose recent local messages actually contain a
+    // patp-bounded `~ourpatp` reference. Falls back to "include" when
+    // we have zero cached messages for the whom — otherwise a new
+    // mention ping on a fresh chat would be hidden until the user
+    // fetched messages.
+    var mentionUnreads by remember { mutableStateOf<List<UnreadEntity>>(emptyList()) }
+    LaunchedEffect(notifyUnreads, activeShip) {
+        val patp = activeShip?.removePrefix("~")
+        if (patp.isNullOrBlank()) {
+            mentionUnreads = notifyUnreads
+            return@LaunchedEffect
+        }
+        val filtered = mutableListOf<UnreadEntity>()
+        for (u in notifyUnreads) {
+            val recent = runCatching {
+                db.messages().latestAnyFor(u.whom, MENTION_SCAN_LIMIT)
+            }.getOrDefault(emptyList())
+            val include = if (recent.isEmpty()) {
+                true
+            } else {
+                recent.any { m ->
+                    val text = StoryCache.textFor(m.id, m.contentJson)
+                    DailyDigestMentionMatcher.containsMention(text, patp)
+                }
+            }
+            if (include) filtered.add(u)
+        }
+        mentionUnreads = filtered
+    }
     val mentionCounts = remember(mentionUnreads) {
         val out = HashMap<String, Int>(mentionUnreads.size)
         for (u in mentionUnreads) out[u.whom] = u.notifyCount
@@ -527,8 +561,31 @@ fun DmListScreen(
         // app — the user has no way to tell "still loading" from
         // "your ship has no chats." Disappears as soon as the
         // bootstrap completes (success or error).
+        //
+        // A text caption sits next to the bar so the loading state is
+        // obvious — bare progress strips at the screen edge are easy
+        // to miss, and users were restarting the app thinking groups
+        // hadn't loaded when really they just needed to wait for the
+        // (slower) groups scry to finish.
         val bootstrapping by repo.bootstrapping.collectAsState()
         if (bootstrapping) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                androidx.compose.material3.CircularProgressIndicator(
+                    modifier = Modifier.size(14.dp),
+                    strokeWidth = 2.dp,
+                )
+                Text(
+                    "Syncing chats and groups…",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
             androidx.compose.material3.LinearProgressIndicator(
                 modifier = Modifier.fillMaxWidth(),
             )
@@ -1008,6 +1065,16 @@ fun DmListScreen(
                 // All view — structured home list. See folder-view
                 // branch above for why GroupHead bundles its children
                 // into a single lazy item with AnimatedVisibility.
+                if (homeRows.isEmpty() && bootstrapping) {
+                    // First-launch limbo: scries haven't returned any
+                    // rows yet. The top-of-screen sync caption is
+                    // visible, but users were missing it on tall
+                    // screens — a centered loading panel makes
+                    // "still loading" unmistakable.
+                    item(key = "__home_loading") {
+                        SpecialEmpty("Loading your chats and groups…")
+                    }
+                }
                 var i = 0
                 while (i < homeRows.size) {
                     val row = homeRows[i]
@@ -1798,6 +1865,13 @@ private fun MenuBadgeDot(modifier: Modifier = Modifier) {
             .background(MaterialTheme.colorScheme.primary),
     )
 }
+
+/** Per-whom message scan depth for the Mentions tab's true-mention
+ *  filter. Bounds the DB read so a ship with many ping-bearing chats
+ *  doesn't pay an unbounded scan; 50 covers the common case of
+ *  "did I get mentioned recently here?" without sliding off old
+ *  pages of cached history. */
+private const val MENTION_SCAN_LIMIT = 50
 
 private val TIME_TODAY: java.time.format.DateTimeFormatter =
     java.time.format.DateTimeFormatter.ofPattern("HH:mm", Locale.getDefault())

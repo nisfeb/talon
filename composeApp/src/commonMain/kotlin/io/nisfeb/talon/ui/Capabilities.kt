@@ -14,6 +14,14 @@ expect val isVoiceMessagesSupported: Boolean
 expect val isOnDeviceAiSupported: Boolean
 
 /**
+ * Whether the platform can launch an in-app QR scanner for login
+ * handoff (see [io.nisfeb.talon.login.TalonLoginUri]). Android: true
+ * via ML Kit's GoogleCodeScanner (Play Services). Desktop: false —
+ * desktops have keyboards, the manual form is already the fast path.
+ */
+expect val isQrLoginScanSupported: Boolean
+
+/**
  * Short human-readable name for the host platform — surfaced in the
  * About panel so the user can see at a glance which build they're on.
  * Android returns "Android"; desktop returns the os.name (e.g. "Linux",

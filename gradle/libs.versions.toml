@@ -16,6 +16,8 @@ lifecycle = "2.8.6"
 reorderable = "2.5.0"
 securityCrypto = "1.1.0-alpha06"
 mlkitEntityExtraction = "16.0.0-beta5"
+zxingCore = "3.5.3"
+zxingAndroidEmbedded = "4.3.0"
 mediapipeTasksText = "0.10.21"
 composeMultiplatform = "1.7.3"
 junit = "4.13.2"
@@ -68,6 +70,8 @@ media3-ui = { group = "androidx.media3", name = "media3-ui", version.ref = "medi
 reorderable = { group = "sh.calvin.reorderable", name = "reorderable", version.ref = "reorderable" }
 androidx-security-crypto = { group = "androidx.security", name = "security-crypto", version.ref = "securityCrypto" }
 mlkit-entity-extraction = { group = "com.google.mlkit", name = "entity-extraction", version.ref = "mlkitEntityExtraction" }
+zxing-core = { group = "com.google.zxing", name = "core", version.ref = "zxingCore" }
+zxing-android-embedded = { group = "com.journeyapps", name = "zxing-android-embedded", version.ref = "zxingAndroidEmbedded" }
 mediapipe-tasks-text = { group = "com.google.mediapipe", name = "tasks-text", version.ref = "mediapipeTasksText" }
 
 # DJL for desktop on-device sentence embedding (smart search /

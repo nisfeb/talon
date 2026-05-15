@@ -1,11 +1,19 @@
 package io.nisfeb.talon.notify
 
-// Manual smoke test for SystemNotifier — emits a single native
-// notification through the platform-native path. Not wired into
-// production; invoked via `./gradlew :composeApp:notifierSmoke`.
+// Manual smoke test for SystemNotifier — emits a single notification
+// through the platform-native path on Linux. macOS and Windows go
+// through the AWT tray fallback by design (so notifications attribute
+// to the .app bundle's icon, not osascript/Script Editor). Not wired
+// into production; invoked via `./gradlew :composeApp:notifierSmoke`.
 fun main() {
+    val osName = System.getProperty("os.name").lowercase()
+    val expectsFallback = "linux" !in osName
     val n = SystemNotifier(trayFallback = { _, _ ->
-        System.err.println("SystemNotifier fell back to TRAY — native path failed")
+        if (expectsFallback) {
+            System.err.println("SystemNotifier delegated to TRAY (expected on this OS)")
+        } else {
+            System.err.println("SystemNotifier fell back to TRAY — native path failed")
+        }
     })
     println("Sending native notification…")
     n.notify(

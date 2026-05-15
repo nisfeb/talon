@@ -310,9 +310,14 @@ fun DmChatScreen(
 
     var hasAnchored by remember(whom) { mutableStateOf(false) }
     var flashMessageId by remember(whom) { mutableStateOf<String?>(null) }
+    // Tracks which anchor (if any) we've already scrolled to, so a fresh
+    // initialScrollMessageId fires even when the user clicks a bookmark
+    // for the chat they're already in (hasAnchored is already true from
+    // the initial bottom-snap). Keyed on whom so a chat switch resets.
+    var lastAppliedAnchor by remember(whom) { mutableStateOf<String?>(null) }
     LaunchedEffect(displayRows.size, initialScrollMessageId) {
         if (displayRows.isEmpty()) return@LaunchedEffect
-        if (!hasAnchored && initialScrollMessageId != null) {
+        if (initialScrollMessageId != null && initialScrollMessageId != lastAppliedAnchor) {
             val originalIdx = displayRows.indexOfFirst { item ->
                 item is ChatListItem.Message && item.row.m.id == initialScrollMessageId
             }
@@ -320,6 +325,7 @@ fun DmChatScreen(
                 listState.scrollToItem(displayRows.lastIndex - originalIdx)
                 hasAnchored = true
                 flashMessageId = initialScrollMessageId
+                lastAppliedAnchor = initialScrollMessageId
                 onScrollConsumed()
                 return@LaunchedEffect
             }

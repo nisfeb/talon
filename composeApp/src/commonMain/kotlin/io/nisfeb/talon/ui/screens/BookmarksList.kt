@@ -46,7 +46,7 @@ import kotlinx.coroutines.launch
 fun BookmarksList(
     db: AppDatabase,
     repo: TlonChatRepo,
-    onOpenConversation: (whom: String) -> Unit,
+    onOpenConversation: (whom: String, postId: String?) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val scope = rememberCoroutineScope()
@@ -150,8 +150,8 @@ fun BookmarksList(
                     BookmarkRow(
                         b = b,
                         contactMap = contactMap,
-                        onClick = { onOpenConversation(b.whom) },
-                        onLongClick = { assignTarget = b },
+                        onClick = { onOpenConversation(b.whom, b.id) },
+                        onAssignToFolder = { assignTarget = b },
                     )
                     HorizontalDivider()
                 }

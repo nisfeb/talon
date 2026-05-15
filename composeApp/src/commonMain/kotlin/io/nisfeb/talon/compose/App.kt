@@ -190,6 +190,16 @@ fun App(
     var showSettings by remember { mutableStateOf(false) }
     var showSidebarSettings by remember { mutableStateOf(false) }
     var openChat by remember { mutableStateOf<String?>(null) }
+    // Optional message id to scroll-and-flash when DmChatScreen mounts /
+    // re-mounts on a new whom. Set when navigating from bookmarks (or any
+    // surface that points at a specific message); cleared by DmChatScreen's
+    // onScrollConsumed once it finds + scrolls to the row, or on whom switch
+    // so a stale anchor can't paint on the wrong chat.
+    var openChatFocusMessageId by remember { mutableStateOf<String?>(null) }
+    /** Login-handoff QR generator. Reachable from LoginScreen
+     *  ("Helping someone else? Generate a login QR →") on cold launch
+     *  and from Settings once a ship is logged in. */
+    var shareLoginQrOpen by remember { mutableStateOf(false) }
     var viewerImageUrl by remember { mutableStateOf<String?>(null) }
     // Multi-image viewer state — set by the photo / gif drilldown
     // (MediaListPane) so the viewer's prev/next + arrow-key
@@ -861,10 +871,19 @@ fun App(
                     // suspend DAO call.
                     val rightPaneScope = rememberCoroutineScope()
                     when {
+                    shareLoginQrOpen -> io.nisfeb.talon.ui.screens.LoginQrShareScreen(
+                        onBack = { shareLoginQrOpen = false },
+                    )
                     ship == null -> LoginScreen(
                         session = session,
                         onLoggedIn = { loggedInShip = it },
                         notice = loginNotice,
+                        // Desktop has no QR scanner (no camera to assume,
+                        // keyboard is already the fast path) but the
+                        // generator works — Compose Desktop can paint the
+                        // QR matrix and the user shows their screen to
+                        // someone scanning from a phone.
+                        onOpenShareQr = { shareLoginQrOpen = true },
                     )
                     // Sidebar settings drills out of Settings; both flags
                     // are true while the user is in Sidebar. Order this
@@ -918,6 +937,7 @@ fun App(
                             // wires it to dailyDigest.generateAndNotifyAsync
                             // when the production MainActivity migrates here.
                             onOpenSidebarSettings = { showSidebarSettings = true },
+                            onOpenShareLoginQr = { shareLoginQrOpen = true },
                         )
                     }
                     showSelfProfile -> ProfileEditScreen(
@@ -941,8 +961,9 @@ fun App(
                         db = db,
                         repo = repo,
                         onBack = { showBookmarks = false },
-                        onOpenConversation = { other ->
+                        onOpenConversation = { other, postId ->
                             showBookmarks = false
+                            openChatFocusMessageId = postId
                             openChat = other
                         },
                     )
@@ -1208,6 +1229,8 @@ fun App(
                                     uiSettings = uiSettings,
                                     ourPatp = ship,
                                     whom = openChat!!,
+                                    initialScrollMessageId = openChatFocusMessageId,
+                                    onScrollConsumed = { openChatFocusMessageId = null },
                                     onBack = { openChat = null },
                                     onOpenThread = { parentId -> openThreadAction(parentId, null) },
                                     onOpenThreadAt = { parentId, replyAnchor ->
@@ -1442,8 +1465,9 @@ fun App(
                                 RailTab.Bookmarks -> BookmarksList(
                                     db = db,
                                     repo = repo,
-                                    onOpenConversation = { other ->
+                                    onOpenConversation = { other, postId ->
                                         showBookmarks = false
+                                        openChatFocusMessageId = postId
                                         openChat = other
                                     },
                                 )

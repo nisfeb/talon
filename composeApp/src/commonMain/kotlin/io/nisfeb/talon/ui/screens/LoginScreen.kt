@@ -9,6 +9,7 @@ package io.nisfeb.talon.ui.screens
 // passes the default `{ Modifier }` and the field is keyboard-only.
 
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -27,6 +28,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.ClickableText
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.Button
@@ -35,6 +37,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -59,6 +62,7 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
+import io.nisfeb.talon.login.TalonLoginUri
 import io.nisfeb.talon.ui.talonLogoPainter
 import io.nisfeb.talon.urbit.UrbitSession
 import kotlinx.coroutines.launch
@@ -81,6 +85,26 @@ fun LoginScreen(
      *  field. */
     passwordAutofill: @Composable ((onFill: (String) -> Unit) -> Modifier) =
         { Modifier },
+    /** Optional QR-scan integration. The composable is invoked with
+     *  an `onResult` callback that LoginScreen wires to its own
+     *  shipUrl/code state. The composable should set up its own
+     *  Activity-result launcher (e.g. via
+     *  `rememberLauncherForActivityResult`) and return a `() -> Unit`
+     *  trigger — non-null when the platform supports scanning, null
+     *  otherwise. LoginScreen renders the "Scan QR" button when the
+     *  trigger is non-null.
+     *
+     *  Android wires this to ZXing-android-embedded's ScanContract
+     *  (FOSS, no Google Play Services required — works on GrapheneOS).
+     *  Desktop passes null. */
+    qrScanIntegration: (@Composable (onResult: (TalonLoginUri.Payload?) -> Unit) -> (() -> Unit)?)? = null,
+    /** Optional callback to open the "Generate handoff QR" screen.
+     *  When non-null, LoginScreen shows a "Generate QR for someone"
+     *  link below the main form so helpers/admins can build a QR
+     *  with another user's credentials. Both targets support
+     *  generation (ZXing core is JVM-only and works under both
+     *  Compose Desktop and Compose Android). */
+    onOpenShareQr: (() -> Unit)? = null,
 ) {
     var shipUrl by remember { mutableStateOf("http://localhost:8080") }
     var code by remember { mutableStateOf("") }
@@ -193,6 +217,45 @@ fun LoginScreen(
                         },
                         modifier = passwordAutofillModifier.fillMaxWidth(),
                     )
+                    // The scanner trigger is composable-scoped (it
+                    // registers an ActivityResult launcher via the
+                    // Android slot) — invoke it OUTSIDE the OutlinedButton
+                    // lambda so the launcher remembers itself across
+                    // recompositions, and call it from onClick.
+                    val triggerScan = qrScanIntegration?.invoke { payload ->
+                        if (payload != null) {
+                            shipUrl = payload.url
+                            code = payload.code
+                            status = "QR scanned — tap Connect to sign in."
+                        } else {
+                            // null = user cancelled OR the QR wasn't a
+                            // talon:// login URI. Keep silent on cancel
+                            // (common path) — the manual fields stay
+                            // editable. A surface'd hint here on bad
+                            // format would help, but distinguishing
+                            // cancel from "wrong QR" would require a
+                            // sentinel from the scanner; defer.
+                        }
+                    }
+                    if (triggerScan != null) {
+                        OutlinedButton(
+                            onClick = {
+                                status = null
+                                triggerScan()
+                            },
+                            enabled = !connecting,
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.QrCodeScanner,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp),
+                            )
+                            Spacer(Modifier.size(8.dp))
+                            Text("Scan QR")
+                        }
+                    }
                     Button(
                         onClick = {
                             status = "Connecting…"
@@ -233,6 +296,24 @@ fun LoginScreen(
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             textAlign = TextAlign.Center,
                             modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+                    onOpenShareQr?.let { openShare ->
+                        // "Helping someone else log in?" affordance —
+                        // opens the QR generator screen. Lives inside
+                        // the form card so it reads as a related action
+                        // and not a stray link. Available on both
+                        // targets since QR generation is JVM-only and
+                        // ZXing core is wired into both leaves.
+                        Text(
+                            text = "Helping someone else? Generate a login QR →",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.primary,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 4.dp)
+                                .clickable(enabled = !connecting) { openShare() },
                         )
                     }
                 }
