@@ -179,10 +179,25 @@ class TalonApplication : Application() {
             recordCheckedAt = { updatePrefs.edit().putLong("last_http_check_ms", it).apply() },
             minIntervalMs = 12L * 60L * 60L * 1000L,
         )
-        appScope.launch {
-            val m = httpChecker.check()
-            if (m != null) updateState.onManifest(m)
-        }
+        // Re-check on every app-foreground (cold launch AND warm
+        // resume), not just process onCreate. HttpUpdateChecker has
+        // its own 12-hour minInterval throttle, so daily users hit
+        // the network at most once per day; the lifecycle observer
+        // just ensures users who keep the Talon process alive for
+        // days (warm-resume only) still get the prompt eventually.
+        // ProcessLifecycleOwner's ON_START fires on first Activity
+        // start as well, so this also covers the initial cold-launch
+        // case — no separate fire-on-create launch needed.
+        androidx.lifecycle.ProcessLifecycleOwner.get().lifecycle.addObserver(
+            object : androidx.lifecycle.DefaultLifecycleObserver {
+                override fun onStart(owner: androidx.lifecycle.LifecycleOwner) {
+                    appScope.launch {
+                        val m = httpChecker.check()
+                        if (m != null) updateState.onManifest(m)
+                    }
+                }
+            },
+        )
 
         // Pre-warm the ML Kit Entity Extraction model so the first
         // chat to render isn't blocked on a one-off ~12MB download.
