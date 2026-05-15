@@ -469,6 +469,7 @@ ksp {
 val iconsExtendedKeep = setOf(
     "androidx/compose/material/icons/automirrored/filled/LogoutKt.class",
     "androidx/compose/material/icons/filled/AttachFileKt.class",
+    "androidx/compose/material/icons/filled/ContentCopyKt.class",
     "androidx/compose/material/icons/filled/DownloadKt.class",
     "androidx/compose/material/icons/filled/DragHandleKt.class",
     "androidx/compose/material/icons/filled/ErrorOutlineKt.class",
@@ -479,6 +480,7 @@ val iconsExtendedKeep = setOf(
     "androidx/compose/material/icons/filled/PauseKt.class",
     "androidx/compose/material/icons/filled/PeopleKt.class",
     "androidx/compose/material/icons/filled/PushPinKt.class",
+    "androidx/compose/material/icons/filled/QrCodeScannerKt.class",
     "androidx/compose/material/icons/filled/ScheduleKt.class",
     "androidx/compose/material/icons/filled/StopKt.class",
     "androidx/compose/material/icons/filled/TopicKt.class",
