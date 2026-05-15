@@ -42,6 +42,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -63,7 +64,10 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import io.nisfeb.talon.login.TalonLoginUri
+import io.nisfeb.talon.ui.UpdateBanner
 import io.nisfeb.talon.ui.talonLogoPainter
+import io.nisfeb.talon.update.UpdateState
+import io.nisfeb.talon.update.UpdateStatus
 import io.nisfeb.talon.urbit.UrbitSession
 import kotlinx.coroutines.launch
 
@@ -105,6 +109,13 @@ fun LoginScreen(
      *  generation (ZXing core is JVM-only and works under both
      *  Compose Desktop and Compose Android). */
     onOpenShareQr: (() -> Unit)? = null,
+    /** Optional update-status hook. When non-null, the global
+     *  [UpdateBanner] renders above the login form so users see
+     *  pending updates on cold launch — the check fires at app
+     *  process start, but the banner only had a render path inside
+     *  the post-login home list before this. Android passes the
+     *  real instance; desktop passes null (no checker wired). */
+    updateState: UpdateState? = null,
 ) {
     var shipUrl by remember { mutableStateOf("http://localhost:8080") }
     var code by remember { mutableStateOf("") }
@@ -114,12 +125,39 @@ fun LoginScreen(
     val scope = rememberCoroutineScope()
     val uriHandler = LocalUriHandler.current
 
-    Box(
+    // Outer Column holds the update banner above the centered form.
+    // Without it, the banner would sit inside the form column and
+    // squeeze its width; placing it full-bleed at the top mirrors
+    // where the home list already shows the banner once logged in.
+    Column(
         modifier = Modifier
             .fillMaxSize()
             .windowInsetsPadding(WindowInsets.safeDrawing),
-        contentAlignment = Alignment.Center,
     ) {
+        if (updateState != null) {
+            val updateStatus by updateState.status.collectAsState()
+            UpdateBanner(
+                status = updateStatus,
+                onTap = {
+                    when (val s = updateStatus) {
+                        is UpdateStatus.Available ->
+                            updateState.startDownload(s.manifest)
+                        is UpdateStatus.Ready ->
+                            updateState.launchInstaller(s.apkPath)
+                        is UpdateStatus.Failed -> {
+                            val m = s.manifest ?: return@UpdateBanner
+                            updateState.startDownload(m)
+                        }
+                        else -> Unit
+                    }
+                },
+                onDismiss = { updateState.dismiss() },
+            )
+        }
+        Box(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center,
+        ) {
         Column(
             modifier = Modifier
                 .widthIn(max = 420.dp)
@@ -348,6 +386,7 @@ fun LoginScreen(
                 baseColor = MaterialTheme.colorScheme.onSurfaceVariant,
                 onLinkTap = { url -> runCatching { uriHandler.openUri(url) } },
             )
+        }
         }
     }
 }

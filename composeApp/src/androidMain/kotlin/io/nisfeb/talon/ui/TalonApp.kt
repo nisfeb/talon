@@ -773,6 +773,7 @@ fun TalonApp(
                     rememberQrLoginScanLauncher(onResult)
                 },
                 onOpenShareQr = { shareLoginQrOpen = true },
+                updateState = app.updateState,
             )
 
             loggedInShip == null -> LoginScreen(
@@ -798,6 +799,7 @@ fun TalonApp(
                     rememberQrLoginScanLauncher(onResult)
                 },
                 onOpenShareQr = { shareLoginQrOpen = true },
+                updateState = app.updateState,
             )
 
             viewerImageList != null -> ImageViewerScreen(
