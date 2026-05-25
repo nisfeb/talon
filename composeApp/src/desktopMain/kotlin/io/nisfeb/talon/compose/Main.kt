@@ -391,6 +391,7 @@ fun main() {
                         io.nisfeb.talon.ui.DesktopMenuSeenStore(ship = ship)
                     },
                     lastOpenChatStore = graph.lastOpenChatStore,
+                    urbLinkLauncher = io.nisfeb.talon.urbit.DesktopUrbLinkLauncher,
                 )
             }
         }

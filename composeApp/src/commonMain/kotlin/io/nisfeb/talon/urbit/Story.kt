@@ -233,9 +233,37 @@ object Story {
 
     // ───────── inline spans ─────────
 
+    /**
+     * Append [text] to [out], but linkify any bare `urb://` runs:
+     * Tlon's server-side linkifier only wraps http(s) URLs in `link`
+     * blocks, so urb:// addresses arrive as plain text. We annotate
+     * those runs with [URL_TAG] (the same tag http links use) so the
+     * renderer makes them tappable — the tap site branches on the
+     * urb:// prefix to route through Lattice instead of the browser.
+     */
+    private fun appendLinkifyingUrb(text: String, out: androidx.compose.ui.text.AnnotatedString.Builder) {
+        val ranges = UrbLink.findRanges(text)
+        if (ranges.isEmpty()) {
+            out.append(text)
+            return
+        }
+        var cursor = 0
+        for (r in ranges) {
+            if (r.first > cursor) out.append(text.substring(cursor, r.first))
+            val url = text.substring(r.first, r.last + 1)
+            out.pushStringAnnotation(URL_TAG, url)
+            out.withSpan(SpanStyle(color = LINK_COLOR, textDecoration = TextDecoration.Underline)) {
+                append(url)
+            }
+            out.pop()
+            cursor = r.last + 1
+        }
+        if (cursor < text.length) out.append(text.substring(cursor))
+    }
+
     private fun renderInline(element: JsonElement, out: androidx.compose.ui.text.AnnotatedString.Builder) {
         (element as? JsonPrimitive)?.let {
-            out.append(if (it.isString) it.content else it.content)
+            appendLinkifyingUrb(if (it.isString) it.content else it.content, out)
             return
         }
         val obj = element as? JsonObject ?: return
