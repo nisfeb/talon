@@ -4,19 +4,9 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.CompositionLocalProvider
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.platform.LocalUriHandler
-import io.nisfeb.talon.urbit.UrbLaunchResult
 import io.nisfeb.talon.urbit.UrbLinkLauncher
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 
 /**
  * Carries the "open this urb:// link" action down to chat renderers
@@ -25,43 +15,16 @@ import kotlinx.coroutines.withContext
  * screens' `onLinkTap` branches on the urb:// prefix and dispatches
  * here; everything else still goes through the normal URI handler.
  *
- * Default is a no-op so previews / tests that don't wrap content in
- * [ProvideUrbLinkHandler] don't crash on a tap.
+ * Provided at the app root (App.kt on desktop, TalonApp.kt on Android)
+ * wired to the platform [UrbLinkLauncher]. Default is a no-op so
+ * previews / tests / surfaces that don't provide it don't crash on a tap.
  */
 val LocalUrbLinkHandler = staticCompositionLocalOf<(String) -> Unit> { {} }
 
 /**
- * Wraps [content] with a urb:// handler backed by [launcher], and
- * hosts the "install Lattice" prompt that appears when no urb://
- * handler is present on the device.
- *
- * The launch runs off the main thread — the desktop launcher shells
- * out to `xdg-mime` / `xdg-open`, which would otherwise block the UI
- * thread on the process round-trip.
+ * Prompt shown when a tapped urb:// link has no handler on the device.
+ * Links to Lattice's releases via the platform URI handler.
  */
-@Composable
-fun ProvideUrbLinkHandler(
-    launcher: UrbLinkLauncher,
-    content: @Composable () -> Unit,
-) {
-    var promptUrl by remember { mutableStateOf<String?>(null) }
-    val scope = rememberCoroutineScope()
-    val handler: (String) -> Unit = remember(launcher) {
-        { url ->
-            scope.launch {
-                val result = withContext(Dispatchers.IO) { launcher.open(url) }
-                if (result != UrbLaunchResult.Opened) promptUrl = url
-            }
-        }
-    }
-    CompositionLocalProvider(LocalUrbLinkHandler provides handler) {
-        content()
-    }
-    promptUrl?.let { url ->
-        InstallLatticeDialog(onDismiss = { promptUrl = null })
-    }
-}
-
 @Composable
 fun InstallLatticeDialog(onDismiss: () -> Unit) {
     val uriHandler = LocalUriHandler.current
