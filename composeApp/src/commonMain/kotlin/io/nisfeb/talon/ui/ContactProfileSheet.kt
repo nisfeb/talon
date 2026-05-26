@@ -46,8 +46,12 @@ fun ContactProfileSheet(
     onEditSelf: () -> Unit,
     onDismiss: () -> Unit,
     /** Add this ship to %contacts. When non-null and the ship isn't
-     *  already a known contact, an "Add to contacts" button shows. */
+     *  already in the contact book, an "Add to contacts" button shows. */
     onAddContact: (() -> Unit)? = null,
+    /** Whether this ship is in our curated contact book. Gates the
+     *  "Add to contacts" button — based on book membership, not mere
+     *  presence in the /v1/all peer cache. */
+    isInBook: Boolean = false,
 ) {
     val sheetState = rememberModalBottomSheetState()
     val label = remember(contact, ship) { contact?.nickname ?: ship }
@@ -100,7 +104,7 @@ fun ContactProfileSheet(
             // Offer "Add to contacts" for a peer we aren't tracking yet
             // (no cached contact row). Tracks them via %contacts so they
             // appear in the contact list / DM picker.
-            if (!self && onAddContact != null && contact == null) {
+            if (!self && onAddContact != null && !isInBook) {
                 OutlinedButton(
                     onClick = onAddContact,
                     modifier = Modifier.fillMaxWidth(),

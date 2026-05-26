@@ -159,6 +159,20 @@ class TlonChatRepo(
     val bootstrapping: StateFlow<Boolean> = _bootstrapping.asStateFlow()
 
     /**
+     * Ships in our curated %contacts *book* (`/x/v1/book`) — the
+     * contacts we've deliberately added, as opposed to the much
+     * broader `/v1/all` peer directory that populates the `contacts`
+     * table. The Contacts screen and the "Add to contacts" affordances
+     * key off this so "already a contact" means "in my book", not
+     * "any peer my ship has ever heard of". Hydrated from /v1/book on
+     * bootstrap and kept in sync by %contacts /v1/news page/wipe facts;
+     * add/remove update it optimistically. Not persisted — re-scried
+     * every login.
+     */
+    private val _bookContacts = MutableStateFlow<Set<String>>(emptySet())
+    val bookContacts: StateFlow<Set<String>> = _bookContacts.asStateFlow()
+
+    /**
      * The chat the user is currently viewing, if any. Used to suppress
      * unread-badge bumps for that whom — if they're looking at it,
      * any new messages are effectively already read. Set from UI
@@ -717,22 +731,28 @@ class TlonChatRepo(
      * never reaches the named peer.
      */
     /**
-     * Add [ship] to our contacts. Pokes %contacts `%meet` to track the
-     * peer — this subscribes us to their published profile, which then
-     * flows in via /v1/news and lands in the contacts table. When
-     * [nickname] is non-blank, also sets a local `%edit` overlay so the
-     * contact gets a name immediately.
+     * Add [ship] to our curated contact *book*.
      *
-     * We optimistically upsert a local row up front so the contact is
-     * visible right away: `%meet` only surfaces a peer once *they've*
-     * published a profile, so a peer with none would otherwise never
-     * appear. Actions per tlon-apps desk/lib/contacts/json-1.hoon
-     * ++action — `meet+(ar ship)` and `edit+(ot kip+kip contact+contact ~)`.
+     * Two pokes per tlon-apps desk/lib/contacts/json-1.hoon ++action:
+     *  1. `%meet [ship]` — track the peer so %contacts fetches their
+     *     published profile into `peers` (a prerequisite: %page reads
+     *     the peer's `con` from there).
+     *  2. `%page {kip, contact}` — create the book entry, with the
+     *     [nickname] as our local `mod` overlay (empty overlay when no
+     *     nickname). This is what puts them in /v1/book.
+     *
+     * NOTE: %page asserts the peer is already tracked, so for a
+     * never-before-seen ship the %page can race the async %meet fetch
+     * and NACK on the first try. We still optimistically add to
+     * [bookContacts] + upsert a local row so the UI is immediate; the
+     * /v1/book re-scry on next login reconciles. Worth smoke-testing
+     * the round-trip on a live ship.
      */
     suspend fun addContact(ship: String, nickname: String? = null) {
         val ch = channel ?: error("not connected")
         require(ship.startsWith("~")) { "addContact: $ship isn't a patp" }
-        // Track the peer.
+        val name = nickname?.trim()?.takeIf { it.isNotBlank() }
+        // 1. Track the peer.
         ch.poke(
             app = "contacts",
             mark = "contact-action-1",
@@ -740,9 +760,26 @@ class TlonChatRepo(
                 put("meet", buildJsonArray { add(JsonPrimitive(ship)) })
             },
         )
-        val name = nickname?.trim()?.takeIf { it.isNotBlank() }
-        // Optimistic local row so the contact shows without waiting on
-        // (or in the absence of) the peer's published profile.
+        // 2. Create the book page (our overlay = optional nickname).
+        ch.poke(
+            app = "contacts",
+            mark = "contact-action-1",
+            payload = buildJsonObject {
+                put("page", buildJsonObject {
+                    put("kip", ship)
+                    put("contact", buildJsonObject {
+                        if (name != null) {
+                            put("nickname", buildJsonObject {
+                                put("type", "text")
+                                put("value", name)
+                            })
+                        }
+                    })
+                })
+            },
+        )
+        // Optimistic: mark in-book + ensure a local row so it shows now.
+        _bookContacts.value = _bookContacts.value + ship
         val current = db.contacts().get(ship)
         db.contacts().upsert(
             ContactEntity(
@@ -755,25 +792,25 @@ class TlonChatRepo(
                 color = current?.color,
             )
         )
-        // Local pet-name overlay, if a nickname was supplied. Same
-        // kip-scoped `%edit` shape as setPetName.
-        if (name != null) {
-            ch.poke(
-                app = "contacts",
-                mark = "contact-action-1",
-                payload = buildJsonObject {
-                    put("edit", buildJsonObject {
-                        put("kip", ship)
-                        put("contact", buildJsonObject {
-                            put("nickname", buildJsonObject {
-                                put("type", "text")
-                                put("value", name)
-                            })
-                        })
-                    })
-                },
-            )
-        }
+    }
+
+    /**
+     * Remove [ship] from our contact book via `%wipe [kip]`
+     * (json-1.hoon ++action `wipe+(ar kip)`). Optimistically drops it
+     * from [bookContacts]; the contacts-table row stays since the peer
+     * may still be in /v1/all.
+     */
+    suspend fun removeContact(ship: String) {
+        val ch = channel ?: error("not connected")
+        require(ship.startsWith("~")) { "removeContact: $ship isn't a patp" }
+        ch.poke(
+            app = "contacts",
+            mark = "contact-action-1",
+            payload = buildJsonObject {
+                put("wipe", buildJsonArray { add(JsonPrimitive(ship)) })
+            },
+        )
+        _bookContacts.value = _bookContacts.value - ship
     }
 
     suspend fun setPetName(ship: String, name: String) {
@@ -2803,8 +2840,12 @@ class TlonChatRepo(
         // the whole bootstrap doesn't pay both serially.
         val allJob = async { runCatching { channel.scry("contacts", "/v1/all") }.getOrNull() }
         val selfJob = async { runCatching { channel.scry("contacts", "/v1/self") }.getOrNull() }
+        // /v1/book is our curated contact book (kip -> [con, mod] page),
+        // a subset of /v1/all. Drives `bookContacts` + the Contacts screen.
+        val bookJob = async { runCatching { channel.scry("contacts", "/v1/book") }.getOrNull() }
         val allBody = allJob.await()
         val selfBody = selfJob.await()
+        val bookBody = bookJob.await()
 
         val fresh = mutableListOf<ContactEntity>()
 
@@ -2823,10 +2864,38 @@ class TlonChatRepo(
             fresh.add(parseContact(ourPatp, fields, parseContactModAt(obj)))
         }
 
+        // Book: keys are `~ship` (or `0v<cid>` for id-pages, which we
+        // skip — Talon only books ships). Each value is the [con, mod]
+        // page; we display mod-over-con so a local pet-name wins.
+        val book = mutableSetOf<String>()
+        (bookBody as? JsonObject)?.forEach { (kip, page) ->
+            if (!kip.startsWith("~")) return@forEach
+            book.add(kip)
+            // Always seed a row (even for an empty page) so every book
+            // member is renderable in the Contacts screen, which filters
+            // the contacts table by the book set.
+            fresh.add(parseContact(kip, pageFields(page) ?: JsonObject(emptyMap()), null))
+        }
+
         if (fresh.isNotEmpty()) {
             val merged = fresh.map { mergeContact(it) }
             db.contacts().upsertAll(merged)
         }
+        _bookContacts.value = book
+    }
+
+    /**
+     * A %contacts book `page` serializes as a 2-element JSON array
+     * `[con, mod]` (see lib/contacts/json-1.hoon ++page). Merge the
+     * peer's published `con` with our local `mod` overlay (mod wins)
+     * into the flat field map parseContact expects.
+     */
+    private fun pageFields(page: JsonElement?): JsonObject? {
+        val arr = page as? JsonArray ?: return null
+        val con = arr.getOrNull(0) as? JsonObject ?: JsonObject(emptyMap())
+        val mod = arr.getOrNull(1) as? JsonObject ?: JsonObject(emptyMap())
+        if (con.isEmpty() && mod.isEmpty()) return null
+        return JsonObject(con + mod)
     }
 
     /**
@@ -2839,11 +2908,23 @@ class TlonChatRepo(
             val kip = page["kip"].asStr() ?: return
             if (!kip.startsWith("~")) return
             val contact = page["contact"] as? JsonObject ?: return
+            // A `page` fact means this kip is in our book — keep the
+            // book set in sync so the Contacts screen reflects adds /
+            // edits made from other clients.
+            _bookContacts.value = _bookContacts.value + kip
             // Prefer the server-provided mod-at. Fall back to our own
             // observation time — we know the status just changed since
             // this fact is the change event itself.
             val modAt = parseContactModAt(page) ?: System.currentTimeMillis()
             db.contacts().upsert(mergeContact(parseContact(kip, contact, modAt)))
+            return
+        }
+        (event["wipe"] as? JsonObject)?.let { wipe ->
+            // Contact page deleted (here or on another client) — drop it
+            // from the book set. The contacts table row stays (the peer
+            // may still be in /v1/all); only book membership changes.
+            val kip = wipe["kip"].asStr() ?: return
+            _bookContacts.value = _bookContacts.value - kip
             return
         }
         (event["peer"] as? JsonObject)?.let { peer ->

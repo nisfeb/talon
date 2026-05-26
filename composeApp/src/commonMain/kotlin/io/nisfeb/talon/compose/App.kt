@@ -268,6 +268,7 @@ fun App(
     var showActivity by remember { mutableStateOf(false) }
     var showSearch by remember { mutableStateOf(false) }
     var showNewDm by remember { mutableStateOf(false) }
+    var showContacts by remember { mutableStateOf(false) }
     var showWatchwords by remember { mutableStateOf(false) }
     var showDailyDigest by remember { mutableStateOf(false) }
     var showGroupAdminList by remember { mutableStateOf(false) }
@@ -380,6 +381,7 @@ fun App(
     PlatformBackHandler(enabled = showSearch) { showSearch = false }
     PlatformBackHandler(enabled = showNewDm) { showNewDm = false }
     PlatformBackHandler(enabled = showWatchwords) { showWatchwords = false }
+    PlatformBackHandler(enabled = showContacts) { showContacts = false }
     PlatformBackHandler(enabled = showDailyDigest) { showDailyDigest = false }
     PlatformBackHandler(
         enabled = openGroupAdminFlag != null,
@@ -453,6 +455,9 @@ fun App(
                 notificationHealth = notificationHealth,
             )
         }
+        // Curated contact book (from %contacts /v1/book) — gates the
+        // "Add to contacts" affordances and backs the Contacts screen.
+        val bookContacts by repo.bookContacts.collectAsState()
         // Per-ship menu-seen store. Constructed inside the
         // key(shipKey) block so a ship-switch starts collecting from
         // the new ship's persisted file (the host's createMenuSeen
@@ -1045,6 +1050,19 @@ fun App(
                                 runCatching { repo.addContact(patp, nickname) }
                             }
                         },
+                        bookContacts = bookContacts,
+                    )
+                    showContacts -> io.nisfeb.talon.ui.screens.ContactsScreen(
+                        db = db,
+                        bookContacts = bookContacts,
+                        onAddContact = { patp, nickname ->
+                            rightPaneScope.launch { runCatching { repo.addContact(patp, nickname) } }
+                        },
+                        onRemoveContact = { patp ->
+                            rightPaneScope.launch { runCatching { repo.removeContact(patp) } }
+                        },
+                        onOpenContact = { patp -> profileSheetShip = patp },
+                        onBack = { showContacts = false },
                     )
                     showWatchwords -> WatchwordsScreen(
                         db = db,
@@ -1426,6 +1444,7 @@ fun App(
                                         onOpenInvites = { showInvites = true },
                                         onOpenBookmarks = onOpenBookmarks,
                                         onOpenActivity = onOpenActivity,
+                                        onOpenContacts = { showContacts = true },
                                         onOpenWatchwords = { showWatchwords = true },
                                         onOpenDigest = { showDailyDigest = true },
                                         digestEnabled = dailyDigestEnabled,
@@ -1599,6 +1618,7 @@ fun App(
                             showSelfProfile = true
                         },
                         onDismiss = { profileSheetShip = null },
+                        isInBook = peer in bookContacts,
                         onAddContact = {
                             val target = peer
                             profileSheetShip = null

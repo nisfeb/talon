@@ -48,6 +48,10 @@ fun NewDmScreen(
     /** Add the entered ~patp to %contacts (with an optional nickname).
      *  Default no-op for call sites that haven't wired it. */
     onAddContact: (patp: String, nickname: String?) -> Unit = { _, _ -> },
+    /** Ships already in the curated contact book — drives whether the
+     *  "Add contact" affordance shows. NOT the broad /v1/all table
+     *  (which includes every known peer). */
+    bookContacts: Set<String> = emptySet(),
     modifier: Modifier = Modifier,
 ) {
     var query by remember { mutableStateOf("") }
@@ -74,7 +78,7 @@ fun NewDmScreen(
     val trimmedInput = query.trim()
     val asPatp = if (trimmedInput.startsWith("~")) trimmedInput else "~$trimmedInput"
     val isValidPatp = PATP_REGEX.matches(asPatp)
-    val alreadyContact = remember(asPatp, contacts) { contacts.any { it.ship == asPatp } }
+    val alreadyContact = remember(asPatp, bookContacts) { asPatp in bookContacts }
 
     Column(modifier = modifier.windowInsetsPadding(WindowInsets.safeDrawing)) {
         Row(

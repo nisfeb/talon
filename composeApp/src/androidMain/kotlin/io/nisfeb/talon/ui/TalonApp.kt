@@ -184,7 +184,11 @@ fun TalonApp(
     var statusFeedOpen by remember { mutableStateOf(false) }
     var bookmarksOpen by remember { mutableStateOf(false) }
     var activityOpen by remember { mutableStateOf(false) }
+    var contactsOpen by remember { mutableStateOf(false) }
     var watchwordsOpen by remember { mutableStateOf(false) }
+    // Curated contact book (%contacts /v1/book) — gates add affordances
+    // and backs the Contacts screen.
+    val bookContacts by app.repo.bookContacts.collectAsState()
     // Daily Digest screen — initialOpenDigest non-null means we
     // arrived from a notification tap, so route straight there.
     var digestOpen by remember { mutableStateOf(initialOpenDigest != null) }
@@ -654,6 +658,7 @@ fun TalonApp(
         BackHandler(enabled = statusFeedOpen) { statusFeedOpen = false }
         BackHandler(enabled = bookmarksOpen) { bookmarksOpen = false }
         BackHandler(enabled = activityOpen) { activityOpen = false }
+        BackHandler(enabled = contactsOpen) { contactsOpen = false }
         BackHandler(enabled = watchwordsOpen) { watchwordsOpen = false }
         BackHandler(enabled = digestOpen) { digestOpen = false }
         BackHandler(enabled = settingsOpen) { settingsOpen = false }
@@ -870,6 +875,20 @@ fun TalonApp(
                     openWhom = whom
                 },
                 onBack = { bookmarksOpen = false },
+                modifier = mod,
+            )
+
+            contactsOpen -> io.nisfeb.talon.ui.screens.ContactsScreen(
+                db = app.db,
+                bookContacts = bookContacts,
+                onAddContact = { patp, nickname ->
+                    appScope.launch { runCatching { app.repo.addContact(patp, nickname) } }
+                },
+                onRemoveContact = { patp ->
+                    appScope.launch { runCatching { app.repo.removeContact(patp) } }
+                },
+                onOpenContact = { patp -> profileSheetShip = patp },
+                onBack = { contactsOpen = false },
                 modifier = mod,
             )
 
@@ -1296,6 +1315,7 @@ fun TalonApp(
                 onAddContact = { patp, nickname ->
                     appScope.launch { runCatching { app.repo.addContact(patp, nickname) } }
                 },
+                bookContacts = bookContacts,
                 modifier = mod,
             )
 
@@ -1312,6 +1332,7 @@ fun TalonApp(
                 onOpenStatusFeed = { statusFeedOpen = true },
                 onOpenBookmarks = { bookmarksOpen = true },
                 onOpenActivity = { activityOpen = true },
+                onOpenContacts = { contactsOpen = true },
                 onOpenWatchwords = { watchwordsOpen = true },
                 onOpenDigest = { digestOpen = true },
                 digestEnabled = app.dailyDigestSettings.state.collectAsState().value.enabled,
@@ -1376,6 +1397,7 @@ fun TalonApp(
                     editingProfile = true
                 },
                 onDismiss = { profileSheetShip = null },
+                isInBook = ship in bookContacts,
                 onAddContact = {
                     val target = ship
                     profileSheetShip = null

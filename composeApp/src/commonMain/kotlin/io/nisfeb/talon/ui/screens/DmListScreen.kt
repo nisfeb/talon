@@ -122,6 +122,9 @@ fun DmListScreen(
     onOpenStatusFeed: () -> Unit,
     onOpenBookmarks: () -> Unit,
     onOpenActivity: () -> Unit,
+    /** Open the curated Contacts (book) screen. Always shown in the
+     *  overflow menu (not a rail item). */
+    onOpenContacts: () -> Unit = {},
     onOpenWatchwords: () -> Unit = {},
     onOpenDigest: () -> Unit = {},
     /** Hide the "Today's brief" menu entry when the digest alarm is
@@ -751,6 +754,13 @@ fun DmListScreen(
                             },
                         )
                     }
+                    DropdownMenuItem(
+                        text = { Text("Contacts") },
+                        onClick = {
+                            menuOpen = false
+                            onOpenContacts()
+                        },
+                    )
                     if (RailItem.Watchwords in kebabItems) {
                         DropdownMenuItem(
                             text = { Text("Watchwords") },
