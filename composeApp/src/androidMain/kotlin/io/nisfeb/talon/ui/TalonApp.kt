@@ -616,6 +616,10 @@ fun TalonApp(
             }
         }
     }
+    val platformUriHandler = androidx.compose.ui.platform.LocalUriHandler.current
+    val urbAwareUriHandler = remember(platformUriHandler, urbLinkHandler) {
+        io.nisfeb.talon.ui.UrbAwareUriHandler(platformUriHandler, urbLinkHandler)
+    }
     androidx.compose.runtime.CompositionLocalProvider(
         // Bind the real ExoPlayer-backed inline players for chat
         // messages. Without this, StoryRenderer falls back to a
@@ -629,6 +633,10 @@ fun TalonApp(
         LocalCalendarLauncher provides calendarLauncher,
         LocalMapsLauncher provides mapsLauncher,
         io.nisfeb.talon.ui.LocalUrbLinkHandler provides urbLinkHandler,
+        // Route urb:// opened via Compose link handling (statuses, bios)
+        // to Lattice. Also avoids an ActivityNotFoundException crash for
+        // users without Lattice — they get the install prompt instead.
+        androidx.compose.ui.platform.LocalUriHandler provides urbAwareUriHandler,
     ) {
     urbPromptUrl?.let {
         io.nisfeb.talon.ui.InstallLatticeDialog(onDismiss = { urbPromptUrl = null })

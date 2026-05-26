@@ -712,11 +712,19 @@ fun App(
                   }
               }
           }
+          // Wrap the platform URI handler so urb:// links opened via
+          // Compose's built-in LinkAnnotation handling (statuses, bios)
+          // also route to Lattice, not just the chat screens' onLinkTap.
+          val platformUriHandler = androidx.compose.ui.platform.LocalUriHandler.current
+          val urbAwareUriHandler = remember(platformUriHandler, urbLinkHandler) {
+              io.nisfeb.talon.ui.UrbAwareUriHandler(platformUriHandler, urbLinkHandler)
+          }
           androidx.compose.runtime.CompositionLocalProvider(
               io.nisfeb.talon.ui.LocalImageDownloader provides imageDownloader,
               io.nisfeb.talon.ui.LocalChatDensity provides chatDensity,
               androidx.compose.ui.platform.LocalDensity provides scaledDensity,
               io.nisfeb.talon.ui.LocalUrbLinkHandler provides urbLinkHandler,
+              androidx.compose.ui.platform.LocalUriHandler provides urbAwareUriHandler,
           ) {
             urbPromptUrl?.let {
                 io.nisfeb.talon.ui.InstallLatticeDialog(onDismiss = { urbPromptUrl = null })
