@@ -1293,6 +1293,9 @@ fun TalonApp(
                     openWhom = patp
                 },
                 onBack = { newDmOpen = false },
+                onAddContact = { patp, nickname ->
+                    appScope.launch { runCatching { app.repo.addContact(patp, nickname) } }
+                },
                 modifier = mod,
             )
 
@@ -1373,6 +1376,11 @@ fun TalonApp(
                     editingProfile = true
                 },
                 onDismiss = { profileSheetShip = null },
+                onAddContact = {
+                    val target = ship
+                    profileSheetShip = null
+                    appScope.launch { runCatching { app.repo.addContact(target) } }
+                },
             )
         }
         } // key(loggedInShip)

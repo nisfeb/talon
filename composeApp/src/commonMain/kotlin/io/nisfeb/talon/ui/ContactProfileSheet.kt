@@ -45,6 +45,9 @@ fun ContactProfileSheet(
     onMessage: () -> Unit,
     onEditSelf: () -> Unit,
     onDismiss: () -> Unit,
+    /** Add this ship to %contacts. When non-null and the ship isn't
+     *  already a known contact, an "Add to contacts" button shows. */
+    onAddContact: (() -> Unit)? = null,
 ) {
     val sheetState = rememberModalBottomSheetState()
     val label = remember(contact, ship) { contact?.nickname ?: ship }
@@ -94,6 +97,15 @@ fun ContactProfileSheet(
                 )
             }
             Spacer(Modifier.height(4.dp))
+            // Offer "Add to contacts" for a peer we aren't tracking yet
+            // (no cached contact row). Tracks them via %contacts so they
+            // appear in the contact list / DM picker.
+            if (!self && onAddContact != null && contact == null) {
+                OutlinedButton(
+                    onClick = onAddContact,
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text("Add to contacts") }
+            }
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(12.dp),

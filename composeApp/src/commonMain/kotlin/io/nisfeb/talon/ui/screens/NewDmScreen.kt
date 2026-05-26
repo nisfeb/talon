@@ -45,9 +45,13 @@ fun NewDmScreen(
     db: AppDatabase,
     onPickPeer: (patp: String) -> Unit,
     onBack: () -> Unit,
+    /** Add the entered ~patp to %contacts (with an optional nickname).
+     *  Default no-op for call sites that haven't wired it. */
+    onAddContact: (patp: String, nickname: String?) -> Unit = { _, _ -> },
     modifier: Modifier = Modifier,
 ) {
     var query by remember { mutableStateOf("") }
+    var newContactName by remember { mutableStateOf("") }
     val contacts by remember { db.contacts().stream() }.collectAsState(initial = emptyList())
     val contactMap by remember {
         contactMapFlow(
@@ -70,6 +74,7 @@ fun NewDmScreen(
     val trimmedInput = query.trim()
     val asPatp = if (trimmedInput.startsWith("~")) trimmedInput else "~$trimmedInput"
     val isValidPatp = PATP_REGEX.matches(asPatp)
+    val alreadyContact = remember(asPatp, contacts) { contacts.any { it.ship == asPatp } }
 
     Column(modifier = modifier.windowInsetsPadding(WindowInsets.safeDrawing)) {
         Row(
@@ -102,6 +107,31 @@ fun NewDmScreen(
                 onClick = { onPickPeer(asPatp) },
                 enabled = isValidPatp,
             ) { Text("Start") }
+        }
+        // Add-to-contacts row — only when a valid ~patp that isn't
+        // already a contact is entered. Optional nickname; tracks the
+        // peer via %contacts so they show up in the contact list.
+        if (isValidPatp && !alreadyContact) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                OutlinedTextField(
+                    value = newContactName,
+                    onValueChange = { newContactName = it },
+                    placeholder = { Text("nickname (optional)") },
+                    singleLine = true,
+                    modifier = Modifier.weight(1f),
+                )
+                TextButton(
+                    onClick = {
+                        onAddContact(asPatp, newContactName.trim().takeIf { it.isNotBlank() })
+                        newContactName = ""
+                        query = ""
+                    },
+                ) { Text("Add contact") }
+            }
         }
         HorizontalDivider()
         LazyColumn(

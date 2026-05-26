@@ -1040,6 +1040,11 @@ fun App(
                             showNewDm = false
                             openChat = peer
                         },
+                        onAddContact = { patp, nickname ->
+                            rightPaneScope.launch {
+                                runCatching { repo.addContact(patp, nickname) }
+                            }
+                        },
                     )
                     showWatchwords -> WatchwordsScreen(
                         db = db,
@@ -1580,6 +1585,7 @@ fun App(
                     val contact by remember(peer) {
                         db.contacts().streamOne(peer)
                     }.collectAsState(initial = null)
+                    val profileScope = rememberCoroutineScope()
                     io.nisfeb.talon.ui.ContactProfileSheet(
                         ship = peer,
                         self = peer == loggedInShip,
@@ -1593,6 +1599,13 @@ fun App(
                             showSelfProfile = true
                         },
                         onDismiss = { profileSheetShip = null },
+                        onAddContact = {
+                            val target = peer
+                            profileSheetShip = null
+                            profileScope.launch {
+                                runCatching { repo.addContact(target) }
+                            }
+                        },
                     )
                 }
             }

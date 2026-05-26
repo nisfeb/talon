@@ -716,6 +716,66 @@ class TlonChatRepo(
      * is the kip-scoped edit — the overlay lives on our ship only and
      * never reaches the named peer.
      */
+    /**
+     * Add [ship] to our contacts. Pokes %contacts `%meet` to track the
+     * peer — this subscribes us to their published profile, which then
+     * flows in via /v1/news and lands in the contacts table. When
+     * [nickname] is non-blank, also sets a local `%edit` overlay so the
+     * contact gets a name immediately.
+     *
+     * We optimistically upsert a local row up front so the contact is
+     * visible right away: `%meet` only surfaces a peer once *they've*
+     * published a profile, so a peer with none would otherwise never
+     * appear. Actions per tlon-apps desk/lib/contacts/json-1.hoon
+     * ++action — `meet+(ar ship)` and `edit+(ot kip+kip contact+contact ~)`.
+     */
+    suspend fun addContact(ship: String, nickname: String? = null) {
+        val ch = channel ?: error("not connected")
+        require(ship.startsWith("~")) { "addContact: $ship isn't a patp" }
+        // Track the peer.
+        ch.poke(
+            app = "contacts",
+            mark = "contact-action-1",
+            payload = buildJsonObject {
+                put("meet", buildJsonArray { add(JsonPrimitive(ship)) })
+            },
+        )
+        val name = nickname?.trim()?.takeIf { it.isNotBlank() }
+        // Optimistic local row so the contact shows without waiting on
+        // (or in the absence of) the peer's published profile.
+        val current = db.contacts().get(ship)
+        db.contacts().upsert(
+            ContactEntity(
+                ship = ship,
+                nickname = name ?: current?.nickname,
+                bio = current?.bio,
+                avatarUrl = current?.avatarUrl,
+                status = current?.status,
+                statusUpdatedMs = current?.statusUpdatedMs,
+                color = current?.color,
+            )
+        )
+        // Local pet-name overlay, if a nickname was supplied. Same
+        // kip-scoped `%edit` shape as setPetName.
+        if (name != null) {
+            ch.poke(
+                app = "contacts",
+                mark = "contact-action-1",
+                payload = buildJsonObject {
+                    put("edit", buildJsonObject {
+                        put("kip", ship)
+                        put("contact", buildJsonObject {
+                            put("nickname", buildJsonObject {
+                                put("type", "text")
+                                put("value", name)
+                            })
+                        })
+                    })
+                },
+            )
+        }
+    }
+
     suspend fun setPetName(ship: String, name: String) {
         val ch = channel ?: error("not connected")
         require(ship.startsWith("~")) { "setPetName: $ship isn't a patp" }
