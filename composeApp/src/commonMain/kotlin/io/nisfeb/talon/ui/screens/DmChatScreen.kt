@@ -802,10 +802,22 @@ fun DmChatScreen(
             val freshContact by remember(ship) {
                 db.contacts().streamOne(ship)
             }.collectAsState(initial = null)
+            val bookContacts by repo.bookContacts.collectAsState()
             ContactProfileSheet(
                 ship = ship,
                 self = ship == ourPatp,
                 contact = freshContact,
+                isInBook = ship in bookContacts,
+                onAddContact = {
+                    val target = ship
+                    profileSheetShip = null
+                    scope.launch { runCatching { repo.addContact(target) } }
+                },
+                onRemoveContact = {
+                    val target = ship
+                    profileSheetShip = null
+                    scope.launch { runCatching { repo.removeContact(target) } }
+                },
                 onMessage = {
                     profileSheetShip = null
                     currentOnOpenConversation(ship)
