@@ -284,8 +284,12 @@ fun ThreadList(
         { patp -> onOpenConversation(patp) }
     }
     val uriHandler = androidx.compose.ui.platform.LocalUriHandler.current
-    val onLinkTap: (String) -> Unit = remember(uriHandler) {
-        { url -> runCatching { uriHandler.openUri(url) } }
+    val urbLinkHandler = io.nisfeb.talon.ui.LocalUrbLinkHandler.current
+    val onLinkTap: (String) -> Unit = remember(uriHandler, urbLinkHandler) {
+        { url ->
+            if (io.nisfeb.talon.urbit.UrbLink.isUrbUrl(url)) urbLinkHandler(url)
+            else runCatching { uriHandler.openUri(url) }
+        }
     }
     val onImageTap: (String) -> Unit = remember(onOpenImage) {
         { url -> onOpenImage(url) }

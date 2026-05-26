@@ -178,6 +178,12 @@ fun App(
      *  conversation instead of an empty pane. Default Noop for tests. */
     lastOpenChatStore: io.nisfeb.talon.notify.LastOpenChatStore =
         io.nisfeb.talon.notify.NoopLastOpenChatStore,
+    /** Opens urb:// links (Lattice handoff). Desktop passes
+     *  DesktopUrbLinkLauncher, Android AndroidUrbLinkLauncher; the
+     *  Noop default reports NotInstalled so tests / unwired hosts
+     *  show the install prompt rather than swallowing taps. */
+    urbLinkLauncher: io.nisfeb.talon.urbit.UrbLinkLauncher =
+        io.nisfeb.talon.urbit.NoopUrbLinkLauncher,
 ) {
     // Derive the initial logged-in ship from sessionStore.active()
     // (the joined SavedSession) rather than activeShip() (just the
@@ -691,11 +697,30 @@ fun App(
                   fontScale = baseDensity.fontScale * chatDensity.fontScaleMultiplier,
               )
           }
+          // urb:// link handoff to Lattice. The handler resolves the
+          // scheme off-thread (desktop shells to xdg-mime/xdg-open) and
+          // raises the install prompt when no handler is present.
+          var urbPromptUrl by remember { mutableStateOf<String?>(null) }
+          val urbScope = rememberCoroutineScope()
+          val urbLinkHandler: (String) -> Unit = remember(urbLinkLauncher) {
+              { url ->
+                  urbScope.launch {
+                      val r = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                          urbLinkLauncher.open(url)
+                      }
+                      if (r != io.nisfeb.talon.urbit.UrbLaunchResult.Opened) urbPromptUrl = url
+                  }
+              }
+          }
           androidx.compose.runtime.CompositionLocalProvider(
               io.nisfeb.talon.ui.LocalImageDownloader provides imageDownloader,
               io.nisfeb.talon.ui.LocalChatDensity provides chatDensity,
               androidx.compose.ui.platform.LocalDensity provides scaledDensity,
+              io.nisfeb.talon.ui.LocalUrbLinkHandler provides urbLinkHandler,
           ) {
+            urbPromptUrl?.let {
+                io.nisfeb.talon.ui.InstallLatticeDialog(onDismiss = { urbPromptUrl = null })
+            }
             val rootFocusRequester = remember { FocusRequester() }
             LaunchedEffect(Unit) { rootFocusRequester.requestFocus() }
             Surface(

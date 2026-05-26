@@ -601,6 +601,21 @@ fun TalonApp(
             runCatching { context.startActivity(intent) }
         }
     }
+    // urb:// link handoff to Lattice — resolve + open off the main
+    // thread, raise the install prompt when no handler is present.
+    var urbPromptUrl by remember { mutableStateOf<String?>(null) }
+    val urbScope = rememberCoroutineScope()
+    val urbLauncher = remember(app) { io.nisfeb.talon.urbit.AndroidUrbLinkLauncher(app) }
+    val urbLinkHandler: (String) -> Unit = remember(urbLauncher) {
+        { url ->
+            urbScope.launch {
+                val r = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    urbLauncher.open(url)
+                }
+                if (r != io.nisfeb.talon.urbit.UrbLaunchResult.Opened) urbPromptUrl = url
+            }
+        }
+    }
     androidx.compose.runtime.CompositionLocalProvider(
         // Bind the real ExoPlayer-backed inline players for chat
         // messages. Without this, StoryRenderer falls back to a
@@ -613,7 +628,11 @@ fun TalonApp(
         },
         LocalCalendarLauncher provides calendarLauncher,
         LocalMapsLauncher provides mapsLauncher,
+        io.nisfeb.talon.ui.LocalUrbLinkHandler provides urbLinkHandler,
     ) {
+    urbPromptUrl?.let {
+        io.nisfeb.talon.ui.InstallLatticeDialog(onDismiss = { urbPromptUrl = null })
+    }
     Scaffold(contentWindowInsets = WindowInsets(0, 0, 0, 0)) { _ ->
         val mod = Modifier.fillMaxSize()
 
