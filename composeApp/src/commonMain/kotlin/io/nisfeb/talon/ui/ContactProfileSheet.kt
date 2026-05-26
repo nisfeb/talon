@@ -21,6 +21,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
@@ -48,9 +49,13 @@ fun ContactProfileSheet(
     /** Add this ship to %contacts. When non-null and the ship isn't
      *  already in the contact book, an "Add to contacts" button shows. */
     onAddContact: (() -> Unit)? = null,
-    /** Whether this ship is in our curated contact book. Gates the
-     *  "Add to contacts" button — based on book membership, not mere
-     *  presence in the /v1/all peer cache. */
+    /** Remove this ship from the contact book. When non-null and the
+     *  ship IS in the book, a "Remove" affordance shows next to the
+     *  already-a-contact indicator. */
+    onRemoveContact: (() -> Unit)? = null,
+    /** Whether this ship is in our curated contact book. Drives the
+     *  add button vs. the "✓ In your contacts" indicator — based on
+     *  book membership, not mere presence in the /v1/all peer cache. */
     isInBook: Boolean = false,
 ) {
     val sheetState = rememberModalBottomSheetState()
@@ -101,14 +106,33 @@ fun ContactProfileSheet(
                 )
             }
             Spacer(Modifier.height(4.dp))
-            // Offer "Add to contacts" for a peer we aren't tracking yet
-            // (no cached contact row). Tracks them via %contacts so they
-            // appear in the contact list / DM picker.
-            if (!self && onAddContact != null && !isInBook) {
-                OutlinedButton(
-                    onClick = onAddContact,
-                    modifier = Modifier.fillMaxWidth(),
-                ) { Text("Add to contacts") }
+            // Contact-book state for a peer (never for self):
+            //  - not in book → "Add to contacts" action
+            //  - in book → "✓ In your contacts" indicator, with an
+            //    optional "Remove" next to it.
+            if (!self) {
+                when {
+                    isInBook -> Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Text(
+                            "✓ In your contacts",
+                            style = MaterialTheme.typography.bodyMedium
+                                .copy(fontWeight = FontWeight.Medium),
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.weight(1f),
+                        )
+                        if (onRemoveContact != null) {
+                            TextButton(onClick = onRemoveContact) { Text("Remove") }
+                        }
+                    }
+                    onAddContact != null -> OutlinedButton(
+                        onClick = onAddContact,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text("Add to contacts") }
+                }
             }
             Row(
                 modifier = Modifier.fillMaxWidth(),

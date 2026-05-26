@@ -1403,6 +1403,11 @@ fun TalonApp(
                     profileSheetShip = null
                     appScope.launch { runCatching { app.repo.addContact(target) } }
                 },
+                onRemoveContact = {
+                    val target = ship
+                    profileSheetShip = null
+                    appScope.launch { runCatching { app.repo.removeContact(target) } }
+                },
             )
         }
         } // key(loggedInShip)

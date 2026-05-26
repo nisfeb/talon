@@ -1626,6 +1626,13 @@ fun App(
                                 runCatching { repo.addContact(target) }
                             }
                         },
+                        onRemoveContact = {
+                            val target = peer
+                            profileSheetShip = null
+                            profileScope.launch {
+                                runCatching { repo.removeContact(target) }
+                            }
+                        },
                     )
                 }
             }
