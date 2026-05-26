@@ -34,6 +34,15 @@ class LinkifyTextTest {
     }
 
     @Test
+    fun `urb scheme url is detected`() {
+        // urb:// links (shared from Lattice) must be clickable in statuses.
+        assertEquals(
+            listOf("urb://~sampel-palnet/notes/x"),
+            urlsIn("read urb://~sampel-palnet/notes/x"),
+        )
+    }
+
+    @Test
     fun `bare www gets https prefix in the href`() {
         assertEquals(listOf("https://www.example.com"), urlsIn("at www.example.com please"))
     }

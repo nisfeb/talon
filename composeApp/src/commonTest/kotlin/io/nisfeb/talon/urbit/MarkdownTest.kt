@@ -100,6 +100,23 @@ class MarkdownTest {
     }
 
     @Test
+    fun `urb link stays one autolink and does not split out the inner patp`() {
+        // A `urb://~ship/path` link (e.g. shared from Lattice) must autolink
+        // whole — the `~ship` inside it must NOT be grabbed as a ship mention,
+        // which would leave only the patp clickable.
+        val out = Markdown.parseInlines("see urb://~sampel-palnet/notes/x here")
+        assertEquals(3, out.size)
+        val link = out[1].jsonObject["link"]!!.jsonObject
+        assertEquals("urb://~sampel-palnet/notes/x", link["href"]!!.jsonPrimitive.content)
+        assertEquals("urb://~sampel-palnet/notes/x", link["content"]!!.jsonPrimitive.content)
+        assertEquals("see ", (out[0] as JsonPrimitive).content)
+        assertEquals(" here", (out[2] as JsonPrimitive).content)
+        // No ship span anywhere in the output.
+        val hasShip = out.any { (it as? JsonObject)?.keys?.contains("ship") == true }
+        assertEquals(false, hasShip)
+    }
+
+    @Test
     fun `patp reference produces ship span`() {
         val out = Markdown.parseInlines("hi ~sampel-palnet friend")
         // Expect: "hi ", ship(~sampel-palnet), " friend".

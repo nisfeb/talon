@@ -62,7 +62,7 @@ fun linkifyStatus(text: String): AnnotatedString {
     }
 }
 
-private val URL_RE = Regex("""(?i)\b(?:https?://|www\.)[^\s<>"'`]+""")
+private val URL_RE = Regex("""(?i)\b(?:https?://|urb://|www\.)[^\s<>"'`]+""")
 
 private val TRAILING_PUNCT = setOf('.', ',', ';', ':', '!', '?', ')', ']')
 

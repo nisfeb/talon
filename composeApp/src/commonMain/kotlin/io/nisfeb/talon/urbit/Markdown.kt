@@ -85,11 +85,13 @@ object Markdown {
                 }
             }
 
-            // Bare URL autolink: http(s)://… — matches at word
+            // Bare URL autolink: http(s)://… or urb://… — matches at word
             // boundaries so we don't glom onto adjacent punctuation.
             // The Markdown `[label](url)` path above takes precedence
-            // because that branch runs first.
-            if ((c == 'h' || c == 'H') && looksLikeUrlStart(text, i)) {
+            // because that branch runs first. urb:// must be handled here
+            // (before the ~patp branch below) or the `~ship` inside a
+            // `urb://~ship/path` link gets split out as a mention.
+            if ((c == 'h' || c == 'H' || c == 'u' || c == 'U') && looksLikeUrlStart(text, i)) {
                 val end = urlEndAt(text, i)
                 if (end > i) {
                     flushPlain()
@@ -179,13 +181,15 @@ object Markdown {
         c.isLetterOrDigit() || c == '-'
 
     /**
-     * True if `text` at `i` begins with `http://` or `https://` and is
-     * positioned at a word boundary (so "foohttp://..." doesn't match).
+     * True if `text` at `i` begins with `http://`, `https://`, or `urb://`
+     * (Urbit gemtext links, e.g. from Lattice) and is positioned at a word
+     * boundary (so "foohttp://..." doesn't match).
      */
     private fun looksLikeUrlStart(text: String, i: Int): Boolean {
         if (i > 0 && isWordChar(text[i - 1])) return false
         return text.regionMatches(i, "http://", 0, 7, ignoreCase = true) ||
-            text.regionMatches(i, "https://", 0, 8, ignoreCase = true)
+            text.regionMatches(i, "https://", 0, 8, ignoreCase = true) ||
+            text.regionMatches(i, "urb://", 0, 6, ignoreCase = true)
     }
 
     /**
