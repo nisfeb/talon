@@ -451,6 +451,16 @@ private fun friendlyError(err: Throwable): String {
         "SSL" in err::class.simpleName.orEmpty() ||
             "certificate" in msg.lowercase() ->
             "TLS error connecting — the ship's certificate was rejected"
+        // OkHttp's UnknownServiceException for a cleartext-blocked HTTP
+        // call. The Android manifest sets usesCleartextTraffic="true",
+        // so this should be unreachable on stock builds — but custom
+        // distros (GrapheneOS, hardened OEM forks) and any future Play
+        // flavor with a stricter network_security_config would surface
+        // it here. Naming the cause keeps the next report actionable.
+        "CLEARTEXT" in msg ->
+            "This build blocks plain HTTP — use https:// or rebuild with cleartext allowed"
+        "Expected URL scheme" in msg ->
+            "Add http:// or https:// to the ship URL"
         "no urbauth cookie" in msg ->
             "Ship didn't return a session cookie — is the URL correct?"
         "ConnectException" in err::class.simpleName.orEmpty() ->

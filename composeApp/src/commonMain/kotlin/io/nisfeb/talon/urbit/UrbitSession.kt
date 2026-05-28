@@ -12,6 +12,23 @@ import okhttp3.Request
 import java.util.concurrent.ConcurrentHashMap
 
 /**
+ * Coerce a user-typed ship URL to one OkHttp's `toHttpUrl()` can parse.
+ * If no scheme is present, prepend `https://` — matches the
+ * security-preferred posture and means users only have to type
+ * `http://` when they explicitly want cleartext (e.g. a LAN ship).
+ * Trailing slashes are stripped so the saved-session entry is stable.
+ */
+internal fun normalizeShipUrl(input: String): String {
+    val trimmed = input.trim().trimEnd('/')
+    val lower = trimmed.lowercase()
+    return if (lower.startsWith("http://") || lower.startsWith("https://")) {
+        trimmed
+    } else {
+        "https://$trimmed"
+    }
+}
+
+/**
  * Holds the session cookie for one authenticated Urbit ship and owns the
  * OkHttp client used for channel traffic. Call login() once; afterwards
  * openChannel() returns an UrbitChannel configured with this session's
@@ -36,11 +53,14 @@ class UrbitSession(
      * Authenticates against shipUrl (e.g. "https://mything.arvo.network" or
      * "http://localhost:8080") using +code. Strips dashes from the code
      * before POSTing. Returns Result.success(ship) on success.
+     *
+     * If `shipUrl` has no scheme, `https://` is assumed — users only have
+     * to type `http://` when they explicitly want cleartext.
      */
     suspend fun login(shipUrl: String, code: String): Result<String> =
         withContext(Dispatchers.IO) {
             runCatching {
-                val url = shipUrl.trimEnd('/').toHttpUrl()
+                val url = normalizeShipUrl(shipUrl).toHttpUrl()
                 // Urbit's /~/login takes `password=<code>` with dashes intact.
                 // Accept a leading `+` from users who paste verbatim from +code.
                 val body = FormBody.Builder()
