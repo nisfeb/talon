@@ -1768,9 +1768,9 @@ private fun MessageActionSheet(
             if (canQuote) {
                 TextButton(onClick = onQuote) { Text("Quote") }
             }
-            // Edit is only supported on top-level channel messages that
-            // the user authored. %chat (DMs + clubs) silently ignores
-            // edit pokes, and reply-edit isn't in either agent's mold.
+            // Edit on channel chats only — %chat (DMs + clubs) silently
+            // ignores edit pokes. Thread replies have their own Edit
+            // affordance in ThreadActionSheet; top-level posts get it here.
             if (isMine && isChannel && message.parentId == null) {
                 TextButton(onClick = onEdit) { Text("Edit") }
             }

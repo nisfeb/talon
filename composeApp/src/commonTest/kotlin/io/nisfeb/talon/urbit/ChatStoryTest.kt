@@ -160,4 +160,69 @@ class ChatStoryTest {
         assertEquals(1, story.size)
         assertFalse(hasBlockquote(story[0].jsonObject))
     }
+
+    // ─── fenced code blocks ─────────────────────────────────────
+
+    /** Extract `block.code.{code,lang}` from a verse, or null. */
+    private fun codeBlock(verse: JsonObject): Pair<String, String>? {
+        val block = verse["block"] as? JsonObject ?: return null
+        val code = block["code"] as? JsonObject ?: return null
+        return (code["code"] as JsonPrimitive).content to
+            (code["lang"] as JsonPrimitive).content
+    }
+
+    @Test
+    fun `triple backtick fenced block becomes a code verse`() {
+        val story = chatTextToStory("```\nfun main() {}\n```")
+        assertEquals(1, story.size)
+        val (body, lang) = assertNotNull(codeBlock(story[0].jsonObject))
+        assertEquals("fun main() {}", body)
+        // Empty lang normalizes to "text" — the agent dejs runs
+        // (se %tas) which rejects "" (not a valid @tas term).
+        assertEquals("text", lang)
+    }
+
+    @Test
+    fun `language tag is lowercased and stripped to valid @tas chars`() {
+        val story = chatTextToStory("```C++ Plus\nint x = 0;\n```")
+        val (_, lang) = assertNotNull(codeBlock(story[0].jsonObject))
+        // "C++ Plus" → lowercase → strip non-[a-z0-9-] → "cplus".
+        // The point is the value is always a valid @tas, matching the
+        // shape Tlon's webclient produces.
+        assertEquals("cplus", lang)
+    }
+
+    @Test
+    fun `language tag after the opener is preserved`() {
+        val story = chatTextToStory("```kotlin\nfun main() {}\n```")
+        val (body, lang) = assertNotNull(codeBlock(story[0].jsonObject))
+        assertEquals("fun main() {}", body)
+        assertEquals("kotlin", lang)
+    }
+
+    @Test
+    fun `code block surrounded by prose yields three verses`() {
+        val story = chatTextToStory("look:\n```\nx = 1\n```\nokay?")
+        assertEquals(3, story.size)
+        assertNull(codeBlock(story[0].jsonObject))
+        assertNotNull(codeBlock(story[1].jsonObject))
+        assertNull(codeBlock(story[2].jsonObject))
+    }
+
+    @Test
+    fun `multi-line code body preserves internal newlines`() {
+        val story = chatTextToStory("```\na\nb\nc\n```")
+        val (body, _) = assertNotNull(codeBlock(story[0].jsonObject))
+        assertEquals("a\nb\nc", body)
+    }
+
+    @Test
+    fun `unclosed fence falls back to inline so the rest still renders`() {
+        // No closing fence — the opener becomes literal text and the
+        // body lines follow as plain inlines. Verifies we don't eat
+        // the rest of the message when the user forgot the closer.
+        val story = chatTextToStory("```\nfun main() {}\nstill writing")
+        assertEquals(1, story.size)
+        assertNull(codeBlock(story[0].jsonObject))
+    }
 }

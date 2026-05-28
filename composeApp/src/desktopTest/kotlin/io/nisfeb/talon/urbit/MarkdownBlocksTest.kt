@@ -83,7 +83,9 @@ class MarkdownBlocksTest {
         assertEquals(1, story.size)
         val code = story[0].jsonObject["block"]!!.jsonObject["code"]!!.jsonObject
         assertEquals("let x = 1", code["code"]!!.jsonPrimitive.content)
-        assertEquals("", code["lang"]!!.jsonPrimitive.content)
+        // Empty lang normalizes to "text" — the %channels dejs runs
+        // (se %tas) on lang and NACKs on "" (not a valid @tas term).
+        assertEquals("text", code["lang"]!!.jsonPrimitive.content)
     }
 
     @Test

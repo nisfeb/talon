@@ -23,13 +23,17 @@ import kotlinx.serialization.json.put
  *   as visible double-spacing.
  * - Consecutive lines beginning with `> ` are grouped into a single
  *   blockquote verse, matching Tlon's rendering for quoted replies.
+ * - Triple-backtick fenced blocks become a code-block verse via
+ *   [codeBlockVerse]. An optional language tag after the opening
+ *   ``` ``` `` is preserved (e.g. ```` ```kotlin ````). An unclosed
+ *   fence falls back to inline so the rest of the message still renders.
  * - Inline tokens inside each line (bold, italic, code, links, patps)
  *   go through [Markdown.parseInlines].
  *
- * Intentionally does NOT parse headings, fenced code, or horizontal
- * rules — those live in [MarkdownBlocks.toStory] for notebook
- * composition. Chat keeps a leaner surface so a plain `# hello`
- * doesn't surprise users with a header.
+ * Intentionally does NOT parse headings or horizontal rules — those
+ * live in [MarkdownBlocks.toStory] for notebook composition. Chat
+ * keeps a leaner surface so a plain `# hello` doesn't surprise users
+ * with a header.
  */
 internal fun chatTextToStory(text: String): JsonArray {
     val lines = text.split('\n')
@@ -62,6 +66,27 @@ internal fun chatTextToStory(text: String): JsonArray {
                 // verse and skip the empty line itself.
                 flushParagraph()
                 i++
+            }
+            line.startsWith("```") -> {
+                // Scan ahead for the closing fence. If there isn't one,
+                // don't eat the rest of the message — fall through to
+                // inline so the opener renders as literal text and the
+                // body still ships.
+                val close = (i + 1 until lines.size)
+                    .firstOrNull { lines[it].startsWith("```") }
+                if (close == null) {
+                    if (pending.isNotEmpty()) {
+                        pending += buildJsonObject { put("break", JsonNull) }
+                    }
+                    Markdown.parseInlines(line).forEach { pending += it }
+                    i++
+                } else {
+                    flushParagraph()
+                    val lang = line.removePrefix("```").trim()
+                    val body = lines.subList(i + 1, close).joinToString("\n")
+                    verses += codeBlockVerse(body, lang)
+                    i = close + 1
+                }
             }
             line.startsWith("> ") -> {
                 flushParagraph()

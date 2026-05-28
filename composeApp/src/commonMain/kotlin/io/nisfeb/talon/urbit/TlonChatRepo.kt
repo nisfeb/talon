@@ -2116,31 +2116,71 @@ class TlonChatRepo(
     }
 
     /**
-     * Edit a top-level channel message's text content. %chat (DMs and
-     * clubs) rejects edit actions on the ships we've tested even though
-     * the action mold in newer Hoon sources includes an `%edit` variant
-     * — so we only offer this for %channels chat-channels. Reply
-     * editing isn't in the agent mold for either side.
+     * Edit a channel message's text content. %chat (DMs and clubs)
+     * rejects edit actions on the ships we've tested even though the
+     * action mold in newer Hoon sources includes an `%edit` variant —
+     * so we only offer this for %channels chat-channels.
+     *
+     * When `parentId` is non-null the post is a thread reply: the
+     * edit is wrapped in the parent's `%reply` action, mirroring the
+     * reply-delete shape (see [delete]). `parentId == null` is the
+     * top-level case.
      */
-    suspend fun edit(whom: String, postId: String, text: String, originalSentMs: Long) {
+    suspend fun edit(
+        whom: String,
+        postId: String,
+        text: String,
+        originalSentMs: Long,
+        parentId: String? = null,
+    ) {
         val ch = channel ?: error("not connected")
         if (!whom.startsWith("chat/")) error("edit only supported on channel chats")
         // Preserve the original `sent` — the server sorts by it and
         // re-using our current time would bump the post to "just now".
         // Tlon keeps the original essay shell and only swaps content.
-        val essay = buildEssay(textToStory(text), originalSentMs)
-        val payload = channelAction(whom, buildJsonObject {
-            put("post", buildJsonObject {
-                // channel-action-2's `id` dejs is `(se %ud)` which runs
-                // `slav %ud` → `dem:ag`, and dem:ag demands Urbit-style
-                // dot-grouped decimals for numbers ≥ 1000.
-                put("edit", buildJsonObject {
-                    put("id", dotAtom(postId))
-                    put("essay", essay)
+        val inner = if (parentId != null) {
+            // channel-action-2 reply.action.edit expects `reply-essay`
+            // (the leaner shape — no kind/meta), NOT the full `essay`.
+            // The agent's dejs NACKs with `[%key 'reply-essay']` on
+            // the latter. Mirrors the `reply-essay` reads in the SSE
+            // ingest path (see classifyReply / applyChatReplyDelta).
+            val replyEssay = buildJsonObject {
+                put("content", textToStory(text))
+                put("author", ourPatp)
+                put("sent", originalSentMs)
+                put("blob", JsonNull)
+            }
+            buildJsonObject {
+                put("post", buildJsonObject {
+                    put("reply", buildJsonObject {
+                        put("id", dotAtom(parentId))
+                        put("action", buildJsonObject {
+                            put("edit", buildJsonObject {
+                                put("id", dotAtom(postId))
+                                put("reply-essay", replyEssay)
+                            })
+                        })
+                    })
                 })
-            })
-        })
-        ch.poke(app = "channels", mark = "channel-action-2", payload = payload)
+            }
+        } else {
+            val essay = buildEssay(textToStory(text), originalSentMs)
+            buildJsonObject {
+                put("post", buildJsonObject {
+                    // channel-action-2's `id` dejs is `(se %ud)` which runs
+                    // `slav %ud` → `dem:ag`, and dem:ag demands Urbit-style
+                    // dot-grouped decimals for numbers ≥ 1000.
+                    put("edit", buildJsonObject {
+                        put("id", dotAtom(postId))
+                        put("essay", essay)
+                    })
+                })
+            }
+        }
+        ch.poke(
+            app = "channels", mark = "channel-action-2",
+            payload = channelAction(whom, inner),
+        )
     }
 
     /**

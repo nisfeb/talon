@@ -252,6 +252,7 @@ fun ThreadList(
         whom.startsWith("~") || whom.startsWith("0v") || whom.startsWith("chat/")
     }
     var pendingDelete by remember(parentId) { mutableStateOf<MessageEntity?>(null) }
+    var editing by remember(parentId) { mutableStateOf<MessageEntity?>(null) }
     // Long-press on any thread message opens this sheet — same role
     // as DmChatScreen.actionTarget. We keep `pendingDelete` for the
     // post-confirm flow the sheet kicks off.
@@ -452,6 +453,11 @@ fun ThreadList(
             db = db,
             ourPatp = ourPatp,
             canDelete = isMine || isChannel,
+            // Edit on channel chats only — %chat (DMs + clubs) silently
+            // ignores edit pokes. Mirror DmChatScreen's gate (author +
+            // channel); the parentId check there guards top-level only,
+            // but here we *want* the reply case.
+            canEdit = isMine && isChannel,
             onDismiss = { actionTarget = null },
             onPickReaction = { code ->
                 actionTarget = null
@@ -473,13 +479,75 @@ fun ThreadList(
                     .fromStoryJson(target.contentJson)
                 clipboardManager.setText(androidx.compose.ui.text.AnnotatedString(md))
             },
+            onEdit = {
+                actionTarget = null
+                editing = target
+            },
             onDelete = {
                 actionTarget = null
                 pendingDelete = target
             },
         )
     }
+
+    editing?.let { target ->
+        EditThreadMessageDialog(
+            initial = StoryCache.textFor(target.id, target.contentJson),
+            onDismiss = { editing = null },
+            onSave = { newText ->
+                editing = null
+                scope.launch {
+                    runCatching {
+                        // parentId == null on the thread's parent row;
+                        // non-null on the replies. The repo handles both.
+                        repo.edit(
+                            whom = whom,
+                            postId = target.id,
+                            text = newText,
+                            originalSentMs = target.sentMs,
+                            parentId = target.parentId,
+                        )
+                    }.onFailure {
+                        composerState.sendError =
+                            "edit failed: ${it.message ?: it::class.simpleName}"
+                    }
+                }
+            },
+        )
+    }
     } // CompositionLocalProvider(LocalCiteResolver)
+}
+
+/**
+ * Minimal edit dialog for thread messages — same UX as
+ * DmChatScreen's EditMessageDialog (which is private to that file).
+ * Kept separate rather than promoted to shared to avoid the visual
+ * churn of moving the dialog out of DmChatScreen.
+ */
+@Composable
+private fun EditThreadMessageDialog(
+    initial: String,
+    onDismiss: () -> Unit,
+    onSave: (String) -> Unit,
+) {
+    var text by remember { mutableStateOf(initial) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Edit message") },
+        text = {
+            OutlinedTextField(
+                value = text,
+                onValueChange = { text = it },
+                modifier = Modifier.fillMaxWidth(),
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = { onSave(text.trim()) }, enabled = text.isNotBlank()) {
+                Text("Save")
+            }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
 }
 
 @OptIn(ExperimentalFoundationApi::class, ExperimentalLayoutApi::class)
@@ -613,10 +681,12 @@ private fun ThreadActionSheet(
     db: AppDatabase,
     ourPatp: String,
     canDelete: Boolean,
+    canEdit: Boolean,
     onDismiss: () -> Unit,
     onPickReaction: (String) -> Unit,
     onCopy: () -> Unit,
     onCopyMarkdown: () -> Unit,
+    onEdit: () -> Unit,
     onDelete: () -> Unit,
 ) {
     val sheetState = rememberModalBottomSheetState()
@@ -705,6 +775,9 @@ private fun ThreadActionSheet(
             HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
             TextButton(onClick = onCopy) { Text("Copy text") }
             TextButton(onClick = onCopyMarkdown) { Text("Copy as Markdown") }
+            if (canEdit) {
+                TextButton(onClick = onEdit) { Text("Edit") }
+            }
             if (canDelete) {
                 Row(
                     modifier = Modifier

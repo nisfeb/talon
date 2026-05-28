@@ -116,12 +116,33 @@ object MarkdownBlocks {
         })
     }
 
-    private fun codeBlock(code: String, lang: String) = buildJsonObject {
-        put("block", buildJsonObject {
-            put("code", buildJsonObject {
-                put("code", code)
-                put("lang", lang)
-            })
+    private fun codeBlock(code: String, lang: String) = codeBlockVerse(code, lang)
+}
+
+/**
+ * Story verse for a fenced code block. Shared by [MarkdownBlocks]
+ * (notebook composer) and [chatTextToStory] (chat / DM / club / channel
+ * composer) so the wire shape stays in one place.
+ *
+ * `lang` is normalized to a valid Hoon `@tas` term — lowercase, only
+ * `[a-z0-9-]`, defaulting to `text` when empty. The %channels agent
+ * runs `(se %tas)` on the value during dejs and NACKs the poke
+ * (`poke-as cast fail [%key 'lang']`) on `""` or any non-term input.
+ * Mirrors tlon-apps' mdast→story emitter (packages/api/src/client/
+ * markdown/mdastToStory.ts).
+ */
+internal fun codeBlockVerse(code: String, lang: String) = buildJsonObject {
+    put("block", buildJsonObject {
+        put("code", buildJsonObject {
+            put("code", code)
+            put("lang", normalizeCodeLang(lang))
         })
-    }
+    })
+}
+
+private val codeLangSanitizer = Regex("[^a-z0-9-]")
+
+internal fun normalizeCodeLang(lang: String): String {
+    val cleaned = lang.trim().lowercase().replace(codeLangSanitizer, "")
+    return cleaned.ifEmpty { "text" }
 }
