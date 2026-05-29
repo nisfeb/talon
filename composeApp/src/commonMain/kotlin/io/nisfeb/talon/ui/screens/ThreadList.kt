@@ -11,6 +11,10 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.size
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
@@ -718,9 +722,11 @@ private fun ThreadActionMenu(
     onEdit: () -> Unit,
     onDelete: () -> Unit,
 ) {
+    val itemPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+    val itemMinHeight = 36.dp
     Column(
-        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+        modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+        verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {
             // Suggested row blends the user's most-used reactions with
             // the default palette — same blend DmChatScreen uses, so
@@ -736,31 +742,49 @@ private fun ThreadActionMenu(
 
             var searchOpen by remember { mutableStateOf(false) }
             var searchQuery by remember { mutableStateOf("") }
+            val searchFocus = remember { FocusRequester() }
+            // Auto-focus the search field when the magnifying glass
+            // is tapped — Android raises the IME on focus.
+            LaunchedEffect(searchOpen) {
+                if (searchOpen) searchFocus.requestFocus()
+            }
 
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     "React",
                     style = MaterialTheme.typography.labelLarge,
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(start = 4.dp),
                 )
-                IconButton(onClick = {
-                    searchOpen = !searchOpen
-                    if (!searchOpen) searchQuery = ""
-                }) {
-                    Icon(Icons.Filled.Search, contentDescription = "Search emojis")
+                IconButton(
+                    onClick = {
+                        searchOpen = !searchOpen
+                        if (!searchOpen) searchQuery = ""
+                    },
+                    modifier = Modifier.size(32.dp),
+                ) {
+                    Icon(
+                        Icons.Filled.Search,
+                        contentDescription = "Search emojis",
+                        modifier = Modifier.size(18.dp),
+                    )
                 }
             }
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                modifier = Modifier.padding(horizontal = 4.dp),
+            ) {
                 suggested.forEach { code ->
                     val glyph = ReactionPalette.display(code)
                     Text(
                         glyph,
                         fontFamily = io.nisfeb.talon.ui.EmojiFontFamily,
-                        style = MaterialTheme.typography.headlineSmall,
+                        style = MaterialTheme.typography.titleLarge,
                         modifier = Modifier
                             .clip(RoundedCornerShape(8.dp))
                             .clickable { onPickReaction(code) }
-                            .padding(horizontal = 8.dp, vertical = 4.dp),
+                            .padding(horizontal = 6.dp, vertical = 2.dp),
                     )
                 }
             }
@@ -773,56 +797,67 @@ private fun ThreadActionMenu(
                     leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(top = 4.dp),
+                        .padding(top = 4.dp)
+                        .focusRequester(searchFocus),
                 )
                 val results = remember(searchQuery) {
                     if (searchQuery.isBlank()) emptyList()
                     else EmojiCatalog.search(searchQuery, limit = 24)
                 }
                 if (results.isNotEmpty()) {
-                    FlowRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        modifier = Modifier.padding(top = 6.dp, start = 4.dp),
+                    ) {
                         results.forEach { entry ->
                             Text(
                                 entry.glyph,
                                 fontFamily = io.nisfeb.talon.ui.EmojiFontFamily,
-                                style = MaterialTheme.typography.headlineSmall,
+                                style = MaterialTheme.typography.titleLarge,
                                 modifier = Modifier
                                     .clip(RoundedCornerShape(8.dp))
                                     .clickable { onPickReaction(entry.shortcode) }
-                                    .padding(horizontal = 8.dp, vertical = 4.dp),
+                                    .padding(horizontal = 6.dp, vertical = 2.dp),
                             )
                         }
                     }
                 }
             }
 
-            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
-            TextButton(onClick = onCopy) { Text("Copy text") }
-            TextButton(onClick = onCopyMarkdown) { Text("Copy as Markdown") }
-            if (canEdit) {
-                TextButton(onClick = onEdit) { Text("Edit") }
-            }
-            if (canDelete) {
-                Row(
+            HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+            @Composable
+            fun ActionRow(
+                onClick: () -> Unit,
+                label: String,
+                color: Color = LocalContentColor.current,
+            ) {
+                TextButton(
+                    onClick = onClick,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(8.dp))
-                        .clickable(onClick = onDelete)
-                        .padding(horizontal = 8.dp, vertical = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
+                        .heightIn(min = itemMinHeight),
+                    contentPadding = itemPadding,
+                    shape = RoundedCornerShape(6.dp),
                 ) {
-                    Icon(
-                        Icons.Filled.Delete,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.error,
-                    )
-                    Spacer(Modifier.width(12.dp))
                     Text(
-                        "Delete",
-                        color = MaterialTheme.colorScheme.error,
-                        style = MaterialTheme.typography.bodyLarge,
+                        label,
+                        color = color,
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.weight(1f),
                     )
                 }
+            }
+            ActionRow(onClick = onCopy, label = "Copy text")
+            ActionRow(onClick = onCopyMarkdown, label = "Copy as Markdown")
+            if (canEdit) {
+                ActionRow(onClick = onEdit, label = "Edit")
+            }
+            if (canDelete) {
+                ActionRow(
+                    onClick = onDelete,
+                    label = "Delete",
+                    color = MaterialTheme.colorScheme.error,
+                )
             }
     }
 }

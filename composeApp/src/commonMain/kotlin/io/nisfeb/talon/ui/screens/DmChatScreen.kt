@@ -16,6 +16,9 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
@@ -1744,15 +1747,29 @@ private fun MessageActionMenu(
 ) {
     val isMine = message.author == ourPatp
     val canReply = message.parentId == null
+    // Compact density tokens. The previous menu used Material's
+    // default 8.dp spacedBy + full TextButton heights (~48.dp each)
+    // and a 16.dp-tall HorizontalDivider, which on a row with 6-8
+    // actions stacked to ~400.dp of dropdown — too tall for
+    // single-thumb reach on phones.
+    val itemPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+    val itemMinHeight = 36.dp
     Column(
-        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+        modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+        verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {
             val topUsage by remember {
                 db.reactionUsage().streamTop(8)
             }.collectAsState(initial = emptyList())
             var searchOpen by remember { mutableStateOf(false) }
             var searchQuery by remember { mutableStateOf("") }
+            val searchFocus = remember { FocusRequester() }
+            // Pull the keyboard up the moment the user taps the
+            // magnifying glass — without this, Android shows the
+            // text field but leaves it inert until tapped again.
+            LaunchedEffect(searchOpen) {
+                if (searchOpen) searchFocus.requestFocus()
+            }
 
             // Merge usage-ranked codes with the default palette so the
             // row is always 8 wide even before the user has reacted much.
@@ -1766,38 +1783,54 @@ private fun MessageActionMenu(
                 Text(
                     "React",
                     style = MaterialTheme.typography.labelLarge,
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(start = 4.dp),
                 )
-                IconButton(onClick = {
-                    searchOpen = !searchOpen
-                    if (!searchOpen) searchQuery = ""
-                }) {
-                    Icon(Icons.Filled.Search, contentDescription = "Search emojis")
+                IconButton(
+                    onClick = {
+                        searchOpen = !searchOpen
+                        if (!searchOpen) searchQuery = ""
+                    },
+                    modifier = Modifier.size(32.dp),
+                ) {
+                    Icon(
+                        Icons.Filled.Search,
+                        contentDescription = "Search emojis",
+                        modifier = Modifier.size(18.dp),
+                    )
                 }
                 if (showAiEmoji) {
-                    TextButton(onClick = onAiEmoji, enabled = !aiEmojiWorking) {
+                    TextButton(
+                        onClick = onAiEmoji,
+                        enabled = !aiEmojiWorking,
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
+                    ) {
                         if (aiEmojiWorking) {
                             CircularProgressIndicator(
                                 strokeWidth = 2.dp,
-                                modifier = Modifier.size(14.dp),
+                                modifier = Modifier.size(12.dp),
                             )
                             Spacer(Modifier.width(6.dp))
                         }
-                        Text("🤖 AI pick")
+                        Text("🤖 AI pick", style = MaterialTheme.typography.labelMedium)
                     }
                 }
             }
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                modifier = Modifier.padding(horizontal = 4.dp),
+            ) {
                 suggested.forEach { code ->
                     val glyph = ReactionPalette.display(code)
                     Text(
                         glyph,
                         fontFamily = io.nisfeb.talon.ui.EmojiFontFamily,
-                        style = MaterialTheme.typography.headlineSmall,
+                        style = MaterialTheme.typography.titleLarge,
                         modifier = Modifier
                             .clip(RoundedCornerShape(8.dp))
                             .clickable { onPickReaction(code) }
-                            .padding(horizontal = 8.dp, vertical = 4.dp),
+                            .padding(horizontal = 6.dp, vertical = 2.dp),
                     )
                 }
             }
@@ -1812,7 +1845,8 @@ private fun MessageActionMenu(
                     },
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(top = 4.dp),
+                        .padding(top = 4.dp)
+                        .focusRequester(searchFocus),
                 )
                 val results = remember(searchQuery) {
                     if (searchQuery.isBlank()) emptyList()
@@ -1821,59 +1855,87 @@ private fun MessageActionMenu(
                 if (results.isNotEmpty()) {
                     FlowRow(
                         horizontalArrangement = Arrangement.spacedBy(10.dp),
-                        modifier = Modifier.padding(top = 6.dp),
+                        modifier = Modifier.padding(top = 6.dp, start = 4.dp),
                     ) {
                         results.forEach { e ->
                             Text(
                                 e.glyph,
                                 fontFamily = io.nisfeb.talon.ui.EmojiFontFamily,
-                                style = MaterialTheme.typography.headlineSmall,
+                                style = MaterialTheme.typography.titleLarge,
                                 modifier = Modifier
                                     .clip(RoundedCornerShape(8.dp))
                                     .clickable { onPickReaction(e.shortcode) }
-                                    .padding(horizontal = 6.dp, vertical = 4.dp),
+                                    .padding(horizontal = 6.dp, vertical = 2.dp),
                             )
                         }
                     }
                 }
             }
-            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
-            TextButton(onClick = onCopy) { Text("Copy text") }
-            TextButton(onClick = onCopyMarkdown) { Text("Copy as Markdown") }
-            if (canBookmark) {
-                TextButton(onClick = onToggleBookmark) {
-                    Text(if (isBookmarked) "Remove bookmark" else "Bookmark")
+            HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+            // Action rows — short, left-aligned, full-width so the
+            // tap target spans the popover and reads like a menu
+            // item instead of a centered button. minHeight 36 (vs
+            // Material default 48) is the main driver of total
+            // popover height.
+            @Composable
+            fun ActionRow(
+                onClick: () -> Unit,
+                label: String,
+                color: androidx.compose.ui.graphics.Color = androidx.compose.material3.LocalContentColor.current,
+            ) {
+                TextButton(
+                    onClick = onClick,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = itemMinHeight),
+                    contentPadding = itemPadding,
+                    shape = RoundedCornerShape(6.dp),
+                ) {
+                    Text(
+                        label,
+                        color = color,
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.weight(1f),
+                    )
                 }
             }
+            ActionRow(onClick = onCopy, label = "Copy text")
+            ActionRow(onClick = onCopyMarkdown, label = "Copy as Markdown")
+            if (canBookmark) {
+                ActionRow(
+                    onClick = onToggleBookmark,
+                    label = if (isBookmarked) "Remove bookmark" else "Bookmark",
+                )
+            }
             if (canReply) {
-                TextButton(onClick = onReply) { Text("Reply in thread") }
+                ActionRow(onClick = onReply, label = "Reply in thread")
             }
             if (canQuote) {
-                TextButton(onClick = onQuote) { Text("Quote") }
+                ActionRow(onClick = onQuote, label = "Quote")
             }
             // Edit on channel chats only — %chat (DMs + clubs) silently
             // ignores edit pokes. Thread replies have their own Edit
             // affordance in ThreadActionSheet; top-level posts get it here.
             if (isMine && isChannel && message.parentId == null) {
-                TextButton(onClick = onEdit) { Text("Edit") }
+                ActionRow(onClick = onEdit, label = "Edit")
             }
             // Pin / Unpin — chat channels only, top-level posts only.
             if (canPin) {
-                TextButton(onClick = onTogglePin) {
-                    Text(if (isPinned) "Unpin" else "Pin (admin)")
-                }
+                ActionRow(
+                    onClick = onTogglePin,
+                    label = if (isPinned) "Unpin" else "Pin",
+                )
             }
             // Delete: always allowed on your own messages. On channels
             // we also show it for others' messages — the server
             // enforces admin-only deletion and rejects if the user
             // isn't authorized, leaving the row in place.
             if (isMine || isChannel) {
-                TextButton(onClick = onDelete) {
-                    Text(
-                        if (isMine) "Delete" else "Delete (admin)",
-                        color = MaterialTheme.colorScheme.error,
-                    )
-                }
+                ActionRow(
+                    onClick = onDelete,
+                    label = if (isMine) "Delete" else "Delete (admin)",
+                    color = MaterialTheme.colorScheme.error,
+                )
             }
     }
 }
