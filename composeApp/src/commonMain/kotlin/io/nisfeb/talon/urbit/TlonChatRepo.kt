@@ -419,6 +419,17 @@ class TlonChatRepo(
                     .onSuccess { Log.i(TAG, "deep-history scry complete") }
                     .onFailure { Log.w(TAG, "deep-history scry failed", it) }
             }
+            // Populate adminGroupsFlow so the pin gate in the message
+            // action menu can hide "Pin" for users who aren't admin in
+            // the group. Heavy (~N scries for N groups, semaphored at 8)
+            // so it runs in the background after first paint. Until it
+            // lands, canPinInGroup falls back to "is the user the
+            // group host?" — which catches the most common case
+            // (host-admins see the option immediately).
+            launch {
+                runCatching { refreshAdminGroups() }
+                    .onFailure { Log.w(TAG, "bootstrap admin-groups refresh failed", it) }
+            }
         }
 
         // Settings sync — scries our desk and subscribes so changes

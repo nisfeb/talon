@@ -710,6 +710,12 @@ fun DmChatScreen(
                 )
             }
             val chatDensity = io.nisfeb.talon.ui.LocalChatDensity.current
+            // Admin-groups cache for the pin gate. Null until the
+            // bootstrap refresh in App.kt completes; we fall back to
+            // "is the user the group host?" until it lands so the
+            // option still appears immediately for host-admins. See
+            // [io.nisfeb.talon.urbit.canPinInGroup].
+            val adminGroups by repo.adminGroupsFlow.collectAsState()
             // Per-row action-menu body. Wired here so the slot's
             // closure captures repo / scope / composerState / pinned
             // state without exploding [MessageRow]'s parameter list.
@@ -731,7 +737,12 @@ fun DmChatScreen(
                     isBookmarked = isBookmarked,
                     isPinned = pinnedPostId == target.id,
                     canBookmark = canBookmark,
-                    canPin = whom.startsWith("chat/") && target.parentId == null,
+                    canPin = whom.startsWith("chat/") && target.parentId == null &&
+                        io.nisfeb.talon.urbit.canPinInGroup(
+                            ourPatp = ourPatp,
+                            groupFlag = contactMap.groupOfChannel(whom),
+                            adminGroups = adminGroups,
+                        ),
                     canQuote = whom.startsWith("chat/") && target.parentId == null,
                     onDismiss = { actionTarget = null },
                     onPickReaction = { emoji ->
