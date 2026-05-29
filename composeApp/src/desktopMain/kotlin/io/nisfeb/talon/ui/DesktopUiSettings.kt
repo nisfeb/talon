@@ -54,6 +54,7 @@ class DesktopUiSettings(
         val railItemOrder: List<String> = emptyList(),
         val powerFeaturesEnabled: Boolean = false,
         val density: String = Density.Comfortable.name,
+        val fontScale: Float = 1.0f,
     )
 
     private val initial = loadInitial()
@@ -111,6 +112,9 @@ class DesktopUiSettings(
             .getOrDefault(Density.Comfortable),
     )
     override val density: StateFlow<Density> = _density.asStateFlow()
+
+    private val _fontScale = MutableStateFlow(normalizeFontScale(initial.fontScale))
+    override val fontScale: StateFlow<Float> = _fontScale.asStateFlow()
 
     private val _railItemOrder = MutableStateFlow(
         sanitizeRailItemOrder(
@@ -183,6 +187,13 @@ class DesktopUiSettings(
         persistCurrent()
     }
 
+    override fun setFontScale(scale: Float) {
+        val v = normalizeFontScale(scale)
+        if (_fontScale.value == v) return
+        _fontScale.value = v
+        persistCurrent()
+    }
+
     override fun setRailItemOrder(items: List<RailItem>) {
         val sanitized = sanitizeRailItemOrder(items)
         if (_railItemOrder.value == sanitized) return
@@ -206,6 +217,7 @@ class DesktopUiSettings(
                 railItemOrder = _railItemOrder.value.map { it.name },
                 powerFeaturesEnabled = _powerFeaturesEnabled.value,
                 density = _density.value.name,
+                fontScale = _fontScale.value,
             ),
         )
     }

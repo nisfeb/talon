@@ -134,6 +134,28 @@ interface UiSettings {
      */
     val density: StateFlow<Density>
     fun setDensity(mode: Density)
+
+    /**
+     * Per-device font-scale multiplier, layered on top of the
+     * density preset's own font multiplier. Driven by the
+     * Ctrl/Cmd +/-/0 desktop shortcuts (see [ShortcutAction]). 1.0 =
+     * no extra scaling. Clamped to [FONT_SCALE_MIN]..[FONT_SCALE_MAX]
+     * at the setter. Stored locally, not synced — a cosmetic
+     * per-device preference like density / accent.
+     */
+    val fontScale: StateFlow<Float>
+    fun setFontScale(scale: Float)
+}
+
+const val FONT_SCALE_MIN = 0.7f
+const val FONT_SCALE_MAX = 2.0f
+const val FONT_SCALE_STEP = 0.1f
+
+/** Clamp + round to a clean step so repeated nudges don't drift into
+ *  float noise (e.g. 1.0000001). */
+fun normalizeFontScale(raw: Float): Float {
+    val clamped = raw.coerceIn(FONT_SCALE_MIN, FONT_SCALE_MAX)
+    return kotlin.math.round(clamped * 10f) / 10f
 }
 
 enum class GroupChannelOrder { Recent, HostOrder }
@@ -268,5 +290,11 @@ class InMemoryUiSettings(
     override val density: StateFlow<Density> = _density.asStateFlow()
     override fun setDensity(mode: Density) {
         _density.value = mode
+    }
+
+    private val _fontScale = MutableStateFlow(1.0f)
+    override val fontScale: StateFlow<Float> = _fontScale.asStateFlow()
+    override fun setFontScale(scale: Float) {
+        _fontScale.value = normalizeFontScale(scale)
     }
 }

@@ -57,6 +57,46 @@ class KeyboardShortcutsTest {
     }
 
     @Test
+    fun `Ctrl+Equals maps to IncreaseFontSize`() {
+        assertEquals(ShortcutAction.IncreaseFontSize, keyEventToShortcut(ctrlKeyDown(Key.Equals)))
+    }
+
+    @Test
+    fun `Ctrl+Shift+Equals (the plus) still maps to IncreaseFontSize`() {
+        // "+" is Shift+"=" on US layouts; the Shift guard must not
+        // swallow this one even though it blocks other Ctrl+Shift combos.
+        assertEquals(
+            ShortcutAction.IncreaseFontSize,
+            keyEventToShortcut(ctrlShiftKeyDown(Key.Equals)),
+        )
+    }
+
+    @Test
+    fun `Ctrl+Minus maps to DecreaseFontSize`() {
+        assertEquals(ShortcutAction.DecreaseFontSize, keyEventToShortcut(ctrlKeyDown(Key.Minus)))
+    }
+
+    @Test
+    fun `Ctrl+0 maps to ResetFontSize`() {
+        assertEquals(ShortcutAction.ResetFontSize, keyEventToShortcut(ctrlKeyDown(Key.Zero)))
+    }
+
+    @Test
+    fun `Ctrl+Shift+K still ignored after font-zoom carve-out`() {
+        // Regression guard: the Shift bypass is scoped to the zoom keys
+        // only; other Ctrl+Shift combos must still pass through.
+        assertNull(keyEventToShortcut(ctrlShiftKeyDown(Key.K)))
+    }
+
+    @Test
+    fun `Cmd+Equals maps to IncreaseFontSize on macOS`() {
+        assertEquals(
+            ShortcutAction.IncreaseFontSize,
+            keyEventToShortcut(metaKeyDown(Key.Equals), isMacHost = true),
+        )
+    }
+
+    @Test
     fun `macOS Cmd+K maps via the meta branch`() {
         assertEquals(ShortcutAction.FocusSearch, keyEventToShortcut(metaKeyDown(Key.K), isMacHost = true))
     }

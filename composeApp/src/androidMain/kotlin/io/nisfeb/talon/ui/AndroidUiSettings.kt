@@ -181,6 +181,17 @@ class AndroidUiSettings(
         _density.value = mode
     }
 
+    private val _fontScale = MutableStateFlow(
+        normalizeFontScale(prefs.getFloat(KEY_FONT_SCALE, 1.0f)),
+    )
+    override val fontScale: StateFlow<Float> = _fontScale.asStateFlow()
+    override fun setFontScale(scale: Float) {
+        val v = normalizeFontScale(scale)
+        if (_fontScale.value == v) return
+        prefs.edit().putFloat(KEY_FONT_SCALE, v).apply()
+        _fontScale.value = v
+    }
+
     private fun loadDensity(): Density {
         val raw = prefs.getString(KEY_DENSITY, null) ?: return Density.Comfortable
         return runCatching { Density.valueOf(raw) }.getOrDefault(Density.Comfortable)
@@ -247,6 +258,7 @@ class AndroidUiSettings(
         private const val KEY_SMART_SEARCH_PREFERRED = "smart_search_preferred"
         private const val KEY_POWER_FEATURES = "power_features_enabled"
         private const val KEY_DENSITY = "density"
+        private const val KEY_FONT_SCALE = "font_scale"
         private const val KEY_RAIL_ITEM_ORDER = "rail_item_order"
     }
 }

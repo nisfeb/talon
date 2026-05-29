@@ -21,6 +21,15 @@ sealed interface ShortcutAction {
     data object Back : ShortcutAction
     data object OpenSettings : ShortcutAction
     data class SwitchShip(val index: Int) : ShortcutAction
+
+    /** Ctrl/Cmd + `=` / `+` — bump the app font scale up one step. */
+    data object IncreaseFontSize : ShortcutAction
+
+    /** Ctrl/Cmd + `-` — drop the app font scale one step. */
+    data object DecreaseFontSize : ShortcutAction
+
+    /** Ctrl/Cmd + `0` — reset the font scale to 1.0. */
+    data object ResetFontSize : ShortcutAction
 }
 
 /**
@@ -39,8 +48,24 @@ sealed interface ShortcutAction {
  */
 fun keyEventToShortcut(event: KeyEvent, isMacHost: Boolean = false): ShortcutAction? {
     if (event.type != KeyEventType.KeyDown) return null
-    if (event.isShiftPressed || event.isAltPressed) return null
+    if (event.isAltPressed) return null
     val modifierActive = if (isMacHost) event.isMetaPressed else event.isCtrlPressed
+
+    // Font-size zoom is handled before the Shift guard below: on US
+    // layouts "+" is Shift+"=", so Ctrl+"+" arrives with Shift set.
+    // Only these specific keys bypass the guard — every other
+    // Ctrl+Shift+X combo still falls through to `return null` and
+    // reaches the editor unchanged.
+    if (modifierActive) {
+        when (event.key) {
+            Key.Equals, Key.Plus, Key.NumPadAdd -> return ShortcutAction.IncreaseFontSize
+            Key.Minus, Key.NumPadSubtract -> return ShortcutAction.DecreaseFontSize
+            Key.Zero, Key.NumPad0 -> return ShortcutAction.ResetFontSize
+            else -> Unit
+        }
+    }
+
+    if (event.isShiftPressed) return null
     if (!modifierActive && event.key != Key.Escape) return null
     return when (event.key) {
         Key.Escape -> ShortcutAction.Back
