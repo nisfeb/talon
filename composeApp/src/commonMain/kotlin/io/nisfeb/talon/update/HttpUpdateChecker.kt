@@ -1,6 +1,6 @@
 package io.nisfeb.talon.update
 
-import android.util.Log
+import io.nisfeb.talon.util.Log
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -54,7 +54,11 @@ class HttpUpdateChecker(
             // termination propagate so coroutine teardown is clean.
             // See DailyDigest.kt for the same pattern.
             if (it is CancellationException) throw it
-            Log.w("HttpUpdateChecker", "check failed", it)
+            Log.w(TAG, "check failed: ${it.message}")
         }.getOrNull()
+    }
+
+    private companion object {
+        const val TAG = "HttpUpdateChecker"
     }
 }

@@ -28,9 +28,15 @@ import io.nisfeb.talon.data.DatabaseOpenTimeoutException
 import io.nisfeb.talon.data.createAppDatabase
 import io.nisfeb.talon.ui.DraftStore
 import io.nisfeb.talon.ui.InMemoryDraftStore
-import io.nisfeb.talon.update.NoopUpdateInstallerHook
-import io.nisfeb.talon.update.StaticUpdateRuntime
+import io.nisfeb.talon.update.DesktopBrowserUpdateInstaller
+import io.nisfeb.talon.update.HttpUpdateChecker
+import io.nisfeb.talon.update.UpdateRuntime
 import io.nisfeb.talon.update.UpdateState
+import io.nisfeb.talon.util.AppDirs
+import io.nisfeb.talon.util.Log
+import kotlinx.coroutines.launch
+import java.io.File
+import java.util.Properties
 import io.nisfeb.talon.urbit.SessionStore
 import io.nisfeb.talon.urbit.SettingsSync
 import io.nisfeb.talon.urbit.SettingsSyncImpl
@@ -119,9 +125,55 @@ private class DesktopAppGraph {
 
     val updateState: UpdateState = UpdateState(
         scope = updateScope,
-        runtime = StaticUpdateRuntime(),
-        installer = NoopUpdateInstallerHook(),
+        // Use the real packaged versionCode so the banner only fires
+        // when the manifest is genuinely newer than what's running.
+        // supportedSdk stays MAX_VALUE — Android SDK gating is
+        // meaningless on desktop builds.
+        runtime = object : UpdateRuntime {
+            override fun installedVersionCode(): Int = io.nisfeb.talon.TalonBuild.versionCode
+            override fun supportedSdk(): Int = Int.MAX_VALUE
+        },
+        installer = DesktopBrowserUpdateInstaller(),
     )
+
+    init {
+        // Cold-start update check. Same throttle Android uses (12h);
+        // the timestamp persists in AppDirs/update.properties so a
+        // user re-launching Talon many times in one session doesn't
+        // re-hit GitHub each time. No window-focus re-trigger yet —
+        // desktop users typically restart the app between sessions,
+        // which is enough to surface a new release within a day.
+        val updatePrefs = File(AppDirs.userData, "update.properties")
+        val readLastChecked: () -> Long = {
+            runCatching {
+                if (updatePrefs.exists()) {
+                    Properties().apply { updatePrefs.inputStream().use { load(it) } }
+                        .getProperty("last_http_check_ms")?.toLongOrNull() ?: 0L
+                } else 0L
+            }.getOrElse { 0L }
+        }
+        val writeLastChecked: (Long) -> Unit = { ms ->
+            runCatching {
+                val p = Properties().apply {
+                    if (updatePrefs.exists()) updatePrefs.inputStream().use { load(it) }
+                    setProperty("last_http_check_ms", ms.toString())
+                }
+                updatePrefs.outputStream().use { p.store(it, "Talon update check timestamp") }
+            }.onFailure { Log.w("UpdateChecker", "couldn't persist last-check ts: ${it.message}") }
+        }
+        val checker = HttpUpdateChecker(
+            http = http,
+            url = "https://github.com/nisfeb/talon/releases/latest/download/latest.json",
+            now = { System.currentTimeMillis() },
+            lastCheckedAtMs = readLastChecked,
+            recordCheckedAt = writeLastChecked,
+            minIntervalMs = 12L * 60L * 60L * 1000L,
+        )
+        updateScope.launch {
+            val m = checker.check()
+            if (m != null) updateState.onManifest(m)
+        }
+    }
 
     fun shutdown() {
         // Best-effort teardown. Order matters:
