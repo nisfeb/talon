@@ -154,12 +154,30 @@ abstract class MessageDao {
     @Query("UPDATE messages SET status = :status WHERE whom = :whom AND id = :id")
     abstract suspend fun setStatus(whom: String, id: String, status: String?)
 
-    /** Reply count per top-level post in this conversation. */
+    /**
+     * Per-parent reply digest: count, most-recent reply timestamp, and
+     * the author of that most-recent reply. Drives the thread indicator
+     * under each top-level message (`"$N replies · author · 2m ago"`
+     * with an avatar). `lastAuthor` is the patp of the most-recent
+     * replier — pulled via correlated subquery so the row matches the
+     * MAX(sentMs)'s author rather than the first one GROUP BY happens
+     * to pick. Always populated when count > 0 (rows with zero replies
+     * never appear in this query because of the `parentId IS NOT NULL`
+     * filter).
+     */
     @Query("""
-        SELECT parentId AS postId, COUNT(*) AS count
-        FROM messages
-        WHERE whom = :whom AND parentId IS NOT NULL AND isDeleted = 0
-        GROUP BY parentId
+        SELECT m.parentId AS postId,
+               COUNT(*) AS count,
+               MAX(m.sentMs) AS lastSentMs,
+               (SELECT r.author FROM messages r
+                WHERE r.whom = :whom
+                  AND r.parentId = m.parentId
+                  AND r.isDeleted = 0
+                ORDER BY r.sentMs DESC, r.id DESC
+                LIMIT 1) AS lastAuthor
+        FROM messages m
+        WHERE m.whom = :whom AND m.parentId IS NOT NULL AND m.isDeleted = 0
+        GROUP BY m.parentId
     """)
     abstract fun streamReplyCounts(whom: String): Flow<List<ReplyCount>>
 
@@ -326,7 +344,17 @@ abstract class MessageDao {
     ): List<MessageEntity>
 }
 
-data class ReplyCount(val postId: String, val count: Int)
+data class ReplyCount(
+    val postId: String,
+    val count: Int,
+    /** Wall-clock ms of the freshest reply in this thread. 0 when the
+     *  query somehow returns a count > 0 with no rows — defensive only;
+     *  Room guarantees these line up. */
+    val lastSentMs: Long = 0L,
+    /** Patp of the author of the freshest reply. Empty when unknown
+     *  (same defensive caveat as [lastSentMs]). */
+    val lastAuthor: String = "",
+)
 
 /**
  * Force id + parentId to their canonical undotted form. The whole app

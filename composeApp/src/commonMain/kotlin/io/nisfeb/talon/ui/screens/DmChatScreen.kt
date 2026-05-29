@@ -1221,7 +1221,7 @@ private fun MessageRow(
                 }
                 entityChips?.invoke(plainText, Modifier.padding(top = 4.dp))
             }
-            if (grouped.isNotEmpty() || row.replyCount > 0) {
+            if (grouped.isNotEmpty()) {
                 FlowRow(
                     modifier = Modifier.padding(top = 4.dp),
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -1236,22 +1236,22 @@ private fun MessageRow(
                             onLongClick = { onReactionLongPress(row.reactions) },
                         )
                     }
-                    if (row.replyCount > 0) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(MaterialTheme.colorScheme.surfaceVariant)
-                                .clickable { onOpenThread(m) }
-                                .padding(horizontal = 10.dp, vertical = 4.dp),
-                        ) {
-                            Text(
-                                "💬 ${row.replyCount}",
-                                style = MaterialTheme.typography.bodyMedium,
-                            )
-                        }
-                    }
                 }
+            }
+            if (row.replyCount > 0) {
+                // Thread indicator on its own row below reactions —
+                // avatar + count + relative time is wider than a
+                // reaction chip and reads better as a standalone
+                // affordance than inline among the emoji.
+                io.nisfeb.talon.ui.ThreadIndicator(
+                    count = row.replyCount,
+                    lastSentMs = row.lastReplySentMs,
+                    lastAuthor = row.lastReplyAuthor,
+                    contactMap = contactMap,
+                    nowMs = System.currentTimeMillis(),
+                    onClick = { onOpenThread(m) },
+                    modifier = Modifier.padding(top = 4.dp),
+                )
             }
         }
         // Trailing action affordance. Opens a popover (DropdownMenu)
@@ -1471,6 +1471,12 @@ private data class DisplayRow(
     val m: MessageEntity,
     val reactions: List<ReactionEntity>,
     val replyCount: Int,
+    /** Wall-clock ms of the most recent reply, or 0 when [replyCount]
+     *  is 0. Drives the relative-time text on the [ThreadIndicator]. */
+    val lastReplySentMs: Long,
+    /** Patp of the author of the most recent reply. Empty when
+     *  [replyCount] is 0; drives the indicator avatar. */
+    val lastReplyAuthor: String,
     val showHeader: Boolean,
 )
 
@@ -1503,16 +1509,28 @@ private fun buildChatListItemsReusing(
             (m.sentMs - prevMsg.sentMs) > GROUP_GAP_MS
         prevMsg = m
         val reactions = reactsByPost[m.id].orEmpty()
-        val replyCount = countsByPost[m.id]?.count ?: 0
+        val digest = countsByPost[m.id]
+        val replyCount = digest?.count ?: 0
+        val lastReplySentMs = digest?.lastSentMs ?: 0L
+        val lastReplyAuthor = digest?.lastAuthor.orEmpty()
         val cached = prev[m.id]
         val row = if (
             cached != null &&
             cached.m == m &&
             cached.reactions == reactions &&
             cached.replyCount == replyCount &&
+            cached.lastReplySentMs == lastReplySentMs &&
+            cached.lastReplyAuthor == lastReplyAuthor &&
             cached.showHeader == showHeader
         ) cached
-        else DisplayRow(m = m, reactions = reactions, replyCount = replyCount, showHeader = showHeader)
+        else DisplayRow(
+            m = m,
+            reactions = reactions,
+            replyCount = replyCount,
+            lastReplySentMs = lastReplySentMs,
+            lastReplyAuthor = lastReplyAuthor,
+            showHeader = showHeader,
+        )
         nextMap[m.id] = row
         out.add(ChatListItem.Message(row))
     }
