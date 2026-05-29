@@ -16,6 +16,24 @@ interface GroupDao {
     @Query("SELECT * FROM groups")
     fun streamGroups(): Flow<List<GroupEntity>>
 
+    /**
+     * Name search over groups for the search screen. Matches the
+     * group's title (case-insensitive substring). Prefix matches sort
+     * first (a query of "des" ranks "Design" above "Wednesday"), then
+     * alphabetical — same relevance shape as [ContactDao.search].
+     * `ESCAPE '\'` so `%` / `_` in the user's text aren't wildcards.
+     */
+    @Query("""
+        SELECT * FROM groups
+        WHERE title IS NOT NULL
+          AND title LIKE '%' || :q || '%' ESCAPE '\' COLLATE NOCASE
+        ORDER BY
+          CASE WHEN title LIKE :q || '%' ESCAPE '\' COLLATE NOCASE THEN 0 ELSE 1 END,
+          title COLLATE NOCASE
+        LIMIT 20
+    """)
+    fun searchGroups(q: String): Flow<List<GroupEntity>>
+
     @Query("SELECT * FROM channel_groups")
     fun streamChannelGroups(): Flow<List<ChannelGroupEntity>>
 

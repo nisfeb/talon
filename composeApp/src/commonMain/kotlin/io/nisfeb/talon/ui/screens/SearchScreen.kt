@@ -110,6 +110,15 @@ fun SearchScreen(
         else db.contacts().search(peopleEscapedNeedle)
     }.collectAsState(initial = emptyList<ContactEntity>())
 
+    // Group-name search — same free-text needle as people (operators
+    // like since:/has: have no analog for groups). Surfaced above
+    // message hits because a name match is a stronger signal of intent
+    // than a substring buried in some message body.
+    val groups by remember(peopleEscapedNeedle) {
+        if (peopleEscapedNeedle.isEmpty()) flowOf(emptyList())
+        else db.groups().searchGroups(peopleEscapedNeedle)
+    }.collectAsState(initial = emptyList<io.nisfeb.talon.data.GroupEntity>())
+
     // Set of whoms the user has any activity with — used to flag a
     // search result as "you've never DMed this person, tap to start"
     // rather than letting them silently land on a 404'd empty chat.
@@ -130,6 +139,26 @@ fun SearchScreen(
             db.groups().streamChannelGroups(),
         )
     }.collectAsState(initial = ContactMap.EMPTY)
+
+    // First (lowest-ordinal) channel of a group, or null if the group
+    // has no channels synced locally. A group isn't itself a `whom`
+    // you can open — the navigable unit is a channel — so tapping a
+    // group result lands the user in its first channel.
+    fun firstChannelOf(flag: String): String? =
+        contactMap.channelGroups
+            .filter { it.groupFlag == flag }
+            .minByOrNull { it.ordinal }
+            ?.nest
+
+    // Only surface group hits we can actually act on (have at least
+    // one openable channel). A title-only match with no synced
+    // channels would be a dead row.
+    val groupHits = remember(groups, contactMap) {
+        groups.mapNotNull { g ->
+            val nest = firstChannelOf(g.flag) ?: return@mapNotNull null
+            g to nest
+        }
+    }
 
     // The chip surfaces a per-search-session preference — "for my
     // searches, default to smart-mode (semantic) or substring".
@@ -264,7 +293,7 @@ fun SearchScreen(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(16.dp),
             )
-        } else if (results.isEmpty() && people.isEmpty()) {
+        } else if (results.isEmpty() && people.isEmpty() && groupHits.isEmpty()) {
             Text(
                 "No matches.",
                 style = MaterialTheme.typography.bodyMedium,
@@ -276,6 +305,22 @@ fun SearchScreen(
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(vertical = 8.dp),
             ) {
+                if (groupHits.isNotEmpty()) {
+                    item(key = "__groups_header", contentType = "header") {
+                        SectionHeader("Groups")
+                    }
+                    items(
+                        items = groupHits,
+                        key = { (g, _) -> "group:${g.flag}" },
+                        contentType = { "group" },
+                    ) { (g, nest) ->
+                        GroupRow(
+                            group = g,
+                            onClick = { onOpenConversation(nest) },
+                        )
+                        HorizontalDivider()
+                    }
+                }
                 if (people.isNotEmpty()) {
                     item(key = "__people_header", contentType = "header") {
                         SectionHeader("People")
@@ -347,6 +392,48 @@ private fun SectionHeader(label: String) {
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
     )
+}
+
+@Composable
+private fun GroupRow(
+    group: io.nisfeb.talon.data.GroupEntity,
+    onClick: () -> Unit,
+) {
+    val label = group.title?.takeIf { it.isNotBlank() } ?: group.flag
+    // GroupEntity.image is either an S3 URL or a hex tint fallback —
+    // Avatar already disambiguates by shape (http* vs hex), same as the
+    // home-list group heads.
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Avatar(
+            label = label,
+            url = group.image,
+            colorHex = group.image,
+            size = 40.dp,
+        )
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            Text(
+                label,
+                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
+                maxLines = 1,
+            )
+            Text(
+                "Group",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+            )
+        }
+    }
 }
 
 @Composable
