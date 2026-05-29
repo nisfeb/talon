@@ -622,6 +622,18 @@ fun App(
                                 storyText = { id, json ->
                                     io.nisfeb.talon.urbit.StoryCache.textFor(id, json)
                                 },
+                                // Staleness guard: only notify for
+                                // messages posted in the last 5 min.
+                                // The `bootstrapping` flag flips false
+                                // after the shallow scry, but deep-
+                                // history + late SSE init keep landing
+                                // older messages (especially after a
+                                // schema-bump DB wipe re-syncs from
+                                // scratch) — without this, all of them
+                                // fire as "new". Backlog has old sentMs
+                                // and is dropped; live messages pass.
+                                nowMs = System.currentTimeMillis(),
+                                freshnessMaxAgeMs = 5L * 60_000L,
                             )
                         lastSeenIds = diff.newLastSeen
                         for (n in diff.notifications) {

@@ -56,6 +56,20 @@ fun diffNewMessageNotifications(
     openChat: String?,
     mutedWhoms: Set<String>,
     storyText: (id: String, contentJson: String) -> String,
+    /** Current wall-clock ms. Paired with [freshnessMaxAgeMs] for the
+     *  staleness guard below. Defaults to 0 which, with the default
+     *  max-age, disables the guard entirely (back-compat for callers
+     *  that don't care about backlog suppression). */
+    nowMs: Long = 0L,
+    /** Suppress notifications for messages older than this. A re-synced
+     *  backlog (fresh DB bootstrap, reconnect replay, deep-history
+     *  fill) brings in messages with OLD `sentMs`; without this guard
+     *  every one of them fires a notification the moment the
+     *  `bootstrapping` flag flips false mid-ingest — the "deluge on
+     *  first login". A genuinely new live message has a recent
+     *  `sentMs` and passes. The baseline still advances for suppressed
+     *  rows so they never fire later either. Default MAX_VALUE = off. */
+    freshnessMaxAgeMs: Long = Long.MAX_VALUE,
 ): NewMessageDiff {
     val newLastSeen = lastSeen.toMutableMap()
     val notifications = mutableListOf<NotificationCandidate>()
@@ -66,6 +80,10 @@ fun diffNewMessageNotifications(
         if (row.author == ourPatp) continue
         if (row.whom == openChat) continue
         if (row.whom in mutedWhoms) continue
+        // Staleness guard: backfilled / re-synced messages have an old
+        // sentMs and must not notify. Baseline already advanced above,
+        // so a suppressed-as-stale row won't re-fire on a later pass.
+        if (nowMs - row.sentMs > freshnessMaxAgeMs) continue
 
         val body = storyText(row.id, row.contentJson)
             .replace('\n', ' ')

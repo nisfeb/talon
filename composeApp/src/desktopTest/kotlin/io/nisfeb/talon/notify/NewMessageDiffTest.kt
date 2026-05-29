@@ -27,11 +27,12 @@ class NewMessageDiffTest {
         id: String,
         author: String = "~zod",
         contentJson: String = """{"inline":[{"text":"hello"}]}""",
+        sentMs: Long = 0L,
     ) = MessageEntity(
         whom = whom,
         id = id,
         author = author,
-        sentMs = 0L,
+        sentMs = sentMs,
         contentJson = contentJson,
         kind = "note",
     )
@@ -60,6 +61,58 @@ class NewMessageDiffTest {
     @Test
     fun `seed of empty rows is empty map`() {
         assertEquals(emptyMap(), seedNewMessageBaseline(emptyList()))
+    }
+
+    // ── diffNewMessageNotifications: staleness guard ────────────
+
+    @Test
+    fun `stale backlog message does not fire but advances baseline`() {
+        val now = 1_700_000_000_000L
+        val diff = diffNewMessageNotifications(
+            rows = listOf(msg("~zod", "old", author = "~bus", sentMs = now - 60L * 60_000L)),
+            lastSeen = emptyMap(),
+            ourPatp = "~zod",
+            openChat = null,
+            mutedWhoms = emptySet(),
+            storyText = storyText,
+            nowMs = now,
+            freshnessMaxAgeMs = 5L * 60_000L,
+        )
+        // 1h-old message with a 5min window → suppressed.
+        assertTrue(diff.notifications.isEmpty())
+        // But baseline advanced, so it won't fire on a later pass.
+        assertEquals(mapOf("~zod" to "old"), diff.newLastSeen)
+    }
+
+    @Test
+    fun `fresh message within the window fires`() {
+        val now = 1_700_000_000_000L
+        val diff = diffNewMessageNotifications(
+            rows = listOf(msg("~zod", "new", author = "~bus", sentMs = now - 30_000L)),
+            lastSeen = emptyMap(),
+            ourPatp = "~zod",
+            openChat = null,
+            mutedWhoms = emptySet(),
+            storyText = storyText,
+            nowMs = now,
+            freshnessMaxAgeMs = 5L * 60_000L,
+        )
+        assertEquals(1, diff.notifications.size)
+    }
+
+    @Test
+    fun `default args disable the staleness guard`() {
+        // Back-compat: callers that don't pass nowMs/freshnessMaxAgeMs
+        // get the old behavior — even a sentMs=0 (epoch) message fires.
+        val diff = diffNewMessageNotifications(
+            rows = listOf(msg("~zod", "id-1", author = "~bus", sentMs = 0L)),
+            lastSeen = emptyMap(),
+            ourPatp = "~zod",
+            openChat = null,
+            mutedWhoms = emptySet(),
+            storyText = storyText,
+        )
+        assertEquals(1, diff.notifications.size)
     }
 
     // ── diffNewMessageNotifications: filtering ──────────────────
