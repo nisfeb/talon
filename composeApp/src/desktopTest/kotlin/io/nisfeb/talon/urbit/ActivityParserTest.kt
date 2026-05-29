@@ -104,6 +104,34 @@ class ActivityParserTest {
     }
 
     @Test
+    fun `toUnread firstUnreadId is null when unread is absent (caught up)`() {
+        val row = toUnread("ship/~sampel", buildJsonObject { })!!
+        assertNull(row.firstUnreadId)
+    }
+
+    @Test
+    fun `toUnread parses channel unread boundary to bare undotted da`() {
+        // channel/<nest> source: MessageEntity.id is the bare undotted
+        // @da, so the wire `~author/<dotted-da>` must reduce to it.
+        val summary = json.parseToJsonElement("""
+            {"count":2,"unread":{"id":"~zod/170.141.184.507.988.700.723.732","time":"x","count":2,"notify":false}}
+        """.trimIndent()).jsonObject
+        val row = toUnread("channel/chat/~host/general", summary)!!
+        assertEquals("170141184507988700723732", row.firstUnreadId)
+    }
+
+    @Test
+    fun `toUnread keeps author prefix for DM unread boundary`() {
+        // ship/club source: MessageEntity.id keeps the ~author prefix,
+        // only the @da is undotted.
+        val summary = json.parseToJsonElement("""
+            {"count":1,"unread":{"id":"~bus/170.141.184.507.111.222.333","time":"x","count":1,"notify":true}}
+        """.trimIndent()).jsonObject
+        val row = toUnread("ship/~bus", summary)!!
+        assertEquals("~bus/170141184507111222333", row.firstUnreadId)
+    }
+
+    @Test
     fun `toUnread with unsurfaced source kind yields null`() {
         assertNull(toUnread("group/~sampel/flag", buildJsonObject { }))
         assertNull(toUnread("thread/x/y", buildJsonObject { }))
@@ -297,40 +325,22 @@ class ActivityParserTest {
     // ─── sourceKeyToWhom — thread variants ──────────────────────
 
     @Test
-    fun `thread source-key resolves to underlying channel nest`() {
-        // `thread/<nest>/<msg-id>` — strip the trailing msg-id back
-        // off to get the channel's nest.
-        assertEquals(
-            "chat/~host/slug",
-            sourceKeyToWhom("thread/chat/~host/slug/170.141.184.507"),
-        )
+    fun `thread source-key resolves to null (handled by sourceKeyToThreadSource)`() {
+        // Used to return the underlying channel nest, but that
+        // double-counted: the agent's channel/<nest> summary already
+        // reflects the channel's activity, so adding the thread
+        // summary's count on top inflated the badge (1 new reply →
+        // channel showed 2). Thread events now flow only through
+        // sourceKeyToThreadSource → ThreadUnreadEntity.
+        assertNull(sourceKeyToWhom("thread/chat/~host/slug/170.141.184.507"))
+        assertNull(sourceKeyToWhom("thread/chat/~host/slug/~author/170.141.184.507"))
     }
 
     @Test
-    fun `thread source-key with author-prefixed msg-id still resolves`() {
-        // Some shapes carry the msg-id as `~author/<da>` (two extra
-        // path segments). The nest is always exactly 3 segments, so
-        // we always slice the first 3.
-        assertEquals(
-            "chat/~host/slug",
-            sourceKeyToWhom("thread/chat/~host/slug/~author/170.141.184.507"),
-        )
-    }
-
-    @Test
-    fun `dm-thread source-key resolves to ship`() {
-        assertEquals(
-            "~sampel-palnet",
-            sourceKeyToWhom("dm-thread/~sampel-palnet/~author/170.141"),
-        )
-    }
-
-    @Test
-    fun `dm-thread source-key resolves to club`() {
-        assertEquals(
-            "0v4.abcde",
-            sourceKeyToWhom("dm-thread/0v4.abcde/~author/170.141"),
-        )
+    fun `dm-thread source-key resolves to null (handled by sourceKeyToThreadSource)`() {
+        // Same rationale as `thread/` above.
+        assertNull(sourceKeyToWhom("dm-thread/~sampel-palnet/~author/170.141"))
+        assertNull(sourceKeyToWhom("dm-thread/0v4.abcde/~author/170.141"))
     }
 
     @Test

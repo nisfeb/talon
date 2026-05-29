@@ -18,32 +18,27 @@ import kotlinx.serialization.json.put
 /**
  * Split `"<kind>/<rest>"` source keys into a `whom` we can look up
  * locally. Tlon's source-key encoding (see `desk/lib/activity-json.hoon
- * string-source`) supports six shapes; we map them all back to a
- * `whom` that points at the parent conversation:
+ * string-source`) supports six shapes; this resolver covers the
+ * conversation-level ones:
  *  - `ship/<patp>`            → the ship          (1:1 DM)
  *  - `club/<id>`              → the club          (group DM)
  *  - `channel/<nest>`         → the channel       (group channel)
- *  - `thread/<nest>/<msg>`    → the channel       (top-level chat)
- *  - `dm-thread/<whom>/<msg>` → the ship/club     (top-level DM)
- *  - anything else (`group/`, `base`, `contact/`) → null (we don't
- *    surface those events in the per-conversation home list).
+ *  - anything else            → null
+ *
+ * Thread / dm-thread keys deliberately resolve to null here — they
+ * used to collapse onto the parent conversation's whom and feed the
+ * channel-level [UnreadEntity], which double-counted: the agent's
+ * `channel/<nest>` summary already reflects per-channel activity, so
+ * adding the thread summaries on top inflated the count (1 new reply
+ * → channel badge showed 2). Thread events now flow exclusively
+ * through [sourceKeyToThreadSource] → [ThreadUnreadEntity], which
+ * drives the per-thread indicator tint without touching the
+ * channel rollup.
  */
 internal fun sourceKeyToWhom(key: String): String? = when {
     key.startsWith("ship/") -> key.removePrefix("ship/")
     key.startsWith("club/") -> key.removePrefix("club/")
     key.startsWith("channel/") -> key.removePrefix("channel/")
-    key.startsWith("thread/") -> {
-        // `thread/<nest>/<msg-id>`. The nest is itself
-        // `<kind>/~host/<slug>` (3 parts). Tail is the msg id.
-        val parts = key.removePrefix("thread/").split("/")
-        if (parts.size >= 3) parts.subList(0, 3).joinToString("/") else null
-    }
-    key.startsWith("dm-thread/") -> {
-        // `dm-thread/<whom>/<msg-id>`. The whom is one path segment —
-        // either `~ship` or `0vclub` — and the msg-id has its own
-        // slashes that we don't need.
-        key.removePrefix("dm-thread/").substringBefore('/').takeIf { it.isNotEmpty() }
-    }
     else -> null
 }
 
@@ -67,38 +62,44 @@ internal data class ThreadSource(val whom: String, val parentPostId: String)
 
 internal fun sourceKeyToThreadSource(key: String): ThreadSource? = when {
     key.startsWith("thread/") -> {
-        // `thread/<nest=kind/~host/slug>/<msg-id>`. The nest is 3
-        // path segments; whatever follows is the parent post id. The
-        // channel-tables form is the bare `<da>` — the substringAfter
-        // matches MessageEntity.parentId for channel posts.
+        // Tlon shape (via desk/lib/activity-json.hoon string-source):
+        //   thread/<nest=kind/~host/slug>/<dotted-da>
+        // The nest is exactly 3 path segments; the tail is `scot %ud
+        // time.key`, i.e. the DOTTED-decimal @da. MessageEntity stores
+        // channel post ids UNDOTTED, so we undot before returning.
         val parts = key.removePrefix("thread/").split("/")
         if (parts.size < 4) null
         else ThreadSource(
             whom = parts.subList(0, 3).joinToString("/"),
-            parentPostId = parts.subList(3, parts.size).joinToString("/")
-                .let(::canonicalChannelPostId),
+            parentPostId = parts[3].undot(),
         )
     }
     key.startsWith("dm-thread/") -> {
-        // `dm-thread/<whom>/<msg-id>`. The whom is a single segment
-        // (`~ship` or `0vclub`); the rest is the writ id in its
-        // canonical `~author/<da>` form, which MessageEntity stores
-        // verbatim for DM / club rows.
+        // Tlon shape:
+        //   dm-thread/<whom-segment>/<patp>/<dotted-da>
+        // whom-segment is `~ship` or `0vclub`. The trailing two
+        // segments are the writ message-id: `<author-patp>/<dotted-da>`.
+        // DM / club MessageEntity rows key on the full `~author/<da>`
+        // form with the @da UNDOTTED, so we undot just the @da half.
         val rest = key.removePrefix("dm-thread/")
-        val slash = rest.indexOf('/')
-        if (slash <= 0) null
-        else ThreadSource(
-            whom = rest.substring(0, slash),
-            parentPostId = rest.substring(slash + 1),
-        )
+        val firstSlash = rest.indexOf('/')
+        if (firstSlash <= 0) null
+        else {
+            val whom = rest.substring(0, firstSlash)
+            val msgId = rest.substring(firstSlash + 1)
+            val lastSlash = msgId.lastIndexOf('/')
+            if (lastSlash <= 0) null
+            else ThreadSource(
+                whom = whom,
+                parentPostId = msgId.substring(0, lastSlash) + "/" +
+                    msgId.substring(lastSlash + 1).undot(),
+            )
+        }
     }
     else -> null
 }
 
-/** Bare-da projection for the channel-side parent id form. Activity
- *  emits `<author>/<da>` everywhere; channel tables key on `<da>`. */
-private fun canonicalChannelPostId(rawId: String): String =
-    rawId.substringAfterLast('/')
+private fun String.undot(): String = replace(".", "")
 
 /**
  * Map a `thread/` or `dm-thread/` activity summary into a
@@ -141,6 +142,9 @@ internal fun sourceToWhom(source: JsonObject): String? {
  * - `notify-count` — subset that should ping the user (@-mentions,
  *   replies to our own posts). Drives the Mentions tab.
  * - `recency` — last-event ms, used to sort the home list.
+ * - `unread.id` — first-unread message boundary (null when caught
+ *   up). Canonicalized to match MessageEntity.id and stored as
+ *   [UnreadEntity.firstUnreadId] for the "New" divider anchor.
  */
 internal fun toUnread(
     sourceKey: String?,
@@ -153,12 +157,41 @@ internal fun toUnread(
     val count = summary["count"].asInt() ?: 0
     val notifyCount = summary["notify-count"].asInt() ?: 0
     val recency = summary["recency"].asLong() ?: 0L
+    // `unread` is `~` (absent) when the conversation is fully read;
+    // otherwise an object whose `id` is the first-unread message id in
+    // wire form (`~author/<dotted-da>`).
+    val firstUnreadId = (summary["unread"] as? JsonObject)
+        ?.get("id").asStr()
+        ?.let { canonicalUnreadId(whom, it) }
     return UnreadEntity(
         whom = whom,
         count = count,
         notifyCount = notifyCount,
         recencyMs = recency,
+        firstUnreadId = firstUnreadId,
     )
+}
+
+/**
+ * Convert an activity `unread.id` (wire form `~author/<dotted-da>`)
+ * into the conversation's canonical MessageEntity.id form:
+ *  - channels (`chat/`, `diary/`, `heap/`) → bare UNDOTTED `@da`
+ *    (channel rows key on just the time)
+ *  - DM / club → `~author/<undotted-da>` (writ rows keep the author)
+ *
+ * `scot %ud` emits the @da dotted; MessageEntity stores it undotted
+ * (see the dedupe pass in TlonChatRepo), so we strip dots either way.
+ */
+internal fun canonicalUnreadId(whom: String, rawId: String): String {
+    val isChannel = whom.startsWith("chat/") ||
+        whom.startsWith("diary/") || whom.startsWith("heap/")
+    return if (isChannel) {
+        rawId.substringAfterLast('/').replace(".", "")
+    } else {
+        val slash = rawId.lastIndexOf('/')
+        if (slash < 0) rawId.replace(".", "")
+        else rawId.substring(0, slash) + "/" + rawId.substring(slash + 1).replace(".", "")
+    }
 }
 
 /**

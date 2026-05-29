@@ -2726,7 +2726,15 @@ class TlonChatRepo(
         // grows with chat count. Same generous timeout as init-posts
         // (see [BOOTSTRAP_TIMEOUT_SECS]). Far less common to hit but
         // the budget is cheap.
-        val body = channel.scry("activity", "/v4/activity", BOOTSTRAP_TIMEOUT_SECS)
+        //
+        // `/v4/activity/full` (NOT plain `/v4/activity`) — the latter
+        // calls `strip-threads activity` in the agent's peek arm,
+        // returning only conversation-level (channel/ship/club)
+        // summaries. Without `full` the per-thread `thread/<nest>/<da>`
+        // and `dm-thread/<whom>/<author>/<da>` sources never surface,
+        // and ThreadUnreadEntity never populates — leaving the
+        // per-row indicator tint and in-thread "New" divider perma-off.
+        val body = channel.scry("activity", "/v4/activity/full", BOOTSTRAP_TIMEOUT_SECS)
         val obj = body as? JsonObject
         if (obj == null) {
             Log.w(
@@ -2748,15 +2756,18 @@ class TlonChatRepo(
         // thread indicator can tint when its specific thread has
         // unread events, and the in-thread view can render the "New"
         // divider above the first unread reply. The channel-level
-        // [rows] above already reflects these events in aggregate;
-        // we're not double-counting, just keeping a finer-grained
-        // shadow copy of the per-thread sources.
+        // [rows] above already reflects channel-direct activity from
+        // the `channel/<nest>` source; thread rows are independent
+        // (no double-counting because `sourceKeyToWhom` returns null
+        // for `thread/` / `dm-thread/` now).
+        //
+        // No focus-override on thread rows: the user being focused on
+        // the *channel* doesn't mean they've opened the *thread*. The
+        // tint should appear under the parent message even while the
+        // channel is open, and only clear when they tap into the
+        // specific thread (`markThreadReadLocal`).
         val threadRows = obj.entries.mapNotNull { (sourceKey, summary) ->
             toThreadUnread(sourceKey, summary as? JsonObject ?: return@mapNotNull null)
-        }.map { row ->
-            // Same focus-override: a refresh shouldn't re-light a
-            // thread inside the conversation the user is staring at.
-            if (row.whom == focused) row.copy(count = 0, notifyCount = 0) else row
         }
         Log.i(
             TAG,
@@ -2786,10 +2797,10 @@ class TlonChatRepo(
                     row.copy(count = 0, notifyCount = 0)
                 } else row
             }
+            // See bootstrapActivity for the no-focus-override rationale —
+            // thread indicator should tint even while the channel is open.
             val threadRows = map.entries.mapNotNull { (key, summary) ->
                 toThreadUnread(key, summary as? JsonObject ?: return@mapNotNull null)
-            }.map { row ->
-                if (row.whom == focused) row.copy(count = 0, notifyCount = 0) else row
             }
             if (rows.isNotEmpty()) db.unreads().upsertAll(rows)
             if (threadRows.isNotEmpty()) db.threadUnreads().upsertAll(threadRows)
@@ -2860,11 +2871,17 @@ class TlonChatRepo(
                 recencyMs = System.currentTimeMillis(),
             )
         )
-        // The server's read-action recurses via `deep=true` so the
-        // per-thread sources clear too; mirror locally so the per-row
-        // thread-indicator tints clear instantly instead of waiting
-        // for the SSE round-trip.
-        db.threadUnreads().deleteForWhom(whom)
+        // NOTE: deliberately does NOT clear per-thread unread rows here.
+        // markRead fires when a CHANNEL is opened (setOpenChat), but
+        // the user has to open the channel to even see the message
+        // whose thread we want to tint — wiping thread_unreads on
+        // channel-open made the accent tint structurally impossible to
+        // observe (it cleared before render). Per-thread rows clear
+        // only when the user opens the specific thread, via
+        // [markThreadReadLocal] (ThreadList wires this). A thread the
+        // user reads on another client self-heals: the next
+        // /v4/activity/full scry returns that source with count=0 and
+        // the upsert overwrites the stale row.
 
         val groupFlag = if (
             whom.startsWith("chat/") ||
@@ -3385,7 +3402,14 @@ class TlonChatRepo(
             for (bundleEl in all) {
                 val bundle = bundleEl as? JsonObject ?: continue
                 val sourceKey = bundle["source-key"].asStr()
-                val sourceWhom = sourceKey?.let { sourceKeyToWhom(it) }
+                // sourceKeyToWhom returns null for thread / dm-thread
+                // keys now (those are routed to ThreadUnreadEntity);
+                // for the Activity feed's title we still want the
+                // conversation name, so fall back to the parent whom
+                // via sourceKeyToThreadSource.
+                val sourceWhom = sourceKey?.let { key ->
+                    sourceKeyToWhom(key) ?: sourceKeyToThreadSource(key)?.whom
+                }
                 val title = when {
                     sourceWhom == null -> sourceKey ?: "activity"
                     sourceWhom.startsWith("~") -> sourceWhom

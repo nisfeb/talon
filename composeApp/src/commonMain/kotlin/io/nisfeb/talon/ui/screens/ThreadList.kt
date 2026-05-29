@@ -51,6 +51,8 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.snapshotFlow
+import kotlinx.coroutines.flow.collectLatest
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -185,10 +187,15 @@ fun ThreadList(
     var threadUnreadSnapshot by remember(whom, parentId) {
         mutableStateOf<Int?>(null)
     }
+    var threadDividerResolved by remember(whom, parentId) { mutableStateOf(false) }
+    // Fade trigger for the in-thread "New" divider — same dwell-fade
+    // contract as the channel divider in DmChatScreen.
+    var threadDividerFaded by remember(whom, parentId) { mutableStateOf(false) }
     LaunchedEffect(whom, parentId) {
-        if (threadUnreadSnapshot == null) {
+        if (!threadDividerResolved) {
             val row = db.threadUnreads().getOne(whom, parentId)
             threadUnreadSnapshot = row?.count ?: 0
+            threadDividerResolved = true
             if ((row?.count ?: 0) > 0) {
                 runCatching { repo.markThreadReadLocal(whom, parentId) }
             }
@@ -384,6 +391,33 @@ fun ThreadList(
         )
     }
 
+    // First-unread anchor for the "New" divider, hoisted out of the
+    // LazyColumn builder so the dwell-fade effect below can watch it.
+    // Reply list is oldest-first → newest-last, so the last N entries
+    // are the unread ones (per the snapshot captured at thread-open).
+    // null when there's nothing to flag.
+    val firstUnreadReplyId: String? = run {
+        val n = threadUnreadSnapshot ?: 0
+        if (n <= 0 || rows.second.isEmpty()) null
+        else rows.second
+            .getOrNull(rows.second.size - n.coerceAtMost(rows.second.size))
+            ?.m
+            ?.id
+    }
+    // Dwell-fade: same contract as the channel divider. Once the reply
+    // the divider sits above has been continuously visible 5s, fade.
+    LaunchedEffect(firstUnreadReplyId, whom, parentId) {
+        if (firstUnreadReplyId == null || threadDividerFaded) return@LaunchedEffect
+        snapshotFlow {
+            listState.layoutInfo.visibleItemsInfo.any { it.key == firstUnreadReplyId }
+        }.collectLatest { visible ->
+            if (visible) {
+                delay(5_000)
+                threadDividerFaded = true
+            }
+        }
+    }
+
     Column(modifier = modifier) {
         LazyColumn(
             state = listState,
@@ -426,25 +460,13 @@ fun ThreadList(
                 }
                 item(key = "__parent_divider") { HorizontalDivider() }
             }
-            // First-unread anchor for the "New" divider. Reply list
-            // is oldest-first → newest-last, so the last N entries
-            // are the unread ones (per the snapshot we captured at
-            // thread-open). null when there's nothing to flag.
-            val firstUnreadReplyId = run {
-                val n = threadUnreadSnapshot ?: 0
-                if (n <= 0 || rows.second.isEmpty()) null
-                else rows.second
-                    .getOrNull(rows.second.size - n.coerceAtMost(rows.second.size))
-                    ?.m
-                    ?.id
-            }
             items(
                 items = rows.second,
                 key = { it.m.id },
                 contentType = { "reply" },
             ) { row ->
                 if (row.m.id == firstUnreadReplyId) {
-                    io.nisfeb.talon.ui.UnreadDividerRow()
+                    io.nisfeb.talon.ui.UnreadDividerRow(faded = threadDividerFaded)
                 }
                 val replyMsg = row.m
                 ThreadMessage(

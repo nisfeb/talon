@@ -10,38 +10,41 @@ import kotlin.test.assertNull
 class ThreadUnreadParserTest {
 
     @Test
-    fun `channel thread key splits into nest and bare-da post id`() {
-        // `thread/<kind>/~host/<slug>/<author>/<da>` — the trailing
-        // <author>/<da> is the wire form; MessageEntity.parentId for
-        // channel posts is the bare <da>, so we strip the author here.
+    fun `channel thread key splits into nest and UNDOTTED da post id`() {
+        // Tlon shape: `thread/<kind>/~host/<slug>/<dotted-da>`. The
+        // @da is emitted via `scot %ud` (dotted), but MessageEntity
+        // stores channel post ids UNDOTTED — so the parser must
+        // strip dots, otherwise threadUnreadByPost[m.id] never
+        // matches at the call site and the indicator stays untinted.
         val src = sourceKeyToThreadSource(
-            "thread/chat/~host/general/~zod/170.141.184.505.123.456.789",
+            "thread/chat/~host/general/170.141.184.505.123.456.789",
         )
         assertNotNull(src)
         assertEquals("chat/~host/general", src.whom)
-        assertEquals("170.141.184.505.123.456.789", src.parentPostId)
+        assertEquals("170141184505123456789", src.parentPostId)
     }
 
     @Test
-    fun `dm-thread key preserves the full author-prefixed writ id`() {
-        // DM / club tables key on the full `~author/<da>` form — don't
-        // strip the author segment like we do for channels.
+    fun `dm-thread key preserves author prefix and undots only the da`() {
+        // Tlon shape: `dm-thread/<whom>/<author>/<dotted-da>`. DM /
+        // club MessageEntity rows key on `~author/<undotted-da>`, so
+        // we undot just the @da half.
         val src = sourceKeyToThreadSource(
             "dm-thread/~peer/~peer/170.141.184.505.111.222.333",
         )
         assertNotNull(src)
         assertEquals("~peer", src.whom)
-        assertEquals("~peer/170.141.184.505.111.222.333", src.parentPostId)
+        assertEquals("~peer/170141184505111222333", src.parentPostId)
     }
 
     @Test
-    fun `dm-thread key with club whom preserves full writ id`() {
+    fun `dm-thread key with club whom undots only the da`() {
         val src = sourceKeyToThreadSource(
             "dm-thread/0v4.abcde/~bus/170.141.184.505.987.654.321",
         )
         assertNotNull(src)
         assertEquals("0v4.abcde", src.whom)
-        assertEquals("~bus/170.141.184.505.987.654.321", src.parentPostId)
+        assertEquals("~bus/170141184505987654321", src.parentPostId)
     }
 
     @Test
@@ -65,6 +68,8 @@ class ThreadUnreadParserTest {
     fun `malformed dm-thread key returns null`() {
         assertNull(sourceKeyToThreadSource("dm-thread/~peer"))
         assertNull(sourceKeyToThreadSource("dm-thread/"))
+        // No author/da tail — only the whom segment.
+        assertNull(sourceKeyToThreadSource("dm-thread/~peer/onlyonepart"))
     }
 
     @Test
@@ -76,12 +81,12 @@ class ThreadUnreadParserTest {
         }
         val entity = assertNotNull(
             toThreadUnread(
-                "thread/chat/~host/g/~zod/170.141.184.505.123.456.789",
+                "thread/chat/~host/g/170.141.184.505.123.456.789",
                 summary,
             ),
         )
         assertEquals("chat/~host/g", entity.whom)
-        assertEquals("170.141.184.505.123.456.789", entity.parentPostId)
+        assertEquals("170141184505123456789", entity.parentPostId)
         assertEquals(5, entity.count)
         assertEquals(2, entity.notifyCount)
         assertEquals(1_700_000_111_222L, entity.recencyMs)

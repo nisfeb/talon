@@ -46,9 +46,19 @@ fun ThreadIndicator(
     hasUnread: Boolean = false,
 ) {
     if (count <= 0) return
-    val bg = if (hasUnread) MaterialTheme.colorScheme.primaryContainer
+    // Unread tint reads `colorScheme.primary` (the user's accent —
+    // yellow on the default theme), NOT primaryContainer: the accent
+    // override in Theme.kt only recomputes `primary`/`onPrimary` and
+    // leaves the container roles at their brand values, so a
+    // primaryContainer fill showed up as dark brown (invisible
+    // against surfaceVariant) regardless of the chosen accent. We use
+    // a low-alpha primary fill so the pill reads clearly accent-tinted
+    // without a glaring solid block, with full-accent text/icon —
+    // matching how UnreadDividerRow colors the "New" divider.
+    val accent = MaterialTheme.colorScheme.primary
+    val bg = if (hasUnread) accent.copy(alpha = 0.20f)
         else MaterialTheme.colorScheme.surfaceVariant
-    val fg = if (hasUnread) MaterialTheme.colorScheme.onPrimaryContainer
+    val fg = if (hasUnread) accent
         else MaterialTheme.colorScheme.onSurfaceVariant
     Row(
         verticalAlignment = Alignment.CenterVertically,

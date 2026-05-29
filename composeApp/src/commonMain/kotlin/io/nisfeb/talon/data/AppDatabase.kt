@@ -50,7 +50,7 @@ import androidx.room.RoomDatabaseConstructor
         MessageMediaEntity::class,
         RailItemPrefEntity::class,
     ],
-    version = 32,
+    version = 33,
     exportSchema = false,
 )
 @ConstructedBy(AppDatabaseConstructor::class)

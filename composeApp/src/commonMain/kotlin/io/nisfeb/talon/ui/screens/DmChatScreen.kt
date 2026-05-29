@@ -82,6 +82,8 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collectLatest
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -253,29 +255,41 @@ fun DmChatScreen(
             .flowOn(Dispatchers.Default)
     }.collectAsState(initial = ChatRowsSnapshot.get(whom))
 
+    // Unread COUNT — drives the catch-me-up banner only. Captured on
+    // entry; not used for the divider anymore (see dividerAnchorId).
     var unreadSnapshot by remember(whom) { mutableStateOf<Int?>(null) }
 
-    val displayRows = remember(rows, unreadSnapshot) {
-        val n = unreadSnapshot ?: 0
-        if (n <= 0 || rows.isEmpty()) rows
+    // "New" divider anchor: the id of the first-unread message, taken
+    // from %activity's server-provided boundary (UnreadEntity.first
+    // UnreadId), captured ONCE on entry. null = no divider. Anchoring
+    // to the message id instead of "count from the end" fixes two
+    // bugs: (1) the count includes reaction / reply events, so a
+    // reaction on an old post used to drop a spurious divider over old
+    // content; (2) it mis-placed the divider whenever unread events
+    // outnumbered unread messages. The id boundary is exact and is
+    // null precisely when the conversation is caught up.
+    var dividerAnchorId by remember(whom) { mutableStateOf<String?>(null) }
+    var dividerResolved by remember(whom) { mutableStateOf(false) }
+    // Fade trigger. The divider element stays in the list once placed;
+    // flipping this true fades it to transparent (height preserved, no
+    // reflow). Never nulled back here — re-entry re-seeds the anchor.
+    var dividerFaded by remember(whom) { mutableStateOf(false) }
+
+    val displayRows = remember(rows, dividerAnchorId) {
+        val anchor = dividerAnchorId
+        if (anchor == null || rows.isEmpty()) rows
         else {
-            var remaining = n
-            var insertAt = rows.size
-            for (i in rows.indices.reversed()) {
-                if (rows[i] is ChatListItem.Message) {
-                    if (remaining == 0) break
-                    remaining--
-                }
-                insertAt = i
-                if (remaining == 0) break
+            val idx = rows.indexOfFirst {
+                it is ChatListItem.Message && it.row.m.id == anchor
             }
-            if (insertAt >= rows.size) rows
-            else {
-                ArrayList<ChatListItem>(rows.size + 1).apply {
-                    addAll(rows.subList(0, insertAt))
-                    add(ChatListItem.UnreadDivider)
-                    addAll(rows.subList(insertAt, rows.size))
-                }
+            // Anchor not loaded yet (rows still paging in) → no divider
+            // this pass; recomputes when `rows` updates and the message
+            // lands.
+            if (idx < 0) rows
+            else ArrayList<ChatListItem>(rows.size + 1).apply {
+                addAll(rows.subList(0, idx))
+                add(ChatListItem.UnreadDivider)
+                addAll(rows.subList(idx, rows.size))
             }
         }
     }
@@ -419,10 +433,42 @@ fun DmChatScreen(
     }
 
     LaunchedEffect(whom) {
-        if (unreadSnapshot == null) {
-            unreadSnapshot = db.unreads().getOne(whom)?.count ?: 0
+        if (!dividerResolved) {
+            // Read the unread row BEFORE setOpenChat (which fires
+            // markRead, clearing count + boundary). We snapshot both
+            // here so the divider survives the channel-open mark-read
+            // and only clears via the dwell logic below.
+            val u = db.unreads().getOne(whom)
+            unreadSnapshot = u?.count ?: 0
+            dividerAnchorId = u?.firstUnreadId
+            dividerResolved = true
         }
         repo.setOpenChat(whom)
+    }
+
+    // Dwell-fade: once the "New" divider has been continuously visible
+    // for 5s (the user scrolled to it and lingered — not a fixed timer
+    // from entry, which would fire before they reach it), fade it out.
+    // We flip [dividerFaded] rather than removing the element, so it
+    // fades in place over UNREAD_DIVIDER_FADE_MS with its height
+    // preserved — nothing below reflows and no tap target slides under
+    // the pointer. markRead already cleared the server + local boundary
+    // on entry, so it won't reappear on re-entry until a genuinely
+    // newer message arrives and %activity hands us a new firstUnreadId.
+    LaunchedEffect(dividerAnchorId, whom) {
+        if (dividerAnchorId == null || dividerFaded) return@LaunchedEffect
+        snapshotFlow {
+            listState.layoutInfo.visibleItemsInfo.any {
+                it.key == ChatListItem.UnreadDivider.key
+            }
+        }.collectLatest { visible ->
+            if (visible) {
+                delay(5_000)
+                // Reached only if still visible after 5s — collectLatest
+                // cancels this branch the moment visibility flips off.
+                dividerFaded = true
+            }
+        }
     }
 
     var refreshing by remember(whom) { mutableStateOf(false) }
@@ -860,7 +906,8 @@ fun DmChatScreen(
                 ) { item ->
                     when (item) {
                         is ChatListItem.DateDivider -> DateDividerRow(item.label)
-                        is ChatListItem.UnreadDivider -> io.nisfeb.talon.ui.UnreadDividerRow()
+                        is ChatListItem.UnreadDivider ->
+                            io.nisfeb.talon.ui.UnreadDividerRow(faded = dividerFaded)
                         is ChatListItem.Message -> {
                             val rowMsg = item.row.m
                             MessageRow(
