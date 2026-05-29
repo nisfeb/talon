@@ -55,6 +55,10 @@ class AndroidUiSettings(
     override val groupChannelOrder: StateFlow<GroupChannelOrder> =
         _groupChannelOrder.asStateFlow()
 
+    private val _folderItemOrder = MutableStateFlow(loadFolderItemOrder())
+    override val folderItemOrder: StateFlow<FolderItemOrder> =
+        _folderItemOrder.asStateFlow()
+
     private val _chatPaneListFraction = MutableStateFlow(
         prefs.getFloat(KEY_CHAT_PANE_LIST_FRACTION, 0.30f).coerceIn(0.20f, 0.50f),
     )
@@ -146,6 +150,12 @@ class AndroidUiSettings(
         _groupChannelOrder.value = order
     }
 
+    override fun setFolderItemOrder(order: FolderItemOrder) {
+        if (_folderItemOrder.value == order) return
+        prefs.edit().putString(KEY_FOLDER_ITEM_ORDER, order.name).apply()
+        _folderItemOrder.value = order
+    }
+
     override fun setChatPaneListFraction(value: Float) {
         val clamped = value.coerceIn(0.20f, 0.50f)
         if (_chatPaneListFraction.value == clamped) return
@@ -197,6 +207,12 @@ class AndroidUiSettings(
             .getOrDefault(GroupChannelOrder.Recent)
     }
 
+    private fun loadFolderItemOrder(): FolderItemOrder {
+        val name = prefs.getString(KEY_FOLDER_ITEM_ORDER, null) ?: return FolderItemOrder.Manual
+        return runCatching { FolderItemOrder.valueOf(name) }
+            .getOrDefault(FolderItemOrder.Manual)
+    }
+
     private fun loadRailItemOrder(prefs: android.content.SharedPreferences): List<RailItem> {
         val raw = prefs.getString(KEY_RAIL_ITEM_ORDER, null) ?: return RailItem.entries
         return raw.split(",").mapNotNull { railItemOrNull(it.trim()) }
@@ -225,6 +241,7 @@ class AndroidUiSettings(
         private const val KEY_ACCENT_MODE = "accent_mode"
         private const val KEY_ACCENT_HEX = "accent_hex"
         private const val KEY_GROUP_CHANNEL_ORDER = "group_channel_order"
+        private const val KEY_FOLDER_ITEM_ORDER = "folder_item_order"
         private const val KEY_CHAT_PANE_LIST_FRACTION = "chat_pane_list_fraction"
         private const val KEY_ACTIVE_RAIL_TAB = "active_rail_tab"
         private const val KEY_SMART_SEARCH_PREFERRED = "smart_search_preferred"

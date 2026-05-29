@@ -118,6 +118,7 @@ fun SettingsScreen(
     val density by uiSettings.density.collectAsState()
     val accentSettings by uiSettings.accentSettings.collectAsState()
     val groupChannelOrder by uiSettings.groupChannelOrder.collectAsState()
+    val folderItemOrder by uiSettings.folderItemOrder.collectAsState()
     val accentEnabled = io.nisfeb.talon.ui.AccentSettings
         .isEnabled(accentSettings, multiShip)
     var customHexInput by remember(accentSettings.customHex) {
@@ -305,6 +306,34 @@ fun SettingsScreen(
                         )
                     },
                     label = { Text("Host order") },
+                )
+            }
+            Spacer(Modifier.height(8.dp))
+
+            Text(
+                "How groups and folder contents sort at the top level. " +
+                    "Unread items still float to the top in either mode.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilterChip(
+                    selected = folderItemOrder == io.nisfeb.talon.ui.FolderItemOrder.Manual,
+                    onClick = {
+                        uiSettings.setFolderItemOrder(
+                            io.nisfeb.talon.ui.FolderItemOrder.Manual,
+                        )
+                    },
+                    label = { Text("Saved order") },
+                )
+                FilterChip(
+                    selected = folderItemOrder == io.nisfeb.talon.ui.FolderItemOrder.Recent,
+                    onClick = {
+                        uiSettings.setFolderItemOrder(
+                            io.nisfeb.talon.ui.FolderItemOrder.Recent,
+                        )
+                    },
+                    label = { Text("Most recent") },
                 )
             }
             Spacer(Modifier.height(8.dp))

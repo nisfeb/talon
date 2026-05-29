@@ -1368,6 +1368,8 @@ fun TalonApp(
                 batteryBanner = { BatteryExemptionBanner() },
                 groupChannelOrder = app.uiSettings.groupChannelOrder
                     .collectAsState().value,
+                folderItemOrder = app.uiSettings.folderItemOrder
+                    .collectAsState().value,
                 kebabItems = RailItem.entries.toSet(),
                 modifier = mod,
             )

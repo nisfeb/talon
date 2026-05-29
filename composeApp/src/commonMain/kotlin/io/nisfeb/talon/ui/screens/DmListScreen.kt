@@ -178,6 +178,11 @@ fun DmListScreen(
      *  takes effect without a relaunch. */
     groupChannelOrder: io.nisfeb.talon.ui.GroupChannelOrder =
         io.nisfeb.talon.ui.GroupChannelOrder.Recent,
+    /** How the home list's Groups section and any custom folder's
+     *  top-level entries sort. Same UiSettings-driven plumbing as
+     *  [groupChannelOrder]. */
+    folderItemOrder: io.nisfeb.talon.ui.FolderItemOrder =
+        io.nisfeb.talon.ui.FolderItemOrder.Manual,
     /** When set to true by a keyboard-shortcut handler upstream, open
      *  the search screen and reset the flag. DmListScreen has no
      *  inline search field — Ctrl+K navigates to the full SearchScreen
@@ -443,7 +448,7 @@ fun DmListScreen(
     val allUnreads = remember(rows) { rows.associate { it.first.whom to it.second } }
     val homeRows = remember(
         selectedFolderId, rows, groupOrders, contactMap, expandedGroups, allUnreads,
-        groupChannelOrder,
+        groupChannelOrder, folderItemOrder,
     ) {
         if (selectedFolderId != null) emptyList()
         else buildHomeRows(
@@ -453,6 +458,7 @@ fun DmListScreen(
             allUnreads = allUnreads,
             groupOrderFlags = groupOrders.map { it.flag },
             groupChannelOrder = groupChannelOrder,
+            folderItemOrder = folderItemOrder,
         )
     }
     // Snapshot the effective group order at this moment so the reorder
@@ -473,7 +479,7 @@ fun DmListScreen(
     // conversation rows, in the user's per-folder ordinal order.
     val folderRows = remember(
         selectedFolderId, rows, members, contactMap, expandedGroups, allUnreads,
-        groupChannelOrder,
+        groupChannelOrder, folderItemOrder,
     ) {
         val fid = selectedFolderId ?: return@remember emptyList<HomeRow>()
         val folderMembers = members.filter { it.folderId == fid }
@@ -484,6 +490,7 @@ fun DmListScreen(
             expandedGroups = expandedGroups,
             allUnreads = allUnreads,
             groupChannelOrder = groupChannelOrder,
+            folderItemOrder = folderItemOrder,
         )
     }
 

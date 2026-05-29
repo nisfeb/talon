@@ -43,6 +43,10 @@ class DesktopUiSettings(
         val accentCustomHex: String? = null,
         // Channel ordering inside group dropdowns on the home list.
         val groupChannelOrder: String = GroupChannelOrder.Recent.name,
+        // Top-level item ordering inside custom folders and the
+        // home list's Groups section. Default Manual keeps the
+        // pre-existing saved-order behavior so the setting is opt-in.
+        val folderItemOrder: String = FolderItemOrder.Manual.name,
         // Fraction of total width given to the chat-list pane on wide windows.
         val chatPaneListFraction: Float = 0.30f,
         val activeRailTab: String = RailTab.Chats.name,
@@ -74,6 +78,13 @@ class DesktopUiSettings(
     )
     override val groupChannelOrder: StateFlow<GroupChannelOrder> =
         _groupChannelOrder.asStateFlow()
+
+    private val _folderItemOrder = MutableStateFlow(
+        runCatching { FolderItemOrder.valueOf(initial.folderItemOrder) }
+            .getOrDefault(FolderItemOrder.Manual),
+    )
+    override val folderItemOrder: StateFlow<FolderItemOrder> =
+        _folderItemOrder.asStateFlow()
 
     private val _chatPaneListFraction = MutableStateFlow(
         initial.chatPaneListFraction.coerceIn(0.20f, 0.50f),
@@ -135,6 +146,12 @@ class DesktopUiSettings(
         persistCurrent()
     }
 
+    override fun setFolderItemOrder(order: FolderItemOrder) {
+        if (_folderItemOrder.value == order) return
+        _folderItemOrder.value = order
+        persistCurrent()
+    }
+
     override fun setChatPaneListFraction(value: Float) {
         val clamped = value.coerceIn(0.20f, 0.50f)
         if (_chatPaneListFraction.value == clamped) return
@@ -182,6 +199,7 @@ class DesktopUiSettings(
                 accentMode = accent.mode.name,
                 accentCustomHex = accent.customHex,
                 groupChannelOrder = _groupChannelOrder.value.name,
+                folderItemOrder = _folderItemOrder.value.name,
                 chatPaneListFraction = _chatPaneListFraction.value,
                 activeRailTab = _activeRailTab.value.name,
                 smartSearchPreferred = _smartSearchPreferred.value,

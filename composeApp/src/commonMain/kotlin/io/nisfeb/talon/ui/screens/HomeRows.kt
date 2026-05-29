@@ -49,18 +49,46 @@ fun buildHomeRows(
      *  always float to the top regardless of mode. */
     groupChannelOrder: io.nisfeb.talon.ui.GroupChannelOrder =
         io.nisfeb.talon.ui.GroupChannelOrder.Recent,
+    /** When [io.nisfeb.talon.ui.FolderItemOrder.Recent], reorder the
+     *  Groups section's top-level entries by the most-recent activity
+     *  across each group's channels (unread groups float first).
+     *  Default Manual preserves the user's saved group order
+     *  ([groupOrderFlags]). */
+    folderItemOrder: io.nisfeb.talon.ui.FolderItemOrder =
+        io.nisfeb.talon.ui.FolderItemOrder.Manual,
 ): List<HomeRow> {
     val byWhom = allConvs.associateBy { it.first.whom }
 
     val out = mutableListOf<HomeRow>()
 
     val allFlags = contactMap.allGroups().associateBy { it.flag }
-    val orderedFlagsSet = groupOrderFlags.toSet()
-    val orderedGroups = groupOrderFlags.mapNotNull { allFlags[it] }
-    val unorderedGroups = allFlags.values
-        .filter { it.flag !in orderedFlagsSet }
-        .sortedBy { (it.title ?: it.flag).lowercase() }
-    val groups = orderedGroups + unorderedGroups
+    val groups = when (folderItemOrder) {
+        io.nisfeb.talon.ui.FolderItemOrder.Manual -> {
+            val orderedFlagsSet = groupOrderFlags.toSet()
+            val orderedGroups = groupOrderFlags.mapNotNull { allFlags[it] }
+            val unorderedGroups = allFlags.values
+                .filter { it.flag !in orderedFlagsSet }
+                .sortedBy { (it.title ?: it.flag).lowercase() }
+            orderedGroups + unorderedGroups
+        }
+        io.nisfeb.talon.ui.FolderItemOrder.Recent -> {
+            // Order groups by aggregate activity: unread groups first
+            // (any channel with unread > 0 floats the group up), then
+            // by the freshest channel timestamp inside that group.
+            // Alpha-by-title as the final tiebreaker so groups with no
+            // activity yet still sort stably.
+            allFlags.values.sortedWith(
+                compareByDescending<io.nisfeb.talon.data.GroupEntity> { g ->
+                    contactMap.channelsOfGroup(g.flag).any { (allUnreads[it] ?: 0) > 0 }
+                }
+                    .thenByDescending { g ->
+                        contactMap.channelsOfGroup(g.flag)
+                            .maxOfOrNull { byWhom[it]?.first?.sentMs ?: 0L } ?: 0L
+                    }
+                    .thenBy { (it.title ?: it.flag).lowercase() }
+            )
+        }
+    }
     val ordinalByNest = contactMap.channelGroups.associate { it.nest to it.ordinal }
     if (groups.isNotEmpty()) {
         out += HomeRow.Header("Groups", "groups")
@@ -132,10 +160,43 @@ fun buildFolderRows(
     allUnreads: Map<String, Int>,
     groupChannelOrder: io.nisfeb.talon.ui.GroupChannelOrder =
         io.nisfeb.talon.ui.GroupChannelOrder.Recent,
+    /** When [io.nisfeb.talon.ui.FolderItemOrder.Recent], top-level
+     *  folder members (groups + DMs) reorder by most-recent activity,
+     *  with unread items floating first. Default Manual respects each
+     *  member's saved [FolderMemberEntity.ordinal]. */
+    folderItemOrder: io.nisfeb.talon.ui.FolderItemOrder =
+        io.nisfeb.talon.ui.FolderItemOrder.Manual,
 ): List<HomeRow> {
     if (members.isEmpty()) return emptyList()
     val byWhom = allConvs.associateBy { it.first.whom }
-    val sorted = members.sortedBy { it.ordinal }
+    val sorted = when (folderItemOrder) {
+        io.nisfeb.talon.ui.FolderItemOrder.Manual -> members.sortedBy { it.ordinal }
+        io.nisfeb.talon.ui.FolderItemOrder.Recent -> {
+            // For a group member: aggregate unread / max sentMs across
+            // the group's channels. For a loose conv (DM): its own
+            // unread + sentMs. Both metrics resolve to the same
+            // comparators so groups and DMs interleave by recency.
+            fun unreadOf(m: FolderMemberEntity): Boolean =
+                if (m.kind == FolderMemberEntity.KIND_GROUP)
+                    contactMap.channelsOfGroup(m.whom).any { (allUnreads[it] ?: 0) > 0 }
+                else (allUnreads[m.whom] ?: 0) > 0
+            fun sentOf(m: FolderMemberEntity): Long =
+                if (m.kind == FolderMemberEntity.KIND_GROUP)
+                    contactMap.channelsOfGroup(m.whom)
+                        .maxOfOrNull { byWhom[it]?.first?.sentMs ?: 0L } ?: 0L
+                else byWhom[m.whom]?.first?.sentMs ?: 0L
+            fun labelOf(m: FolderMemberEntity): String =
+                if (m.kind == FolderMemberEntity.KIND_GROUP) {
+                    val g = contactMap.allGroups().firstOrNull { it.flag == m.whom }
+                    (g?.title ?: m.whom).lowercase()
+                } else m.whom.lowercase()
+            members.sortedWith(
+                compareByDescending<FolderMemberEntity> { unreadOf(it) }
+                    .thenByDescending { sentOf(it) }
+                    .thenBy { labelOf(it) }
+            )
+        }
+    }
     val ordinalByNest = contactMap.channelGroups.associate { it.nest to it.ordinal }
 
     val coveredByGroup = buildSet {

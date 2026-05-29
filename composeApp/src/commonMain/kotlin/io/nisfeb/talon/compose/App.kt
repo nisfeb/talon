@@ -1507,6 +1507,8 @@ fun App(
                                         },
                                         groupChannelOrder = uiSettings.groupChannelOrder
                                             .collectAsState().value,
+                                        folderItemOrder = uiSettings.folderItemOrder
+                                            .collectAsState().value,
                                         focusSearchRequest = focusSearchRequest,
                                         onFocusSearchHandled = { focusSearchRequest = false },
                                         showNewDmRequest = showNewDmRequest,

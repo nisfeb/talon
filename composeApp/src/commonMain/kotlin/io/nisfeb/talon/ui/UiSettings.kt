@@ -40,6 +40,19 @@ interface UiSettings {
     fun setGroupChannelOrder(order: GroupChannelOrder)
 
     /**
+     * How top-level items in the home list (groups in the Groups
+     * section) and inside a custom folder sort. Default
+     * [FolderItemOrder.Manual] preserves the saved order — for the
+     * home list that's the user's group-order (via %settings sync);
+     * for folders it's the user-set ordinal of each member.
+     * [FolderItemOrder.Recent] reorders by most-recent activity, with
+     * unread items still floating to the top (mirrors the
+     * unread-first cascade in [GroupChannelOrder.Recent]).
+     */
+    val folderItemOrder: StateFlow<FolderItemOrder>
+    fun setFolderItemOrder(order: FolderItemOrder)
+
+    /**
      * Ratio of total width given to the chat-list pane on wide
      * windows (≥840dp). Clamped to 0.20–0.50 at the setter; corrupt
      * values from disk get normalised on next write. See
@@ -126,6 +139,12 @@ interface UiSettings {
 enum class GroupChannelOrder { Recent, HostOrder }
 
 /**
+ * How the home list's Groups section and any custom folder's
+ * contents are ordered at the top level. See [UiSettings.folderItemOrder].
+ */
+enum class FolderItemOrder { Manual, Recent }
+
+/**
  * How the active ship's accent gets resolved to a single color.
  *
  * - [Brand] — always use the Talon brand primary. The off state.
@@ -161,6 +180,7 @@ class InMemoryUiSettings(
     initialHide: Boolean = false,
     initialAccent: AccentSettings = AccentSettings(),
     initialGroupOrder: GroupChannelOrder = GroupChannelOrder.Recent,
+    initialFolderItemOrder: FolderItemOrder = FolderItemOrder.Manual,
     initialChatPaneListFraction: Float = 0.30f,
     initialActiveRailTab: RailTab = RailTab.Chats,
     initialRailVisibility: Map<RailItem, Boolean> = emptyMap(),
@@ -186,6 +206,13 @@ class InMemoryUiSettings(
         _groupChannelOrder.asStateFlow()
     override fun setGroupChannelOrder(order: GroupChannelOrder) {
         _groupChannelOrder.value = order
+    }
+
+    private val _folderItemOrder = MutableStateFlow(initialFolderItemOrder)
+    override val folderItemOrder: StateFlow<FolderItemOrder> =
+        _folderItemOrder.asStateFlow()
+    override fun setFolderItemOrder(order: FolderItemOrder) {
+        _folderItemOrder.value = order
     }
 
     private val _chatPaneListFraction = MutableStateFlow(

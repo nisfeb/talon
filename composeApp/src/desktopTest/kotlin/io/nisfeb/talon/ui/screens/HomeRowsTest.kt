@@ -413,4 +413,134 @@ class HomeRowsTest {
         )
         assertTrue(rows.isEmpty())
     }
+
+    // ─── FolderItemOrder.Recent ──────────────────────────────────
+
+    @Test
+    fun `Recent mode reorders groups in home list by max activity timestamp`() {
+        // Two groups: "alpha-old" (channels topped at sentMs=100) and
+        // "zeta-new" (sentMs=500). Saved order puts alpha-old first.
+        // Recent mode should put zeta-new on top despite its later
+        // alphabetical position and later saved-order position.
+        val convs = listOf(
+            msg("chat/~host/a-old-chan", 100L) to 0,
+            msg("chat/~host/z-new-chan", 500L) to 0,
+        )
+        val rows = buildHomeRows(
+            allConvs = convs,
+            contactMap = contactMapWith(
+                groups = listOf(
+                    GroupEntity("~host/alpha-old", title = "Alpha", image = null),
+                    GroupEntity("~host/zeta-new", title = "Zeta", image = null),
+                ),
+                channelGroups = listOf(
+                    ChannelGroupEntity(nest = "chat/~host/a-old-chan", groupFlag = "~host/alpha-old", ordinal = 0),
+                    ChannelGroupEntity(nest = "chat/~host/z-new-chan", groupFlag = "~host/zeta-new", ordinal = 0),
+                ),
+            ),
+            expandedGroups = emptySet(),
+            allUnreads = emptyMap(),
+            groupOrderFlags = listOf("~host/alpha-old", "~host/zeta-new"),
+            folderItemOrder = io.nisfeb.talon.ui.FolderItemOrder.Recent,
+        )
+        val groups = rows.filterIsInstance<HomeRow.GroupHead>().map { it.flag }
+        assertEquals(listOf("~host/zeta-new", "~host/alpha-old"), groups)
+    }
+
+    @Test
+    fun `Recent mode floats unread groups in home list above more-recent read groups`() {
+        // unread-quiet group (sentMs=100, unread=1) should outrank
+        // read-loud group (sentMs=500, unread=0) — unread-first
+        // mirrors the GroupChannelOrder.Recent cascade.
+        val convs = listOf(
+            msg("chat/~host/unread-chan", 100L) to 0,
+            msg("chat/~host/loud-chan", 500L) to 0,
+        )
+        val rows = buildHomeRows(
+            allConvs = convs,
+            contactMap = contactMapWith(
+                groups = listOf(
+                    GroupEntity("~host/unread-quiet", title = "Quiet", image = null),
+                    GroupEntity("~host/read-loud", title = "Loud", image = null),
+                ),
+                channelGroups = listOf(
+                    ChannelGroupEntity(nest = "chat/~host/unread-chan", groupFlag = "~host/unread-quiet", ordinal = 0),
+                    ChannelGroupEntity(nest = "chat/~host/loud-chan", groupFlag = "~host/read-loud", ordinal = 0),
+                ),
+            ),
+            expandedGroups = emptySet(),
+            allUnreads = mapOf("chat/~host/unread-chan" to 1),
+            folderItemOrder = io.nisfeb.talon.ui.FolderItemOrder.Recent,
+        )
+        val groups = rows.filterIsInstance<HomeRow.GroupHead>().map { it.flag }
+        assertEquals(listOf("~host/unread-quiet", "~host/read-loud"), groups)
+    }
+
+    @Test
+    fun `Recent mode interleaves groups and DMs by recency inside a custom folder`() {
+        // Folder contains a group (max sentMs=200) and two DMs
+        // (sentMs=100, 300). Default Manual would respect ordinals
+        // (group, dm-old, dm-new); Recent should interleave by
+        // timestamp: dm-new(300), group(200), dm-old(100).
+        val convs = listOf(
+            msg("chat/~host/c", 200L) to 0,
+            msg("~zod", 300L) to 0,
+            msg("~bus", 100L) to 0,
+        )
+        val rows = buildFolderRows(
+            members = listOf(
+                FolderMemberEntity(
+                    folderId = 1L, whom = "~host/g", ordinal = 0,
+                    kind = FolderMemberEntity.KIND_GROUP,
+                ),
+                FolderMemberEntity(folderId = 1L, whom = "~bus", ordinal = 1),
+                FolderMemberEntity(folderId = 1L, whom = "~zod", ordinal = 2),
+            ),
+            allConvs = convs,
+            contactMap = contactMapWith(
+                groups = listOf(GroupEntity("~host/g", title = "G", image = null)),
+                channelGroups = listOf(
+                    ChannelGroupEntity(nest = "chat/~host/c", groupFlag = "~host/g", ordinal = 0),
+                ),
+            ),
+            expandedGroups = emptySet(),
+            allUnreads = emptyMap(),
+            folderItemOrder = io.nisfeb.talon.ui.FolderItemOrder.Recent,
+        )
+        val whoms = rows.mapNotNull {
+            when (it) {
+                is HomeRow.GroupHead -> it.flag
+                is HomeRow.Flat -> it.m.whom
+                else -> null
+            }
+        }
+        assertEquals(listOf("~zod", "~host/g", "~bus"), whoms)
+    }
+
+    @Test
+    fun `Manual mode default preserves saved ordinals in folder view`() {
+        // Regression guard: omitting folderItemOrder should keep the
+        // historical behavior (sorted by member.ordinal). The Recent
+        // mode tests above flip ordinals deliberately; this confirms
+        // the default doesn't sneak in recency sorting on existing
+        // installs.
+        val convs = listOf(
+            msg("~zod", 300L) to 0,
+            msg("~bus", 100L) to 0,
+        )
+        val rows = buildFolderRows(
+            members = listOf(
+                // ordinal 0=~bus (older), ordinal 1=~zod (newer).
+                // Recent would put ~zod first; Manual must keep ~bus.
+                FolderMemberEntity(folderId = 1L, whom = "~bus", ordinal = 0),
+                FolderMemberEntity(folderId = 1L, whom = "~zod", ordinal = 1),
+            ),
+            allConvs = convs,
+            contactMap = contactMapWith(),
+            expandedGroups = emptySet(),
+            allUnreads = emptyMap(),
+        )
+        val flats = rows.filterIsInstance<HomeRow.Flat>().map { it.m.whom }
+        assertEquals(listOf("~bus", "~zod"), flats)
+    }
 }
