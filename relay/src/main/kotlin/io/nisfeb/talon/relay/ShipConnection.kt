@@ -54,6 +54,10 @@ class ShipConnection(
     private val db: Db,
     private val push: Push,
     private val http: OkHttpClient,
+    /** Tunables for the cold-start warmup + freshness filter. Defaults
+     *  in [SuppressionConfig] match what the relay ships with; tests
+     *  inject shorter windows so they don't sleep for minutes. */
+    private val suppression: SuppressionConfig = SuppressionConfig(),
 ) {
 
     private val log = LoggerFactory.getLogger("ShipConn[$patp/${deviceId.take(6)}]")
@@ -88,7 +92,12 @@ class ShipConnection(
         val channelId = openChannel() ?: return false
         val subscribed = subscribeActivity(channelId)
         if (!subscribed) return false
-        return consumeEvents(channelId)
+        // Per-connection state for the suppression decision (see
+        // [decideSuppress]). Captured into the handler closure so
+        // each fresh SSE connection starts a new warmup window.
+        val connStartMs = System.currentTimeMillis()
+        val isFirstConnect = db.lastEventId(shipRowId, deviceId) == null
+        return consumeEvents(channelId, connStartMs, isFirstConnect)
     }
 
     /** Open a `/~/channel/<id>` and return its id. Cookie auth via
@@ -126,7 +135,11 @@ class ShipConnection(
         }.getOrDefault(false)
     }
 
-    private suspend fun consumeEvents(channelId: String): Boolean {
+    private suspend fun consumeEvents(
+        channelId: String,
+        connStartMs: Long,
+        isFirstConnect: Boolean,
+    ): Boolean {
         val req = Request.Builder()
             .url("$shipUrl/~/channel/$channelId")
             .header("Cookie", cookie)
@@ -139,7 +152,12 @@ class ShipConnection(
             req,
             object : EventSourceListener() {
                 override fun onOpen(eventSource: EventSource, response: okhttp3.Response) {
-                    log.info("SSE open")
+                    log.info(
+                        "SSE open (firstConnect=$isFirstConnect, warmup=${
+                            if (isFirstConnect) suppression.firstConnectWarmupMs
+                            else suppression.reconnectWarmupMs
+                        }ms)",
+                    )
                 }
 
                 override fun onEvent(
@@ -150,7 +168,7 @@ class ShipConnection(
                 ) {
                     val parsed = runCatching { Json.parseToJsonElement(data).jsonObject }
                         .getOrNull() ?: return
-                    handleEvent(id, parsed, channelId)
+                    handleEvent(id, parsed, channelId, connStartMs, isFirstConnect)
                 }
 
                 override fun onClosed(eventSource: EventSource) {
@@ -176,7 +194,13 @@ class ShipConnection(
         }
     }
 
-    private fun handleEvent(eventId: String?, body: JsonObject, channelId: String) {
+    private fun handleEvent(
+        eventId: String?,
+        body: JsonObject,
+        channelId: String,
+        connStartMs: Long,
+        isFirstConnect: Boolean,
+    ) {
         // Ack the SSE event so the channel doesn't backfill on reconnect.
         eventId?.let { ackEvent(channelId, it) }
 
@@ -210,6 +234,28 @@ class ShipConnection(
 
         val cursor = db.lastEventId(shipRowId, deviceId)
         if (cursor == postId) return
+
+        // Suppression layer — see Suppression.kt for the full
+        // contract. Cursor still advances on suppress so we don't
+        // re-evaluate the same event on the next reconnect.
+        val nowMs = System.currentTimeMillis()
+        val eventTimeMs = UrbitTime.postIdToMs(postId)
+        val decision = decideSuppress(
+            nowMs = nowMs,
+            connStartMs = connStartMs,
+            isFirstConnect = isFirstConnect,
+            eventTimeMs = eventTimeMs,
+            config = suppression,
+        )
+        if (decision != SuppressReason.NONE) {
+            log.info(
+                "suppress ($decision) post=$postId age=${
+                    eventTimeMs?.let { nowMs - it }?.toString() ?: "?"
+                }ms",
+            )
+            db.setLastEventId(shipRowId, deviceId, postId)
+            return
+        }
 
         val pushEndpoint = db.pushEndpointFor(deviceId) ?: run {
             log.warn("device $deviceId has no push endpoint; skipping")
