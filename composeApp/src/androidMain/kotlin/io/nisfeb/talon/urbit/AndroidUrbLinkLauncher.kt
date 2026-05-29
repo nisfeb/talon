@@ -2,6 +2,7 @@ package io.nisfeb.talon.urbit
 
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
 import io.nisfeb.talon.util.Log
 
@@ -27,7 +28,9 @@ class AndroidUrbLinkLauncher(context: Context) : UrbLinkLauncher {
         // check — resolveActivity can return the system resolver even
         // when nothing concrete handles the scheme.
         val handlers = appContext.packageManager.queryIntentActivities(intent, 0)
-        if (handlers.isEmpty()) return UrbLaunchResult.NotInstalled
+        if (handlers.isEmpty() && !isLatticeInstalled()) {
+            return UrbLaunchResult.NotInstalled
+        }
         return try {
             appContext.startActivity(intent)
             UrbLaunchResult.Opened
@@ -35,5 +38,32 @@ class AndroidUrbLinkLauncher(context: Context) : UrbLinkLauncher {
             Log.w("UrbLinkLauncher", "startActivity failed for $url: ${e.message}")
             UrbLaunchResult.Failed
         }
+    }
+
+    /**
+     * Fallback for when queryIntentActivities comes back empty even
+     * though Lattice is installed (observed on some OEM ROMs where the
+     * <queries><intent> visibility matcher silently mis-matches). The
+     * <queries><package> entry in AndroidManifest.xml makes this lookup
+     * succeed regardless of intent-filter resolution quirks. If Lattice
+     * is present we attempt startActivity anyway — worst case it throws
+     * ActivityNotFoundException and we report Failed.
+     */
+    private fun isLatticeInstalled(): Boolean = runCatching {
+        appContext.packageManager.getPackageInfo(LATTICE_PACKAGE, 0)
+        true
+    }.getOrElse { e ->
+        // PackageManager.NameNotFoundException → Lattice not installed,
+        // which is the only expected miss path. Anything else (security
+        // exception, etc.) we also treat as a miss so we don't shadow
+        // the original NotInstalled report.
+        if (e !is PackageManager.NameNotFoundException) {
+            Log.w("UrbLinkLauncher", "getPackageInfo($LATTICE_PACKAGE) failed: ${e.message}")
+        }
+        false
+    }
+
+    private companion object {
+        const val LATTICE_PACKAGE = "io.nisfeb.lattice"
     }
 }

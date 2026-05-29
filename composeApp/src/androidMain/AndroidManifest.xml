@@ -4,10 +4,22 @@
     <!-- Android 11+ package visibility: without this, queryIntentActivities
          for the urb:// scheme is filtered to empty even when Lattice is
          installed, so AndroidUrbLinkLauncher would always report
-         NotInstalled. Declares that we need to see urb:// VIEW handlers. -->
+         NotInstalled.
+         -
+         The <package> entry is the load-bearing one — it makes Lattice
+         visible to PackageManager unconditionally, sidestepping
+         intent-filter matching nuance across OEM ROMs (we had reports
+         of users with Lattice installed still seeing the install prompt
+         while stock-Android testers didn't reproduce). The <intent>
+         entry stays as forward-compat for any third-party urb:// handler;
+         it mirrors the categories Lattice's filter actually declares
+         (DEFAULT + BROWSABLE) so the visibility match is exact. -->
     <queries>
+        <package android:name="io.nisfeb.lattice" />
         <intent>
             <action android:name="android.intent.action.VIEW" />
+            <category android:name="android.intent.category.DEFAULT" />
+            <category android:name="android.intent.category.BROWSABLE" />
             <data android:scheme="urb" />
         </intent>
     </queries>
