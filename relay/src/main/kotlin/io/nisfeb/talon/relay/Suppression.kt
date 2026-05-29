@@ -28,7 +28,11 @@ package io.nisfeb.talon.relay
  * cursor — the caller does that — so the next live event is treated
  * as "fresh after we caught up".
  */
-internal data class SuppressionConfig(
+// Public (not internal) because it's a parameter type on
+// ShipConnection's public constructor — Kotlin rejects a public
+// signature exposing an internal type. The relay is a standalone app
+// module, so the visibility is cosmetic anyway.
+data class SuppressionConfig(
     val firstConnectWarmupMs: Long = 60_000L,
     val reconnectWarmupMs: Long = 5_000L,
     val freshnessMaxAgeMs: Long = 5L * 60_000L,
