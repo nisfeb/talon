@@ -5,6 +5,9 @@ import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.rememberTransformableState
 import androidx.compose.foundation.gestures.transformable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsHoveredAsState
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
@@ -49,6 +52,8 @@ import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import io.nisfeb.talon.ui.LocalImageDownloader
@@ -208,33 +213,25 @@ fun ImageViewerScreen(
         // open. Disabled-but-visible at the ends so the user gets
         // feedback that they're at the boundary.
         if (multi) {
-            IconButton(
+            LightboxIconButton(
                 onClick = ::goPrev,
                 enabled = hasPrev,
+                contentDescription = "Previous image",
                 modifier = Modifier
                     .align(Alignment.CenterStart)
-                    .padding(start = 8.dp)
-                    .size(48.dp),
-                colors = IconButtonDefaults.iconButtonColors(
-                    contentColor = Color.White,
-                    disabledContentColor = Color.White.copy(alpha = 0.3f),
-                ),
+                    .padding(start = 8.dp),
             ) {
-                Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, contentDescription = "Previous image")
+                Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, contentDescription = null)
             }
-            IconButton(
+            LightboxIconButton(
                 onClick = ::goNext,
                 enabled = hasNext,
+                contentDescription = "Next image",
                 modifier = Modifier
                     .align(Alignment.CenterEnd)
-                    .padding(end = 8.dp)
-                    .size(48.dp),
-                colors = IconButtonDefaults.iconButtonColors(
-                    contentColor = Color.White,
-                    disabledContentColor = Color.White.copy(alpha = 0.3f),
-                ),
+                    .padding(end = 8.dp),
             ) {
-                Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = "Next image")
+                Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null)
             }
         }
 
@@ -253,13 +250,11 @@ fun ImageViewerScreen(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            IconButton(
+            LightboxIconButton(
                 onClick = onClose,
-                colors = IconButtonDefaults.iconButtonColors(
-                    contentColor = Color.White,
-                ),
+                contentDescription = "Close",
             ) {
-                Icon(Icons.Filled.Close, contentDescription = "Close")
+                Icon(Icons.Filled.Close, contentDescription = null)
             }
             if (multi) {
                 Text(
@@ -269,9 +264,9 @@ fun ImageViewerScreen(
                 )
             }
             if (downloader !== io.nisfeb.talon.ui.NoopImageDownloader) {
-                IconButton(
+                LightboxIconButton(
                     onClick = {
-                        if (saving) return@IconButton
+                        if (saving) return@LightboxIconButton
                         saving = true
                         scope.launch {
                             val result = downloader.saveImage(url)
@@ -285,11 +280,9 @@ fun ImageViewerScreen(
                         }
                     },
                     enabled = !saving,
-                    colors = IconButtonDefaults.iconButtonColors(
-                        contentColor = Color.White,
-                    ),
+                    contentDescription = "Download",
                 ) {
-                    Icon(Icons.Filled.Download, contentDescription = "Download")
+                    Icon(Icons.Filled.Download, contentDescription = null)
                 }
             } else {
                 // Spacer so the n-of-N text stays centred even when
@@ -304,6 +297,56 @@ fun ImageViewerScreen(
             modifier = Modifier.align(Alignment.BottomCenter),
         ) { data ->
             Snackbar(snackbarData = data)
+        }
+    }
+}
+
+/**
+ * Lightbox icon button with a semi-transparent circular halo on
+ * hover / press. Without this the bare-glyph IconButton against the
+ * black backdrop has almost no clickable affordance — desktop users
+ * weren't sure the icons were buttons. Hover state isn't visible on
+ * Android (no pointer) but the press state still benefits.
+ *
+ * Container alpha values match Material 3's state-layer convention
+ * (~12% hover, ~20% press) but tinted white so they read on the
+ * black backdrop instead of disappearing.
+ */
+@Composable
+private fun LightboxIconButton(
+    onClick: () -> Unit,
+    contentDescription: String,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    content: @Composable () -> Unit,
+) {
+    val interaction = remember { MutableInteractionSource() }
+    val hovered by interaction.collectIsHoveredAsState()
+    val pressed by interaction.collectIsPressedAsState()
+    val container = when {
+        !enabled -> Color.Transparent
+        pressed -> Color.White.copy(alpha = 0.20f)
+        hovered -> Color.White.copy(alpha = 0.12f)
+        else -> Color.Transparent
+    }
+    IconButton(
+        onClick = onClick,
+        enabled = enabled,
+        interactionSource = interaction,
+        modifier = modifier.size(48.dp),
+        colors = IconButtonDefaults.iconButtonColors(
+            containerColor = container,
+            contentColor = Color.White,
+            disabledContentColor = Color.White.copy(alpha = 0.3f),
+        ),
+    ) {
+        // Wrap with semantics so screen readers pick up the
+        // description even though the inner Icon passes
+        // contentDescription = null.
+        Box(
+            modifier = Modifier.semantics { this.contentDescription = contentDescription },
+        ) {
+            content()
         }
     }
 }
