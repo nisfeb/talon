@@ -64,10 +64,12 @@ import io.nisfeb.talon.ui.CiteResolver
 import io.nisfeb.talon.ui.ContactMap
 import io.nisfeb.talon.ui.EmojiCatalog
 import io.nisfeb.talon.ui.LocalCiteResolver
+import io.nisfeb.talon.ui.MessageActionsButton
 import io.nisfeb.talon.ui.ReactionPalette
 import io.nisfeb.talon.ui.StoryRenderer
 import io.nisfeb.talon.ui.combinedClickableWithSecondary
 import io.nisfeb.talon.ui.contactMapFlow
+import io.nisfeb.talon.ui.onSecondaryClick
 import io.nisfeb.talon.urbit.StoryCache
 import io.nisfeb.talon.urbit.TlonChatRepo
 import io.nisfeb.talon.util.Log
@@ -315,6 +317,50 @@ fun ThreadList(
 
     CompositionLocalProvider(LocalCiteResolver provides citeResolver) {
     val chatDensity = io.nisfeb.talon.ui.LocalChatDensity.current
+    // Per-row action-menu body. Composed only when the row's menu is
+    // expanded (DropdownMenu's content composes lazily). Mirrors the
+    // pattern in DmChatScreen.MessageRow.
+    val clipboardManager = androidx.compose.ui.platform.LocalClipboardManager.current
+    val threadActionMenuFor: @Composable (MessageEntity) -> Unit = { target ->
+        val isMine = target.author == ourPatp
+        val isChannel = whom.startsWith("chat/")
+        ThreadActionMenu(
+            db = db,
+            ourPatp = ourPatp,
+            canDelete = isMine || isChannel,
+            canEdit = isMine && isChannel,
+            onPickReaction = { code ->
+                actionTarget = null
+                scope.launch {
+                    runCatching { repo.react(whom, target.id, code) }
+                        .onFailure {
+                            composerState.sendError =
+                                "react failed: ${it.message ?: it::class.simpleName}"
+                        }
+                }
+            },
+            onCopy = {
+                actionTarget = null
+                val text = StoryCache.textFor(target.id, target.contentJson)
+                clipboardManager.setText(androidx.compose.ui.text.AnnotatedString(text))
+            },
+            onCopyMarkdown = {
+                actionTarget = null
+                val md = io.nisfeb.talon.urbit.RawMarkdown
+                    .fromStoryJson(target.contentJson)
+                clipboardManager.setText(androidx.compose.ui.text.AnnotatedString(md))
+            },
+            onEdit = {
+                actionTarget = null
+                editing = target
+            },
+            onDelete = {
+                actionTarget = null
+                pendingDelete = target
+            },
+        )
+    }
+
     Column(modifier = modifier) {
         LazyColumn(
             state = listState,
@@ -343,7 +389,10 @@ fun ThreadList(
                         onLinkTap = onLinkTap,
                         onImageTap = onImageTap,
                         onCitationTap = onCitationTap,
-                        onLongPress = { actionTarget = it },
+                        menuExpanded = actionTarget?.id == p.id,
+                        onMenuExpand = { actionTarget = p },
+                        onMenuDismiss = { actionTarget = null },
+                        actionMenu = { threadActionMenuFor(p) },
                         onReactionTap = onReactionForMessage,
                         onReactionLongPress = { reactionDetailsTarget = it },
                         onPollVote = onPollVoteHandler,
@@ -359,8 +408,9 @@ fun ThreadList(
                 key = { it.m.id },
                 contentType = { "reply" },
             ) { row ->
+                val replyMsg = row.m
                 ThreadMessage(
-                    m = row.m,
+                    m = replyMsg,
                     reactions = row.reactions,
                     ourPatp = ourPatp,
                     contactMap = contactMap,
@@ -368,7 +418,10 @@ fun ThreadList(
                     onLinkTap = onLinkTap,
                     onImageTap = onImageTap,
                     onCitationTap = onCitationTap,
-                    onLongPress = { actionTarget = it },
+                    menuExpanded = actionTarget?.id == replyMsg.id,
+                    onMenuExpand = { actionTarget = replyMsg },
+                    onMenuDismiss = { actionTarget = null },
+                    actionMenu = { threadActionMenuFor(replyMsg) },
                     onReactionTap = onReactionForMessage,
                     onReactionLongPress = { reactionDetailsTarget = it },
                     onPollVote = onPollVoteHandler,
@@ -445,51 +498,6 @@ fun ThreadList(
         )
     }
 
-    actionTarget?.let { target ->
-        val isMine = target.author == ourPatp
-        val isChannel = whom.startsWith("chat/")
-        val clipboardManager = androidx.compose.ui.platform.LocalClipboardManager.current
-        ThreadActionSheet(
-            db = db,
-            ourPatp = ourPatp,
-            canDelete = isMine || isChannel,
-            // Edit on channel chats only — %chat (DMs + clubs) silently
-            // ignores edit pokes. Mirror DmChatScreen's gate (author +
-            // channel); the parentId check there guards top-level only,
-            // but here we *want* the reply case.
-            canEdit = isMine && isChannel,
-            onDismiss = { actionTarget = null },
-            onPickReaction = { code ->
-                actionTarget = null
-                scope.launch {
-                    runCatching { repo.react(whom, target.id, code) }
-                        .onFailure {
-                            composerState.sendError = "react failed: ${it.message ?: it::class.simpleName}"
-                        }
-                }
-            },
-            onCopy = {
-                actionTarget = null
-                val text = StoryCache.textFor(target.id, target.contentJson)
-                clipboardManager.setText(androidx.compose.ui.text.AnnotatedString(text))
-            },
-            onCopyMarkdown = {
-                actionTarget = null
-                val md = io.nisfeb.talon.urbit.RawMarkdown
-                    .fromStoryJson(target.contentJson)
-                clipboardManager.setText(androidx.compose.ui.text.AnnotatedString(md))
-            },
-            onEdit = {
-                actionTarget = null
-                editing = target
-            },
-            onDelete = {
-                actionTarget = null
-                pendingDelete = target
-            },
-        )
-    }
-
     editing?.let { target ->
         EditThreadMessageDialog(
             initial = StoryCache.textFor(target.id, target.contentJson),
@@ -561,7 +569,15 @@ private fun ThreadMessage(
     onLinkTap: (String) -> Unit,
     onImageTap: (String) -> Unit,
     onCitationTap: (String) -> Unit,
-    onLongPress: (MessageEntity) -> Unit,
+    /** True when this row's action menu is open (driven by the
+     *  screen-level `actionTarget` so only one menu shows at a time). */
+    menuExpanded: Boolean,
+    onMenuExpand: () -> Unit,
+    onMenuDismiss: () -> Unit,
+    /** Per-row action menu body — invoked inside a [DropdownMenu]
+     *  anchored to the trailing "⋯" button. See DmChatScreen's
+     *  MessageRow for the equivalent slot. */
+    actionMenu: @Composable () -> Unit,
     /** Called when the user taps an already-rendered reaction chip
      *  to toggle their own reaction. Same shape as DmChatScreen's
      *  onReactionTap so the handler logic can be shared. */
@@ -591,68 +607,82 @@ private fun ThreadMessage(
     val baseColor = if (highlighted) MaterialTheme.colorScheme.surfaceVariant
         else MaterialTheme.colorScheme.surface
     val flashOverlay = Color(0xFFFFC107).copy(alpha = 0.30f * flashAlpha.value)
-    Column(
+    // Outer Row hosts the trailing MessageActionsButton — Android's
+    // long-press is now reserved for text selection inside the bubble
+    // (see SelectionContainer in StoryRenderer), so sheet access moves
+    // to the ⋯ button (and desktop right-click on the row).
+    Row(
         modifier = Modifier
             .fillMaxWidth()
-            .combinedClickableWithSecondary(onClick = {}, onLongClick = { onLongPress(m) })
+            .onSecondaryClick { onMenuExpand() }
             .background(baseColor)
             .background(flashOverlay)
             .padding(top = if (showHeader) 10.dp else 2.dp, bottom = 2.dp),
-        verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {
-        if (showHeader) {
-            Text(
-                "$authorLabel · $stamp",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            if (showHeader) {
+                Text(
+                    "$authorLabel · $stamp",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            StoryRenderer(
+                parts,
+                onMentionTap = onMentionTap,
+                onLinkTap = onLinkTap,
+                onImageTap = onImageTap,
+                onCitationTap = onCitationTap,
+                reactions = reactions,
+                ourPatp = ourPatp,
+                onPollVote = { emoji -> onPollVote(m, reactions, emoji) },
             )
-        }
-        StoryRenderer(
-            parts,
-            onMentionTap = onMentionTap,
-            onLinkTap = onLinkTap,
-            onImageTap = onImageTap,
-            onCitationTap = onCitationTap,
-            reactions = reactions,
-            ourPatp = ourPatp,
-            onPollVote = { emoji -> onPollVote(m, reactions, emoji) },
-        )
-        if (grouped.isNotEmpty()) {
-            FlowRow(
-                modifier = Modifier.padding(top = 4.dp),
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp),
-            ) {
-                grouped.forEach { (emoji, count, mine) ->
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(
-                                if (mine) MaterialTheme.colorScheme.primaryContainer
-                                else MaterialTheme.colorScheme.surfaceVariant
-                            )
-                            .combinedClickableWithSecondary(
-                                onClick = { onReactionTap(m, reactions, emoji) },
-                                onLongClick = { onReactionLongPress(reactions) },
-                            )
-                            .padding(horizontal = 10.dp, vertical = 4.dp),
-                    ) {
-                        Text(
-                            ReactionPalette.display(emoji),
-                            fontFamily = io.nisfeb.talon.ui.EmojiFontFamily,
-                            style = MaterialTheme.typography.bodyMedium,
-                        )
-                        if (count > 1) {
+            if (grouped.isNotEmpty()) {
+                FlowRow(
+                    modifier = Modifier.padding(top = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    grouped.forEach { (emoji, count, mine) ->
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(
+                                    if (mine) MaterialTheme.colorScheme.primaryContainer
+                                    else MaterialTheme.colorScheme.surfaceVariant
+                                )
+                                .combinedClickableWithSecondary(
+                                    onClick = { onReactionTap(m, reactions, emoji) },
+                                    onLongClick = { onReactionLongPress(reactions) },
+                                )
+                                .padding(horizontal = 10.dp, vertical = 4.dp),
+                        ) {
                             Text(
-                                " $count",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                ReactionPalette.display(emoji),
+                                fontFamily = io.nisfeb.talon.ui.EmojiFontFamily,
+                                style = MaterialTheme.typography.bodyMedium,
                             )
+                            if (count > 1) {
+                                Text(
+                                    " $count",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
                         }
                     }
                 }
             }
+        }
+        MessageActionsButton(
+            expanded = menuExpanded,
+            onExpandedChange = { open -> if (open) onMenuExpand() else onMenuDismiss() },
+        ) { _ ->
+            actionMenu()
         }
     }
 }
@@ -677,27 +707,21 @@ private data class ReplyRow(
  */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
-private fun ThreadActionSheet(
+private fun ThreadActionMenu(
     db: AppDatabase,
     ourPatp: String,
     canDelete: Boolean,
     canEdit: Boolean,
-    onDismiss: () -> Unit,
     onPickReaction: (String) -> Unit,
     onCopy: () -> Unit,
     onCopyMarkdown: () -> Unit,
     onEdit: () -> Unit,
     onDelete: () -> Unit,
 ) {
-    val sheetState = rememberModalBottomSheetState()
-    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp)
-                .windowInsetsPadding(WindowInsets.navigationBars),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
+    Column(
+        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
             // Suggested row blends the user's most-used reactions with
             // the default palette — same blend DmChatScreen uses, so
             // the thread sheet feels consistent with the chat sheet.
@@ -800,6 +824,5 @@ private fun ThreadActionSheet(
                     )
                 }
             }
-        }
     }
 }

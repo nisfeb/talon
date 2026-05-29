@@ -7,7 +7,9 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import io.nisfeb.talon.ui.MessageActionsButton
 import io.nisfeb.talon.ui.combinedClickableWithSecondary
+import io.nisfeb.talon.ui.onSecondaryClick
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -524,7 +526,6 @@ fun DmChatScreen(
     val currentOnOpenConversation by rememberUpdatedState(onOpenConversation)
     val currentOnOpenImage by rememberUpdatedState(onOpenImage)
 
-    val onLongPressMessage: (MessageEntity) -> Unit = { m -> actionTarget = m }
     val onOpenThreadForMessage: (MessageEntity) -> Unit = remember {
         { m -> currentOnOpenThread(m.id) }
     }
@@ -709,6 +710,124 @@ fun DmChatScreen(
                 )
             }
             val chatDensity = io.nisfeb.talon.ui.LocalChatDensity.current
+            // Per-row action-menu body. Wired here so the slot's
+            // closure captures repo / scope / composerState / pinned
+            // state without exploding [MessageRow]'s parameter list.
+            // The slot is composed only when a row's menu is expanded
+            // (DropdownMenu's content composes lazily), so the
+            // bookmark/pinned lookups don't run for every list row.
+            val clipboardManager = LocalClipboardManager.current
+            val messageActionMenuFor: @Composable (MessageEntity) -> Unit = { target ->
+                val isBookmarked by remember(target.whom, target.id) {
+                    db.bookmarks().isBookmarked(target.whom, target.id)
+                }.collectAsState(initial = false)
+                val canBookmark = repo.settingsSync != null
+
+                MessageActionMenu(
+                    db = db,
+                    message = target,
+                    ourPatp = ourPatp,
+                    isChannel = whom.startsWith("chat/"),
+                    isBookmarked = isBookmarked,
+                    isPinned = pinnedPostId == target.id,
+                    canBookmark = canBookmark,
+                    canPin = whom.startsWith("chat/") && target.parentId == null,
+                    canQuote = whom.startsWith("chat/") && target.parentId == null,
+                    onDismiss = { actionTarget = null },
+                    onPickReaction = { emoji ->
+                        actionTarget = null
+                        scope.launch {
+                            runCatching { repo.react(whom, target.id, emoji) }
+                                .onFailure {
+                                    composerState.sendError =
+                                        "react failed: ${it.message ?: it::class.simpleName}"
+                                }
+                        }
+                    },
+                    onReply = {
+                        actionTarget = null
+                        onOpenThread(target.id)
+                    },
+                    onQuote = {
+                        actionTarget = null
+                        composerState.pendingQuote = target
+                    },
+                    onCopy = {
+                        actionTarget = null
+                        val text = StoryCache.textFor(target.id, target.contentJson)
+                        clipboardManager.setText(AnnotatedString(text))
+                    },
+                    onCopyMarkdown = {
+                        actionTarget = null
+                        val md = io.nisfeb.talon.urbit.RawMarkdown
+                            .fromStoryJson(target.contentJson)
+                        clipboardManager.setText(AnnotatedString(md))
+                    },
+                    onToggleBookmark = {
+                        actionTarget = null
+                        scope.launch {
+                            if (isBookmarked) {
+                                repo.settingsSync?.removeBookmark(target.whom, target.id)
+                            } else {
+                                repo.settingsSync?.addBookmark(
+                                    target.whom,
+                                    target.id,
+                                    System.currentTimeMillis(),
+                                )
+                            }
+                        }
+                    },
+                    onEdit = {
+                        actionTarget = null
+                        editing = target
+                    },
+                    onDelete = {
+                        actionTarget = null
+                        confirmingDelete = target
+                    },
+                    onTogglePin = {
+                        val wasPinned = pinnedPostId == target.id
+                        actionTarget = null
+                        scope.launch {
+                            runCatching {
+                                if (wasPinned) repo.unpinPost(whom)
+                                else repo.pinPost(whom, target.id)
+                            }.onFailure {
+                                composerState.sendError =
+                                    "pin failed: ${it.message ?: it::class.simpleName}"
+                            }
+                        }
+                    },
+                    showAiEmoji = aiConfigured.hasKey() && aiConfigured.emojiReactEnabled,
+                    aiEmojiWorking = aiEmojiWorking,
+                    onAiEmoji = {
+                        if (aiEmojiWorking) return@MessageActionMenu
+                        aiEmojiWorking = true
+                        scope.launch {
+                            runCatching {
+                                val text = StoryCache.textFor(target.id, target.contentJson)
+                                aiFeatures.suggestEmojiReact(text)
+                            }.onSuccess { code ->
+                                if (code != null) {
+                                    runCatching { repo.react(whom, target.id, code) }
+                                        .onFailure {
+                                            composerState.sendError =
+                                                "react failed: ${it.message ?: it::class.simpleName}"
+                                        }
+                                } else {
+                                    composerState.sendError = "AI didn't return a known reaction"
+                                }
+                            }.onFailure {
+                                composerState.sendError =
+                                    "AI react failed: ${it.message ?: it::class.simpleName}"
+                            }
+                            aiEmojiWorking = false
+                            actionTarget = null
+                        }
+                    },
+                )
+            }
+
             LazyColumn(
                 state = listState,
                 modifier = Modifier.fillMaxSize(),
@@ -724,26 +843,40 @@ fun DmChatScreen(
                     when (item) {
                         is ChatListItem.DateDivider -> DateDividerRow(item.label)
                         is ChatListItem.UnreadDivider -> UnreadDividerRow()
-                        is ChatListItem.Message -> MessageRow(
-                            row = item.row,
-                            ourPatp = ourPatp,
-                            contactMap = contactMap,
-                            http = http,
-                            onLongPress = onLongPressMessage,
-                            onOpenThread = onOpenThreadForMessage,
-                            onReactionTap = onReactionForMessage,
-                            onReactionLongPress = { reactions ->
-                                reactionDetailsTarget = reactions
-                            },
-                            onMentionTap = onMentionTap,
-                            onLinkTap = onLinkTap,
-                            onImageTap = currentOnOpenImage,
-                            onAvatarTap = onAvatarTap,
-                            onCitationTap = onCitationTap,
-                            entityActionsEnabled = aiConfigured.entityActionsEnabled,
-                            entityChips = entityChips,
-                            flashAmber = item.row.m.id == flashMessageId,
-                        )
+                        is ChatListItem.Message -> {
+                            val rowMsg = item.row.m
+                            MessageRow(
+                                row = item.row,
+                                ourPatp = ourPatp,
+                                contactMap = contactMap,
+                                http = http,
+                                menuExpanded = actionTarget?.id == rowMsg.id,
+                                onMenuExpand = { actionTarget = rowMsg },
+                                onMenuDismiss = { actionTarget = null },
+                                actionMenu = {
+                                    // Per-row menu body. State lookups
+                                    // (bookmark flag) live in here so they
+                                    // only fire for the row whose menu is
+                                    // open. All callbacks dismiss via
+                                    // `actionTarget = null` to mirror the
+                                    // old bottom-sheet's auto-close.
+                                    messageActionMenuFor(rowMsg)
+                                },
+                                onOpenThread = onOpenThreadForMessage,
+                                onReactionTap = onReactionForMessage,
+                                onReactionLongPress = { reactions ->
+                                    reactionDetailsTarget = reactions
+                                },
+                                onMentionTap = onMentionTap,
+                                onLinkTap = onLinkTap,
+                                onImageTap = currentOnOpenImage,
+                                onAvatarTap = onAvatarTap,
+                                onCitationTap = onCitationTap,
+                                entityActionsEnabled = aiConfigured.entityActionsEnabled,
+                                entityChips = entityChips,
+                                flashAmber = item.row.m.id == flashMessageId,
+                            )
+                        }
                     }
                 }
             }
@@ -830,118 +963,6 @@ fun DmChatScreen(
             )
         }
 
-        actionTarget?.let { target ->
-            val isBookmarked by remember(target.whom, target.id) {
-                db.bookmarks().isBookmarked(target.whom, target.id)
-            }.collectAsState(initial = false)
-
-            val clipboardManager = LocalClipboardManager.current
-            val canBookmark = repo.settingsSync != null
-
-            MessageActionSheet(
-                db = db,
-                message = target,
-                ourPatp = ourPatp,
-                isChannel = whom.startsWith("chat/"),
-                isBookmarked = isBookmarked,
-                isPinned = pinnedPostId == target.id,
-                canBookmark = canBookmark,
-                onDismiss = { actionTarget = null },
-                onPickReaction = { emoji ->
-                    actionTarget = null
-                    scope.launch {
-                        runCatching { repo.react(whom, target.id, emoji) }
-                            .onFailure { composerState.sendError = "react failed: ${it.message ?: it::class.simpleName}" }
-                    }
-                },
-                onReply = {
-                    actionTarget = null
-                    onOpenThread(target.id)
-                },
-                onQuote = {
-                    actionTarget = null
-                    composerState.pendingQuote = target
-                },
-                canQuote = whom.startsWith("chat/") && target.parentId == null,
-                onCopy = {
-                    actionTarget = null
-                    val text = StoryCache.textFor(target.id, target.contentJson)
-                    clipboardManager.setText(AnnotatedString(text))
-                },
-                onCopyMarkdown = {
-                    actionTarget = null
-                    // Inverse of Markdown.parseInlines + MarkdownBlocks.toStory —
-                    // hands back the source the user typed (or close
-                    // to it). Use this when forwarding / quoting /
-                    // archiving where formatting matters; the
-                    // existing onCopy stays for plain-text previews.
-                    val md = io.nisfeb.talon.urbit.RawMarkdown
-                        .fromStoryJson(target.contentJson)
-                    clipboardManager.setText(AnnotatedString(md))
-                },
-                onToggleBookmark = {
-                    actionTarget = null
-                    // Only reached when canBookmark == true; settingsSync is non-null.
-                    scope.launch {
-                        if (isBookmarked) {
-                            repo.settingsSync?.removeBookmark(target.whom, target.id)
-                        } else {
-                            repo.settingsSync?.addBookmark(
-                                target.whom,
-                                target.id,
-                                System.currentTimeMillis(),
-                            )
-                        }
-                    }
-                },
-                onEdit = {
-                    actionTarget = null
-                    editing = target
-                },
-                onDelete = {
-                    actionTarget = null
-                    confirmingDelete = target
-                },
-                onTogglePin = {
-                    val wasPinned = pinnedPostId == target.id
-                    actionTarget = null
-                    scope.launch {
-                        runCatching {
-                            if (wasPinned) repo.unpinPost(whom)
-                            else repo.pinPost(whom, target.id)
-                        }.onFailure {
-                            composerState.sendError = "pin failed: ${it.message ?: it::class.simpleName}"
-                        }
-                    }
-                },
-                canPin = whom.startsWith("chat/") && target.parentId == null,
-                showAiEmoji = aiConfigured.hasKey() && aiConfigured.emojiReactEnabled,
-                aiEmojiWorking = aiEmojiWorking,
-                onAiEmoji = {
-                    if (aiEmojiWorking) return@MessageActionSheet
-                    aiEmojiWorking = true
-                    scope.launch {
-                        runCatching {
-                            val text = StoryCache.textFor(target.id, target.contentJson)
-                            aiFeatures.suggestEmojiReact(text)
-                        }.onSuccess { code ->
-                            if (code != null) {
-                                runCatching { repo.react(whom, target.id, code) }
-                                    .onFailure {
-                                        composerState.sendError = "react failed: ${it.message ?: it::class.simpleName}"
-                                    }
-                            } else {
-                                composerState.sendError = "AI didn't return a known reaction"
-                            }
-                        }.onFailure {
-                            composerState.sendError = "AI react failed: ${it.message ?: it::class.simpleName}"
-                        }
-                        aiEmojiWorking = false
-                        actionTarget = null
-                    }
-                },
-            )
-        }
     }
 
     editing?.let { target ->
@@ -1041,7 +1062,21 @@ private fun MessageRow(
     ourPatp: String,
     contactMap: ContactMap,
     http: OkHttpClient,
-    onLongPress: (MessageEntity) -> Unit,
+    /** True when this row's action menu is open. Source of truth is
+     *  the screen-level `actionTarget` so opening one menu auto-closes
+     *  any other. */
+    menuExpanded: Boolean,
+    /** Mark this row as the one whose action menu should be open.
+     *  Fires from the trailing "⋯" tap AND from desktop right-click on
+     *  the row chrome. */
+    onMenuExpand: () -> Unit,
+    /** Clear the open-menu marker (DropdownMenu dismiss). */
+    onMenuDismiss: () -> Unit,
+    /** Body of the row's action menu — invoked inside a [DropdownMenu]
+     *  anchored to the trailing "⋯" button. Composed only when
+     *  [menuExpanded] becomes true, so the per-target state lookups
+     *  (bookmark flag, pin state) don't run for every row in the list. */
+    actionMenu: @Composable () -> Unit,
     onOpenThread: (MessageEntity) -> Unit,
     onReactionTap: (MessageEntity, List<ReactionEntity>, String) -> Unit,
     /** Long-press / right-click on any reaction chip — surfaces the
@@ -1084,7 +1119,12 @@ private fun MessageRow(
         modifier = Modifier
             .fillMaxWidth()
             .background(flashColor)
-            .combinedClickableWithSecondary(onClick = {}, onLongClick = { onLongPress(m) })
+            // Right-click on desktop opens the per-row action menu —
+            // the Android long-press path was removed so Compose's
+            // SelectionContainer in StoryRenderer owns long-press for
+            // text selection. Android reaches the menu via the trailing
+            // MessageActionsButton (the "⋯").
+            .onSecondaryClick { onMenuExpand() }
             .graphicsLayer {
                 translationX = offsetX.value
                 alpha = if (isPending) 0.55f else 1f
@@ -1159,7 +1199,6 @@ private fun MessageRow(
                 onLinkTap = onLinkTap,
                 onImageTap = onImageTap,
                 onCitationTap = onCitationTap,
-                onLongPress = { onLongPress(m) },
                 reactions = row.reactions,
                 ourPatp = ourPatp,
                 onPollVote = { emoji -> onReactionTap(m, row.reactions, emoji) },
@@ -1214,6 +1253,16 @@ private fun MessageRow(
                     }
                 }
             }
+        }
+        // Trailing action affordance. Opens a popover (DropdownMenu)
+        // anchored to the button — replaces the row-wide bottom sheet
+        // that previously fired on long-press. Long-press is now the
+        // text selection gesture inside the message bubble.
+        MessageActionsButton(
+            expanded = menuExpanded,
+            onExpandedChange = { open -> if (open) onMenuExpand() else onMenuDismiss() },
+        ) { _ ->
+            actionMenu()
         }
     }
 }
@@ -1499,7 +1548,7 @@ private fun dividerLabel(ms: Long): String {
     else DIVIDER_DATE_FMT_OLD.format(instant)
 }
 
-// ── MessageActionSheet ────────────────────────────────────────────────────────
+// ── MessageActionMenu ────────────────────────────────────────────────────────
 //
 // Ported from production app/src/main/java/io/nisfeb/talon/ui/screens/
 // DmChatScreen.kt lines 1630–1792.
@@ -1624,9 +1673,19 @@ private fun EditMessageDialog(
     )
 }
 
-@OptIn(ExperimentalMaterial3Api::class, androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+/**
+ * Per-message action menu rendered as the body of a [DropdownMenu]
+ * anchored to the row's trailing "⋯" button (see [MessageActionsButton]).
+ * Previously a [ModalBottomSheet] at screen level — the bottom-sheet
+ * pattern wasted vertical room and obscured the message the user was
+ * acting on. Now it floats next to the source row.
+ *
+ * Self-dismissing actions invoke [onDismiss] before firing so the menu
+ * closes immediately on selection.
+ */
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
-private fun MessageActionSheet(
+private fun MessageActionMenu(
     db: AppDatabase,
     message: MessageEntity,
     ourPatp: String,
@@ -1654,17 +1713,12 @@ private fun MessageActionSheet(
     aiEmojiWorking: Boolean,
     onAiEmoji: () -> Unit,
 ) {
-    val sheetState = rememberModalBottomSheetState()
     val isMine = message.author == ourPatp
     val canReply = message.parentId == null
-    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp)
-                .windowInsetsPadding(WindowInsets.navigationBars),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
+    Column(
+        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
             val topUsage by remember {
                 db.reactionUsage().streamTop(8)
             }.collectAsState(initial = emptyList())
@@ -1792,7 +1846,6 @@ private fun MessageActionSheet(
                     )
                 }
             }
-        }
     }
 }
 

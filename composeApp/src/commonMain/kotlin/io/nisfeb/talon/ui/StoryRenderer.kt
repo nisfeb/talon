@@ -6,6 +6,7 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
@@ -132,10 +133,6 @@ fun StoryRenderer(
     onLinkTap: (String) -> Unit = {},
     onImageTap: (String) -> Unit = {},
     onCitationTap: (target: String) -> Unit = {},
-    /** Long-press anywhere inside the story — including on annotated
-     * text — should bubble up here so the parent row's action sheet
-     * stays reachable. */
-    onLongPress: (() -> Unit)? = null,
     /** Reactions on this message, used by the poll widget to render
      *  per-option tallies. */
     reactions: List<io.nisfeb.talon.data.ReactionEntity> = emptyList(),
@@ -148,8 +145,15 @@ fun StoryRenderer(
      *  reaction pills. */
     onPollVote: ((emoji: String) -> Unit)? = null,
 ) {
+    // SelectionContainer makes the rendered text drag-selectable on
+    // both targets — mouse-drag on desktop, long-press-and-drag on
+    // Android. The action sheet used to be wired to long-press here
+    // and on the parent row; both paths were removed so Compose's
+    // selection gesture has unobstructed ownership of long-press
+    // inside text. Sheet access moves to the row's trailing ellipsis
+    // (MessageActionsButton) plus desktop right-click on the row.
+    SelectionContainer(modifier = modifier) {
     Column(
-        modifier = modifier,
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         parts.forEach { part ->
@@ -173,9 +177,12 @@ fun StoryRenderer(
                             style = MaterialTheme.typography.bodyMedium,
                             onTextLayout = { layout.value = it },
                             modifier = if (hasAnnotations) {
-                                Modifier.pointerInput(part.text, onLongPress) {
+                                Modifier.pointerInput(part.text) {
+                                    // No onLongPress here — long-press is
+                                    // owned by SelectionContainer (text
+                                    // selection start). Tap stays bound to
+                                    // URL / mention navigation.
                                     detectTapGestures(
-                                        onLongPress = { onLongPress?.invoke() },
                                         onTap = { pos ->
                                             val l = layout.value ?: return@detectTapGestures
                                             val offset = l.getOffsetForPosition(pos)
@@ -277,6 +284,7 @@ fun StoryRenderer(
             }
         }
     }
+    } // SelectionContainer
 }
 
 /**
