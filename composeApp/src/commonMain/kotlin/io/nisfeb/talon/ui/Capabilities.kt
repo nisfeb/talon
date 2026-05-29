@@ -22,6 +22,23 @@ expect val isOnDeviceAiSupported: Boolean
 expect val isQrLoginScanSupported: Boolean
 
 /**
+ * Whether touch swipe-navigation gestures are wired. Android: true.
+ * Desktop: false — a mouse can't "swipe" without ambiguity, and the
+ * horizontal-drag detectors these gestures need compete with normal
+ * clicks: a click with a few px of drift gets claimed as a
+ * (sub-threshold) swipe and the child's click is cancelled, so
+ * links / reactions / buttons appear dead.
+ *
+ * Gates two surfaces today:
+ *  - swipe-a-message-row to open its thread (DmChatScreen.MessageRow);
+ *    desktop uses the reply-count pill / ⋯ menu / right-click instead.
+ *  - edge-swipe to open the ship-switcher drawer (App.kt
+ *    ModalNavigationDrawer.gesturesEnabled); desktop opens it by
+ *    clicking the Talon logo.
+ */
+expect val isTouchSwipeNavSupported: Boolean
+
+/**
  * Short human-readable name for the host platform — surfaced in the
  * About panel so the user can see at a glance which build they're on.
  * Android returns "Android"; desktop returns the os.name (e.g. "Linux",

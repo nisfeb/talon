@@ -3,6 +3,10 @@ package io.nisfeb.talon.ui
 actual val isDailyDigestSupported: Boolean = false
 actual val isVoiceMessagesSupported: Boolean = false
 actual val isQrLoginScanSupported: Boolean = false
+// Off on desktop: horizontal-drag detectors swallow child clicks when
+// the mouse drifts a few px mid-click, and edge-swipe to open the
+// ship drawer is meaningless with a mouse (the logo opens it).
+actual val isTouchSwipeNavSupported: Boolean = false
 
 actual val platformLabel: String = run {
     val os = System.getProperty("os.name") ?: "Desktop"

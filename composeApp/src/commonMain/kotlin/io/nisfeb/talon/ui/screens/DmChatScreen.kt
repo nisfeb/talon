@@ -1194,22 +1194,34 @@ private fun MessageRow(
                 translationX = offsetX.value
                 alpha = if (isPending) 0.55f else 1f
             }
-            .pointerInput(m.id) {
-                detectHorizontalDragGestures(
-                    onDragEnd = {
-                        val fired = offsetX.value < -SWIPE_REPLY_THRESHOLD_PX
-                        offsetX.value = 0f
-                        if (fired) onOpenThread(m)
-                    },
-                    onDragCancel = {
-                        offsetX.value = 0f
-                    },
-                    onHorizontalDrag = { _, dx ->
-                        offsetX.value = (offsetX.value + dx)
-                            .coerceIn(-SWIPE_REPLY_MAX_PX, 0f)
-                    },
-                )
-            }
+            // Swipe-to-open-thread is a touch gesture only. On desktop
+            // the row-level horizontal-drag detector competed with
+            // child clicks — a click with a few px of horizontal drift
+            // got claimed as a sub-threshold swipe and the child's
+            // click (link, reaction, ⋯, thread pill) was cancelled, so
+            // they read as dead. Gated off on desktop via
+            // isTouchSwipeNavSupported; mouse users use the pill / ⋯ /
+            // right-click instead.
+            .then(
+                if (io.nisfeb.talon.ui.isTouchSwipeNavSupported) {
+                    Modifier.pointerInput(m.id) {
+                        detectHorizontalDragGestures(
+                            onDragEnd = {
+                                val fired = offsetX.value < -SWIPE_REPLY_THRESHOLD_PX
+                                offsetX.value = 0f
+                                if (fired) onOpenThread(m)
+                            },
+                            onDragCancel = {
+                                offsetX.value = 0f
+                            },
+                            onHorizontalDrag = { _, dx ->
+                                offsetX.value = (offsetX.value + dx)
+                                    .coerceIn(-SWIPE_REPLY_MAX_PX, 0f)
+                            },
+                        )
+                    }
+                } else Modifier,
+            )
             .padding(top = if (row.showHeader) 12.dp else 2.dp),
         horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {

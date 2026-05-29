@@ -668,6 +668,9 @@ fun App(
         val chatDensity = remember(densityMode) {
             io.nisfeb.talon.ui.ChatDensity.forMode(densityMode)
         }
+        // User font scale (Ctrl/Cmd +/-/0). Layered on top of the
+        // density preset's own multiplier below.
+        val userFontScale by uiSettings.fontScale.collectAsState()
         val multiShip = remember(loggedInShip) {
             sessionStore.all().size >= 2
         }
@@ -708,10 +711,11 @@ fun App(
           // image viewer, etc.); per-component dp values stay under
           // explicit `LocalChatDensity.current` reads.
           val baseDensity = androidx.compose.ui.platform.LocalDensity.current
-          val scaledDensity = remember(baseDensity, chatDensity) {
+          val scaledDensity = remember(baseDensity, chatDensity, userFontScale) {
               androidx.compose.ui.unit.Density(
                   density = baseDensity.density,
-                  fontScale = baseDensity.fontScale * chatDensity.fontScaleMultiplier,
+                  fontScale = baseDensity.fontScale *
+                      chatDensity.fontScaleMultiplier * userFontScale,
               )
           }
           // urb:// link handoff to Lattice. The handler resolves the
@@ -771,6 +775,16 @@ fun App(
                             io.nisfeb.talon.ui.ShortcutAction.OpenSettings -> showSettings = true
                             io.nisfeb.talon.ui.ShortcutAction.NewDm -> showNewDmRequest = true
                             io.nisfeb.talon.ui.ShortcutAction.FocusSearch -> focusSearchRequest = true
+                            io.nisfeb.talon.ui.ShortcutAction.IncreaseFontSize ->
+                                uiSettings.setFontScale(
+                                    userFontScale + io.nisfeb.talon.ui.FONT_SCALE_STEP,
+                                )
+                            io.nisfeb.talon.ui.ShortcutAction.DecreaseFontSize ->
+                                uiSettings.setFontScale(
+                                    userFontScale - io.nisfeb.talon.ui.FONT_SCALE_STEP,
+                                )
+                            io.nisfeb.talon.ui.ShortcutAction.ResetFontSize ->
+                                uiSettings.setFontScale(1.0f)
                             is io.nisfeb.talon.ui.ShortcutAction.SwitchShip -> {
                                 sessionStore.all().getOrNull(action.index)?.ship?.let { targetShip ->
                                     // Clear the previous ship's open chat before
@@ -855,6 +869,10 @@ fun App(
                 // gallery) participate in the list/detail split.
                 androidx.compose.material3.ModalNavigationDrawer(
                     drawerState = drawerState,
+                    // Desktop opens the ship switcher only via the Talon
+                    // logo click — the edge-swipe is a touch gesture that
+                    // a mouse triggers ambiguously, so it's off there.
+                    gesturesEnabled = io.nisfeb.talon.ui.isTouchSwipeNavSupported,
                     drawerContent = {
                         // Empty drawer content when no ships are logged in
                         // (LoginScreen path). The drawer trigger isn't
