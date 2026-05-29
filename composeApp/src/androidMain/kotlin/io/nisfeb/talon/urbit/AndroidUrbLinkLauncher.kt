@@ -19,10 +19,22 @@ class AndroidUrbLinkLauncher(context: Context) : UrbLinkLauncher {
 
     override fun open(url: String): UrbLaunchResult {
         val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
-            // We're launching from outside an Activity context (the
-            // launcher is held at application scope), so a new task is
-            // required or startActivity throws.
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            // NEW_TASK: launcher is held at application scope, not an
+            //   Activity, so a new task is required or startActivity throws.
+            // CLEAR_TOP | SINGLE_TOP: defensive against the receiver's
+            //   launchMode. Lattice's MainActivity is `standard`, which
+            //   means a bare NEW_TASK on a running Lattice silently
+            //   foregrounds the task without delivering the new intent
+            //   — Lattice opens but doesn't navigate. CLEAR_TOP + SINGLE_TOP
+            //   routes the URI through onNewIntent on the existing
+            //   instance with state preserved (per FLAG_ACTIVITY_CLEAR_TOP
+            //   docs: "if FLAG_ACTIVITY_SINGLE_TOP is set then this Intent
+            //   will be delivered to the current instance's onNewIntent()").
+            addFlags(
+                Intent.FLAG_ACTIVITY_NEW_TASK
+                    or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                    or Intent.FLAG_ACTIVITY_SINGLE_TOP,
+            )
         }
         // queryIntentActivities is the reliable "is there a handler?"
         // check — resolveActivity can return the system resolver even
