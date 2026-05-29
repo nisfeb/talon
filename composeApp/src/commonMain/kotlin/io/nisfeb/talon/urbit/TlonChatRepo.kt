@@ -2744,11 +2744,27 @@ class TlonChatRepo(
             // doesn't re-bump the badge while the user is still looking.
             if (row.whom == focused) row.copy(count = 0, notifyCount = 0) else row
         }
+        // Per-thread breakdown — separate table so the message-row
+        // thread indicator can tint when its specific thread has
+        // unread events, and the in-thread view can render the "New"
+        // divider above the first unread reply. The channel-level
+        // [rows] above already reflects these events in aggregate;
+        // we're not double-counting, just keeping a finer-grained
+        // shadow copy of the per-thread sources.
+        val threadRows = obj.entries.mapNotNull { (sourceKey, summary) ->
+            toThreadUnread(sourceKey, summary as? JsonObject ?: return@mapNotNull null)
+        }.map { row ->
+            // Same focus-override: a refresh shouldn't re-light a
+            // thread inside the conversation the user is staring at.
+            if (row.whom == focused) row.copy(count = 0, notifyCount = 0) else row
+        }
         Log.i(
             TAG,
-            "activity scry: total-keys=${obj.size} unread-rows=${rows.size}",
+            "activity scry: total-keys=${obj.size} unread-rows=${rows.size} " +
+                "thread-rows=${threadRows.size}",
         )
         if (rows.isNotEmpty()) db.unreads().upsertAll(rows)
+        if (threadRows.isNotEmpty()) db.threadUnreads().upsertAll(threadRows)
     }
 
     private suspend fun applyActivityUpdate(obj: JsonObject) {
@@ -2770,7 +2786,13 @@ class TlonChatRepo(
                     row.copy(count = 0, notifyCount = 0)
                 } else row
             }
+            val threadRows = map.entries.mapNotNull { (key, summary) ->
+                toThreadUnread(key, summary as? JsonObject ?: return@mapNotNull null)
+            }.map { row ->
+                if (row.whom == focused) row.copy(count = 0, notifyCount = 0) else row
+            }
             if (rows.isNotEmpty()) db.unreads().upsertAll(rows)
+            if (threadRows.isNotEmpty()) db.threadUnreads().upsertAll(threadRows)
             return
         }
         (obj["read"] as? JsonObject)?.let { read ->
@@ -2809,6 +2831,19 @@ class TlonChatRepo(
     // activityReadAction extracted to ActivityParser.kt for testing.
 
     /**
+     * Locally clear the unread row for one specific thread. Fired
+     * when the user opens a thread so the per-row indicator tint and
+     * any in-thread "New" divider clear immediately. No server poke —
+     * the channel-level [markRead] (with `deep=true`) is what
+     * propagates "thread seen" to the ship; this is purely a UI mirror
+     * for the case where the user opens a thread without leaving the
+     * channel (so the channel-wide markRead doesn't fire).
+     */
+    suspend fun markThreadReadLocal(whom: String, parentPostId: String) {
+        db.threadUnreads().deleteOne(whom, parentPostId)
+    }
+
+    /**
      * Poke %activity to mark a conversation read. Channels require the
      * enclosing group flag; for v1 we only mark DMs (ship / club).
      */
@@ -2825,6 +2860,11 @@ class TlonChatRepo(
                 recencyMs = System.currentTimeMillis(),
             )
         )
+        // The server's read-action recurses via `deep=true` so the
+        // per-thread sources clear too; mirror locally so the per-row
+        // thread-indicator tints clear instantly instead of waiting
+        // for the SSE round-trip.
+        db.threadUnreads().deleteForWhom(whom)
 
         val groupFlag = if (
             whom.startsWith("chat/") ||

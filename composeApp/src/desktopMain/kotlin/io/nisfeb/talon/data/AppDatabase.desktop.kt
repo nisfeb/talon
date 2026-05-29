@@ -28,6 +28,7 @@ actual abstract class AppDatabase : RoomDatabase() {
     actual abstract fun messages(): MessageDao
     actual abstract fun reactions(): ReactionDao
     actual abstract fun unreads(): UnreadDao
+    actual abstract fun threadUnreads(): ThreadUnreadDao
     actual abstract fun contacts(): ContactDao
     actual abstract fun clubs(): ClubDao
     actual abstract fun groups(): GroupDao

@@ -29,6 +29,7 @@ import androidx.room.RoomDatabaseConstructor
         MessageEntity::class,
         ReactionEntity::class,
         UnreadEntity::class,
+        ThreadUnreadEntity::class,
         ContactEntity::class,
         ClubEntity::class,
         GroupEntity::class,
@@ -49,7 +50,7 @@ import androidx.room.RoomDatabaseConstructor
         MessageMediaEntity::class,
         RailItemPrefEntity::class,
     ],
-    version = 31,
+    version = 32,
     exportSchema = false,
 )
 @ConstructedBy(AppDatabaseConstructor::class)
@@ -57,6 +58,7 @@ expect abstract class AppDatabase : RoomDatabase {
     abstract fun messages(): MessageDao
     abstract fun reactions(): ReactionDao
     abstract fun unreads(): UnreadDao
+    abstract fun threadUnreads(): ThreadUnreadDao
     abstract fun contacts(): ContactDao
     abstract fun clubs(): ClubDao
     abstract fun groups(): GroupDao

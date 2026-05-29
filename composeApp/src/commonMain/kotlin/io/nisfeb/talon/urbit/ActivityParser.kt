@@ -1,5 +1,6 @@
 package io.nisfeb.talon.urbit
 
+import io.nisfeb.talon.data.ThreadUnreadEntity
 import io.nisfeb.talon.data.UnreadEntity
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
@@ -44,6 +45,75 @@ internal fun sourceKeyToWhom(key: String): String? = when {
         key.removePrefix("dm-thread/").substringBefore('/').takeIf { it.isNotEmpty() }
     }
     else -> null
+}
+
+/**
+ * For `thread/<nest>/<msg>` and `dm-thread/<whom>/<msg>` source keys,
+ * extract both the parent conversation [whom] AND the parent post id
+ * the thread hangs off. Returns null for any non-thread key.
+ *
+ * The returned `parentPostId` is normalized to the form
+ * [io.nisfeb.talon.data.MessageEntity.parentId] uses for its
+ * conversation:
+ *  - channels (`chat/`, `diary/`, `heap/`) → bare `<da>`
+ *  - DMs / clubs → full `~author/<da>`
+ *
+ * Without this, all thread events for a given conversation collapse
+ * onto a single [UnreadEntity] row and the per-thread breakdown
+ * needed for the per-row unread tint / in-thread "New" divider is
+ * lost.
+ */
+internal data class ThreadSource(val whom: String, val parentPostId: String)
+
+internal fun sourceKeyToThreadSource(key: String): ThreadSource? = when {
+    key.startsWith("thread/") -> {
+        // `thread/<nest=kind/~host/slug>/<msg-id>`. The nest is 3
+        // path segments; whatever follows is the parent post id. The
+        // channel-tables form is the bare `<da>` — the substringAfter
+        // matches MessageEntity.parentId for channel posts.
+        val parts = key.removePrefix("thread/").split("/")
+        if (parts.size < 4) null
+        else ThreadSource(
+            whom = parts.subList(0, 3).joinToString("/"),
+            parentPostId = parts.subList(3, parts.size).joinToString("/")
+                .let(::canonicalChannelPostId),
+        )
+    }
+    key.startsWith("dm-thread/") -> {
+        // `dm-thread/<whom>/<msg-id>`. The whom is a single segment
+        // (`~ship` or `0vclub`); the rest is the writ id in its
+        // canonical `~author/<da>` form, which MessageEntity stores
+        // verbatim for DM / club rows.
+        val rest = key.removePrefix("dm-thread/")
+        val slash = rest.indexOf('/')
+        if (slash <= 0) null
+        else ThreadSource(
+            whom = rest.substring(0, slash),
+            parentPostId = rest.substring(slash + 1),
+        )
+    }
+    else -> null
+}
+
+/** Bare-da projection for the channel-side parent id form. Activity
+ *  emits `<author>/<da>` everywhere; channel tables key on `<da>`. */
+private fun canonicalChannelPostId(rawId: String): String =
+    rawId.substringAfterLast('/')
+
+/**
+ * Map a `thread/` or `dm-thread/` activity summary into a
+ * [ThreadUnreadEntity]. Returns null when [sourceKey] isn't a thread
+ * source.
+ */
+internal fun toThreadUnread(sourceKey: String, summary: JsonObject): ThreadUnreadEntity? {
+    val src = sourceKeyToThreadSource(sourceKey) ?: return null
+    return ThreadUnreadEntity(
+        whom = src.whom,
+        parentPostId = src.parentPostId,
+        count = summary["count"].asInt() ?: 0,
+        notifyCount = summary["notify-count"].asInt() ?: 0,
+        recencyMs = summary["recency"].asLong() ?: 0L,
+    )
 }
 
 /**

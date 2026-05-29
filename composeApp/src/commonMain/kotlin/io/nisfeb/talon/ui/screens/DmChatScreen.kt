@@ -223,7 +223,9 @@ fun DmChatScreen(
                 .onStart { emit(emptyList()) },
             db.messages().streamReplyCounts(whom).distinctUntilChanged()
                 .onStart { emit(emptyList()) },
-        ) { messages, reactions, replyCounts ->
+            db.threadUnreads().streamForWhom(whom).distinctUntilChanged()
+                .onStart { emit(emptyList()) },
+        ) { messages, reactions, replyCounts, threadUnreads ->
             if (messages.isEmpty()) {
                 prevByMsgId = emptyMap()
                 emptyList()
@@ -232,6 +234,8 @@ fun DmChatScreen(
                     messages = messages,
                     reactsByPost = reactions.groupBy { it.postId },
                     countsByPost = replyCounts.associateBy(ReplyCount::postId),
+                    threadUnreadByPost = threadUnreads
+                        .associateBy { it.parentPostId },
                     prev = prevByMsgId,
                 )
                 prevByMsgId = nextMap
@@ -856,7 +860,7 @@ fun DmChatScreen(
                 ) { item ->
                     when (item) {
                         is ChatListItem.DateDivider -> DateDividerRow(item.label)
-                        is ChatListItem.UnreadDivider -> UnreadDividerRow()
+                        is ChatListItem.UnreadDivider -> io.nisfeb.talon.ui.UnreadDividerRow()
                         is ChatListItem.Message -> {
                             val rowMsg = item.row.m
                             MessageRow(
@@ -1264,6 +1268,7 @@ private fun MessageRow(
                     contactMap = contactMap,
                     nowMs = System.currentTimeMillis(),
                     onClick = { onOpenThread(m) },
+                    hasUnread = row.threadHasUnread,
                     modifier = Modifier.padding(top = 4.dp),
                 )
             }
@@ -1413,28 +1418,8 @@ private fun DateDividerRow(label: String) {
     }
 }
 
-@Composable
-private fun UnreadDividerRow() {
-    // Reads `colorScheme.primary` so the divider tint follows the
-    // user's chosen accent (Settings → Custom accent color). When the
-    // setting is off this resolves to the brand amber via the theme;
-    // when on, it picks up the profile color or custom hex.
-    val tint = MaterialTheme.colorScheme.primary
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.Center,
-    ) {
-        HorizontalDivider(modifier = Modifier.weight(1f), color = tint)
-        Text(
-            "New",
-            style = MaterialTheme.typography.labelSmall,
-            color = tint,
-            modifier = Modifier.padding(horizontal = 10.dp),
-        )
-        HorizontalDivider(modifier = Modifier.weight(1f), color = tint)
-    }
-}
+// UnreadDividerRow lives in io.nisfeb.talon.ui.UnreadDivider so the
+// thread list (ThreadList.kt) can reuse the exact same widget.
 
 // Thread-safe formatter — message rendering happens on whatever
 // dispatcher Compose lands on, and `buildChatListItemsReusing`
@@ -1491,6 +1476,10 @@ private data class DisplayRow(
     /** Patp of the author of the most recent reply. Empty when
      *  [replyCount] is 0; drives the indicator avatar. */
     val lastReplyAuthor: String,
+    /** True when this thread has unread events (per
+     *  [io.nisfeb.talon.data.ThreadUnreadEntity] for `whom + this
+     *  message id`). Drives the accent tint on the [ThreadIndicator]. */
+    val threadHasUnread: Boolean,
     val showHeader: Boolean,
 )
 
@@ -1504,6 +1493,7 @@ private fun buildChatListItemsReusing(
     messages: List<MessageEntity>,
     reactsByPost: Map<String, List<ReactionEntity>>,
     countsByPost: Map<String, ReplyCount>,
+    threadUnreadByPost: Map<String, io.nisfeb.talon.data.ThreadUnreadEntity>,
     prev: Map<String, DisplayRow>,
 ): Pair<List<ChatListItem>, Map<String, DisplayRow>> {
     val out = ArrayList<ChatListItem>(messages.size + 8)
@@ -1527,6 +1517,7 @@ private fun buildChatListItemsReusing(
         val replyCount = digest?.count ?: 0
         val lastReplySentMs = digest?.lastSentMs ?: 0L
         val lastReplyAuthor = digest?.lastAuthor.orEmpty()
+        val threadHasUnread = (threadUnreadByPost[m.id]?.count ?: 0) > 0
         val cached = prev[m.id]
         val row = if (
             cached != null &&
@@ -1535,6 +1526,7 @@ private fun buildChatListItemsReusing(
             cached.replyCount == replyCount &&
             cached.lastReplySentMs == lastReplySentMs &&
             cached.lastReplyAuthor == lastReplyAuthor &&
+            cached.threadHasUnread == threadHasUnread &&
             cached.showHeader == showHeader
         ) cached
         else DisplayRow(
@@ -1543,6 +1535,7 @@ private fun buildChatListItemsReusing(
             replyCount = replyCount,
             lastReplySentMs = lastReplySentMs,
             lastReplyAuthor = lastReplyAuthor,
+            threadHasUnread = threadHasUnread,
             showHeader = showHeader,
         )
         nextMap[m.id] = row

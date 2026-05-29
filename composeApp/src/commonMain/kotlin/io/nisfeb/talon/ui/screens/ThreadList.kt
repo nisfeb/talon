@@ -176,6 +176,25 @@ fun ThreadList(
             .onFailure { Log.w("ThreadScreen", "fetchThread failed: ${it.message}") }
     }
 
+    // Snapshot the per-thread unread count at thread-open. The
+    // snapshot is what positions the "New" divider in the list
+    // (above the last N replies). Cleared in the local DB the moment
+    // we read it so the per-row indicator on the message bubble in
+    // the parent chat tints stop highlighting — server-side state
+    // catches up on the next markRead(whom) at channel scope.
+    var threadUnreadSnapshot by remember(whom, parentId) {
+        mutableStateOf<Int?>(null)
+    }
+    LaunchedEffect(whom, parentId) {
+        if (threadUnreadSnapshot == null) {
+            val row = db.threadUnreads().getOne(whom, parentId)
+            threadUnreadSnapshot = row?.count ?: 0
+            if ((row?.count ?: 0) > 0) {
+                runCatching { repo.markThreadReadLocal(whom, parentId) }
+            }
+        }
+    }
+
     var hasAnchored by remember(parentId) { mutableStateOf(false) }
     var flashReplyId by remember(parentId) { mutableStateOf<String?>(null) }
     LaunchedEffect(rows.second.size, initialScrollReplyId) {
@@ -407,11 +426,26 @@ fun ThreadList(
                 }
                 item(key = "__parent_divider") { HorizontalDivider() }
             }
+            // First-unread anchor for the "New" divider. Reply list
+            // is oldest-first → newest-last, so the last N entries
+            // are the unread ones (per the snapshot we captured at
+            // thread-open). null when there's nothing to flag.
+            val firstUnreadReplyId = run {
+                val n = threadUnreadSnapshot ?: 0
+                if (n <= 0 || rows.second.isEmpty()) null
+                else rows.second
+                    .getOrNull(rows.second.size - n.coerceAtMost(rows.second.size))
+                    ?.m
+                    ?.id
+            }
             items(
                 items = rows.second,
                 key = { it.m.id },
                 contentType = { "reply" },
             ) { row ->
+                if (row.m.id == firstUnreadReplyId) {
+                    io.nisfeb.talon.ui.UnreadDividerRow()
+                }
                 val replyMsg = row.m
                 ThreadMessage(
                     m = replyMsg,

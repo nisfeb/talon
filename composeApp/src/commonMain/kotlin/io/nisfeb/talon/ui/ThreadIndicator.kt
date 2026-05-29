@@ -39,14 +39,23 @@ fun ThreadIndicator(
     nowMs: Long,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    /** True when this thread has unseen replies. Tints the pill with
+     *  the accent (primaryContainer surface + onPrimaryContainer text)
+     *  so it matches the same accent the home-list unread badges and
+     *  the in-chat "New" divider use. Driven by ThreadUnreadEntity. */
+    hasUnread: Boolean = false,
 ) {
     if (count <= 0) return
+    val bg = if (hasUnread) MaterialTheme.colorScheme.primaryContainer
+        else MaterialTheme.colorScheme.surfaceVariant
+    val fg = if (hasUnread) MaterialTheme.colorScheme.onPrimaryContainer
+        else MaterialTheme.colorScheme.onSurfaceVariant
     Row(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         modifier = modifier
             .clip(RoundedCornerShape(12.dp))
-            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .background(bg)
             .clickable(onClick = onClick)
             .padding(horizontal = 10.dp, vertical = 6.dp),
     ) {
@@ -61,19 +70,15 @@ fun ThreadIndicator(
         Text(
             text = if (count == 1) "1 reply" else "$count replies",
             style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            color = fg,
         )
         if (lastSentMs > 0L) {
             Spacer(Modifier.width(2.dp))
-            Text(
-                "·",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            Text("·", style = MaterialTheme.typography.labelMedium, color = fg)
             Text(
                 text = shortRelativeTime(thenMs = lastSentMs, nowMs = nowMs),
                 style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = fg,
             )
         }
     }
