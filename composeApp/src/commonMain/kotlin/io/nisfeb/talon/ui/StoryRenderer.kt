@@ -144,6 +144,13 @@ fun StoryRenderer(
      *  toggle-on-same / replace-on-different logic used by the normal
      *  reaction pills. */
     onPollVote: ((emoji: String) -> Unit)? = null,
+    /** A plain tap on the message text that did NOT hit a link or
+     *  mention. The row uses this to open its action menu (tapping a
+     *  message reveals the menu). Annotated text consumes its own
+     *  taps, so without this hook a tap on the non-link part of a
+     *  message containing a link would be swallowed; plain text falls
+     *  through to the row's own clickable instead. */
+    onMessageTap: (() -> Unit)? = null,
 ) {
     // SelectionContainer makes the rendered text drag-selectable on
     // both targets — mouse-drag on desktop, long-press-and-drag on
@@ -184,14 +191,18 @@ fun StoryRenderer(
                                     // URL / mention navigation.
                                     detectTapGestures(
                                         onTap = { pos ->
-                                            val l = layout.value ?: return@detectTapGestures
-                                            val offset = l.getOffsetForPosition(pos)
-                                            val ann = part.text
-                                                .getStringAnnotations(offset, offset)
-                                                .firstOrNull() ?: return@detectTapGestures
-                                            when (ann.tag) {
+                                            val l = layout.value
+                                            val ann = l?.let {
+                                                val offset = it.getOffsetForPosition(pos)
+                                                part.text.getStringAnnotations(offset, offset)
+                                                    .firstOrNull()
+                                            }
+                                            when (ann?.tag) {
                                                 URL_TAG -> onLinkTap(ann.item)
                                                 MENTION_TAG -> onMentionTap(ann.item)
+                                                // Tap landed on text, not a link →
+                                                // bubble up to open the message menu.
+                                                else -> onMessageTap?.invoke()
                                             }
                                         },
                                     )

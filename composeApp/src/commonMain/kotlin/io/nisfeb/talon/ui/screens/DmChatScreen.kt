@@ -7,7 +7,6 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
-import io.nisfeb.talon.ui.MessageActionsButton
 import io.nisfeb.talon.ui.combinedClickableWithSecondary
 import io.nisfeb.talon.ui.onSecondaryClick
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
@@ -30,6 +29,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -1184,11 +1184,18 @@ private fun MessageRow(
         modifier = Modifier
             .fillMaxWidth()
             .background(flashColor)
-            // Right-click on desktop opens the per-row action menu —
-            // the Android long-press path was removed so Compose's
-            // SelectionContainer in StoryRenderer owns long-press for
-            // text selection. Android reaches the menu via the trailing
-            // MessageActionsButton (the "⋯").
+            // Accent tint while this message's menu is open — shows
+            // which message you're acting on.
+            .background(
+                if (menuExpanded) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
+                else Color.Transparent,
+            )
+            // Single tap anywhere on the row opens the action menu;
+            // children that handle their own taps (avatar, reactions,
+            // thread pill, images, links) consume first. Long-press is
+            // still text selection (SelectionContainer); right-click
+            // also opens the menu on desktop.
+            .clickable { onMenuExpand() }
             .onSecondaryClick { onMenuExpand() }
             .graphicsLayer {
                 translationX = offsetX.value
@@ -1279,6 +1286,9 @@ private fun MessageRow(
                 reactions = row.reactions,
                 ourPatp = ourPatp,
                 onPollVote = { emoji -> onReactionTap(m, row.reactions, emoji) },
+                // Tapping the message text (off any link) opens the
+                // action menu — same as tapping the row background.
+                onMessageTap = onMenuExpand,
             )
             val firstLink = remember(parts) { firstLinkUrl(parts) }
             if (firstLink != null) {
@@ -1331,16 +1341,17 @@ private fun MessageRow(
                     modifier = Modifier.padding(top = 4.dp),
                 )
             }
-        }
-        // Trailing action affordance. Opens a popover (DropdownMenu)
-        // anchored to the button — replaces the row-wide bottom sheet
-        // that previously fired on long-press. Long-press is now the
-        // text selection gesture inside the message bubble.
-        MessageActionsButton(
-            expanded = menuExpanded,
-            onExpandedChange = { open -> if (open) onMenuExpand() else onMenuDismiss() },
-        ) { _ ->
-            actionMenu()
+            // Action menu, anchored to the message. Opened by a single
+            // tap on the row (see the row-level clickable + the
+            // StoryRenderer onMessageTap above) and by right-click on
+            // desktop — the trailing "⋯" button it replaced is gone.
+            androidx.compose.material3.DropdownMenu(
+                expanded = menuExpanded,
+                onDismissRequest = onMenuDismiss,
+                modifier = Modifier.widthIn(min = 280.dp, max = 360.dp),
+            ) {
+                actionMenu()
+            }
         }
     }
 }
@@ -1759,10 +1770,11 @@ private fun EditMessageDialog(
 
 /**
  * Per-message action menu rendered as the body of a [DropdownMenu]
- * anchored to the row's trailing "⋯" button (see [MessageActionsButton]).
- * Previously a [ModalBottomSheet] at screen level — the bottom-sheet
- * pattern wasted vertical room and obscured the message the user was
- * acting on. Now it floats next to the source row.
+ * anchored to the message row, opened by a single tap on the row (or
+ * right-click on desktop). Previously a [ModalBottomSheet] at screen
+ * level — the bottom-sheet pattern wasted vertical room and obscured
+ * the message the user was acting on. Now it floats next to the
+ * source row.
  *
  * Self-dismissing actions invoke [onDismiss] before firing so the menu
  * closes immediately on selection.

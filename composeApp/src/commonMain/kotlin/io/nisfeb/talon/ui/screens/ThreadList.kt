@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
@@ -70,7 +71,6 @@ import io.nisfeb.talon.ui.CiteResolver
 import io.nisfeb.talon.ui.ContactMap
 import io.nisfeb.talon.ui.EmojiCatalog
 import io.nisfeb.talon.ui.LocalCiteResolver
-import io.nisfeb.talon.ui.MessageActionsButton
 import io.nisfeb.talon.ui.ReactionPalette
 import io.nisfeb.talon.ui.StoryRenderer
 import io.nisfeb.talon.ui.combinedClickableWithSecondary
@@ -667,16 +667,21 @@ private fun ThreadMessage(
     val baseColor = if (highlighted) MaterialTheme.colorScheme.surfaceVariant
         else MaterialTheme.colorScheme.surface
     val flashOverlay = Color(0xFFFFC107).copy(alpha = 0.30f * flashAlpha.value)
-    // Outer Row hosts the trailing MessageActionsButton — Android's
-    // long-press is now reserved for text selection inside the bubble
-    // (see SelectionContainer in StoryRenderer), so sheet access moves
-    // to the ⋯ button (and desktop right-click on the row).
+    // Single tap on the row opens the action menu (and tints the row
+    // with the accent to show which message); right-click also opens
+    // it on desktop. Long-press stays text selection (Selection
+    // Container). The trailing "⋯" button is gone.
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .clickable { onMenuExpand() }
             .onSecondaryClick { onMenuExpand() }
             .background(baseColor)
             .background(flashOverlay)
+            .background(
+                if (menuExpanded) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
+                else Color.Transparent,
+            )
             .padding(top = if (showHeader) 10.dp else 2.dp, bottom = 2.dp),
     ) {
         Column(
@@ -699,6 +704,7 @@ private fun ThreadMessage(
                 reactions = reactions,
                 ourPatp = ourPatp,
                 onPollVote = { emoji -> onPollVote(m, reactions, emoji) },
+                onMessageTap = onMenuExpand,
             )
             if (grouped.isNotEmpty()) {
                 FlowRow(
@@ -737,12 +743,14 @@ private fun ThreadMessage(
                     }
                 }
             }
-        }
-        MessageActionsButton(
-            expanded = menuExpanded,
-            onExpandedChange = { open -> if (open) onMenuExpand() else onMenuDismiss() },
-        ) { _ ->
-            actionMenu()
+            // Action menu anchored to the message (tap / right-click).
+            androidx.compose.material3.DropdownMenu(
+                expanded = menuExpanded,
+                onDismissRequest = onMenuDismiss,
+                modifier = Modifier.widthIn(min = 280.dp, max = 360.dp),
+            ) {
+                actionMenu()
+            }
         }
     }
 }
