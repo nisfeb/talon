@@ -306,6 +306,9 @@ fun App(
     // onPreviewKeyEvent handler (on the Surface inside key()) can flip
     // them, and DmListScreen (also inside key()) can consume them.
     var focusSearchRequest by remember { mutableStateOf(false) }
+    // Set when a group is tapped in search; consumed by DmListScreen to
+    // scroll-to + expand that group on the home list.
+    var revealGroupRequest by remember { mutableStateOf<String?>(null) }
     var showNewDmRequest by remember { mutableStateOf(false) }
 
     // Used by the onPreviewKeyEvent handler to pick the right modifier
@@ -1067,6 +1070,13 @@ fun App(
                                 openThreadParent = parentId
                             }
                         },
+                        onOpenGroup = { flag ->
+                            // Back to the home list, then let DmListScreen
+                            // reveal + expand the group.
+                            showSearch = false
+                            openChat = null
+                            revealGroupRequest = flag
+                        },
                     )
                     showNewDm -> NewDmScreen(
                         db = db,
@@ -1543,6 +1553,8 @@ fun App(
                                         onFocusSearchHandled = { focusSearchRequest = false },
                                         showNewDmRequest = showNewDmRequest,
                                         onShowNewDmHandled = { showNewDmRequest = false },
+                                        revealGroupFlag = revealGroupRequest,
+                                        onRevealGroupHandled = { revealGroupRequest = null },
                                     )
                                 }
                                 RailTab.Statuses -> StatusFeedList(

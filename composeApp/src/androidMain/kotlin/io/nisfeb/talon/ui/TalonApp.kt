@@ -175,6 +175,7 @@ fun TalonApp(
      *  thread screen reads it. */
     var pendingThreadAnchor by remember { mutableStateOf<String?>(initialThreadAnchor) }
     var searchOpen by remember { mutableStateOf(false) }
+    var revealGroupRequest by remember { mutableStateOf<String?>(null) }
     var newDmOpen by remember { mutableStateOf(false) }
     var viewerImageUrl by remember { mutableStateOf<String?>(null) }
     var viewerImageList by remember {
@@ -1301,6 +1302,11 @@ fun TalonApp(
                         pendingScrollMessageId = postId
                     }
                 },
+                onOpenGroup = { flag ->
+                    searchOpen = false
+                    openWhom = null
+                    revealGroupRequest = flag
+                },
                 onBack = { searchOpen = false },
                 modifier = mod,
             )
@@ -1371,6 +1377,8 @@ fun TalonApp(
                 folderItemOrder = app.uiSettings.folderItemOrder
                     .collectAsState().value,
                 kebabItems = RailItem.entries.toSet(),
+                revealGroupFlag = revealGroupRequest,
+                onRevealGroupHandled = { revealGroupRequest = null },
                 modifier = mod,
             )
         }

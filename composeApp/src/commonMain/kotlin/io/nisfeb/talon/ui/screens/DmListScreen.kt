@@ -189,6 +189,11 @@ fun DmListScreen(
      *  via [onOpenSearch]. */
     focusSearchRequest: Boolean = false,
     onFocusSearchHandled: () -> Unit = {},
+    /** When non-null (set after tapping a group in search), switch to
+     *  the main home view, expand that group's channels, and scroll
+     *  it into view. Cleared via [onRevealGroupHandled] once done. */
+    revealGroupFlag: String? = null,
+    onRevealGroupHandled: () -> Unit = {},
     /** When set to true by a keyboard-shortcut handler upstream, open
      *  the New-DM dialog and reset the flag. */
     showNewDmRequest: Boolean = false,
@@ -497,6 +502,40 @@ fun DmListScreen(
     // Reuse a singleton LazyListState so the user's scroll position in
     // the home list survives navigating into a chat and back out.
     val listState = snap.listState
+
+    // Reveal-a-group from search. Re-keyed on homeRows so it settles
+    // across the recompositions caused by switching to the All view
+    // and expanding: each pass either advances one step (switch view →
+    // return; then expand + scroll) or no-ops. Setting expandedGroups
+    // to a structurally-equal set is a no-op under mutableStateOf's
+    // default equality, so there's no re-run loop.
+    androidx.compose.runtime.LaunchedEffect(revealGroupFlag, homeRows) {
+        val flag = revealGroupFlag ?: return@LaunchedEffect
+        if (selectedFolderId != null || selectedSpecial != SpecialTab.All) {
+            selectedFolderId = null
+            selectedSpecial = SpecialTab.All
+            return@LaunchedEffect
+        }
+        expandedGroups = expandedGroups + flag
+        // Lazy-item index of the group head: each Header / GroupHead /
+        // Flat is one item; GroupChild rows are bundled into their
+        // head's item, so they don't count. -1 when the group isn't in
+        // the list (not a member / not synced) — clear and give up.
+        var idx = -1
+        var count = 0
+        for (r in homeRows) {
+            when (r) {
+                is HomeRow.GroupHead -> {
+                    if (r.flag == flag) { idx = count; break }
+                    count++
+                }
+                is HomeRow.Header, is HomeRow.Flat -> count++
+                is HomeRow.GroupChild -> Unit
+            }
+        }
+        if (idx >= 0) runCatching { listState.animateScrollToItem(idx) }
+        onRevealGroupHandled()
+    }
     // Tracks what was touched during a drag so onDragStopped knows what
     // to push to %settings. Null means "nothing pending".
     var pendingPushFolderId by remember { mutableStateOf<Long?>(null) }

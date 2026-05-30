@@ -52,6 +52,11 @@ fun SearchScreen(
     uiSettings: io.nisfeb.talon.ui.UiSettings,
     onOpenConversation: (whom: String) -> Unit,
     onOpenMessage: (whom: String, postId: String, parentId: String?) -> Unit,
+    /** Tapping a group result reveals it in the home list (scrolls to
+     *  the group head and expands its channels) rather than jumping
+     *  straight into a channel — the user searched for the group, so
+     *  show them the group. */
+    onOpenGroup: (flag: String) -> Unit,
     onBack: () -> Unit,
     /** Optional ML-backed search affordances. Android wires the real
      *  Embedder + EmbeddingIndexer; desktop passes null and the screen
@@ -140,25 +145,6 @@ fun SearchScreen(
         )
     }.collectAsState(initial = ContactMap.EMPTY)
 
-    // First (lowest-ordinal) channel of a group, or null if the group
-    // has no channels synced locally. A group isn't itself a `whom`
-    // you can open — the navigable unit is a channel — so tapping a
-    // group result lands the user in its first channel.
-    fun firstChannelOf(flag: String): String? =
-        contactMap.channelGroups
-            .filter { it.groupFlag == flag }
-            .minByOrNull { it.ordinal }
-            ?.nest
-
-    // Only surface group hits we can actually act on (have at least
-    // one openable channel). A title-only match with no synced
-    // channels would be a dead row.
-    val groupHits = remember(groups, contactMap) {
-        groups.mapNotNull { g ->
-            val nest = firstChannelOf(g.flag) ?: return@mapNotNull null
-            g to nest
-        }
-    }
 
     // The chip surfaces a per-search-session preference — "for my
     // searches, default to smart-mode (semantic) or substring".
@@ -293,7 +279,7 @@ fun SearchScreen(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(16.dp),
             )
-        } else if (results.isEmpty() && people.isEmpty() && groupHits.isEmpty()) {
+        } else if (results.isEmpty() && people.isEmpty() && groups.isEmpty()) {
             Text(
                 "No matches.",
                 style = MaterialTheme.typography.bodyMedium,
@@ -305,18 +291,18 @@ fun SearchScreen(
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(vertical = 8.dp),
             ) {
-                if (groupHits.isNotEmpty()) {
+                if (groups.isNotEmpty()) {
                     item(key = "__groups_header", contentType = "header") {
                         SectionHeader("Groups")
                     }
                     items(
-                        items = groupHits,
-                        key = { (g, _) -> "group:${g.flag}" },
+                        items = groups,
+                        key = { "group:${it.flag}" },
                         contentType = { "group" },
-                    ) { (g, nest) ->
+                    ) { g ->
                         GroupRow(
                             group = g,
-                            onClick = { onOpenConversation(nest) },
+                            onClick = { onOpenGroup(g.flag) },
                         )
                         HorizontalDivider()
                     }
