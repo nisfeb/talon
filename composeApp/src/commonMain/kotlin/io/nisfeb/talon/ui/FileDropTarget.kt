@@ -1,5 +1,6 @@
 package io.nisfeb.talon.ui
 
+import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 
 /**
@@ -64,3 +65,27 @@ data class DroppedFile(
  *  intercept on desktop. Android returns null until we wire
  *  ContentReceiver. */
 expect fun readClipboardImageOrNull(): DroppedFile?
+
+/**
+ * Accept a pasted (or keyboard-inserted) image into the composer's
+ * text field and hand it to [onImage] for the same upload+send path
+ * drag-drop and the picker use.
+ *
+ * This is the Android paste-image route: a touch keyboard has no
+ * Ctrl+V, and the system Paste action on a plain text field only
+ * yields text — so Android registers the field as a rich-content
+ * receiver via Compose's `contentReceiver`, which fires for images
+ * pasted from the clipboard menu or inserted from the keyboard
+ * (Gboard image/GIF). Desktop already handles paste through the
+ * Ctrl+V intercept + [readClipboardImageOrNull], so its actual is a
+ * no-op.
+ *
+ * Composable because the Android actual reads `LocalContext` to
+ * resolve the pasted `content://` URI to bytes. [enabled] gates it
+ * the same way [fileDropTarget] does (`canSend && !uploading`).
+ */
+@Composable
+expect fun Modifier.imagePasteTarget(
+    enabled: Boolean,
+    onImage: (DroppedFile) -> Unit,
+): Modifier

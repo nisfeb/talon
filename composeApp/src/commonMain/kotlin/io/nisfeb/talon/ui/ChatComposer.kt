@@ -525,6 +525,13 @@ fun ChatComposer(
                 visualTransformation = EmojiVisualTransformation,
                 modifier = Modifier
                     .weight(1f)
+                    // Android paste-image route (no-op on desktop, which
+                    // uses the Ctrl+V intercept below). Same upload+send
+                    // path as drag-drop and the picker.
+                    .imagePasteTarget(
+                        enabled = canSend && !state.uploading,
+                        onImage = uploadAndSend,
+                    )
                     .onPreviewKeyEvent { e ->
                         if (e.type != KeyEventType.KeyDown) {
                             return@onPreviewKeyEvent false

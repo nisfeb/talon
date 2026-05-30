@@ -119,3 +119,12 @@ actual fun readClipboardImageOrNull(): DroppedFile? {
         bytes = out.toByteArray(),
     )
 }
+
+// Desktop pastes images through the Ctrl+V intercept in ChatComposer
+// (which calls readClipboardImageOrNull above), so the rich-content
+// receiver is a no-op here.
+@androidx.compose.runtime.Composable
+actual fun Modifier.imagePasteTarget(
+    enabled: Boolean,
+    onImage: (DroppedFile) -> Unit,
+): Modifier = this
