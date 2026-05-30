@@ -1042,7 +1042,14 @@ fun DmListScreen(
                             }
                             val childrenSnapshot = children.toList()
                             item(key = row.key, contentType = "GroupHead") {
-                                ReorderableItem(reorderState, key = row.key) { _ ->
+                                // enabled = editMode: outside reorder mode the
+                                // item is inert — no drag, and crucially no
+                                // placement animation. The placement animation
+                                // running during normal activity-driven reorders
+                                // (esp. "Most recent" group ordering) fought the
+                                // expand/collapse AnimatedVisibility height
+                                // change and rendered groups overlapped/compacted.
+                                ReorderableItem(reorderState, key = row.key, enabled = editMode) { _ ->
                                     Column {
                                         GroupHeaderRow(
                                             flag = row.flag,
@@ -1094,7 +1101,14 @@ fun DmListScreen(
                         }
                         is HomeRow.Flat -> {
                             item(key = row.key, contentType = "Flat") {
-                                ReorderableItem(reorderState, key = row.key) { _ ->
+                                // enabled = editMode: outside reorder mode the
+                                // item is inert — no drag, and crucially no
+                                // placement animation. The placement animation
+                                // running during normal activity-driven reorders
+                                // (esp. "Most recent" group ordering) fought the
+                                // expand/collapse AnimatedVisibility height
+                                // change and rendered groups overlapped/compacted.
+                                ReorderableItem(reorderState, key = row.key, enabled = editMode) { _ ->
                                     ConversationRow(
                                         m = row.m,
                                         unread = row.unread,
@@ -1153,7 +1167,14 @@ fun DmListScreen(
                             }
                             val childrenSnapshot = children.toList()
                             item(key = row.key, contentType = "GroupHead") {
-                                ReorderableItem(reorderState, key = row.key) { _ ->
+                                // enabled = editMode: outside reorder mode the
+                                // item is inert — no drag, and crucially no
+                                // placement animation. The placement animation
+                                // running during normal activity-driven reorders
+                                // (esp. "Most recent" group ordering) fought the
+                                // expand/collapse AnimatedVisibility height
+                                // change and rendered groups overlapped/compacted.
+                                ReorderableItem(reorderState, key = row.key, enabled = editMode) { _ ->
                                     Column {
                                         GroupHeaderRow(
                                             flag = row.flag,
