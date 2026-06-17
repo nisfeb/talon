@@ -156,7 +156,12 @@ suspend fun runCommand(
         // function runs. Recognize them here so unknown-command errors
         // don't fire if someone routes a stale invocation through.
         "img", "file", "mic" -> CommandResult.Handled
-        else -> CommandResult.Error("unknown command: /${parsed.cmd}")
+        // Unrecognized slash commands pass through as a normal message
+        // (verbatim — original casing/spacing preserved) so server-side
+        // bots like hermes can receive their own `/command` syntax. A
+        // recognized command with bad usage still returns a helpful
+        // Error above; only truly-unknown commands fall through here.
+        else -> CommandResult.Send(rawText)
     }
 }
 

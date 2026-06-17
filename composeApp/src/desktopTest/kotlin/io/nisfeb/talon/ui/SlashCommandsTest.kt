@@ -18,13 +18,15 @@ import kotlin.test.assertTrue
 
 /**
  * Pins the runCommand dispatcher. Every slash-command flow goes through
- * this switch — without coverage, a stale invocation can silently route
- * into the chat send path, or a typo could turn an unknown command into
- * a no-op instead of a user-facing error.
+ * this switch — without coverage, a stale invocation could route to the
+ * wrong arm, or a recognized command with bad usage could silently send
+ * into the channel instead of surfacing its error. Unknown commands are
+ * expected to pass through verbatim (so bots like hermes get their own
+ * slash syntax); the tests below pin that boundary.
  *
  * `/cal`, `/tz`, `/poll` parse paths are exercised in their own files;
  * here we cover the routing + the parser-free commands (`/me`, `/pet`,
- * `/talk`, `/loc`, plus the unknown-command branch).
+ * `/talk`, `/loc`, plus the unknown-command passthrough).
  */
 class SlashCommandsTest {
     private lateinit var tmpDir: File
@@ -68,10 +70,22 @@ class SlashCommandsTest {
     }
 
     @Test
-    fun `unknown slash command returns Error with the command name`() {
-        val r = run("/notarealcommand foo")
+    fun `unknown slash command passes through verbatim as a Send`() {
+        // Passthrough: an unrecognized /command is sent as a normal
+        // message (original casing + spacing intact) so server-side
+        // bots like hermes can receive their own slash syntax.
+        val r = run("/NotARealCommand foo bar")
+        assertTrue(r is CommandResult.Send)
+        assertEquals("/NotARealCommand foo bar", (r as CommandResult.Send).body)
+    }
+
+    @Test
+    fun `recognized command with bad usage still returns Error not passthrough`() {
+        // The passthrough only catches truly-unknown commands. A known
+        // command with invalid args must still surface its helpful error
+        // rather than silently sending "/pet" into the channel.
+        val r = run("/pet")
         assertTrue(r is CommandResult.Error)
-        assertTrue((r as CommandResult.Error).message.contains("notarealcommand"))
     }
 
     @Test
