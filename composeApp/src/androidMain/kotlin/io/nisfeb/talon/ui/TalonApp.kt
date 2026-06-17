@@ -339,19 +339,27 @@ fun TalonApp(
         io.nisfeb.talon.notify.AndroidLastOpenChatStore(app)
     }
     val lastOpenChatState by lastOpenChatStore.state.collectAsState()
+    // True once the seed has had its chance for the current ship. Guards
+    // the mirror effect below so the pre-seed `openWhom == null` at launch
+    // doesn't clear the persisted entry before we've restored from it.
+    var chatSeeded by remember(loggedInShip) { mutableStateOf(false) }
     // Seed openWhom from persisted store on first composition or ship
-    // switch, so wide-screen / tablet layouts restore the last chat.
+    // switch so we restore the user's last chat.
     LaunchedEffect(loggedInShip) {
-        if (openWhom == null && loggedInShip != null) {
-            lastOpenChatState[loggedInShip]?.let { openWhom = it }
+        if (loggedInShip != null) {
+            if (openWhom == null) lastOpenChatState[loggedInShip]?.let { openWhom = it }
+            chatSeeded = true
         }
     }
-    // Mirror openWhom flips back into the store. Intentionally skips
-    // null so backing out of a chat doesn't erase the persisted entry.
+    // Mirror openWhom into the store: persist on open, and CLEAR on
+    // back-out (openWhom == null) so closing on the home list reopens to
+    // the list rather than forcing the last chat back open.
     LaunchedEffect(openWhom, loggedInShip) {
         val ship = loggedInShip ?: return@LaunchedEffect
+        if (!chatSeeded) return@LaunchedEffect
         val whom = openWhom
         if (whom != null) lastOpenChatStore.set(ship, whom)
+        else lastOpenChatStore.clear(ship)
     }
 
     // Single entry point for "open this conversation target" clicks.

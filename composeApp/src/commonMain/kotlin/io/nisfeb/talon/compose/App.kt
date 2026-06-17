@@ -323,20 +323,27 @@ fun App(
     // showing an empty right pane. Must be AFTER `var openChat` and
     // keyed on loggedInShip so a ship-switch seeds the new ship's entry.
     val seedChat by lastOpenChatStore.state.collectAsState()
+    // True once the seed has had its chance for the current ship. Guards
+    // the mirror effect below so the pre-seed `openChat == null` at launch
+    // doesn't clear the persisted entry before we've restored from it.
+    var chatSeeded by remember(loggedInShip) { mutableStateOf(false) }
     LaunchedEffect(loggedInShip) {
-        if (openChat == null && loggedInShip != null) {
-            seedChat[loggedInShip]?.let { openChat = it }
+        if (loggedInShip != null) {
+            if (openChat == null) seedChat[loggedInShip]?.let { openChat = it }
+            chatSeeded = true
         }
     }
 
-    // Mirror openChat flips back into the store so the next launch / ship
-    // switch can restore them. We deliberately don't clear on null so
-    // "user backed out of a chat" doesn't erase the persisted entry —
-    // they get restored to the same chat on the next launch.
+    // Mirror openChat into the store so the next launch / ship switch
+    // restores where the user actually left off: persist on open, and
+    // CLEAR on back-out (openChat == null) so closing on the home list
+    // reopens to the list rather than forcing the last chat back open.
     LaunchedEffect(openChat, loggedInShip) {
         val ship = loggedInShip ?: return@LaunchedEffect
+        if (!chatSeeded) return@LaunchedEffect
         val whom = openChat
         if (whom != null) lastOpenChatStore.set(ship, whom)
+        else lastOpenChatStore.clear(ship)
     }
 
     // BackHandlers live outside the key block so they observe the
