@@ -7,6 +7,7 @@ import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -149,6 +150,107 @@ class MarkdownBlocksTest {
         val verse = MarkdownBlocks.toStory("---").single().jsonObject
         val block = verse["block"]!!.jsonObject
         assertTrue("has rule key", block.containsKey("rule"))
+    }
+
+    // ─── lists ────────────────────────────────────────────────────
+
+    private fun listOf(verse: JsonObject): JsonObject =
+        verse["block"]!!.jsonObject["listing"]!!.jsonObject["list"]!!.jsonObject
+
+    @Test
+    fun `dash bullets emit one unordered listing grouping the items`() {
+        val verse = MarkdownBlocks.toStory("- a\n- b\n- c").single().jsonObject
+        val list = listOf(verse)
+        assertEquals("unordered", list["type"]!!.jsonPrimitive.content)
+        assertEquals(3, list["items"]!!.jsonArray.size)
+    }
+
+    @Test
+    fun `numbered lines emit one ordered listing`() {
+        val verse = MarkdownBlocks.toStory("1. first\n2. second").single().jsonObject
+        val list = listOf(verse)
+        assertEquals("ordered", list["type"]!!.jsonPrimitive.content)
+        assertEquals(2, list["items"]!!.jsonArray.size)
+    }
+
+    @Test
+    fun `asterisk and plus also start bullets`() {
+        assertTrue(MarkdownBlocks.isListLine("* star"))
+        assertTrue(MarkdownBlocks.isListLine("+ plus"))
+        assertTrue(MarkdownBlocks.isListLine("1) paren"))
+    }
+
+    @Test
+    fun `double-asterisk bold line is not a list`() {
+        // "**bold**" starts with '*' but not "* " — must stay a paragraph
+        // so it renders bold, not as a bullet.
+        assertFalse(MarkdownBlocks.isListLine("**bold**"))
+        val verse = MarkdownBlocks.toStory("**bold**").single().jsonObject
+        assertTrue("plain paragraph, not a list", verse.containsKey("inline"))
+    }
+
+    @Test
+    fun `switching marker kind starts a fresh list`() {
+        // Two bullets then two numbers → two separate listing blocks.
+        val story = MarkdownBlocks.toStory("- a\n- b\n1. c\n2. d")
+        assertEquals(2, story.size)
+        assertEquals("unordered", listOf(story[0].jsonObject)["type"]!!.jsonPrimitive.content)
+        assertEquals("ordered", listOf(story[1].jsonObject)["type"]!!.jsonPrimitive.content)
+    }
+
+    @Test
+    fun `list item body keeps inline styling`() {
+        val verse = MarkdownBlocks.toStory("- has **bold**").single().jsonObject
+        val item = listOf(verse)["items"]!!.jsonArray[0].jsonObject["item"]!!.jsonArray
+        assertTrue("item carries a bold span", item.any { (it as? JsonObject)?.containsKey("bold") == true })
+    }
+
+    // ─── tables ───────────────────────────────────────────────────
+
+    private fun tableOf(verse: JsonObject): JsonObject =
+        verse["block"]!!.jsonObject["table"]!!.jsonObject
+
+    /** Flatten an inline cell array down to its plain text. */
+    private fun cellText(cell: JsonArray): String =
+        cell.joinToString("") { (it as? JsonPrimitive)?.content.orEmpty() }
+
+    @Test
+    fun `a GFM table emits a table block with header and rows`() {
+        val src = "| Header 1 | Header 2 |\n| --- | --- |\n| Cell 1 | Cell 2 |"
+        val story = MarkdownBlocks.toStory(src)
+        assertEquals(1, story.size)
+        val table = tableOf(story[0].jsonObject)
+        val header = table["header"]!!.jsonArray
+        assertEquals(2, header.size)
+        assertEquals("Header 1", cellText(header[0].jsonArray))
+        assertEquals("Header 2", cellText(header[1].jsonArray))
+        val rows = table["rows"]!!.jsonArray
+        assertEquals(1, rows.size)
+        assertEquals("Cell 1", cellText(rows[0].jsonArray[0].jsonArray))
+        assertEquals("Cell 2", cellText(rows[0].jsonArray[1].jsonArray))
+    }
+
+    @Test
+    fun `table cells carry inline styling`() {
+        val src = "| Name | Note |\n| --- | --- |\n| a | **bold** |"
+        val rows = tableOf(MarkdownBlocks.toStory(src).single().jsonObject)["rows"]!!.jsonArray
+        val noteCell = rows[0].jsonArray[1].jsonArray
+        assertTrue("bold survives in a cell", noteCell.any { (it as? JsonObject)?.containsKey("bold") == true })
+    }
+
+    @Test
+    fun `bare triple dash is a rule, not a one-column table`() {
+        // No pipe → not a table separator; stays a horizontal rule.
+        assertFalse(MarkdownBlocks.isTableSeparator("---"))
+        val verse = MarkdownBlocks.toStory("---").single().jsonObject
+        assertTrue(verse["block"]!!.jsonObject.containsKey("rule"))
+    }
+
+    @Test
+    fun `a pipe line with no separator stays a paragraph`() {
+        // GFM requires the `---` separator row; without it, literal text.
+        val story = MarkdownBlocks.toStory("a | b | c")
+        assertTrue(story[0].jsonObject.containsKey("inline"))
     }
 
     // ─── mixed content ────────────────────────────────────────────

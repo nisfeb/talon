@@ -87,6 +87,8 @@ object StoryCache {
                 is StoryPart.Text -> part.text.text
                 is StoryPart.Image -> part.alt?.takeIf { it.isNotBlank() } ?: "[image]"
                 is StoryPart.Code -> "```\n${part.code}\n```"
+                is StoryPart.Table -> (listOf(part.header) + part.rows)
+                    .joinToString("\n") { row -> row.joinToString(" | ") { it.text } }
                 is StoryPart.LinkPreview -> part.title ?: part.url
                 is StoryPart.Citation -> part.label
                 is StoryPart.TzWidget -> "[tz]"

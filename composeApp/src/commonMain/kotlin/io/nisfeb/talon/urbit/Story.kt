@@ -7,11 +7,13 @@ import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
+import io.nisfeb.talon.ui.EmojiCatalog
 import io.nisfeb.talon.util.Log
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonArray
 
 /**
  * Structured representation of a Tlon `story` (Verse[]) for rendering.
@@ -33,6 +35,17 @@ sealed interface StoryPart {
 
     @androidx.compose.runtime.Immutable
     data class Code(val code: String) : StoryPart
+
+    /**
+     * GFM table. `header` is one cell per column; `rows` is a list of
+     * rows, each a list of cells. Cells carry inline styling. Synthesised
+     * by render-time markdown ([MarkdownBlocks]) — Tlon has no table verse.
+     */
+    @androidx.compose.runtime.Immutable
+    data class Table(
+        val header: List<AnnotatedString>,
+        val rows: List<List<AnnotatedString>>,
+    ) : StoryPart
 
     /**
      * Server-enriched URL preview (Tlon's `block.link`). Metadata is
@@ -147,8 +160,18 @@ const val URL_TAG = "url"
 
 object Story {
 
-    /** Parse a JSON story into structured parts. Returns an empty list on junk. */
-    fun parse(element: JsonElement?): List<StoryPart> {
+    /**
+     * Parse a JSON story into structured parts. Returns an empty list on junk.
+     *
+     * [expandMarkdown] turns on render-time markdown: any plain-text span
+     * (from a bot or a foreign client that never structured it) is
+     * re-flowed through the same parsers the composer uses — inline styles
+     * everywhere, and block constructs (headings, lists, fenced code,
+     * blockquotes, rules) when a whole verse is nothing but plain text.
+     * Already-structured spans are trusted untouched. Always pass `false`
+     * when re-parsing parser output to avoid infinite recursion.
+     */
+    fun parse(element: JsonElement?, expandMarkdown: Boolean = true): List<StoryPart> {
         if (element == null) return emptyList()
         val verses = element as? JsonArray ?: return emptyList()
         val out = mutableListOf<StoryPart>()
@@ -156,8 +179,20 @@ object Story {
             val obj = verse as? JsonObject ?: continue
             obj["inline"]?.let { inline ->
                 val arr = inline as? JsonArray ?: return@let
+                // A verse that's only plain text + line breaks can carry
+                // raw block markdown. Re-flow it through MarkdownBlocks
+                // (the notebook composer's parser) and parse the result
+                // with expansion OFF. Skip the round-trip for prose with
+                // no block markers — inline re-parsing below covers that.
+                if (expandMarkdown && isPlainTextInline(arr)) {
+                    val raw = reconstructPlainText(arr)
+                    if (hasBlockMarkdown(raw)) {
+                        out.addAll(parse(MarkdownBlocks.toStory(raw), expandMarkdown = false))
+                        return@let
+                    }
+                }
                 val rendered = buildAnnotatedString {
-                    arr.forEach { renderInline(it, this) }
+                    arr.forEach { renderInline(it, this, expandMarkdown) }
                 }
                 // Trim a trailing `break` (`\n`) from the verse so it
                 // doesn't render as a blank row on top of the column-
@@ -169,7 +204,7 @@ object Story {
             }
             obj["block"]?.let { block ->
                 val blockObj = block as? JsonObject ?: return@let
-                renderBlock(blockObj)?.let(out::add)
+                renderBlock(blockObj, expandMarkdown)?.let(out::add)
             }
         }
         // Our slash commands send a human-readable preamble (so plain
@@ -195,6 +230,8 @@ object Story {
                 is StoryPart.Text -> part.text.text
                 is StoryPart.Image -> part.alt?.takeIf { it.isNotBlank() } ?: "[image]"
                 is StoryPart.Code -> "```\n${part.code}\n```"
+                is StoryPart.Table -> (listOf(part.header) + part.rows)
+                    .joinToString("\n") { row -> row.joinToString(" | ") { it.text } }
                 is StoryPart.LinkPreview -> part.title ?: part.url
                 is StoryPart.Citation -> part.label
                 is StoryPart.TzWidget -> "[tz]"
@@ -241,7 +278,17 @@ object Story {
      * renderer makes them tappable — the tap site branches on the
      * urb:// prefix to route through Lattice instead of the browser.
      */
-    private fun appendLinkifyingUrb(text: String, out: androidx.compose.ui.text.AnnotatedString.Builder) {
+    /** `:shortcode:` → emoji glyph for known names; unknown names pass
+     *  through untouched. Applied to plain body text only (never code
+     *  spans), so `` `:tada:` `` stays literal. */
+    private val EMOJI_SHORTCODE_RE = Regex(":[a-z0-9_+-]+:")
+    private fun replaceEmojiShortcodes(text: String): String {
+        if (':' !in text) return text
+        return EMOJI_SHORTCODE_RE.replace(text) { m -> EmojiCatalog.glyphFor(m.value) ?: m.value }
+    }
+
+    private fun appendLinkifyingUrb(raw: String, out: androidx.compose.ui.text.AnnotatedString.Builder) {
+        val text = replaceEmojiShortcodes(raw)
         val ranges = UrbLink.findRanges(text)
         if (ranges.isEmpty()) {
             out.append(text)
@@ -261,9 +308,66 @@ object Story {
         if (cursor < text.length) out.append(text.substring(cursor))
     }
 
-    private fun renderInline(element: JsonElement, out: androidx.compose.ui.text.AnnotatedString.Builder) {
+    /** True if every inline element is a plain string or a `break` — i.e.
+     *  the verse has no structured spans we'd drop by re-flowing it
+     *  through the markdown parser. */
+    private fun isPlainTextInline(arr: JsonArray): Boolean = arr.all { el ->
+        when (el) {
+            is JsonPrimitive -> el.isString
+            is JsonObject -> el.size == 1 && el.containsKey("break")
+            else -> false
+        }
+    }
+
+    /** Flatten a plain-text inline array back to source text, turning
+     *  `break` spans into newlines so multi-line block markdown is
+     *  recoverable. */
+    private fun reconstructPlainText(arr: JsonArray): String = buildString {
+        arr.forEach { el ->
+            when (el) {
+                is JsonPrimitive -> if (el.isString) append(el.content)
+                is JsonObject -> if (el.containsKey("break")) append('\n')
+                else -> {}
+            }
+        }
+    }
+
+    /** Cheap pre-check: does any line open a block construct MarkdownBlocks
+     *  would promote (heading, quote, fence, rule, list)? Lets ordinary
+     *  prose skip the block round-trip — inline re-parsing handles it. */
+    private fun hasBlockMarkdown(text: String): Boolean =
+        text.replace("\r\n", "\n").split('\n').any { line ->
+            line.startsWith("# ") || line.startsWith("## ") || line.startsWith("### ") ||
+                line.startsWith("> ") || line.startsWith("```") ||
+                line.startsWith("---") || line.startsWith("***") ||
+                MarkdownBlocks.isListLine(line) || MarkdownBlocks.isTableSeparator(line)
+        }
+
+    /** Cheap pre-check before running the inline parser on a plain span:
+     *  bail unless it holds a char that could open inline markup. */
+    private fun mightHaveInlineMarkup(s: String): Boolean =
+        s.any { it == '*' || it == '_' || it == '`' || it == '[' || it == '~' } ||
+            s.contains("://")
+
+    private fun renderInline(
+        element: JsonElement,
+        out: androidx.compose.ui.text.AnnotatedString.Builder,
+        expandMarkdown: Boolean = true,
+    ) {
         (element as? JsonPrimitive)?.let {
-            appendLinkifyingUrb(if (it.isString) it.content else it.content, out)
+            val raw = it.content
+            // Render-time inline markdown: a plain span may hold raw
+            // **bold**, *italic*, `code`, [links](url), bare URLs or
+            // ~mentions. Re-flow through the composer's inline parser,
+            // then render the result with expansion OFF so a plain leaf
+            // can't recurse forever.
+            if (expandMarkdown && mightHaveInlineMarkup(raw)) {
+                Markdown.parseInlines(raw).forEach { span ->
+                    renderInline(span, out, expandMarkdown = false)
+                }
+            } else {
+                appendLinkifyingUrb(raw, out)
+            }
             return
         }
         val obj = element as? JsonObject ?: return
@@ -290,15 +394,15 @@ object Story {
             return
         }
         obj["italics"]?.let { arr ->
-            out.withSpan(SpanStyle(fontStyle = FontStyle.Italic)) { renderInlineArray(arr, this) }
+            out.withSpan(SpanStyle(fontStyle = FontStyle.Italic)) { renderInlineArray(arr, this, expandMarkdown) }
             return
         }
         obj["bold"]?.let { arr ->
-            out.withSpan(SpanStyle(fontWeight = FontWeight.Bold)) { renderInlineArray(arr, this) }
+            out.withSpan(SpanStyle(fontWeight = FontWeight.Bold)) { renderInlineArray(arr, this, expandMarkdown) }
             return
         }
         obj["strike"]?.let { arr ->
-            out.withSpan(SpanStyle(textDecoration = TextDecoration.LineThrough)) { renderInlineArray(arr, this) }
+            out.withSpan(SpanStyle(textDecoration = TextDecoration.LineThrough)) { renderInlineArray(arr, this, expandMarkdown) }
             return
         }
         // Tlon emits both `code` (older) and `inline-code` (newer) for
@@ -317,7 +421,7 @@ object Story {
                 ),
             ) {
                 out.append("“")
-                renderInlineArray(arr, out)
+                renderInlineArray(arr, out, expandMarkdown)
                 out.append("”")
             }
             return
@@ -325,7 +429,7 @@ object Story {
         (obj["task"] as? JsonObject)?.let { task ->
             val checked = task["checked"].asText() == "true"
             out.append(if (checked) "[x] " else "[ ] ")
-            task["content"]?.let { renderInlineArray(it, out) }
+            task["content"]?.let { renderInlineArray(it, out, expandMarkdown) }
             return
         }
 
@@ -336,9 +440,10 @@ object Story {
     private fun renderInlineArray(
         element: JsonElement,
         out: androidx.compose.ui.text.AnnotatedString.Builder,
+        expandMarkdown: Boolean = true,
     ) {
         val arr = element as? JsonArray ?: return
-        arr.forEach { renderInline(it, out) }
+        arr.forEach { renderInline(it, out, expandMarkdown) }
     }
 
     /**
@@ -357,15 +462,37 @@ object Story {
         listing: JsonObject,
         out: androidx.compose.ui.text.AnnotatedString.Builder,
         depth: Int,
+        expandMarkdown: Boolean = true,
     ) {
         val list = listing["list"] as? JsonObject ?: return
-        renderList(list, out, depth)
+        renderList(list, out, depth, expandMarkdown)
+    }
+
+    private class TaskItem(val checked: Boolean, val rest: JsonArray)
+
+    private val TASK_PREFIX_RE = Regex("^\\[([ xX])]\\s+")
+
+    /** If a list item's first inline span opens with `[ ]` / `[x]`, return
+     *  the checked state plus the item's inlines with that marker stripped;
+     *  null for an ordinary list item. */
+    private fun taskItem(inlineArr: JsonArray): TaskItem? {
+        val first = inlineArr.firstOrNull() as? JsonPrimitive ?: return null
+        if (!first.isString) return null
+        val m = TASK_PREFIX_RE.find(first.content) ?: return null
+        val checked = first.content[1].lowercaseChar() == 'x'
+        val tail = first.content.substring(m.range.last + 1)
+        val rest = buildJsonArray {
+            if (tail.isNotEmpty()) add(JsonPrimitive(tail))
+            inlineArr.drop(1).forEach { add(it) }
+        }
+        return TaskItem(checked, rest)
     }
 
     private fun renderList(
         list: JsonObject,
         out: androidx.compose.ui.text.AnnotatedString.Builder,
         depth: Int,
+        expandMarkdown: Boolean = true,
     ) {
         val ordered = list["type"].asStr() == "ordered"
         val contents = list["contents"] as? JsonArray
@@ -397,7 +524,7 @@ object Story {
         if (contents != null && contents.isNotEmpty()) {
             ensureNewline()
             out.append(indent)
-            renderInlineArray(contents, out)
+            renderInlineArray(contents, out, expandMarkdown)
             // Inline content doesn't terminate with '\n' by convention
             // (the only way it does is a trailing `break` inline; the
             // worst-case cost of a wrong guess here is one redundant
@@ -409,15 +536,23 @@ object Story {
             val itemObj = raw as? JsonObject ?: return@forEachIndexed
             (itemObj["item"] as? JsonArray)?.let { inlineArr ->
                 ensureNewline()
-                val bullet = if (ordered) "${idx + 1}. " else "• "
                 out.append(indent)
-                out.append(bullet)
-                renderInlineArray(inlineArr, out)
+                // Task-list item ("- [ ] todo" / "- [x] done"): a checkbox
+                // glyph replaces the bullet, and the `[ ]`/`[x]` marker is
+                // stripped from the rendered text.
+                val task = taskItem(inlineArr)
+                if (task != null) {
+                    out.append(if (task.checked) "☑ " else "☐ ")
+                    renderInlineArray(task.rest, out, expandMarkdown)
+                } else {
+                    out.append(if (ordered) "${idx + 1}. " else "• ")
+                    renderInlineArray(inlineArr, out, expandMarkdown)
+                }
                 endsWithNewline = false
                 return@forEachIndexed
             }
             (itemObj["list"] as? JsonObject)?.let { nested ->
-                renderList(nested, out, depth + 1)
+                renderList(nested, out, depth + 1, expandMarkdown)
                 endsWithNewline = null  // recursion: unknown, force re-check
             }
         }
@@ -425,7 +560,7 @@ object Story {
 
     // ───────── blocks ─────────
 
-    private fun renderBlock(block: JsonObject): StoryPart? {
+    private fun renderBlock(block: JsonObject, expandMarkdown: Boolean = true): StoryPart? {
         (block["image"] as? JsonObject)?.let { image ->
             val src = image["src"].asStr() ?: return null
             val width = image["width"].asLong()?.toInt()
@@ -463,16 +598,33 @@ object Story {
         (block["header"] as? JsonObject)?.let { header ->
             val text = buildAnnotatedString {
                 withSpan(SpanStyle(fontWeight = FontWeight.Bold)) {
-                    renderInlineArray(header["content"] ?: JsonArray(emptyList()), this)
+                    renderInlineArray(header["content"] ?: JsonArray(emptyList()), this, expandMarkdown)
                 }
             }
             if (text.isNotEmpty()) return StoryPart.Text(text)
         }
         (block["listing"] as? JsonObject)?.let { listing ->
             val text = buildAnnotatedString {
-                renderListing(listing, this, depth = 0)
+                renderListing(listing, this, depth = 0, expandMarkdown = expandMarkdown)
             }
             if (text.isNotEmpty()) return StoryPart.Text(text)
+        }
+        (block["table"] as? JsonObject)?.let { table ->
+            fun cells(arr: JsonArray?): List<AnnotatedString> =
+                (arr ?: JsonArray(emptyList())).map { cell ->
+                    buildAnnotatedString { renderInlineArray(cell, this, expandMarkdown) }
+                }
+            val header = cells(table["header"] as? JsonArray)
+            val rows = (table["rows"] as? JsonArray)?.map { cells(it as? JsonArray) }.orEmpty()
+            if (header.isNotEmpty() || rows.isNotEmpty()) {
+                return StoryPart.Table(header, rows)
+            }
+        }
+        // Horizontal rule (`---` / `***`). Tlon has no rule glyph; render
+        // a thin divider line of box-drawing chars so it reads as a break
+        // instead of the literal `[rule]` the unknown-block path would emit.
+        if (block.containsKey("rule")) {
+            return StoryPart.Text(AnnotatedString("─".repeat(24)))
         }
         // Some Tlon versions wrap multi-line blockquotes at block level
         // instead of inline. Accept both tag spellings and render the
@@ -487,11 +639,11 @@ object Story {
                 ) {
                     append("“")
                     when (content) {
-                        is JsonArray -> renderInlineArray(content, this@buildAnnotatedString)
+                        is JsonArray -> renderInlineArray(content, this@buildAnnotatedString, expandMarkdown)
                         is JsonObject -> {
                             // Older format: { "block-quote": { "content": [...] } }
                             val inner = content["content"] ?: content["inline"]
-                            if (inner != null) renderInlineArray(inner, this@buildAnnotatedString)
+                            if (inner != null) renderInlineArray(inner, this@buildAnnotatedString, expandMarkdown)
                         }
                         else -> {}
                     }

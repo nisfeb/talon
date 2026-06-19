@@ -1,6 +1,7 @@
 package io.nisfeb.talon.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -8,13 +9,19 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.VerticalDivider
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.compositionLocalOf
@@ -240,6 +247,25 @@ fun StoryRenderer(
                     )
                 }
 
+                is StoryPart.Table -> {
+                    val cols = maxOf(
+                        part.header.size,
+                        part.rows.maxOfOrNull { it.size } ?: 0,
+                    )
+                    val outline = MaterialTheme.colorScheme.outlineVariant
+                    Column(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .border(1.dp, outline, RoundedCornerShape(8.dp)),
+                    ) {
+                        StoryTableRow(part.header, cols, header = true, outline = outline)
+                        part.rows.forEach { row ->
+                            HorizontalDivider(color = outline)
+                            StoryTableRow(row, cols, header = false, outline = outline)
+                        }
+                    }
+                }
+
                 is StoryPart.LinkPreview -> InlineLinkPreview(preview = part) {
                     onLinkTap(part.url)
                 }
@@ -332,6 +358,39 @@ val LocalCalendarLauncher:
 val LocalMapsLauncher:
     androidx.compose.runtime.ProvidableCompositionLocal<MapsLauncher?> =
     androidx.compose.runtime.compositionLocalOf { null }
+
+/** One row of a markdown [StoryPart.Table]. Cells share the row width
+ *  equally; vertical dividers separate columns, and the header row gets a
+ *  tinted background + bold text. `IntrinsicSize.Min` makes the dividers
+ *  span the tallest cell so wrapped text still lines up. */
+@Composable
+private fun StoryTableRow(
+    cells: List<AnnotatedString>,
+    cols: Int,
+    header: Boolean,
+    outline: Color,
+) {
+    val rowBg = if (header) MaterialTheme.colorScheme.surfaceVariant else Color.Unspecified
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(rowBg)
+            .height(IntrinsicSize.Min),
+    ) {
+        for (c in 0 until cols) {
+            if (c > 0) VerticalDivider(color = outline)
+            Text(
+                text = cells.getOrElse(c) { AnnotatedString("") }.applyEmojiSpans(),
+                style = MaterialTheme.typography.bodyMedium.let {
+                    if (header) it.copy(fontWeight = FontWeight.Bold) else it
+                },
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(horizontal = 8.dp, vertical = 6.dp),
+            )
+        }
+    }
+}
 
 @Composable
 private fun FallbackInlineMediaRow(url: String, kind: MediaKind) {
