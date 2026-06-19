@@ -268,9 +268,33 @@ fun ChatComposer(
     val emojiSuggestions = remember(emojiQuery) {
         emojiQuery?.let { (q, _) -> EmojiCatalog.search(q, limit = 6) } ?: emptyList()
     }
+    // Arrow-key cursor into the emoji dropdown. Resets to the top each
+    // time the query changes (new suggestion list); Tab/Enter completes
+    // whichever row this points at.
+    var emojiSel by remember(emojiQuery?.first) { mutableStateOf(0) }
     val slashTrigger = detectSlashTrigger(state.draft.text, state.draft.selection.start)
     val slashSuggestions = remember(slashTrigger) {
         slashTrigger?.let { filterSlashCommands(it.query) } ?: emptyList()
+    }
+
+    // Replace the active trigger token (`@x`, `:x`, `/x`) with a pick.
+    // Shared by the dropdown clicks and the Tab key handler so both
+    // insert identically. Each is only invoked while its trigger is live.
+    fun replaceTrigger(startIdx: Int, inserted: String) {
+        val caret = state.draft.selection.start
+        val before = state.draft.text.substring(0, startIdx)
+        val after = state.draft.text.substring(caret)
+        updateDraft(
+            TextFieldValue(
+                text = before + inserted + after,
+                selection = TextRange(before.length + inserted.length),
+            ),
+        )
+    }
+    val applyEmojiPick: (EmojiCatalog.Entry) -> Unit = { e -> replaceTrigger(emojiQuery!!.second, "${e.glyph} ") }
+    val applyMentionPick: (String) -> Unit = { ship -> replaceTrigger(mention!!.second, "$ship ") }
+    val applySlashPick: (SlashCommandSpec) -> Unit = { spec ->
+        updateDraft(TextFieldValue("/${spec.name} ", TextRange(spec.name.length + 2)))
     }
 
     Column(
@@ -291,57 +315,22 @@ fun ChatComposer(
         if (slashSuggestions.isNotEmpty() && slashTrigger != null) {
             SlashPicker(
                 suggestions = slashSuggestions,
-                onPick = { spec ->
-                    val newText = "/${spec.name} "
-                    updateDraft(
-                        TextFieldValue(
-                            text = newText,
-                            selection = TextRange(newText.length),
-                        ),
-                    )
-                },
+                onPick = applySlashPick,
                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
             )
         }
         if (emojiSuggestions.isNotEmpty() && emojiQuery != null) {
             EmojiPickerDropdown(
                 suggestions = emojiSuggestions,
-                onPick = { entry ->
-                    val (_, colonIdx) = emojiQuery
-                    val caret = state.draft.selection.start
-                    val before = state.draft.text.substring(0, colonIdx)
-                    val after = state.draft.text.substring(caret)
-                    val inserted = "${entry.glyph} "
-                    val newText = before + inserted + after
-                    val newCaret = before.length + inserted.length
-                    updateDraft(
-                        TextFieldValue(
-                            text = newText,
-                            selection = TextRange(newCaret),
-                        ),
-                    )
-                },
+                onPick = applyEmojiPick,
+                selectedIndex = emojiSel,
                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
             )
         }
         if (suggestions.isNotEmpty() && mention != null) {
             MentionPicker(
                 suggestions = suggestions,
-                onPick = { ship ->
-                    val (_, atIdx) = mention
-                    val caret = state.draft.selection.start
-                    val before = state.draft.text.substring(0, atIdx)
-                    val after = state.draft.text.substring(caret)
-                    val inserted = "$ship "
-                    val newText = before + inserted + after
-                    val newCaret = before.length + inserted.length
-                    updateDraft(
-                        TextFieldValue(
-                            text = newText,
-                            selection = TextRange(newCaret),
-                        ),
-                    )
-                },
+                onPick = applyMentionPick,
                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
             )
         }
@@ -535,6 +524,37 @@ fun ChatComposer(
                     .onPreviewKeyEvent { e ->
                         if (e.type != KeyEventType.KeyDown) {
                             return@onPreviewKeyEvent false
+                        }
+                        // Up/Down move the highlighted row in the emoji
+                        // dropdown (clamped at the ends). Only while the
+                        // emoji picker is live, so arrows otherwise keep
+                        // their normal caret behaviour.
+                        if (emojiQuery != null && emojiSuggestions.isNotEmpty() &&
+                            (e.key == Key.DirectionDown || e.key == Key.DirectionUp)
+                        ) {
+                            val last = emojiSuggestions.lastIndex
+                            emojiSel = if (e.key == Key.DirectionDown) {
+                                (emojiSel + 1).coerceAtMost(last)
+                            } else {
+                                (emojiSel - 1).coerceAtLeast(0)
+                            }
+                            return@onPreviewKeyEvent true
+                        }
+                        // Tab accepts the highlighted autocomplete
+                        // suggestion (emoji / mention / slash), mirroring a
+                        // dropdown click. Only consumes Tab while a picker
+                        // is live; otherwise it falls through.
+                        if (e.key == Key.Tab) {
+                            when {
+                                emojiQuery != null && emojiSuggestions.isNotEmpty() ->
+                                    applyEmojiPick(emojiSuggestions[emojiSel.coerceIn(0, emojiSuggestions.lastIndex)])
+                                mention != null && suggestions.isNotEmpty() ->
+                                    applyMentionPick(suggestions.first().ship)
+                                slashTrigger != null && slashSuggestions.isNotEmpty() ->
+                                    applySlashPick(slashSuggestions.first())
+                                else -> return@onPreviewKeyEvent false
+                            }
+                            return@onPreviewKeyEvent true
                         }
                         // Ctrl+V (or Cmd+V on macOS) — if the
                         // clipboard holds an image, intercept the
