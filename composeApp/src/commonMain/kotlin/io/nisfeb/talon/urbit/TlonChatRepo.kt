@@ -1803,13 +1803,23 @@ class TlonChatRepo(
             ?: error("no %storage credentials on this ship")
         val config = parseStorageConfiguration(configElement)
             ?: error("no %storage configuration on this ship")
-        if (!config.service.isNullOrEmpty() && config.service != "credentials") {
-            error("%storage is in '${config.service}' mode; only 'credentials' is supported")
-        }
-        if (creds.accessKeyId.isBlank() || creds.secretAccessKey.isBlank() ||
-            creds.endpoint.isBlank() || config.bucket.isBlank()
-        ) {
-            error("%storage credentials not fully configured")
+        // Upload via direct S3 whenever the agent has full credentials,
+        // regardless of the `service` mode — matching tlon-apps. We do NOT
+        // reject `presigned-url` mode: that field only routes Tlon-hosted
+        // ships to memex (already tried above), and gating on it here was
+        // what blocked ships left in presigned-url mode but holding valid
+        // creds (the ~dinnyt-divsud report). See StorageUpload.kt.
+        if (!storageS3Ready(creds, config)) {
+            error(
+                if (config.service == "presigned-url") {
+                    "%storage is in presigned-url mode with no S3 credentials. " +
+                        "Talon uploads need direct credentials — add them in " +
+                        "Landscape's storage settings, or switch the agent with " +
+                        "`:storage &storage-action [%toggle-service %credentials]`."
+                } else {
+                    "%storage credentials not fully configured"
+                },
+            )
         }
 
         val safeName = fileName.replace(Regex("[^A-Za-z0-9._-]"), "_")
@@ -1831,51 +1841,6 @@ class TlonChatRepo(
             bytes = bytes,
             contentType = contentType,
         )
-    }
-
-    private data class StorageCreds(
-        val endpoint: String,
-        val accessKeyId: String,
-        val secretAccessKey: String,
-    )
-
-    private data class StorageConfig(
-        val bucket: String,
-        val region: String,
-        val publicUrlBase: String?,
-        val service: String?,
-    )
-
-    private fun parseStorageCredentials(body: JsonElement?): StorageCreds? {
-        // %storage returns {"storage-update": {"credentials": {...}}}; field
-        // names may be kebab-case or camelCase depending on the agent version.
-        val obj = (body as? JsonObject) ?: return null
-        val inner = (obj["storage-update"] as? JsonObject)?.get("credentials") as? JsonObject
-            ?: (obj["credentials"] as? JsonObject)
-            ?: obj
-        val endpoint = inner["endpoint"].asStr() ?: ""
-        val accessKeyId = inner["access-key-id"].asStr()
-            ?: inner["accessKeyId"].asStr()
-            ?: ""
-        val secretAccessKey = inner["secret-access-key"].asStr()
-            ?: inner["secretAccessKey"].asStr()
-            ?: ""
-        return StorageCreds(endpoint, accessKeyId, secretAccessKey)
-    }
-
-    private fun parseStorageConfiguration(body: JsonElement?): StorageConfig? {
-        val obj = (body as? JsonObject) ?: return null
-        val inner = (obj["storage-update"] as? JsonObject)?.get("configuration") as? JsonObject
-            ?: (obj["configuration"] as? JsonObject)
-            ?: obj
-        val bucket = inner["current-bucket"].asStr()
-            ?: inner["currentBucket"].asStr()
-            ?: ""
-        val region = inner["region"].asStr() ?: ""
-        val publicUrlBase = inner["public-url-base"].asStr()
-            ?: inner["publicUrlBase"].asStr()
-        val service = inner["service"].asStr()
-        return StorageConfig(bucket, region, publicUrlBase, service)
     }
 
     /**
