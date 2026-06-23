@@ -48,7 +48,18 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        consumeIntent(intent)
+        // Only consume the launch intent's deep-link extras on a genuine
+        // fresh start. A notification tap routes through onNewIntent and
+        // setIntent(), so the notification intent (with EXTRA_OPEN_WHOM /
+        // EXTRA_SCROLL_TO_MESSAGE) becomes the task's sticky intent. When
+        // the OS later kills the backgrounded process and the user
+        // reopens — especially from Recents — the activity is recreated
+        // with savedInstanceState != null and getIntent() still returns
+        // that old notification intent. Re-consuming it yanked the user
+        // back to a week-old message on every reopen (the reported bug).
+        // A real notification tap on a dead process is a fresh start
+        // (savedInstanceState == null), so it still routes correctly.
+        if (savedInstanceState == null) consumeIntent(intent)
 
         // Android 13+ gates notifications behind a runtime prompt.
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -160,20 +171,42 @@ class MainActivity : ComponentActivity() {
 
     private fun consumeIntent(intent: Intent?) {
         if (intent == null) return
+        var consumedDeepLink = false
         intent.getStringExtra(Notifications.EXTRA_OPEN_WHOM)?.let {
             deepLinkWhom.value = it
+            consumedDeepLink = true
         }
         intent.getStringExtra(Notifications.EXTRA_SCROLL_TO_MESSAGE)?.let {
             deepLinkMessageId.value = it
+            consumedDeepLink = true
         }
         intent.getStringExtra(Notifications.EXTRA_OPEN_THREAD)?.let {
             deepLinkThreadParent.value = it
+            consumedDeepLink = true
         }
         intent.getStringExtra(Notifications.EXTRA_THREAD_ANCHOR)?.let {
             deepLinkThreadAnchor.value = it
+            consumedDeepLink = true
         }
         intent.getStringExtra(Notifications.EXTRA_OPEN_DIGEST)?.let {
             deepLinkOpenDigest.value = it
+            consumedDeepLink = true
+        }
+        // Strip the deep-link extras now that we've read them, then write
+        // the cleaned intent back as the activity's intent. The task
+        // retains its current intent across a process kill; without this,
+        // getIntent() would keep handing back the same notification
+        // payload and re-route to a stale message on the next launch
+        // (belt-and-suspenders with the savedInstanceState guard in
+        // onCreate). Only the deep-link extras are cleared — share
+        // routing below is a transient ACTION_SEND intent, not retained.
+        if (consumedDeepLink) {
+            intent.removeExtra(Notifications.EXTRA_OPEN_WHOM)
+            intent.removeExtra(Notifications.EXTRA_SCROLL_TO_MESSAGE)
+            intent.removeExtra(Notifications.EXTRA_OPEN_THREAD)
+            intent.removeExtra(Notifications.EXTRA_THREAD_ANCHOR)
+            intent.removeExtra(Notifications.EXTRA_OPEN_DIGEST)
+            setIntent(intent)
         }
         ShareIntent.from(intent)?.let {
             pendingShare.value = it
