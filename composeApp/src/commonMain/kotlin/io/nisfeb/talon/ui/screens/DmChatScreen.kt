@@ -963,6 +963,21 @@ fun DmChatScreen(
                 voicePlayer = voicePlayer,
                 onSlashMic = onSlashMic,
                 powerFeaturesEnabled = powerFeaturesEnabled,
+                // Up-arrow-on-empty-composer edits your most recent
+                // message. Same predicate as the Edit menu action
+                // (mine, channel chat, top-level) so it can only open
+                // an edit the action menu would also allow. Null on
+                // non-channel chats — %chat DMs ignore edit pokes.
+                onEditLast = if (whom.startsWith("chat/")) {
+                    {
+                        rows.asSequence()
+                            .filterIsInstance<ChatListItem.Message>()
+                            .map { it.row.m }
+                            .filter { it.author == ourPatp && it.parentId == null }
+                            .maxByOrNull { it.sentMs }
+                            ?.let { editing = it }
+                    }
+                } else null,
                 onBeforeLocalEcho = {
                     // Capture the row count synchronously BEFORE the
                     // optimistic upsert can land, then bump the
@@ -1748,19 +1763,49 @@ private fun EditMessageDialog(
     onDismiss: () -> Unit,
     onSave: (String) -> Unit,
 ) {
-    var text by remember { mutableStateOf(initial) }
+    // TextFieldValue (not a bare String) so Shift+Enter can splice a
+    // newline in at the caret. Caret starts at the end so the user can
+    // immediately type or hit Return to save.
+    var value by remember {
+        mutableStateOf(TextFieldValue(initial, selection = TextRange(initial.length)))
+    }
+    val focus = remember { FocusRequester() }
+    LaunchedEffect(Unit) { focus.requestFocus() }
+    val submit = { if (value.text.isNotBlank()) onSave(value.text.trim()) }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Edit message") },
         text = {
             OutlinedTextField(
-                value = text,
-                onValueChange = { text = it },
-                modifier = Modifier.fillMaxWidth(),
+                value = value,
+                onValueChange = { value = it },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .focusRequester(focus)
+                    .onPreviewKeyEvent { e ->
+                        // Return sends the edit; Shift+Return inserts a
+                        // newline (CMP Desktop won't on a hardware Return,
+                        // so splice it in ourselves). Mirrors the composer.
+                        if (e.type != KeyEventType.KeyDown || e.key != Key.Enter) {
+                            return@onPreviewKeyEvent false
+                        }
+                        if (e.isShiftPressed) {
+                            val sel = value.selection
+                            val newText = value.text.substring(0, sel.start) +
+                                "\n" + value.text.substring(sel.end)
+                            value = value.copy(
+                                text = newText,
+                                selection = TextRange(sel.start + 1),
+                            )
+                        } else {
+                            submit()
+                        }
+                        true
+                    },
             )
         },
         confirmButton = {
-            TextButton(onClick = { onSave(text.trim()) }, enabled = text.isNotBlank()) {
+            TextButton(onClick = submit, enabled = value.text.isNotBlank()) {
                 Text("Save")
             }
         },
