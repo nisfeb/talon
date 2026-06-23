@@ -150,6 +150,11 @@ fun ChatComposer(
      *  poking. Caller threads `uiSettings.powerFeaturesEnabled`
      *  through. */
     powerFeaturesEnabled: Boolean = false,
+    /** Up-arrow-on-empty-composer hook: edit your most recently sent
+     *  message (Slack/Discord convenience for hardware keyboards). Null
+     *  where editing isn't supported (e.g. %chat DMs), in which case Up
+     *  keeps its normal caret behaviour. */
+    onEditLast: (() -> Unit)? = null,
     /** Caller-side hook fired right before the optimistic upsert
      *  lands. DM uses this to capture its scroll baseline + bump
      *  the force-bottom tick so its self-send-scroll heuristic sees
@@ -538,6 +543,17 @@ fun ChatComposer(
                             } else {
                                 (emojiSel - 1).coerceAtLeast(0)
                             }
+                            return@onPreviewKeyEvent true
+                        }
+                        // Up arrow on an empty composer jumps straight into
+                        // editing your most recently sent message (matches
+                        // Slack/Discord). Gated on an empty draft so Up
+                        // still moves the caret while you're typing, and on
+                        // onEditLast being wired (channel chats only).
+                        if (e.key == Key.DirectionUp && onEditLast != null &&
+                            state.draft.text.isEmpty()
+                        ) {
+                            onEditLast()
                             return@onPreviewKeyEvent true
                         }
                         // Tab accepts the highlighted autocomplete
