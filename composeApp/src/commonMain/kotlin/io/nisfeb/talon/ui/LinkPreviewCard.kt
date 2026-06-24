@@ -98,18 +98,33 @@ fun LinkPreviewCard(
 }
 
 /**
- * Scan a list of StoryParts for the first URL annotation. Returns null
- * if none found — skips the preview card entirely in that case.
+ * The first URL in [parts] that the story doesn't already preview
+ * itself — the one the client-side [LinkPreviewCard] should render.
+ *
+ * Tlon's server enriches some links into a `block.link`
+ * ([io.nisfeb.talon.urbit.StoryPart.LinkPreview]) that the story
+ * renderer already shows inline. The client card must skip those, or a
+ * server-previewed URL renders TWO previews — the story's plus the
+ * card below it. URLs with no server preview still get a card. Returns
+ * null when there's nothing left to preview.
  */
 fun firstLinkUrl(parts: List<io.nisfeb.talon.urbit.StoryPart>): String? {
+    // URLs the story already previews. Trailing slash normalized so the
+    // server's echoed url and the typed url match (`example.com/` vs
+    // `example.com`).
+    val previewed = parts.asSequence()
+        .filterIsInstance<io.nisfeb.talon.urbit.StoryPart.LinkPreview>()
+        .mapTo(HashSet()) { it.url.trimEnd('/') }
     for (p in parts) {
         if (p is io.nisfeb.talon.urbit.StoryPart.Text) {
-            val ann = p.text.getStringAnnotations(
+            val anns = p.text.getStringAnnotations(
                 tag = io.nisfeb.talon.urbit.URL_TAG,
                 start = 0,
                 end = p.text.length,
-            ).firstOrNull()
-            if (ann != null) return ann.item
+            )
+            for (ann in anns) {
+                if (ann.item.trimEnd('/') !in previewed) return ann.item
+            }
         }
     }
     return null
