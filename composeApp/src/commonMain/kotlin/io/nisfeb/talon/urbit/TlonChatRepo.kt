@@ -180,6 +180,24 @@ class TlonChatRepo(
      */
     @Volatile private var openWhom: String? = null
 
+    /**
+     * Whether the app is actually in front of the user — foregrounded on
+     * Android, window-focused on desktop. A chat left open in a
+     * backgrounded app or an unfocused/minimized window is NOT being
+     * read, so incoming messages there must still raise the unread badge
+     * and fire a notification. Driven by UI lifecycle via [setForeground].
+     */
+    @Volatile private var appForegrounded: Boolean = true
+
+    /**
+     * The chat the user is *actively viewing right now*: the open chat,
+     * but only while the app is foregrounded. This is the gate for
+     * auto-marking incoming messages read — see [applyActivityUpdate].
+     * Reading [openWhom] alone (the old behaviour) silently marked DMs
+     * read whenever the app was backgrounded with that chat still open.
+     */
+    private fun focusedWhom(): String? = if (appForegrounded) openWhom else null
+
     fun setOpenChat(whom: String?) {
         val prev = openWhom
         openWhom = whom
@@ -190,6 +208,20 @@ class TlonChatRepo(
         }
         if (whom != null && prev != whom) {
             scope.launch { runCatching { markRead(whom) } }
+        }
+    }
+
+    /**
+     * UI lifecycle hook: the app moved to / from the foreground (Android
+     * ON_START/ON_STOP) or the desktop window gained / lost focus. On
+     * regaining focus with a chat still open, the user is looking at it
+     * again, so mark anything that arrived while away as read.
+     */
+    fun setForeground(foreground: Boolean) {
+        val was = appForegrounded
+        appForegrounded = foreground
+        if (foreground && !was) {
+            openWhom?.let { whom -> scope.launch { runCatching { markRead(whom) } } }
         }
     }
 
@@ -2709,7 +2741,7 @@ class TlonChatRepo(
             )
             return
         }
-        val focused = openWhom
+        val focused = focusedWhom()
         val rows = obj.entries.mapNotNull { (sourceKey, summary) ->
             toUnread(sourceKey, summary as? JsonObject ?: return@mapNotNull null)
         }.map { row ->
@@ -2743,8 +2775,8 @@ class TlonChatRepo(
         if (threadRows.isNotEmpty()) db.threadUnreads().upsertAll(threadRows)
     }
 
-    private suspend fun applyActivityUpdate(obj: JsonObject) {
-        val focused = openWhom
+    internal suspend fun applyActivityUpdate(obj: JsonObject) {
+        val focused = focusedWhom()
         (obj["activity"] as? JsonObject)?.let { map ->
             val rows = map.entries.mapNotNull { (key, summary) ->
                 toUnread(key, summary as? JsonObject ?: return@mapNotNull null)
