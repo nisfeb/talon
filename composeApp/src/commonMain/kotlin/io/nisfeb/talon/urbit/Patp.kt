@@ -13,5 +13,3 @@ package io.nisfeb.talon.urbit
 // or planets like ~sarlev / ~finned-palmer.
 val PATP_REGEX: Regex =
     Regex("~(?:[a-z]{6}|[a-z]{3})(?:-(?:[a-z]{6}|[a-z]{3}))*")
-
-fun String.isPatp(): Boolean = PATP_REGEX.matches(this)
