@@ -553,7 +553,26 @@ fun TalonApp(
                 }
             }
         }
-        onDispose { app.repo.messageListener = null }
+        // New pending DM request → notify. Always fires (there's no
+        // "open" state for an unaccepted request), so a brand-new DM no
+        // longer arrives silently.
+        app.repo.dmInviteListener = { ship ->
+            appScope.launch {
+                Notifications.showMessage(
+                    context = context,
+                    whom = ship,
+                    postId = ship,
+                    parentId = null,
+                    title = contactMap.displayName(ship),
+                    body = "wants to message you",
+                    sentMs = System.currentTimeMillis(),
+                )
+            }
+        }
+        onDispose {
+            app.repo.messageListener = null
+            app.repo.dmInviteListener = null
+        }
     }
 
     // Foreground catch-up: when the app returns to the front, force a

@@ -212,6 +212,10 @@ fun DmListScreen(
     // the per-write work. distinctUntilChanged on each Room source
     // suppresses Room's spurious re-emissions on unrelated table
     // writes; the row-build runs on Default so it never lands on Main.
+    // Pending DM requests — strangers who opened a DM we haven't accepted.
+    // Rendered as a "Requests" section at the top of the list.
+    val dmInvites by remember { db.dmInvites().stream() }
+        .collectAsState(initial = emptyList())
     val rows by remember {
         combine(
             db.messages().conversationLatest().distinctUntilChanged(),
@@ -959,6 +963,41 @@ fun DmListScreen(
             contentPadding = PaddingValues(vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(0.dp),
         ) {
+            // Pending DM requests pinned to the top — Accept opens the
+            // conversation, Decline dismisses it. Always shown (any tab)
+            // so a new DM can't hide behind a folder/special selection.
+            if (dmInvites.isNotEmpty()) {
+                item(key = "__dm_requests_header", contentType = "req_header") {
+                    Text(
+                        "Requests",
+                        style = MaterialTheme.typography.titleSmall,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                    )
+                }
+                items(
+                    items = dmInvites,
+                    key = { "req:${it.ship}" },
+                    contentType = { "req" },
+                ) { invite ->
+                    DmRequestRow(
+                        ship = invite.ship,
+                        contactMap = contactMap,
+                        onAccept = {
+                            repo.pushScope.launch {
+                                runCatching { repo.acceptDmInvite(invite.ship) }
+                            }
+                            currentOnOpenConversation(invite.ship)
+                        },
+                        onDecline = {
+                            repo.pushScope.launch {
+                                runCatching { repo.declineDmInvite(invite.ship) }
+                            }
+                        },
+                    )
+                    HorizontalDivider()
+                }
+            }
             if (selectedFolderId == null && selectedSpecial == SpecialTab.Unread) {
                 // Unread view — flat list of whoms with pending pings.
                 // Read-only (no drag-reorder, no section headers).
@@ -1748,6 +1787,42 @@ private fun FolderCreateDialog(onCreate: (String) -> Unit, onDismiss: () -> Unit
 }
 
 @OptIn(ExperimentalFoundationApi::class)
+/** A pending DM request row: avatar + name, with Decline / Accept. */
+@Composable
+private fun DmRequestRow(
+    ship: String,
+    contactMap: ContactMap,
+    onAccept: () -> Unit,
+    onDecline: () -> Unit,
+) {
+    val label = remember(ship, contactMap) { contactMap.nickname(ship) ?: ship }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 16.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Avatar(
+            label = label,
+            url = contactMap.conversationAvatar(ship),
+        )
+        Column(Modifier.weight(1f)) {
+            Text(label, style = MaterialTheme.typography.bodyLarge, maxLines = 1)
+            Text(
+                "wants to message you",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+            )
+        }
+        TextButton(onClick = onDecline) {
+            Text("Decline", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        TextButton(onClick = onAccept) { Text("Accept") }
+    }
+}
+
 @Composable
 private fun ConversationRow(
     m: MessageEntity,
