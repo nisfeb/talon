@@ -29,6 +29,7 @@ import io.nisfeb.talon.data.AppDatabase
 import io.nisfeb.talon.data.ChannelGroupEntity
 import io.nisfeb.talon.data.ClubEntity
 import io.nisfeb.talon.data.ContactEntity
+import io.nisfeb.talon.data.DmInviteEntity
 import io.nisfeb.talon.data.GroupEntity
 import io.nisfeb.talon.data.MessageEntity
 import io.nisfeb.talon.data.ReactionEntity
@@ -241,6 +242,14 @@ class TlonChatRepo(
      */
     @Volatile var messageListener: ((MessageEntity, Boolean) -> Unit)? = null
 
+    /**
+     * Called once per newly-arrived pending DM request (a ship that just
+     * opened a DM with us, live — not on bootstrap). UI wires this to the
+     * notification path, same as [messageListener]. The ship is the
+     * inviter's patp.
+     */
+    @Volatile var dmInviteListener: ((ship: String) -> Unit)? = null
+
     fun start(session: UrbitSession) {
         if (started) return
         started = true
@@ -419,6 +428,10 @@ class TlonChatRepo(
                 runCatching { bootstrapChannelOrders(ch) }
                     .onFailure { Log.e(TAG, "channel orders scry failed", it) }
             }
+            val dmInvitesJob = async {
+                runCatching { bootstrapDmInvites(ch) }
+                    .onFailure { Log.e(TAG, "dm-invites scry failed", it) }
+            }
             val firstRunJobs = if (firstRun) {
                 listOf(
                     async {
@@ -431,7 +444,7 @@ class TlonChatRepo(
                     },
                 )
             } else emptyList()
-            (listOf(initJob, activityJob, contactsJob, ordersJob) + firstRunJobs).awaitAll()
+            (listOf(initJob, activityJob, contactsJob, ordersJob, dmInvitesJob) + firstRunJobs).awaitAll()
         } finally {
             if (firstRun) _bootstrapping.value = false
         }
@@ -2421,6 +2434,12 @@ class TlonChatRepo(
             return
         }
         if (response != "diff") return
+        // %chat pushes the full pending-DM-invite ship list as a bare
+        // JSON array on the chat /v4 subscription (the other agents only
+        // ever emit objects, so an array is unambiguously this). Handle
+        // it before the object cast below drops it on the floor — that
+        // drop is why brand-new DMs were invisible.
+        (outer["json"] as? JsonArray)?.let { applyDmInvites(it, notify = true); return }
         val payload = outer["json"] as? JsonObject ?: return
 
         // %chat writ-response-4: { whom, id, response }
@@ -2827,6 +2846,67 @@ class TlonChatRepo(
             sourceToWhom(source)?.let { db.unreads().delete(it) }
             return
         }
+    }
+
+    // ───────── pending DM requests ─────────
+
+    /**
+     * Scry the full pending-DM-invite list at (re)connect. `%chat`
+     * `/dm/invited` returns a JSON array of inviter patps. Bootstrap
+     * doesn't notify — a launch shouldn't fire a balloon for every
+     * already-pending request; only live arrivals (via [applyEvent]) do.
+     */
+    private suspend fun bootstrapDmInvites(channel: UrbitChannel) {
+        val body = runCatching { channel.scry("chat", "/dm/invited") }
+            .onFailure { Log.w(TAG, "dm/invited scry failed", it) }
+            .getOrNull() as? JsonArray ?: return
+        applyDmInvites(body, notify = false)
+    }
+
+    /**
+     * Reconcile the local pending-invite table against a fresh snapshot
+     * (the complete list `%chat` sends each time). Ships new to us are
+     * inserted (and, when [notify] is true, surfaced to
+     * [dmInviteListener]); ships no longer present — accepted/declined
+     * elsewhere — are removed.
+     */
+    internal suspend fun applyDmInvites(arr: JsonArray, notify: Boolean) {
+        val incoming = arr.mapNotNull { (it as? JsonPrimitive)?.takeIf { p -> p.isString }?.content }
+            .filter { it.startsWith("~") }
+            .toSet()
+        val existing = db.dmInvites().allShips().toSet()
+        val added = incoming - existing
+        val removed = existing - incoming
+        if (added.isNotEmpty()) {
+            val now = System.currentTimeMillis()
+            db.dmInvites().upsertAll(added.map { DmInviteEntity(ship = it, receivedMs = now) })
+        }
+        removed.forEach { db.dmInvites().delete(it) }
+        if (notify) added.forEach { ship -> runCatching { dmInviteListener?.invoke(ship) } }
+    }
+
+    /**
+     * Accept a pending DM request: poke `chat-dm-rsvp` with `ok=true`.
+     * The DM becomes a real conversation whose writs then flow normally;
+     * drop the local invite row immediately (the next `/v4` snapshot also
+     * reflects it).
+     */
+    suspend fun acceptDmInvite(ship: String) = rsvpDmInvite(ship, accept = true)
+
+    /** Decline a pending DM request: poke `chat-dm-rsvp` with `ok=false`. */
+    suspend fun declineDmInvite(ship: String) = rsvpDmInvite(ship, accept = false)
+
+    private suspend fun rsvpDmInvite(ship: String, accept: Boolean) {
+        val ch = channel ?: error("not connected")
+        ch.poke(
+            app = "chat",
+            mark = "chat-dm-rsvp",
+            payload = buildJsonObject {
+                put("ship", ship)
+                put("ok", accept)
+            },
+        )
+        db.dmInvites().delete(ship)
     }
 
     /**

@@ -49,8 +49,9 @@ import androidx.room.RoomDatabaseConstructor
         DailyDigestEntity::class,
         MessageMediaEntity::class,
         RailItemPrefEntity::class,
+        DmInviteEntity::class,
     ],
-    version = 33,
+    version = 34,
     exportSchema = false,
 )
 @ConstructedBy(AppDatabaseConstructor::class)
@@ -73,6 +74,7 @@ expect abstract class AppDatabase : RoomDatabase {
     abstract fun dailyDigests(): DailyDigestDao
     abstract fun messageMedia(): MessageMediaDao
     abstract fun railItemPrefs(): RailItemPrefDao
+    abstract fun dmInvites(): DmInviteDao
 }
 
 /**

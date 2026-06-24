@@ -604,6 +604,16 @@ fun App(
                     .collect { focused -> repo.setForeground(focused) }
             }
 
+            // New pending DM request → tray notification. Always fires
+            // (an unaccepted request has no "open" state to suppress
+            // against), so a brand-new DM no longer arrives silently.
+            DisposableEffect(repo, notifier) {
+                repo.dmInviteListener = { ship ->
+                    runCatching { notifier.notify(ship, "wants to message you") }
+                }
+                onDispose { repo.dmInviteListener = null }
+            }
+
             // OS notifications for incoming messages. Watches the
             // per-conversation latest-message flow and fires a balloon
             // when a whom's latest id changes to something authored by
