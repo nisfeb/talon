@@ -1394,6 +1394,12 @@ fun App(
                         // queries is the trade-off — cheap, and lets each
                         // call site stay self-contained.
                         val menuSeenState by menuSeen.state.collectAsState()
+                        // Cross-device status-seen marker (see DmListScreen).
+                        val railStatusesSeenFlow = remember(repo) {
+                            repo.settingsSync?.statusesSeenMs
+                                ?: kotlinx.coroutines.flow.MutableStateFlow(0L)
+                        }
+                        val railSyncedStatusesSeenMs by railStatusesSeenFlow.collectAsState()
                         val railPendingInvites = repo.invitesFlow.collectAsState().value
                             ?: emptyList()
                         val railLatestDigest by remember(db, ship) {
@@ -1405,13 +1411,15 @@ fun App(
                         val railInvitesSnapshot = remember(railPendingInvites) {
                             invitesSnapshot(railPendingInvites.map { it.flag })
                         }
+                        val railEffectiveStatusesSeenMs =
+                            maxOf(menuSeenState.lastSeenStatusesMs, railSyncedStatusesSeenMs)
                         val menuBadges = remember(
                             railLatestDigest, railStatusFeed, railPendingInvites,
-                            railInvitesSnapshot, menuSeenState, ship,
+                            railInvitesSnapshot, menuSeenState, railEffectiveStatusesSeenMs, ship,
                         ) {
                             MenuBadges(
                                 statusesFresh = railStatusFeed.any { c ->
-                                    (c.statusUpdatedMs ?: 0L) > menuSeenState.lastSeenStatusesMs &&
+                                    (c.statusUpdatedMs ?: 0L) > railEffectiveStatusesSeenMs &&
                                         !c.status.isNullOrBlank() &&
                                         c.ship != ship
                                 },
@@ -1429,8 +1437,13 @@ fun App(
                             // DmListScreen already had, so the dot lingered
                             // until the user opened the kebab.
                             when (item) {
-                                RailItem.Statuses ->
-                                    menuSeen.markStatusesSeenAt(System.currentTimeMillis())
+                                RailItem.Statuses -> {
+                                    val now = System.currentTimeMillis()
+                                    menuSeen.markStatusesSeenAt(now)
+                                    repo.pushScope.launch {
+                                        runCatching { repo.settingsSync?.pushStatusesSeen(now) }
+                                    }
+                                }
                                 RailItem.TodaysBrief ->
                                     railLatestDigest?.dateLocal?.let { menuSeen.markDigestSeen(it) }
                                 RailItem.Invites ->

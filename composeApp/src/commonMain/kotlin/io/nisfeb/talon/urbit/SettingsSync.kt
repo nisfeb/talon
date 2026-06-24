@@ -1,6 +1,12 @@
 package io.nisfeb.talon.urbit
 
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.serialization.json.JsonObject
+
+/** Shared empty flow for the [SettingsSync.statusesSeenMs] default. */
+private val ZERO_STATUSES_SEEN: StateFlow<Long> = MutableStateFlow(0L).asStateFlow()
 
 /**
  * Narrow interface — the slice of the rich [SettingsSyncImpl] that
@@ -54,6 +60,20 @@ interface SettingsSync {
 
     suspend fun addBookmark(whom: String, postId: String, ts: Long) {}
     suspend fun removeBookmark(whom: String, postId: String) {}
+
+    // ───────── status-feed seen sync ─────────
+    /**
+     * High-water mark (unix-ms) of the latest time ANY of the user's
+     * devices opened the Status feed. Synced via %settings so the
+     * fresh-status dot clears on every device once seen on one. The UI
+     * maxes this with its local MenuSeenStore value; 0 until first sync.
+     */
+    val statusesSeenMs: StateFlow<Long> get() = ZERO_STATUSES_SEEN
+
+    /** Record + broadcast that the user opened the Status feed at [ms].
+     *  Other devices receive it via the %settings subscription and clear
+     *  their fresh-status dot. Default no-op for hosts that don't sync. */
+    suspend fun pushStatusesSeen(ms: Long) {}
 
     // ───────── notify level mutation ─────────
     // Persists the per-conversation notification volume locally and

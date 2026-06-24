@@ -736,6 +736,48 @@ class SettingsSyncApplyBucketTest {
         assertEquals(0, dailyDigest.state.value.minuteOfDay)
         assertEquals(0, rearmCount)
     }
+
+    // ── status-seen (cross-device fresh-status marker) ──────────────
+
+    @Test
+    fun `applyBucket STATUS_SEEN publishes the marker to the flow`() = runBlocking {
+        assertEquals(0L, sync.statusesSeenMs.value)
+        val bucket = buildJsonObject {
+            put("me", buildJsonObject { put("ms", 1_700_000_000_000L) })
+        }
+        sync.applyBucket(SettingsSyncImpl.BUCKET_STATUS_SEEN, bucket)
+        assertEquals(1_700_000_000_000L, sync.statusesSeenMs.value)
+    }
+
+    @Test
+    fun `status-seen marker is monotonic — a stale value never regresses it`() = runBlocking {
+        sync.applyBucket(
+            SettingsSyncImpl.BUCKET_STATUS_SEEN,
+            buildJsonObject { put("me", buildJsonObject { put("ms", 5_000L) }) },
+        )
+        // An older remote value (e.g. a lagging device, or "ship wins"
+        // bootstrap from a stale ship copy) must not move it backwards.
+        sync.applyBucket(
+            SettingsSyncImpl.BUCKET_STATUS_SEEN,
+            buildJsonObject { put("me", buildJsonObject { put("ms", 1_000L) }) },
+        )
+        assertEquals(5_000L, sync.statusesSeenMs.value)
+    }
+
+    @Test
+    fun `put-entry event for status-seen updates the marker`() = runBlocking {
+        val payload = buildJsonObject {
+            put("put-entry", buildJsonObject {
+                put("desk", "talon")
+                put("bucket-key", SettingsSyncImpl.BUCKET_STATUS_SEEN)
+                put("entry-key", "me")
+                // Wire values are JSON-stringified cords.
+                put("value", JsonPrimitive("""{"ms":1700000000123}"""))
+            })
+        }
+        sync.applySettingsEvent(payload)
+        assertEquals(1_700_000_000_123L, sync.statusesSeenMs.value)
+    }
 }
 
 // ──────────────────────────────────────────────────────────────────
