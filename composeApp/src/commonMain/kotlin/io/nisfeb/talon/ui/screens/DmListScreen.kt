@@ -707,6 +707,14 @@ fun DmListScreen(
             // exactly that). The marker writes happen in the per-item
             // onClick branches below.
             val seenState by menuSeen.state.collectAsState()
+            // Status-feed "seen" syncs across the user's devices via
+            // %settings; merge that high-water mark with the local one so
+            // viewing statuses on any device clears the fresh dot on all.
+            val statusesSeenFlow = remember(repo) {
+                repo.settingsSync?.statusesSeenMs
+                    ?: kotlinx.coroutines.flow.MutableStateFlow(0L)
+            }
+            val syncedStatusesSeenMs by statusesSeenFlow.collectAsState()
             val pendingInvites = repo.invitesFlow.collectAsState().value
                 ?: emptyList()
             val latestDigest by remember(db, activeShip) {
@@ -721,9 +729,11 @@ fun DmListScreen(
             val hasFreshDigest = latestDigest?.dateLocal?.let {
                 it != seenState.lastSeenDigestDate
             } == true
-            val hasFreshStatuses = remember(statusFeedRows, seenState.lastSeenStatusesMs, activeShip) {
+            val effectiveStatusesSeenMs =
+                maxOf(seenState.lastSeenStatusesMs, syncedStatusesSeenMs)
+            val hasFreshStatuses = remember(statusFeedRows, effectiveStatusesSeenMs, activeShip) {
                 statusFeedRows.any { c ->
-                    (c.statusUpdatedMs ?: 0L) > seenState.lastSeenStatusesMs &&
+                    (c.statusUpdatedMs ?: 0L) > effectiveStatusesSeenMs &&
                         !c.status.isNullOrBlank() &&
                         c.ship != activeShip
                 }
@@ -777,7 +787,11 @@ fun DmListScreen(
                             },
                             onClick = {
                                 menuOpen = false
-                                menuSeen.markStatusesSeenAt(System.currentTimeMillis())
+                                val now = System.currentTimeMillis()
+                                menuSeen.markStatusesSeenAt(now)
+                                repo.pushScope.launch {
+                                    runCatching { repo.settingsSync?.pushStatusesSeen(now) }
+                                }
                                 onOpenStatusFeed()
                             },
                         )

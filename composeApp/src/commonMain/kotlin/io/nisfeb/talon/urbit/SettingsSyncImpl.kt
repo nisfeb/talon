@@ -15,6 +15,9 @@ import io.nisfeb.talon.data.NotifyPreferenceEntity
 import io.nisfeb.talon.data.RailItemPrefEntity
 import io.nisfeb.talon.ui.RailItem
 import io.nisfeb.talon.ui.railItemOrNull
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.serialization.json.booleanOrNull
@@ -84,6 +87,10 @@ class SettingsSyncImpl(
         const val BUCKET_WATCHWORDS = "watchwords"
         const val BUCKET_WATCHWORD_EXCLUDES = "watchword-excludes"
         const val BUCKET_DAILY_DIGEST = "daily-digest"
+        const val BUCKET_STATUS_SEEN = "status-seen"
+        // Single-entry bucket: the seen high-water mark is global to the
+        // user, not per-anything, so one stable key holds it.
+        private const val STATUS_SEEN_ENTRY = "me"
         private const val AI_ENTRY = "config"
 
         // Wire schema version for the ai-settings entry. v1 (no
@@ -96,6 +103,25 @@ class SettingsSyncImpl(
     }
 
     @Volatile private var channel: UrbitChannel? = null
+
+    private val _statusesSeenMs = MutableStateFlow(0L)
+    override val statusesSeenMs: StateFlow<Long> = _statusesSeenMs.asStateFlow()
+
+    /** Monotonic merge: the seen marker is a high-water mark, so a stale
+     *  remote value (or the "ship wins" bootstrap) can never move a
+     *  device that's already viewed more recently backwards. */
+    private fun bumpStatusesSeen(ms: Long) {
+        if (ms > _statusesSeenMs.value) _statusesSeenMs.value = ms
+    }
+
+    override suspend fun pushStatusesSeen(ms: Long) {
+        bumpStatusesSeen(ms)
+        pokePutEntry(
+            BUCKET_STATUS_SEEN,
+            STATUS_SEEN_ENTRY,
+            buildJsonObject { put("ms", ms) },
+        )
+    }
 
     override fun attach(channel: UrbitChannel) {
         this.channel = channel
@@ -160,6 +186,7 @@ class SettingsSyncImpl(
             applyBucket(BUCKET_WATCHWORDS, deskMap[BUCKET_WATCHWORDS] as? JsonObject)
             applyBucket(BUCKET_WATCHWORD_EXCLUDES, deskMap[BUCKET_WATCHWORD_EXCLUDES] as? JsonObject)
             applyBucket(BUCKET_DAILY_DIGEST, deskMap[BUCKET_DAILY_DIGEST] as? JsonObject)
+            applyBucket(BUCKET_STATUS_SEEN, deskMap[BUCKET_STATUS_SEEN] as? JsonObject)
         }
 
         // Per-bucket recovery: catch buckets that aren't on the ship
@@ -971,6 +998,11 @@ class SettingsSyncImpl(
                 dailyDigestSettings.applyRemote(enabled, hourOfDay, minuteOfDay)
                 rearmDailyDigest()
             }
+            BUCKET_STATUS_SEEN -> {
+                val v = entries?.get(STATUS_SEEN_ENTRY) ?: return
+                val ms = (unwrap(v) as? JsonObject)?.get("ms").asLong() ?: return
+                bumpStatusesSeen(ms)
+            }
         }
     }
 
@@ -1092,6 +1124,10 @@ class SettingsSyncImpl(
                     }
                 }
                 rearmDailyDigest()
+            }
+            BUCKET_STATUS_SEEN -> {
+                val ms = (unwrapped as? JsonObject)?.get("ms").asLong() ?: return
+                bumpStatusesSeen(ms)
             }
         }
     }
