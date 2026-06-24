@@ -12,6 +12,8 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
@@ -590,11 +592,23 @@ fun App(
                 }
             }
 
+            // Desktop "is the user actually here" signal = window focus.
+            // Drives the repo's auto-mark-read gate so a chat left open in
+            // an unfocused / minimized window doesn't silently read its
+            // incoming messages, and feeds the notification suppression
+            // below. Without this, a DM open in a background window got
+            // neither an unread badge nor a notification.
+            val windowInfo = LocalWindowInfo.current
+            LaunchedEffect(repo, windowInfo) {
+                snapshotFlow { windowInfo.isWindowFocused }
+                    .collect { focused -> repo.setForeground(focused) }
+            }
+
             // OS notifications for incoming messages. Watches the
             // per-conversation latest-message flow and fires a balloon
             // when a whom's latest id changes to something authored by
-            // someone other than us, AND the chat isn't currently open,
-            // AND the chat isn't muted. Decision logic lives in
+            // someone other than us, AND the chat isn't currently open
+            // *and focused*, AND the chat isn't muted. Decision logic lives in
             // [diffNewMessageNotifications] — kept pure and unit-tested
             // so the seeding behavior can't silently regress.
             //
@@ -627,7 +641,10 @@ fun App(
                                 rows = rows,
                                 lastSeen = lastSeenIds,
                                 ourPatp = loggedInShip,
-                                openChat = openChat,
+                                // Only suppress for the open chat while the
+                                // window is focused — an unfocused window's
+                                // open chat should still notify.
+                                openChat = openChat.takeIf { windowInfo.isWindowFocused },
                                 mutedWhoms = muted,
                                 storyText = { id, json ->
                                     io.nisfeb.talon.urbit.StoryCache.textFor(id, json)

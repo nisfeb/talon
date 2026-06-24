@@ -571,8 +571,17 @@ fun TalonApp(
     DisposableEffect(Unit) {
         val lifecycle = ProcessLifecycleOwner.get().lifecycle
         val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_START) {
-                app.repo.forceReconnect()
+            when (event) {
+                Lifecycle.Event.ON_START -> {
+                    // Foreground: a chat left open now counts as actively
+                    // viewed again (gates auto-mark-read in the repo).
+                    app.repo.setForeground(true)
+                    app.repo.forceReconnect()
+                }
+                // Background: stop treating the open chat as read so DMs
+                // arriving while away still badge + notify.
+                Lifecycle.Event.ON_STOP -> app.repo.setForeground(false)
+                else -> {}
             }
         }
         lifecycle.addObserver(observer)
