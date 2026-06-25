@@ -6,8 +6,11 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -22,6 +25,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -473,11 +477,41 @@ fun AssistantScreen(
                 )
             }
 
-            transcript.forEach { line ->
-                when (line) {
-                    is Line.You -> Text("You: ${line.text}", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary)
-                    is Line.Note -> Text(line.text, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, fontFamily = FontFamily.Monospace)
-                    is Line.Said -> MarkdownText(line.text)
+            // SelectionContainer makes the whole transcript (questions,
+            // tool log, answers) highlightable + copyable — MarkdownText and
+            // the Text lines all participate. Consecutive Note (agent-log)
+            // lines are batched into a constrained, independently-scrollable
+            // box so a long tool log doesn't push the answer below the fold.
+            SelectionContainer {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    var i = 0
+                    while (i < transcript.size) {
+                        when (val line = transcript[i]) {
+                            is Line.You -> {
+                                Text(
+                                    "You: ${line.text}",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.primary,
+                                )
+                                i++
+                            }
+                            is Line.Said -> {
+                                MarkdownText(line.text)
+                                i++
+                            }
+                            is Line.Note -> {
+                                val logLines = ArrayList<String>()
+                                while (i < transcript.size && transcript[i] is Line.Note) {
+                                    logLines.add((transcript[i] as Line.Note).text)
+                                    i++
+                                }
+                                AgentLog(logLines)
+                            }
+                        }
+                    }
                 }
             }
 
@@ -514,6 +548,40 @@ fun AssistantScreen(
                         onToggle = { expandedConvId = if (expandedConvId == conv.id) null else conv.id },
                     )
                 }
+            }
+        }
+    }
+}
+
+/**
+ * The agent's running log (thinking + tool calls) for one turn, in a
+ * height-capped, independently-scrollable box so a long tool transcript
+ * doesn't push the answer below the fold. Auto-scrolls to the latest line
+ * as the run progresses.
+ */
+@Composable
+private fun AgentLog(lines: List<String>) {
+    val scroll = rememberScrollState()
+    LaunchedEffect(lines.size) { scroll.scrollTo(scroll.maxValue) }
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        shape = RoundedCornerShape(8.dp),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(
+            modifier = Modifier
+                .heightIn(max = 160.dp)
+                .verticalScroll(scroll)
+                .padding(8.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            lines.forEach { line ->
+                Text(
+                    line,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontFamily = FontFamily.Monospace,
+                )
             }
         }
     }
