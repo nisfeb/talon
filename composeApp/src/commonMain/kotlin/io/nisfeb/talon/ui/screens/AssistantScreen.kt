@@ -422,7 +422,13 @@ fun AssistantScreen(
         error = null
         transcript.clear()
         scope.launch {
-            historyDao.forConversation(c.id).forEach { t ->
+            val turns = historyDao.forConversation(c.id)
+            // Guard the async replay: a second select (or a New) while this
+            // DB read was in flight has already re-pointed currentConvId and
+            // cleared the transcript — appending now would splice this topic's
+            // turns onto the newer one. Bail if we've been superseded.
+            if (currentConvId != c.id) return@launch
+            turns.forEach { t ->
                 transcript.add(Line.You(t.question))
                 transcript.add(Line.Said(t.answer))
             }
