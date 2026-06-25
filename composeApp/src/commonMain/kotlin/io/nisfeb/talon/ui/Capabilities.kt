@@ -11,7 +11,28 @@ package io.nisfeb.talon.ui
  */
 expect val isDailyDigestSupported: Boolean
 expect val isVoiceMessagesSupported: Boolean
+
+/**
+ * Whether the **on-device embedder** runs on this platform — the
+ * backbone for semantic search, important-message highlights, and the
+ * assistant's auto topic-grouping. Android: true (MediaPipe, 100-dim).
+ * Desktop: the [io.nisfeb.talon.ai.EmbedderProbe] verdict (DJL ONNX,
+ * 384-dim) — works on most hosts but SIGSEGVs on a few Linux libstdc++
+ * ABIs, so it's gated on a one-time child-process probe. This is NOT
+ * the gate for the assistant itself (see [isAssistantSupported]); the
+ * assistant degrades to keyword search + flat history without it.
+ */
 expect val isOnDeviceAiSupported: Boolean
+
+/**
+ * Whether the AI **assistant** can be offered at all. True on both
+ * Android and desktop: the assistant only needs a cloud LLM key + a
+ * ship session, both of which every platform has. Retrieval and
+ * topic-grouping are *enhanced* by [isOnDeviceAiSupported] but degrade
+ * gracefully (lexical keyword search, flat history) where it's off.
+ * Gates the assistant entry point and the Agent/Mcp settings toggles.
+ */
+expect val isAssistantSupported: Boolean
 
 /**
  * Whether the platform can launch an in-app QR scanner for login

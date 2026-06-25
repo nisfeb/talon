@@ -13,23 +13,30 @@ actual val platformLabel: String = run {
     val ver = System.getProperty("os.version") ?: ""
     if (ver.isBlank()) "Desktop ($os)" else "Desktop ($os $ver)"
 }
-// On-device AI shut off on desktop. The HuggingFace Rust tokenizers
-// JNI native lib (pulled in by DJL's OnnxRuntime engine for sentence
-// embedding) SIGSEGVs in libstdc++ codecvt against modern Linux
-// distros — confirmed reproduction on a user's Mageia/OpenMandriva
-// host with libstdc++ 6.0.34. Until DJL ships a Rust JNI built
-// against a newer libstdc++ ABI (or we swap to a non-Rust tokenizer),
-// shipping the embedder would only give the user "Indexing forever"
-// or a hard JVM abort. Off everywhere on desktop is honest.
+// On-device embedder, probe-gated on desktop. The HuggingFace Rust
+// tokenizers JNI native lib (pulled in by DJL's OnnxRuntime engine)
+// SIGSEGVs in libstdc++ codecvt on SOME Linux ABIs — one confirmed
+// Mageia/OpenMandriva host with libstdc++ 6.0.34 — but runs cleanly on
+// most modern distros (verified Arch/Manjaro 6.0.35, 384-dim output).
+// The crash is a hard JVM abort, uncatchable in-process, so a static
+// flag can't tell good hosts from bad. EmbedderProbe runs one embed in
+// a child JVM once and caches the verdict; this flag reflects it. A
+// "bad" or not-yet-probed host stays off and the assistant falls back
+// to keyword search (see isAssistantSupported).
 //
 // Pre-condition history that got us here:
 // - Slim task was stripping `native/lib/tokenizers.properties` from
-//   the tokenizers JAR — fixed in the same rc.
+//   the tokenizers JAR — fixed.
 // - Model URL pointed at the PyTorch zoo while the engine is
 //   OnnxRuntime — fixed (now `ai.djl.huggingface.onnxruntime`).
-// - Even with both fixed, the Rust tokenizer crashes on first use.
-actual val isOnDeviceAiSupported: Boolean = false
+actual val isOnDeviceAiSupported: Boolean = io.nisfeb.talon.ai.EmbedderProbe.cachedVerdict()
 
+// The assistant runs on desktop regardless of the embedder — it only
+// needs a cloud key + ship session. Search/grouping degrade without
+// the embedder (see isOnDeviceAiSupported).
+actual val isAssistantSupported: Boolean = true
+
+// On-device-only features (smart search, highlights) need the embedder.
 actual fun isOnDeviceAiFeatureSupported(
     @Suppress("UNUSED_PARAMETER") feature: io.nisfeb.talon.ai.AiSettings.Feature,
-): Boolean = false
+): Boolean = isOnDeviceAiSupported

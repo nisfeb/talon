@@ -37,7 +37,10 @@ object ToolCatalog {
     fun default(
         repo: TlonChatRepo,
         db: AppDatabase,
-        embedder: SearchEmbedderClient,
+        // Nullable: a platform without a working on-device embedder
+        // (e.g. a desktop host the EmbedderProbe failed) still gets the
+        // assistant — search_history falls back to keyword-only.
+        embedder: SearchEmbedderClient?,
         displayName: (String) -> String,
     ): List<Tool> = listOf(
         Tool(
@@ -57,7 +60,12 @@ object ToolCatalog {
             // Clamp: a model-supplied negative k would throw; 0 would
             // silently return nothing. Mirrors read_conversation.
             val k = (args.int("k") ?: 10).coerceIn(1, 50)
-            format(embedder.hybridSearch(q, k), displayName)
+            // Hybrid (semantic + keyword) when an embedder is available;
+            // keyword-only otherwise so the tool still works on a host
+            // with no on-device embedder.
+            val hits = embedder?.hybridSearch(q, k)
+                ?: keywordSearch(db, AskUrbit.salientTerms(q)).take(k)
+            format(hits, displayName)
         },
         Tool(
             spec = ToolSpec(

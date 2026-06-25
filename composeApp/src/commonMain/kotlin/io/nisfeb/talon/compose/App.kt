@@ -38,7 +38,7 @@ import io.nisfeb.talon.ui.PlatformBackHandler
 import io.nisfeb.talon.ui.RailItem
 import io.nisfeb.talon.ui.RailTab
 import io.nisfeb.talon.ui.invitesSnapshot
-import io.nisfeb.talon.ui.isOnDeviceAiSupported
+import io.nisfeb.talon.ui.isAssistantSupported
 import io.nisfeb.talon.ui.isVisible
 import io.nisfeb.talon.ui.RightPaneContent
 import io.nisfeb.talon.ui.RightPaneState
@@ -1524,13 +1524,12 @@ fun App(
                                         },
                                         onOpenSearch = { showSearch = true },
                                         // Opt-in + key-gated, so the entry
-                                        // point stays hidden by default
-                                        // during rc rollout. Also requires
-                                        // the on-device embedder (retrieval
-                                        // backbone) — desktop has none today,
-                                        // so the assistant is Android-only and
-                                        // must not surface a dead-end there.
-                                        onOpenAssistant = if (isOnDeviceAiSupported &&
+                                        // point stays hidden by default during
+                                        // rc rollout. Gated on isAssistant-
+                                        // Supported (true on both platforms) —
+                                        // the embedder only enhances retrieval,
+                                        // it isn't required to run.
+                                        onOpenAssistant = if (isAssistantSupported &&
                                             (aiState.askUrbitEnabled || aiState.agentEnabled) &&
                                             aiState.hasKey()
                                         ) {

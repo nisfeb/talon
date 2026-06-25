@@ -237,6 +237,12 @@ fun main() {
     // of what 10 simultaneous Talons did to one user's machine.
     SingleInstance.acquireOrExit()
 
+    // Decide once, in a child JVM, whether this host's libstdc++ can run
+    // the DJL tokenizer without a SIGSEGV. Fire-and-forget; the verdict
+    // gates the on-device embedder and takes effect next launch. See
+    // EmbedderProbe.
+    io.nisfeb.talon.ai.EmbedderProbe.probeIfUnknown()
+
     // Construct the dependency graph BEFORE entering application { … }.
     // application's body composes on the AWT EDT; building the graph
     // there means the SQLite smoke-test's runBlocking parks the EDT

@@ -191,8 +191,8 @@ tasks.withType<Test>().configureEach {
 // version inside derivePackageVersion and silently drifted — every
 // release between 0.7.14 and 0.7.23 shipped with stale .dmg/.msi/.deb
 // filenames because nobody updated both literals.
-val talonVersionCode = 157
-val talonVersionName = "0.14.0-rc7"
+val talonVersionCode = 158
+val talonVersionName = "0.14.0-rc8"
 
 // Surface the gradle-side version constants to commonMain code via a
 // generated Kotlin source file. Without this, the About section in
@@ -417,6 +417,22 @@ tasks.register<JavaExec>("notifierSmoke") {
         desktopMain.runtimeDependencyFiles,
     )
     mainClass.set("io.nisfeb.talon.notify.SystemNotifierSmokeKt")
+}
+
+// Manual smoke for the desktop on-device embedder — verifies whether
+// DJL's ONNX + HuggingFace tokenizer runs on this host or SIGSEGVs
+// (the reason isOnDeviceAiSupported is off on desktop). Run explicitly:
+//     ./gradlew :composeApp:embedderSmoke
+tasks.register<JavaExec>("embedderSmoke") {
+    description = "Run DesktopEmbedder against a couple of strings (verify ONNX/tokenizer works on this host)."
+    group = "verification"
+    val desktopMain = kotlin.targets.getByName("desktop")
+        .compilations.getByName("main")
+    classpath = files(
+        desktopMain.output.allOutputs,
+        desktopMain.runtimeDependencyFiles,
+    )
+    mainClass.set("io.nisfeb.talon.ai.DesktopEmbedderSmokeKt")
 }
 
 // Room 2.7 KMP generates per-target. We attach the room-compiler

@@ -58,6 +58,7 @@ import io.nisfeb.talon.ai.AiSettings
 import io.nisfeb.talon.ai.AiSettingsRepository
 import io.nisfeb.talon.ui.UiSettings
 import io.nisfeb.talon.ui.isOnDeviceAiFeatureSupported
+import io.nisfeb.talon.ui.isAssistantSupported
 import io.nisfeb.talon.ui.isOnDeviceAiSupported
 import io.nisfeb.talon.ui.theme.ThemePreference
 
@@ -571,11 +572,11 @@ fun SettingsScreen(
                 )
                 AiSettings.Feature.values()
                     .filter { it.requiresCloudKey }
-                    // Assistant + Mcp need a key AND the on-device embedder
-                    // for retrieval; hide them where there's no embedder
-                    // (desktop) rather than show a dead-end toggle.
+                    // Assistant + Mcp need a cloud key; they run on every
+                    // platform that supports the assistant (the embedder
+                    // only enhances retrieval, see isAssistantSupported).
                     .filter {
-                        isOnDeviceAiSupported ||
+                        isAssistantSupported ||
                             (it != AiSettings.Feature.Agent && it != AiSettings.Feature.Mcp)
                     }
                     .forEach { feature ->

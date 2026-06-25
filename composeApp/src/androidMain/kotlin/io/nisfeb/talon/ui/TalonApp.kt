@@ -1396,9 +1396,9 @@ fun TalonApp(
                 onOpenConversation = { openWhom = it },
                 onOpenSearch = { searchOpen = true },
                 // Opt-in + key-gated assistant entry point. Mirrors
-                // App.kt's gate (desktop/tablet path). Requires the
-                // on-device embedder as retrieval backbone.
-                onOpenAssistant = if (isOnDeviceAiSupported &&
+                // App.kt's gate. isAssistantSupported is true on both
+                // platforms — the embedder only enhances retrieval.
+                onOpenAssistant = if (isAssistantSupported &&
                     (aiState.askUrbitEnabled || aiState.agentEnabled) &&
                     aiState.hasKey()
                 ) {

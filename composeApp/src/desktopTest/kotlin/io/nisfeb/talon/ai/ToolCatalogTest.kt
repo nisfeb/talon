@@ -111,4 +111,16 @@ class ToolCatalogTest {
     fun `read_conversation with an empty db reports no messages`() {
         assertEquals("No messages found.", run("read_conversation", argsOf("whom" to "~bus")))
     }
+
+    @Test
+    fun `search_history falls back to keyword-only when there is no embedder`() {
+        // Null embedder (a desktop host the probe failed): search_history
+        // must route to keyword search via the db, not NPE on hybridSearch.
+        val noEmbedder = ToolCatalog.default(repo, db, null) { it }
+        val out = runBlocking {
+            noEmbedder.first { it.spec.name == "search_history" }
+                .execute(argsOf("query" to "anything"))
+        }
+        assertEquals("No messages found.", out)
+    }
 }

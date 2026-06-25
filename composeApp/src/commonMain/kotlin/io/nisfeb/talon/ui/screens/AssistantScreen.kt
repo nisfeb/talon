@@ -164,7 +164,9 @@ fun AssistantScreen(
     }
 
     val agentLoop = remember(aiSettings, embedder, repo, contactMap, mcpTools) {
-        if (repo != null && embedder != null) {
+        // Needs a ship session for its tools; the embedder is optional
+        // (search_history degrades to keyword-only, grouping to flat).
+        if (repo != null) {
             AgentLoop(
                 completer = { sys, msgs, tools -> agentClient.completeWithTools(sys, msgs, tools) },
                 tools = ToolCatalog.default(repo, db, embedder) { contactMap.displayName(it) } + mcpTools,
@@ -387,7 +389,7 @@ fun AssistantScreen(
 
             if (!ready) {
                 Text(
-                    "On-device search isn't available here, so the assistant can't run.",
+                    "The assistant needs an active ship session to run. Sign in and try again.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.error,
                 )
