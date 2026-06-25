@@ -43,6 +43,24 @@ interface SettingsSync {
      *  the ship-side store. Default no-op. */
     suspend fun clearDailyDigestOnShip() {}
 
+    // ───────── assistant history sync ─────────
+    /**
+     * Push one assistant turn + its conversation metadata to %settings
+     * so the exchange shows up on the user's other devices. Turns are
+     * append-only (keyed by [io.nisfeb.talon.data.AssistantHistoryEntity.gid])
+     * so concurrent writes from two devices can't clobber each other.
+     * Embeddings are NOT pushed — only the conversation's title/counts
+     * and the turn's text. Default no-op.
+     */
+    suspend fun pushAssistantTurn(
+        conversation: io.nisfeb.talon.data.AssistantConversationEntity,
+        turn: io.nisfeb.talon.data.AssistantHistoryEntity,
+    ) {}
+
+    /** Drop all assistant conversations + turns from the ship — the
+     *  user-initiated "clear history" action. Default no-op. */
+    suspend fun clearAssistantHistoryOnShip() {}
+
     // ───────── home-list reorder hooks ─────────
     // Called from DmListScreen drag callbacks. The Android impl writes
     // through to Room and (for the push variants) sends pokes to

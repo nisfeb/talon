@@ -13,12 +13,19 @@ import androidx.room.PrimaryKey
  * That clustering is what keeps context bounded — only a conversation's
  * own recent turns feed the model.
  *
- * Local-only, like the turns themselves; not synced.
+ * [gid] is the cross-device identity (see [newGid]); the autoincrement
+ * [id] is local-only and collides across devices. [centroid] is NOT
+ * synced — it's a device-local embedder artifact (Android 100-dim vs
+ * desktop 384-dim aren't comparable), so a conversation pulled from the
+ * ship starts with an empty centroid and re-learns it as turns are
+ * added on this device.
  */
 @Immutable
 @Entity(tableName = "assistant_conversation")
 data class AssistantConversationEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    /** Cross-device id (empty only for pre-sync rows mid-migration). */
+    val gid: String = "",
     val title: String,
     val createdAt: Long,
     val updatedAt: Long,
@@ -34,6 +41,7 @@ data class AssistantConversationEntity(
         if (this === other) return true
         if (other !is AssistantConversationEntity) return false
         return id == other.id &&
+            gid == other.gid &&
             title == other.title &&
             createdAt == other.createdAt &&
             updatedAt == other.updatedAt &&
@@ -44,6 +52,7 @@ data class AssistantConversationEntity(
 
     override fun hashCode(): Int {
         var result = id.hashCode()
+        result = 31 * result + gid.hashCode()
         result = 31 * result + title.hashCode()
         result = 31 * result + createdAt.hashCode()
         result = 31 * result + updatedAt.hashCode()

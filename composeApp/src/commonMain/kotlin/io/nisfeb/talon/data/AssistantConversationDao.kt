@@ -15,6 +15,13 @@ interface AssistantConversationDao {
     @Query("SELECT * FROM assistant_conversation WHERE id = :id LIMIT 1")
     suspend fun get(id: Long): AssistantConversationEntity?
 
+    /** Resolve a synced conversation to its local row (sync upsert key). */
+    @Query("SELECT * FROM assistant_conversation WHERE gid = :gid LIMIT 1")
+    suspend fun getByGid(gid: String): AssistantConversationEntity?
+
+    @Query("DELETE FROM assistant_conversation WHERE gid = :gid")
+    suspend fun deleteByGid(gid: String)
+
     /** Newest conversation, used to resume the active topic on reopen. */
     @Query("SELECT * FROM assistant_conversation ORDER BY updatedAt DESC LIMIT 1")
     suspend fun mostRecent(): AssistantConversationEntity?

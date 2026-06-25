@@ -58,6 +58,7 @@ import io.nisfeb.talon.ai.unpackEmbedding
 import io.nisfeb.talon.data.AppDatabase
 import io.nisfeb.talon.data.AssistantConversationEntity
 import io.nisfeb.talon.data.AssistantHistoryEntity
+import io.nisfeb.talon.data.newGid
 import io.nisfeb.talon.ui.ContactMap
 import io.nisfeb.talon.ui.MarkdownText
 import io.nisfeb.talon.ui.MentionPicker
@@ -194,6 +195,7 @@ fun AssistantScreen(
     val convDao = remember(db) { db.assistantConversations() }
     val conversations by convDao.recent(CONV_KEEP).collectAsState(initial = emptyList())
     var currentConvId by remember { mutableStateOf<Long?>(null) }
+    var currentConvGid by remember { mutableStateOf<String?>(null) }
     var currentCentroid by remember { mutableStateOf<FloatArray?>(null) }
     var currentTurnCount by remember { mutableStateOf(0) }
     var expandedConvId by remember { mutableStateOf<Long?>(null) }
@@ -205,6 +207,7 @@ fun AssistantScreen(
     LaunchedEffect(Unit) {
         convDao.mostRecent()?.let { c ->
             currentConvId = c.id
+            currentConvGid = c.gid.ifBlank { null }
             currentCentroid = if (c.dim > 0) unpackEmbedding(c.centroid, c.dim) else null
             currentTurnCount = c.turnCount
         }
@@ -256,52 +259,72 @@ fun AssistantScreen(
 
                 val now = System.currentTimeMillis()
                 val vec = qVec ?: FloatArray(0)
-                val convId = if (continuing) {
-                    val id = currentConvId!!
+                val convEntity: AssistantConversationEntity = if (continuing) {
+                    val gid = currentConvGid ?: newGid().also { currentConvGid = it }
                     val merged = currentCentroid
                         ?.let { ConversationGrouper.updateCentroid(it, currentTurnCount, vec) }
                         ?: vec
                     currentCentroid = merged.takeIf { it.isNotEmpty() }
                     currentTurnCount += 1
-                    convDao.get(id)?.let {
-                        convDao.update(
-                            it.copy(
-                                updatedAt = now,
-                                turnCount = currentTurnCount,
-                                centroid = packEmbedding(merged),
-                                dim = merged.size,
-                            ),
-                        )
-                    }
-                    id
-                } else {
-                    val id = convDao.insert(
-                        AssistantConversationEntity(
-                            title = q.take(CONV_TITLE_CHARS).trim(),
-                            createdAt = now,
+                    val base = currentConvId?.let { convDao.get(it) }
+                    if (base != null) {
+                        val updated = base.copy(
+                            gid = gid,
                             updatedAt = now,
-                            centroid = packEmbedding(vec),
-                            dim = vec.size,
-                            turnCount = 1,
-                        ),
+                            turnCount = currentTurnCount,
+                            centroid = packEmbedding(merged),
+                            dim = merged.size,
+                        )
+                        convDao.update(updated)
+                        updated
+                    } else {
+                        // The conversation row was trimmed away under us;
+                        // recreate it (same gid) so the turn isn't orphaned.
+                        val row = AssistantConversationEntity(
+                            gid = gid, title = q.take(CONV_TITLE_CHARS).trim(),
+                            createdAt = now, updatedAt = now,
+                            centroid = packEmbedding(merged), dim = merged.size,
+                            turnCount = currentTurnCount,
+                        )
+                        val newId = convDao.insert(row)
+                        currentConvId = newId
+                        row.copy(id = newId)
+                    }
+                } else {
+                    val gid = newGid()
+                    val row = AssistantConversationEntity(
+                        gid = gid,
+                        title = q.take(CONV_TITLE_CHARS).trim(),
+                        createdAt = now,
+                        updatedAt = now,
+                        centroid = packEmbedding(vec),
+                        dim = vec.size,
+                        turnCount = 1,
                     )
+                    val id = convDao.insert(row)
                     currentConvId = id
+                    currentConvGid = gid
                     currentCentroid = vec.takeIf { it.isNotEmpty() }
                     currentTurnCount = 1
-                    id
+                    row.copy(id = id)
                 }
                 convDao.trim(CONV_KEEP)
 
-                historyDao.insert(
-                    AssistantHistoryEntity(
-                        mode = "Assistant",
-                        question = q,
-                        answer = finalAnswer.ifBlank { "(no reply)" },
-                        createdAt = now,
-                        conversationId = convId,
-                    ),
+                val turnEntity = AssistantHistoryEntity(
+                    gid = newGid(),
+                    mode = "Assistant",
+                    question = q,
+                    answer = finalAnswer.ifBlank { "(no reply)" },
+                    createdAt = now,
+                    conversationId = convEntity.id,
+                    convGid = convEntity.gid,
                 )
+                historyDao.insert(turnEntity)
                 historyDao.trim(HISTORY_KEEP)
+
+                // Replicate to the user's other devices. No-op without a
+                // synced ship session; embeddings stay local (not pushed).
+                runCatching { repo?.settingsSync?.pushAssistantTurn(convEntity, turnEntity) }
             }.onFailure { error = it.message ?: it::class.simpleName }
             busy = false
         }
@@ -438,7 +461,13 @@ fun AssistantScreen(
                 ) {
                     Text("Conversations", style = MaterialTheme.typography.labelLarge)
                     TextButton(onClick = {
-                        scope.launch { historyDao.clearAll(); convDao.clearAll() }
+                        scope.launch {
+                            historyDao.clearAll(); convDao.clearAll()
+                            // Clearing is explicit user intent → forget on
+                            // the ship too, so it doesn't sync back / linger
+                            // on other devices. (Auto-trim stays local.)
+                            runCatching { repo?.settingsSync?.clearAssistantHistoryOnShip() }
+                        }
                         expandedConvId = null
                         newConversation()
                     }) { Text("Clear") }

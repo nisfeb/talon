@@ -53,7 +53,7 @@ import androidx.room.RoomDatabaseConstructor
         AssistantHistoryEntity::class,
         AssistantConversationEntity::class,
     ],
-    version = 36,
+    version = 37,
     exportSchema = false,
 )
 @ConstructedBy(AppDatabaseConstructor::class)

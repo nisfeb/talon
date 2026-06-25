@@ -6,22 +6,27 @@ import androidx.room.PrimaryKey
 
 /**
  * One past Assistant exchange, kept for reference (docs/assistant.md).
- * Local-only — history is per-device and not synced through %settings;
- * it's a convenience log, not shared state. [AssistantHistoryDao.trim]
- * caps the table so it can't grow without bound.
+ * Synced across devices via %settings (append-only, keyed by [gid]);
+ * [AssistantHistoryDao.trim] caps the local table so it can't grow
+ * without bound — trimming is local cache eviction, the ship keeps the
+ * superset.
  *
- * `answer` is the final reply text for both modes (Ask's grounded
- * answer, or Act's last spoken line). `mode` is "Ask" or "Act".
+ * `answer` is the final reply text. `mode` is retained for legacy rows.
  */
 @Immutable
 @Entity(tableName = "assistant_history")
 data class AssistantHistoryEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    /** Cross-device turn id (see [newGid]); empty for pre-sync rows. */
+    val gid: String = "",
     val mode: String,
     val question: String,
     val answer: String,
     val createdAt: Long,
-    /** The conversation this turn belongs to
-     *  ([AssistantConversationEntity.id]); 0 for legacy ungrouped turns. */
+    /** The conversation this turn belongs to, by local
+     *  [AssistantConversationEntity.id]; 0 for legacy ungrouped turns. */
     val conversationId: Long = 0,
+    /** The conversation's cross-device id ([AssistantConversationEntity.gid]),
+     *  used to re-link turns to the right conversation on a peer device. */
+    val convGid: String = "",
 )

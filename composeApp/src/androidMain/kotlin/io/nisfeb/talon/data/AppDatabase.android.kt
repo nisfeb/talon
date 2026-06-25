@@ -56,6 +56,7 @@ fun createAppDatabase(context: Context, name: String): AppDatabase {
             MIGRATION_23_24, MIGRATION_24_25, MIGRATION_25_26,
             MIGRATION_26_27, MIGRATION_27_28, MIGRATION_28_29,
             MIGRATION_29_30, MIGRATION_30_31, MIGRATION_34_35, MIGRATION_35_36,
+            MIGRATION_36_37,
         )
         // dropAllTables = true preserves the pre-2.7 behaviour: when
         // Room can't find a migration path, drop everything and rebuild.
@@ -302,6 +303,30 @@ private val MIGRATION_35_36 = object : Migration(35, 36) {
                 turnCount INTEGER NOT NULL
             )
             """.trimIndent()
+        )
+    }
+}
+
+// Cross-device sync for assistant history: a global id (gid) on each
+// conversation + turn, plus convGid on a turn to re-link it to its
+// conversation on a peer device. Backfill existing rows with random
+// 128-bit ids (matching data.newGid()'s format) so pre-sync history is
+// addressable too. Additive, non-destructive.
+private val MIGRATION_36_37 = object : Migration(36, 37) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE assistant_conversation ADD COLUMN gid TEXT NOT NULL DEFAULT ''")
+        db.execSQL("UPDATE assistant_conversation SET gid = lower(hex(randomblob(16))) WHERE gid = ''")
+        db.execSQL("ALTER TABLE assistant_history ADD COLUMN gid TEXT NOT NULL DEFAULT ''")
+        db.execSQL("ALTER TABLE assistant_history ADD COLUMN convGid TEXT NOT NULL DEFAULT ''")
+        db.execSQL("UPDATE assistant_history SET gid = lower(hex(randomblob(16))) WHERE gid = ''")
+        // COALESCE to '' so a turn whose conversation row is missing
+        // (orphaned conversationId) backfills to '' rather than NULL —
+        // convGid is NOT NULL, and a NULL here would fail the migration
+        // and brick app startup.
+        db.execSQL(
+            "UPDATE assistant_history SET convGid = COALESCE(" +
+                "(SELECT c.gid FROM assistant_conversation c WHERE c.id = assistant_history.conversationId), '') " +
+                "WHERE convGid = '' AND conversationId != 0",
         )
     }
 }

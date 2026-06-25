@@ -16,6 +16,18 @@ interface AssistantHistoryDao {
     @Query("SELECT * FROM assistant_history WHERE conversationId = :conversationId ORDER BY createdAt ASC")
     suspend fun forConversation(conversationId: Long): List<AssistantHistoryEntity>
 
+    /** Whether a synced turn already landed locally — turns are
+     *  append-only, so a matching gid means we can skip it (idempotent). */
+    @Query("SELECT * FROM assistant_history WHERE gid = :gid LIMIT 1")
+    suspend fun getByGid(gid: String): AssistantHistoryEntity?
+
+    /** Drop all turns of a conversation (cascade when it's deleted). */
+    @Query("DELETE FROM assistant_history WHERE conversationId = :conversationId")
+    suspend fun deleteForConversation(conversationId: Long)
+
+    @Query("DELETE FROM assistant_history WHERE gid = :gid")
+    suspend fun deleteByGid(gid: String)
+
     @Insert
     suspend fun insert(row: AssistantHistoryEntity)
 

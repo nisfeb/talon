@@ -88,6 +88,10 @@ class SettingsSyncImpl(
         const val BUCKET_WATCHWORD_EXCLUDES = "watchword-excludes"
         const val BUCKET_DAILY_DIGEST = "daily-digest"
         const val BUCKET_STATUS_SEEN = "status-seen"
+        // Assistant history (Stage 2). Conversation metadata + append-only
+        // turns, keyed by global id; embeddings stay device-local.
+        const val BUCKET_ASSISTANT_CONVERSATIONS = "assistant-conversations"
+        const val BUCKET_ASSISTANT_TURNS = "assistant-turns"
         // Single-entry bucket: the seen high-water mark is global to the
         // user, not per-anything, so one stable key holds it.
         private const val STATUS_SEEN_ENTRY = "me"
@@ -187,6 +191,12 @@ class SettingsSyncImpl(
             applyBucket(BUCKET_WATCHWORD_EXCLUDES, deskMap[BUCKET_WATCHWORD_EXCLUDES] as? JsonObject)
             applyBucket(BUCKET_DAILY_DIGEST, deskMap[BUCKET_DAILY_DIGEST] as? JsonObject)
             applyBucket(BUCKET_STATUS_SEEN, deskMap[BUCKET_STATUS_SEEN] as? JsonObject)
+            // Assistant history. Upsert (not replace-all) so conversations
+            // created offline on this device aren't wiped; conversations
+            // before turns so turns resolve their convGid (a stub is
+            // created either way if they arrive out of order).
+            applyBucket(BUCKET_ASSISTANT_CONVERSATIONS, deskMap[BUCKET_ASSISTANT_CONVERSATIONS] as? JsonObject)
+            applyBucket(BUCKET_ASSISTANT_TURNS, deskMap[BUCKET_ASSISTANT_TURNS] as? JsonObject)
         }
 
         // Per-bucket recovery: catch buckets that aren't on the ship
@@ -560,6 +570,47 @@ class SettingsSyncImpl(
         }
         runCatching { ch.poke(app = "settings", mark = "settings-event", payload = payload) }
             .onFailure { Log.w(TAG, "del-bucket ai-settings failed", it) }
+    }
+
+    override suspend fun pushAssistantTurn(
+        conversation: io.nisfeb.talon.data.AssistantConversationEntity,
+        turn: io.nisfeb.talon.data.AssistantHistoryEntity,
+    ) {
+        if (conversation.gid.isBlank() || turn.gid.isBlank()) return
+        pokePutEntry(
+            BUCKET_ASSISTANT_CONVERSATIONS, conversation.gid,
+            buildJsonObject {
+                put("title", conversation.title)
+                put("createdAt", conversation.createdAt)
+                put("updatedAt", conversation.updatedAt)
+                put("turnCount", conversation.turnCount)
+            },
+        )
+        pokePutEntry(
+            BUCKET_ASSISTANT_TURNS, turn.gid,
+            buildJsonObject {
+                // `mode` is intentionally not pushed — it's a vestigial
+                // local field; the applier defaults it to "Assistant".
+                put("convGid", conversation.gid)
+                put("question", turn.question)
+                put("answer", turn.answer)
+                put("createdAt", turn.createdAt)
+            },
+        )
+    }
+
+    override suspend fun clearAssistantHistoryOnShip() {
+        val ch = channel ?: return
+        for (bucket in listOf(BUCKET_ASSISTANT_CONVERSATIONS, BUCKET_ASSISTANT_TURNS)) {
+            val payload = buildJsonObject {
+                put("del-bucket", buildJsonObject {
+                    put("desk", DESK)
+                    put("bucket-key", bucket)
+                })
+            }
+            runCatching { ch.poke(app = "settings", mark = "settings-event", payload = payload) }
+                .onFailure { Log.w(TAG, "del-bucket $bucket failed", it) }
+        }
     }
 
     private fun applyAiEntry(obj: JsonObject) {
@@ -1013,6 +1064,16 @@ class SettingsSyncImpl(
                 val ms = (unwrap(v) as? JsonObject)?.get("ms").asLong() ?: return
                 bumpStatusesSeen(ms)
             }
+            BUCKET_ASSISTANT_CONVERSATIONS -> {
+                entries?.forEach { (gid, v) ->
+                    (unwrap(v) as? JsonObject)?.let { upsertAssistantConversation(gid, it) }
+                }
+            }
+            BUCKET_ASSISTANT_TURNS -> {
+                entries?.forEach { (gid, v) ->
+                    (unwrap(v) as? JsonObject)?.let { upsertAssistantTurn(gid, it) }
+                }
+            }
         }
     }
 
@@ -1139,6 +1200,12 @@ class SettingsSyncImpl(
                 val ms = (unwrapped as? JsonObject)?.get("ms").asLong() ?: return
                 bumpStatusesSeen(ms)
             }
+            BUCKET_ASSISTANT_CONVERSATIONS -> {
+                (unwrapped as? JsonObject)?.let { upsertAssistantConversation(entry, it) }
+            }
+            BUCKET_ASSISTANT_TURNS -> {
+                (unwrapped as? JsonObject)?.let { upsertAssistantTurn(entry, it) }
+            }
         }
     }
 
@@ -1196,7 +1263,79 @@ class SettingsSyncImpl(
                 }
                 rearmDailyDigest()
             }
+            BUCKET_ASSISTANT_CONVERSATIONS -> {
+                // Deleting a conversation cascades to its turns locally.
+                db.assistantConversations().getByGid(entry)?.let {
+                    db.assistantHistory().deleteForConversation(it.id)
+                }
+                db.assistantConversations().deleteByGid(entry)
+            }
+            BUCKET_ASSISTANT_TURNS -> db.assistantHistory().deleteByGid(entry)
         }
+    }
+
+    // ───────── assistant history upsert (sync apply) ─────────
+    // Upsert, not replace — a peer's bucket is merged into local state so
+    // conversations created offline here survive.
+
+    private suspend fun upsertAssistantConversation(gid: String, obj: JsonObject) {
+        if (gid.isBlank()) return
+        val dao = db.assistantConversations()
+        val title = obj["title"].asStr() ?: ""
+        val createdAt = obj["createdAt"].asLong() ?: 0L
+        val updatedAt = obj["updatedAt"].asLong() ?: createdAt
+        val existing = dao.getByGid(gid)
+        if (existing != null) {
+            // Preserve centroid/dim (device-local, not on the wire) AND
+            // turnCount (derived from the turns THIS device actually holds,
+            // maintained in upsertAssistantTurn) — the wire's turnCount
+            // counts a peer's turns that may not have synced here yet, so
+            // trusting it would claim more turns than exist locally.
+            dao.update(existing.copy(title = title, updatedAt = updatedAt))
+        } else {
+            // turnCount starts at 0; each synced turn bumps it so it always
+            // matches the local row count, never the peer's claim.
+            dao.insert(
+                io.nisfeb.talon.data.AssistantConversationEntity(
+                    gid = gid, title = title, createdAt = createdAt,
+                    updatedAt = updatedAt, centroid = ByteArray(0), dim = 0, turnCount = 0,
+                ),
+            )
+        }
+    }
+
+    private suspend fun upsertAssistantTurn(gid: String, obj: JsonObject) {
+        if (gid.isBlank()) return
+        val turnDao = db.assistantHistory()
+        if (turnDao.getByGid(gid) != null) return // append-only → idempotent
+        val convGid = obj["convGid"].asStr()
+        if (convGid == null) {
+            Log.w(TAG, "assistant turn $gid missing convGid; dropped")
+            return
+        }
+        val question = obj["question"].asStr() ?: ""
+        val answer = obj["answer"].asStr() ?: ""
+        val mode = obj["mode"].asStr() ?: "Assistant"
+        val createdAt = obj["createdAt"].asLong() ?: 0L
+        val convDao = db.assistantConversations()
+        // The turn may arrive before its conversation's metadata — stub a
+        // conversation (turnCount=0) so the turn always has a home; the
+        // real metadata upserts (preserving this id) when it arrives.
+        val conv = convDao.getByGid(convGid)
+        val localConvId = conv?.id ?: convDao.insert(
+            io.nisfeb.talon.data.AssistantConversationEntity(
+                gid = convGid, title = question.take(60).trim(), createdAt = createdAt,
+                updatedAt = createdAt, centroid = ByteArray(0), dim = 0, turnCount = 0,
+            ),
+        )
+        turnDao.insert(
+            io.nisfeb.talon.data.AssistantHistoryEntity(
+                gid = gid, mode = mode, question = question, answer = answer,
+                createdAt = createdAt, conversationId = localConvId, convGid = convGid,
+            ),
+        )
+        // Keep turnCount tracking the turns this device actually holds.
+        convDao.get(localConvId)?.let { convDao.update(it.copy(turnCount = it.turnCount + 1)) }
     }
 
     internal suspend fun clearBucketLocally(bucket: String) {
@@ -1222,6 +1361,13 @@ class SettingsSyncImpl(
                 // del-bucket from ship: revert to defaults locally.
                 dailyDigestSettings.applyRemote(enabled = false, hourOfDay = 6, minuteOfDay = 0)
                 rearmDailyDigest()
+            }
+            // A peer cleared assistant history (del-bucket) — mirror it
+            // locally. Either bucket's del-bucket wipes both tables; turns
+            // can't outlive their conversations.
+            BUCKET_ASSISTANT_CONVERSATIONS, BUCKET_ASSISTANT_TURNS -> {
+                db.assistantHistory().clearAll()
+                db.assistantConversations().clearAll()
             }
         }
     }

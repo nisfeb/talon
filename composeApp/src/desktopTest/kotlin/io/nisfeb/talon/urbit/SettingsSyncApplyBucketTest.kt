@@ -6,6 +6,8 @@ import io.nisfeb.talon.ai.AiSettings
 import io.nisfeb.talon.ai.AiSettingsRepository
 import io.nisfeb.talon.ai.DailyDigestSettings
 import io.nisfeb.talon.data.AppDatabase
+import io.nisfeb.talon.data.AssistantConversationEntity
+import io.nisfeb.talon.data.AssistantHistoryEntity
 import io.nisfeb.talon.data.BookmarkEntity
 import io.nisfeb.talon.data.BookmarkFolderEntity
 import io.nisfeb.talon.data.BookmarkFolderMemberEntity
@@ -845,6 +847,144 @@ class SettingsSyncApplyBucketTest {
         }
         sync.applySettingsEvent(payload)
         assertEquals(1_700_000_000_123L, sync.statusesSeenMs.value)
+    }
+
+    // ── assistant history (Stage 2) ─────────────────────────────────
+
+    private fun convMeta(title: String, turnCount: Int) = buildJsonObject {
+        put("title", title)
+        put("createdAt", 100L)
+        put("updatedAt", 200L)
+        put("turnCount", turnCount)
+    }
+
+    private fun turnVal(convGid: String, question: String, answer: String) = buildJsonObject {
+        put("convGid", convGid)
+        put("question", question)
+        put("answer", answer)
+        put("mode", "Assistant")
+        put("createdAt", 150L)
+    }
+
+    @Test
+    fun `applyBucket ASSISTANT_CONVERSATIONS upserts by gid, preserves the local centroid and turnCount`() = runBlocking {
+        // A conversation this device already learned a centroid for.
+        db.assistantConversations().insert(
+            AssistantConversationEntity(
+                gid = "c1", title = "old", createdAt = 1, updatedAt = 1,
+                centroid = byteArrayOf(1, 2, 3, 4), dim = 1, turnCount = 1,
+            ),
+        )
+        sync.applyBucket(
+            SettingsSyncImpl.BUCKET_ASSISTANT_CONVERSATIONS,
+            buildJsonObject { put("c1", convMeta("new title", turnCount = 3)) },
+        )
+        val row = db.assistantConversations().getByGid("c1")!!
+        assertEquals("new title", row.title)
+        // Embeddings aren't on the wire — the update must not wipe them.
+        assertTrue(byteArrayOf(1, 2, 3, 4).contentEquals(row.centroid))
+        assertEquals(1, row.dim)
+        // turnCount is local-derived, not taken from the wire's claim of 3.
+        assertEquals(1, row.turnCount)
+    }
+
+    @Test
+    fun `turnCount tracks the turns this device holds, not the wire claim`() = runBlocking {
+        // Metadata claims 5 turns (peer total), but only one turn syncs here.
+        sync.applyBucket(
+            SettingsSyncImpl.BUCKET_ASSISTANT_CONVERSATIONS,
+            buildJsonObject { put("c1", convMeta("topic", turnCount = 5)) },
+        )
+        sync.applyBucket(
+            SettingsSyncImpl.BUCKET_ASSISTANT_TURNS,
+            buildJsonObject { put("t1", turnVal("c1", "q1", "a1")) },
+        )
+        val row = db.assistantConversations().getByGid("c1")!!
+        assertEquals(1, row.turnCount)
+        assertEquals(1, db.assistantHistory().forConversation(row.id).size)
+    }
+
+    @Test
+    fun `metadata arriving after a stub turn does not inflate turnCount`() = runBlocking {
+        // Out-of-order: turn first (stub, count->1), then metadata claiming 5.
+        sync.applyBucket(
+            SettingsSyncImpl.BUCKET_ASSISTANT_TURNS,
+            buildJsonObject { put("t1", turnVal("c1", "q1", "a1")) },
+        )
+        sync.applyBucket(
+            SettingsSyncImpl.BUCKET_ASSISTANT_CONVERSATIONS,
+            buildJsonObject { put("c1", convMeta("topic", turnCount = 5)) },
+        )
+        assertEquals(1, db.assistantConversations().getByGid("c1")!!.turnCount)
+    }
+
+    @Test
+    fun `clearBucketLocally for an assistant bucket wipes conversations and turns`() = runBlocking {
+        sync.applyBucket(
+            SettingsSyncImpl.BUCKET_ASSISTANT_CONVERSATIONS,
+            buildJsonObject { put("c1", convMeta("topic", turnCount = 1)) },
+        )
+        sync.applyBucket(
+            SettingsSyncImpl.BUCKET_ASSISTANT_TURNS,
+            buildJsonObject { put("t1", turnVal("c1", "q1", "a1")) },
+        )
+        // A peer's "clear history" arrives as del-bucket → clearBucketLocally.
+        sync.clearBucketLocally(SettingsSyncImpl.BUCKET_ASSISTANT_CONVERSATIONS)
+        assertNull(db.assistantConversations().getByGid("c1"))
+        assertTrue(db.assistantHistory().recent(10).first().isEmpty())
+    }
+
+    @Test
+    fun `applyBucket ASSISTANT_TURNS links the turn to its conversation`() = runBlocking {
+        sync.applyBucket(
+            SettingsSyncImpl.BUCKET_ASSISTANT_CONVERSATIONS,
+            buildJsonObject { put("c1", convMeta("topic", turnCount = 1)) },
+        )
+        sync.applyBucket(
+            SettingsSyncImpl.BUCKET_ASSISTANT_TURNS,
+            buildJsonObject { put("t1", turnVal("c1", "q1", "a1")) },
+        )
+        val convId = db.assistantConversations().getByGid("c1")!!.id
+        val turns = db.assistantHistory().forConversation(convId)
+        assertEquals(listOf("q1"), turns.map { it.question })
+        assertEquals("c1", turns.single().convGid)
+    }
+
+    @Test
+    fun `applyBucket ASSISTANT_TURNS stubs a conversation when the turn arrives first`() = runBlocking {
+        // Out-of-order delivery: the turn must still have a home.
+        sync.applyBucket(
+            SettingsSyncImpl.BUCKET_ASSISTANT_TURNS,
+            buildJsonObject { put("t1", turnVal("c2", "orphan question", "a")) },
+        )
+        val conv = db.assistantConversations().getByGid("c2")
+        assertNotNull(conv)
+        assertEquals(1, db.assistantHistory().forConversation(conv.id).size)
+    }
+
+    @Test
+    fun `applyBucket ASSISTANT_TURNS is idempotent on a repeated gid`() = runBlocking {
+        val bucket = buildJsonObject { put("t1", turnVal("c1", "q1", "a1")) }
+        sync.applyBucket(SettingsSyncImpl.BUCKET_ASSISTANT_TURNS, bucket)
+        sync.applyBucket(SettingsSyncImpl.BUCKET_ASSISTANT_TURNS, bucket)
+        val convId = db.assistantConversations().getByGid("c1")!!.id
+        assertEquals(1, db.assistantHistory().forConversation(convId).size)
+    }
+
+    @Test
+    fun `removeEntry ASSISTANT_CONVERSATIONS cascades to the conversation's turns`() = runBlocking {
+        sync.applyBucket(
+            SettingsSyncImpl.BUCKET_ASSISTANT_CONVERSATIONS,
+            buildJsonObject { put("c1", convMeta("topic", turnCount = 1)) },
+        )
+        sync.applyBucket(
+            SettingsSyncImpl.BUCKET_ASSISTANT_TURNS,
+            buildJsonObject { put("t1", turnVal("c1", "q1", "a1")) },
+        )
+        val convId = db.assistantConversations().getByGid("c1")!!.id
+        sync.removeEntry(SettingsSyncImpl.BUCKET_ASSISTANT_CONVERSATIONS, "c1")
+        assertNull(db.assistantConversations().getByGid("c1"))
+        assertTrue(db.assistantHistory().forConversation(convId).isEmpty())
     }
 }
 
