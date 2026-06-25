@@ -85,10 +85,30 @@ import kotlinx.coroutines.launch
  */
 
 /** A line in the agent transcript. */
-private sealed interface Line {
+internal sealed interface Line {
     data class You(val text: String) : Line
     data class Note(val text: String) : Line
     data class Said(val text: String) : Line
+}
+
+/**
+ * Split the flat transcript into exchanges, each starting at a [Line.You].
+ * Used to render newest-exchange-first (so the latest answer sits at the
+ * top, under the input) while preserving question→log→answer order WITHIN
+ * an exchange — a naive reverse of the line list would scramble that.
+ * A leading run with no [Line.You] (unusual) becomes its own group.
+ */
+internal fun toExchanges(lines: List<Line>): List<List<Line>> {
+    val out = ArrayList<List<Line>>()
+    var cur = ArrayList<Line>()
+    for (line in lines) {
+        if (line is Line.You && cur.isNotEmpty()) {
+            out.add(cur); cur = ArrayList()
+        }
+        cur.add(line)
+    }
+    if (cur.isNotEmpty()) out.add(cur)
+    return out
 }
 
 private data class Pending(val call: ToolCall, val tool: Tool, val gate: CompletableDeferred<Boolean>)
@@ -487,28 +507,36 @@ fun AssistantScreen(
                     modifier = Modifier.fillMaxWidth(),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    var i = 0
-                    while (i < transcript.size) {
-                        when (val line = transcript[i]) {
-                            is Line.You -> {
-                                Text(
-                                    "You: ${line.text}",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.primary,
-                                )
-                                i++
-                            }
-                            is Line.Said -> {
-                                MarkdownText(line.text)
-                                i++
-                            }
-                            is Line.Note -> {
-                                val logLines = ArrayList<String>()
-                                while (i < transcript.size && transcript[i] is Line.Note) {
-                                    logLines.add((transcript[i] as Line.Note).text)
+                    // Newest exchange first, so the latest answer sits at the
+                    // top (right under the input) instead of below the
+                    // resumed conversation's text. Lines stay in
+                    // question→log→answer order within each exchange.
+                    val exchanges = toExchanges(transcript).asReversed()
+                    exchanges.forEachIndexed { idx, lines ->
+                        if (idx > 0) HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+                        var i = 0
+                        while (i < lines.size) {
+                            when (val line = lines[i]) {
+                                is Line.You -> {
+                                    Text(
+                                        "You: ${line.text}",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.primary,
+                                    )
                                     i++
                                 }
-                                AgentLog(logLines)
+                                is Line.Said -> {
+                                    MarkdownText(line.text)
+                                    i++
+                                }
+                                is Line.Note -> {
+                                    val logLines = ArrayList<String>()
+                                    while (i < lines.size && lines[i] is Line.Note) {
+                                        logLines.add((lines[i] as Line.Note).text)
+                                        i++
+                                    }
+                                    AgentLog(logLines)
+                                }
                             }
                         }
                     }
