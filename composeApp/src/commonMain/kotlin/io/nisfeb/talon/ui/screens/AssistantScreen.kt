@@ -210,6 +210,17 @@ fun AssistantScreen(
             currentConvGid = c.gid.ifBlank { null }
             currentCentroid = if (c.dim > 0) unpackEmbedding(c.centroid, c.dim) else null
             currentTurnCount = c.turnCount
+            // Replay the resumed conversation into the transcript so the
+            // screen shows which topic you're continuing. Without this the
+            // assistant opens blank even though a conversation is active,
+            // and "New" (which detaches that topic) looks like it does
+            // nothing — there's no visible thread for it to clear.
+            if (transcript.isEmpty()) {
+                historyDao.forConversation(c.id).forEach { t ->
+                    transcript.add(Line.You(t.question))
+                    transcript.add(Line.Said(t.answer))
+                }
+            }
         }
     }
 
@@ -367,7 +378,12 @@ fun AssistantScreen(
                 actions = {
                     // Manual override for the topic heuristic: drop the
                     // active conversation so the next question starts fresh.
-                    TextButton(onClick = { newConversation() }, enabled = !busy) {
+                    // Disabled when there's nothing to reset (no live thread
+                    // and no active conversation), so it never looks inert.
+                    TextButton(
+                        onClick = { newConversation() },
+                        enabled = !busy && (transcript.isNotEmpty() || currentConvId != null),
+                    ) {
                         Text("New")
                     }
                 },
