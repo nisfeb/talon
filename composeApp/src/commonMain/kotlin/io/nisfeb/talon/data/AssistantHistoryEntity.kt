@@ -21,4 +21,7 @@ data class AssistantHistoryEntity(
     val question: String,
     val answer: String,
     val createdAt: Long,
+    /** The conversation this turn belongs to
+     *  ([AssistantConversationEntity.id]); 0 for legacy ungrouped turns. */
+    val conversationId: Long = 0,
 )

@@ -58,6 +58,9 @@ class DesktopSearchEmbedderClient(
     override suspend fun keywordSearch(terms: List<String>): List<MessageEntity> =
         io.nisfeb.talon.ai.keywordSearch(db, terms)
 
+    override suspend fun embed(text: String): FloatArray? =
+        withContext(Dispatchers.IO) { embedder.embed(text) }
+
     override suspend fun computeHighlights(): List<MessageEntity> =
         io.nisfeb.talon.ai.computeHighlights(db)
 }

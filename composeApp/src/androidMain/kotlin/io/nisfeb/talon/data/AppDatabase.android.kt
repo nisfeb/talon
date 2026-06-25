@@ -33,6 +33,7 @@ actual abstract class AppDatabase : RoomDatabase() {
     actual abstract fun railItemPrefs(): RailItemPrefDao
     actual abstract fun dmInvites(): DmInviteDao
     actual abstract fun assistantHistory(): AssistantHistoryDao
+    actual abstract fun assistantConversations(): AssistantConversationDao
 }
 
 /**
@@ -54,7 +55,7 @@ fun createAppDatabase(context: Context, name: String): AppDatabase {
             MIGRATION_20_21, MIGRATION_21_22, MIGRATION_22_23,
             MIGRATION_23_24, MIGRATION_24_25, MIGRATION_25_26,
             MIGRATION_26_27, MIGRATION_27_28, MIGRATION_28_29,
-            MIGRATION_29_30, MIGRATION_30_31, MIGRATION_34_35,
+            MIGRATION_29_30, MIGRATION_30_31, MIGRATION_34_35, MIGRATION_35_36,
         )
         // dropAllTables = true preserves the pre-2.7 behaviour: when
         // Room can't find a migration path, drop everything and rebuild.
@@ -278,6 +279,27 @@ private val MIGRATION_34_35 = object : Migration(34, 35) {
                 question TEXT NOT NULL,
                 answer TEXT NOT NULL,
                 createdAt INTEGER NOT NULL
+            )
+            """.trimIndent()
+        )
+    }
+}
+
+// Conversation grouping: a conversations table + a conversationId on
+// each turn (default 0 = legacy ungrouped). Additive, non-destructive.
+private val MIGRATION_35_36 = object : Migration(35, 36) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE assistant_history ADD COLUMN conversationId INTEGER NOT NULL DEFAULT 0")
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS assistant_conversation (
+                id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+                title TEXT NOT NULL,
+                createdAt INTEGER NOT NULL,
+                updatedAt INTEGER NOT NULL,
+                centroid BLOB NOT NULL,
+                dim INTEGER NOT NULL,
+                turnCount INTEGER NOT NULL
             )
             """.trimIndent()
         )

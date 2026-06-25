@@ -11,6 +11,11 @@ interface AssistantHistoryDao {
     @Query("SELECT * FROM assistant_history ORDER BY createdAt DESC LIMIT :limit")
     fun recent(limit: Int): Flow<List<AssistantHistoryEntity>>
 
+    /** A conversation's turns, oldest-first (chronological reading +
+     *  oldest-first context replay to the model). */
+    @Query("SELECT * FROM assistant_history WHERE conversationId = :conversationId ORDER BY createdAt ASC")
+    suspend fun forConversation(conversationId: Long): List<AssistantHistoryEntity>
+
     @Insert
     suspend fun insert(row: AssistantHistoryEntity)
 

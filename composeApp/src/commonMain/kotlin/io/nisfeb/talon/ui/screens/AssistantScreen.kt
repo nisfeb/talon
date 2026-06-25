@@ -44,14 +44,19 @@ import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import io.nisfeb.talon.ai.AgentClient
 import io.nisfeb.talon.ai.AgentLoop
+import io.nisfeb.talon.ai.AgentMessage
 import io.nisfeb.talon.ai.AiSettingsRepository
+import io.nisfeb.talon.ai.ConversationGrouper
 import io.nisfeb.talon.ai.McpClient
 import io.nisfeb.talon.ai.mcpAgentTools
+import io.nisfeb.talon.ai.packEmbedding
 import io.nisfeb.talon.ai.SearchEmbedderClient
 import io.nisfeb.talon.ai.Tool
 import io.nisfeb.talon.ai.ToolCall
 import io.nisfeb.talon.ai.ToolCatalog
+import io.nisfeb.talon.ai.unpackEmbedding
 import io.nisfeb.talon.data.AppDatabase
+import io.nisfeb.talon.data.AssistantConversationEntity
 import io.nisfeb.talon.data.AssistantHistoryEntity
 import io.nisfeb.talon.ui.ContactMap
 import io.nisfeb.talon.ui.MarkdownText
@@ -83,8 +88,14 @@ private sealed interface Line {
 
 private data class Pending(val call: ToolCall, val tool: Tool, val gate: CompletableDeferred<Boolean>)
 
-/** How many past exchanges to retain. "~50 or so, maybe more." */
+/** How many turns to retain across all conversations. */
 private const val HISTORY_KEEP = 100
+
+/** How many topic conversations to retain. */
+private const val CONV_KEEP = 50
+
+/** Max chars of the first question used as a conversation's title. */
+private const val CONV_TITLE_CHARS = 60
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -174,10 +185,28 @@ fun AssistantScreen(
     // same here as when typing a message.
     val allShips = remember(contactMap) { contactMap.contacts.map { it.ship } }
 
-    // Local reference log of past exchanges (docs/assistant.md).
+    // Conversation grouping (docs/assistant.md): turns are clustered into
+    // topic conversations on-device. The active conversation resumes from
+    // the most recent one on open so a topic can continue over time.
     val historyDao = remember(db) { db.assistantHistory() }
-    val history by historyDao.recent(HISTORY_KEEP).collectAsState(initial = emptyList())
-    var expandedHistoryId by remember { mutableStateOf<Long?>(null) }
+    val convDao = remember(db) { db.assistantConversations() }
+    val conversations by convDao.recent(CONV_KEEP).collectAsState(initial = emptyList())
+    var currentConvId by remember { mutableStateOf<Long?>(null) }
+    var currentCentroid by remember { mutableStateOf<FloatArray?>(null) }
+    var currentTurnCount by remember { mutableStateOf(0) }
+    var expandedConvId by remember { mutableStateOf<Long?>(null) }
+    var expandedTurns by remember { mutableStateOf<List<AssistantHistoryEntity>>(emptyList()) }
+    LaunchedEffect(expandedConvId) {
+        expandedTurns = expandedConvId?.let { historyDao.forConversation(it) } ?: emptyList()
+    }
+
+    LaunchedEffect(Unit) {
+        convDao.mostRecent()?.let { c ->
+            currentConvId = c.id
+            currentCentroid = if (c.dim > 0) unpackEmbedding(c.centroid, c.dim) else null
+            currentTurnCount = c.turnCount
+        }
+    }
 
     fun submit() {
         val loop = agentLoop ?: return
@@ -189,8 +218,27 @@ fun AssistantScreen(
         var finalAnswer = ""
         scope.launch {
             runCatching {
+                val qVec = embedder?.embed(q)
+                // Continue the active topic if this question is on-topic,
+                // else start fresh — which also resets the model's context.
+                val continuing = currentConvId != null &&
+                    ConversationGrouper.continues(qVec, currentCentroid)
+                val priorTurns = if (continuing) {
+                    historyDao.forConversation(currentConvId!!)
+                        .takeLast(ConversationGrouper.CONTEXT_TURNS)
+                        .flatMap {
+                            listOf(
+                                AgentMessage.User(it.question),
+                                AgentMessage.Assistant(it.answer, emptyList()),
+                            )
+                        }
+                } else {
+                    emptyList()
+                }
+
                 loop.run(
                     question = q,
+                    priorTurns = priorTurns,
                     confirm = { call, tool ->
                         val gate = CompletableDeferred<Boolean>()
                         pending = Pending(call, tool, gate)
@@ -203,18 +251,66 @@ fun AssistantScreen(
                         transcript.add(ev.toLine())
                     },
                 )
+
+                val now = System.currentTimeMillis()
+                val vec = qVec ?: FloatArray(0)
+                val convId = if (continuing) {
+                    val id = currentConvId!!
+                    val merged = currentCentroid
+                        ?.let { ConversationGrouper.updateCentroid(it, currentTurnCount, vec) }
+                        ?: vec
+                    currentCentroid = merged.takeIf { it.isNotEmpty() }
+                    currentTurnCount += 1
+                    convDao.get(id)?.let {
+                        convDao.update(
+                            it.copy(
+                                updatedAt = now,
+                                turnCount = currentTurnCount,
+                                centroid = packEmbedding(merged),
+                                dim = merged.size,
+                            ),
+                        )
+                    }
+                    id
+                } else {
+                    val id = convDao.insert(
+                        AssistantConversationEntity(
+                            title = q.take(CONV_TITLE_CHARS).trim(),
+                            createdAt = now,
+                            updatedAt = now,
+                            centroid = packEmbedding(vec),
+                            dim = vec.size,
+                            turnCount = 1,
+                        ),
+                    )
+                    currentConvId = id
+                    currentCentroid = vec.takeIf { it.isNotEmpty() }
+                    currentTurnCount = 1
+                    id
+                }
+                convDao.trim(CONV_KEEP)
+
                 historyDao.insert(
                     AssistantHistoryEntity(
                         mode = "Assistant",
                         question = q,
                         answer = finalAnswer.ifBlank { "(no reply)" },
-                        createdAt = System.currentTimeMillis(),
+                        createdAt = now,
+                        conversationId = convId,
                     ),
                 )
                 historyDao.trim(HISTORY_KEEP)
             }.onFailure { error = it.message ?: it::class.simpleName }
             busy = false
         }
+    }
+
+    fun newConversation() {
+        currentConvId = null
+        currentCentroid = null
+        currentTurnCount = 0
+        transcript.clear()
+        error = null
     }
 
     Scaffold(
@@ -225,6 +321,13 @@ fun AssistantScreen(
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                    }
+                },
+                actions = {
+                    // Manual override for the topic heuristic: drop the
+                    // active conversation so the next question starts fresh.
+                    TextButton(onClick = { newConversation() }, enabled = !busy) {
+                        Text("New")
                     }
                 },
             )
@@ -321,31 +424,31 @@ fun AssistantScreen(
                 }
             }
 
-            // Reference log of past exchanges. Tap a row to reveal its
-            // answer; "Ask again" drops the question back into the field.
-            if (history.isNotEmpty()) {
+            // Past conversations, grouped by topic. The active one shows
+            // live above, so it's excluded here. Tap to read its turns.
+            val pastConversations = conversations.filter { it.id != currentConvId }
+            if (pastConversations.isNotEmpty()) {
                 HorizontalDivider(modifier = Modifier.padding(top = 4.dp))
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text("Recent", style = MaterialTheme.typography.labelLarge)
+                    Text("Conversations", style = MaterialTheme.typography.labelLarge)
                     TextButton(onClick = {
-                        scope.launch { historyDao.clearAll() }
-                        expandedHistoryId = null
+                        scope.launch { historyDao.clearAll(); convDao.clearAll() }
+                        expandedConvId = null
+                        newConversation()
                     }) { Text("Clear") }
                 }
-                val now = remember(history) { System.currentTimeMillis() }
-                history.forEach { h ->
-                    HistoryRow(
-                        entry = h,
+                val now = remember(pastConversations) { System.currentTimeMillis() }
+                pastConversations.forEach { conv ->
+                    ConversationRow(
+                        conversation = conv,
                         nowMs = now,
-                        expanded = expandedHistoryId == h.id,
-                        onToggle = { expandedHistoryId = if (expandedHistoryId == h.id) null else h.id },
-                        onAskAgain = {
-                            questionField = TextFieldValue(h.question, TextRange(h.question.length))
-                        },
+                        expanded = expandedConvId == conv.id,
+                        turns = if (expandedConvId == conv.id) expandedTurns else emptyList(),
+                        onToggle = { expandedConvId = if (expandedConvId == conv.id) null else conv.id },
                     )
                 }
             }
@@ -354,29 +457,42 @@ fun AssistantScreen(
 }
 
 @Composable
-private fun HistoryRow(
-    entry: AssistantHistoryEntity,
+private fun ConversationRow(
+    conversation: AssistantConversationEntity,
     nowMs: Long,
     expanded: Boolean,
+    turns: List<AssistantHistoryEntity>,
     onToggle: () -> Unit,
-    onAskAgain: () -> Unit,
 ) {
     Card(modifier = Modifier.fillMaxWidth().clickable { onToggle() }) {
-        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    shortRelativeTime(conversation.updatedAt, nowMs),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text(
+                    "${conversation.turnCount} ${if (conversation.turnCount == 1) "turn" else "turns"}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
             Text(
-                shortRelativeTime(entry.createdAt, nowMs),
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Text(
-                entry.question,
+                conversation.title,
                 style = MaterialTheme.typography.bodyMedium,
-                maxLines = if (expanded) Int.MAX_VALUE else 2,
+                maxLines = if (expanded) Int.MAX_VALUE else 1,
                 overflow = TextOverflow.Ellipsis,
             )
             if (expanded) {
-                MarkdownText(entry.answer)
-                OutlinedButton(onClick = onAskAgain) { Text("Ask again") }
+                turns.forEach { t ->
+                    Text(
+                        "You: ${t.question}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                    MarkdownText(t.answer)
+                }
             }
         }
     }

@@ -32,6 +32,11 @@ interface SearchEmbedderClient {
      *  wording the embedding model misses. Empty when [terms] is empty. */
     suspend fun keywordSearch(terms: List<String>): List<MessageEntity>
 
+    /** Raw embedding for arbitrary text (L2-normalized), used to cluster
+     *  assistant questions into topic conversations. Null if embedding
+     *  is unavailable or fails. */
+    suspend fun embed(text: String): FloatArray?
+
     /** Bookmarks-driven important-messages highlights — scored
      *  against the user's bookmark centroid. Empty when no
      *  bookmarks exist or the user hasn't enabled the feature. */

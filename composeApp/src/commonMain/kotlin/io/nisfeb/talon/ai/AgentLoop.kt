@@ -45,16 +45,23 @@ class AgentLoop(
     /**
      * Run one user question to completion.
      *
+     * @param priorTurns prior turns of the same conversation, oldest
+     *   first, as alternating User/Assistant messages — replayed so the
+     *   model has context for follow-ups. The caller bounds this (recent
+     *   turns of one topic) so the prompt stays in budget.
      * @param confirm gate for write tools — return true to allow. Reads
      *   never call it.
      * @param onEvent progress sink (UI transcript).
      */
     suspend fun run(
         question: String,
+        priorTurns: List<AgentMessage> = emptyList(),
         confirm: suspend (ToolCall, Tool) -> Boolean,
         onEvent: (Event) -> Unit = {},
     ): String {
-        val history = mutableListOf<AgentMessage>(AgentMessage.User(question))
+        val history = mutableListOf<AgentMessage>()
+        history.addAll(priorTurns)
+        history.add(AgentMessage.User(question))
         var step = 0
         while (step < maxSteps) {
             step++

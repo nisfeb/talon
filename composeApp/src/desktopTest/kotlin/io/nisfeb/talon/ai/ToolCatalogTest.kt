@@ -38,6 +38,7 @@ class ToolCatalogTest {
         override suspend fun start() {}
         override suspend fun semanticSearch(query: String): List<MessageEntity> = emptyList()
         override suspend fun keywordSearch(terms: List<String>): List<MessageEntity> = emptyList()
+        override suspend fun embed(text: String): FloatArray? = null
         override suspend fun computeHighlights(): List<MessageEntity> = emptyList()
     }
 
