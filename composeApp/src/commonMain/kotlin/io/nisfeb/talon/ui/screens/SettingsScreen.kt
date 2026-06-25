@@ -571,10 +571,15 @@ fun SettingsScreen(
                 )
                 AiSettings.Feature.values()
                     .filter { it.requiresCloudKey }
-                    // AskUrbit/Agent need a key AND the on-device embedder
-                    // for retrieval; hide them where there's no embedder
-                    // (desktop) rather than show a toggle that dead-ends.
-                    .filter { isOnDeviceAiSupported || (it != AiSettings.Feature.AskUrbit && it != AiSettings.Feature.Agent) }
+                    // AskUrbit/Agent/Mcp need a key AND the on-device
+                    // embedder for retrieval; hide them where there's no
+                    // embedder (desktop) rather than show a dead-end toggle.
+                    .filter {
+                        isOnDeviceAiSupported ||
+                            (it != AiSettings.Feature.AskUrbit &&
+                                it != AiSettings.Feature.Agent &&
+                                it != AiSettings.Feature.Mcp)
+                    }
                     .forEach { feature ->
                         FeatureToggleRow(
                             label = feature.label,
@@ -814,6 +819,7 @@ internal fun aiFeatureEnabled(state: AiSettings.Config, feature: AiSettings.Feat
         AiSettings.Feature.ImportantMessages -> state.importantMessagesEnabled
         AiSettings.Feature.AskUrbit -> state.askUrbitEnabled
         AiSettings.Feature.Agent -> state.agentEnabled
+        AiSettings.Feature.Mcp -> state.mcpEnabled
     }
 
 @Composable

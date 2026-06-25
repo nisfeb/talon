@@ -78,6 +78,7 @@ class DesktopAiSettings : AiSettingsRepository {
             AiSettings.Feature.ImportantMessages -> cur.copy(importantMessagesEnabled = enabled)
             AiSettings.Feature.AskUrbit -> cur.copy(askUrbitEnabled = enabled)
             AiSettings.Feature.Agent -> cur.copy(agentEnabled = enabled)
+            AiSettings.Feature.Mcp -> cur.copy(mcpEnabled = enabled)
         }
         persist(cfg)
         onStateChange?.invoke(cfg, false)
@@ -121,6 +122,7 @@ class DesktopAiSettings : AiSettingsRepository {
         importantMessagesEnabled = true,
         askUrbitEnabled = false,
         agentEnabled = false,
+        mcpEnabled = false,
         syncEnabled = true,
     )
 

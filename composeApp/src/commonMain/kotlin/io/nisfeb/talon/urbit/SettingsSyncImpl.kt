@@ -539,6 +539,7 @@ class SettingsSyncImpl(
                 put("importantMessagesEnabled", cfg.importantMessagesEnabled)
                 put("askUrbitEnabled", cfg.askUrbitEnabled)
                 put("agentEnabled", cfg.agentEnabled)
+                put("mcpEnabled", cfg.mcpEnabled)
             },
         )
     }
@@ -594,6 +595,7 @@ class SettingsSyncImpl(
                 importantMessagesEnabled = bool("importantMessagesEnabled", current.importantMessagesEnabled),
                 askUrbitEnabled = bool("askUrbitEnabled", current.askUrbitEnabled),
                 agentEnabled = bool("agentEnabled", current.agentEnabled),
+                mcpEnabled = bool("mcpEnabled", current.mcpEnabled),
             )
         } else {
             Log.i(TAG, "applyAiEntry ignoring legacy feature toggles; keeping local defaults")

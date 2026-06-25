@@ -134,9 +134,16 @@ class TlonChatRepo(
     @Volatile private var started = false
     @Volatile private var channel: UrbitChannel? = null
     @Volatile private var http: OkHttpClient? = null
+    @Volatile private var baseUrl: okhttp3.HttpUrl? = null
     @Volatile private var ourPatp: String = ""
     @Volatile private var sessionJob: Job? = null
     @Volatile private var lastEventMs: Long = 0L
+
+    /** Authenticated client + base URL for the active ship (null until
+     *  [start]). Lets ship-adjacent features — e.g. the MCP endpoint at
+     *  `/mcp` — reuse the session without re-plumbing auth. */
+    val shipHttp: OkHttpClient? get() = http
+    val shipBaseUrl: okhttp3.HttpUrl? get() = baseUrl
 
     // Admin-groups cache: populated by refreshAdminGroups(), consumed
     // by the Administration screen. Fetching the full per-group state
@@ -255,6 +262,7 @@ class TlonChatRepo(
         started = true
         ourPatp = session.ourPatp
         http = session.http
+        baseUrl = session.baseUrl
         scope.launch {
             // One-shot cleanup for anyone whose DM history was doubled
             // by the applyChatDelta dotted-id bug. Idempotent: on a

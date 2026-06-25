@@ -28,6 +28,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
@@ -48,6 +49,8 @@ import io.nisfeb.talon.ai.AgentLoop
 import io.nisfeb.talon.ai.AiClient
 import io.nisfeb.talon.ai.AiSettingsRepository
 import io.nisfeb.talon.ai.AskUrbit
+import io.nisfeb.talon.ai.McpClient
+import io.nisfeb.talon.ai.mcpAgentTools
 import io.nisfeb.talon.ai.SearchEmbedderClient
 import io.nisfeb.talon.ai.Tool
 import io.nisfeb.talon.ai.ToolCall
@@ -115,11 +118,38 @@ fun AssistantScreen(
         embedder?.let { AskUrbit(AiClient { aiSettings.state.value }, it) }
     }
     val agentClient = remember(aiSettings) { AgentClient { aiSettings.state.value } }
-    val agentLoop = remember(aiSettings, embedder, repo, contactMap) {
+
+    // MCP: if the user opted in (and is in Act mode) and the ship exposes
+    // an /mcp endpoint, discover its tools and hand them to the agent.
+    // Read tools run free; pokes are confirm-gated; eval/install stay
+    // hidden (see McpTools). Discovery doubles as the gate — a ship with
+    // no MCP server just yields no tools.
+    val mcpClient = remember(repo, aiState.mcpEnabled, aiState.agentEnabled) {
+        val http = repo?.shipHttp
+        val base = repo?.shipBaseUrl
+        if (aiState.mcpEnabled && aiState.agentEnabled && http != null && base != null) {
+            McpClient(http, base)
+        } else {
+            null
+        }
+    }
+    var mcpTools by remember { mutableStateOf<List<Tool>>(emptyList()) }
+    LaunchedEffect(mcpClient) {
+        mcpTools = if (mcpClient == null) {
+            emptyList()
+        } else {
+            runCatching {
+                mcpClient.initialize()
+                mcpAgentTools(mcpClient, mcpClient.listTools())
+            }.getOrElse { emptyList() }
+        }
+    }
+
+    val agentLoop = remember(aiSettings, embedder, repo, contactMap, mcpTools) {
         if (repo != null && embedder != null) {
             AgentLoop(
                 completer = { sys, msgs, tools -> agentClient.completeWithTools(sys, msgs, tools) },
-                tools = ToolCatalog.default(repo, db, embedder) { contactMap.displayName(it) },
+                tools = ToolCatalog.default(repo, db, embedder) { contactMap.displayName(it) } + mcpTools,
             )
         } else null
     }

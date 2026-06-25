@@ -48,6 +48,11 @@ object AiSettings {
         // Phase 2 agentic mode — same opt-in, off-by-default treatment;
         // additionally every write it proposes is user-confirmed.
         val agentEnabled: Boolean = false,
+        // Lets the agent reach the ship's MCP server (scry-agent + gated
+        // poke-agent). Opt-in, off by default; the most dangerous MCP
+        // tools (eval/install) stay hidden regardless. Only meaningful
+        // when the agent is also on.
+        val mcpEnabled: Boolean = false,
         val syncEnabled: Boolean = true,
     ) {
         fun hasKey(): Boolean = apiKey.isNotBlank()
@@ -116,6 +121,12 @@ object AiSettings {
             "feat_agent",
             "Assistant actions (beta)",
             "Let the assistant take actions for you — search, send, reply, react, mark read. Every action that changes anything is shown for your confirmation before it happens.",
+            requiresCloudKey = true,
+        ),
+        Mcp(
+            "feat_mcp",
+            "Reach the ship's tools (MCP, beta)",
+            "If your ship runs an MCP server, let the assistant scry any agent to answer questions and (with your per-action confirmation) poke agents. Arbitrary-code tools stay off. Only applies in Assistant actions mode.",
             requiresCloudKey = true,
         ),
     }

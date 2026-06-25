@@ -70,6 +70,7 @@ class AndroidAiSettings(context: Context) : AiSettingsRepository {
             AiSettings.Feature.ImportantMessages -> _state.value.copy(importantMessagesEnabled = enabled)
             AiSettings.Feature.AskUrbit -> _state.value.copy(askUrbitEnabled = enabled)
             AiSettings.Feature.Agent -> _state.value.copy(agentEnabled = enabled)
+            AiSettings.Feature.Mcp -> _state.value.copy(mcpEnabled = enabled)
         }
         onStateChange?.invoke(_state.value, false)
     }
@@ -97,6 +98,7 @@ class AndroidAiSettings(context: Context) : AiSettingsRepository {
             .putBoolean(AiSettings.Feature.ImportantMessages.key, config.importantMessagesEnabled)
             .putBoolean(AiSettings.Feature.AskUrbit.key, config.askUrbitEnabled)
             .putBoolean(AiSettings.Feature.Agent.key, config.agentEnabled)
+            .putBoolean(AiSettings.Feature.Mcp.key, config.mcpEnabled)
             .putBoolean(KEY_SYNC, config.syncEnabled)
             .apply()
         _state.value = config
@@ -144,6 +146,7 @@ class AndroidAiSettings(context: Context) : AiSettingsRepository {
             importantMessagesEnabled = prefs.getBoolean(AiSettings.Feature.ImportantMessages.key, true),
             askUrbitEnabled = prefs.getBoolean(AiSettings.Feature.AskUrbit.key, false),
             agentEnabled = prefs.getBoolean(AiSettings.Feature.Agent.key, false),
+            mcpEnabled = prefs.getBoolean(AiSettings.Feature.Mcp.key, false),
             syncEnabled = prefs.getBoolean(KEY_SYNC, true),
         )
     }
