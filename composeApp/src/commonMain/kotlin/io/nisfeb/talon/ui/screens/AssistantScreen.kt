@@ -64,6 +64,7 @@ import io.nisfeb.talon.ui.detectMentionQuery
 import io.nisfeb.talon.ui.shortRelativeTime
 import io.nisfeb.talon.ui.suggestionsFor
 import io.nisfeb.talon.urbit.TlonChatRepo
+import io.nisfeb.talon.util.Log
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.launch
 
@@ -134,14 +135,30 @@ fun AssistantScreen(
         }
     }
     var mcpTools by remember { mutableStateOf<List<Tool>>(emptyList()) }
+    // Surfaced in the UI + logged, so a failed connect is distinguishable
+    // from "no server" (it used to silently collapse to an empty list).
+    var mcpStatus by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(mcpClient) {
-        mcpTools = if (mcpClient == null) {
-            emptyList()
-        } else {
-            runCatching {
-                mcpClient.initialize()
-                mcpAgentTools(mcpClient, mcpClient.listTools())
-            }.getOrElse { emptyList() }
+        val client = mcpClient
+        if (client == null) {
+            mcpTools = emptyList()
+            mcpStatus = null
+            return@LaunchedEffect
+        }
+        mcpStatus = "Connecting to ship tools…"
+        runCatching {
+            client.initialize()
+            client.listTools()
+        }.onSuccess { defs ->
+            val tools = mcpAgentTools(client, defs)
+            mcpTools = tools
+            val hidden = defs.size - tools.size
+            mcpStatus = "Ship tools: ${tools.size} available" +
+                if (hidden > 0) " · $hidden hidden" else ""
+        }.onFailure { e ->
+            mcpTools = emptyList()
+            mcpStatus = "Ship tools unavailable: ${e.message ?: e::class.simpleName}"
+            Log.w("AssistantScreen", "MCP tool load failed", e)
         }
     }
 
@@ -265,6 +282,26 @@ fun AssistantScreen(
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     FilterChip(selected = mode == Mode.Ask, onClick = { mode = Mode.Ask }, label = { Text("Ask") })
                     FilterChip(selected = mode == Mode.Act, onClick = { mode = Mode.Act }, label = { Text("Act") })
+                }
+            }
+
+            // MCP (ship tools) only apply to the Act agent. Steer the user
+            // there if they enabled it but are in Ask mode / haven't turned
+            // on actions, and otherwise show the live connection status.
+            if (aiState.mcpEnabled) {
+                val mcpHint = when {
+                    !aiState.agentEnabled ->
+                        "Ship tools (MCP) run in Assistant actions mode — turn that on too."
+                    mode == Mode.Ask ->
+                        "Ship tools (MCP) run in the Act tab, not Ask."
+                    else -> mcpStatus
+                }
+                mcpHint?.let {
+                    Text(
+                        it,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
             }
 
