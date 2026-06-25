@@ -41,6 +41,10 @@ object AiSettings {
         val semanticSearchEnabled: Boolean = true,
         val topicClustersEnabled: Boolean = true,
         val importantMessagesEnabled: Boolean = true,
+        // Opt-in, unlike the others: the assistant is rolled out behind
+        // rc releases, so it defaults OFF and stays invisible until the
+        // user both configures a key and turns it on.
+        val askUrbitEnabled: Boolean = false,
         val syncEnabled: Boolean = true,
     ) {
         fun hasKey(): Boolean = apiKey.isNotBlank()
@@ -98,6 +102,12 @@ object AiSettings {
             "Highlight important messages",
             "Flag incoming messages that look similar to ones you've bookmarked. On-device, needs at least 5 bookmarks.",
             requiresCloudKey = false,
+        ),
+        AskUrbit(
+            "feat_ask_urbit",
+            "Ask your Urbit (beta)",
+            "Ask questions about your chat history and get answers grounded in your real messages, with citations. Retrieval is on-device; only the question and matched excerpts go to your AI provider.",
+            requiresCloudKey = true,
         ),
     }
 }

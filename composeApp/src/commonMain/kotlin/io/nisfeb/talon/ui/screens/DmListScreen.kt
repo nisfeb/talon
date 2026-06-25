@@ -46,6 +46,7 @@ import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -116,6 +117,10 @@ fun DmListScreen(
     updateState: UpdateState,
     onOpenConversation: (whom: String) -> Unit,
     onOpenSearch: () -> Unit,
+    /** Opt-in assistant entry point. Null hides the affordance — passed
+     *  non-null only when the "Ask your Urbit" feature is on and a key
+     *  is configured, so it stays invisible during rc rollout. */
+    onOpenAssistant: (() -> Unit)? = null,
     onNewMessage: () -> Unit,
     onSignOut: () -> Unit,
     onOpenSelfProfile: () -> Unit,
@@ -694,6 +699,11 @@ fun DmListScreen(
             Spacer(Modifier.weight(1f))
             IconButton(onClick = onOpenSearch) {
                 Icon(Icons.Filled.Search, contentDescription = "Search")
+            }
+            onOpenAssistant?.let { open ->
+                IconButton(onClick = open) {
+                    Icon(Icons.Filled.Star, contentDescription = "Ask your Urbit")
+                }
             }
             IconButton(onClick = { editMode = !editMode }) {
                 Icon(

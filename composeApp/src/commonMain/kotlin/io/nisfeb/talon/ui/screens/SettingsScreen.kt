@@ -808,6 +808,7 @@ internal fun aiFeatureEnabled(state: AiSettings.Config, feature: AiSettings.Feat
         AiSettings.Feature.SemanticSearch -> state.semanticSearchEnabled
         AiSettings.Feature.TopicClusters -> state.topicClustersEnabled
         AiSettings.Feature.ImportantMessages -> state.importantMessagesEnabled
+        AiSettings.Feature.AskUrbit -> state.askUrbitEnabled
     }
 
 @Composable

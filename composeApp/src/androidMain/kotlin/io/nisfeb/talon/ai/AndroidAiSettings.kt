@@ -68,6 +68,7 @@ class AndroidAiSettings(context: Context) : AiSettingsRepository {
             AiSettings.Feature.SemanticSearch -> _state.value.copy(semanticSearchEnabled = enabled)
             AiSettings.Feature.TopicClusters -> _state.value.copy(topicClustersEnabled = enabled)
             AiSettings.Feature.ImportantMessages -> _state.value.copy(importantMessagesEnabled = enabled)
+            AiSettings.Feature.AskUrbit -> _state.value.copy(askUrbitEnabled = enabled)
         }
         onStateChange?.invoke(_state.value, false)
     }
@@ -93,6 +94,7 @@ class AndroidAiSettings(context: Context) : AiSettingsRepository {
             .putBoolean(AiSettings.Feature.SemanticSearch.key, config.semanticSearchEnabled)
             .putBoolean(AiSettings.Feature.TopicClusters.key, config.topicClustersEnabled)
             .putBoolean(AiSettings.Feature.ImportantMessages.key, config.importantMessagesEnabled)
+            .putBoolean(AiSettings.Feature.AskUrbit.key, config.askUrbitEnabled)
             .putBoolean(KEY_SYNC, config.syncEnabled)
             .apply()
         _state.value = config
@@ -137,6 +139,7 @@ class AndroidAiSettings(context: Context) : AiSettingsRepository {
             semanticSearchEnabled = prefs.getBoolean(AiSettings.Feature.SemanticSearch.key, true),
             topicClustersEnabled = prefs.getBoolean(AiSettings.Feature.TopicClusters.key, true),
             importantMessagesEnabled = prefs.getBoolean(AiSettings.Feature.ImportantMessages.key, true),
+            askUrbitEnabled = prefs.getBoolean(AiSettings.Feature.AskUrbit.key, false),
             syncEnabled = prefs.getBoolean(KEY_SYNC, true),
         )
     }

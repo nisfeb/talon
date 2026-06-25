@@ -45,6 +45,7 @@ import io.nisfeb.talon.ui.RightPaneStateReducer
 import io.nisfeb.talon.ui.RightPaneHost
 import io.nisfeb.talon.ui.UiSettings
 import io.nisfeb.talon.ui.screens.ActivityList
+import io.nisfeb.talon.ui.screens.AssistantScreen
 import io.nisfeb.talon.ui.screens.BookmarksList
 import io.nisfeb.talon.ui.screens.DmChatScreen
 import io.nisfeb.talon.ui.screens.DmListScreen
@@ -269,6 +270,7 @@ fun App(
     var showBookmarks by remember { mutableStateOf(false) }
     var showActivity by remember { mutableStateOf(false) }
     var showSearch by remember { mutableStateOf(false) }
+    var showAssistant by remember { mutableStateOf(false) }
     var showNewDm by remember { mutableStateOf(false) }
     var showContacts by remember { mutableStateOf(false) }
     var showWatchwords by remember { mutableStateOf(false) }
@@ -1087,6 +1089,21 @@ fun App(
                             openThreadReplyAnchor = replyId
                         },
                     )
+                    showAssistant -> AssistantScreen(
+                        db = db,
+                        aiSettings = aiSettings,
+                        embedder = searchEmbedderClient,
+                        onBack = { showAssistant = false },
+                        onOpenMessage = { whomTarget, postId, parentId ->
+                            showAssistant = false
+                            openChat = whomTarget
+                            if (parentId != null) {
+                                openThreadParent = parentId
+                            } else {
+                                openChatFocusMessageId = postId
+                            }
+                        },
+                    )
                     showSearch -> SearchScreen(
                         db = db,
                         aiSettings = aiSettings,
@@ -1504,6 +1521,12 @@ fun App(
                                             openChat = whom
                                         },
                                         onOpenSearch = { showSearch = true },
+                                        // Opt-in + key-gated, so the entry
+                                        // point stays hidden by default
+                                        // during rc rollout.
+                                        onOpenAssistant = if (aiState.askUrbitEnabled && aiState.hasKey()) {
+                                            { showAssistant = true }
+                                        } else null,
                                         onNewMessage = { showNewDm = true },
                                         onSignOut = {
                                             // session.logout() already removes just

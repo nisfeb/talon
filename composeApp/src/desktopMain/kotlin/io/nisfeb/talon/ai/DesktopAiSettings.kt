@@ -76,6 +76,7 @@ class DesktopAiSettings : AiSettingsRepository {
             AiSettings.Feature.SemanticSearch -> cur.copy(semanticSearchEnabled = enabled)
             AiSettings.Feature.TopicClusters -> cur.copy(topicClustersEnabled = enabled)
             AiSettings.Feature.ImportantMessages -> cur.copy(importantMessagesEnabled = enabled)
+            AiSettings.Feature.AskUrbit -> cur.copy(askUrbitEnabled = enabled)
         }
         persist(cfg)
         onStateChange?.invoke(cfg, false)
@@ -117,6 +118,7 @@ class DesktopAiSettings : AiSettingsRepository {
         semanticSearchEnabled = true,
         topicClustersEnabled = true,
         importantMessagesEnabled = true,
+        askUrbitEnabled = false,
         syncEnabled = true,
     )
 
