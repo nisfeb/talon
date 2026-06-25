@@ -2,7 +2,9 @@ package io.nisfeb.talon.ai
 
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.add
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
@@ -107,12 +109,7 @@ class AgentClient(private val settingsProvider: () -> AiSettings.Config) {
                 val body = resp.body?.string().orEmpty()
                 val host = req.url.host
                 if (!resp.isSuccessful) {
-                    val pretty = runCatching {
-                        val obj = JSON.parseToJsonElement(body).jsonObject
-                        (obj["error"] as? JsonObject)?.get("message")?.jsonPrimitive?.content
-                            ?: obj["message"]?.jsonPrimitive?.content
-                    }.getOrNull()
-                    error("$host ${resp.code}: ${pretty ?: body.take(200)}")
+                    error(extractApiError(host, resp.code, body))
                 }
                 val obj = runCatching { JSON.parseToJsonElement(body).jsonObject }
                     .getOrElse { error("$host bad JSON: ${body.take(300)}") }
@@ -291,3 +288,45 @@ internal fun parseOpenAiTurn(body: JsonObject): AgentTurn {
 private fun parseArgs(raw: String): JsonObject =
     runCatching { (AgentClient.JSON.parseToJsonElement(raw) as? JsonObject) }
         .getOrNull() ?: JsonObject(emptyMap())
+
+/**
+ * Build a diagnosable message from an error response. OpenRouter wraps an
+ * upstream provider failure as a generic `error.message` ("Provider
+ * returned error") and stashes the real reason in `error.metadata`
+ * (`provider_name` + `raw`, the raw being the provider's own JSON-or-
+ * string error). Surface that so a 400 is actionable instead of opaque.
+ * Pure + internal so it's unit-tested without a live API.
+ */
+internal fun extractApiError(host: String, code: Int, body: String): String {
+    val parsed = runCatching {
+        val obj = AgentClient.JSON.parseToJsonElement(body).jsonObject
+        val err = obj["error"] as? JsonObject
+        val msg = err?.get("message")?.jsonPrimitive?.contentOrNull
+            ?: obj["message"]?.jsonPrimitive?.contentOrNull
+        val meta = err?.get("metadata") as? JsonObject
+        val provider = meta?.get("provider_name")?.jsonPrimitive?.contentOrNull
+        val upstream = meta?.get("raw")?.let { upstreamMessage(it) }
+        buildString {
+            append(msg.orEmpty())
+            if (!provider.isNullOrBlank()) append(" (provider: $provider)")
+            if (!upstream.isNullOrBlank() && upstream != msg) {
+                if (isNotEmpty()) append(" — ")
+                append(upstream)
+            }
+        }.trim().ifBlank { null }
+    }.getOrNull()
+    return "$host $code: ${(parsed ?: body.take(300)).take(600)}"
+}
+
+/** `error.metadata.raw` is either the upstream provider's error object, or
+ *  a JSON-encoded string of one, or an opaque string. Dig out its nested
+ *  message when present; otherwise return the raw text. */
+private fun upstreamMessage(raw: JsonElement): String? {
+    val asObj = raw as? JsonObject
+        ?: (raw as? JsonPrimitive)?.contentOrNull?.let { s ->
+            runCatching { AgentClient.JSON.parseToJsonElement(s).jsonObject }.getOrNull()
+        }
+    val nested = (asObj?.get("error") as? JsonObject)?.get("message")?.jsonPrimitive?.contentOrNull
+        ?: asObj?.get("message")?.jsonPrimitive?.contentOrNull
+    return nested ?: (raw as? JsonPrimitive)?.contentOrNull
+}

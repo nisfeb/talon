@@ -122,4 +122,36 @@ class AgentClientTest {
         ).jsonObject
         assertEquals(AgentTurn.Final("hello"), parseOpenAiTurn(body))
     }
+
+    @Test
+    fun `extractApiError surfaces OpenRouter's wrapped upstream reason`() {
+        // OpenRouter reports the upstream provider failure as a generic
+        // "Provider returned error" with the real cause in error.metadata
+        // (provider_name + raw, raw being the provider's own JSON error).
+        // We must surface that, not just the generic wrapper.
+        val body = """
+            {"error":{"message":"Provider returned error","code":400,
+              "metadata":{"provider_name":"Anthropic",
+                "raw":"{\"type\":\"error\",\"error\":{\"type\":\"invalid_request_error\",\"message\":\"max_tokens: 1024 > 200000 is too large\"}}"}}}
+        """.trimIndent()
+        val msg = extractApiError("openrouter.ai", 400, body)
+        assertTrue(msg.contains("openrouter.ai 400"), "keeps host + code: $msg")
+        assertTrue(msg.contains("Anthropic"), "names the provider: $msg")
+        assertTrue(msg.contains("max_tokens"), "surfaces the upstream reason: $msg")
+    }
+
+    @Test
+    fun `extractApiError handles raw metadata as an object and plain bodies`() {
+        // raw can arrive as an object (not a JSON-encoded string)…
+        val objRaw = """
+            {"error":{"message":"Provider returned error",
+              "metadata":{"provider_name":"OpenAI","raw":{"error":{"message":"model does not support tools"}}}}}
+        """.trimIndent()
+        assertTrue(extractApiError("openrouter.ai", 400, objRaw).contains("model does not support tools"))
+
+        // …and a non-JSON body must not throw — fall back to the raw text.
+        val plain = extractApiError("api.openai.com", 500, "upstream timeout")
+        assertTrue(plain.contains("api.openai.com 500"))
+        assertTrue(plain.contains("upstream timeout"))
+    }
 }
