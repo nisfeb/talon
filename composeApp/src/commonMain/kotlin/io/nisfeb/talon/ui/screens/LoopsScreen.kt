@@ -73,6 +73,44 @@ fun LoopsScreen(
     settingsSync: SettingsSync? = null,
     modifier: Modifier = Modifier,
 ) {
+    Scaffold(
+        modifier = modifier.fillMaxSize(),
+        topBar = {
+            TopAppBar(
+                title = { Text("Loops") },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                    }
+                },
+            )
+        },
+    ) { padding ->
+        LoopsPanel(
+            db = db,
+            scheduler = scheduler,
+            onRunNow = onRunNow,
+            settingsSync = settingsSync,
+            modifier = Modifier.padding(padding),
+        )
+    }
+}
+
+/**
+ * Embeddable loops CRUD — the list/add/edit body without a Scaffold, so it
+ * can live standalone ([LoopsScreen]) or inside the assistant's Jobs tab.
+ * Owns its own add/edit form state; the "New loop" affordance is in the
+ * list header (the empty state has its own), so no app-bar action is
+ * needed by the host.
+ */
+@Composable
+fun LoopsPanel(
+    db: AppDatabase,
+    scheduler: LoopScheduler,
+    onRunNow: (Long) -> Unit,
+    settingsSync: SettingsSync? = null,
+    modifier: Modifier = Modifier,
+) {
     val scope = rememberCoroutineScope()
     val loopDao = remember(db) { db.loops() }
     val loops by loopDao.stream().collectAsState(initial = emptyList())
@@ -80,29 +118,15 @@ fun LoopsScreen(
     // null = list view; a LoopEntity (id 0 for new) = the add/edit form.
     var editing by remember { mutableStateOf<LoopEntity?>(null) }
 
-    Scaffold(
-        modifier = modifier.fillMaxSize(),
-        topBar = {
-            TopAppBar(
-                title = { Text(if (editing == null) "Loops" else if (editing!!.id == 0L) "New loop" else "Edit loop") },
-                navigationIcon = {
-                    IconButton(onClick = { if (editing != null) editing = null else onBack() }) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-                    }
-                },
-                actions = {
-                    if (editing == null) {
-                        IconButton(onClick = { editing = blankLoop() }) {
-                            Icon(Icons.Filled.Add, contentDescription = "New loop")
-                        }
-                    }
-                },
-            )
-        },
-    ) { padding ->
-        Box(Modifier.padding(padding).fillMaxSize()) {
-            val form = editing
-            if (form != null) {
+    Box(modifier.fillMaxSize()) {
+        val form = editing
+        if (form != null) {
+            Column(Modifier.fillMaxSize()) {
+                Text(
+                    if (form.id == 0L) "New loop" else "Edit loop",
+                    style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.padding(start = 16.dp, top = 16.dp),
+                )
                 LoopForm(
                     initial = form,
                     onCancel = { editing = null },
@@ -133,48 +157,56 @@ fun LoopsScreen(
                         }
                     },
                 )
-            } else if (loops.isEmpty()) {
-                EmptyLoops(onAdd = { editing = blankLoop() })
-            } else {
-                LazyColumn(
-                    Modifier.fillMaxSize().padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    item {
+            }
+        } else if (loops.isEmpty()) {
+            EmptyLoops(onAdd = { editing = blankLoop() })
+        } else {
+            LazyColumn(
+                Modifier.fillMaxSize().padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                item {
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
                         Text(
                             "Loops run on your LLM key — each run uses tokens. " +
                                 "They run on this device.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.weight(1f),
                         )
+                        TextButton(onClick = { editing = blankLoop() }) { Text("New loop") }
                     }
-                    items(loops, key = { it.id }) { loop ->
-                        LoopCard(
-                            db = db,
-                            loop = loop,
-                            onToggleEnabled = { on ->
-                                scope.launch {
-                                    loopDao.setEnabled(loop.id, on, System.currentTimeMillis())
-                                    // setEnabled is a partial UPDATE, so `loop` is
-                                    // stale for enabled/updatedAt — re-read the fresh
-                                    // row before pushing.
-                                    loopDao.get(loop.id)?.let { settingsSync?.pushLoop(it) }
-                                    scheduler.reschedule()
-                                }
-                            },
-                            onRunNow = { onRunNow(loop.id) },
-                            onEdit = { editing = loop },
-                            onDelete = {
-                                scope.launch {
-                                    val gid = loop.gid
-                                    loopDao.delete(loop.id)
-                                    db.loopRuns().deleteForLoop(loop.id)
-                                    settingsSync?.deleteLoop(gid)
-                                    scheduler.reschedule()
-                                }
-                            },
-                        )
-                    }
+                }
+                items(loops, key = { it.id }) { loop ->
+                    LoopCard(
+                        db = db,
+                        loop = loop,
+                        onToggleEnabled = { on ->
+                            scope.launch {
+                                loopDao.setEnabled(loop.id, on, System.currentTimeMillis())
+                                // setEnabled is a partial UPDATE, so `loop` is
+                                // stale for enabled/updatedAt — re-read the fresh
+                                // row before pushing.
+                                loopDao.get(loop.id)?.let { settingsSync?.pushLoop(it) }
+                                scheduler.reschedule()
+                            }
+                        },
+                        onRunNow = { onRunNow(loop.id) },
+                        onEdit = { editing = loop },
+                        onDelete = {
+                            scope.launch {
+                                val gid = loop.gid
+                                loopDao.delete(loop.id)
+                                db.loopRuns().deleteForLoop(loop.id)
+                                settingsSync?.deleteLoop(gid)
+                                scheduler.reschedule()
+                            }
+                        },
+                    )
                 }
             }
         }

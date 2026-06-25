@@ -2,20 +2,25 @@ package io.nisfeb.talon.ui.screens
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -24,8 +29,10 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -51,6 +58,7 @@ import io.nisfeb.talon.ai.AgentLoop
 import io.nisfeb.talon.ai.AgentMessage
 import io.nisfeb.talon.ai.AiSettingsRepository
 import io.nisfeb.talon.ai.ConversationGrouper
+import io.nisfeb.talon.ai.LoopScheduler
 import io.nisfeb.talon.ai.McpClient
 import io.nisfeb.talon.ai.mcpAgentTools
 import io.nisfeb.talon.ai.packEmbedding
@@ -63,13 +71,18 @@ import io.nisfeb.talon.data.AppDatabase
 import io.nisfeb.talon.data.AssistantConversationEntity
 import io.nisfeb.talon.data.AssistantHistoryEntity
 import io.nisfeb.talon.data.newGid
+import io.nisfeb.talon.ui.ChatPaneScaffold
 import io.nisfeb.talon.ui.ContactMap
+import io.nisfeb.talon.ui.DEFAULT_LIST_FRACTION
+import io.nisfeb.talon.ui.ExpandedThreshold
 import io.nisfeb.talon.ui.MarkdownText
 import io.nisfeb.talon.ui.MentionPicker
 import io.nisfeb.talon.ui.contactMapFlow
 import io.nisfeb.talon.ui.detectMentionQuery
+import io.nisfeb.talon.ui.isLoopsSupported
 import io.nisfeb.talon.ui.shortRelativeTime
 import io.nisfeb.talon.ui.suggestionsFor
+import io.nisfeb.talon.urbit.SettingsSync
 import io.nisfeb.talon.urbit.TlonChatRepo
 import io.nisfeb.talon.util.Log
 import kotlinx.coroutines.CompletableDeferred
@@ -131,6 +144,11 @@ fun AssistantScreen(
     onBack: () -> Unit,
     onOpenMessage: (whom: String, postId: String, parentId: String?) -> Unit,
     repo: TlonChatRepo? = null,
+    // Backs the Jobs sidebar tab. Android passes its AlarmManager-backed
+    // Loops facade; desktop passes Noop + runs loops via the LoopRunner
+    // ticker, so "Run now" routes straight there.
+    scheduler: LoopScheduler = LoopScheduler.Noop,
+    onRunLoop: (Long) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val aiState by aiSettings.state.collectAsState()
@@ -222,11 +240,13 @@ fun AssistantScreen(
     var currentConvGid by remember { mutableStateOf<String?>(null) }
     var currentCentroid by remember { mutableStateOf<FloatArray?>(null) }
     var currentTurnCount by remember { mutableStateOf(0) }
-    var expandedConvId by remember { mutableStateOf<Long?>(null) }
-    var expandedTurns by remember { mutableStateOf<List<AssistantHistoryEntity>>(emptyList()) }
-    LaunchedEffect(expandedConvId) {
-        expandedTurns = expandedConvId?.let { historyDao.forConversation(it) } ?: emptyList()
-    }
+
+    // Sidebar (master pane) state: which tab is showing, and — on narrow
+    // screens where the panes stack — whether the sidebar or the transcript
+    // is the visible pane. `listFraction` is the split ratio when wide.
+    var sidebarTab by remember { mutableStateOf(SidebarTab.Conversations) }
+    var mobileShowSidebar by remember { mutableStateOf(false) }
+    var listFraction by remember { mutableStateOf(DEFAULT_LIST_FRACTION) }
 
     LaunchedEffect(Unit) {
         convDao.mostRecent()?.let { c ->
@@ -383,45 +403,74 @@ fun AssistantScreen(
 
     fun newConversation() {
         currentConvId = null
+        currentConvGid = null
         currentCentroid = null
         currentTurnCount = 0
         transcript.clear()
         error = null
+        mobileShowSidebar = false
     }
 
-    Scaffold(
-        modifier = modifier.fillMaxSize(),
-        topBar = {
-            TopAppBar(
-                title = { Text("Assistant") },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-                    }
+    // Load a past conversation into the active transcript — replaces the
+    // old inline-expand. Restores the topic context (id/gid/centroid/turns)
+    // so a follow-up continues it instead of forking, and replays its turns.
+    fun selectConversation(c: AssistantConversationEntity) {
+        currentConvId = c.id
+        currentConvGid = c.gid.ifBlank { null }
+        currentCentroid = if (c.dim > 0) unpackEmbedding(c.centroid, c.dim) else null
+        currentTurnCount = c.turnCount
+        error = null
+        transcript.clear()
+        scope.launch {
+            historyDao.forConversation(c.id).forEach { t ->
+                transcript.add(Line.You(t.question))
+                transcript.add(Line.Said(t.answer))
+            }
+        }
+        mobileShowSidebar = false
+    }
+
+    val jobsEnabled = isLoopsSupported && aiState.hasKey()
+    val settingsSync = repo?.settingsSync
+
+    BoxWithConstraints(modifier.fillMaxSize()) {
+        val expanded = maxWidth >= ExpandedThreshold
+
+        // Detail pane: transcript + composer. Beside the sidebar when the
+        // window is wide; stacked when narrow, where the top-bar menu opens
+        // the sidebar (flips `mobileShowSidebar`).
+        val transcriptPane: @Composable () -> Unit = {
+            Scaffold(
+                modifier = Modifier.fillMaxSize(),
+                topBar = {
+                    TopAppBar(
+                        title = { Text("Assistant") },
+                        navigationIcon = {
+                            IconButton(onClick = onBack) {
+                                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                            }
+                        },
+                        actions = {
+                            // Narrow screens stack the panes — this opens the
+                            // conversations/jobs sidebar. Hidden when wide,
+                            // where the sidebar is always on-screen.
+                            if (!expanded) {
+                                IconButton(onClick = { mobileShowSidebar = true }) {
+                                    Icon(Icons.Filled.Menu, contentDescription = "Conversations")
+                                }
+                            }
+                        },
+                    )
                 },
-                actions = {
-                    // Manual override for the topic heuristic: drop the
-                    // active conversation so the next question starts fresh.
-                    // Disabled when there's nothing to reset (no live thread
-                    // and no active conversation), so it never looks inert.
-                    TextButton(
-                        onClick = { newConversation() },
-                        enabled = !busy && (transcript.isNotEmpty() || currentConvId != null),
-                    ) {
-                        Text("New")
-                    }
-                },
-            )
-        },
-    ) { padding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
-                .padding(16.dp)
-                .verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
+            ) { padding ->
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(padding)
+                        .padding(16.dp)
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
             // Ship-tools (MCP) connection status, when opted in.
             if (aiState.mcpEnabled) {
                 mcpStatus?.let {
@@ -543,18 +592,22 @@ fun AssistantScreen(
                 }
             }
 
-            // Past conversations, grouped by topic. The active one shows
-            // live above, so it's excluded here. Tap to read its turns.
-            val pastConversations = conversations.filter { it.id != currentConvId }
-            if (pastConversations.isNotEmpty()) {
-                HorizontalDivider(modifier = Modifier.padding(top = 4.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text("Conversations", style = MaterialTheme.typography.labelLarge)
-                    TextButton(onClick = {
+                }
+            }
+        }
+
+        ChatPaneScaffold(
+            list = {
+                AssistantSidebar(
+                    expanded = expanded,
+                    tab = sidebarTab,
+                    onTabChange = { sidebarTab = it },
+                    jobsEnabled = jobsEnabled,
+                    conversations = conversations,
+                    currentConvId = currentConvId,
+                    onSelectConversation = { selectConversation(it) },
+                    onNewConversation = { newConversation() },
+                    onClearAll = {
                         scope.launch {
                             historyDao.clearAll(); convDao.clearAll()
                             // Clearing is explicit user intent → forget on
@@ -562,19 +615,206 @@ fun AssistantScreen(
                             // on other devices. (Auto-trim stays local.)
                             runCatching { repo?.settingsSync?.clearAssistantHistoryOnShip() }
                         }
-                        expandedConvId = null
                         newConversation()
-                    }) { Text("Clear") }
+                    },
+                    onCloseSidebar = { mobileShowSidebar = false },
+                    db = db,
+                    scheduler = scheduler,
+                    onRunLoop = onRunLoop,
+                    settingsSync = settingsSync,
+                )
+            },
+            detail = if (!expanded && mobileShowSidebar) null else transcriptPane,
+            listFraction = listFraction,
+            onListFractionChange = { listFraction = it },
+        )
+    }
+}
+
+/** Sidebar tabs for the assistant's master pane. */
+private enum class SidebarTab(val label: String) {
+    Conversations("Conversations"),
+    Jobs("Jobs"),
+}
+
+/**
+ * The assistant's master pane: a [Conversations] list (select to load a
+ * topic into the transcript) and, when loops are available, a [Jobs] tab
+ * with a recent-runs feed plus inline loop management. On narrow screens
+ * it shows a back affordance ([onCloseSidebar]) to return to the transcript.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun AssistantSidebar(
+    expanded: Boolean,
+    tab: SidebarTab,
+    onTabChange: (SidebarTab) -> Unit,
+    jobsEnabled: Boolean,
+    conversations: List<AssistantConversationEntity>,
+    currentConvId: Long?,
+    onSelectConversation: (AssistantConversationEntity) -> Unit,
+    onNewConversation: () -> Unit,
+    onClearAll: () -> Unit,
+    onCloseSidebar: () -> Unit,
+    db: AppDatabase,
+    scheduler: LoopScheduler,
+    onRunLoop: (Long) -> Unit,
+    settingsSync: SettingsSync?,
+    modifier: Modifier = Modifier,
+) {
+    Surface(modifier = modifier.fillMaxSize(), color = MaterialTheme.colorScheme.surface) {
+        Column(Modifier.fillMaxSize()) {
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                if (!expanded) {
+                    IconButton(onClick = onCloseSidebar) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back to assistant")
+                    }
                 }
-                val now = remember(pastConversations) { System.currentTimeMillis() }
-                pastConversations.forEach { conv ->
+                Text(
+                    "Assistant",
+                    style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.weight(1f).padding(start = 8.dp),
+                )
+            }
+
+            // The Jobs tab only exists where loops can run AND a key is set
+            // (gated like Settings' loops row). Without it there's nothing to
+            // switch between, so skip the tab strip entirely.
+            val effectiveTab = if (jobsEnabled) tab else SidebarTab.Conversations
+            if (jobsEnabled) {
+                PrimaryTabRow(selectedTabIndex = effectiveTab.ordinal) {
+                    SidebarTab.values().forEach { t ->
+                        Tab(selected = effectiveTab == t, onClick = { onTabChange(t) }, text = { Text(t.label) })
+                    }
+                }
+            }
+
+            when (effectiveTab) {
+                SidebarTab.Conversations -> ConversationsTab(
+                    conversations = conversations,
+                    currentConvId = currentConvId,
+                    onSelect = onSelectConversation,
+                    onNew = onNewConversation,
+                    onClearAll = onClearAll,
+                    modifier = Modifier.weight(1f),
+                )
+                SidebarTab.Jobs -> Column(Modifier.weight(1f).fillMaxWidth()) {
+                    RecentRunsFeed(db)
+                    HorizontalDivider()
+                    LoopsPanel(
+                        db = db,
+                        scheduler = scheduler,
+                        onRunNow = onRunLoop,
+                        settingsSync = settingsSync,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ConversationsTab(
+    conversations: List<AssistantConversationEntity>,
+    currentConvId: Long?,
+    onSelect: (AssistantConversationEntity) -> Unit,
+    onNew: () -> Unit,
+    onClearAll: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(modifier.fillMaxSize()) {
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            TextButton(onClick = onNew) { Text("New conversation") }
+            if (conversations.isNotEmpty()) {
+                TextButton(onClick = onClearAll) { Text("Clear") }
+            }
+        }
+        if (conversations.isEmpty()) {
+            Text(
+                "No conversations yet.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 12.dp),
+            )
+        } else {
+            val now = remember(conversations) { System.currentTimeMillis() }
+            LazyColumn(
+                Modifier.fillMaxSize().padding(horizontal = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                items(conversations, key = { it.id }) { conv ->
                     ConversationRow(
                         conversation = conv,
                         nowMs = now,
-                        expanded = expandedConvId == conv.id,
-                        turns = if (expandedConvId == conv.id) expandedTurns else emptyList(),
-                        onToggle = { expandedConvId = if (expandedConvId == conv.id) null else conv.id },
+                        selected = conv.id == currentConvId,
+                        onClick = { onSelect(conv) },
                     )
+                }
+            }
+        }
+    }
+}
+
+/** Cross-loop recent-runs feed — the latest handful of loop runs, newest
+ *  first, as a compact fixed summary above the loops list. */
+@Composable
+private fun RecentRunsFeed(db: AppDatabase) {
+    val runs by remember(db) { db.loopRuns().streamRecent(6) }.collectAsState(initial = emptyList())
+    Column(
+        Modifier.fillMaxWidth().padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Text("Recent runs", style = MaterialTheme.typography.labelLarge)
+        if (runs.isEmpty()) {
+            Text(
+                "No loop runs yet.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        } else {
+            val now = remember(runs) { System.currentTimeMillis() }
+            runs.forEach { r ->
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            if (r.ok) "✓" else "⚠",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (r.ok) MaterialTheme.colorScheme.onSurfaceVariant
+                            else MaterialTheme.colorScheme.error,
+                        )
+                        Text(
+                            r.loopName,
+                            style = MaterialTheme.typography.bodyMedium,
+                            modifier = Modifier.weight(1f),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Text(
+                            shortRelativeTime(r.ranAt, now),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    if (r.output.isNotBlank()) {
+                        Text(
+                            r.output.trim(),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
                 }
             }
         }
@@ -619,12 +859,18 @@ private fun AgentLog(lines: List<String>) {
 private fun ConversationRow(
     conversation: AssistantConversationEntity,
     nowMs: Long,
-    expanded: Boolean,
-    turns: List<AssistantHistoryEntity>,
-    onToggle: () -> Unit,
+    selected: Boolean,
+    onClick: () -> Unit,
 ) {
-    Card(modifier = Modifier.fillMaxWidth().clickable { onToggle() }) {
-        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+    Card(
+        modifier = Modifier.fillMaxWidth().clickable { onClick() },
+        colors = if (selected) {
+            CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)
+        } else {
+            CardDefaults.cardColors()
+        },
+    ) {
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     shortRelativeTime(conversation.updatedAt, nowMs),
@@ -640,19 +886,9 @@ private fun ConversationRow(
             Text(
                 conversation.title,
                 style = MaterialTheme.typography.bodyMedium,
-                maxLines = if (expanded) Int.MAX_VALUE else 1,
+                maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
-            if (expanded) {
-                turns.forEach { t ->
-                    Text(
-                        "You: ${t.question}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.primary,
-                    )
-                    MarkdownText(t.answer)
-                }
-            }
         }
     }
 }

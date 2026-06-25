@@ -1034,6 +1034,8 @@ fun TalonApp(
                 aiSettings = app.aiSettings,
                 embedder = app.searchEmbedderClient,
                 repo = app.repo,
+                scheduler = app.loops,
+                onRunLoop = { app.loops.runOneNow(it) },
                 onBack = { assistantOpen = false },
                 onOpenMessage = { whom, postId, parentId ->
                     assistantOpen = false

@@ -4,6 +4,7 @@ import io.nisfeb.talon.data.LoopDao
 import io.nisfeb.talon.data.LoopEntity
 import io.nisfeb.talon.data.LoopRunDao
 import io.nisfeb.talon.data.LoopRunEntity
+import io.nisfeb.talon.data.LoopRunWithName
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOf
@@ -135,6 +136,7 @@ private class FakeLoopRunDao : LoopRunDao {
     val inserted = mutableListOf<LoopRunEntity>()
     override suspend fun insert(run: LoopRunEntity): Long { inserted += run; return run.id }
     override fun streamForLoop(loopId: Long, limit: Int): Flow<List<LoopRunEntity>> = flowOf(emptyList())
+    override fun streamRecent(limit: Int): Flow<List<LoopRunWithName>> = flowOf(emptyList())
     override suspend fun deleteForLoop(loopId: Long) {}
     override suspend fun pruneForLoop(loopId: Long, keep: Int) {}
     override suspend fun clearAll() {}

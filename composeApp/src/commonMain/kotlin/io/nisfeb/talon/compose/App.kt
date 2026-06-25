@@ -1154,6 +1154,14 @@ fun App(
                         aiSettings = aiSettings,
                         embedder = searchEmbedderClient,
                         repo = repo,
+                        // Desktop has no scheduler; the while-open ticker runs
+                        // loops and "Run now" goes straight to loopRunner.
+                        scheduler = io.nisfeb.talon.ai.LoopScheduler.Noop,
+                        onRunLoop = { loopId ->
+                            loopScope.launch {
+                                db.loops().get(loopId)?.let { loopRunner.runLoop(it) }
+                            }
+                        },
                         onBack = { showAssistant = false },
                         onOpenMessage = { whomTarget, postId, parentId ->
                             showAssistant = false
