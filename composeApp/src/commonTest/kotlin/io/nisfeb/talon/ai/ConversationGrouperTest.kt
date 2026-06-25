@@ -41,4 +41,27 @@ class ConversationGrouperTest {
             ConversationGrouper.updateCentroid(floatArrayOf(2f, 4f), count = 3, vec = floatArrayOf()).toList(),
         )
     }
+
+    @Test
+    fun `centroidOf averages the vectors and skips empty or off-dim ones`() {
+        assertEquals(
+            listOf(1f, 2f),
+            ConversationGrouper.centroidOf(
+                listOf(floatArrayOf(2f, 0f), floatArrayOf(0f, 4f), floatArrayOf()),
+            )!!.toList(),
+        )
+        // First vector sets the dim; a stray off-dim vector is dropped.
+        assertEquals(
+            listOf(2f, 0f),
+            ConversationGrouper.centroidOf(
+                listOf(floatArrayOf(2f, 0f), floatArrayOf(1f, 2f, 3f)),
+            )!!.toList(),
+        )
+    }
+
+    @Test
+    fun `centroidOf is null when there is nothing usable`() {
+        assertEquals(null, ConversationGrouper.centroidOf(emptyList()))
+        assertEquals(null, ConversationGrouper.centroidOf(listOf(floatArrayOf(), floatArrayOf())))
+    }
 }

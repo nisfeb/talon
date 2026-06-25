@@ -224,6 +224,22 @@ fun AssistantScreen(
         scope.launch {
             runCatching {
                 val qVec = embedder?.embed(q)
+                // Lazily rebuild a synced conversation's centroid. A
+                // conversation pulled from another device has no local
+                // centroid (embeddings are device-local), so without this
+                // every follow-up to it would fork a new topic. Recompute
+                // once from its turns, persist, and reuse thereafter.
+                val activeConvId = currentConvId
+                if (qVec != null && activeConvId != null && currentCentroid == null && embedder != null) {
+                    val turns = historyDao.forConversation(activeConvId)
+                    val rebuilt = ConversationGrouper.centroidOf(turns.mapNotNull { embedder.embed(it.question) })
+                    if (rebuilt != null) {
+                        currentCentroid = rebuilt
+                        convDao.get(activeConvId)?.let {
+                            convDao.update(it.copy(centroid = packEmbedding(rebuilt), dim = rebuilt.size))
+                        }
+                    }
+                }
                 // Continue the active topic if this question is on-topic,
                 // else start fresh — which also resets the model's context.
                 val continuing = currentConvId != null &&

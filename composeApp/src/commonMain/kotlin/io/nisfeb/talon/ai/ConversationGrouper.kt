@@ -34,6 +34,28 @@ object ConversationGrouper {
         return cosine(questionVec, centroid) >= threshold
     }
 
+    /** Mean of [vectors] — used to rebuild a conversation's centroid from
+     *  its turns' question embeddings. A conversation synced from another
+     *  device arrives without a centroid (embeddings are device-local and
+     *  the two platforms' vector spaces differ), so the first time this
+     *  device would group against it we recompute one here. Null if there
+     *  are no usable (non-empty, same-dim) vectors. */
+    fun centroidOf(vectors: List<FloatArray>): FloatArray? {
+        val usable = vectors.filter { it.isNotEmpty() }
+        if (usable.isEmpty()) return null
+        val dim = usable.first().size
+        val sum = FloatArray(dim)
+        var n = 0
+        for (v in usable) {
+            if (v.size != dim) continue // skip a stray off-dim vector
+            for (i in 0 until dim) sum[i] += v[i]
+            n++
+        }
+        if (n == 0) return null
+        for (i in 0 until dim) sum[i] /= n
+        return sum
+    }
+
     /** Running mean after folding [vec] into a [centroid] that already
      *  summarised [count] vectors. Returns [vec] if shapes don't line up
      *  (e.g. a conversation that started before embeddings were on). */
