@@ -34,6 +34,8 @@ actual abstract class AppDatabase : RoomDatabase() {
     actual abstract fun dmInvites(): DmInviteDao
     actual abstract fun assistantHistory(): AssistantHistoryDao
     actual abstract fun assistantConversations(): AssistantConversationDao
+    actual abstract fun loops(): LoopDao
+    actual abstract fun loopRuns(): LoopRunDao
 }
 
 /**
@@ -56,7 +58,7 @@ fun createAppDatabase(context: Context, name: String): AppDatabase {
             MIGRATION_23_24, MIGRATION_24_25, MIGRATION_25_26,
             MIGRATION_26_27, MIGRATION_27_28, MIGRATION_28_29,
             MIGRATION_29_30, MIGRATION_30_31, MIGRATION_34_35, MIGRATION_35_36,
-            MIGRATION_36_37,
+            MIGRATION_36_37, MIGRATION_37_38,
         )
         // dropAllTables = true preserves the pre-2.7 behaviour: when
         // Room can't find a migration path, drop everything and rebuild.
@@ -327,6 +329,46 @@ private val MIGRATION_36_37 = object : Migration(36, 37) {
             "UPDATE assistant_history SET convGid = COALESCE(" +
                 "(SELECT c.gid FROM assistant_conversation c WHERE c.id = assistant_history.conversationId), '') " +
                 "WHERE convGid = '' AND conversationId != 0",
+        )
+    }
+}
+
+// User-defined loops: a definition table + a local run-history table.
+// Two new tables only, so installs on the current version keep their
+// (expensive) embeddings rather than hitting destructive fallback.
+// No DEFAULT clauses — matches the entity-derived schema (Kotlin
+// constructor defaults are not SQL defaults), mirroring MIGRATION_35_36.
+private val MIGRATION_37_38 = object : Migration(37, 38) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS loop (
+                id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+                gid TEXT NOT NULL,
+                name TEXT NOT NULL,
+                prompt TEXT NOT NULL,
+                intervalMinutes INTEGER NOT NULL,
+                enabled INTEGER NOT NULL,
+                writesAuthorized INTEGER NOT NULL,
+                createdAt INTEGER NOT NULL,
+                updatedAt INTEGER NOT NULL,
+                lastRunAt INTEGER NOT NULL
+            )
+            """.trimIndent(),
+        )
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS loop_run (
+                id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+                loopId INTEGER NOT NULL,
+                ranAt INTEGER NOT NULL,
+                ok INTEGER NOT NULL,
+                output TEXT NOT NULL
+            )
+            """.trimIndent(),
+        )
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS index_loop_run_loopId_ranAt ON loop_run (loopId, ranAt)",
         )
     }
 }

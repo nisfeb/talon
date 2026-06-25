@@ -46,6 +46,8 @@ actual abstract class AppDatabase : RoomDatabase() {
     actual abstract fun dmInvites(): DmInviteDao
     actual abstract fun assistantHistory(): AssistantHistoryDao
     actual abstract fun assistantConversations(): AssistantConversationDao
+    actual abstract fun loops(): LoopDao
+    actual abstract fun loopRuns(): LoopRunDao
 }
 
 /**

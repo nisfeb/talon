@@ -59,6 +59,7 @@ import io.nisfeb.talon.ai.AiSettingsRepository
 import io.nisfeb.talon.ui.UiSettings
 import io.nisfeb.talon.ui.isOnDeviceAiFeatureSupported
 import io.nisfeb.talon.ui.isAssistantSupported
+import io.nisfeb.talon.ui.isLoopsSupported
 import io.nisfeb.talon.ui.isOnDeviceAiSupported
 import io.nisfeb.talon.ui.theme.ThemePreference
 
@@ -110,6 +111,9 @@ fun SettingsScreen(
      *  hosts that haven't wired the share screen yet (tests, older
      *  call sites) don't render the row. */
     onOpenShareLoginQr: () -> Unit = {},
+    /** Opens the Loops screen (scheduled agent prompts). Defaults to
+     *  no-op; the row only renders where isLoopsSupported + a key. */
+    onOpenLoops: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val aiState by aiSettings.state.collectAsState()
@@ -629,6 +633,38 @@ fun SettingsScreen(
                     settings = dailyDigestSettings,
                     onTestDigest = onTestDigest,
                 )
+            }
+
+            // Loops — scheduled agent prompts. Needs a cloud key (it runs
+            // the agent) and a platform that can fire it, so it's gated on
+            // isLoopsSupported (Android via AlarmManager; desktop via the
+            // while-open ticker — both true).
+            if (isLoopsSupported && aiState.hasKey()) {
+                Spacer(Modifier.height(16.dp))
+                HorizontalDivider()
+                Spacer(Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable(onClick = onOpenLoops)
+                        .padding(vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Loops", style = MaterialTheme.typography.bodyLarge)
+                        Text(
+                            "Run a saved prompt over your chats on a schedule.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Icon(
+                        Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
 
             Spacer(Modifier.height(16.dp))

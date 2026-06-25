@@ -35,6 +35,17 @@ expect val isOnDeviceAiSupported: Boolean
 expect val isAssistantSupported: Boolean
 
 /**
+ * Whether user-defined **Loops** (a saved prompt run on a schedule
+ * through the assistant agent, headless) are offered. Android: true —
+ * AlarmManager fires the loop even with the app closed. Desktop: true —
+ * a coroutine ticker (App.kt) runs due loops while the window is open;
+ * loops only advance with the app running, which the screen's copy
+ * states (CLAUDE.md §3: an honest ceiling, not a faked schedule).
+ * Gates the Loops screen + nav entry (which also require an LLM key).
+ */
+expect val isLoopsSupported: Boolean
+
+/**
  * Whether the platform can launch an in-app QR scanner for login
  * handoff (see [io.nisfeb.talon.login.TalonLoginUri]). Android: true
  * via ML Kit's GoogleCodeScanner (Play Services). Desktop: false —

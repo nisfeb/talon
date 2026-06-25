@@ -199,6 +199,7 @@ fun TalonApp(
     var digestOpen by remember { mutableStateOf(initialOpenDigest != null) }
     var settingsOpen by remember { mutableStateOf(false) }
     var assistantOpen by remember { mutableStateOf(false) }
+    var loopsOpen by remember { mutableStateOf(false) }
     var sidebarSettingsOpen by remember { mutableStateOf(false) }
     var adminListOpen by remember { mutableStateOf(false) }
     var adminGroupFlag by remember { mutableStateOf<String?>(null) }
@@ -705,6 +706,7 @@ fun TalonApp(
         BackHandler(enabled = digestOpen) { digestOpen = false }
         BackHandler(enabled = settingsOpen) { settingsOpen = false }
         BackHandler(enabled = assistantOpen) { assistantOpen = false }
+        BackHandler(enabled = loopsOpen) { loopsOpen = false }
         BackHandler(enabled = sidebarSettingsOpen) { sidebarSettingsOpen = false }
         BackHandler(enabled = adminGroupFlag != null) { adminGroupFlag = null }
         BackHandler(enabled = adminListOpen && adminGroupFlag == null) {
@@ -760,6 +762,7 @@ fun TalonApp(
             openGroupFlag != null -> "GroupHome($openGroupFlag)"
             sidebarSettingsOpen -> "SidebarSettings"
             assistantOpen -> "Assistant"
+            loopsOpen -> "Loops"
             settingsOpen -> "Settings"
             pendingShare != null -> "ShareTarget"
             openThread != null && openWhom != null -> "Thread($openWhom/$openThread)"
@@ -1045,6 +1048,15 @@ fun TalonApp(
                 modifier = mod,
             )
 
+            loopsOpen -> io.nisfeb.talon.ui.screens.LoopsScreen(
+                db = app.db,
+                scheduler = app.loops,
+                onRunNow = { app.loops.runOneNow(it) },
+                onBack = { loopsOpen = false },
+                settingsSync = app.settingsSync,
+                modifier = mod,
+            )
+
             settingsOpen -> {
                 // Observe via the app-level flows so a ship switch
                 // re-renders the panel with the new ship's preview.
@@ -1099,6 +1111,7 @@ fun TalonApp(
                     onTestDigest = { app.dailyDigest.generateAndNotifyAsync("user_test") },
                     onOpenSidebarSettings = { sidebarSettingsOpen = true },
                     onOpenShareLoginQr = { shareLoginQrOpen = true },
+                    onOpenLoops = { loopsOpen = true },
                     modifier = mod,
                 )
             }

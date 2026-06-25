@@ -61,6 +61,21 @@ interface SettingsSync {
      *  user-initiated "clear history" action. Default no-op. */
     suspend fun clearAssistantHistoryOnShip() {}
 
+    // ───────── loop definition sync ─────────
+    /**
+     * Push one loop's *definition* (name, prompt, interval, enabled,
+     * timestamps) to %settings, keyed by
+     * [io.nisfeb.talon.data.LoopEntity.gid], so it follows the ship to
+     * other devices. lastRunAt, run history, AND the writesAuthorized
+     * grant are device-local and never travel (the unattended-write grant
+     * is a per-device decision). Default no-op for hosts without loop sync.
+     */
+    suspend fun pushLoop(loop: io.nisfeb.talon.data.LoopEntity) {}
+
+    /** Remove a loop from the ship's %settings store by gid. Default
+     *  no-op. */
+    suspend fun deleteLoop(gid: String) {}
+
     // ───────── home-list reorder hooks ─────────
     // Called from DmListScreen drag callbacks. The Android impl writes
     // through to Room and (for the push variants) sends pokes to

@@ -23,6 +23,7 @@ object Notifications {
     const val CHANNEL_SYNC = "sync"
     const val CHANNEL_WATCHWORDS = "watchwords"
     const val CHANNEL_DAILY_DIGEST = "daily-digest"
+    const val CHANNEL_LOOPS = "loops"
     const val EXTRA_OPEN_WHOM = "open_whom"
     const val EXTRA_SCROLL_TO_MESSAGE = "scroll_to_message"
     /** When the notification is for a reply, the parent post id —
@@ -84,6 +85,18 @@ object Notifications {
                     NotificationManager.IMPORTANCE_DEFAULT,
                 ).apply {
                     description = "Morning brief — fires once a day"
+                    enableLights(true)
+                }
+            )
+        }
+        if (mgr.getNotificationChannel(CHANNEL_LOOPS) == null) {
+            mgr.createNotificationChannel(
+                NotificationChannel(
+                    CHANNEL_LOOPS,
+                    "Loops",
+                    NotificationManager.IMPORTANCE_DEFAULT,
+                ).apply {
+                    description = "Results from your scheduled loops"
                     enableLights(true)
                 }
             )
@@ -242,6 +255,44 @@ object Notifications {
             .build()
 
         mgr.notify("digest:$ship:$dateLocal", NOTIFICATION_ID, notification)
+    }
+
+    /**
+     * Loop-result notification. One channel for all loops; tag =
+     * "loop:<loopId>" (the stable row id, NOT the display name) so
+     * re-running a loop replaces its own row while distinct loops keep
+     * separate rows even if they share a name (Android dedupes per
+     * (tag, id)). Tap just opens the app — there's no per-loop deep link yet.
+     */
+    fun showLoop(context: Context, loopId: Long, title: String, body: String, whenMs: Long) {
+        val mgr = ContextCompat.getSystemService(context, NotificationManager::class.java)
+            ?: return
+
+        val tag = "loop:$loopId"
+        val tapIntent = Intent(context, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        }
+        val pending = PendingIntent.getActivity(
+            context,
+            tag.hashCode(),
+            tapIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+
+        val notification = NotificationCompat.Builder(context, CHANNEL_LOOPS)
+            .setSmallIcon(android.R.drawable.ic_dialog_email)
+            .setContentTitle(title)
+            .setContentText(body)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(body))
+            .setContentIntent(pending)
+            .setAutoCancel(true)
+            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            .setCategory(NotificationCompat.CATEGORY_REMINDER)
+            .setWhen(whenMs)
+            .setShowWhen(true)
+            .build()
+
+        mgr.notify(tag, NOTIFICATION_ID, notification)
     }
 
     fun clear(context: Context, whom: String) {

@@ -4,6 +4,7 @@ actual val isDailyDigestSupported: Boolean = true
 actual val isVoiceMessagesSupported: Boolean = true
 actual val isOnDeviceAiSupported: Boolean = true
 actual val isAssistantSupported: Boolean = true
+actual val isLoopsSupported: Boolean = true
 actual val isQrLoginScanSupported: Boolean = true
 actual val isTouchSwipeNavSupported: Boolean = true
 

@@ -199,6 +199,7 @@ fun App(
     var loggedInShip by remember { mutableStateOf(sessionStore.active()?.ship) }
     var showSettings by remember { mutableStateOf(false) }
     var showSidebarSettings by remember { mutableStateOf(false) }
+    var showLoops by remember { mutableStateOf(false) }
     var openChat by remember { mutableStateOf<String?>(null) }
     // Optional message id to scroll-and-flash when DmChatScreen mounts /
     // re-mounts on a new whom. Set when navigating from bookmarks (or any
@@ -421,6 +422,9 @@ fun App(
     PlatformBackHandler(enabled = showSidebarSettings) {
         showSidebarSettings = false
     }
+    PlatformBackHandler(enabled = showLoops) {
+        showLoops = false
+    }
 
     // Ship-scoped graph. Re-keyed on (loggedInShip ?: "__loggedout__")
     // so signing out and back in fully rebuilds session + repo. The
@@ -485,6 +489,29 @@ fun App(
         val searchEmbedderClient = remember(db) {
             createSearchEmbedderClient?.invoke(db)
         }
+
+        // Desktop loop runner. No AlarmManager on desktop, so loops run
+        // via a while-open ticker (below, inside the logged-in guard) plus
+        // the "Run now" button. Built here so both the ticker and the
+        // LoopsScreen branch share one instance. Full tool catalog —
+        // LoopRunner keeps write tools only for loops that opted in.
+        val loopRunner = remember(db, repo, searchEmbedderClient) {
+            val agentClient = io.nisfeb.talon.ai.AgentClient { aiSettings.state.value }
+            io.nisfeb.talon.ai.LoopRunner(
+                loops = db.loops(),
+                runs = db.loopRuns(),
+                tools = io.nisfeb.talon.ai.ToolCatalog.default(repo, db, searchEmbedderClient) { it },
+                completer = { sys, msgs, t -> agentClient.completeWithTools(sys, msgs, t) },
+                aiConfig = { aiSettings.state.value },
+                // loopId is dropped: the desktop Notifier (tray balloon /
+                // notify-send) has no per-notification tag, so loops can't
+                // group/replace like Android's id-tagged notifications. A
+                // tag param on Notifier.notify is the upgrade path if it
+                // matters; for now each loop run is a standalone toast.
+                notify = { _, title, body -> notifier.notify(title, body) },
+            )
+        }
+        val loopScope = rememberCoroutineScope()
 
         // Kick off the embedder index as soon as ANY feature that
         // depends on it is enabled — smart search, topic clusters, or
@@ -592,6 +619,20 @@ fun App(
                             else sink.pushDailyDigest(ds.state.value)
                         }
                     }
+                }
+            }
+
+            // Desktop loop scheduler. Android arms an AlarmManager wake-up;
+            // desktop has none, so loops run on a while-open ticker that
+            // fires due loops once a minute. Bounded to the logged-in
+            // session and cancelled on ship re-key / app exit. runDue
+            // no-ops without an AI key or when nothing is due, so an idle
+            // tick is cheap. (isLoopsSupported is now true on desktop.)
+            LaunchedEffect(loopRunner) {
+                while (true) {
+                    runCatching { loopRunner.runDue() }
+                        .onFailure { if (it is kotlinx.coroutines.CancellationException) throw it }
+                    kotlinx.coroutines.delay(60_000)
                 }
             }
 
@@ -1014,6 +1055,23 @@ fun App(
                             onBack = { showSidebarSettings = false },
                         )
                     }
+                    // Ordered before showSettings so Back from Loops pops
+                    // to Settings (same breadcrumb rationale as Sidebar).
+                    // Desktop has no AlarmManager, so there's no scheduler to
+                    // re-arm — the while-open ticker (above) drives runs and
+                    // "Run now" goes straight to loopRunner. Noop scheduler
+                    // satisfies the screen's reschedule() calls.
+                    showLoops -> io.nisfeb.talon.ui.screens.LoopsScreen(
+                        db = db,
+                        scheduler = io.nisfeb.talon.ai.LoopScheduler.Noop,
+                        onRunNow = { loopId ->
+                            loopScope.launch {
+                                db.loops().get(loopId)?.let { loopRunner.runLoop(it) }
+                            }
+                        },
+                        onBack = { showLoops = false },
+                        settingsSync = settingsSync,
+                    )
                     showSettings -> {
                         val relayClient = remember(http) {
                             io.nisfeb.talon.notify.RelayClient(
@@ -1046,6 +1104,7 @@ fun App(
                             // when the production MainActivity migrates here.
                             onOpenSidebarSettings = { showSidebarSettings = true },
                             onOpenShareLoginQr = { shareLoginQrOpen = true },
+                            onOpenLoops = { showLoops = true },
                         )
                     }
                     showSelfProfile -> ProfileEditScreen(

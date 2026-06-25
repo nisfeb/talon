@@ -52,8 +52,10 @@ import androidx.room.RoomDatabaseConstructor
         DmInviteEntity::class,
         AssistantHistoryEntity::class,
         AssistantConversationEntity::class,
+        LoopEntity::class,
+        LoopRunEntity::class,
     ],
-    version = 37,
+    version = 38,
     exportSchema = false,
 )
 @ConstructedBy(AppDatabaseConstructor::class)
@@ -79,6 +81,8 @@ expect abstract class AppDatabase : RoomDatabase {
     abstract fun dmInvites(): DmInviteDao
     abstract fun assistantHistory(): AssistantHistoryDao
     abstract fun assistantConversations(): AssistantConversationDao
+    abstract fun loops(): LoopDao
+    abstract fun loopRuns(): LoopRunDao
 }
 
 /**

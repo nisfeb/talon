@@ -51,6 +51,11 @@ class SettingsSyncImpl(
      *  avoid bouncing the change back to the ship (pingpong), but that
      *  also skips the local re-arm — this callback restores it. */
     private val rearmDailyDigest: () -> Unit = {},
+    /** Re-arm the loop alarm after a remote-applied loop change (enabled/
+     *  interval can shift the next-fire time). commonMain can't reach the
+     *  Android Loops facade, so the host injects this. No-op on desktop /
+     *  tests (the while-open ticker re-reads loops every tick). */
+    private val rearmLoops: () -> Unit = {},
     /** Toggle a chat's watchword-exclusion through the Android-only
      *  Watchwords class (which fires backfill cleanup + onChange →
      *  %settings push). commonMain can't reference Watchwords directly
@@ -92,6 +97,9 @@ class SettingsSyncImpl(
         // turns, keyed by global id; embeddings stay device-local.
         const val BUCKET_ASSISTANT_CONVERSATIONS = "assistant-conversations"
         const val BUCKET_ASSISTANT_TURNS = "assistant-turns"
+        // Loop definitions, keyed by gid. lastRunAt + run history are
+        // device-local and never sync — only the definition travels.
+        const val BUCKET_LOOPS = "loops"
         // Single-entry bucket: the seen high-water mark is global to the
         // user, not per-anything, so one stable key holds it.
         private const val STATUS_SEEN_ENTRY = "me"
@@ -197,6 +205,9 @@ class SettingsSyncImpl(
             // created either way if they arrive out of order).
             applyBucket(BUCKET_ASSISTANT_CONVERSATIONS, deskMap[BUCKET_ASSISTANT_CONVERSATIONS] as? JsonObject)
             applyBucket(BUCKET_ASSISTANT_TURNS, deskMap[BUCKET_ASSISTANT_TURNS] as? JsonObject)
+            // Loop definitions. Upsert (not replace-all) so loops created
+            // offline on this device survive; lastRunAt is preserved per row.
+            applyBucket(BUCKET_LOOPS, deskMap[BUCKET_LOOPS] as? JsonObject)
         }
 
         // Per-bucket recovery: catch buckets that aren't on the ship
@@ -611,6 +622,29 @@ class SettingsSyncImpl(
             runCatching { ch.poke(app = "settings", mark = "settings-event", payload = payload) }
                 .onFailure { Log.w(TAG, "del-bucket $bucket failed", it) }
         }
+    }
+
+    override suspend fun pushLoop(loop: io.nisfeb.talon.data.LoopEntity) {
+        if (loop.gid.isBlank()) return
+        pokePutEntry(
+            BUCKET_LOOPS, loop.gid,
+            buildJsonObject {
+                // Definition only. id + lastRunAt + run history stay local;
+                // so does writesAuthorized — the unattended-write grant is a
+                // per-device decision (see upsertLoop), so we don't ship it.
+                put("name", loop.name)
+                put("prompt", loop.prompt)
+                put("intervalMinutes", loop.intervalMinutes)
+                put("enabled", loop.enabled)
+                put("createdAt", loop.createdAt)
+                put("updatedAt", loop.updatedAt)
+            },
+        )
+    }
+
+    override suspend fun deleteLoop(gid: String) {
+        if (gid.isBlank()) return
+        pokeDelEntry(BUCKET_LOOPS, gid)
     }
 
     private fun applyAiEntry(obj: JsonObject) {
@@ -1074,6 +1108,11 @@ class SettingsSyncImpl(
                     (unwrap(v) as? JsonObject)?.let { upsertAssistantTurn(gid, it) }
                 }
             }
+            BUCKET_LOOPS -> {
+                entries?.forEach { (gid, v) ->
+                    (unwrap(v) as? JsonObject)?.let { upsertLoop(gid, it) }
+                }
+            }
         }
     }
 
@@ -1206,6 +1245,9 @@ class SettingsSyncImpl(
             BUCKET_ASSISTANT_TURNS -> {
                 (unwrapped as? JsonObject)?.let { upsertAssistantTurn(entry, it) }
             }
+            BUCKET_LOOPS -> {
+                (unwrapped as? JsonObject)?.let { upsertLoop(entry, it) }
+            }
         }
     }
 
@@ -1271,6 +1313,10 @@ class SettingsSyncImpl(
                 db.assistantConversations().deleteByGid(entry)
             }
             BUCKET_ASSISTANT_TURNS -> db.assistantHistory().deleteByGid(entry)
+            BUCKET_LOOPS -> db.loops().getByGid(entry)?.let {
+                db.loops().delete(it.id)
+                db.loopRuns().deleteForLoop(it.id)
+            }
         }
     }
 
@@ -1302,6 +1348,38 @@ class SettingsSyncImpl(
                 ),
             )
         }
+    }
+
+    private suspend fun upsertLoop(gid: String, obj: JsonObject) {
+        if (gid.isBlank()) return
+        val dao = db.loops()
+        val existing = dao.getByGid(gid)
+        // Preserve the local id (so @Upsert updates rather than inserts a
+        // dup) and lastRunAt (device-local schedule state, never on the
+        // wire). Everything else comes from the synced definition — EXCEPT
+        // writesAuthorized: that grant gives a loop unattended write access
+        // to the ship, so it's a per-device decision the local user must
+        // make here. We never honor it from the wire (a peer or anyone with
+        // ship access could otherwise flip a read-only loop into one that
+        // posts unattended). A freshly-synced loop arrives read-only; an
+        // existing one keeps whatever this device granted. Mirrors how AI
+        // cloud-key fields gate on local syncEnabled rather than crossing
+        // over from a peer.
+        dao.upsert(
+            io.nisfeb.talon.data.LoopEntity(
+                id = existing?.id ?: 0L,
+                gid = gid,
+                name = obj["name"].asStr() ?: "",
+                prompt = obj["prompt"].asStr() ?: "",
+                intervalMinutes = obj["intervalMinutes"].asInt() ?: 60,
+                enabled = (obj["enabled"] as? JsonPrimitive)?.booleanOrNull ?: true,
+                writesAuthorized = existing?.writesAuthorized ?: false,
+                createdAt = obj["createdAt"].asLong() ?: 0L,
+                updatedAt = obj["updatedAt"].asLong() ?: 0L,
+                lastRunAt = existing?.lastRunAt ?: 0L,
+            ),
+        )
+        rearmLoops()
     }
 
     private suspend fun upsertAssistantTurn(gid: String, obj: JsonObject) {
@@ -1368,6 +1446,14 @@ class SettingsSyncImpl(
             BUCKET_ASSISTANT_CONVERSATIONS, BUCKET_ASSISTANT_TURNS -> {
                 db.assistantHistory().clearAll()
                 db.assistantConversations().clearAll()
+            }
+            // A peer cleared all loops (del-bucket) — wipe definitions and
+            // their local run history, then re-arm (the scheduler should
+            // disarm when nothing is left).
+            BUCKET_LOOPS -> {
+                db.loops().clearAll()
+                db.loopRuns().clearAll()
+                rearmLoops()
             }
         }
     }

@@ -986,6 +986,97 @@ class SettingsSyncApplyBucketTest {
         assertNull(db.assistantConversations().getByGid("c1"))
         assertTrue(db.assistantHistory().forConversation(convId).isEmpty())
     }
+
+    // ── loops (definition sync) ─────────────────────────────────────
+
+    private fun loopVal(name: String, prompt: String, interval: Int, enabled: Boolean, writes: Boolean) =
+        buildJsonObject {
+            put("name", name)
+            put("prompt", prompt)
+            put("intervalMinutes", interval)
+            put("enabled", enabled)
+            put("writesAuthorized", writes)
+            put("createdAt", 100L)
+            put("updatedAt", 200L)
+        }
+
+    @Test
+    fun `applyBucket LOOPS upserts the definition but keeps lastRunAt and the local write-grant`() = runBlocking {
+        // A loop this device already ran (lastRunAt set) and granted write
+        // access to. The synced definition must update name/prompt/etc but
+        // NEVER reset the local schedule clock (else a sync re-fires the
+        // loop) and NEVER honor the wire's writesAuthorized (the wire says
+        // false here, but the local true must stand — and conversely a wire
+        // `true` must not flip a local false; see the insert test).
+        db.loops().upsert(
+            io.nisfeb.talon.data.LoopEntity(
+                gid = "g1", name = "old", prompt = "old prompt", intervalMinutes = 60,
+                enabled = false, writesAuthorized = true,
+                createdAt = 1, updatedAt = 1, lastRunAt = 12_345L,
+            ),
+        )
+        sync.applyBucket(
+            SettingsSyncImpl.BUCKET_LOOPS,
+            buildJsonObject { put("g1", loopVal("new", "new prompt", 180, enabled = true, writes = false)) },
+        )
+        val row = db.loops().getByGid("g1")!!
+        assertEquals("new", row.name)
+        assertEquals("new prompt", row.prompt)
+        assertEquals(180, row.intervalMinutes)
+        assertEquals(true, row.enabled)
+        // Invariants: device-local fields untouched by the wire.
+        assertEquals(12_345L, row.lastRunAt)
+        assertEquals(true, row.writesAuthorized)
+    }
+
+    @Test
+    fun `applyBucket LOOPS inserts a fresh loop read-only even when the wire says writes are authorized`() = runBlocking {
+        // Security: an unattended-write grant must be made on THIS device.
+        // A loop synced in (with writes=true on the wire) lands read-only
+        // until the local user opts in.
+        sync.applyBucket(
+            SettingsSyncImpl.BUCKET_LOOPS,
+            buildJsonObject { put("g2", loopVal("fresh", "do it", 30, enabled = true, writes = true)) },
+        )
+        val row = db.loops().getByGid("g2")!!
+        assertEquals("fresh", row.name)
+        assertEquals(0L, row.lastRunAt)
+        assertEquals(false, row.writesAuthorized, "remote write-grant must not cross over to a new device")
+        assertTrue(row.id != 0L, "insert assigns an autogen id")
+    }
+
+    @Test
+    fun `clearBucketLocally LOOPS wipes all loops and run history`() = runBlocking {
+        val id = db.loops().upsert(
+            io.nisfeb.talon.data.LoopEntity(
+                gid = "g", name = "x", prompt = "p", intervalMinutes = 60,
+                createdAt = 1, updatedAt = 1,
+            ),
+        )
+        db.loopRuns().insert(
+            io.nisfeb.talon.data.LoopRunEntity(loopId = id, ranAt = 1, ok = true, output = "o"),
+        )
+        // A peer's del-bucket for loops arrives → clearBucketLocally.
+        sync.clearBucketLocally(SettingsSyncImpl.BUCKET_LOOPS)
+        assertTrue(db.loops().stream().first().isEmpty())
+        assertTrue(db.loopRuns().streamForLoop(id, 10).first().isEmpty())
+    }
+
+    @Test
+    fun `removeEntry LOOPS deletes the loop and its run history`() = runBlocking {
+        val id = db.loops().upsert(
+            io.nisfeb.talon.data.LoopEntity(
+                gid = "g3", name = "x", prompt = "p", intervalMinutes = 60,
+                createdAt = 1, updatedAt = 1,
+            ),
+        )
+        db.loopRuns().insert(
+            io.nisfeb.talon.data.LoopRunEntity(loopId = id, ranAt = 1, ok = true, output = "out"),
+        )
+        sync.removeEntry(SettingsSyncImpl.BUCKET_LOOPS, "g3")
+        assertNull(db.loops().getByGid("g3"))
+        assertTrue(db.loopRuns().streamForLoop(id, 10).first().isEmpty())
+    }
 }
 
 // ──────────────────────────────────────────────────────────────────

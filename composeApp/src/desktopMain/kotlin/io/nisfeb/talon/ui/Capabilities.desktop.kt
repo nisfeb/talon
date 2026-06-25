@@ -3,6 +3,12 @@ package io.nisfeb.talon.ui
 actual val isDailyDigestSupported: Boolean = false
 actual val isVoiceMessagesSupported: Boolean = false
 actual val isQrLoginScanSupported: Boolean = false
+// Loops run on desktop via a while-open ticker in App.kt (no
+// AlarmManager off Android): due loops fire once a minute while the
+// window is live, and "Run now" works any time. Honest about the
+// ceiling — loops only advance while the app is open, which the
+// screen's copy states (CLAUDE.md §3: gate, don't fake).
+actual val isLoopsSupported: Boolean = true
 // Off on desktop: horizontal-drag detectors swallow child clicks when
 // the mouse drifts a few px mid-click, and edge-swipe to open the
 // ship drawer is meaningless with a mouse (the logo opens it).
