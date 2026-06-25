@@ -4,6 +4,8 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertTrue
 
 /**
  * Pins the trust-posture classification (what the model may see / must
@@ -49,5 +51,19 @@ class McpToolsTest {
     fun `extractToolText handles empty content`() {
         assertEquals("(no output)", McpClient.extractToolText(result("""{"content":[]}""")))
         assertEquals("(no output)", McpClient.extractToolText(result("""{}""")))
+    }
+
+    @Test
+    fun `isLoopbackHost recognizes only localhost forms`() {
+        // These pass the ship's HTTPS-or-loopback gate over http; the rest
+        // trip the bodyless 400 → drive the "use https" diagnostic.
+        assertTrue(McpClient.isLoopbackHost("localhost"))
+        assertTrue(McpClient.isLoopbackHost("127.0.0.1"))
+        assertTrue(McpClient.isLoopbackHost("127.13.2.9"))
+        assertTrue(McpClient.isLoopbackHost("::1"))
+        assertTrue(McpClient.isLoopbackHost("[::1]"))
+        assertFalse(McpClient.isLoopbackHost("ship.example.com"))
+        assertFalse(McpClient.isLoopbackHost("192.168.1.50"))
+        assertFalse(McpClient.isLoopbackHost("10.0.0.5"))
     }
 }

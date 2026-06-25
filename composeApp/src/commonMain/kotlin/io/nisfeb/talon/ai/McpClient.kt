@@ -81,7 +81,7 @@ class McpClient(
             http.newCall(post(payload)).execute().use { resp ->
                 val body = resp.body?.string().orEmpty()
                 val obj = runCatching { Json.parseToJsonElement(body).jsonObject }.getOrNull()
-                    ?: error("mcp $method: HTTP ${resp.code}, non-JSON body")
+                    ?: error(diagnoseFailure(method, resp.code, body))
                 obj["error"]?.jsonObject?.let { err ->
                     throw McpException(
                         err["code"]?.jsonPrimitive?.intOrNull ?: -1,
@@ -91,6 +91,26 @@ class McpClient(
                 obj["result"] ?: JsonObject(emptyMap())
             }
         }
+
+    /** Turn an unparseable HTTP response into an actionable message.
+     *  The ship's MCP server rejects requests it can't confirm are secure
+     *  with a *bodyless* 400 (a cleartext/rebinding guard, before auth or
+     *  body parsing — see mcp-server.hoon), which otherwise surfaces as a
+     *  baffling "non-JSON body". Name the likely cause when we can. */
+    private fun diagnoseFailure(method: String, code: Int, body: String): String {
+        val detail = body.trim().take(200)
+        if (code == 400 && detail.isEmpty()) {
+            val hint = if (endpoint.scheme == "http" && !isLoopbackHost(endpoint.host)) {
+                "Talon is on http to ${endpoint.host} — reconnect using your ship's https:// URL."
+            } else {
+                "Your ship treated the request as insecure. If it's behind a reverse proxy " +
+                    "(nginx), the proxy must send X-Forwarded-Proto and the MCP server must trust it."
+            }
+            return "mcp $method: HTTP 400 — the ship's MCP server rejected the request before " +
+                "processing it. $hint"
+        }
+        return "mcp $method: HTTP $code — ${detail.ifBlank { "(empty response body)" }}"
+    }
 
     /** Fire a notification (no id, no response body expected). */
     private suspend fun notify(method: String) {
@@ -152,6 +172,13 @@ class McpClient(
     companion object {
         const val MCP_PROTOCOL_VERSION = "2025-11-25"
         private val JSON_MEDIA = "application/json".toMediaType()
+
+        /** Loopback host per the ship's own loopback-authority check, so
+         *  Talon's diagnostic matches when the server's HTTPS gate fires. */
+        internal fun isLoopbackHost(host: String): Boolean {
+            val h = host.removePrefix("[").removeSuffix("]") // strip IPv6 brackets
+            return h == "localhost" || h == "::1" || h.startsWith("127.")
+        }
 
         /** Flatten an MCP `tools/call` result's content blocks to plain
          *  text for the model. Pure. */
