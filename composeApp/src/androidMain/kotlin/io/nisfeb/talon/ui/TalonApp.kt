@@ -190,10 +190,15 @@ fun TalonApp(
     // Curated contact book (%contacts /v1/book) — gates add affordances
     // and backs the Contacts screen.
     val bookContacts by app.repo.bookContacts.collectAsState()
+    // AI settings — gates the assistant entry point (see DmListScreen
+    // onOpenAssistant below); collected here so a toggle/key change
+    // recomposes the gate live.
+    val aiState by app.aiSettings.state.collectAsState()
     // Daily Digest screen — initialOpenDigest non-null means we
     // arrived from a notification tap, so route straight there.
     var digestOpen by remember { mutableStateOf(initialOpenDigest != null) }
     var settingsOpen by remember { mutableStateOf(false) }
+    var assistantOpen by remember { mutableStateOf(false) }
     var sidebarSettingsOpen by remember { mutableStateOf(false) }
     var adminListOpen by remember { mutableStateOf(false) }
     var adminGroupFlag by remember { mutableStateOf<String?>(null) }
@@ -699,6 +704,7 @@ fun TalonApp(
         BackHandler(enabled = watchwordsOpen) { watchwordsOpen = false }
         BackHandler(enabled = digestOpen) { digestOpen = false }
         BackHandler(enabled = settingsOpen) { settingsOpen = false }
+        BackHandler(enabled = assistantOpen) { assistantOpen = false }
         BackHandler(enabled = sidebarSettingsOpen) { sidebarSettingsOpen = false }
         BackHandler(enabled = adminGroupFlag != null) { adminGroupFlag = null }
         BackHandler(enabled = adminListOpen && adminGroupFlag == null) {
@@ -753,6 +759,7 @@ fun TalonApp(
             invitesOpen -> "Invites"
             openGroupFlag != null -> "GroupHome($openGroupFlag)"
             sidebarSettingsOpen -> "SidebarSettings"
+            assistantOpen -> "Assistant"
             settingsOpen -> "Settings"
             pendingShare != null -> "ShareTarget"
             openThread != null && openWhom != null -> "Thread($openWhom/$openThread)"
@@ -1018,6 +1025,25 @@ fun TalonApp(
                     modifier = mod,
                 )
             }
+
+            assistantOpen -> io.nisfeb.talon.ui.screens.AssistantScreen(
+                db = app.db,
+                aiSettings = app.aiSettings,
+                embedder = app.searchEmbedderClient,
+                repo = app.repo,
+                onBack = { assistantOpen = false },
+                onOpenMessage = { whom, postId, parentId ->
+                    assistantOpen = false
+                    openWhom = whom
+                    if (parentId != null) {
+                        pendingThreadAnchor = postId
+                        openThread = parentId
+                    } else {
+                        pendingScrollMessageId = postId
+                    }
+                },
+                modifier = mod,
+            )
 
             settingsOpen -> {
                 // Observe via the app-level flows so a ship switch
@@ -1369,6 +1395,15 @@ fun TalonApp(
                 menuSeen = app.menuSeen,
                 onOpenConversation = { openWhom = it },
                 onOpenSearch = { searchOpen = true },
+                // Opt-in + key-gated assistant entry point. Mirrors
+                // App.kt's gate (desktop/tablet path). Requires the
+                // on-device embedder as retrieval backbone.
+                onOpenAssistant = if (isOnDeviceAiSupported &&
+                    (aiState.askUrbitEnabled || aiState.agentEnabled) &&
+                    aiState.hasKey()
+                ) {
+                    { assistantOpen = true }
+                } else null,
                 onNewMessage = { newDmOpen = true },
                 onOpenSelfProfile = { editingProfile = true },
                 onOpenStatusFeed = { statusFeedOpen = true },

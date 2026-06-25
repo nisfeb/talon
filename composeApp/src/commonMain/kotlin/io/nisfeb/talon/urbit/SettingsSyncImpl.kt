@@ -537,6 +537,8 @@ class SettingsSyncImpl(
                 put("semanticSearchEnabled", cfg.semanticSearchEnabled)
                 put("topicClustersEnabled", cfg.topicClustersEnabled)
                 put("importantMessagesEnabled", cfg.importantMessagesEnabled)
+                put("askUrbitEnabled", cfg.askUrbitEnabled)
+                put("agentEnabled", cfg.agentEnabled)
             },
         )
     }
@@ -590,6 +592,8 @@ class SettingsSyncImpl(
                 semanticSearchEnabled = bool("semanticSearchEnabled", current.semanticSearchEnabled),
                 topicClustersEnabled = bool("topicClustersEnabled", current.topicClustersEnabled),
                 importantMessagesEnabled = bool("importantMessagesEnabled", current.importantMessagesEnabled),
+                askUrbitEnabled = bool("askUrbitEnabled", current.askUrbitEnabled),
+                agentEnabled = bool("agentEnabled", current.agentEnabled),
             )
         } else {
             Log.i(TAG, "applyAiEntry ignoring legacy feature toggles; keeping local defaults")
@@ -609,7 +613,11 @@ class SettingsSyncImpl(
             if (provider != null) {
                 features.copy(
                     provider = provider,
-                    apiKey = obj["apiKey"].asStr().orEmpty(),
+                    // Only overwrite the key when the entry actually
+                    // carries one — a peer push with syncEnabled=false
+                    // omits apiKey, and orEmpty() would blank a good
+                    // local key (data loss → silently disables AI).
+                    apiKey = obj["apiKey"].asStr() ?: current.apiKey,
                     model = obj["model"].asStr(),
                     baseUrl = obj["baseUrl"].asStr(),
                 )

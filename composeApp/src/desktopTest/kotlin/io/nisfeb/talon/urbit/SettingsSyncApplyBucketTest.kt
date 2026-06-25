@@ -310,6 +310,74 @@ class SettingsSyncApplyBucketTest {
         }
 
     @Test
+    fun `applyBucket AI_SETTINGS preserves a locally-enabled assistant toggle the entry omits`() =
+        runBlocking {
+            // Regression: the ai-settings round-trip didn't carry
+            // askUrbit/agent, so an entry lacking them (e.g. written by
+            // an older client) must NOT reset a locally-true value back
+            // to false — which would silently hide the assistant.
+            aiSettings.applyRemote(
+                AiSettings.Config(
+                    provider = AiSettings.Provider.Anthropic,
+                    apiKey = "sk-local",
+                    model = null,
+                    syncEnabled = true,
+                    askUrbitEnabled = true,
+                ),
+            )
+            val bucket = buildJsonObject {
+                put("config", buildJsonObject {
+                    put("schemaVersion", 2)
+                    put("provider", "Anthropic")
+                    put("apiKey", "sk-local")
+                    // no askUrbitEnabled / agentEnabled keys
+                })
+            }
+            sync.applyBucket(SettingsSyncImpl.BUCKET_AI_SETTINGS, bucket)
+            assertEquals(true, aiSettings.state.value.askUrbitEnabled)
+        }
+
+    @Test
+    fun `applyBucket AI_SETTINGS applies the assistant toggles from a v2 entry`() =
+        runBlocking {
+            aiSettings.applyRemote(
+                AiSettings.Config(AiSettings.Provider.Anthropic, "sk-local", null, syncEnabled = true),
+            )
+            val bucket = buildJsonObject {
+                put("config", buildJsonObject {
+                    put("schemaVersion", 2)
+                    put("provider", "Anthropic")
+                    put("apiKey", "sk-local")
+                    put("askUrbitEnabled", "true")
+                    put("agentEnabled", "true")
+                })
+            }
+            sync.applyBucket(SettingsSyncImpl.BUCKET_AI_SETTINGS, bucket)
+            assertEquals(true, aiSettings.state.value.askUrbitEnabled)
+            assertEquals(true, aiSettings.state.value.agentEnabled)
+        }
+
+    @Test
+    fun `applyBucket AI_SETTINGS does not blank a saved key when the entry omits apiKey`() =
+        runBlocking {
+            // A peer push with syncEnabled=false omits apiKey; the old
+            // orEmpty() blanked the local key → silently disabled AI.
+            aiSettings.applyRemote(
+                AiSettings.Config(AiSettings.Provider.Anthropic, "sk-keep", null, syncEnabled = true),
+            )
+            val bucket = buildJsonObject {
+                put("config", buildJsonObject {
+                    put("schemaVersion", 2)
+                    put("provider", "Anthropic")
+                    put("emojiReactEnabled", "false")
+                    // no apiKey
+                })
+            }
+            sync.applyBucket(SettingsSyncImpl.BUCKET_AI_SETTINGS, bucket)
+            assertEquals("sk-keep", aiSettings.state.value.apiKey)
+        }
+
+    @Test
     fun `applyBucket AI_SETTINGS applies feature toggles even when sync is off`() =
         runBlocking {
             // Per-feature toggles always sync — a peer device that
