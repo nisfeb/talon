@@ -76,8 +76,9 @@ class DesktopAiSettings : AiSettingsRepository {
             AiSettings.Feature.SemanticSearch -> cur.copy(semanticSearchEnabled = enabled)
             AiSettings.Feature.TopicClusters -> cur.copy(topicClustersEnabled = enabled)
             AiSettings.Feature.ImportantMessages -> cur.copy(importantMessagesEnabled = enabled)
-            AiSettings.Feature.AskUrbit -> cur.copy(askUrbitEnabled = enabled)
-            AiSettings.Feature.Agent -> cur.copy(agentEnabled = enabled)
+            // Unified assistant — keep the legacy askUrbit flag mirrored.
+            AiSettings.Feature.Agent ->
+                cur.copy(agentEnabled = enabled, askUrbitEnabled = enabled)
             AiSettings.Feature.Mcp -> cur.copy(mcpEnabled = enabled)
         }
         persist(cfg)

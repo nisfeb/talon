@@ -111,22 +111,21 @@ object AiSettings {
             "Flag incoming messages that look similar to ones you've bookmarked. On-device, needs at least 5 bookmarks.",
             requiresCloudKey = false,
         ),
-        AskUrbit(
-            "feat_ask_urbit",
-            "Ask your Urbit (beta)",
-            "Ask questions about your chat history and get answers grounded in your real messages, with citations. Retrieval is on-device; only the question and matched excerpts go to your AI provider.",
-            requiresCloudKey = true,
-        ),
+        // One unified assistant (was Ask + Act). It answers questions
+        // grounded in your real messages AND takes actions; anything that
+        // changes data is confirmed first. Keeps key "feat_agent" so
+        // existing agent-enabled installs carry over; setFeature/read
+        // keep the legacy askUrbit flag in lockstep for migration.
         Agent(
             "feat_agent",
-            "Assistant actions (beta)",
-            "Let the assistant take actions for you — search, send, reply, react, mark read. Every action that changes anything is shown for your confirmation before it happens.",
+            "Assistant (beta)",
+            "A chat assistant grounded in your real messages. Ask about your history or tell it to do things — search, send, reply, react, mark read. Anything that changes data is shown for your confirmation first.",
             requiresCloudKey = true,
         ),
         Mcp(
             "feat_mcp",
             "Reach the ship's tools (MCP, beta)",
-            "If your ship runs an MCP server, let the assistant scry any agent to answer questions and (with your per-action confirmation) poke agents. Arbitrary-code tools stay off. Only applies in Assistant actions mode.",
+            "If your ship runs an MCP server, let the assistant scry any agent to answer questions and (with your per-action confirmation) poke agents. Arbitrary-code tools stay off.",
             requiresCloudKey = true,
         ),
     }

@@ -68,8 +68,9 @@ class AndroidAiSettings(context: Context) : AiSettingsRepository {
             AiSettings.Feature.SemanticSearch -> _state.value.copy(semanticSearchEnabled = enabled)
             AiSettings.Feature.TopicClusters -> _state.value.copy(topicClustersEnabled = enabled)
             AiSettings.Feature.ImportantMessages -> _state.value.copy(importantMessagesEnabled = enabled)
-            AiSettings.Feature.AskUrbit -> _state.value.copy(askUrbitEnabled = enabled)
-            AiSettings.Feature.Agent -> _state.value.copy(agentEnabled = enabled)
+            // Unified assistant — keep the legacy askUrbit flag mirrored.
+            AiSettings.Feature.Agent ->
+                _state.value.copy(agentEnabled = enabled, askUrbitEnabled = enabled)
             AiSettings.Feature.Mcp -> _state.value.copy(mcpEnabled = enabled)
         }
         onStateChange?.invoke(_state.value, false)
@@ -96,8 +97,8 @@ class AndroidAiSettings(context: Context) : AiSettingsRepository {
             .putBoolean(AiSettings.Feature.SemanticSearch.key, config.semanticSearchEnabled)
             .putBoolean(AiSettings.Feature.TopicClusters.key, config.topicClustersEnabled)
             .putBoolean(AiSettings.Feature.ImportantMessages.key, config.importantMessagesEnabled)
-            .putBoolean(AiSettings.Feature.AskUrbit.key, config.askUrbitEnabled)
             .putBoolean(AiSettings.Feature.Agent.key, config.agentEnabled)
+            .putBoolean(LEGACY_ASK_URBIT_KEY, config.agentEnabled)
             .putBoolean(AiSettings.Feature.Mcp.key, config.mcpEnabled)
             .putBoolean(KEY_SYNC, config.syncEnabled)
             .apply()
@@ -115,6 +116,7 @@ class AndroidAiSettings(context: Context) : AiSettingsRepository {
         // enabled feature (especially the opt-in AskUrbit/Agent) can't
         // survive sign-out and resurrect as enabled on the next launch.
         AiSettings.Feature.values().forEach { editor.remove(it.key) }
+        editor.remove(LEGACY_ASK_URBIT_KEY) // no longer in Feature.values()
         editor.apply()
         _state.value = AiSettings.Config(AiSettings.Provider.Anthropic, "", null)
         onStateChange?.invoke(_state.value, false)
@@ -128,6 +130,10 @@ class AndroidAiSettings(context: Context) : AiSettingsRepository {
         val key = prefs.getString(KEY_API_KEY, "").orEmpty()
         val model = prefs.getString(KEY_MODEL, null)?.takeIf { it.isNotBlank() }
         val baseUrl = prefs.getString(KEY_BASE_URL, null)?.takeIf { it.isNotBlank() }
+        // Unified assistant: either the current flag or the legacy
+        // "Ask your Urbit" flag means enabled (migration).
+        val assistantOn = prefs.getBoolean(AiSettings.Feature.Agent.key, false) ||
+            prefs.getBoolean(LEGACY_ASK_URBIT_KEY, false)
         return AiSettings.Config(
             provider = provider,
             apiKey = key,
@@ -144,8 +150,8 @@ class AndroidAiSettings(context: Context) : AiSettingsRepository {
             semanticSearchEnabled = prefs.getBoolean(AiSettings.Feature.SemanticSearch.key, true),
             topicClustersEnabled = prefs.getBoolean(AiSettings.Feature.TopicClusters.key, true),
             importantMessagesEnabled = prefs.getBoolean(AiSettings.Feature.ImportantMessages.key, true),
-            askUrbitEnabled = prefs.getBoolean(AiSettings.Feature.AskUrbit.key, false),
-            agentEnabled = prefs.getBoolean(AiSettings.Feature.Agent.key, false),
+            askUrbitEnabled = assistantOn,
+            agentEnabled = assistantOn,
             mcpEnabled = prefs.getBoolean(AiSettings.Feature.Mcp.key, false),
             syncEnabled = prefs.getBoolean(KEY_SYNC, true),
         )
@@ -157,5 +163,8 @@ class AndroidAiSettings(context: Context) : AiSettingsRepository {
         private const val KEY_MODEL = "model"
         private const val KEY_BASE_URL = "base_url"
         private const val KEY_SYNC = "sync_enabled"
+        // Legacy "Ask your Urbit" key, folded into the unified assistant
+        // (feat_agent). Read for migration + written in lockstep.
+        private const val LEGACY_ASK_URBIT_KEY = "feat_ask_urbit"
     }
 }

@@ -42,14 +42,8 @@ class AskUrbit(
         k: Int = 20,
     ): Answer {
         // Hybrid retrieval: semantic for "messages about X", lexical for
-        // "the message that literally said X". Merging the two keeps a
-        // specifically-worded line the embedding model ranks low — or
-        // drops below the cosine floor — from being invisible to the
-        // model (see mergeHits + KeywordSearch).
-        val semantic = embedder.semanticSearch(question)
-        val terms = salientTerms(question)
-        val lexical = if (terms.isEmpty()) emptyList() else embedder.keywordSearch(terms)
-        val hits = mergeHits(lexical = lexical, semantic = semantic, k = k)
+        // "the message that literally said X" (see hybridSearch).
+        val hits = embedder.hybridSearch(question, k)
         if (hits.isEmpty()) {
             return Answer(
                 "I couldn't find anything in your message history about that.",

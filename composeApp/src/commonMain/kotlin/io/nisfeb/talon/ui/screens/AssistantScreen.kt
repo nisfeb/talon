@@ -11,12 +11,10 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -46,9 +44,7 @@ import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import io.nisfeb.talon.ai.AgentClient
 import io.nisfeb.talon.ai.AgentLoop
-import io.nisfeb.talon.ai.AiClient
 import io.nisfeb.talon.ai.AiSettingsRepository
-import io.nisfeb.talon.ai.AskUrbit
 import io.nisfeb.talon.ai.McpClient
 import io.nisfeb.talon.ai.mcpAgentTools
 import io.nisfeb.talon.ai.SearchEmbedderClient
@@ -58,6 +54,7 @@ import io.nisfeb.talon.ai.ToolCatalog
 import io.nisfeb.talon.data.AppDatabase
 import io.nisfeb.talon.data.AssistantHistoryEntity
 import io.nisfeb.talon.ui.ContactMap
+import io.nisfeb.talon.ui.MarkdownText
 import io.nisfeb.talon.ui.MentionPicker
 import io.nisfeb.talon.ui.contactMapFlow
 import io.nisfeb.talon.ui.detectMentionQuery
@@ -69,19 +66,15 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.launch
 
 /**
- * Talon Assistant (docs/assistant.md). Two opt-in modes share one screen:
- *
- *  - **Ask** (Phase 1): grounded Q&A over the user's history. Retrieval
- *    is on-device; only the question + matched excerpts hit the LLM.
- *  - **Act** (Phase 2): an agent that runs tools. Reads run freely;
- *    every write surfaces a confirmation card before it executes.
- *
- * Each mode appears only when its feature flag is on and a key is set,
- * so the screen (and its entry point) stay invisible during rc rollout.
+ * Talon Assistant (docs/assistant.md). One opt-in agent: it answers
+ * questions grounded in the user's real messages (via its search/read
+ * tools) and takes actions on request. Reads run freely; every write
+ * surfaces a confirmation card before it executes — that gate, not a
+ * mode split, is the trust boundary. Visible only when the assistant
+ * feature is on and a key is set, so it stays invisible during rollout.
  */
-private enum class Mode { Ask, Act }
 
-/** A line in the Act-mode transcript. */
+/** A line in the agent transcript. */
 private sealed interface Line {
     data class You(val text: String) : Line
     data class Note(val text: String) : Line
@@ -115,9 +108,6 @@ fun AssistantScreen(
     }.collectAsState(initial = ContactMap.EMPTY)
     val scope = rememberCoroutineScope()
 
-    val askUrbit = remember(aiSettings, embedder) {
-        embedder?.let { AskUrbit(AiClient { aiSettings.state.value }, it) }
-    }
     val agentClient = remember(aiSettings) { AgentClient { aiSettings.state.value } }
 
     // MCP: if the user opted in (and is in Act mode) and the ship exposes
@@ -125,10 +115,10 @@ fun AssistantScreen(
     // Read tools run free; pokes are confirm-gated; eval/install stay
     // hidden (see McpTools). Discovery doubles as the gate — a ship with
     // no MCP server just yields no tools.
-    val mcpClient = remember(repo, aiState.mcpEnabled, aiState.agentEnabled) {
+    val mcpClient = remember(repo, aiState.mcpEnabled) {
         val http = repo?.shipHttp
         val base = repo?.shipBaseUrl
-        if (aiState.mcpEnabled && aiState.agentEnabled && http != null && base != null) {
+        if (aiState.mcpEnabled && http != null && base != null) {
             McpClient(http, base)
         } else {
             null
@@ -171,19 +161,11 @@ fun AssistantScreen(
         } else null
     }
 
-    val askOn = aiState.askUrbitEnabled && askUrbit != null
-    val actOn = aiState.agentEnabled && agentLoop != null
-    var mode by remember(askOn, actOn) {
-        mutableStateOf(if (actOn && !askOn) Mode.Act else Mode.Ask)
-    }
-
     var questionField by remember { mutableStateOf(TextFieldValue("")) }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
 
-    // Ask-mode result.
-    var answer by remember { mutableStateOf<AskUrbit.Answer?>(null) }
-    // Act-mode transcript + the in-flight write awaiting confirmation.
+    // The agent transcript + the in-flight write awaiting confirmation.
     val transcript = remember { mutableStateListOf<Line>() }
     var pending by remember { mutableStateOf<Pending?>(null) }
 
@@ -197,31 +179,11 @@ fun AssistantScreen(
     val history by historyDao.recent(HISTORY_KEEP).collectAsState(initial = emptyList())
     var expandedHistoryId by remember { mutableStateOf<Long?>(null) }
 
-    suspend fun record(mode: Mode, question: String, answerText: String) {
-        historyDao.insert(
-            AssistantHistoryEntity(
-                mode = if (mode == Mode.Act) "Act" else "Ask",
-                question = question,
-                answer = answerText,
-                createdAt = System.currentTimeMillis(),
-            ),
-        )
-        historyDao.trim(HISTORY_KEEP)
-    }
-
-    fun submitAsk(q: String) {
-        val ask = askUrbit ?: return
-        busy = true; error = null; answer = null
-        scope.launch {
-            runCatching { ask.ask(q, displayName = { contactMap.displayName(it) }) }
-                .onSuccess { answer = it; record(Mode.Ask, q, it.text) }
-                .onFailure { error = it.message ?: it::class.simpleName }
-            busy = false
-        }
-    }
-
-    fun submitAct(q: String) {
+    fun submit() {
         val loop = agentLoop ?: return
+        val q = questionField.text.trim()
+        if (q.isEmpty() || busy) return
+        questionField = TextFieldValue("")
         busy = true; error = null
         transcript.add(Line.You(q))
         var finalAnswer = ""
@@ -241,19 +203,17 @@ fun AssistantScreen(
                         transcript.add(ev.toLine())
                     },
                 )
-                record(Mode.Act, q, finalAnswer.ifBlank { "(no reply)" })
+                historyDao.insert(
+                    AssistantHistoryEntity(
+                        mode = "Assistant",
+                        question = q,
+                        answer = finalAnswer.ifBlank { "(no reply)" },
+                        createdAt = System.currentTimeMillis(),
+                    ),
+                )
+                historyDao.trim(HISTORY_KEEP)
             }.onFailure { error = it.message ?: it::class.simpleName }
             busy = false
-        }
-    }
-
-    fun submit() {
-        val q = questionField.text.trim()
-        if (q.isEmpty() || busy) return
-        questionField = TextFieldValue("")
-        when (mode) {
-            Mode.Ask -> submitAsk(q)
-            Mode.Act -> submitAct(q)
         }
     }
 
@@ -278,25 +238,9 @@ fun AssistantScreen(
                 .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            if (askOn && actOn) {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    FilterChip(selected = mode == Mode.Ask, onClick = { mode = Mode.Ask }, label = { Text("Ask") })
-                    FilterChip(selected = mode == Mode.Act, onClick = { mode = Mode.Act }, label = { Text("Act") })
-                }
-            }
-
-            // MCP (ship tools) only apply to the Act agent. Steer the user
-            // there if they enabled it but are in Ask mode / haven't turned
-            // on actions, and otherwise show the live connection status.
+            // Ship-tools (MCP) connection status, when opted in.
             if (aiState.mcpEnabled) {
-                val mcpHint = when {
-                    !aiState.agentEnabled ->
-                        "Ship tools (MCP) run in Assistant actions mode — turn that on too."
-                    mode == Mode.Ask ->
-                        "Ship tools (MCP) run in the Act tab, not Ask."
-                    else -> mcpStatus
-                }
-                mcpHint?.let {
+                mcpStatus?.let {
                     Text(
                         it,
                         style = MaterialTheme.typography.labelSmall,
@@ -305,14 +249,12 @@ fun AssistantScreen(
                 }
             }
 
-            val ready = if (mode == Mode.Ask) askUrbit != null else agentLoop != null
+            val ready = agentLoop != null
             OutlinedTextField(
                 value = questionField,
                 onValueChange = { questionField = it },
                 modifier = Modifier.fillMaxWidth(),
-                label = {
-                    Text(if (mode == Mode.Ask) "Ask about your chat history" else "Tell the assistant what to do")
-                },
+                label = { Text("Ask or tell your assistant…") },
                 enabled = ready && !busy,
                 keyboardActions = androidx.compose.foundation.text.KeyboardActions(onSend = { submit() }),
                 keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = ImeAction.Send),
@@ -348,7 +290,7 @@ fun AssistantScreen(
                 )
             } else {
                 Button(onClick = { submit() }, enabled = !busy && questionField.text.isNotBlank()) {
-                    Text(if (busy) "Working…" else if (mode == Mode.Ask) "Ask" else "Go")
+                    Text(if (busy) "Working…" else "Send")
                 }
             }
 
@@ -371,26 +313,11 @@ fun AssistantScreen(
                 )
             }
 
-            if (mode == Mode.Ask) {
-                answer?.let { a ->
-                    Text(a.text, style = MaterialTheme.typography.bodyLarge)
-                    if (a.sources.isNotEmpty()) {
-                        Text("Sources", style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(top = 4.dp))
-                        a.sources.forEach { src ->
-                            AssistChip(
-                                onClick = { onOpenMessage(src.whom, src.postId, null) },
-                                label = { Text("[${src.index}] ${contactMap.displayName(src.author)}: ${src.snippet}") },
-                            )
-                        }
-                    }
-                }
-            } else {
-                transcript.forEach { line ->
-                    when (line) {
-                        is Line.You -> Text("You: ${line.text}", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary)
-                        is Line.Note -> Text(line.text, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, fontFamily = FontFamily.Monospace)
-                        is Line.Said -> Text(line.text, style = MaterialTheme.typography.bodyLarge)
-                    }
+            transcript.forEach { line ->
+                when (line) {
+                    is Line.You -> Text("You: ${line.text}", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary)
+                    is Line.Note -> Text(line.text, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, fontFamily = FontFamily.Monospace)
+                    is Line.Said -> MarkdownText(line.text)
                 }
             }
 
@@ -418,7 +345,6 @@ fun AssistantScreen(
                         onToggle = { expandedHistoryId = if (expandedHistoryId == h.id) null else h.id },
                         onAskAgain = {
                             questionField = TextFieldValue(h.question, TextRange(h.question.length))
-                            mode = if (h.mode == "Act") Mode.Act else Mode.Ask
                         },
                     )
                 }
@@ -437,14 +363,11 @@ private fun HistoryRow(
 ) {
     Card(modifier = Modifier.fillMaxWidth().clickable { onToggle() }) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text(entry.mode, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
-                Text(
-                    shortRelativeTime(entry.createdAt, nowMs),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
+            Text(
+                shortRelativeTime(entry.createdAt, nowMs),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
             Text(
                 entry.question,
                 style = MaterialTheme.typography.bodyMedium,
@@ -452,11 +375,7 @@ private fun HistoryRow(
                 overflow = TextOverflow.Ellipsis,
             )
             if (expanded) {
-                Text(
-                    entry.answer,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                MarkdownText(entry.answer)
                 OutlinedButton(onClick = onAskAgain) { Text("Ask again") }
             }
         }

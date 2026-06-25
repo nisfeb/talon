@@ -43,7 +43,7 @@ object ToolCatalog {
         Tool(
             spec = ToolSpec(
                 "search_history",
-                "Semantic search over the user's whole chat history. Returns the most relevant messages with their whom (conversation id), post (message id), author, and text.",
+                "Search the user's whole chat history (semantic + keyword). Returns the most relevant messages with their whom (conversation id), post (message id), author, and text.",
                 schema(
                     "query" to ("string" to "What to search for, in natural language."),
                     "k" to ("integer" to "Max results (default 10)."),
@@ -54,10 +54,10 @@ object ToolCatalog {
         ) { args ->
             val q = args.str("query").orEmpty()
             if (q.isBlank()) return@Tool "Error: query is required."
-            // Clamp: a model-supplied negative k would throw in take(); 0
-            // would silently return nothing. Mirrors read_conversation.
+            // Clamp: a model-supplied negative k would throw; 0 would
+            // silently return nothing. Mirrors read_conversation.
             val k = (args.int("k") ?: 10).coerceIn(1, 50)
-            format(embedder.semanticSearch(q).take(k), displayName)
+            format(embedder.hybridSearch(q, k), displayName)
         },
         Tool(
             spec = ToolSpec(

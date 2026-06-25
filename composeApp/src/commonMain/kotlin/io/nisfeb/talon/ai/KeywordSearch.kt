@@ -41,3 +41,16 @@ internal suspend fun keywordSearch(
         )
         .take(cap)
 }
+
+/**
+ * Semantic + lexical retrieval merged into one ranked list — the single
+ * retrieval path the assistant uses everywhere (the Ask answer and the
+ * agent's `search_history` tool), so a specifically-worded message the
+ * embedding model ranks low isn't missed. See [AskUrbit.mergeHits].
+ */
+suspend fun SearchEmbedderClient.hybridSearch(query: String, k: Int): List<MessageEntity> {
+    val semantic = semanticSearch(query)
+    val terms = AskUrbit.salientTerms(query)
+    val lexical = if (terms.isEmpty()) emptyList() else keywordSearch(terms)
+    return AskUrbit.mergeHits(lexical = lexical, semantic = semantic, k = k)
+}
