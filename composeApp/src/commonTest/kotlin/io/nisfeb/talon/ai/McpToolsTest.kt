@@ -1,7 +1,10 @@
 package io.nisfeb.talon.ai
 
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonObject
+import okhttp3.HttpUrl.Companion.toHttpUrl
+import okhttp3.OkHttpClient
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -51,6 +54,44 @@ class McpToolsTest {
     fun `extractToolText handles empty content`() {
         assertEquals("(no output)", McpClient.extractToolText(result("""{"content":[]}""")))
         assertEquals("(no output)", McpClient.extractToolText(result("""{}""")))
+    }
+
+    @Test
+    fun `sanitizeToolName coerces namespaced MCP names to the provider pattern`() {
+        // The bug: an MCP tool named with a "/" (or ":" / "%") was sent as
+        // a function name and the provider 400'd the whole request with
+        // tools.N.name must match ^[A-Za-z0-9_-]{1,128}$.
+        val pattern = Regex("^[A-Za-z0-9_-]{1,64}$")
+        listOf(
+            "chat/send" to "chat_send",
+            "%settings:get" to "settings_get",
+            "scry-agent" to "scry-agent", // already valid, unchanged
+            "poke agent!" to "poke_agent",
+        ).forEach { (input, expected) ->
+            val out = sanitizeToolName(input)
+            assertEquals(expected, out, "for '$input'")
+            assertTrue(pattern.matches(out), "'$out' must match the provider pattern")
+        }
+        // Never blank, even when every char is illegal.
+        assertEquals("tool", sanitizeToolName("///"))
+        assertTrue(pattern.matches(sanitizeToolName("////")))
+    }
+
+    @Test
+    fun `mcpAgentTools sanitizes names, de-dups, and drops hidden tools`() {
+        val schema = JsonObject(emptyMap())
+        // Dispatch closures are never invoked here, so a throwaway client is fine.
+        val client = McpClient(OkHttpClient(), "http://localhost".toHttpUrl())
+        val defs = listOf(
+            McpToolDef("chat/send", "send", schema),
+            McpToolDef("chat:send", "send2", schema), // sanitizes to the same base
+            McpToolDef("mcp/eval-thread-builder", "danger", schema), // hidden
+        )
+        val tools = mcpAgentTools(client, defs)
+        // eval is dropped; the two collide-on-sanitize names are made unique.
+        assertEquals(listOf("chat_send", "chat_send_2"), tools.map { it.spec.name })
+        val pattern = Regex("^[A-Za-z0-9_-]{1,64}$")
+        assertTrue(tools.all { pattern.matches(it.spec.name) })
     }
 
     @Test

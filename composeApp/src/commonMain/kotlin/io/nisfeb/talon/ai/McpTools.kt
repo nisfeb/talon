@@ -35,18 +35,52 @@ internal fun mcpToolVisibility(name: String): McpVisibility {
     return McpVisibility.Write
 }
 
-/** Map discovered MCP tool defs to agent [Tool]s, dropping hidden ones. */
-fun mcpAgentTools(client: McpClient, defs: List<McpToolDef>): List<Tool> =
-    defs.mapNotNull { def ->
-        when (mcpToolVisibility(def.name)) {
-            McpVisibility.Hidden -> null
-            McpVisibility.Read -> Tool(
-                spec = ToolSpec(def.name, def.description, def.inputSchema),
-                write = false,
-            ) { args -> client.callTool(def.name, args) }
-            McpVisibility.Write -> Tool(
-                spec = ToolSpec(def.name, def.description, def.inputSchema),
-                write = true,
-            ) { args -> client.callTool(def.name, args) }
-        }
+/** Map discovered MCP tool defs to agent [Tool]s, dropping hidden ones.
+ *
+ *  The model-facing tool name is sanitized to the provider-required
+ *  `^[A-Za-z0-9_-]{1,64}$`: MCP names are routinely namespaced (e.g.
+ *  `chat/send`, `%settings:get`) and OpenAI/OpenRouter/Anthropic all
+ *  reject a `/`, `:` or `%` in a function name with a 400 that fails the
+ *  WHOLE request — not just that tool. Dispatch still uses the original
+ *  [McpToolDef.name] against the server; only what the model sees and
+ *  calls back by is sanitized (so the [AgentLoop] name→tool lookup, which
+ *  keys on [ToolSpec.name], still resolves). Names are de-duplicated
+ *  because sanitization can map distinct originals onto the same string. */
+fun mcpAgentTools(client: McpClient, defs: List<McpToolDef>): List<Tool> {
+    val used = mutableSetOf<String>()
+    return defs.mapNotNull { def ->
+        val visibility = mcpToolVisibility(def.name)
+        if (visibility == McpVisibility.Hidden) return@mapNotNull null
+        val safeName = uniqueToolName(sanitizeToolName(def.name), used)
+        Tool(
+            spec = ToolSpec(safeName, def.description, def.inputSchema),
+            write = visibility == McpVisibility.Write,
+        ) { args -> client.callTool(def.name, args) }
     }
+}
+
+/** Coerce a name to `^[A-Za-z0-9_-]{1,64}$`: ASCII alphanumerics, `_` and
+ *  `-` pass; everything else becomes `_`. Trims leading/trailing `_`, caps
+ *  length, and never returns blank. 64 (not 128) satisfies every provider
+ *  dialect's limit, Anthropic's being the tightest. */
+internal fun sanitizeToolName(name: String): String {
+    val cleaned = buildString {
+        for (c in name) {
+            append(if (c in 'a'..'z' || c in 'A'..'Z' || c in '0'..'9' || c == '_' || c == '-') c else '_')
+        }
+    }.trim('_').take(64)
+    return cleaned.ifBlank { "tool" }
+}
+
+/** Ensure a name is unique within [used] by appending `_2`, `_3`, … —
+ *  two distinct MCP names can sanitize to the same string, which would
+ *  otherwise collide in the agent's name→tool map. */
+private fun uniqueToolName(base: String, used: MutableSet<String>): String {
+    if (used.add(base)) return base
+    var i = 2
+    while (true) {
+        val candidate = "${base.take(60)}_$i"
+        if (used.add(candidate)) return candidate
+        i++
+    }
+}
