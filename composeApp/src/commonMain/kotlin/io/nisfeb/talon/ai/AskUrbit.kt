@@ -41,7 +41,15 @@ class AskUrbit(
         displayName: (String) -> String,
         k: Int = 20,
     ): Answer {
-        val hits = embedder.semanticSearch(question).take(k)
+        // Hybrid retrieval: semantic for "messages about X", lexical for
+        // "the message that literally said X". Merging the two keeps a
+        // specifically-worded line the embedding model ranks low — or
+        // drops below the cosine floor — from being invisible to the
+        // model (see mergeHits + KeywordSearch).
+        val semantic = embedder.semanticSearch(question)
+        val terms = salientTerms(question)
+        val lexical = if (terms.isEmpty()) emptyList() else embedder.keywordSearch(terms)
+        val hits = mergeHits(lexical = lexical, semantic = semantic, k = k)
         if (hits.isEmpty()) {
             return Answer(
                 "I couldn't find anything in your message history about that.",
@@ -63,6 +71,59 @@ class AskUrbit(
         private val CITE = Regex("""\[(\d+)]""")
         private const val EXCERPT_CHARS = 400
         private const val SNIPPET_CHARS = 120
+
+        // Question words + connectives that carry no retrieval signal —
+        // searching them matches almost everything. Distinctive nouns,
+        // names and numbers survive the filter and drive the lexical pass.
+        private val STOPWORDS = setOf(
+            "the", "a", "an", "and", "or", "but", "is", "are", "was", "were",
+            "be", "been", "being", "to", "of", "in", "on", "at", "for", "with",
+            "from", "by", "about", "into", "over", "what", "whats", "when",
+            "where", "who", "whom", "why", "how", "which", "that", "this",
+            "these", "those", "there", "here", "did", "do", "does", "done",
+            "can", "could", "would", "should", "will", "shall", "may", "i",
+            "you", "he", "she", "it", "we", "they", "me", "him", "her", "us",
+            "them", "my", "your", "his", "its", "our", "their", "said", "say",
+            "says", "tell", "show", "find", "any", "some", "anyone", "someone",
+            "message", "messages", "chat", "talking", "mentioned", "remember",
+        )
+
+        /** Distinctive words to drive the lexical pass — lowercased,
+         *  stop-worded, deduped, longest-first so rare nouns/names win
+         *  the cap over short common words. Pure. */
+        internal fun salientTerms(question: String, max: Int = 6): List<String> =
+            question.split(Regex("[^\\p{L}\\p{N}]+"))
+                .asSequence()
+                .map { it.lowercase() }
+                .filter { it.length >= 3 && it !in STOPWORDS }
+                .distinct()
+                .sortedByDescending { it.length }
+                .take(max)
+                .toList()
+
+        /** Merge lexical + semantic candidates into one ordered, deduped
+         *  list of at most [k]. Lexical gets [lexicalBudget] reserved
+         *  front slots so an exact-keyword match can't be crowded out by
+         *  semantic neighbours; semantic then fills the rest; any unused
+         *  room is topped up with leftover lexical. Dedup is by
+         *  (whom, id). Pure. */
+        internal fun mergeHits(
+            lexical: List<MessageEntity>,
+            semantic: List<MessageEntity>,
+            k: Int,
+            lexicalBudget: Int = k / 2,
+        ): List<MessageEntity> {
+            val seen = LinkedHashSet<String>()
+            val out = ArrayList<MessageEntity>(k)
+            fun add(m: MessageEntity) {
+                if (out.size >= k) return
+                if (seen.add("${m.whom}:${m.id}")) out.add(m)
+            }
+            lexical.take(lexicalBudget.coerceAtLeast(0)).forEach(::add)
+            semantic.forEach(::add)
+            lexical.forEach(::add)
+            return out
+        }
 
         /** Number (author, body) pairs into `"[n] who: text"` lines.
          *  Pure — newline-flattened and length-capped so the prompt

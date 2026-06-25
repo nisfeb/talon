@@ -37,6 +37,7 @@ class ToolCatalogTest {
         override val progress = MutableStateFlow(IndexProgress())
         override suspend fun start() {}
         override suspend fun semanticSearch(query: String): List<MessageEntity> = emptyList()
+        override suspend fun keywordSearch(terms: List<String>): List<MessageEntity> = emptyList()
         override suspend fun computeHighlights(): List<MessageEntity> = emptyList()
     }
 

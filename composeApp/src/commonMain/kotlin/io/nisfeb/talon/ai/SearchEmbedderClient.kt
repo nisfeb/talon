@@ -26,6 +26,12 @@ interface SearchEmbedderClient {
      *  (most-similar first). Empty on any failure or short query. */
     suspend fun semanticSearch(query: String): List<MessageEntity>
 
+    /** Lexical recall: messages whose content contains the query
+     *  [terms] (substring, case-insensitive), ranked by how many terms
+     *  match then recency. Complements [semanticSearch] for the exact
+     *  wording the embedding model misses. Empty when [terms] is empty. */
+    suspend fun keywordSearch(terms: List<String>): List<MessageEntity>
+
     /** Bookmarks-driven important-messages highlights — scored
      *  against the user's bookmark centroid. Empty when no
      *  bookmarks exist or the user hasn't enabled the feature. */
