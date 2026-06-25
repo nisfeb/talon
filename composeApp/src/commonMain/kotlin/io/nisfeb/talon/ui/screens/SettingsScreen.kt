@@ -809,6 +809,7 @@ internal fun aiFeatureEnabled(state: AiSettings.Config, feature: AiSettings.Feat
         AiSettings.Feature.TopicClusters -> state.topicClustersEnabled
         AiSettings.Feature.ImportantMessages -> state.importantMessagesEnabled
         AiSettings.Feature.AskUrbit -> state.askUrbitEnabled
+        AiSettings.Feature.Agent -> state.agentEnabled
     }
 
 @Composable

@@ -45,6 +45,9 @@ object AiSettings {
         // rc releases, so it defaults OFF and stays invisible until the
         // user both configures a key and turns it on.
         val askUrbitEnabled: Boolean = false,
+        // Phase 2 agentic mode — same opt-in, off-by-default treatment;
+        // additionally every write it proposes is user-confirmed.
+        val agentEnabled: Boolean = false,
         val syncEnabled: Boolean = true,
     ) {
         fun hasKey(): Boolean = apiKey.isNotBlank()
@@ -107,6 +110,12 @@ object AiSettings {
             "feat_ask_urbit",
             "Ask your Urbit (beta)",
             "Ask questions about your chat history and get answers grounded in your real messages, with citations. Retrieval is on-device; only the question and matched excerpts go to your AI provider.",
+            requiresCloudKey = true,
+        ),
+        Agent(
+            "feat_agent",
+            "Assistant actions (beta)",
+            "Let the assistant take actions for you — search, send, reply, react, mark read. Every action that changes anything is shown for your confirmation before it happens.",
             requiresCloudKey = true,
         ),
     }

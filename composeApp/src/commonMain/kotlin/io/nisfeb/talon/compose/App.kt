@@ -1093,6 +1093,7 @@ fun App(
                         db = db,
                         aiSettings = aiSettings,
                         embedder = searchEmbedderClient,
+                        repo = repo,
                         onBack = { showAssistant = false },
                         onOpenMessage = { whomTarget, postId, parentId ->
                             showAssistant = false
@@ -1523,8 +1524,9 @@ fun App(
                                         onOpenSearch = { showSearch = true },
                                         // Opt-in + key-gated, so the entry
                                         // point stays hidden by default
-                                        // during rc rollout.
-                                        onOpenAssistant = if (aiState.askUrbitEnabled && aiState.hasKey()) {
+                                        // during rc rollout. Either mode
+                                        // (Ask or Act) surfaces it.
+                                        onOpenAssistant = if ((aiState.askUrbitEnabled || aiState.agentEnabled) && aiState.hasKey()) {
                                             { showAssistant = true }
                                         } else null,
                                         onNewMessage = { showNewDm = true },
