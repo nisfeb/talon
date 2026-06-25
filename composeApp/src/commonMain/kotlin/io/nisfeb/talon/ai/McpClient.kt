@@ -3,7 +3,9 @@ package io.nisfeb.talon.ai
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonObject
@@ -180,19 +182,34 @@ class McpClient(
             return h == "localhost" || h == "::1" || h.startsWith("127.")
         }
 
-        /** Flatten an MCP `tools/call` result's content blocks to plain
-         *  text for the model. Pure. */
+        /** Flatten an MCP `tools/call` result to plain text for the model.
+         *  Pure. Handles all three shapes the ship's server emits:
+         *   - unstructured `content` blocks (`%text`, and `%resource` whose
+         *     text is nested under `resource.text`);
+         *   - structured tools (e.g. get-our-id) that send `structuredContent`
+         *     with NO text block — without this they read as "(no output)";
+         *   - `isError` flagged failures. */
         internal fun extractToolText(result: JsonObject): String {
-            val content = result["content"]?.jsonArray
-                ?: return "(no output)"
-            val text = content
-                .mapNotNull { (it as? JsonObject)?.get("text")?.jsonPrimitive?.contentOrNull }
+            val blocks = (result["content"] as? JsonArray) ?: JsonArray(emptyList())
+            val text = blocks
+                .mapNotNull { block ->
+                    val o = block as? JsonObject ?: return@mapNotNull null
+                    o["text"]?.jsonPrimitive?.contentOrNull
+                        ?: (o["resource"] as? JsonObject)?.get("text")?.jsonPrimitive?.contentOrNull
+                }
                 .joinToString("\n")
+            val structured = result["structuredContent"]
+                ?.takeUnless { it is JsonNull }
+                ?.toString()
+            val combined = listOfNotNull(
+                text.takeIf { it.isNotBlank() },
+                structured?.takeIf { it.isNotBlank() && it != text },
+            ).joinToString("\n")
             val isError = result["isError"]?.jsonPrimitive?.booleanOrNull == true
             return when {
-                isError -> "Error: ${text.ifBlank { "the tool reported a failure" }}"
-                text.isBlank() -> "(no output)"
-                else -> text
+                isError -> "Error: ${combined.ifBlank { "the tool reported a failure" }}"
+                combined.isBlank() -> "(no output)"
+                else -> combined
             }
         }
     }

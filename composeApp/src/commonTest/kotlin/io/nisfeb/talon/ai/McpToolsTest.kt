@@ -57,6 +57,29 @@ class McpToolsTest {
     }
 
     @Test
+    fun `extractToolText surfaces structuredContent when there is no text block`() {
+        // Structured tools (e.g. get-our-id) return structuredContent and
+        // NO content[].text — that read as "(no output)" and made every
+        // structured tool look like it returned nothing.
+        val r = result("""{"structuredContent":{"ship":"~sampel-palnet"},"isError":false}""")
+        val out = McpClient.extractToolText(r)
+        assertTrue(out.contains("~sampel-palnet"), "must surface the structured data: $out")
+    }
+
+    @Test
+    fun `extractToolText reads text nested under a resource block`() {
+        val r = result("""{"content":[{"type":"resource","resource":{"uri":"x","text":"file body"}}]}""")
+        assertEquals("file body", McpClient.extractToolText(r))
+    }
+
+    @Test
+    fun `extractToolText combines text and structuredContent`() {
+        val r = result("""{"content":[{"type":"text","text":"summary"}],"structuredContent":{"n":3}}""")
+        val out = McpClient.extractToolText(r)
+        assertTrue(out.contains("summary") && out.contains("\"n\":3"), out)
+    }
+
+    @Test
     fun `sanitizeToolName coerces namespaced MCP names to the provider pattern`() {
         // The bug: an MCP tool named with a "/" (or ":" / "%") was sent as
         // a function name and the provider 400'd the whole request with
