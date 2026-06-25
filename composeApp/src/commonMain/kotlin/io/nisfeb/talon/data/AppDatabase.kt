@@ -50,8 +50,9 @@ import androidx.room.RoomDatabaseConstructor
         MessageMediaEntity::class,
         RailItemPrefEntity::class,
         DmInviteEntity::class,
+        AssistantHistoryEntity::class,
     ],
-    version = 34,
+    version = 35,
     exportSchema = false,
 )
 @ConstructedBy(AppDatabaseConstructor::class)
@@ -75,6 +76,7 @@ expect abstract class AppDatabase : RoomDatabase {
     abstract fun messageMedia(): MessageMediaDao
     abstract fun railItemPrefs(): RailItemPrefDao
     abstract fun dmInvites(): DmInviteDao
+    abstract fun assistantHistory(): AssistantHistoryDao
 }
 
 /**

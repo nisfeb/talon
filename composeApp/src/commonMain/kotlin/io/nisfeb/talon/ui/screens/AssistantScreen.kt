@@ -1,5 +1,6 @@
 package io.nisfeb.talon.ui.screens
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -16,6 +17,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -23,6 +25,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -32,9 +35,13 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import io.nisfeb.talon.ai.AgentClient
 import io.nisfeb.talon.ai.AgentLoop
@@ -46,8 +53,13 @@ import io.nisfeb.talon.ai.Tool
 import io.nisfeb.talon.ai.ToolCall
 import io.nisfeb.talon.ai.ToolCatalog
 import io.nisfeb.talon.data.AppDatabase
+import io.nisfeb.talon.data.AssistantHistoryEntity
 import io.nisfeb.talon.ui.ContactMap
+import io.nisfeb.talon.ui.MentionPicker
 import io.nisfeb.talon.ui.contactMapFlow
+import io.nisfeb.talon.ui.detectMentionQuery
+import io.nisfeb.talon.ui.shortRelativeTime
+import io.nisfeb.talon.ui.suggestionsFor
 import io.nisfeb.talon.urbit.TlonChatRepo
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.launch
@@ -73,6 +85,9 @@ private sealed interface Line {
 }
 
 private data class Pending(val call: ToolCall, val tool: Tool, val gate: CompletableDeferred<Boolean>)
+
+/** How many past exchanges to retain. "~50 or so, maybe more." */
+private const val HISTORY_KEEP = 100
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -115,7 +130,7 @@ fun AssistantScreen(
         mutableStateOf(if (actOn && !askOn) Mode.Act else Mode.Ask)
     }
 
-    var question by remember { mutableStateOf("") }
+    var questionField by remember { mutableStateOf(TextFieldValue("")) }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
 
@@ -125,12 +140,34 @@ fun AssistantScreen(
     val transcript = remember { mutableStateListOf<Line>() }
     var pending by remember { mutableStateOf<Pending?>(null) }
 
+    // @p autocomplete: candidate ships are the contact book. Mirrors the
+    // chat composer (ChatComposer.kt) so referring to a ship feels the
+    // same here as when typing a message.
+    val allShips = remember(contactMap) { contactMap.contacts.map { it.ship } }
+
+    // Local reference log of past exchanges (docs/assistant.md).
+    val historyDao = remember(db) { db.assistantHistory() }
+    val history by historyDao.recent(HISTORY_KEEP).collectAsState(initial = emptyList())
+    var expandedHistoryId by remember { mutableStateOf<Long?>(null) }
+
+    suspend fun record(mode: Mode, question: String, answerText: String) {
+        historyDao.insert(
+            AssistantHistoryEntity(
+                mode = if (mode == Mode.Act) "Act" else "Ask",
+                question = question,
+                answer = answerText,
+                createdAt = System.currentTimeMillis(),
+            ),
+        )
+        historyDao.trim(HISTORY_KEEP)
+    }
+
     fun submitAsk(q: String) {
         val ask = askUrbit ?: return
         busy = true; error = null; answer = null
         scope.launch {
             runCatching { ask.ask(q, displayName = { contactMap.displayName(it) }) }
-                .onSuccess { answer = it }
+                .onSuccess { answer = it; record(Mode.Ask, q, it.text) }
                 .onFailure { error = it.message ?: it::class.simpleName }
             busy = false
         }
@@ -140,6 +177,7 @@ fun AssistantScreen(
         val loop = agentLoop ?: return
         busy = true; error = null
         transcript.add(Line.You(q))
+        var finalAnswer = ""
         scope.launch {
             runCatching {
                 loop.run(
@@ -151,17 +189,21 @@ fun AssistantScreen(
                         pending = null
                         ok
                     },
-                    onEvent = { ev -> transcript.add(ev.toLine()) },
+                    onEvent = { ev ->
+                        if (ev is AgentLoop.Event.Answer) finalAnswer = ev.text
+                        transcript.add(ev.toLine())
+                    },
                 )
+                record(Mode.Act, q, finalAnswer.ifBlank { "(no reply)" })
             }.onFailure { error = it.message ?: it::class.simpleName }
             busy = false
         }
     }
 
     fun submit() {
-        val q = question.trim()
+        val q = questionField.text.trim()
         if (q.isEmpty() || busy) return
-        question = ""
+        questionField = TextFieldValue("")
         when (mode) {
             Mode.Ask -> submitAsk(q)
             Mode.Act -> submitAct(q)
@@ -198,8 +240,8 @@ fun AssistantScreen(
 
             val ready = if (mode == Mode.Ask) askUrbit != null else agentLoop != null
             OutlinedTextField(
-                value = question,
-                onValueChange = { question = it },
+                value = questionField,
+                onValueChange = { questionField = it },
                 modifier = Modifier.fillMaxWidth(),
                 label = {
                     Text(if (mode == Mode.Ask) "Ask about your chat history" else "Tell the assistant what to do")
@@ -209,6 +251,28 @@ fun AssistantScreen(
                 keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = ImeAction.Send),
             )
 
+            // @p suggestions for the word the caret is in. Tapping inserts
+            // the ship at the trigger and moves the caret past it.
+            val mention = detectMentionQuery(questionField.text, questionField.selection.start)
+            val suggestions = mention?.let { (q, _) -> suggestionsFor(q, contactMap, allShips) }.orEmpty()
+            if (ready && !busy && mention != null && suggestions.isNotEmpty()) {
+                val triggerStart = mention.second
+                MentionPicker(
+                    suggestions = suggestions,
+                    onPick = { ship ->
+                        val text = questionField.text
+                        val caret = questionField.selection.start.coerceIn(0, text.length)
+                        val before = text.substring(0, triggerStart)
+                        val after = text.substring(caret)
+                        val inserted = "$ship "
+                        questionField = TextFieldValue(
+                            text = before + inserted + after,
+                            selection = TextRange(before.length + inserted.length),
+                        )
+                    },
+                )
+            }
+
             if (!ready) {
                 Text(
                     "On-device search isn't available here, so the assistant can't run.",
@@ -216,7 +280,7 @@ fun AssistantScreen(
                     color = MaterialTheme.colorScheme.error,
                 )
             } else {
-                Button(onClick = { submit() }, enabled = !busy && question.isNotBlank()) {
+                Button(onClick = { submit() }, enabled = !busy && questionField.text.isNotBlank()) {
                     Text(if (busy) "Working…" else if (mode == Mode.Ask) "Ask" else "Go")
                 }
             }
@@ -261,6 +325,72 @@ fun AssistantScreen(
                         is Line.Said -> Text(line.text, style = MaterialTheme.typography.bodyLarge)
                     }
                 }
+            }
+
+            // Reference log of past exchanges. Tap a row to reveal its
+            // answer; "Ask again" drops the question back into the field.
+            if (history.isNotEmpty()) {
+                HorizontalDivider(modifier = Modifier.padding(top = 4.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text("Recent", style = MaterialTheme.typography.labelLarge)
+                    TextButton(onClick = {
+                        scope.launch { historyDao.clearAll() }
+                        expandedHistoryId = null
+                    }) { Text("Clear") }
+                }
+                val now = remember(history) { System.currentTimeMillis() }
+                history.forEach { h ->
+                    HistoryRow(
+                        entry = h,
+                        nowMs = now,
+                        expanded = expandedHistoryId == h.id,
+                        onToggle = { expandedHistoryId = if (expandedHistoryId == h.id) null else h.id },
+                        onAskAgain = {
+                            questionField = TextFieldValue(h.question, TextRange(h.question.length))
+                            mode = if (h.mode == "Act") Mode.Act else Mode.Ask
+                        },
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun HistoryRow(
+    entry: AssistantHistoryEntity,
+    nowMs: Long,
+    expanded: Boolean,
+    onToggle: () -> Unit,
+    onAskAgain: () -> Unit,
+) {
+    Card(modifier = Modifier.fillMaxWidth().clickable { onToggle() }) {
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(entry.mode, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                Text(
+                    shortRelativeTime(entry.createdAt, nowMs),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Text(
+                entry.question,
+                style = MaterialTheme.typography.bodyMedium,
+                maxLines = if (expanded) Int.MAX_VALUE else 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (expanded) {
+                Text(
+                    entry.answer,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                OutlinedButton(onClick = onAskAgain) { Text("Ask again") }
             }
         }
     }

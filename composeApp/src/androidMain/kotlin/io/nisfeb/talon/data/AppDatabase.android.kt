@@ -32,6 +32,7 @@ actual abstract class AppDatabase : RoomDatabase() {
     actual abstract fun messageMedia(): MessageMediaDao
     actual abstract fun railItemPrefs(): RailItemPrefDao
     actual abstract fun dmInvites(): DmInviteDao
+    actual abstract fun assistantHistory(): AssistantHistoryDao
 }
 
 /**
@@ -53,7 +54,7 @@ fun createAppDatabase(context: Context, name: String): AppDatabase {
             MIGRATION_20_21, MIGRATION_21_22, MIGRATION_22_23,
             MIGRATION_23_24, MIGRATION_24_25, MIGRATION_25_26,
             MIGRATION_26_27, MIGRATION_27_28, MIGRATION_28_29,
-            MIGRATION_29_30, MIGRATION_30_31,
+            MIGRATION_29_30, MIGRATION_30_31, MIGRATION_34_35,
         )
         // dropAllTables = true preserves the pre-2.7 behaviour: when
         // Room can't find a migration path, drop everything and rebuild.
@@ -258,6 +259,25 @@ private val MIGRATION_30_31 = object : Migration(30, 31) {
             CREATE TABLE IF NOT EXISTS rail_item_prefs (
                 itemName TEXT NOT NULL PRIMARY KEY,
                 visible INTEGER NOT NULL
+            )
+            """.trimIndent()
+        )
+    }
+}
+
+// New table only — everyone on the current release sits at 34, so this
+// one hop spares their (expensive) on-device embeddings from a
+// destructive rebuild. Older installs still fall back to drop+rebuild.
+private val MIGRATION_34_35 = object : Migration(34, 35) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS assistant_history (
+                id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+                mode TEXT NOT NULL,
+                question TEXT NOT NULL,
+                answer TEXT NOT NULL,
+                createdAt INTEGER NOT NULL
             )
             """.trimIndent()
         )
