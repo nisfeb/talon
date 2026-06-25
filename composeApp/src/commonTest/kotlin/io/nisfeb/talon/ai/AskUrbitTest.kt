@@ -1,7 +1,11 @@
 package io.nisfeb.talon.ai
 
+import io.nisfeb.talon.data.MessageEntity
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.runBlocking
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 
 /**
  * Pins the pure retrieval-grounding logic behind "Ask your Urbit":
@@ -53,5 +57,21 @@ class AskUrbitTest {
             emptyList(),
             AskUrbit.parseCitedIndices("I couldn't find anything about that.", max = 10),
         )
+    }
+
+    @Test
+    fun `ask with no hits returns the no-results answer without calling the model`() = runBlocking {
+        // Empty retrieval short-circuits before the LLM, so the passthrough
+        // AiClient (no key, would throw on a real call) is never invoked.
+        val embedder = object : SearchEmbedderClient {
+            override val progress = MutableStateFlow(IndexProgress())
+            override suspend fun start() {}
+            override suspend fun semanticSearch(query: String): List<MessageEntity> = emptyList()
+            override suspend fun computeHighlights(): List<MessageEntity> = emptyList()
+        }
+        val ask = AskUrbit(AiClient { AiSettings.Config(AiSettings.Provider.Anthropic, "", null) }, embedder)
+        val answer = ask.ask("anything at all", displayName = { it })
+        assertTrue(answer.sources.isEmpty())
+        assertTrue(answer.text.contains("couldn't find"), "got: ${answer.text}")
     }
 }

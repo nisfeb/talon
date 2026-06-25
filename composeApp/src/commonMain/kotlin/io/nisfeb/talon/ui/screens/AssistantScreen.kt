@@ -293,7 +293,13 @@ private fun AgentLoop.Event.toLine(): Line = when (this) {
 private fun describe(call: ToolCall, contactMap: ContactMap): String {
     val args = call.args.entries.joinToString("\n") { (k, v) ->
         val raw = v.toString().trim('"')
-        val shown = if (raw.startsWith("~")) contactMap.displayName(raw) else raw
+        // Resolve conversation ids to titles so the user is approving a
+        // legible target, not an opaque "chat/~zod/general" / "0v..." id.
+        val shown = when {
+            k == "whom" -> contactMap.conversationLabel(raw)
+            raw.startsWith("~") -> contactMap.displayName(raw)
+            else -> raw
+        }
         "  $k: $shown"
     }
     return "${call.name}\n$args"

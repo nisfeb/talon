@@ -6,6 +6,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.add
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -267,7 +268,10 @@ internal fun parseOpenAiTurn(body: JsonObject): AgentTurn {
     val msg = (body["choices"] as? JsonArray)?.firstOrNull()
         ?.jsonObject?.get("message")?.jsonObject
         ?: return AgentTurn.Final("")
-    val text = msg["content"]?.jsonPrimitive?.content
+    // contentOrNull yields Kotlin null for a JSON `null` (JsonNull is a
+    // JsonPrimitive whose `.content` is the literal string "null"); the
+    // common tool-call turn sends "content": null.
+    val text = msg["content"]?.jsonPrimitive?.contentOrNull
     val calls = (msg["tool_calls"] as? JsonArray)?.mapNotNull { tc ->
         val o = tc as? JsonObject ?: return@mapNotNull null
         val fn = o["function"]?.jsonObject ?: return@mapNotNull null

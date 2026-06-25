@@ -54,7 +54,9 @@ object ToolCatalog {
         ) { args ->
             val q = args.str("query").orEmpty()
             if (q.isBlank()) return@Tool "Error: query is required."
-            val k = args.int("k") ?: 10
+            // Clamp: a model-supplied negative k would throw in take(); 0
+            // would silently return nothing. Mirrors read_conversation.
+            val k = (args.int("k") ?: 10).coerceIn(1, 50)
             format(embedder.semanticSearch(q).take(k), displayName)
         },
         Tool(
@@ -86,7 +88,8 @@ object ToolCatalog {
             write = true,
         ) { args ->
             val whom = args.str("whom") ?: return@Tool "Error: whom is required."
-            val text = args.str("text") ?: return@Tool "Error: text is required."
+            val text = args.str("text")?.takeIf { it.isNotBlank() }
+                ?: return@Tool "Error: text is required."
             repo.send(whom, text)
             "Sent."
         },
@@ -105,7 +108,8 @@ object ToolCatalog {
         ) { args ->
             val whom = args.str("whom") ?: return@Tool "Error: whom is required."
             val parent = args.str("parentPost") ?: return@Tool "Error: parentPost is required."
-            val text = args.str("text") ?: return@Tool "Error: text is required."
+            val text = args.str("text")?.takeIf { it.isNotBlank() }
+                ?: return@Tool "Error: text is required."
             repo.reply(whom, parent, text)
             "Replied."
         },
@@ -124,7 +128,8 @@ object ToolCatalog {
         ) { args ->
             val whom = args.str("whom") ?: return@Tool "Error: whom is required."
             val post = args.str("post") ?: return@Tool "Error: post is required."
-            val emoji = args.str("emoji") ?: return@Tool "Error: emoji is required."
+            val emoji = args.str("emoji")?.takeIf { it.isNotBlank() }
+                ?: return@Tool "Error: emoji is required."
             repo.react(whom, post, emoji)
             "Reacted."
         },

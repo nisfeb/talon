@@ -18,7 +18,7 @@ releases so we never break installed apps.
 
 ---
 
-## Phase 1 — Answer (grounded RAG, read-only)  ← this branch
+## Phase 1 — Answer (grounded RAG, read-only)  ✅ landed
 
 Ask in natural language; get an answer grounded in your real messages, every
 claim citing the source message.
@@ -50,7 +50,7 @@ Test: pure-logic `commonTest` over `numberedContext` + `parseCitedIndices`
 
 ---
 
-## Phase 2 — Act (agentic tool-use)
+## Phase 2 — Act (agentic tool-use)  ✅ landed
 
 The assistant gains hands: it calls Talon's real `TlonChatRepo` pokes as tools,
 loops until done, and **never writes without explicit confirmation**.
@@ -89,8 +89,12 @@ desktop needs a scheduler analog → capability-flag it (mirror
 
 ## Cross-cutting
 
-- Lives in `commonMain`; both platforms have on-device embedders (DJL/ONNX
-  desktop, Embedder android), so retrieval works on both.
+- Lives in `commonMain`, but retrieval needs the on-device embedder, which
+  today works on **Android only**. Desktop sets `isOnDeviceAiSupported = false`
+  (the DJL/ONNX Rust tokenizer JNI SIGSEGVs against modern libstdc++), so the
+  Assistant is gated on `isOnDeviceAiSupported` and is Android-only for now —
+  the same flag flips it on for desktop the day that stack lands (mirrors
+  smart-search). Both the Settings toggles and the entry point honor the gate.
 - Default model: a current tool-capable model per provider (`AiClient.kt`).
 - Index coverage: `EmbeddingIndexer` must cover history for retrieval to be
   trustworthy — surface index progress in the assistant UI.

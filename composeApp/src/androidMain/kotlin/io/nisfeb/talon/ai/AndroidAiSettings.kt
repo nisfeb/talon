@@ -103,16 +103,17 @@ class AndroidAiSettings(context: Context) : AiSettingsRepository {
     }
 
     override fun clear() {
-        prefs.edit()
+        val editor = prefs.edit()
             .remove(KEY_PROVIDER)
             .remove(KEY_API_KEY)
             .remove(KEY_MODEL)
             .remove(KEY_BASE_URL)
-            .remove(AiSettings.Feature.CatchMeUp.key)
-            .remove(AiSettings.Feature.EmojiReact.key)
-            .remove(AiSettings.Feature.DailyDigest.key)
             .remove(KEY_SYNC)
-            .apply()
+        // Remove every feature toggle — not a hand-picked few — so an
+        // enabled feature (especially the opt-in AskUrbit/Agent) can't
+        // survive sign-out and resurrect as enabled on the next launch.
+        AiSettings.Feature.values().forEach { editor.remove(it.key) }
+        editor.apply()
         _state.value = AiSettings.Config(AiSettings.Provider.Anthropic, "", null)
         onStateChange?.invoke(_state.value, false)
     }

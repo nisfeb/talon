@@ -38,6 +38,7 @@ import io.nisfeb.talon.ui.PlatformBackHandler
 import io.nisfeb.talon.ui.RailItem
 import io.nisfeb.talon.ui.RailTab
 import io.nisfeb.talon.ui.invitesSnapshot
+import io.nisfeb.talon.ui.isOnDeviceAiSupported
 import io.nisfeb.talon.ui.isVisible
 import io.nisfeb.talon.ui.RightPaneContent
 import io.nisfeb.talon.ui.RightPaneState
@@ -1524,9 +1525,15 @@ fun App(
                                         onOpenSearch = { showSearch = true },
                                         // Opt-in + key-gated, so the entry
                                         // point stays hidden by default
-                                        // during rc rollout. Either mode
-                                        // (Ask or Act) surfaces it.
-                                        onOpenAssistant = if ((aiState.askUrbitEnabled || aiState.agentEnabled) && aiState.hasKey()) {
+                                        // during rc rollout. Also requires
+                                        // the on-device embedder (retrieval
+                                        // backbone) — desktop has none today,
+                                        // so the assistant is Android-only and
+                                        // must not surface a dead-end there.
+                                        onOpenAssistant = if (isOnDeviceAiSupported &&
+                                            (aiState.askUrbitEnabled || aiState.agentEnabled) &&
+                                            aiState.hasKey()
+                                        ) {
                                             { showAssistant = true }
                                         } else null,
                                         onNewMessage = { showNewDm = true },

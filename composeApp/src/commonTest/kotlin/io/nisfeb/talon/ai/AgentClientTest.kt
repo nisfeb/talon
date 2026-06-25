@@ -10,6 +10,7 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /**
@@ -101,6 +102,17 @@ class AgentClientTest {
         val call = turn.calls.single()
         assertEquals("react", call.name)
         assertEquals("5", call.args["post"]!!.jsonPrimitive.content)
+        // Regression: JSON `content: null` must decode to Kotlin null,
+        // not the literal string "null" (JsonNull.content == "null").
+        assertNull(turn.text)
+    }
+
+    @Test
+    fun `parse openai content-null without tool_calls yields empty Final, not "null"`() {
+        val body = json.parseToJsonElement(
+            """{"choices":[{"message":{"role":"assistant","content":null}}]}""",
+        ).jsonObject
+        assertEquals(AgentTurn.Final(""), parseOpenAiTurn(body))
     }
 
     @Test
