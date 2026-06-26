@@ -60,6 +60,7 @@ import io.nisfeb.talon.ai.AgentClient
 import io.nisfeb.talon.ai.AgentLoop
 import io.nisfeb.talon.ai.AgentMessage
 import io.nisfeb.talon.ai.AiSettingsRepository
+import io.nisfeb.talon.ai.BraveSearchClient
 import io.nisfeb.talon.ai.ConversationGrouper
 import io.nisfeb.talon.ai.LoopScheduler
 import io.nisfeb.talon.ai.McpClient
@@ -209,13 +210,23 @@ fun AssistantScreen(
         }
     }
 
-    val agentLoop = remember(aiSettings, embedder, repo, contactMap, mcpTools) {
+    // Web search: a stable client reading the live key; the tool is only
+    // wired in when the user has both enabled it and set a Brave key, so the
+    // model never sees a tool it can't use. webSearchOn is a remember key so
+    // toggling it rebuilds the loop with/without the tool.
+    val braveSearch = remember(aiSettings) { BraveSearchClient { aiSettings.state.value } }
+    val webSearchOn = aiState.webSearchEnabled && aiState.braveApiKey.isNotBlank()
+
+    val agentLoop = remember(aiSettings, embedder, repo, contactMap, mcpTools, webSearchOn) {
         // Needs a ship session for its tools; the embedder is optional
         // (search_history degrades to keyword-only, grouping to flat).
         if (repo != null) {
             AgentLoop(
                 completer = { sys, msgs, tools -> agentClient.completeWithTools(sys, msgs, tools) },
-                tools = ToolCatalog.default(repo, db, embedder) { contactMap.displayName(it) } + mcpTools,
+                tools = ToolCatalog.default(
+                    repo, db, embedder,
+                    braveSearch = if (webSearchOn) braveSearch else null,
+                ) { contactMap.displayName(it) } + mcpTools,
             )
         } else null
     }

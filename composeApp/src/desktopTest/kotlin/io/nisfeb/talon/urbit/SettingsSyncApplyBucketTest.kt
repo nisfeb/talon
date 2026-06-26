@@ -1100,6 +1100,9 @@ internal class FakeAiSettings : AiSettingsRepository {
         baseUrl: String?,
     ) { /* unused */ }
     override fun setFeature(feature: AiSettings.Feature, enabled: Boolean) {}
+    override fun setBraveApiKey(key: String) {
+        _state.value = _state.value.copy(braveApiKey = key)
+    }
     override fun setSyncEnabled(enabled: Boolean) {
         _state.value = _state.value.copy(syncEnabled = enabled)
     }

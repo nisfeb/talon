@@ -180,6 +180,7 @@ private class NoopAiSettings : AiSettingsRepository {
         baseUrl: String?,
     ) {}
     override fun setFeature(feature: AiSettings.Feature, enabled: Boolean) {}
+    override fun setBraveApiKey(key: String) {}
     override fun setSyncEnabled(enabled: Boolean) {}
     override fun applyRemote(config: AiSettings.Config) { _state.value = config }
     override fun clear() {}

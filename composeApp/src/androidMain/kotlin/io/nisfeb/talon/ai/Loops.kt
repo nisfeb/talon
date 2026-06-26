@@ -113,7 +113,10 @@ class Loops(
         // Full catalog (reads + writes); LoopRunner keeps write tools only
         // for loops with writesAuthorized set. displayName is the raw patp —
         // headless we have no live ContactMap to resolve nicknames.
-        val tools = ToolCatalog.default(getRepo(), db, getEmbedder()) { it }
+        val tools = ToolCatalog.default(
+            getRepo(), db, getEmbedder(),
+            braveSearch = BraveSearchClient { aiSettings.state.value },
+        ) { it }
         val agentClient = AgentClient { aiSettings.state.value }
         return LoopRunner(
             loops = db.loops(),

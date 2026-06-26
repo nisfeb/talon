@@ -136,6 +136,8 @@ fun SettingsScreen(
     var baseUrl by remember { mutableStateOf(aiState.baseUrl.orEmpty()) }
     var revealKey by remember { mutableStateOf(false) }
     var providerMenuOpen by remember { mutableStateOf(false) }
+    var braveKey by remember { mutableStateOf(aiState.braveApiKey) }
+    var revealBrave by remember { mutableStateOf(false) }
 
     val dirty = provider != aiState.provider ||
         apiKey != aiState.apiKey ||
@@ -583,6 +585,8 @@ fun SettingsScreen(
                         isAssistantSupported ||
                             (it != AiSettings.Feature.Agent && it != AiSettings.Feature.Mcp)
                     }
+                    // Web search has its own subsection (toggle + key field).
+                    .filter { it != AiSettings.Feature.WebSearch }
                     .forEach { feature ->
                         FeatureToggleRow(
                             label = feature.label,
@@ -591,6 +595,55 @@ fun SettingsScreen(
                             onChange = { aiSettings.setFeature(feature, it) },
                         )
                     }
+
+                // Web search (Brave): the toggle plus its credential field,
+                // grouped so the key sits with the feature it powers. Only
+                // where the assistant runs — the tool lives in the agent.
+                if (isAssistantSupported) {
+                    Spacer(Modifier.height(8.dp))
+                    HorizontalDivider()
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "Web search",
+                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
+                    )
+                    FeatureToggleRow(
+                        label = AiSettings.Feature.WebSearch.label,
+                        description = AiSettings.Feature.WebSearch.description,
+                        enabled = aiState.webSearchEnabled,
+                        onChange = { aiSettings.setFeature(AiSettings.Feature.WebSearch, it) },
+                    )
+                    OutlinedTextField(
+                        value = braveKey,
+                        onValueChange = { braveKey = it },
+                        label = { Text("Brave Search API key") },
+                        singleLine = true,
+                        visualTransformation = if (revealBrave) VisualTransformation.None
+                        else PasswordVisualTransformation(),
+                        trailingIcon = {
+                            IconButton(onClick = { revealBrave = !revealBrave }) {
+                                Icon(
+                                    imageVector = if (revealBrave) Icons.Filled.VisibilityOff
+                                    else Icons.Filled.Visibility,
+                                    contentDescription = if (revealBrave) "Hide key" else "Show key",
+                                )
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(
+                            onClick = { aiSettings.setBraveApiKey(braveKey.trim()) },
+                            enabled = braveKey.trim() != aiState.braveApiKey,
+                        ) { Text("Save key") }
+                    }
+                    Text(
+                        "Get a free key at search.brave.com/help/api, paste it here, " +
+                            "then turn on Web search above.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
 
             // On-device features — gated behind isOnDeviceAiSupported.
@@ -855,6 +908,7 @@ internal fun aiFeatureEnabled(state: AiSettings.Config, feature: AiSettings.Feat
         // Unified assistant: either legacy flag counts as enabled.
         AiSettings.Feature.Agent -> state.agentEnabled || state.askUrbitEnabled
         AiSettings.Feature.Mcp -> state.mcpEnabled
+        AiSettings.Feature.WebSearch -> state.webSearchEnabled
     }
 
 @Composable

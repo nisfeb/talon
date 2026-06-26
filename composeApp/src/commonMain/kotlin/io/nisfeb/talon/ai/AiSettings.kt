@@ -53,7 +53,14 @@ object AiSettings {
         // tools (eval/install) stay hidden regardless. Only meaningful
         // when the agent is also on.
         val mcpEnabled: Boolean = false,
+        // Lets the assistant search the public web via Brave Search.
+        // Opt-in like the other beta surfaces; needs [braveApiKey] set to
+        // actually run (the tool no-ops with a message otherwise).
+        val webSearchEnabled: Boolean = false,
         val syncEnabled: Boolean = true,
+        // Brave Search API credential. Separate from the LLM [apiKey];
+        // travels with the same syncEnabled gate (see SettingsSyncImpl).
+        val braveApiKey: String = "",
     ) {
         fun hasKey(): Boolean = apiKey.isNotBlank()
     }
@@ -126,6 +133,15 @@ object AiSettings {
             "feat_mcp",
             "Reach the ship's tools (MCP, beta)",
             "If your ship runs an MCP server, let the assistant scry any agent to answer questions and (with your per-action confirmation) poke agents. Arbitrary-code tools stay off.",
+            requiresCloudKey = true,
+        ),
+        // Rendered in its own Settings subsection (with the Brave key
+        // field), not the generic cloud-features list — SettingsScreen
+        // filters it out of that loop.
+        WebSearch(
+            "feat_web_search",
+            "Web search (Brave)",
+            "Let the assistant search the public web via the Brave Search API — for current events and facts outside your chat history. Requires a Brave Search API key, set below.",
             requiresCloudKey = true,
         ),
     }

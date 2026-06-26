@@ -80,7 +80,14 @@ class DesktopAiSettings : AiSettingsRepository {
             AiSettings.Feature.Agent ->
                 cur.copy(agentEnabled = enabled, askUrbitEnabled = enabled)
             AiSettings.Feature.Mcp -> cur.copy(mcpEnabled = enabled)
+            AiSettings.Feature.WebSearch -> cur.copy(webSearchEnabled = enabled)
         }
+        persist(cfg)
+        onStateChange?.invoke(cfg, false)
+    }
+
+    override fun setBraveApiKey(key: String) {
+        val cfg = _state.value.copy(braveApiKey = key)
         persist(cfg)
         onStateChange?.invoke(cfg, false)
     }

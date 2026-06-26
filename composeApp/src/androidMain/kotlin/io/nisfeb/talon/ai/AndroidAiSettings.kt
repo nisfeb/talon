@@ -72,7 +72,14 @@ class AndroidAiSettings(context: Context) : AiSettingsRepository {
             AiSettings.Feature.Agent ->
                 _state.value.copy(agentEnabled = enabled, askUrbitEnabled = enabled)
             AiSettings.Feature.Mcp -> _state.value.copy(mcpEnabled = enabled)
+            AiSettings.Feature.WebSearch -> _state.value.copy(webSearchEnabled = enabled)
         }
+        onStateChange?.invoke(_state.value, false)
+    }
+
+    override fun setBraveApiKey(key: String) {
+        prefs.edit().putString(KEY_BRAVE_API_KEY, key).apply()
+        _state.value = _state.value.copy(braveApiKey = key)
         onStateChange?.invoke(_state.value, false)
     }
 
@@ -100,6 +107,8 @@ class AndroidAiSettings(context: Context) : AiSettingsRepository {
             .putBoolean(AiSettings.Feature.Agent.key, config.agentEnabled)
             .putBoolean(LEGACY_ASK_URBIT_KEY, config.agentEnabled)
             .putBoolean(AiSettings.Feature.Mcp.key, config.mcpEnabled)
+            .putBoolean(AiSettings.Feature.WebSearch.key, config.webSearchEnabled)
+            .putString(KEY_BRAVE_API_KEY, config.braveApiKey)
             .putBoolean(KEY_SYNC, config.syncEnabled)
             .apply()
         _state.value = config
@@ -111,6 +120,7 @@ class AndroidAiSettings(context: Context) : AiSettingsRepository {
             .remove(KEY_API_KEY)
             .remove(KEY_MODEL)
             .remove(KEY_BASE_URL)
+            .remove(KEY_BRAVE_API_KEY)
             .remove(KEY_SYNC)
         // Remove every feature toggle — not a hand-picked few — so an
         // enabled feature (especially the opt-in AskUrbit/Agent) can't
@@ -153,7 +163,9 @@ class AndroidAiSettings(context: Context) : AiSettingsRepository {
             askUrbitEnabled = assistantOn,
             agentEnabled = assistantOn,
             mcpEnabled = prefs.getBoolean(AiSettings.Feature.Mcp.key, false),
+            webSearchEnabled = prefs.getBoolean(AiSettings.Feature.WebSearch.key, false),
             syncEnabled = prefs.getBoolean(KEY_SYNC, true),
+            braveApiKey = prefs.getString(KEY_BRAVE_API_KEY, "").orEmpty(),
         )
     }
 
@@ -162,6 +174,7 @@ class AndroidAiSettings(context: Context) : AiSettingsRepository {
         private const val KEY_API_KEY = "api_key"
         private const val KEY_MODEL = "model"
         private const val KEY_BASE_URL = "base_url"
+        private const val KEY_BRAVE_API_KEY = "brave_api_key"
         private const val KEY_SYNC = "sync_enabled"
         // Legacy "Ask your Urbit" key, folded into the unified assistant
         // (feat_agent). Read for migration + written in lockstep.

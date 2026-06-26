@@ -500,7 +500,10 @@ fun App(
             io.nisfeb.talon.ai.LoopRunner(
                 loops = db.loops(),
                 runs = db.loopRuns(),
-                tools = io.nisfeb.talon.ai.ToolCatalog.default(repo, db, searchEmbedderClient) { it },
+                tools = io.nisfeb.talon.ai.ToolCatalog.default(
+                    repo, db, searchEmbedderClient,
+                    braveSearch = io.nisfeb.talon.ai.BraveSearchClient { aiSettings.state.value },
+                ) { it },
                 completer = { sys, msgs, t -> agentClient.completeWithTools(sys, msgs, t) },
                 aiConfig = { aiSettings.state.value },
                 // loopId is dropped: the desktop Notifier (tray balloon /

@@ -550,6 +550,9 @@ class SettingsSyncImpl(
                     put("apiKey", cfg.apiKey)
                     cfg.model?.let { put("model", it) }
                     cfg.baseUrl?.let { put("baseUrl", it) }
+                    // Brave key rides the same opt-in gate as the LLM key —
+                    // both are service credentials.
+                    put("braveApiKey", cfg.braveApiKey)
                 }
                 put("catchMeUpEnabled", cfg.catchMeUpEnabled)
                 put("emojiReactEnabled", cfg.emojiReactEnabled)
@@ -561,6 +564,7 @@ class SettingsSyncImpl(
                 put("askUrbitEnabled", cfg.askUrbitEnabled)
                 put("agentEnabled", cfg.agentEnabled)
                 put("mcpEnabled", cfg.mcpEnabled)
+                put("webSearchEnabled", cfg.webSearchEnabled)
             },
         )
     }
@@ -681,6 +685,7 @@ class SettingsSyncImpl(
                 askUrbitEnabled = bool("askUrbitEnabled", current.askUrbitEnabled),
                 agentEnabled = bool("agentEnabled", current.agentEnabled),
                 mcpEnabled = bool("mcpEnabled", current.mcpEnabled),
+                webSearchEnabled = bool("webSearchEnabled", current.webSearchEnabled),
             )
         } else {
             Log.i(TAG, "applyAiEntry ignoring legacy feature toggles; keeping local defaults")
@@ -707,6 +712,9 @@ class SettingsSyncImpl(
                     apiKey = obj["apiKey"].asStr() ?: current.apiKey,
                     model = obj["model"].asStr(),
                     baseUrl = obj["baseUrl"].asStr(),
+                    // Same "only overwrite when present" guard as apiKey, so a
+                    // peer push without it doesn't blank a good local key.
+                    braveApiKey = obj["braveApiKey"].asStr() ?: current.braveApiKey,
                 )
             } else features
         } else features

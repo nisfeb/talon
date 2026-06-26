@@ -232,6 +232,9 @@ private class FakeAiSettingsRepository : AiSettingsRepository {
         baseUrl: String?,
     ) { /* unused in these tests */ }
     override fun setFeature(feature: AiSettings.Feature, enabled: Boolean) {}
+    override fun setBraveApiKey(key: String) {
+        _state.value = _state.value.copy(braveApiKey = key)
+    }
     override fun setSyncEnabled(enabled: Boolean) {}
     override fun applyRemote(config: AiSettings.Config) {
         _state.value = config

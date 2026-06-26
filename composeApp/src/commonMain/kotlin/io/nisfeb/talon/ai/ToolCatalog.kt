@@ -41,8 +41,12 @@ object ToolCatalog {
         // (e.g. a desktop host the EmbedderProbe failed) still gets the
         // assistant — search_history falls back to keyword-only.
         embedder: SearchEmbedderClient?,
+        // When non-null, the web_search tool is added. Callers gate this on
+        // the user's opt-in (webSearchEnabled + a Brave key); the client
+        // itself also no-ops with a message if called while disabled.
+        braveSearch: BraveSearchClient? = null,
         displayName: (String) -> String,
-    ): List<Tool> = listOf(
+    ): List<Tool> = listOfNotNull(
         Tool(
             spec = ToolSpec(
                 "search_history",
@@ -155,6 +159,27 @@ object ToolCatalog {
             val whom = args.str("whom") ?: return@Tool "Error: whom is required."
             repo.markRead(whom)
             "Marked read."
+        },
+        // Web search — only present when the caller passes a client (the
+        // user opted in). Read-only: it fetches, it doesn't mutate.
+        braveSearch?.let { brave ->
+            Tool(
+                spec = ToolSpec(
+                    "web_search",
+                    "Search the public web (Brave Search) for current events, facts, or anything outside the user's chat history. Returns ranked results with title, URL, and snippet.",
+                    schema(
+                        "query" to ("string" to "The search query, in natural language."),
+                        "count" to ("integer" to "Max results (default 5, max 20)."),
+                        required = listOf("query"),
+                    ),
+                ),
+                write = false,
+            ) { args ->
+                val q = args.str("query").orEmpty()
+                if (q.isBlank()) return@Tool "Error: query is required."
+                val count = (args.int("count") ?: 5).coerceIn(1, 20)
+                brave.search(q, count)
+            }
         },
     )
 
