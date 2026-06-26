@@ -671,7 +671,16 @@ class SettingsSyncImpl(
         // device. Cloud-key fields stay on the same wire-or-local
         // path because they're already gated on local syncEnabled.
         val schemaVersion = obj["schemaVersion"].asInt() ?: 0
-        Log.i(TAG, "applyAiEntry schemaVersion=$schemaVersion obj=$obj")
+        // Redact the service credentials before logging — the toggle values
+        // are the useful part of this debug line; apiKey/braveApiKey are
+        // secrets and the log sink (unlike the EncryptedSharedPreferences
+        // store) isn't encrypted.
+        val redacted = JsonObject(
+            obj.mapValues { (k, v) ->
+                if (k == "apiKey" || k == "braveApiKey") JsonPrimitive("***") else v
+            },
+        )
+        Log.i(TAG, "applyAiEntry schemaVersion=$schemaVersion obj=$redacted")
 
         val features = if (schemaVersion >= AI_SCHEMA_V2) {
             current.copy(
