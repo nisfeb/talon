@@ -295,12 +295,14 @@ fun ThreadList(
     val onReactionForMessage: (MessageEntity, List<ReactionEntity>, String) -> Unit =
         remember(ourPatp, whom, repo) {
             { m, rs, emoji ->
-                // Compare on glyph: outbound reactions are normalized to
-                // unicode in TlonChatRepo.react(), so the DB row for our
-                // own reaction is a glyph even when the picker hands us
-                // a shortcode.
-                val ours = ReactionPalette.display(emoji)
-                val mineSame = rs.any { it.author == ourPatp && it.emoji == ours }
+                // Compare on the canonical key (see DmChatScreen): react()
+                // stores the variation-selector-stripped form, and the
+                // picker may hand us a shortcode or a glyph — normalize
+                // both sides so our own reaction toggles off reliably.
+                val ours = ReactionPalette.normalize(emoji)
+                val mineSame = rs.any {
+                    it.author == ourPatp && ReactionPalette.normalize(it.emoji) == ours
+                }
                 scope.launch {
                     runCatching {
                         if (mineSame) repo.unreact(whom, m.id)
@@ -428,9 +430,11 @@ fun ThreadList(
             val onPollVoteHandler: (MessageEntity, List<ReactionEntity>, String) -> Unit =
                 { msg, rs, emoji ->
                     val mine = rs.firstOrNull { it.author == ourPatp }?.emoji
+                    val same = mine != null &&
+                        ReactionPalette.normalize(mine) == ReactionPalette.normalize(emoji)
                     scope.launch {
                         runCatching {
-                            if (mine == emoji) repo.unreact(whom, msg.id)
+                            if (same) repo.unreact(whom, msg.id)
                             else repo.react(whom, msg.id, emoji)
                         }
                     }
@@ -798,10 +802,16 @@ private fun ThreadActionMenu(
             val topUsage by remember {
                 db.reactionUsage().streamTop(8)
             }.collectAsState(initial = emptyList())
+            // De-dupe by canonical reaction (normalize) so a used glyph
+            // and its palette code don't both show — see DmChatScreen.
             val suggested = remember(topUsage) {
-                val used = topUsage.map { it.shortcode }
-                val fallback = ReactionPalette.picker.map { it.first }
-                (used + fallback.filter { it !in used }).take(8)
+                val seen = mutableSetOf<String>()
+                val out = mutableListOf<String>()
+                (topUsage.map { it.shortcode } + ReactionPalette.picker.map { it.first })
+                    .forEach { item ->
+                        if (seen.add(ReactionPalette.normalize(item))) out.add(item)
+                    }
+                out.take(8)
             }
 
             var searchOpen by remember { mutableStateOf(false) }

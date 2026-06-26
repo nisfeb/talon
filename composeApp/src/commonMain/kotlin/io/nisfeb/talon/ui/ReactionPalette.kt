@@ -49,4 +49,20 @@ object ReactionPalette {
      */
     fun display(raw: String): String =
         table[raw] ?: EmojiCatalog.glyphFor(raw) ?: raw
+
+    /**
+     * Canonical grouping key for a reaction. Resolves any shortcode to
+     * its glyph, then strips variation selectors (U+FE00–U+FE0F) so the
+     * text-style "❤" (U+2764) and emoji-style "❤️" (U+2764 U+FE0F) — and
+     * a legacy ":heart:" — all collapse to one reaction. Display always
+     * uses EmojiFontFamily, which renders the bare codepoint in color
+     * either way, so the stripped form is safe to show.
+     *
+     * Apply at the DB storage boundary (TlonChatRepo.react + the inbound
+     * add-react handlers) and when de-duping the picker's suggestion row,
+     * so `groupBy { it.emoji }` and the usage table unify the forms
+     * without every call site having to know about variation selectors.
+     */
+    fun normalize(raw: String): String =
+        display(raw).filterNot { it.code in 0xFE00..0xFE0F }
 }

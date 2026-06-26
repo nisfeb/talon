@@ -600,12 +600,14 @@ fun DmChatScreen(
     val onReactionForMessage: (MessageEntity, List<ReactionEntity>, String) -> Unit =
         remember(ourPatp) {
             { m, reactions, emoji ->
-                // Compare on glyph: outbound reactions are normalized to
-                // unicode in TlonChatRepo.react(), so the DB row for our
-                // own reaction is a glyph even when the picker hands us
-                // a shortcode.
-                val ours = ReactionPalette.display(emoji)
-                val mineSame = reactions.any { it.author == ourPatp && it.emoji == ours }
+                // Compare on the canonical key: react() stores the
+                // variation-selector-stripped form, and the picker may
+                // hand us a shortcode or a glyph — normalize both sides
+                // so tapping our own reaction toggles it off reliably.
+                val ours = ReactionPalette.normalize(emoji)
+                val mineSame = reactions.any {
+                    it.author == ourPatp && ReactionPalette.normalize(it.emoji) == ours
+                }
                 scope.launch {
                     runCatching {
                         if (mineSame) repo.unreact(m.whom, m.id)
@@ -1844,12 +1846,20 @@ private fun MessageActionMenu(
                 if (searchOpen) searchFocus.requestFocus()
             }
 
-            // Merge usage-ranked codes with the default palette so the
-            // row is always 8 wide even before the user has reacted much.
+            // Merge usage-ranked reactions with the default palette so
+            // the row is always 8 wide even before the user has reacted
+            // much. De-dupe by canonical reaction (normalize) so a glyph
+            // already in history (❤️) and its palette code (:heart:) don't
+            // both show as separate-looking options. Usage rows rank
+            // first, then the palette fills the rest.
             val suggested = remember(topUsage) {
-                val used = topUsage.map { it.shortcode }
-                val fallback = ReactionPalette.picker.map { it.first }
-                (used + fallback.filter { it !in used }).take(8)
+                val seen = mutableSetOf<String>()
+                val out = mutableListOf<String>()
+                (topUsage.map { it.shortcode } + ReactionPalette.picker.map { it.first })
+                    .forEach { item ->
+                        if (seen.add(ReactionPalette.normalize(item))) out.add(item)
+                    }
+                out.take(8)
             }
 
             Row(verticalAlignment = Alignment.CenterVertically) {

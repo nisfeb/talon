@@ -1908,7 +1908,13 @@ class TlonChatRepo(
      */
     suspend fun react(whom: String, postId: String, emoji: String) {
         val ch = channel ?: error("not connected")
+        // Wire: the emoji-presentation glyph (FE0F-bearing), to match
+        // what every other Tlon client sends. Local DB + usage: the
+        // variation-selector-stripped canonical form so our optimistic
+        // row groups with the same reaction arriving from any client
+        // (and with the ship's echo of this very poke).
         val glyph = ReactionPalette.display(emoji)
+        val canonical = ReactionPalette.normalize(glyph)
         val delta = buildJsonObject {
             put("add-react", buildJsonObject {
                 put("author", ourPatp)
@@ -1946,8 +1952,8 @@ class TlonChatRepo(
             )
             else -> error("unsupported whom: $whom")
         }
-        db.reactions().upsert(ReactionEntity(whom, postId, ourPatp, glyph))
-        runCatching { db.reactionUsage().bump(glyph) }
+        db.reactions().upsert(ReactionEntity(whom, postId, ourPatp, canonical))
+        runCatching { db.reactionUsage().bump(canonical) }
     }
 
     /** Remove our reaction from a post. */
@@ -2587,7 +2593,7 @@ class TlonChatRepo(
         (response["add-react"] as? JsonObject)?.let { ar ->
             val author = ar["author"].asStr() ?: return@let
             val react = ar["react"].asStr() ?: return@let
-            db.reactions().upsert(ReactionEntity(whom, id, author, react))
+            db.reactions().upsert(ReactionEntity(whom, id, author, ReactionPalette.normalize(react)))
             return
         }
         response["del-react"].asStr()?.let { author ->
@@ -2631,7 +2637,7 @@ class TlonChatRepo(
         (delta["add-react"] as? JsonObject)?.let { ar ->
             val author = ar["author"].asStr() ?: return@let
             val react = ar["react"].asStr() ?: return@let
-            db.reactions().upsert(ReactionEntity(whom, replyId, author, react))
+            db.reactions().upsert(ReactionEntity(whom, replyId, author, ReactionPalette.normalize(react)))
             return
         }
         delta["del-react"].asStr()?.let { author ->
