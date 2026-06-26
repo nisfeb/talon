@@ -443,6 +443,44 @@ class SettingsSyncApplyBucketTest {
         }
 
     @Test
+    fun `applyBucket AI_SETTINGS applies and resets the custom system prompt`() =
+        runBlocking {
+            aiSettings.applyRemote(
+                AiSettings.Config(
+                    provider = AiSettings.Provider.Anthropic,
+                    apiKey = "k",
+                    model = null,
+                    syncEnabled = true,
+                    systemPrompt = "old local prompt",
+                ),
+            )
+            // A peer set a custom prompt → adopt it.
+            sync.applyBucket(
+                SettingsSyncImpl.BUCKET_AI_SETTINGS,
+                buildJsonObject {
+                    put("config", buildJsonObject {
+                        put("schemaVersion", 2)
+                        put("systemPrompt", "peer custom prompt")
+                    })
+                },
+            )
+            assertEquals("peer custom prompt", aiSettings.state.value.systemPrompt)
+
+            // A peer reset to default ("") → the reset propagates (unlike a
+            // credential, an empty prompt is a valid "use built-in" state).
+            sync.applyBucket(
+                SettingsSyncImpl.BUCKET_AI_SETTINGS,
+                buildJsonObject {
+                    put("config", buildJsonObject {
+                        put("schemaVersion", 2)
+                        put("systemPrompt", "")
+                    })
+                },
+            )
+            assertEquals("", aiSettings.state.value.systemPrompt)
+        }
+
+    @Test
     fun `applyBucket AI_SETTINGS does not apply cloud-key fields when sync is off`() =
         runBlocking {
             // Sec-relevant invariant: a peer's API key must not be
@@ -1125,6 +1163,9 @@ internal class FakeAiSettings : AiSettingsRepository {
     override fun setFeature(feature: AiSettings.Feature, enabled: Boolean) {}
     override fun setBraveApiKey(key: String) {
         _state.value = _state.value.copy(braveApiKey = key)
+    }
+    override fun setSystemPrompt(prompt: String) {
+        _state.value = _state.value.copy(systemPrompt = prompt)
     }
     override fun setSyncEnabled(enabled: Boolean) {
         _state.value = _state.value.copy(syncEnabled = enabled)

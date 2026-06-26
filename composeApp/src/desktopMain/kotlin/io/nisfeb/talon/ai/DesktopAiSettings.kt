@@ -99,6 +99,12 @@ class DesktopAiSettings : AiSettingsRepository {
         onStateChange?.invoke(cfg, false)
     }
 
+    override fun setSystemPrompt(prompt: String) {
+        val cfg = _state.value.copy(systemPrompt = prompt)
+        persist(cfg)
+        onStateChange?.invoke(cfg, false)
+    }
+
     override fun setSyncEnabled(enabled: Boolean) {
         val cur = _state.value
         val transitionedOff = cur.syncEnabled && !enabled

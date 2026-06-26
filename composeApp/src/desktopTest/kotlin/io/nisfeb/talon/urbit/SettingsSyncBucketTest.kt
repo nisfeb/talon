@@ -235,6 +235,9 @@ private class FakeAiSettingsRepository : AiSettingsRepository {
     override fun setBraveApiKey(key: String) {
         _state.value = _state.value.copy(braveApiKey = key)
     }
+    override fun setSystemPrompt(prompt: String) {
+        _state.value = _state.value.copy(systemPrompt = prompt)
+    }
     override fun setSyncEnabled(enabled: Boolean) {}
     override fun applyRemote(config: AiSettings.Config) {
         _state.value = config

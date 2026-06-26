@@ -58,6 +58,7 @@ import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import io.nisfeb.talon.ai.AgentClient
 import io.nisfeb.talon.ai.AgentLoop
+import io.nisfeb.talon.ai.AgentPrompt
 import io.nisfeb.talon.ai.AgentMessage
 import io.nisfeb.talon.ai.AiSettingsRepository
 import io.nisfeb.talon.ai.BraveSearchClient
@@ -221,7 +222,11 @@ fun AssistantScreen(
     val urlFetcher = remember(aiSettings) { UrlFetcher { aiSettings.state.value } }
     val braveKeyPresent = aiState.braveApiKey.isNotBlank()
 
-    val agentLoop = remember(aiSettings, embedder, repo, contactMap, mcpTools, braveKeyPresent) {
+    // Blank override keeps the maintained built-in default; a custom
+    // prompt (set in Settings) overrides it. Keyed into the remember so
+    // editing the prompt rebuilds the loop with the new system message.
+    val systemPrompt = aiState.systemPrompt.ifBlank { AgentPrompt.system }
+    val agentLoop = remember(aiSettings, embedder, repo, contactMap, mcpTools, braveKeyPresent, systemPrompt) {
         // Needs a ship session for its tools; the embedder is optional
         // (search_history degrades to keyword-only, grouping to flat).
         if (repo != null) {
@@ -232,6 +237,7 @@ fun AssistantScreen(
                     braveSearch = if (braveKeyPresent) braveSearch else null,
                     urlFetcher = urlFetcher,
                 ) { contactMap.displayName(it) } + mcpTools,
+                systemPrompt = systemPrompt,
             )
         } else null
     }

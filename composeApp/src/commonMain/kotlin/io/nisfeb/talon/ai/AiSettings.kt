@@ -52,6 +52,10 @@ object AiSettings {
         // Optional (the assistant can open URLs without it). Travels with
         // the same syncEnabled gate as the LLM key (see SettingsSyncImpl).
         val braveApiKey: String = "",
+        // User override for the assistant's system prompt. Blank = use the
+        // built-in default (AgentPrompt.system). Not a credential — synced
+        // like a preference (always, schemaVersion>=2), see SettingsSyncImpl.
+        val systemPrompt: String = "",
     ) {
         fun hasKey(): Boolean = apiKey.isNotBlank()
 

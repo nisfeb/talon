@@ -34,6 +34,10 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Surface
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -54,6 +58,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.material3.FilterChip
+import io.nisfeb.talon.ai.AgentPrompt
 import io.nisfeb.talon.ai.AiSettings
 import io.nisfeb.talon.ai.AiSettingsRepository
 import io.nisfeb.talon.ui.UiSettings
@@ -138,6 +143,7 @@ fun SettingsScreen(
     var providerMenuOpen by remember { mutableStateOf(false) }
     var braveKey by remember { mutableStateOf(aiState.braveApiKey) }
     var revealBrave by remember { mutableStateOf(false) }
+    var promptEditorOpen by remember { mutableStateOf(false) }
 
     val dirty = provider != aiState.provider ||
         apiKey != aiState.apiKey ||
@@ -631,6 +637,36 @@ fun SettingsScreen(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "System prompt",
+                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
+                    )
+                    OutlinedButton(onClick = { promptEditorOpen = true }) {
+                        Text(
+                            if (aiState.systemPrompt.isBlank()) "Edit system prompt"
+                            else "Edit system prompt (customized)",
+                        )
+                    }
+                    Text(
+                        "The instructions the assistant follows — what it knows about " +
+                            "Urbit, your ship's tools, and how to search. Customize it to " +
+                            "change the assistant's behavior; edits sync across your devices.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    if (promptEditorOpen) {
+                        SystemPromptEditorDialog(
+                            current = aiState.systemPrompt,
+                            default = AgentPrompt.system,
+                            onSave = {
+                                aiSettings.setSystemPrompt(it)
+                                promptEditorOpen = false
+                            },
+                            onDismiss = { promptEditorOpen = false },
+                        )
+                    }
                 }
             }
 
@@ -1368,4 +1404,66 @@ private fun ThemePreference.Mode.label(): String = when (this) {
     ThemePreference.Mode.System -> "System"
     ThemePreference.Mode.Light -> "Light"
     ThemePreference.Mode.Dark -> "Dark"
+}
+
+/**
+ * Full-height editor for the assistant's system prompt. Pre-fills with the
+ * current override, or the built-in [default] when none is set so the user
+ * edits from a real starting point. Saving text identical to the default
+ * stores "" — that keeps the user tracking the maintained default instead
+ * of freezing a copy. [onSave] receives the value to persist (sync handles
+ * propagation).
+ */
+@Composable
+private fun SystemPromptEditorDialog(
+    current: String,
+    default: String,
+    onSave: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var text by remember { mutableStateOf(current.ifBlank { default }) }
+    Dialog(
+        onDismissRequest = onDismiss,
+        // Default-width dialogs cap at ~280dp — too narrow to edit a
+        // multi-paragraph prompt. Let the Surface size itself instead.
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        Surface(
+            shape = RoundedCornerShape(16.dp),
+            tonalElevation = 6.dp,
+            modifier = Modifier.fillMaxWidth(0.95f).fillMaxHeight(0.9f),
+        ) {
+            Column(
+                Modifier.padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Text(
+                    "Assistant system prompt",
+                    style = MaterialTheme.typography.titleMedium,
+                )
+                Text(
+                    "Instructions the assistant follows. Tailor it to change behavior, " +
+                        "or reset to the built-in default. Edits sync across your devices.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                OutlinedTextField(
+                    value = text,
+                    onValueChange = { text = it },
+                    modifier = Modifier.fillMaxWidth().weight(1f),
+                    textStyle = MaterialTheme.typography.bodySmall,
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(onClick = {
+                        // Unchanged default → store "" so future default
+                        // improvements still reach this user.
+                        onSave(if (text.trim() == default.trim()) "" else text)
+                    }) { Text("Save") }
+                    OutlinedButton(onClick = { text = default }) { Text("Reset to default") }
+                    Spacer(Modifier.weight(1f))
+                    TextButton(onClick = onDismiss) { Text("Cancel") }
+                }
+            }
+        }
+    }
 }

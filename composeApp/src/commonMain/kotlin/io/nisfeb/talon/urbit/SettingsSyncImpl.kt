@@ -563,6 +563,9 @@ class SettingsSyncImpl(
                 put("smartFeaturesEnabled", cfg.smartFeaturesEnabled)
                 put("askUrbitEnabled", cfg.askUrbitEnabled)
                 put("agentEnabled", cfg.agentEnabled)
+                // User's custom agent system prompt (blank = built-in
+                // default). A preference, not a credential — always push.
+                put("systemPrompt", cfg.systemPrompt)
             },
         )
     }
@@ -687,6 +690,9 @@ class SettingsSyncImpl(
                 smartFeaturesEnabled = bool("smartFeaturesEnabled", current.smartFeaturesEnabled),
                 askUrbitEnabled = bool("askUrbitEnabled", current.askUrbitEnabled),
                 agentEnabled = bool("agentEnabled", current.agentEnabled),
+                // Absent → keep local; present (even blank) → adopt, so a
+                // peer's reset-to-default ("") propagates too.
+                systemPrompt = obj["systemPrompt"].asStr() ?: current.systemPrompt,
             )
         } else {
             Log.i(TAG, "applyAiEntry ignoring legacy feature toggles; keeping local defaults")
