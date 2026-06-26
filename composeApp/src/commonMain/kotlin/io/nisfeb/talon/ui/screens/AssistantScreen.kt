@@ -63,6 +63,7 @@ import io.nisfeb.talon.ai.AiSettingsRepository
 import io.nisfeb.talon.ai.BraveSearchClient
 import io.nisfeb.talon.ai.ConversationGrouper
 import io.nisfeb.talon.ai.LoopScheduler
+import io.nisfeb.talon.ai.UrlFetcher
 import io.nisfeb.talon.ai.McpClient
 import io.nisfeb.talon.ai.mcpAgentTools
 import io.nisfeb.talon.ai.packEmbedding
@@ -210,14 +211,16 @@ fun AssistantScreen(
         }
     }
 
-    // Web search: a stable client reading the live key; the tool is only
-    // wired in when the user has both enabled it and set a Brave key, so the
-    // model never sees a tool it can't use. webSearchOn is a remember key so
-    // toggling it rebuilds the loop with/without the tool.
+    // Web access: stable clients reading live config. The web access toggle
+    // (webEnabled) gates fetch_url; web_search additionally needs a Brave
+    // key. Gating tool *presence* means the model never sees a tool it can't
+    // use; both are remember keys so toggling rebuilds the loop.
     val braveSearch = remember(aiSettings) { BraveSearchClient { aiSettings.state.value } }
-    val webSearchOn = aiState.webSearchEnabled && aiState.braveApiKey.isNotBlank()
+    val urlFetcher = remember(aiSettings) { UrlFetcher { aiSettings.state.value } }
+    val webEnabled = aiState.webSearchEnabled
+    val braveKeyPresent = aiState.braveApiKey.isNotBlank()
 
-    val agentLoop = remember(aiSettings, embedder, repo, contactMap, mcpTools, webSearchOn) {
+    val agentLoop = remember(aiSettings, embedder, repo, contactMap, mcpTools, webEnabled, braveKeyPresent) {
         // Needs a ship session for its tools; the embedder is optional
         // (search_history degrades to keyword-only, grouping to flat).
         if (repo != null) {
@@ -225,7 +228,8 @@ fun AssistantScreen(
                 completer = { sys, msgs, tools -> agentClient.completeWithTools(sys, msgs, tools) },
                 tools = ToolCatalog.default(
                     repo, db, embedder,
-                    braveSearch = if (webSearchOn) braveSearch else null,
+                    braveSearch = if (webEnabled && braveKeyPresent) braveSearch else null,
+                    urlFetcher = if (webEnabled) urlFetcher else null,
                 ) { contactMap.displayName(it) } + mcpTools,
             )
         } else null

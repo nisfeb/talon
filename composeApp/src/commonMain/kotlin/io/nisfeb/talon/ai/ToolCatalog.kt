@@ -45,6 +45,10 @@ object ToolCatalog {
         // the user's opt-in (webSearchEnabled + a Brave key); the client
         // itself also no-ops with a message if called while disabled.
         braveSearch: BraveSearchClient? = null,
+        // When non-null, the fetch_url tool is added. Gated on web access
+        // (webSearchEnabled) — no Brave key needed; the fetcher self-checks
+        // the toggle and hardens against internal/SSRF targets.
+        urlFetcher: UrlFetcher? = null,
         displayName: (String) -> String,
     ): List<Tool> = listOfNotNull(
         Tool(
@@ -179,6 +183,25 @@ object ToolCatalog {
                 if (q.isBlank()) return@Tool "Error: query is required."
                 val count = (args.int("count") ?: 5).coerceIn(1, 20)
                 brave.search(q, count)
+            }
+        },
+        // Fetch a specific URL — only present when the caller opts in.
+        // Read-only: it GETs and returns text, it doesn't mutate.
+        urlFetcher?.let { fetcher ->
+            Tool(
+                spec = ToolSpec(
+                    "fetch_url",
+                    "Fetch a single public web page or API endpoint (http/https) and return its text content (HTML is reduced to text). Use to read a specific web_search result, or a known URL/JSON API directly — e.g. https://hacker-news.firebaseio.com/v0/topstories.json. Internal/loopback addresses are refused.",
+                    schema(
+                        "url" to ("string" to "The full http(s) URL to fetch."),
+                        required = listOf("url"),
+                    ),
+                ),
+                write = false,
+            ) { args ->
+                val url = args.str("url")?.takeIf { it.isNotBlank() }
+                    ?: return@Tool "Error: url is required."
+                fetcher.fetch(url)
             }
         },
     )

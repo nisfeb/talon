@@ -140,8 +140,8 @@ object AiSettings {
         // filters it out of that loop.
         WebSearch(
             "feat_web_search",
-            "Web search (Brave)",
-            "Let the assistant search the public web via the Brave Search API — for current events and facts outside your chat history. Requires a Brave Search API key, set below.",
+            "Web access",
+            "Let the assistant reach the public web — search (Brave Search) and open specific pages/URLs — for current events and facts outside your chat history. Web search needs a Brave Search API key (set below); opening URLs works without one.",
             requiresCloudKey = true,
         ),
     }

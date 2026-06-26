@@ -116,6 +116,7 @@ class Loops(
         val tools = ToolCatalog.default(
             getRepo(), db, getEmbedder(),
             braveSearch = BraveSearchClient { aiSettings.state.value },
+            urlFetcher = UrlFetcher { aiSettings.state.value },
         ) { it }
         val agentClient = AgentClient { aiSettings.state.value }
         return LoopRunner(

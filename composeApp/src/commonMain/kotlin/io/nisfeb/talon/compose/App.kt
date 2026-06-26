@@ -503,6 +503,7 @@ fun App(
                 tools = io.nisfeb.talon.ai.ToolCatalog.default(
                     repo, db, searchEmbedderClient,
                     braveSearch = io.nisfeb.talon.ai.BraveSearchClient { aiSettings.state.value },
+                    urlFetcher = io.nisfeb.talon.ai.UrlFetcher { aiSettings.state.value },
                 ) { it },
                 completer = { sys, msgs, t -> agentClient.completeWithTools(sys, msgs, t) },
                 aiConfig = { aiSettings.state.value },
