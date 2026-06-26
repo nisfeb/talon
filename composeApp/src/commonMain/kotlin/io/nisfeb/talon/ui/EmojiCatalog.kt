@@ -18,8 +18,9 @@ object EmojiCatalog {
 
     /** Alias → canonical shortcode (for alternate names Tlon might emit). */
     private val aliases: Map<String, String> = mapOf(
-        ":thumbsup:" to ":+1:",
-        ":thumbsdown:" to ":-1:",
+        // Deprecated GitHub-style codes → Tlon's current canonical ones.
+        ":+1:" to ":thumbsup:",
+        ":-1:" to ":thumbsdown:",
         ":joy:" to ":laughing:",
         ":grin:" to ":grinning:",
         ":grinning_face:" to ":grinning:",
@@ -116,8 +117,8 @@ object EmojiCatalog {
         Entry(":dog_face:", "🐶", listOf("dog", "puppy")),
 
         // --- Gestures / body ---
-        Entry(":+1:", "👍", listOf("thumbs", "up", "yes", "ok")),
-        Entry(":-1:", "👎", listOf("thumbs", "down", "no", "nope")),
+        Entry(":thumbsup:", "👍", listOf("thumbs", "up", "yes", "ok")),
+        Entry(":thumbsdown:", "👎", listOf("thumbs", "down", "no", "nope")),
         Entry(":ok_hand:", "👌", listOf("ok", "okay")),
         Entry(":pinched:", "🤌", listOf("pinched", "italian")),
         Entry(":pinch:", "🤏", listOf("pinch", "small", "little")),

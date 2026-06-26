@@ -93,7 +93,7 @@ class ChatWireShapesTest {
         val body = clubAction(
             clubId = "0v2.abcde",
             postId = "~x/1.000",
-            delta = writsAddReactDelta("~x", ":+1:"),
+            delta = writsAddReactDelta("~x", "👍"),
         )
         val diff = body["diff"]!!.jsonObject
         // Known-good uid sentinel.
@@ -348,7 +348,7 @@ class ChatWireShapesTest {
         val body = dmAction(
             peer = "~sampel",
             postId = "~author/170141184507933044937549665940933705728",
-            delta = writsAddReactDelta("~me", ":+1:"),
+            delta = writsAddReactDelta("~me", "👍"),
         )
         assertEquals(
             "~author/170.141.184.507.933.044.937.549.665.940.933.705.728",

@@ -1898,11 +1898,11 @@ class TlonChatRepo(
 
     /**
      * Add or replace our reaction on a post. The caller may pass either
-     * a shortcode (`:+1:`) or a unicode glyph (`👍`); we normalize to a
-     * glyph here because Tlon migrated reactions away from shortcodes
-     * to unicode in 2025 — every other Tlon client now sends glyphs on
-     * the wire, so emitting a shortcode would fragment reaction
-     * grouping (a `:+1:` from us and a `👍` from web Tlon become two
+     * a shortcode (`:thumbsup:`) or a unicode glyph (`👍`); we normalize
+     * to a glyph here because Tlon migrated reactions away from
+     * shortcodes to unicode in 2025 — every other Tlon client now sends
+     * glyphs on the wire, so emitting a shortcode would fragment reaction
+     * grouping (a `:thumbsup:` from us and a `👍` from web Tlon become two
      * separate chips). `ReactionPalette.display` is shortcode→glyph
      * with a passthrough fallback, so glyphs in stay glyphs out.
      */
