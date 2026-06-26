@@ -507,6 +507,10 @@ fun App(
                 ) { it },
                 completer = { sys, msgs, t -> agentClient.completeWithTools(sys, msgs, t) },
                 aiConfig = { aiSettings.state.value },
+                // One device runs a scheduled write fire — the %settings lease
+                // (SettingsSyncImpl implements LoopWriteCoordinator). Noop when
+                // there's no sync channel (a write loop needs the ship anyway).
+                coordinator = settingsSync ?: io.nisfeb.talon.ai.LoopWriteCoordinator.Noop,
                 // loopId is dropped: the desktop Notifier (tray balloon /
                 // notify-send) has no per-notification tag, so loops can't
                 // group/replace like Android's id-tagged notifications. A

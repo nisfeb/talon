@@ -19,7 +19,7 @@ private val ZERO_STATUSES_SEEN: StateFlow<Long> = MutableStateFlow(0L).asStateFl
  * Desktop passes `null` and the relevant code paths short-circuit
  * until a desktop %settings bridge is wired.
  */
-interface SettingsSync {
+interface SettingsSync : io.nisfeb.talon.ai.LoopWriteCoordinator {
     fun attach(channel: UrbitChannel)
     suspend fun bootstrap()
     suspend fun applySettingsEvent(payload: JsonObject)

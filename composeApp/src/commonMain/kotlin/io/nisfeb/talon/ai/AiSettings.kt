@@ -59,6 +59,11 @@ object AiSettings {
         val urbitKnowledgePrompt: String = "", // shared by assistant + loops
         val assistantPrompt: String = "",      // interactive-assistant specifics
         val loopPrompt: String = "",           // headless-loop specifics
+        // Stable per-device id, generated once by the platform store and
+        // DEVICE-LOCAL — never pushed to or read from %settings (see
+        // SettingsSyncImpl push/apply). Identifies this device when it
+        // contests the cross-device write-loop lease (LoopWriteCoordinator).
+        val deviceId: String = "",
     ) {
         fun hasKey(): Boolean = apiKey.isNotBlank()
 

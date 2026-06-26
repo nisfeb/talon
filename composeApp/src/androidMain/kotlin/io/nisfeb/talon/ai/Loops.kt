@@ -125,6 +125,10 @@ class Loops(
             tools = tools,
             completer = { sys, msgs, t -> agentClient.completeWithTools(sys, msgs, t) },
             aiConfig = { aiSettings.state.value },
+            // One device runs a scheduled write fire — the %settings lease.
+            // Noop if this build has no sync channel (a write loop needs the
+            // ship anyway, so an un-coordinated device can't double-write).
+            coordinator = getRepo().settingsSync ?: LoopWriteCoordinator.Noop,
             // Tag the notification on the stable loop id (not the name).
             notify = { id, title, body ->
                 Notifications.showLoop(context, id, title, body, System.currentTimeMillis())

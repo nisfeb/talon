@@ -29,6 +29,10 @@ class LoopRunner(
     private val completer: AgentLoop.Completer,
     private val aiConfig: () -> AiSettings.Config,
     private val notify: (loopId: Long, title: String, body: String) -> Unit,
+    // Cross-device gate for scheduled write-loop fires (runDue only). Default
+    // Noop runs everywhere; the host wires the %settings lease so several
+    // devices don't all run the same write automation.
+    private val coordinator: LoopWriteCoordinator = LoopWriteCoordinator.Noop,
     private val now: () -> Long = { System.currentTimeMillis() },
 ) {
 
@@ -68,6 +72,13 @@ class LoopRunner(
         val t = now()
         for (loop in loops.enabled()) {
             if (!LoopSchedule.isDue(t, loop.lastRunAt, loop.intervalMinutes)) continue
+            // Only one running device should perform a scheduled WRITE fire.
+            // If we lose the lease, stamp lastRunAt locally so we treat this
+            // slot as handled and don't re-contest every tick.
+            if (loop.writesAuthorized && !coordinator.claim(loop)) {
+                loops.markRan(loop.id, t)
+                continue
+            }
             runCatching { runLoop(loop) }
                 .onFailure { if (it is CancellationException) throw it }
         }

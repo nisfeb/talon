@@ -106,6 +106,9 @@ class AndroidAiSettings(context: Context) : AiSettingsRepository {
             .putString(KEY_URBIT_KNOWLEDGE_PROMPT, config.urbitKnowledgePrompt)
             .putString(KEY_ASSISTANT_PROMPT, config.assistantPrompt)
             .putString(KEY_LOOP_PROMPT, config.loopPrompt)
+            // Device id is carried through from current (never on the wire),
+            // so applyRemote preserves this device's stable identity.
+            .putString(KEY_DEVICE_ID, config.deviceId)
             .putBoolean(KEY_SYNC, config.syncEnabled)
             .apply()
         _state.value = config
@@ -128,7 +131,11 @@ class AndroidAiSettings(context: Context) : AiSettingsRepository {
         AiSettings.Feature.values().forEach { editor.remove(it.key) }
         editor.remove(LEGACY_ASK_URBIT_KEY) // no longer in Feature.values()
         editor.apply()
-        _state.value = AiSettings.Config(AiSettings.Provider.Anthropic, "", null)
+        // Keep the device id across sign-out — it's this physical device's
+        // stable identity, not account state, so re-login keeps one id.
+        _state.value = AiSettings.Config(
+            AiSettings.Provider.Anthropic, "", null, deviceId = deviceId(),
+        )
         onStateChange?.invoke(_state.value, false)
     }
 
@@ -163,8 +170,15 @@ class AndroidAiSettings(context: Context) : AiSettingsRepository {
             urbitKnowledgePrompt = prefs.getString(KEY_URBIT_KNOWLEDGE_PROMPT, "").orEmpty(),
             assistantPrompt = prefs.getString(KEY_ASSISTANT_PROMPT, "").orEmpty(),
             loopPrompt = prefs.getString(KEY_LOOP_PROMPT, "").orEmpty(),
+            deviceId = deviceId(),
         )
     }
+
+    /** This device's stable id, generated + persisted on first read. */
+    private fun deviceId(): String =
+        prefs.getString(KEY_DEVICE_ID, null)?.takeIf { it.isNotBlank() }
+            ?: java.util.UUID.randomUUID().toString()
+                .also { prefs.edit().putString(KEY_DEVICE_ID, it).apply() }
 
     private fun promptKey(kind: AiSettings.PromptKind): String = when (kind) {
         AiSettings.PromptKind.UrbitKnowledge -> KEY_URBIT_KNOWLEDGE_PROMPT
@@ -181,6 +195,7 @@ class AndroidAiSettings(context: Context) : AiSettingsRepository {
         private const val KEY_URBIT_KNOWLEDGE_PROMPT = "urbit_knowledge_prompt"
         private const val KEY_ASSISTANT_PROMPT = "assistant_prompt"
         private const val KEY_LOOP_PROMPT = "loop_prompt"
+        private const val KEY_DEVICE_ID = "device_id"
         private const val KEY_SYNC = "sync_enabled"
         // Legacy "Ask your Urbit" key, folded into the unified assistant
         // (feat_agent). Read for migration + written in lockstep.

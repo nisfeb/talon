@@ -39,6 +39,9 @@ class DesktopAiSettings : AiSettingsRepository {
                 Log.w(TAG, "ai_settings.json unreadable; falling back to defaults", it)
                 defaultConfig()
             }
+            // Back-fill a stable device id for configs written before it
+            // existed, persisting so it stays put across launches.
+            .let { if (it.deviceId.isBlank()) it.copy(deviceId = newDeviceId()).also(::writeAtomically) else it }
     }
 
     /**
@@ -142,10 +145,12 @@ class DesktopAiSettings : AiSettingsRepository {
         askUrbitEnabled = false,
         agentEnabled = false,
         syncEnabled = true,
+        deviceId = newDeviceId(),
     )
 
     private companion object {
         private const val TAG = "DesktopAiSettings"
         private val JSON = Json { ignoreUnknownKeys = true; prettyPrint = false }
+        private fun newDeviceId(): String = java.util.UUID.randomUUID().toString()
     }
 }

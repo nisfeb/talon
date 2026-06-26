@@ -100,6 +100,18 @@ class SettingsSyncImpl(
         // Loop definitions, keyed by gid. lastRunAt + run history are
         // device-local and never sync — only the definition travels.
         const val BUCKET_LOOPS = "loops"
+        // Cross-device write-loop lease, keyed by loop gid:
+        // { holder: <deviceId>, claimedAt: <ms> }. Pure coordination state,
+        // not a user pref — it rides the desk scry but no applyBucket /
+        // applyEntry branch maps it, so it never touches Room. See claim().
+        const val BUCKET_AUTOMATION_CLAIMS = "automation-claims"
+        // How long to let concurrent claims settle on the ship before
+        // deciding the winner. Load-bearing: too short and two devices can
+        // both read themselves as holder and double-fire.
+        // ponytail: last-write-wins + settle. If it ever double-fires,
+        // upgrade to per-device claim sub-keys (<gid>~<deviceId>, lowest id
+        // wins) — deterministic, no settle window.
+        private const val CLAIM_SETTLE_MS = 3_000L
         // Single-entry bucket: the seen high-water mark is global to the
         // user, not per-anything, so one stable key holds it.
         private const val STATUS_SEEN_ENTRY = "me"
@@ -652,6 +664,64 @@ class SettingsSyncImpl(
     override suspend fun deleteLoop(gid: String) {
         if (gid.isBlank()) return
         pokeDelEntry(BUCKET_LOOPS, gid)
+        // Drop any lease so a recreated loop with the same gid starts clean.
+        pokeDelEntry(BUCKET_AUTOMATION_CLAIMS, gid)
+    }
+
+    /**
+     * Cross-device lease so exactly one running device performs a scheduled
+     * write-loop fire (see [io.nisfeb.talon.ai.LoopWriteCoordinator]). The
+     * lease lives in %settings/[BUCKET_AUTOMATION_CLAIMS] keyed by gid; it
+     * holds the current runner's device id + when it last claimed.
+     *
+     * I run if I already hold it (and refresh), or if it's unclaimed/stale
+     * (holder went offline ~2 intervals) and I win the contest after a
+     * settle. A fresh holder that isn't me → I skip. No channel, no gid, or
+     * any ship error → I do NOT run: a write loop needs the ship anyway, so
+     * a device that can't coordinate can't safely fire.
+     */
+    override suspend fun claim(loop: io.nisfeb.talon.data.LoopEntity): Boolean {
+        val ch = channel ?: return false
+        if (loop.gid.isBlank()) return true // unsynced loop: single-device, nothing to race
+        val me = aiSettings.state.value.deviceId
+        if (me.isBlank()) return true       // no id (not a real platform store) — don't block
+        val now = System.currentTimeMillis()
+        // Stale after ~2 missed fires, clamped so sub-hour loops still fail
+        // over reasonably and long loops don't pin a dead holder for days.
+        val staleMs = (loop.intervalMinutes.toLong() * 2).coerceIn(30, 720) * 60_000L
+
+        return when (io.nisfeb.talon.ai.decideClaim(readClaim(ch, loop.gid), me, now, staleMs)) {
+            io.nisfeb.talon.ai.ClaimDecision.RUN -> { writeClaim(loop.gid, me, now); true }
+            io.nisfeb.talon.ai.ClaimDecision.SKIP -> false
+            io.nisfeb.talon.ai.ClaimDecision.CONTEST -> {
+                // Stake a claim, let concurrent claimants settle on the ship,
+                // then run only if I'm still the holder.
+                writeClaim(loop.gid, me, now)
+                kotlinx.coroutines.delay(CLAIM_SETTLE_MS)
+                readClaim(ch, loop.gid)?.first == me
+            }
+        }
+    }
+
+    /** Read the lease for [gid] → (holder deviceId, claimedAt ms), or null
+     *  if unclaimed / unreadable. */
+    private suspend fun readClaim(ch: UrbitChannel, gid: String): Pair<String, Long>? {
+        val body = runCatching { ch.scry("settings", "/desk/$DESK") }.getOrNull() as? JsonObject
+        val deskMap = (body?.get("desk") as? JsonObject) ?: body
+        val claims = deskMap?.get(BUCKET_AUTOMATION_CLAIMS) as? JsonObject ?: return null
+        val obj = unwrap(claims[gid]) as? JsonObject ?: return null
+        val holder = obj["holder"].asStr()?.takeIf { it.isNotBlank() } ?: return null
+        return holder to (obj["claimedAt"].asLong() ?: 0L)
+    }
+
+    private suspend fun writeClaim(gid: String, holder: String, at: Long) {
+        pokePutEntry(
+            BUCKET_AUTOMATION_CLAIMS, gid,
+            buildJsonObject {
+                put("holder", holder)
+                put("claimedAt", at)
+            },
+        )
     }
 
     private fun applyAiEntry(obj: JsonObject) {
