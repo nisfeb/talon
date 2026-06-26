@@ -71,6 +71,18 @@ expect val isQrLoginScanSupported: Boolean
 expect val isTouchSwipeNavSupported: Boolean
 
 /**
+ * Whether a plain left-tap on a message opens its action menu.
+ * Android: true — tap-anywhere is the menu affordance (no right mouse
+ * button, and long-press is reserved for text selection). Desktop:
+ * false — a left-press-drag belongs to the SelectionContainer (select
+ * message text); a row-level clickable would swallow that drag and pop
+ * the menu on mouse-up instead. Desktop opens the menu via right-click
+ * (onSecondaryClick) on the row. Gates the row clickable + StoryRenderer
+ * onMessageTap in DmChatScreen.MessageRow.
+ */
+expect val isTapToOpenMenuSupported: Boolean
+
+/**
  * Short human-readable name for the host platform — surfaced in the
  * About panel so the user can see at a glance which build they're on.
  * Android returns "Android"; desktop returns the os.name (e.g. "Linux",

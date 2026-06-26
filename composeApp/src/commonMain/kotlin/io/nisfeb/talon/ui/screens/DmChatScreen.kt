@@ -1172,12 +1172,18 @@ private fun MessageRow(
                 if (menuExpanded) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
                 else Color.Transparent,
             )
-            // Single tap anywhere on the row opens the action menu;
-            // children that handle their own taps (avatar, reactions,
-            // thread pill, images, links) consume first. Long-press is
-            // still text selection (SelectionContainer); right-click
-            // also opens the menu on desktop.
-            .clickable { onMenuExpand() }
+            // Touch only: a left-tap anywhere on the row opens the action
+            // menu (children that handle their own taps — avatar, reactions,
+            // thread pill, images, links — consume first). On desktop this
+            // clickable is OFF so a left-press-drag reaches the message
+            // text's SelectionContainer instead of being swallowed and
+            // popping the menu on mouse-up; desktop opens the menu via
+            // right-click below. (isTapToOpenMenuSupported)
+            .then(
+                if (io.nisfeb.talon.ui.isTapToOpenMenuSupported) {
+                    Modifier.clickable { onMenuExpand() }
+                } else Modifier,
+            )
             .onSecondaryClick { onMenuExpand() }
             .graphicsLayer {
                 translationX = offsetX.value
@@ -1268,9 +1274,11 @@ private fun MessageRow(
                 reactions = row.reactions,
                 ourPatp = ourPatp,
                 onPollVote = { emoji -> onReactionTap(m, row.reactions, emoji) },
-                // Tapping the message text (off any link) opens the
-                // action menu — same as tapping the row background.
-                onMessageTap = onMenuExpand,
+                // Touch only: tapping the message text (off any link) opens
+                // the action menu — same as tapping the row background. Null
+                // on desktop so a left-press-drag in text selects rather than
+                // opening the menu (right-click opens it instead).
+                onMessageTap = if (io.nisfeb.talon.ui.isTapToOpenMenuSupported) onMenuExpand else null,
             )
             val firstLink = remember(parts) { firstLinkUrl(parts) }
             if (firstLink != null) {
@@ -1314,10 +1322,11 @@ private fun MessageRow(
                     modifier = Modifier.padding(top = 4.dp),
                 )
             }
-            // Action menu, anchored to the message. Opened by a single
-            // tap on the row (see the row-level clickable + the
-            // StoryRenderer onMessageTap above) and by right-click on
-            // desktop — the trailing "⋯" button it replaced is gone.
+            // Action menu, anchored to the message. On touch, opened by a
+            // single tap on the row (see the gated row clickable + the
+            // StoryRenderer onMessageTap above); on desktop, by right-click
+            // on the row — the trailing "⋯" button it replaced is gone, and
+            // left-click/drag is reserved for text selection.
             androidx.compose.material3.DropdownMenu(
                 expanded = menuExpanded,
                 onDismissRequest = onMenuDismiss,
