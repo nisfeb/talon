@@ -150,15 +150,15 @@ fun SearchScreen(
     // searches, default to smart-mode (semantic) or substring".
     // Persists in UiSettings so leaving Search and coming back keeps
     // the user's last choice. Independent of
-    // AiSettings.Feature.SemanticSearch — that flag controls whether
+    // AiSettings.Feature.SmartFeatures — that flag controls whether
     // the feature is *available* (Settings screen) and whether the
     // indexer runs; this UiSettings preference picks which mode the
     // chip starts in. Toggling the chip OFF gives a literal-text
     // search without disabling smart search globally.
-    val semanticEnabled = embedder != null && aiState.semanticSearchEnabled
+    val semanticEnabled = embedder != null && aiState.smartFeaturesEnabled
     val smartPreferred by uiSettings.smartSearchPreferred.collectAsState()
     val smartMode = semanticEnabled && smartPreferred
-    val highlightsEnabled = embedder != null && aiState.importantMessagesEnabled
+    val highlightsEnabled = embedder != null && aiState.smartFeaturesEnabled
 
     val indexProgress by (embedder?.progress?.collectAsState()
         ?: remember { mutableStateOf(io.nisfeb.talon.ai.IndexProgress()) })

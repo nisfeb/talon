@@ -172,11 +172,10 @@ fun DmChatScreen(
     onOpenSelfProfile: () -> Unit,
     /** Optional Android-only platform widget slots. Each replaces a
      *  former expect/actual shim; desktop and tests pass null and the
-     *  surface degrades gracefully (no chips, no voice button, no GPS
-     *  for /loc, no voice preview playback). The platform entry point
-     *  that creates App() supplies these — Main.kt stays null, the
-     *  future MainActivity will pass real Composables. */
-    entityChips: (@Composable (text: String, modifier: Modifier) -> Unit)? = null,
+     *  surface degrades gracefully (no voice button, no GPS for /loc, no
+     *  voice preview playback). The platform entry point that creates
+     *  App() supplies these — Main.kt stays null, the future MainActivity
+     *  will pass real Composables. */
     voiceComposer: (@Composable (
         enabled: Boolean,
         onRecorded: (path: String, durationMs: Long) -> Unit,
@@ -214,7 +213,6 @@ fun DmChatScreen(
     var catchUpSummary by remember(whom) { mutableStateOf<String?>(null) }
     var catchingUp by remember(whom) { mutableStateOf(false) }
     var catchUpError by remember(whom) { mutableStateOf<String?>(null) }
-    var aiEmojiWorking by remember { mutableStateOf(false) }
     var topicsSheetOpen by remember(whom) { mutableStateOf(false) }
     val composerState = io.nisfeb.talon.ui.rememberComposerState(whom, drafts)
     val rows by remember(whom) {
@@ -656,9 +654,9 @@ fun DmChatScreen(
                 // "Indexer hasn't started yet" forever. The flag also
                 // gates Settings rendering, so feature stays
                 // discoverable on platforms that do support it.
-                if (aiConfigured.topicClustersEnabled &&
+                if (aiConfigured.smartFeaturesEnabled &&
                     io.nisfeb.talon.ui.isOnDeviceAiFeatureSupported(
-                        io.nisfeb.talon.ai.AiSettings.Feature.TopicClusters,
+                        io.nisfeb.talon.ai.AiSettings.Feature.SmartFeatures,
                     )
                 ) {
                     IconButton(onClick = { topicsSheetOpen = true }) {
@@ -862,33 +860,6 @@ fun DmChatScreen(
                             }
                         }
                     },
-                    showAiEmoji = aiConfigured.hasKey() && aiConfigured.emojiReactEnabled,
-                    aiEmojiWorking = aiEmojiWorking,
-                    onAiEmoji = {
-                        if (aiEmojiWorking) return@MessageActionMenu
-                        aiEmojiWorking = true
-                        scope.launch {
-                            runCatching {
-                                val text = StoryCache.textFor(target.id, target.contentJson)
-                                aiFeatures.suggestEmojiReact(text)
-                            }.onSuccess { code ->
-                                if (code != null) {
-                                    runCatching { repo.react(whom, target.id, code) }
-                                        .onFailure {
-                                            composerState.sendError =
-                                                "react failed: ${it.message ?: it::class.simpleName}"
-                                        }
-                                } else {
-                                    composerState.sendError = "AI didn't return a known reaction"
-                                }
-                            }.onFailure {
-                                composerState.sendError =
-                                    "AI react failed: ${it.message ?: it::class.simpleName}"
-                            }
-                            aiEmojiWorking = false
-                            actionTarget = null
-                        }
-                    },
                 )
             }
 
@@ -937,8 +908,6 @@ fun DmChatScreen(
                                 onImageTap = currentOnOpenImage,
                                 onAvatarTap = onAvatarTap,
                                 onCitationTap = onCitationTap,
-                                entityActionsEnabled = aiConfigured.entityActionsEnabled,
-                                entityChips = entityChips,
                                 flashAmber = item.row.m.id == flashMessageId,
                             )
                         }
@@ -1168,8 +1137,6 @@ private fun MessageRow(
     onImageTap: (String) -> Unit,
     onAvatarTap: (String) -> Unit,
     onCitationTap: (String) -> Unit,
-    entityActionsEnabled: Boolean,
-    entityChips: (@Composable (text: String, modifier: Modifier) -> Unit)? = null,
     flashAmber: Boolean = false,
 ) {
     val m = row.m
@@ -1313,15 +1280,6 @@ private fun MessageRow(
                     onOpen = onLinkTap,
                     modifier = Modifier.padding(top = 6.dp),
                 )
-            }
-            // ML Kit entity extraction is Android-only; the desktop
-            // actual is a no-op so this composable is safe to call from
-            // commonMain. Toggle gated on the user's AI settings.
-            if (entityActionsEnabled) {
-                val plainText = remember(m.id, m.contentJson) {
-                    StoryCache.textFor(m.id, m.contentJson)
-                }
-                entityChips?.invoke(plainText, Modifier.padding(top = 4.dp))
             }
             if (grouped.isNotEmpty()) {
                 FlowRow(
@@ -1850,9 +1808,6 @@ private fun MessageActionMenu(
     onEdit: () -> Unit,
     onDelete: () -> Unit,
     onTogglePin: () -> Unit,
-    showAiEmoji: Boolean,
-    aiEmojiWorking: Boolean,
-    onAiEmoji: () -> Unit,
 ) {
     val isMine = message.author == ourPatp
     val canReply = message.parentId == null
@@ -1908,22 +1863,6 @@ private fun MessageActionMenu(
                         contentDescription = "Search emojis",
                         modifier = Modifier.size(18.dp),
                     )
-                }
-                if (showAiEmoji) {
-                    TextButton(
-                        onClick = onAiEmoji,
-                        enabled = !aiEmojiWorking,
-                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
-                    ) {
-                        if (aiEmojiWorking) {
-                            CircularProgressIndicator(
-                                strokeWidth = 2.dp,
-                                modifier = Modifier.size(12.dp),
-                            )
-                            Spacer(Modifier.width(6.dp))
-                        }
-                        Text("🤖 AI pick", style = MaterialTheme.typography.labelMedium)
-                    }
                 }
             }
             FlowRow(

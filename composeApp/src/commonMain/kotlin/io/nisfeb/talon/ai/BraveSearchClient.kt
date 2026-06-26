@@ -33,7 +33,7 @@ class BraveSearchClient(private val settings: () -> AiSettings.Config) {
 
     suspend fun search(query: String, count: Int): String {
         val cfg = settings()
-        if (!cfg.webSearchEnabled) return "Web search is turned off in Settings."
+        if (!cfg.assistantOn()) return "Web search is part of the assistant, which is off in Settings."
         val key = cfg.braveApiKey.trim()
         if (key.isBlank()) return "No Brave Search API key is set in Settings."
         val q = query.trim()

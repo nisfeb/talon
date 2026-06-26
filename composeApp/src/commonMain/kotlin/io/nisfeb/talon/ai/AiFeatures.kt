@@ -1,7 +1,6 @@
 package io.nisfeb.talon.ai
 
 import io.nisfeb.talon.data.MessageEntity
-import io.nisfeb.talon.ui.ReactionPalette
 import io.nisfeb.talon.urbit.StoryCache
 
 /**
@@ -38,34 +37,5 @@ class AiFeatures(
         """.trimIndent()
         val user = "Summarize what I missed:\n\n$lines"
         return client.complete(sys, user, maxOutputTokens = 512)
-    }
-
-    /**
-     * "AI emoji react": pick a single reaction for a message based on
-     * its content. Returns a shortcode from [ReactionPalette] or null
-     * if the model's output doesn't map to anything we can send.
-     *
-     * Prompting returns the emoji character directly rather than a
-     * shortcode — models are more reliable at single-token emoji
-     * output than choosing from a typed list, and matching on the
-     * emoji glyph (not a substring of a word like "thinking") avoids
-     * accidental defaults.
-     */
-    suspend fun suggestEmojiReact(messageText: String): String? {
-        val emojiList = ReactionPalette.picker.joinToString(" ") { it.second }
-        val sys = """
-            You react to a chat message with a single emoji.
-            Pick the one from this list that fits the message best:
-            $emojiList
-            Reply with just the emoji character. No words. No punctuation.
-            Default to 👍 if nothing else obviously fits — do not default
-            to 🤔 unless the message is genuinely puzzling.
-        """.trimIndent()
-        val raw = client.complete(sys, messageText.take(1200), maxOutputTokens = 8)
-            .trim()
-        // Match by emoji glyph. Order matters — pick the first palette
-        // emoji that appears anywhere in the response string.
-        val emojiToCode = ReactionPalette.picker.associate { (code, emoji) -> emoji to code }
-        return emojiToCode.entries.firstOrNull { (emoji, _) -> raw.contains(emoji) }?.value
     }
 }

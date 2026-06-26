@@ -524,8 +524,8 @@ class SettingsSyncImpl(
 
     /**
      * Push the current AI settings to %settings. Per-feature toggles
-     * (catchMeUp, emojiReact, dailyDigest, entityActions, semantic
-     * search, topic clusters, important messages) ALWAYS push — they
+     * (catchMeUp, dailyDigest, smartFeatures, the assistant)
+     * ALWAYS push — they
      * are user preferences with no security cost and should follow
      * the user across devices. Cloud-key fields (provider / apiKey /
      * model / baseUrl) only push when the user has explicitly opted
@@ -555,16 +555,10 @@ class SettingsSyncImpl(
                     put("braveApiKey", cfg.braveApiKey)
                 }
                 put("catchMeUpEnabled", cfg.catchMeUpEnabled)
-                put("emojiReactEnabled", cfg.emojiReactEnabled)
                 put("dailyDigestEnabled", cfg.dailyDigestEnabled)
-                put("entityActionsEnabled", cfg.entityActionsEnabled)
-                put("semanticSearchEnabled", cfg.semanticSearchEnabled)
-                put("topicClustersEnabled", cfg.topicClustersEnabled)
-                put("importantMessagesEnabled", cfg.importantMessagesEnabled)
+                put("smartFeaturesEnabled", cfg.smartFeaturesEnabled)
                 put("askUrbitEnabled", cfg.askUrbitEnabled)
                 put("agentEnabled", cfg.agentEnabled)
-                put("mcpEnabled", cfg.mcpEnabled)
-                put("webSearchEnabled", cfg.webSearchEnabled)
             },
         )
     }
@@ -685,16 +679,10 @@ class SettingsSyncImpl(
         val features = if (schemaVersion >= AI_SCHEMA_V2) {
             current.copy(
                 catchMeUpEnabled = bool("catchMeUpEnabled", current.catchMeUpEnabled),
-                emojiReactEnabled = bool("emojiReactEnabled", current.emojiReactEnabled),
                 dailyDigestEnabled = bool("dailyDigestEnabled", current.dailyDigestEnabled),
-                entityActionsEnabled = bool("entityActionsEnabled", current.entityActionsEnabled),
-                semanticSearchEnabled = bool("semanticSearchEnabled", current.semanticSearchEnabled),
-                topicClustersEnabled = bool("topicClustersEnabled", current.topicClustersEnabled),
-                importantMessagesEnabled = bool("importantMessagesEnabled", current.importantMessagesEnabled),
+                smartFeaturesEnabled = bool("smartFeaturesEnabled", current.smartFeaturesEnabled),
                 askUrbitEnabled = bool("askUrbitEnabled", current.askUrbitEnabled),
                 agentEnabled = bool("agentEnabled", current.agentEnabled),
-                mcpEnabled = bool("mcpEnabled", current.mcpEnabled),
-                webSearchEnabled = bool("webSearchEnabled", current.webSearchEnabled),
             )
         } else {
             Log.i(TAG, "applyAiEntry ignoring legacy feature toggles; keeping local defaults")

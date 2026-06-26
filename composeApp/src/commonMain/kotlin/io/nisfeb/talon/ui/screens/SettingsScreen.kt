@@ -578,15 +578,9 @@ fun SettingsScreen(
                 )
                 AiSettings.Feature.values()
                     .filter { it.requiresCloudKey }
-                    // Assistant + Mcp need a cloud key; they run on every
-                    // platform that supports the assistant (the embedder
-                    // only enhances retrieval, see isAssistantSupported).
-                    .filter {
-                        isAssistantSupported ||
-                            (it != AiSettings.Feature.Agent && it != AiSettings.Feature.Mcp)
-                    }
-                    // Web search has its own subsection (toggle + key field).
-                    .filter { it != AiSettings.Feature.WebSearch }
+                    // The Assistant needs the embedder host (isAssistantSupported);
+                    // the other cloud features run anywhere a key is set.
+                    .filter { isAssistantSupported || it != AiSettings.Feature.Agent }
                     .forEach { feature ->
                         FeatureToggleRow(
                             label = feature.label,
@@ -596,27 +590,20 @@ fun SettingsScreen(
                         )
                     }
 
-                // Web search (Brave): the toggle plus its credential field,
-                // grouped so the key sits with the feature it powers. Only
-                // where the assistant runs — the tool lives in the agent.
-                if (isAssistantSupported) {
-                    Spacer(Modifier.height(8.dp))
-                    HorizontalDivider()
+                // The assistant subsumes MCP (ship tools) and web access —
+                // no separate toggles. When it's on, offer the optional
+                // Brave key that powers its web search (it can open URLs
+                // without one).
+                if (isAssistantSupported && aiFeatureEnabled(aiState, AiSettings.Feature.Agent)) {
                     Spacer(Modifier.height(8.dp))
                     Text(
-                        "Web search",
+                        "Assistant web search",
                         style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
-                    )
-                    FeatureToggleRow(
-                        label = AiSettings.Feature.WebSearch.label,
-                        description = AiSettings.Feature.WebSearch.description,
-                        enabled = aiState.webSearchEnabled,
-                        onChange = { aiSettings.setFeature(AiSettings.Feature.WebSearch, it) },
                     )
                     OutlinedTextField(
                         value = braveKey,
                         onValueChange = { braveKey = it },
-                        label = { Text("Brave Search API key") },
+                        label = { Text("Brave Search API key (optional)") },
                         singleLine = true,
                         visualTransformation = if (revealBrave) VisualTransformation.None
                         else PasswordVisualTransformation(),
@@ -638,8 +625,9 @@ fun SettingsScreen(
                         ) { Text("Save key") }
                     }
                     Text(
-                        "Get a free key at search.brave.com/help/api, paste it here, " +
-                            "then turn on Web search above.",
+                        "Optional — a Brave Search API key lets the assistant search " +
+                            "the web (it can already open URLs without one). " +
+                            "Get a free key at search.brave.com/help/api.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -899,16 +887,10 @@ private fun formatNextFire(hourOfDay: Int, minuteOfDay: Int): String {
 internal fun aiFeatureEnabled(state: AiSettings.Config, feature: AiSettings.Feature): Boolean =
     when (feature) {
         AiSettings.Feature.CatchMeUp -> state.catchMeUpEnabled
-        AiSettings.Feature.EmojiReact -> state.emojiReactEnabled
         AiSettings.Feature.DailyDigest -> state.dailyDigestEnabled
-        AiSettings.Feature.EntityActions -> state.entityActionsEnabled
-        AiSettings.Feature.SemanticSearch -> state.semanticSearchEnabled
-        AiSettings.Feature.TopicClusters -> state.topicClustersEnabled
-        AiSettings.Feature.ImportantMessages -> state.importantMessagesEnabled
+        AiSettings.Feature.SmartFeatures -> state.smartFeaturesEnabled
         // Unified assistant: either legacy flag counts as enabled.
         AiSettings.Feature.Agent -> state.agentEnabled || state.askUrbitEnabled
-        AiSettings.Feature.Mcp -> state.mcpEnabled
-        AiSettings.Feature.WebSearch -> state.webSearchEnabled
     }
 
 @Composable

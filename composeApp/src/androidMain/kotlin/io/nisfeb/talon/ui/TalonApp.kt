@@ -26,7 +26,6 @@ import io.nisfeb.talon.TalonSyncService
 import io.nisfeb.talon.ui.RailItem
 import io.nisfeb.talon.ui.BatteryExemptionBanner
 import io.nisfeb.talon.ui.CalendarLauncher
-import io.nisfeb.talon.ui.EntityActionChips
 import io.nisfeb.talon.ui.InlineAudioPlayer
 import io.nisfeb.talon.ui.InlineVideoPlayer
 import io.nisfeb.talon.ui.LocalCalendarLauncher
@@ -464,7 +463,7 @@ fun TalonApp(
             // has opted in. Indexer is idempotent so it's safe to call
             // every launch — but if the feature is off we skip the
             // model download + CPU entirely.
-            if (app.aiSettings.state.value.semanticSearchEnabled) {
+            if (app.aiSettings.state.value.smartFeaturesEnabled) {
                 app.embeddingIndexer.start()
             }
         }
@@ -1324,7 +1323,6 @@ fun TalonApp(
                     // Android-only platform widgets — desktop hosts pass null
                     // and the screen degrades gracefully. Wired via
                     // composable slots so commonMain has no Android deps.
-                    entityChips = { text, m -> EntityActionChips(text, m) },
                     voiceComposer = { enabled, onRecorded ->
                         VoiceRecordButton(
                             enabled = enabled,

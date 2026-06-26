@@ -171,13 +171,14 @@ fun AssistantScreen(
 
     // MCP: if the user opted in (and is in Act mode) and the ship exposes
     // an /mcp endpoint, discover its tools and hand them to the agent.
-    // Read tools run free; pokes are confirm-gated; eval/install stay
-    // hidden (see McpTools). Discovery doubles as the gate — a ship with
-    // no MCP server just yields no tools.
-    val mcpClient = remember(repo, aiState.mcpEnabled) {
+    // MCP is part of the assistant now (no separate opt-in) — being in this
+    // screen means the assistant is on. Read tools run free; pokes are
+    // confirm-gated; eval/install stay hidden (see McpTools). Discovery
+    // doubles as the gate — a ship with no MCP server just yields no tools.
+    val mcpClient = remember(repo) {
         val http = repo?.shipHttp
         val base = repo?.shipBaseUrl
-        if (aiState.mcpEnabled && http != null && base != null) {
+        if (http != null && base != null) {
             McpClient(http, base)
         } else {
             null
@@ -211,16 +212,16 @@ fun AssistantScreen(
         }
     }
 
-    // Web access: stable clients reading live config. The web access toggle
-    // (webEnabled) gates fetch_url; web_search additionally needs a Brave
-    // key. Gating tool *presence* means the model never sees a tool it can't
-    // use; both are remember keys so toggling rebuilds the loop.
+    // Web access is part of the assistant (no separate toggle) — being here
+    // means it's on, so fetch_url is always wired and web_search whenever a
+    // Brave key is set. Gating tool *presence* means the model never sees a
+    // tool it can't use; braveKeyPresent is a remember key so adding the key
+    // rebuilds the loop with web_search.
     val braveSearch = remember(aiSettings) { BraveSearchClient { aiSettings.state.value } }
     val urlFetcher = remember(aiSettings) { UrlFetcher { aiSettings.state.value } }
-    val webEnabled = aiState.webSearchEnabled
     val braveKeyPresent = aiState.braveApiKey.isNotBlank()
 
-    val agentLoop = remember(aiSettings, embedder, repo, contactMap, mcpTools, webEnabled, braveKeyPresent) {
+    val agentLoop = remember(aiSettings, embedder, repo, contactMap, mcpTools, braveKeyPresent) {
         // Needs a ship session for its tools; the embedder is optional
         // (search_history degrades to keyword-only, grouping to flat).
         if (repo != null) {
@@ -228,8 +229,8 @@ fun AssistantScreen(
                 completer = { sys, msgs, tools -> agentClient.completeWithTools(sys, msgs, tools) },
                 tools = ToolCatalog.default(
                     repo, db, embedder,
-                    braveSearch = if (webEnabled && braveKeyPresent) braveSearch else null,
-                    urlFetcher = if (webEnabled) urlFetcher else null,
+                    braveSearch = if (braveKeyPresent) braveSearch else null,
+                    urlFetcher = urlFetcher,
                 ) { contactMap.displayName(it) } + mcpTools,
             )
         } else null
@@ -495,15 +496,14 @@ fun AssistantScreen(
                         .verticalScroll(rememberScrollState()),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
-            // Ship-tools (MCP) connection status, when opted in.
-            if (aiState.mcpEnabled) {
-                mcpStatus?.let {
-                    Text(
-                        it,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
+            // Ship-tools (MCP) connection status — shown whenever the ship
+            // exposes a server (MCP is part of the assistant now).
+            mcpStatus?.let {
+                Text(
+                    it,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
 
             val ready = agentLoop != null

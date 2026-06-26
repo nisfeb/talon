@@ -36,7 +36,7 @@ class UrlFetcher(private val settings: () -> AiSettings.Config) {
         .build()
 
     suspend fun fetch(url: String): String {
-        if (!settings().webSearchEnabled) return "Web access is turned off in Settings."
+        if (!settings().assistantOn()) return "Web access is part of the assistant, which is off in Settings."
         val parsed = url.trim().toHttpUrlOrNull()
             ?: return "Error: not a valid http(s) URL: ${url.take(120)}"
         return withContext(Dispatchers.IO) {

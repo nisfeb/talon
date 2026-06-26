@@ -201,12 +201,6 @@ class TalonApplication : Application() {
             },
         )
 
-        // Pre-warm the ML Kit Entity Extraction model so the first
-        // chat to render isn't blocked on a one-off ~12MB download.
-        // Best-effort; failures (no Play Services, etc.) just mean
-        // chips don't appear until the model lands later.
-        runCatching { io.nisfeb.talon.ai.EntityActions.warmup() }
-
         // Pick the ship to open with — the most-recently-active one,
         // or the single saved ship if exactly one exists, or the
         // first in the list as a safe fallback.

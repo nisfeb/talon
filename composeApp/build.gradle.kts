@@ -84,10 +84,8 @@ kotlin {
             implementation(libs.androidx.lifecycle.process)
             implementation(libs.kotlinx.coroutines.android)
             implementation(libs.androidx.security.crypto)
-            // ML Kit Entity Extraction backs EntityActions chip
-            // detection. MediaPipe text tasks back the on-device
-            // Embedder used by SemanticSearch + EmbeddingIndexer.
-            implementation(libs.mlkit.entity.extraction)
+            // MediaPipe text tasks back the on-device Embedder used by
+            // the SmartFeatures suite + EmbeddingIndexer.
             implementation(libs.mediapipe.tasks.text)
             // ZXing scanner Activity for the LoginScreen "Scan QR"
             // button. Pure FOSS; works on degoogled Android (GrapheneOS,

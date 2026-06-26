@@ -70,17 +70,11 @@ class DesktopAiSettings : AiSettingsRepository {
         val cur = _state.value
         val cfg = when (feature) {
             AiSettings.Feature.CatchMeUp -> cur.copy(catchMeUpEnabled = enabled)
-            AiSettings.Feature.EmojiReact -> cur.copy(emojiReactEnabled = enabled)
             AiSettings.Feature.DailyDigest -> cur.copy(dailyDigestEnabled = enabled)
-            AiSettings.Feature.EntityActions -> cur.copy(entityActionsEnabled = enabled)
-            AiSettings.Feature.SemanticSearch -> cur.copy(semanticSearchEnabled = enabled)
-            AiSettings.Feature.TopicClusters -> cur.copy(topicClustersEnabled = enabled)
-            AiSettings.Feature.ImportantMessages -> cur.copy(importantMessagesEnabled = enabled)
+            AiSettings.Feature.SmartFeatures -> cur.copy(smartFeaturesEnabled = enabled)
             // Unified assistant — keep the legacy askUrbit flag mirrored.
             AiSettings.Feature.Agent ->
                 cur.copy(agentEnabled = enabled, askUrbitEnabled = enabled)
-            AiSettings.Feature.Mcp -> cur.copy(mcpEnabled = enabled)
-            AiSettings.Feature.WebSearch -> cur.copy(webSearchEnabled = enabled)
         }
         persist(cfg)
         onStateChange?.invoke(cfg, false)
@@ -122,15 +116,10 @@ class DesktopAiSettings : AiSettingsRepository {
         // a fresh install starts with the full feature set enabled.
         // Capability flags hide unsupported features per-platform.
         catchMeUpEnabled = true,
-        emojiReactEnabled = true,
         dailyDigestEnabled = true,
-        entityActionsEnabled = true,
-        semanticSearchEnabled = true,
-        topicClustersEnabled = true,
-        importantMessagesEnabled = true,
+        smartFeaturesEnabled = true,
         askUrbitEnabled = false,
         agentEnabled = false,
-        mcpEnabled = false,
         syncEnabled = true,
     )
 

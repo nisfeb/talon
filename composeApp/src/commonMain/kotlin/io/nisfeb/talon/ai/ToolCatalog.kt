@@ -42,12 +42,12 @@ object ToolCatalog {
         // assistant — search_history falls back to keyword-only.
         embedder: SearchEmbedderClient?,
         // When non-null, the web_search tool is added. Callers gate this on
-        // the user's opt-in (webSearchEnabled + a Brave key); the client
-        // itself also no-ops with a message if called while disabled.
+        // a Brave key being set; the client also no-ops with a message when
+        // the assistant is off.
         braveSearch: BraveSearchClient? = null,
-        // When non-null, the fetch_url tool is added. Gated on web access
-        // (webSearchEnabled) — no Brave key needed; the fetcher self-checks
-        // the toggle and hardens against internal/SSRF targets.
+        // When non-null, the fetch_url tool is added — no key needed; the
+        // fetcher self-checks the assistant is on and hardens against
+        // internal/SSRF targets.
         urlFetcher: UrlFetcher? = null,
         displayName: (String) -> String,
     ): List<Tool> = listOfNotNull(

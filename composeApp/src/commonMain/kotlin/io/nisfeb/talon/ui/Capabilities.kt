@@ -82,8 +82,9 @@ expect val platformLabel: String
  * Per-feature supported predicate. The [isOnDeviceAiSupported] flag
  * gates whether the on-device-AI section of SettingsScreen renders
  * at all; this finer predicate then hides individual toggles whose
- * platform impl hasn't landed (e.g. EntityActions wants ML Kit on
- * Android, no equivalent on desktop yet).
+ * platform impl hasn't landed. (Currently the on-device feature is
+ * SmartFeatures — the embedder suite — supported wherever the
+ * embedder is.)
  */
 expect fun isOnDeviceAiFeatureSupported(
     feature: io.nisfeb.talon.ai.AiSettings.Feature,

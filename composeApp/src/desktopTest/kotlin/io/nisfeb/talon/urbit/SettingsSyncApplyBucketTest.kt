@@ -297,7 +297,7 @@ class SettingsSyncApplyBucketTest {
                     put("provider", "OpenAi")
                     put("apiKey", "sk-secret")
                     put("model", "gpt-4")
-                    put("emojiReactEnabled", "false")
+                    put("catchMeUpEnabled", "false")
                     put("dailyDigestEnabled", "true")
                 })
             }
@@ -307,7 +307,7 @@ class SettingsSyncApplyBucketTest {
             assertEquals(AiSettings.Provider.OpenAi, cfg.provider)
             assertEquals("sk-secret", cfg.apiKey)
             assertEquals("gpt-4", cfg.model)
-            assertEquals(false, cfg.emojiReactEnabled)
+            assertEquals(false, cfg.catchMeUpEnabled)
             assertEquals(true, cfg.dailyDigestEnabled)
         }
 
@@ -371,7 +371,7 @@ class SettingsSyncApplyBucketTest {
                 put("config", buildJsonObject {
                     put("schemaVersion", 2)
                     put("provider", "Anthropic")
-                    put("emojiReactEnabled", "false")
+                    put("catchMeUpEnabled", "false")
                     // no apiKey
                 })
             }
@@ -383,7 +383,7 @@ class SettingsSyncApplyBucketTest {
     fun `applyBucket AI_SETTINGS applies feature toggles even when sync is off`() =
         runBlocking {
             // Per-feature toggles always sync — a peer device that
-            // turned on emoji-react should propagate to this device
+            // turned on catch-me-up should propagate to this device
             // regardless of whether this device opted into key sync.
             // The cloud-key fields, however, MUST NOT cross over
             // without local consent (next test pins that).
@@ -396,15 +396,15 @@ class SettingsSyncApplyBucketTest {
                     put("schemaVersion", 2)
                     put("provider", "OpenAi")
                     put("apiKey", "sk-secret")
-                    put("emojiReactEnabled", "false")
-                    put("topicClustersEnabled", "true")
+                    put("catchMeUpEnabled", "false")
+                    put("smartFeaturesEnabled", "true")
                 })
             }
             sync.applyBucket(SettingsSyncImpl.BUCKET_AI_SETTINGS, bucket)
 
             val cfg = aiSettings.state.value
-            assertEquals(false, cfg.emojiReactEnabled)
-            assertEquals(true, cfg.topicClustersEnabled)
+            assertEquals(false, cfg.catchMeUpEnabled)
+            assertEquals(true, cfg.smartFeaturesEnabled)
             // Cloud-key fields stayed at the prior local values —
             // syncEnabled was off, so the wire's provider/apiKey
             // never cross into local state.
@@ -486,7 +486,7 @@ class SettingsSyncApplyBucketTest {
                     put("schemaVersion", 2)
                     put("provider", "NotARealProvider")
                     put("apiKey", "key")
-                    put("emojiReactEnabled", "false")
+                    put("catchMeUpEnabled", "false")
                 })
             }
             sync.applyBucket(SettingsSyncImpl.BUCKET_AI_SETTINGS, bucket)
@@ -495,7 +495,7 @@ class SettingsSyncApplyBucketTest {
             assertEquals(before.provider, cfg.provider)
             assertEquals(before.apiKey, cfg.apiKey)
             // Feature toggle from the bucket still landed.
-            assertEquals(false, cfg.emojiReactEnabled)
+            assertEquals(false, cfg.catchMeUpEnabled)
         }
 
     @Test
@@ -512,25 +512,18 @@ class SettingsSyncApplyBucketTest {
             // pattern across rc27/28/29/30 — toggles flipped on,
             // reinstall, toggles back off.
             val localDefaults = aiSettings.state.value
-            assertEquals(true, localDefaults.entityActionsEnabled)
-            assertEquals(true, localDefaults.semanticSearchEnabled)
+            assertEquals(true, localDefaults.smartFeaturesEnabled)
             val legacyBucket = buildJsonObject {
                 put("config", buildJsonObject {
                     // Note: no `schemaVersion` key. Mirrors the wire
                     // shape pushed by every rc before rc33.
-                    put("entityActionsEnabled", false)
-                    put("semanticSearchEnabled", false)
-                    put("topicClustersEnabled", false)
-                    put("importantMessagesEnabled", false)
+                    put("smartFeaturesEnabled", false)
                 })
             }
             sync.applyBucket(SettingsSyncImpl.BUCKET_AI_SETTINGS, legacyBucket)
 
             val cfg = aiSettings.state.value
-            assertEquals(true, cfg.entityActionsEnabled)
-            assertEquals(true, cfg.semanticSearchEnabled)
-            assertEquals(true, cfg.topicClustersEnabled)
-            assertEquals(true, cfg.importantMessagesEnabled)
+            assertEquals(true, cfg.smartFeaturesEnabled)
         }
 
     // ── daily-digest ────────────────────────────────────────────────

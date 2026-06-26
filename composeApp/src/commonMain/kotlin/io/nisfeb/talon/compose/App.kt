@@ -526,13 +526,9 @@ fun App(
         // no-op if already running, so flipping any toggle (or cold-
         // launching with one already on) just wakes the indexer once.
         val aiState by aiSettings.state.collectAsState()
-        LaunchedEffect(searchEmbedderClient, aiState.semanticSearchEnabled,
-            aiState.topicClustersEnabled, aiState.importantMessagesEnabled) {
+        LaunchedEffect(searchEmbedderClient, aiState.smartFeaturesEnabled) {
             val client = searchEmbedderClient ?: return@LaunchedEffect
-            val needsIndex = aiState.semanticSearchEnabled ||
-                aiState.topicClustersEnabled ||
-                aiState.importantMessagesEnabled
-            if (needsIndex) runCatching { client.start() }
+            if (aiState.smartFeaturesEnabled) runCatching { client.start() }
         }
 
         // Populate message_media for messages that pre-date Task 2.3's

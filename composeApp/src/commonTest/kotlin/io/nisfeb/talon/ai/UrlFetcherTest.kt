@@ -1,6 +1,7 @@
 package io.nisfeb.talon.ai
 
 import java.net.InetAddress
+import kotlinx.coroutines.runBlocking
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -66,5 +67,28 @@ class UrlFetcherTest {
     @Test
     fun `htmlToText collapses whitespace`() {
         assertEquals("one two", htmlToText("<span>one</span>   <span>two</span>"))
+    }
+
+    /**
+     * The assistantOn() gate is the load-bearing web-egress control: with
+     * the assistant off, neither web tool may touch the network. Keys are
+     * set here so the off-sentinel can ONLY come from that gate firing first
+     * — if a refactor drops the `if (!assistantOn())` line, both calls fall
+     * through to HTTP and this test fails (no sentinel). Hermetic while the
+     * gate stands: nothing connects.
+     */
+    @Test
+    fun `web tools refuse when the assistant is off`() = runBlocking {
+        val off = AiSettings.Config(
+            provider = AiSettings.Provider.Anthropic,
+            apiKey = "sk-set",
+            model = null,
+            agentEnabled = false,
+            askUrbitEnabled = false,
+            braveApiKey = "brave-set",
+        )
+        assertFalse(off.assistantOn())
+        assertTrue("is off in Settings" in BraveSearchClient { off }.search("anything", 5))
+        assertTrue("is off in Settings" in UrlFetcher { off }.fetch("https://example.com"))
     }
 }

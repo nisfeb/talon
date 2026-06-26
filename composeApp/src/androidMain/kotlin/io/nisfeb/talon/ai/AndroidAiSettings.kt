@@ -62,17 +62,11 @@ class AndroidAiSettings(context: Context) : AiSettingsRepository {
         prefs.edit().putBoolean(feature.key, enabled).apply()
         _state.value = when (feature) {
             AiSettings.Feature.CatchMeUp -> _state.value.copy(catchMeUpEnabled = enabled)
-            AiSettings.Feature.EmojiReact -> _state.value.copy(emojiReactEnabled = enabled)
             AiSettings.Feature.DailyDigest -> _state.value.copy(dailyDigestEnabled = enabled)
-            AiSettings.Feature.EntityActions -> _state.value.copy(entityActionsEnabled = enabled)
-            AiSettings.Feature.SemanticSearch -> _state.value.copy(semanticSearchEnabled = enabled)
-            AiSettings.Feature.TopicClusters -> _state.value.copy(topicClustersEnabled = enabled)
-            AiSettings.Feature.ImportantMessages -> _state.value.copy(importantMessagesEnabled = enabled)
+            AiSettings.Feature.SmartFeatures -> _state.value.copy(smartFeaturesEnabled = enabled)
             // Unified assistant — keep the legacy askUrbit flag mirrored.
             AiSettings.Feature.Agent ->
                 _state.value.copy(agentEnabled = enabled, askUrbitEnabled = enabled)
-            AiSettings.Feature.Mcp -> _state.value.copy(mcpEnabled = enabled)
-            AiSettings.Feature.WebSearch -> _state.value.copy(webSearchEnabled = enabled)
         }
         onStateChange?.invoke(_state.value, false)
     }
@@ -98,16 +92,10 @@ class AndroidAiSettings(context: Context) : AiSettingsRepository {
             .putString(KEY_MODEL, config.model?.takeIf { it.isNotBlank() })
             .putString(KEY_BASE_URL, config.baseUrl?.takeIf { it.isNotBlank() })
             .putBoolean(AiSettings.Feature.CatchMeUp.key, config.catchMeUpEnabled)
-            .putBoolean(AiSettings.Feature.EmojiReact.key, config.emojiReactEnabled)
             .putBoolean(AiSettings.Feature.DailyDigest.key, config.dailyDigestEnabled)
-            .putBoolean(AiSettings.Feature.EntityActions.key, config.entityActionsEnabled)
-            .putBoolean(AiSettings.Feature.SemanticSearch.key, config.semanticSearchEnabled)
-            .putBoolean(AiSettings.Feature.TopicClusters.key, config.topicClustersEnabled)
-            .putBoolean(AiSettings.Feature.ImportantMessages.key, config.importantMessagesEnabled)
+            .putBoolean(AiSettings.Feature.SmartFeatures.key, config.smartFeaturesEnabled)
             .putBoolean(AiSettings.Feature.Agent.key, config.agentEnabled)
             .putBoolean(LEGACY_ASK_URBIT_KEY, config.agentEnabled)
-            .putBoolean(AiSettings.Feature.Mcp.key, config.mcpEnabled)
-            .putBoolean(AiSettings.Feature.WebSearch.key, config.webSearchEnabled)
             .putString(KEY_BRAVE_API_KEY, config.braveApiKey)
             .putBoolean(KEY_SYNC, config.syncEnabled)
             .apply()
@@ -154,16 +142,10 @@ class AndroidAiSettings(context: Context) : AiSettingsRepository {
             // Explicit-off survives because SharedPreferences only
             // returns the default when the key is absent.
             catchMeUpEnabled = prefs.getBoolean(AiSettings.Feature.CatchMeUp.key, true),
-            emojiReactEnabled = prefs.getBoolean(AiSettings.Feature.EmojiReact.key, true),
             dailyDigestEnabled = prefs.getBoolean(AiSettings.Feature.DailyDigest.key, true),
-            entityActionsEnabled = prefs.getBoolean(AiSettings.Feature.EntityActions.key, true),
-            semanticSearchEnabled = prefs.getBoolean(AiSettings.Feature.SemanticSearch.key, true),
-            topicClustersEnabled = prefs.getBoolean(AiSettings.Feature.TopicClusters.key, true),
-            importantMessagesEnabled = prefs.getBoolean(AiSettings.Feature.ImportantMessages.key, true),
+            smartFeaturesEnabled = prefs.getBoolean(AiSettings.Feature.SmartFeatures.key, true),
             askUrbitEnabled = assistantOn,
             agentEnabled = assistantOn,
-            mcpEnabled = prefs.getBoolean(AiSettings.Feature.Mcp.key, false),
-            webSearchEnabled = prefs.getBoolean(AiSettings.Feature.WebSearch.key, false),
             syncEnabled = prefs.getBoolean(KEY_SYNC, true),
             braveApiKey = prefs.getString(KEY_BRAVE_API_KEY, "").orEmpty(),
         )
