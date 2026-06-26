@@ -380,6 +380,36 @@ class SettingsSyncApplyBucketTest {
         }
 
     @Test
+    fun `applyBucket AI_SETTINGS does not blank a saved key when the entry carries an empty apiKey`() =
+        runBlocking {
+            // Regression for the "keys not persisted" data loss: an older
+            // client seeded the ship with apiKey:"" / braveApiKey:"".
+            // asStr() returns "" (non-null) for an empty string, so the
+            // bare ?: guard didn't catch it and applying the entry blanked
+            // a good local key. Present-but-empty must be treated as absent.
+            aiSettings.applyRemote(
+                AiSettings.Config(
+                    provider = AiSettings.Provider.Anthropic,
+                    apiKey = "sk-keep",
+                    model = null,
+                    syncEnabled = true,
+                    braveApiKey = "brave-keep",
+                ),
+            )
+            val bucket = buildJsonObject {
+                put("config", buildJsonObject {
+                    put("schemaVersion", 2)
+                    put("provider", "Anthropic")
+                    put("apiKey", "")
+                    put("braveApiKey", "")
+                })
+            }
+            sync.applyBucket(SettingsSyncImpl.BUCKET_AI_SETTINGS, bucket)
+            assertEquals("sk-keep", aiSettings.state.value.apiKey)
+            assertEquals("brave-keep", aiSettings.state.value.braveApiKey)
+        }
+
+    @Test
     fun `applyBucket AI_SETTINGS applies feature toggles even when sync is off`() =
         runBlocking {
             // Per-feature toggles always sync — a peer device that

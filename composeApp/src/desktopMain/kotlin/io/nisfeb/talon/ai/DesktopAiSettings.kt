@@ -1,6 +1,7 @@
 package io.nisfeb.talon.ai
 
 import io.nisfeb.talon.util.AppDirs
+import io.nisfeb.talon.util.Log
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -30,16 +31,24 @@ class DesktopAiSettings : AiSettingsRepository {
     private fun loadInitial(): AiSettings.Config {
         if (!file.exists()) return defaultConfig()
         return runCatching { JSON.decodeFromString<AiSettings.Config>(file.readText()) }
-            .getOrElse { defaultConfig() }
+            .getOrElse {
+                // We're about to fall back to an empty config, and the
+                // next write overwrites the file — i.e. the user's key
+                // silently vanishes. Log it so a "key not persisted"
+                // report is diagnosable instead of mute.
+                Log.w(TAG, "ai_settings.json unreadable; falling back to defaults", it)
+                defaultConfig()
+            }
     }
 
     /**
-     * Atomic write — temp file + ATOMIC_MOVE. A JVM crash mid-write
+     * Atomic write — temp file + ATOMIC_MOVE. A crash (or an abrupt
+     * process kill — more common on macOS app termination) mid-write
      * would otherwise leave a truncated config and the next launch
      * would fall back to defaults, silently dropping the user's
      * provider + API key.
      */
-    private fun persist(cfg: AiSettings.Config) {
+    private fun writeAtomically(cfg: AiSettings.Config) {
         val tmp = File(file.parentFile, file.name + ".tmp")
         tmp.writeText(JSON.encodeToString(cfg))
         Files.move(
@@ -47,6 +56,10 @@ class DesktopAiSettings : AiSettingsRepository {
             StandardCopyOption.ATOMIC_MOVE,
             StandardCopyOption.REPLACE_EXISTING,
         )
+    }
+
+    private fun persist(cfg: AiSettings.Config) {
+        writeAtomically(cfg)
         _state.value = cfg
     }
 
@@ -97,7 +110,9 @@ class DesktopAiSettings : AiSettingsRepository {
     override fun applyRemote(config: AiSettings.Config) {
         // applyRemote is called from %settings sync; persist without
         // re-firing onStateChange so we don't pingpong back to the ship.
-        file.writeText(JSON.encodeToString(config))
+        // Atomic (same as persist) so a kill mid-write can't truncate
+        // the file and wipe the key on next launch.
+        writeAtomically(config)
         _state.value = config
     }
 
@@ -124,6 +139,7 @@ class DesktopAiSettings : AiSettingsRepository {
     )
 
     private companion object {
+        private const val TAG = "DesktopAiSettings"
         private val JSON = Json { ignoreUnknownKeys = true; prettyPrint = false }
     }
 }

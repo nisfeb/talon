@@ -547,12 +547,16 @@ class SettingsSyncImpl(
                 put("schemaVersion", AI_SCHEMA_V2)
                 if (cfg.syncEnabled) {
                     put("provider", cfg.provider.name)
-                    put("apiKey", cfg.apiKey)
+                    // Only ship a credential we actually have. Emitting "" would
+                    // make the ship's entry authoritatively key-less, and a
+                    // later pull (here or on a peer) then blanks a real local
+                    // key — the "keys not persisted" data loss. Absent ≠ empty.
+                    if (cfg.apiKey.isNotBlank()) put("apiKey", cfg.apiKey)
                     cfg.model?.let { put("model", it) }
                     cfg.baseUrl?.let { put("baseUrl", it) }
                     // Brave key rides the same opt-in gate as the LLM key —
-                    // both are service credentials.
-                    put("braveApiKey", cfg.braveApiKey)
+                    // both are service credentials; same don't-ship-empty rule.
+                    if (cfg.braveApiKey.isNotBlank()) put("braveApiKey", cfg.braveApiKey)
                 }
                 put("catchMeUpEnabled", cfg.catchMeUpEnabled)
                 put("dailyDigestEnabled", cfg.dailyDigestEnabled)
@@ -706,12 +710,15 @@ class SettingsSyncImpl(
                     // carries one — a peer push with syncEnabled=false
                     // omits apiKey, and orEmpty() would blank a good
                     // local key (data loss → silently disables AI).
-                    apiKey = obj["apiKey"].asStr() ?: current.apiKey,
+                    // Treat present-but-empty ("") as absent too: asStr()
+                    // returns "" (non-null) for an empty string, so the
+                    // ?: guard alone wouldn't catch a ship entry that was
+                    // seeded with apiKey:"" by an older client.
+                    apiKey = obj["apiKey"].asStr()?.takeIf { it.isNotBlank() } ?: current.apiKey,
                     model = obj["model"].asStr(),
                     baseUrl = obj["baseUrl"].asStr(),
-                    // Same "only overwrite when present" guard as apiKey, so a
-                    // peer push without it doesn't blank a good local key.
-                    braveApiKey = obj["braveApiKey"].asStr() ?: current.braveApiKey,
+                    // Same "only overwrite when present and non-empty" guard.
+                    braveApiKey = obj["braveApiKey"].asStr()?.takeIf { it.isNotBlank() } ?: current.braveApiKey,
                 )
             } else features
         } else features
