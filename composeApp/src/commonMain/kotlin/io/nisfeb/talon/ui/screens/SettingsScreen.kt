@@ -61,6 +61,7 @@ import androidx.compose.material3.FilterChip
 import io.nisfeb.talon.ai.AgentPrompt
 import io.nisfeb.talon.ai.AiSettings
 import io.nisfeb.talon.ai.AiSettingsRepository
+import io.nisfeb.talon.ai.LoopPrompt
 import io.nisfeb.talon.ui.UiSettings
 import io.nisfeb.talon.ui.isOnDeviceAiFeatureSupported
 import io.nisfeb.talon.ui.isAssistantSupported
@@ -143,7 +144,7 @@ fun SettingsScreen(
     var providerMenuOpen by remember { mutableStateOf(false) }
     var braveKey by remember { mutableStateOf(aiState.braveApiKey) }
     var revealBrave by remember { mutableStateOf(false) }
-    var promptEditorOpen by remember { mutableStateOf(false) }
+    var promptEditorKind by remember { mutableStateOf<AiSettings.PromptKind?>(null) }
 
     val dirty = provider != aiState.provider ||
         apiKey != aiState.apiKey ||
@@ -640,31 +641,35 @@ fun SettingsScreen(
 
                     Spacer(Modifier.height(8.dp))
                     Text(
-                        "System prompt",
+                        "System prompts",
                         style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
                     )
-                    OutlinedButton(onClick = { promptEditorOpen = true }) {
-                        Text(
-                            if (aiState.systemPrompt.isBlank()) "Edit system prompt"
-                            else "Edit system prompt (customized)",
-                        )
-                    }
                     Text(
-                        "The instructions the assistant follows — what it knows about " +
-                            "Urbit, your ship's tools, and how to search. Customize it to " +
-                            "change the assistant's behavior; edits sync across your devices.",
+                        "The instructions the AI follows. Urbit knowledge is shared by " +
+                            "the assistant and scheduled jobs; each also has its own. " +
+                            "Customizing changes behavior; edits sync across your devices.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    if (promptEditorOpen) {
+                    PROMPT_PARTS.forEach { part ->
+                        OutlinedButton(onClick = { promptEditorKind = part.kind }) {
+                            Text(
+                                if (aiState.prompt(part.kind).isBlank()) "Edit ${part.label}"
+                                else "Edit ${part.label} (customized)",
+                            )
+                        }
+                    }
+                    promptEditorKind?.let { kind ->
+                        val part = PROMPT_PARTS.first { it.kind == kind }
                         SystemPromptEditorDialog(
-                            current = aiState.systemPrompt,
-                            default = AgentPrompt.system,
+                            title = part.label,
+                            current = aiState.prompt(kind),
+                            default = part.default,
                             onSave = {
-                                aiSettings.setSystemPrompt(it)
-                                promptEditorOpen = false
+                                aiSettings.setPrompt(kind, it)
+                                promptEditorKind = null
                             },
-                            onDismiss = { promptEditorOpen = false },
+                            onDismiss = { promptEditorKind = null },
                         )
                     }
                 }
@@ -1406,6 +1411,20 @@ private fun ThemePreference.Mode.label(): String = when (this) {
     ThemePreference.Mode.Dark -> "Dark"
 }
 
+/** The three editable prompt parts, with the built-in default each falls
+ *  back to when blank. Drives both the Settings buttons and the editor. */
+private class PromptPart(
+    val kind: AiSettings.PromptKind,
+    val label: String,
+    val default: String,
+)
+
+private val PROMPT_PARTS = listOf(
+    PromptPart(AiSettings.PromptKind.UrbitKnowledge, "Urbit knowledge (shared)", AgentPrompt.urbitKnowledge),
+    PromptPart(AiSettings.PromptKind.Assistant, "assistant prompt", AgentPrompt.assistant),
+    PromptPart(AiSettings.PromptKind.Loop, "scheduled-job prompt", LoopPrompt.loop),
+)
+
 /**
  * Full-height editor for the assistant's system prompt. Pre-fills with the
  * current override, or the built-in [default] when none is set so the user
@@ -1416,6 +1435,7 @@ private fun ThemePreference.Mode.label(): String = when (this) {
  */
 @Composable
 private fun SystemPromptEditorDialog(
+    title: String,
     current: String,
     default: String,
     onSave: (String) -> Unit,
@@ -1438,11 +1458,11 @@ private fun SystemPromptEditorDialog(
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 Text(
-                    "Assistant system prompt",
+                    title.replaceFirstChar { it.uppercase() },
                     style = MaterialTheme.typography.titleMedium,
                 )
                 Text(
-                    "Instructions the assistant follows. Tailor it to change behavior, " +
+                    "Instructions the AI follows. Tailor it to change behavior, " +
                         "or reset to the built-in default. Edits sync across your devices.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,

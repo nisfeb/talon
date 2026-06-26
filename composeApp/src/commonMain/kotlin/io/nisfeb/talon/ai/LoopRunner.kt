@@ -47,7 +47,7 @@ class LoopRunner(
         // mis-tagged or the catalog changes.
         val active = if (loop.writesAuthorized) tools else tools.filter { !it.write }
         val outcome = runCatching {
-            AgentLoop(completer = completer, tools = active, systemPrompt = LoopPrompt.system)
+            AgentLoop(completer = completer, tools = active, systemPrompt = LoopPrompt.forLoop(aiConfig()))
                 .run(question = loop.prompt, confirm = { _, _ -> loop.writesAuthorized })
         }
         val ok = outcome.isSuccess

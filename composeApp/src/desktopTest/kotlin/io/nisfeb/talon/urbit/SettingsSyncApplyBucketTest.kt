@@ -443,7 +443,7 @@ class SettingsSyncApplyBucketTest {
         }
 
     @Test
-    fun `applyBucket AI_SETTINGS applies and resets the custom system prompt`() =
+    fun `applyBucket AI_SETTINGS applies and resets the custom system prompts`() =
         runBlocking {
             aiSettings.applyRemote(
                 AiSettings.Config(
@@ -451,20 +451,28 @@ class SettingsSyncApplyBucketTest {
                     apiKey = "k",
                     model = null,
                     syncEnabled = true,
-                    systemPrompt = "old local prompt",
+                    urbitKnowledgePrompt = "old shared",
+                    assistantPrompt = "old assistant",
+                    loopPrompt = "old loop",
                 ),
             )
-            // A peer set a custom prompt → adopt it.
+            // A peer set custom prompts → adopt each independently.
             sync.applyBucket(
                 SettingsSyncImpl.BUCKET_AI_SETTINGS,
                 buildJsonObject {
                     put("config", buildJsonObject {
                         put("schemaVersion", 2)
-                        put("systemPrompt", "peer custom prompt")
+                        put("urbitKnowledgePrompt", "peer shared")
+                        put("assistantPrompt", "peer assistant")
+                        put("loopPrompt", "peer loop")
                     })
                 },
             )
-            assertEquals("peer custom prompt", aiSettings.state.value.systemPrompt)
+            aiSettings.state.value.let {
+                assertEquals("peer shared", it.urbitKnowledgePrompt)
+                assertEquals("peer assistant", it.assistantPrompt)
+                assertEquals("peer loop", it.loopPrompt)
+            }
 
             // A peer reset to default ("") → the reset propagates (unlike a
             // credential, an empty prompt is a valid "use built-in" state).
@@ -473,11 +481,17 @@ class SettingsSyncApplyBucketTest {
                 buildJsonObject {
                     put("config", buildJsonObject {
                         put("schemaVersion", 2)
-                        put("systemPrompt", "")
+                        put("urbitKnowledgePrompt", "")
+                        put("assistantPrompt", "")
+                        put("loopPrompt", "")
                     })
                 },
             )
-            assertEquals("", aiSettings.state.value.systemPrompt)
+            aiSettings.state.value.let {
+                assertEquals("", it.urbitKnowledgePrompt)
+                assertEquals("", it.assistantPrompt)
+                assertEquals("", it.loopPrompt)
+            }
         }
 
     @Test
@@ -1164,8 +1178,8 @@ internal class FakeAiSettings : AiSettingsRepository {
     override fun setBraveApiKey(key: String) {
         _state.value = _state.value.copy(braveApiKey = key)
     }
-    override fun setSystemPrompt(prompt: String) {
-        _state.value = _state.value.copy(systemPrompt = prompt)
+    override fun setPrompt(kind: AiSettings.PromptKind, value: String) {
+        _state.value = _state.value.withPrompt(kind, value)
     }
     override fun setSyncEnabled(enabled: Boolean) {
         _state.value = _state.value.copy(syncEnabled = enabled)

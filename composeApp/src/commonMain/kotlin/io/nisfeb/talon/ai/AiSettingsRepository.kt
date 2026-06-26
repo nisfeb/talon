@@ -36,10 +36,9 @@ interface AiSettingsRepository {
      *  the LLM key set via [update]. */
     fun setBraveApiKey(key: String)
 
-    /** Override the assistant's system prompt. Blank restores the built-in
-     *  default ([AgentPrompt.system]). Synced like a preference, not a
-     *  credential. */
-    fun setSystemPrompt(prompt: String)
+    /** Override one editable system-prompt part. Blank restores that part's
+     *  built-in default. Synced like a preference, not a credential. */
+    fun setPrompt(kind: AiSettings.PromptKind, value: String)
 
     /**
      * Apply a snapshot received from %settings. Bypasses onStateChange

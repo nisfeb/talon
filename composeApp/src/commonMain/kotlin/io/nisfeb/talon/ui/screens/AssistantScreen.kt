@@ -222,10 +222,11 @@ fun AssistantScreen(
     val urlFetcher = remember(aiSettings) { UrlFetcher { aiSettings.state.value } }
     val braveKeyPresent = aiState.braveApiKey.isNotBlank()
 
-    // Blank override keeps the maintained built-in default; a custom
-    // prompt (set in Settings) overrides it. Keyed into the remember so
-    // editing the prompt rebuilds the loop with the new system message.
-    val systemPrompt = aiState.systemPrompt.ifBlank { AgentPrompt.system }
+    // Shared Urbit knowledge + assistant specifics, each falling back to
+    // its built-in default when the user hasn't customized it (set in
+    // Settings). Keyed into the remember so editing a prompt part rebuilds
+    // the loop with the new system message.
+    val systemPrompt = AgentPrompt.forAssistant(aiState)
     val agentLoop = remember(aiSettings, embedder, repo, contactMap, mcpTools, braveKeyPresent, systemPrompt) {
         // Needs a ship session for its tools; the embedder is optional
         // (search_history degrades to keyword-only, grouping to flat).

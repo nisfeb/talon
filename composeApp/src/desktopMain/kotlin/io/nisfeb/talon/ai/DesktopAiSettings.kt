@@ -99,8 +99,8 @@ class DesktopAiSettings : AiSettingsRepository {
         onStateChange?.invoke(cfg, false)
     }
 
-    override fun setSystemPrompt(prompt: String) {
-        val cfg = _state.value.copy(systemPrompt = prompt)
+    override fun setPrompt(kind: AiSettings.PromptKind, value: String) {
+        val cfg = _state.value.withPrompt(kind, value)
         persist(cfg)
         onStateChange?.invoke(cfg, false)
     }

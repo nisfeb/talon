@@ -52,17 +52,38 @@ object AiSettings {
         // Optional (the assistant can open URLs without it). Travels with
         // the same syncEnabled gate as the LLM key (see SettingsSyncImpl).
         val braveApiKey: String = "",
-        // User override for the assistant's system prompt. Blank = use the
-        // built-in default (AgentPrompt.system). Not a credential — synced
-        // like a preference (always, schemaVersion>=2), see SettingsSyncImpl.
-        val systemPrompt: String = "",
+        // Editable agent system-prompt parts. Each blank = use its built-in
+        // default; the effective prompt for a role is the shared knowledge
+        // followed by that role's specifics (see AgentPrompt/LoopPrompt).
+        // Not credentials — synced like preferences (always, schemaVersion>=2).
+        val urbitKnowledgePrompt: String = "", // shared by assistant + loops
+        val assistantPrompt: String = "",      // interactive-assistant specifics
+        val loopPrompt: String = "",           // headless-loop specifics
     ) {
         fun hasKey(): Boolean = apiKey.isNotBlank()
 
         /** The unified assistant is on (current flag or the legacy one).
          *  Gates MCP + web access, which are now part of the assistant. */
         fun assistantOn(): Boolean = agentEnabled || askUrbitEnabled
+
+        /** Read the editable prompt for [kind] (blank = use built-in default). */
+        fun prompt(kind: PromptKind): String = when (kind) {
+            PromptKind.UrbitKnowledge -> urbitKnowledgePrompt
+            PromptKind.Assistant -> assistantPrompt
+            PromptKind.Loop -> loopPrompt
+        }
+
+        /** Copy with [kind]'s editable prompt set to [value]. */
+        fun withPrompt(kind: PromptKind, value: String): Config = when (kind) {
+            PromptKind.UrbitKnowledge -> copy(urbitKnowledgePrompt = value)
+            PromptKind.Assistant -> copy(assistantPrompt = value)
+            PromptKind.Loop -> copy(loopPrompt = value)
+        }
     }
+
+    /** The three editable system-prompt parts. UrbitKnowledge is shared by
+     *  the assistant and loops; the other two are role-specific. */
+    enum class PromptKind { UrbitKnowledge, Assistant, Loop }
 
     /**
      * Per-feature toggles. SettingsScreen iterates this enum to render

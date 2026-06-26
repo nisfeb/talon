@@ -77,9 +77,9 @@ class AndroidAiSettings(context: Context) : AiSettingsRepository {
         onStateChange?.invoke(_state.value, false)
     }
 
-    override fun setSystemPrompt(prompt: String) {
-        prefs.edit().putString(KEY_SYSTEM_PROMPT, prompt).apply()
-        _state.value = _state.value.copy(systemPrompt = prompt)
+    override fun setPrompt(kind: AiSettings.PromptKind, value: String) {
+        prefs.edit().putString(promptKey(kind), value).apply()
+        _state.value = _state.value.withPrompt(kind, value)
         onStateChange?.invoke(_state.value, false)
     }
 
@@ -103,7 +103,9 @@ class AndroidAiSettings(context: Context) : AiSettingsRepository {
             .putBoolean(AiSettings.Feature.Agent.key, config.agentEnabled)
             .putBoolean(LEGACY_ASK_URBIT_KEY, config.agentEnabled)
             .putString(KEY_BRAVE_API_KEY, config.braveApiKey)
-            .putString(KEY_SYSTEM_PROMPT, config.systemPrompt)
+            .putString(KEY_URBIT_KNOWLEDGE_PROMPT, config.urbitKnowledgePrompt)
+            .putString(KEY_ASSISTANT_PROMPT, config.assistantPrompt)
+            .putString(KEY_LOOP_PROMPT, config.loopPrompt)
             .putBoolean(KEY_SYNC, config.syncEnabled)
             .apply()
         _state.value = config
@@ -116,7 +118,9 @@ class AndroidAiSettings(context: Context) : AiSettingsRepository {
             .remove(KEY_MODEL)
             .remove(KEY_BASE_URL)
             .remove(KEY_BRAVE_API_KEY)
-            .remove(KEY_SYSTEM_PROMPT)
+            .remove(KEY_URBIT_KNOWLEDGE_PROMPT)
+            .remove(KEY_ASSISTANT_PROMPT)
+            .remove(KEY_LOOP_PROMPT)
             .remove(KEY_SYNC)
         // Remove every feature toggle — not a hand-picked few — so an
         // enabled feature (especially the opt-in AskUrbit/Agent) can't
@@ -156,8 +160,16 @@ class AndroidAiSettings(context: Context) : AiSettingsRepository {
             agentEnabled = assistantOn,
             syncEnabled = prefs.getBoolean(KEY_SYNC, true),
             braveApiKey = prefs.getString(KEY_BRAVE_API_KEY, "").orEmpty(),
-            systemPrompt = prefs.getString(KEY_SYSTEM_PROMPT, "").orEmpty(),
+            urbitKnowledgePrompt = prefs.getString(KEY_URBIT_KNOWLEDGE_PROMPT, "").orEmpty(),
+            assistantPrompt = prefs.getString(KEY_ASSISTANT_PROMPT, "").orEmpty(),
+            loopPrompt = prefs.getString(KEY_LOOP_PROMPT, "").orEmpty(),
         )
+    }
+
+    private fun promptKey(kind: AiSettings.PromptKind): String = when (kind) {
+        AiSettings.PromptKind.UrbitKnowledge -> KEY_URBIT_KNOWLEDGE_PROMPT
+        AiSettings.PromptKind.Assistant -> KEY_ASSISTANT_PROMPT
+        AiSettings.PromptKind.Loop -> KEY_LOOP_PROMPT
     }
 
     companion object {
@@ -166,7 +178,9 @@ class AndroidAiSettings(context: Context) : AiSettingsRepository {
         private const val KEY_MODEL = "model"
         private const val KEY_BASE_URL = "base_url"
         private const val KEY_BRAVE_API_KEY = "brave_api_key"
-        private const val KEY_SYSTEM_PROMPT = "system_prompt"
+        private const val KEY_URBIT_KNOWLEDGE_PROMPT = "urbit_knowledge_prompt"
+        private const val KEY_ASSISTANT_PROMPT = "assistant_prompt"
+        private const val KEY_LOOP_PROMPT = "loop_prompt"
         private const val KEY_SYNC = "sync_enabled"
         // Legacy "Ask your Urbit" key, folded into the unified assistant
         // (feat_agent). Read for migration + written in lockstep.
