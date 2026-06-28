@@ -6,6 +6,10 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.hoverable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsHoveredAsState
+import androidx.compose.ui.draw.alpha
 import androidx.compose.foundation.combinedClickable
 import io.nisfeb.talon.ui.combinedClickableWithSecondary
 import io.nisfeb.talon.ui.onSecondaryClick
@@ -44,6 +48,7 @@ import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.NotificationsOff
@@ -1164,9 +1169,15 @@ private fun MessageRow(
     }
     val flashColor = Color(0xFFFFC107).copy(alpha = 0.30f * flashAlpha.value)
 
+    // Desktop only: track row hover so the trailing "⋯" can reveal on
+    // hover (the touch path opens the menu by tapping the row instead).
+    val interactionSource = remember { MutableInteractionSource() }
+    val hovered by interactionSource.collectIsHoveredAsState()
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .hoverable(interactionSource)
             .background(flashColor)
             // Accent tint while this message's menu is open — shows
             // which message you're acting on.
@@ -1326,15 +1337,28 @@ private fun MessageRow(
             }
             // Action menu, anchored to the message. On touch, opened by a
             // single tap on the row (see the gated row clickable + the
-            // StoryRenderer onMessageTap above); on desktop, by right-click
-            // on the row — the trailing "⋯" button it replaced is gone, and
-            // left-click/drag is reserved for text selection.
+            // StoryRenderer onMessageTap above); on desktop, by the trailing
+            // hover "⋯" below (left-click/drag is reserved for text selection,
+            // and right-click is eaten by the text's SelectionContainer).
             androidx.compose.material3.DropdownMenu(
                 expanded = menuExpanded,
                 onDismissRequest = onMenuDismiss,
                 modifier = Modifier.widthIn(min = 280.dp, max = 360.dp),
             ) {
                 actionMenu()
+            }
+        }
+        // Desktop affordance: a hover-revealed "⋯" is the reliable way to
+        // open the menu when tap-to-open is off. Without it the menu is
+        // unreachable over a message's text (selection owns left-drag;
+        // SelectionContainer swallows the row's right-click). Kept in the
+        // layout (alpha, not absence) so rows don't shift on hover.
+        if (!io.nisfeb.talon.ui.isTapToOpenMenuSupported) {
+            IconButton(
+                onClick = onMenuExpand,
+                modifier = Modifier.alpha(if (hovered || menuExpanded) 1f else 0f),
+            ) {
+                Icon(Icons.Filled.MoreVert, contentDescription = "Message actions")
             }
         }
     }

@@ -164,8 +164,9 @@ fun StoryRenderer(
     // Android. The action sheet used to be wired to long-press here
     // and on the parent row; both paths were removed so Compose's
     // selection gesture has unobstructed ownership of long-press
-    // inside text. Sheet access moves to the row's trailing ellipsis
-    // (MessageActionsButton) plus desktop right-click on the row.
+    // inside text. The action menu is reached by tapping the row on
+    // touch (onMessageTap) and by the row's hover "⋯" on desktop —
+    // right-click can't be used here, this SelectionContainer eats it.
     SelectionContainer(modifier = modifier) {
     Column(
         verticalArrangement = Arrangement.spacedBy(6.dp),
