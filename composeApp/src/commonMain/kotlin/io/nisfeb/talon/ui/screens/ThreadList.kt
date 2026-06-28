@@ -6,6 +6,10 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.hoverable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsHoveredAsState
+import androidx.compose.ui.draw.alpha
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -32,6 +36,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -671,14 +676,24 @@ private fun ThreadMessage(
     val baseColor = if (highlighted) MaterialTheme.colorScheme.surfaceVariant
         else MaterialTheme.colorScheme.surface
     val flashOverlay = Color(0xFFFFC107).copy(alpha = 0.30f * flashAlpha.value)
-    // Single tap on the row opens the action menu (and tints the row
-    // with the accent to show which message); right-click also opens
-    // it on desktop. Long-press stays text selection (Selection
-    // Container). The trailing "⋯" button is gone.
+    // Desktop only: track row hover so the trailing "⋯" can reveal on
+    // hover (matches DmChatScreen.MessageRow).
+    val interactionSource = remember { MutableInteractionSource() }
+    val hovered by interactionSource.collectIsHoveredAsState()
+    // Touch: a single tap on the row opens the action menu (and tints the
+    // row to show which message). On desktop that clickable is OFF so a
+    // left-press-drag reaches the text's SelectionContainer instead of
+    // popping the menu; desktop opens it via the hover "⋯" below.
+    // (isTapToOpenMenuSupported — see DmChatScreen.MessageRow.)
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable { onMenuExpand() }
+            .hoverable(interactionSource)
+            .then(
+                if (io.nisfeb.talon.ui.isTapToOpenMenuSupported) {
+                    Modifier.clickable { onMenuExpand() }
+                } else Modifier,
+            )
             .onSecondaryClick { onMenuExpand() }
             .background(baseColor)
             .background(flashOverlay)
@@ -708,7 +723,9 @@ private fun ThreadMessage(
                 reactions = reactions,
                 ourPatp = ourPatp,
                 onPollVote = { emoji -> onPollVote(m, reactions, emoji) },
-                onMessageTap = onMenuExpand,
+                // Touch only: null on desktop so a left-press-drag selects
+                // text rather than opening the menu (hover "⋯" opens it).
+                onMessageTap = if (io.nisfeb.talon.ui.isTapToOpenMenuSupported) onMenuExpand else null,
             )
             if (grouped.isNotEmpty()) {
                 FlowRow(
@@ -747,13 +764,27 @@ private fun ThreadMessage(
                     }
                 }
             }
-            // Action menu anchored to the message (tap / right-click).
+            // Action menu, anchored to the message. Opened by tapping the
+            // row on touch and by the hover "⋯" below on desktop.
             androidx.compose.material3.DropdownMenu(
                 expanded = menuExpanded,
                 onDismissRequest = onMenuDismiss,
                 modifier = Modifier.widthIn(min = 280.dp, max = 360.dp),
             ) {
                 actionMenu()
+            }
+        }
+        // Desktop affordance: a hover-revealed "⋯" — the reliable way to
+        // open the menu when tap-to-open is off (selection owns left-drag;
+        // SelectionContainer eats the row's right-click). Kept in layout
+        // (alpha, not absence) so rows don't shift on hover. Mirrors
+        // DmChatScreen.MessageRow.
+        if (!io.nisfeb.talon.ui.isTapToOpenMenuSupported) {
+            IconButton(
+                onClick = onMenuExpand,
+                modifier = Modifier.alpha(if (hovered || menuExpanded) 1f else 0f),
+            ) {
+                Icon(Icons.Filled.MoreVert, contentDescription = "Message actions")
             }
         }
     }
