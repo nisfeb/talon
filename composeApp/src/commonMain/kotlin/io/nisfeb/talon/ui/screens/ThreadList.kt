@@ -697,9 +697,14 @@ private fun ThreadMessage(
             .onSecondaryClick { onMenuExpand() }
             .background(baseColor)
             .background(flashOverlay)
+            // Accent tint while this message's menu is open, plus a subtle
+            // hover tint (desktop) so it's clear which message the "⋯" acts on.
             .background(
-                if (menuExpanded) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
-                else Color.Transparent,
+                when {
+                    menuExpanded -> MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
+                    hovered -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.05f)
+                    else -> Color.Transparent
+                },
             )
             .padding(top = if (showHeader) 10.dp else 2.dp, bottom = 2.dp),
     ) {
@@ -776,16 +781,23 @@ private fun ThreadMessage(
         }
         // Desktop affordance: a hover-revealed "⋯" — the reliable way to
         // open the menu when tap-to-open is off (selection owns left-drag;
-        // SelectionContainer eats the row's right-click). Kept in layout
-        // (alpha, not absence) so rows don't shift on hover. Mirrors
+        // SelectionContainer eats the row's right-click). A plain Icon, NOT
+        // IconButton — its 48dp min touch size inflates short rows.
+        // Top-aligned + alpha-toggled so the slot never shifts. Mirrors
         // DmChatScreen.MessageRow.
         if (!io.nisfeb.talon.ui.isTapToOpenMenuSupported) {
-            IconButton(
-                onClick = onMenuExpand,
-                modifier = Modifier.alpha(if (hovered || menuExpanded) 1f else 0f),
-            ) {
-                Icon(Icons.Filled.MoreVert, contentDescription = "Message actions")
-            }
+            Icon(
+                Icons.Filled.MoreVert,
+                contentDescription = "Message actions",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier
+                    .align(Alignment.Top)
+                    .alpha(if (hovered || menuExpanded) 1f else 0f)
+                    .clip(RoundedCornerShape(6.dp))
+                    .clickable(onClick = onMenuExpand)
+                    .padding(2.dp)
+                    .size(20.dp),
+            )
         }
     }
 }

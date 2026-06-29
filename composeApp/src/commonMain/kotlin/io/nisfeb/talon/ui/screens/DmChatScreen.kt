@@ -1179,11 +1179,15 @@ private fun MessageRow(
             .fillMaxWidth()
             .hoverable(interactionSource)
             .background(flashColor)
-            // Accent tint while this message's menu is open — shows
-            // which message you're acting on.
+            // Accent tint while this message's menu is open, plus a subtle
+            // hover tint (desktop) so it's clear which message the trailing
+            // "⋯" acts on when rows are short or the window is wide.
             .background(
-                if (menuExpanded) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
-                else Color.Transparent,
+                when {
+                    menuExpanded -> MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
+                    hovered -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.05f)
+                    else -> Color.Transparent
+                },
             )
             // Touch only: a left-tap anywhere on the row opens the action
             // menu (children that handle their own taps — avatar, reactions,
@@ -1351,15 +1355,22 @@ private fun MessageRow(
         // Desktop affordance: a hover-revealed "⋯" is the reliable way to
         // open the menu when tap-to-open is off. Without it the menu is
         // unreachable over a message's text (selection owns left-drag;
-        // SelectionContainer swallows the row's right-click). Kept in the
-        // layout (alpha, not absence) so rows don't shift on hover.
+        // SelectionContainer swallows the row's right-click). A plain Icon,
+        // NOT IconButton — the latter's 48dp min touch size inflates short
+        // rows. Top-aligned + alpha-toggled so the slot never shifts.
         if (!io.nisfeb.talon.ui.isTapToOpenMenuSupported) {
-            IconButton(
-                onClick = onMenuExpand,
-                modifier = Modifier.alpha(if (hovered || menuExpanded) 1f else 0f),
-            ) {
-                Icon(Icons.Filled.MoreVert, contentDescription = "Message actions")
-            }
+            Icon(
+                Icons.Filled.MoreVert,
+                contentDescription = "Message actions",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier
+                    .align(Alignment.Top)
+                    .alpha(if (hovered || menuExpanded) 1f else 0f)
+                    .clip(RoundedCornerShape(6.dp))
+                    .clickable(onClick = onMenuExpand)
+                    .padding(2.dp)
+                    .size(20.dp),
+            )
         }
     }
 }
