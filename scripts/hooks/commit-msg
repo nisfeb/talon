@@ -1,0 +1,18 @@
+#!/usr/bin/env sh
+#
+# Lint the commit message against the Doom Emacs git-conventions linter —
+# the same check the lattice repo enforces (type(scope): subject, subject
+# length, allowed scopes, trailers). See https://discourse.doomemacs.org/git-conventions
+#
+# Talon points core.hooksPath at scripts/hooks (see the repo's git config),
+# so this file IS the commit-msg hook. It's tracked, so it runs on every
+# clone — hence the graceful skip when doom isn't installed, so a machine
+# without it can still commit. Override the path with DOOM=/path/to/doom.
+
+doom="${DOOM:-$HOME/.config/emacs/bin/doom}"
+if [ -x "$doom" ]; then
+    exec "$doom" --no-color ci hook commit-msg "$@"
+fi
+
+# doom not found — nothing to lint with; don't block the commit.
+exit 0
