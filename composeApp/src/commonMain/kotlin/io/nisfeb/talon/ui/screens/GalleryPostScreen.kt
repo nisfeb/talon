@@ -36,6 +36,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -70,6 +71,18 @@ fun GalleryPostScreen(
     modifier: Modifier = Modifier,
 ) {
     val scope = rememberCoroutineScope()
+
+    // Keep this channel "focused" while the post overlay is open. Opening a
+    // post unmounts GalleryGridScreen (App.kt routes grid/post/compose as
+    // mutually-exclusive branches), so its onDispose clears openWhom. Without
+    // this, openWhom goes null while you view a post: the %activity
+    // focus-override stops suppressing unread re-bumps for this channel, and
+    // navigating straight to another channel never fires this channel's
+    // markRead — so the badge sticks until you back all the way out.
+    DisposableEffect(whom) {
+        repo.setOpenChat(whom)
+        onDispose { repo.setOpenChat(null) }
+    }
 
     // Suppress Room's invalidation-tracker re-emissions on unrelated
     // messages-table writes — without this the post body and replies

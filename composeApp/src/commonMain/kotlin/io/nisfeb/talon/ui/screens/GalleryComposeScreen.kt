@@ -30,6 +30,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -66,6 +67,15 @@ fun GalleryComposeScreen(
     modifier: Modifier = Modifier,
 ) {
     val scope = rememberCoroutineScope()
+
+    // Keep this channel "focused" while composing — the gallery grid is
+    // unmounted underneath (mutually-exclusive App.kt branches), so without
+    // this openWhom goes null and the channel's unread can re-bump / not
+    // clear on navigate-away. See GalleryPostScreen for the full rationale.
+    DisposableEffect(whom) {
+        repo.setOpenChat(whom)
+        onDispose { repo.setOpenChat(null) }
+    }
 
     var tab by remember { mutableStateOf(GalleryTab.Image) }
 
