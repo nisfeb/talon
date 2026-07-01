@@ -7,9 +7,12 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -20,6 +23,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
@@ -34,6 +38,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -52,6 +57,7 @@ import io.nisfeb.talon.data.newGid
 import io.nisfeb.talon.ui.MarkdownText
 import io.nisfeb.talon.ui.shortRelativeTime
 import io.nisfeb.talon.urbit.SettingsSync
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /**
@@ -273,6 +279,23 @@ fun LoopDetail(
     var loop by remember(initialLoop.id) { mutableStateOf(initialLoop) }
     var editing by remember(initialLoop.id) { mutableStateOf(initialLoop.id == 0L) }
 
+    // "Run now" is fire-and-forget and takes a few seconds (an LLM call); it
+    // lands a fresh run row + a notification when done. Track from the click
+    // until that row appears (or a safety timeout) so the button visibly does
+    // something instead of looking dead.
+    var runStartedAt by remember(loop.id) { mutableStateOf<Long?>(null) }
+    val latestRun by remember(loop.id) { db.loopRuns().streamForLoop(loop.id, 1) }
+        .collectAsState(initial = emptyList())
+    val latestRanAt = latestRun.firstOrNull()?.ranAt
+    LaunchedEffect(latestRanAt) {
+        val started = runStartedAt
+        if (started != null && latestRanAt != null && latestRanAt >= started) runStartedAt = null
+    }
+    LaunchedEffect(runStartedAt) {
+        if (runStartedAt != null) { delay(120_000); runStartedAt = null }
+    }
+    val running = runStartedAt != null
+
     if (editing) {
         Column(modifier.fillMaxSize()) {
             Text(
@@ -342,7 +365,24 @@ fun LoopDetail(
             )
             Text(loop.prompt, style = MaterialTheme.typography.bodyMedium)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(onClick = { onRunNow(loop.id) }) { Text("Run now") }
+                OutlinedButton(
+                    onClick = {
+                        runStartedAt = System.currentTimeMillis()
+                        onRunNow(loop.id)
+                    },
+                    enabled = !running,
+                ) {
+                    if (running) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(16.dp),
+                            strokeWidth = 2.dp,
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text("Running…")
+                    } else {
+                        Text("Run now")
+                    }
+                }
                 TextButton(onClick = { editing = true }) { Text("Edit") }
                 TextButton(onClick = {
                     scope.launch {
