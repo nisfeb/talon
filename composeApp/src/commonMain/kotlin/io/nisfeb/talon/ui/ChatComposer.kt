@@ -185,12 +185,17 @@ fun ChatComposer(
             state.uploading = true
             state.sendError = null
             runCatching {
+                // Validate before upload — chat used to upload+send whatever
+                // the picker returned, so an empty/corrupt image became a
+                // blank message pointing at a hosted empty object. Gallery /
+                // notebook already reject undecodable images here.
                 val dims = decodeImageDimensions(picked.bytes)
+                    ?: error("that didn't decode as an image — try a different photo or a JPG/PNG")
                 val hostedUrl = repo.uploadImage(picked.bytes, picked.mimeType, picked.displayName)
                 strategy.sendImage(
                     src = hostedUrl,
-                    width = dims?.first ?: 0,
-                    height = dims?.second ?: 0,
+                    width = dims.first,
+                    height = dims.second,
                     alt = picked.displayName,
                 )
                 // Image-attach is a send action even though the user

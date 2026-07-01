@@ -44,6 +44,15 @@ actual fun rememberImagePicker(): suspend () -> PickedImage? {
                     val name = uri.lastPathSegment?.substringAfterLast('/') ?: "image"
                     val bytes = resolver.openInputStream(uri)?.use { it.readBytes() }
                         ?: error("cannot read image bytes")
+                    // A cloud/online photo (Samsung Gallery, Google Photos)
+                    // that hasn't downloaded can hand back a valid-but-empty
+                    // stream: readBytes() returns 0 bytes with no exception.
+                    // Uploading that produces a hosted URL to a blank object,
+                    // and the chat sends an empty image. Fail loudly instead.
+                    if (bytes.isEmpty()) error(
+                        "image came back empty — if it's an online/cloud photo, " +
+                            "open it in your Gallery first so it downloads, then retry",
+                    )
                     val (b, m, n) = transcodeHeicToJpeg(bytes, mime, name)
                     PickedImage(b, m, n)
                 }
@@ -85,6 +94,7 @@ actual fun rememberAnyFilePicker(): suspend () -> PickedImage? {
                     val name = uri.lastPathSegment?.substringAfterLast('/') ?: "file"
                     val bytes = resolver.openInputStream(uri)?.use { it.readBytes() }
                         ?: error("cannot read file bytes")
+                    if (bytes.isEmpty()) error("file came back empty (0 bytes)")
                     PickedImage(bytes, mime, name)
                 }
             }
