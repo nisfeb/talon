@@ -1814,10 +1814,17 @@ class TlonChatRepo(
                 if (!resp.isSuccessful) error("memex upload-url failed: HTTP ${resp.code}")
                 val body = resp.body?.string() ?: error("empty memex response")
                 val obj = Json.parseToJsonElement(body).jsonObject
-                val hosted = obj["hostedUrl"].asStr()
-                    ?: error("no hostedUrl in memex response")
-                val upload = obj["uploadUrl"].asStr()
-                    ?: error("no uploadUrl in memex response")
+                // Field names have drifted across memex/hosting versions
+                // (hostedUrl/uploadUrl vs url), which is what broke uploads
+                // for a Tlon-hosted ship whose response had neither key.
+                // Accept the known aliases; if the shape is still
+                // unrecognized, report the actual KEYS (not values — a value
+                // can be a short-lived presigned URL) so the next report
+                // pins the contract exactly.
+                val upload = obj["uploadUrl"].asStr() ?: obj["url"].asStr()
+                    ?: error("no upload url in memex response; keys=${obj.keys}")
+                val hosted = obj["hostedUrl"].asStr() ?: obj["url"].asStr()
+                    ?: error("no hosted url in memex response; keys=${obj.keys}")
                 hosted to upload
             }
 
