@@ -64,6 +64,10 @@ import androidx.compose.ui.unit.sp
 @Composable
 fun DesktopShell(
     activeRailTab: RailTab,
+    // A modal rail item (e.g. Assistant) whose destination is currently
+    // showing — highlighted instead of the active pane-tab so the rail
+    // reflects where you are. Null when a pane-tab is the active surface.
+    activeModalItem: RailItem? = null,
     enabledItems: List<RailItem>,
     onItemClicked: (RailItem) -> Unit,
     list: @Composable () -> Unit,
@@ -93,6 +97,7 @@ fun DesktopShell(
         Row(modifier = Modifier.fillMaxSize()) {
             DesktopRail(
                 activeTab = activeRailTab,
+                activeModalItem = activeModalItem,
                 enabledItems = enabledItems,
                 onItemClicked = onItemClicked,
                 menuBadges = menuBadges,
@@ -139,6 +144,7 @@ fun DesktopShell(
 @Composable
 private fun DesktopRail(
     activeTab: RailTab,
+    activeModalItem: RailItem?,
     enabledItems: List<RailItem>,
     onItemClicked: (RailItem) -> Unit,
     menuBadges: MenuBadges,
@@ -154,7 +160,13 @@ private fun DesktopRail(
             modifier = Modifier.fillMaxHeight().padding(vertical = 8.dp),
         ) {
             for (item in enabledItems) {
-                val isSelected = item.isPaneTab && item.toRailTab() == activeTab
+                // A modal destination (Assistant) wins the highlight while
+                // it's showing, so the previously-active pane-tab goes dark.
+                val isSelected = if (activeModalItem != null) {
+                    item == activeModalItem
+                } else {
+                    item.isPaneTab && item.toRailTab() == activeTab
+                }
                 RailIconButton(
                     item = item,
                     isSelected = isSelected,

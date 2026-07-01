@@ -147,9 +147,13 @@ fun LoopsList(
 ) {
     val scope = rememberCoroutineScope()
     val loopDao = remember(db) { db.loops() }
-    val loops by loopDao.stream().collectAsState(initial = emptyList())
+    // null = the first DB emission is still in flight. Rendering the empty
+    // state during that frame flashes "no loops / add a loop" when switching
+    // to the Jobs tab before the list loads — so wait for the real value.
+    val loops by loopDao.stream().collectAsState(initial = null)
+    val list = loops ?: return
 
-    if (loops.isEmpty()) {
+    if (list.isEmpty()) {
         EmptyLoops(onAdd = onNew)
         return
     }
@@ -172,7 +176,7 @@ fun LoopsList(
                 TextButton(onClick = onNew) { Text("New") }
             }
         }
-        items(loops, key = { it.id }) { loop ->
+        items(list, key = { it.id }) { loop ->
             LoopListRow(
                 db = db,
                 loop = loop,

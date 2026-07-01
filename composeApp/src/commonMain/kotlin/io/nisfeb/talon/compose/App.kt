@@ -1732,6 +1732,10 @@ fun App(
                         }
                         DesktopShell(
                             activeRailTab = activeRailTab,
+                            // Assistant is a modal destination that keeps the
+                            // rail — highlight its "A" (and dim the pane-tab)
+                            // while it's open.
+                            activeModalItem = if (showAssistant) RailItem.Assistant else null,
                             enabledItems = enabledItems,
                             onItemClicked = onRailItemClicked,
                             list = railListSlot,
