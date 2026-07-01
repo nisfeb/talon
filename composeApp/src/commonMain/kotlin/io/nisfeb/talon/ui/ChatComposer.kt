@@ -179,7 +179,9 @@ fun ChatComposer(
 
     val onPickAndSendImage: () -> Unit = {
         scope.launch {
-            val picked = pickImage() ?: return@launch
+            val picked = runCatching { pickImage() }
+                .onFailure { state.sendError = "couldn't read image: ${it.message ?: it::class.simpleName}" }
+                .getOrNull() ?: return@launch
             state.uploading = true
             state.sendError = null
             runCatching {
@@ -205,7 +207,9 @@ fun ChatComposer(
 
     val onPickAndSendFile: () -> Unit = {
         scope.launch {
-            val picked = pickAnyFile() ?: return@launch
+            val picked = runCatching { pickAnyFile() }
+                .onFailure { state.sendError = "couldn't read file: ${it.message ?: it::class.simpleName}" }
+                .getOrNull() ?: return@launch
             state.uploading = true
             state.sendError = null
             runCatching {

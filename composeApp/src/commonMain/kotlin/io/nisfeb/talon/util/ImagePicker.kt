@@ -8,8 +8,12 @@ import androidx.compose.runtime.Composable
  * which requires being inside a Composable scope. The desktop impl
  * delegates to DesktopFilePicker (Swing JFileChooser).
  *
- * Returns a suspend lambda that opens the platform's image picker
- * and resolves to a PickedImage or null on cancel/failure.
+ * Returns a suspend lambda that opens the platform's image picker and
+ * resolves to a PickedImage, or null when the user CANCELS. A read/decode
+ * failure THROWS (rather than resolving null) so the caller can surface a
+ * real error instead of a silent no-op — callers wrap the call in
+ * runCatching and route the message to their error UI. On Android, HEIC/
+ * HEIF (Samsung/iPhone default) is transcoded to JPEG before returning.
  */
 @Composable
 expect fun rememberImagePicker(): suspend () -> PickedImage?

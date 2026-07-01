@@ -96,7 +96,9 @@ fun GalleryComposeScreen(
     val pickImage = rememberImagePicker()
     val onPickImage: () -> Unit = {
         scope.launch {
-            val picked = pickImage() ?: return@launch
+            val picked = runCatching { pickImage() }
+                .onFailure { error = "couldn't read image: ${it.message ?: it::class.simpleName}" }
+                .getOrNull() ?: return@launch
             uploading = true
             error = null
             runCatching {

@@ -461,7 +461,9 @@ private fun AdminBody(
 
     fun launchPicker(slot: String) {
         scope.launch {
-            val picked = pickImage() ?: return@launch
+            val picked = runCatching { pickImage() }
+                .onFailure { onReportError("couldn't read image: ${it.message ?: it::class.simpleName}") }
+                .getOrNull() ?: return@launch
             uploading = true
             runCatching {
                 // Bounds-only decode validates the bytes are a real
