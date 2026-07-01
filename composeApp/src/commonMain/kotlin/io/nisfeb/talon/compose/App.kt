@@ -1734,12 +1734,18 @@ fun App(
                             activeRailTab = activeRailTab,
                             enabledItems = enabledItems,
                             onItemClicked = onRailItemClicked,
-                            // When the assistant is open it takes over the
-                            // shell content (full-width; detail=null), leaving
-                            // the rail as navigation. On narrow, DesktopShell
-                            // renders list() full-screen and we keep a back
-                            // arrow; on wide the rail is the way out.
-                            list = if (showAssistant) {
+                            list = railListSlot,
+                            detail = detailSlot,
+                            listFraction = listFraction,
+                            onListFractionChange = { uiSettings.setChatPaneListFraction(it) },
+                            menuBadges = menuBadges,
+                            // The assistant takes over the whole area beside the
+                            // rail and manages its OWN panes (conversations/jobs
+                            // list left, transcript right) — so it gets full
+                            // width here instead of being crammed into the 30%
+                            // list slot. Rail stays for navigation; back arrow
+                            // only on narrow (where DesktopShell stacks it).
+                            content = if (showAssistant) {
                                 {
                                     AssistantScreen(
                                         db = db,
@@ -1753,6 +1759,10 @@ fun App(
                                             }
                                         },
                                         onBack = if (expanded) null else ({ showAssistant = false }),
+                                        // Rail is showing → force the two-pane
+                                        // layout so the 64dp rail can't trip the
+                                        // stacked/hamburger fallback.
+                                        forceExpanded = expanded,
                                         onOpenMessage = { whomTarget, postId, parentId ->
                                             showAssistant = false
                                             openChat = whomTarget
@@ -1764,11 +1774,7 @@ fun App(
                                         },
                                     )
                                 }
-                            } else railListSlot,
-                            detail = if (showAssistant) null else detailSlot,
-                            listFraction = listFraction,
-                            onListFractionChange = { uiSettings.setChatPaneListFraction(it) },
-                            menuBadges = menuBadges,
+                            } else null,
                             rightSidebar = rightPaneContent?.let { content ->
                                 {
                                     RightPaneHost(

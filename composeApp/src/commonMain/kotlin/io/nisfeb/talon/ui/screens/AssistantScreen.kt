@@ -157,6 +157,11 @@ fun AssistantScreen(
     // ticker, so "Run now" routes straight there.
     scheduler: LoopScheduler = LoopScheduler.Noop,
     onRunLoop: (Long) -> Unit = {},
+    // Force the two-pane (sidebar + transcript) layout regardless of measured
+    // width — set when hosted in the desktop shell beside the rail, so the
+    // rail's 64dp can't push the content below the threshold and fall back to
+    // the stacked/hamburger layout.
+    forceExpanded: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     val aiState by aiSettings.state.collectAsState()
@@ -468,7 +473,7 @@ fun AssistantScreen(
     val settingsSync = repo?.settingsSync
 
     BoxWithConstraints(modifier.fillMaxSize()) {
-        val expanded = maxWidth >= ExpandedThreshold
+        val expanded = forceExpanded || maxWidth >= ExpandedThreshold
 
         // Detail pane: transcript + composer. Beside the sidebar when the
         // window is wide; stacked when narrow, where the top-bar menu opens

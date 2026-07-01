@@ -72,13 +72,22 @@ fun DesktopShell(
     onListFractionChange: (Float) -> Unit,
     rightSidebar: (@Composable () -> Unit)? = null,
     menuBadges: MenuBadges = MenuBadges(),
+    // Full-width content that takes over the whole area beside the rail,
+    // bypassing the list/detail split — for a screen that manages its own
+    // panes (e.g. the assistant: its own conversations/jobs sidebar + a
+    // transcript). Keeps the rail visible for navigation.
+    content: (@Composable () -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     BoxWithConstraints(modifier = modifier.fillMaxSize()) {
         val expanded = maxWidth >= ExpandedThreshold
         if (!expanded) {
             // Compact: rail/sidebar collapsed; identical to Phase 1.
-            if (detail != null) detail() else list()
+            when {
+                content != null -> content()
+                detail != null -> detail()
+                else -> list()
+            }
             return@BoxWithConstraints
         }
         Row(modifier = Modifier.fillMaxSize()) {
@@ -97,12 +106,16 @@ fun DesktopShell(
             // drawer was open and its panel happened to clip against
             // the list-pane bounds.
             Box(modifier = Modifier.weight(1f).fillMaxHeight()) {
-                ChatPaneScaffold(
-                    list = list,
-                    detail = detail,
-                    listFraction = listFraction,
-                    onListFractionChange = onListFractionChange,
-                )
+                if (content != null) {
+                    content()
+                } else {
+                    ChatPaneScaffold(
+                        list = list,
+                        detail = detail,
+                        listFraction = listFraction,
+                        onListFractionChange = onListFractionChange,
+                    )
+                }
             }
             // Right sidebar — Phase 3's thread / group-info / media-
             // drilldown surface. Fixed 360dp width when present; when
