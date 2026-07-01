@@ -12,13 +12,17 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -46,6 +50,7 @@ import io.nisfeb.talon.data.AppDatabase
 import io.nisfeb.talon.data.LoopEntity
 import io.nisfeb.talon.data.newGid
 import io.nisfeb.talon.ui.MarkdownText
+import io.nisfeb.talon.ui.shortRelativeTime
 import io.nisfeb.talon.urbit.SettingsSync
 import kotlinx.coroutines.launch
 
@@ -75,209 +80,308 @@ fun LoopsScreen(
     settingsSync: SettingsSync? = null,
     modifier: Modifier = Modifier,
 ) {
+    // Standalone (full-screen) host: the list and a job's detail/editor
+    // swap in place. In the assistant they live in the two panes instead.
+    var openJob by remember { mutableStateOf<LoopEntity?>(null) }
+    val job = openJob
     Scaffold(
         modifier = modifier.fillMaxSize(),
         topBar = {
             TopAppBar(
-                title = { Text("Loops") },
+                title = {
+                    Text(
+                        when {
+                            job == null -> "Loops"
+                            job.id == 0L -> "New loop"
+                            else -> job.name
+                        },
+                    )
+                },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
+                    IconButton(onClick = { if (job != null) openJob = null else onBack() }) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
                 },
             )
         },
     ) { padding ->
-        LoopsPanel(
-            db = db,
-            scheduler = scheduler,
-            onRunNow = onRunNow,
-            settingsSync = settingsSync,
-            modifier = Modifier.padding(padding),
-        )
+        Box(Modifier.padding(padding)) {
+            if (job != null) {
+                LoopDetail(
+                    db = db,
+                    initialLoop = job,
+                    scheduler = scheduler,
+                    settingsSync = settingsSync,
+                    onRunNow = onRunNow,
+                    onClose = { openJob = null },
+                )
+            } else {
+                LoopsList(
+                    db = db,
+                    scheduler = scheduler,
+                    settingsSync = settingsSync,
+                    selectedId = null,
+                    onSelect = { openJob = it },
+                    onNew = { openJob = blankLoop() },
+                )
+            }
+        }
     }
 }
 
 /**
- * Embeddable loops CRUD — the list/add/edit body without a Scaffold, so it
- * can live standalone ([LoopsScreen]) or inside the assistant's Jobs tab.
- * Owns its own add/edit form state; the "New loop" affordance is in the
- * list header (the empty state has its own), so no app-bar action is
- * needed by the host.
+ * Compact loops roster — one row per job (name, interval, on/off, a small
+ * last-run status). Selecting a row hands the job to the host, which shows
+ * its detail/editor (right pane in the assistant, full-screen in
+ * [LoopsScreen]). Empty state + the "New" affordance live here.
  */
 @Composable
-fun LoopsPanel(
+fun LoopsList(
     db: AppDatabase,
     scheduler: LoopScheduler,
-    onRunNow: (Long) -> Unit,
     settingsSync: SettingsSync? = null,
+    selectedId: Long? = null,
+    onSelect: (LoopEntity) -> Unit,
+    onNew: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val scope = rememberCoroutineScope()
     val loopDao = remember(db) { db.loops() }
     val loops by loopDao.stream().collectAsState(initial = emptyList())
 
-    // null = list view; a LoopEntity (id 0 for new) = the add/edit form.
-    var editing by remember { mutableStateOf<LoopEntity?>(null) }
-
-    Box(modifier.fillMaxSize()) {
-        val form = editing
-        if (form != null) {
-            Column(Modifier.fillMaxSize()) {
-                Text(
-                    if (form.id == 0L) "New loop" else "Edit loop",
-                    style = MaterialTheme.typography.titleMedium,
-                    modifier = Modifier.padding(start = 16.dp, top = 16.dp),
-                )
-                LoopForm(
-                    initial = form,
-                    onCancel = { editing = null },
-                    onSave = { name, prompt, interval, writes ->
-                        scope.launch {
-                            val now = System.currentTimeMillis()
-                            val row = if (form.id == 0L) {
-                                form.copy(
-                                    gid = newGid(),
-                                    name = name, prompt = prompt, intervalMinutes = interval,
-                                    writesAuthorized = writes,
-                                    createdAt = now, updatedAt = now, lastRunAt = now,
-                                )
-                            } else {
-                                form.copy(
-                                    // Legacy loops predate sync (gid=""); stamp one
-                                    // on first edit so they start syncing.
-                                    gid = form.gid.ifBlank { newGid() },
-                                    name = name, prompt = prompt, intervalMinutes = interval,
-                                    writesAuthorized = writes,
-                                    updatedAt = now,
-                                )
-                            }
-                            loopDao.upsert(row)
-                            settingsSync?.pushLoop(row)
-                            scheduler.reschedule()
-                            editing = null
-                        }
-                    },
-                )
-            }
-        } else if (loops.isEmpty()) {
-            EmptyLoops(onAdd = { editing = blankLoop() })
-        } else {
-            LazyColumn(
-                Modifier.fillMaxSize().padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
+    if (loops.isEmpty()) {
+        EmptyLoops(onAdd = onNew)
+        return
+    }
+    LazyColumn(
+        modifier.fillMaxSize().padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        item {
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                item {
-                    Row(
-                        Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(
-                            "Loops run on your LLM key — each run uses tokens. " +
-                                "They run on this device.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.weight(1f),
-                        )
-                        TextButton(onClick = { editing = blankLoop() }) { Text("New loop") }
-                    }
-                }
-                items(loops, key = { it.id }) { loop ->
-                    LoopCard(
-                        db = db,
-                        loop = loop,
-                        onToggleEnabled = { on ->
-                            scope.launch {
-                                loopDao.setEnabled(loop.id, on, System.currentTimeMillis())
-                                // setEnabled is a partial UPDATE, so `loop` is
-                                // stale for enabled/updatedAt — re-read the fresh
-                                // row before pushing.
-                                loopDao.get(loop.id)?.let { settingsSync?.pushLoop(it) }
-                                scheduler.reschedule()
-                            }
-                        },
-                        onRunNow = { onRunNow(loop.id) },
-                        onEdit = { editing = loop },
-                        onDelete = {
-                            scope.launch {
-                                val gid = loop.gid
-                                loopDao.delete(loop.id)
-                                db.loopRuns().deleteForLoop(loop.id)
-                                settingsSync?.deleteLoop(gid)
-                                scheduler.reschedule()
-                            }
-                        },
-                    )
-                }
+                Text(
+                    "Runs on your LLM key, on this device.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.weight(1f),
+                )
+                TextButton(onClick = onNew) { Text("New") }
             }
+        }
+        items(loops, key = { it.id }) { loop ->
+            LoopListRow(
+                db = db,
+                loop = loop,
+                selected = loop.id == selectedId,
+                onClick = { onSelect(loop) },
+                onToggleEnabled = { on ->
+                    scope.launch {
+                        loopDao.setEnabled(loop.id, on, System.currentTimeMillis())
+                        // setEnabled is a partial UPDATE, so `loop` is stale for
+                        // enabled/updatedAt — re-read the fresh row before pushing.
+                        loopDao.get(loop.id)?.let { settingsSync?.pushLoop(it) }
+                        scheduler.reschedule()
+                    }
+                },
+            )
         }
     }
 }
 
 @Composable
-private fun LoopCard(
+private fun LoopListRow(
     db: AppDatabase,
     loop: LoopEntity,
+    selected: Boolean,
+    onClick: () -> Unit,
     onToggleEnabled: (Boolean) -> Unit,
-    onRunNow: () -> Unit,
-    onEdit: () -> Unit,
-    onDelete: () -> Unit,
 ) {
-    var expanded by remember { mutableStateOf(false) }
-    Card(Modifier.fillMaxWidth().clickable { expanded = !expanded }) {
-        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text(loop.name, style = MaterialTheme.typography.bodyLarge)
+    // Only the LATEST run for an at-a-glance status; the full history lives
+    // in the detail pane, not crammed into the list.
+    val latest by remember(loop.id) { db.loopRuns().streamForLoop(loop.id, 1) }
+        .collectAsState(initial = emptyList())
+    val run = latest.firstOrNull()
+    Card(
+        Modifier.fillMaxWidth().clickable { onClick() },
+        colors = if (selected) {
+            CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)
+        } else {
+            CardDefaults.cardColors()
+        },
+    ) {
+        Row(
+            Modifier.padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text(
+                    loop.name.ifBlank { "(unnamed)" },
+                    style = MaterialTheme.typography.bodyLarge,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    buildString {
+                        append("Every ${intervalLabel(loop.intervalMinutes)}")
+                        run?.let {
+                            append("  ·  ")
+                            append(if (it.ok) "✓ " else "⚠ ")
+                            append(shortRelativeTime(it.ranAt, System.currentTimeMillis()))
+                        }
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (run?.ok == false) MaterialTheme.colorScheme.error
+                    else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Switch(checked = loop.enabled, onCheckedChange = onToggleEnabled)
+        }
+    }
+}
+
+/**
+ * Full detail for one job — prompt, run controls, and the complete run
+ * history — with an inline editor. Self-contained: owns the working copy of
+ * the loop and its edit state (a new job, id 0, opens straight in the
+ * editor). The host places this in the right pane (assistant) or full-screen
+ * ([LoopsScreen]).
+ */
+@Composable
+fun LoopDetail(
+    db: AppDatabase,
+    initialLoop: LoopEntity,
+    scheduler: LoopScheduler,
+    settingsSync: SettingsSync? = null,
+    onRunNow: (Long) -> Unit,
+    onClose: () -> Unit,
+    // Render an in-pane back button (assistant right pane). Off when the host
+    // supplies its own back chrome (LoopsScreen's app bar).
+    showBack: Boolean = false,
+    modifier: Modifier = Modifier,
+) {
+    val scope = rememberCoroutineScope()
+    val loopDao = remember(db) { db.loops() }
+    var loop by remember(initialLoop.id) { mutableStateOf(initialLoop) }
+    var editing by remember(initialLoop.id) { mutableStateOf(initialLoop.id == 0L) }
+
+    if (editing) {
+        Column(modifier.fillMaxSize()) {
+            Text(
+                if (loop.id == 0L) "New loop" else "Edit loop",
+                style = MaterialTheme.typography.titleMedium,
+                modifier = Modifier.padding(start = 16.dp, top = 16.dp),
+            )
+            LoopForm(
+                initial = loop,
+                onCancel = { if (loop.id == 0L) onClose() else editing = false },
+                onSave = { name, prompt, interval, writes ->
+                    scope.launch {
+                        val now = System.currentTimeMillis()
+                        val row = if (loop.id == 0L) {
+                            loop.copy(
+                                gid = newGid(),
+                                name = name, prompt = prompt, intervalMinutes = interval,
+                                writesAuthorized = writes,
+                                createdAt = now, updatedAt = now, lastRunAt = now,
+                            )
+                        } else {
+                            // Legacy loops predate sync (gid=""); stamp one on
+                            // first edit so they start syncing.
+                            loop.copy(
+                                gid = loop.gid.ifBlank { newGid() },
+                                name = name, prompt = prompt, intervalMinutes = interval,
+                                writesAuthorized = writes,
+                                updatedAt = now,
+                            )
+                        }
+                        val id = loopDao.upsert(row)
+                        settingsSync?.pushLoop(row)
+                        scheduler.reschedule()
+                        loop = row.copy(id = id)
+                        editing = false
+                    }
+                },
+            )
+        }
+    } else {
+        Column(
+            modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            if (showBack) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(onClick = onClose) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                    }
                     Text(
-                        "Every ${intervalLabel(loop.intervalMinutes)}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        loop.name,
+                        style = MaterialTheme.typography.titleLarge,
+                        modifier = Modifier.weight(1f),
                     )
                 }
-                Switch(checked = loop.enabled, onCheckedChange = onToggleEnabled)
+            } else {
+                Text(loop.name, style = MaterialTheme.typography.titleLarge)
             }
             Text(
-                loop.prompt,
-                style = MaterialTheme.typography.bodySmall,
-                maxLines = if (expanded) Int.MAX_VALUE else 1,
-                overflow = TextOverflow.Ellipsis,
+                "Every ${intervalLabel(loop.intervalMinutes)}" +
+                    if (loop.enabled) "" else " · paused",
+                style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            if (expanded) {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(onClick = onRunNow) { Text("Run now") }
-                    TextButton(onClick = onEdit) { Text("Edit") }
-                    TextButton(onClick = onDelete) { Text("Delete") }
-                }
-                ExpandedRuns(db, loop.id)
+            Text(loop.prompt, style = MaterialTheme.typography.bodyMedium)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = { onRunNow(loop.id) }) { Text("Run now") }
+                TextButton(onClick = { editing = true }) { Text("Edit") }
+                TextButton(onClick = {
+                    scope.launch {
+                        val gid = loop.gid
+                        loopDao.delete(loop.id)
+                        db.loopRuns().deleteForLoop(loop.id)
+                        settingsSync?.deleteLoop(gid)
+                        scheduler.reschedule()
+                        onClose()
+                    }
+                }) { Text("Delete") }
             }
+            HorizontalDivider()
+            Text("Run history", style = MaterialTheme.typography.titleSmall)
+            LoopRunHistory(db, loop.id)
         }
     }
 }
 
 @Composable
-private fun ExpandedRuns(db: AppDatabase, loopId: Long) {
+private fun LoopRunHistory(db: AppDatabase, loopId: Long) {
     val runs by remember(loopId) { db.loopRuns().streamForLoop(loopId, 20) }
         .collectAsState(initial = emptyList())
     if (runs.isEmpty()) {
         Text(
             "No runs yet.",
-            style = MaterialTheme.typography.labelSmall,
+            style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         return
     }
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    val now = remember(runs) { System.currentTimeMillis() }
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         runs.forEach { run ->
-            Text(
-                (if (run.ok) "" else "⚠ ") + "run",
-                style = MaterialTheme.typography.labelSmall,
-                color = if (run.ok) MaterialTheme.colorScheme.onSurfaceVariant
-                else MaterialTheme.colorScheme.error,
-            )
-            MarkdownText(run.output)
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(
+                    (if (run.ok) "✓ " else "⚠ ") + shortRelativeTime(run.ranAt, now),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = if (run.ok) MaterialTheme.colorScheme.onSurfaceVariant
+                    else MaterialTheme.colorScheme.error,
+                )
+                if (run.output.isNotBlank()) MarkdownText(run.output)
+            }
         }
     }
 }
@@ -369,7 +473,7 @@ private fun EmptyLoops(onAdd: () -> Unit) {
     }
 }
 
-private fun blankLoop() = LoopEntity(
+internal fun blankLoop() = LoopEntity(
     name = "", prompt = "", intervalMinutes = 60, createdAt = 0, updatedAt = 0,
 )
 

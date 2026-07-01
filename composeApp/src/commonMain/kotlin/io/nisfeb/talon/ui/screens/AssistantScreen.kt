@@ -76,6 +76,7 @@ import io.nisfeb.talon.ai.unpackEmbedding
 import io.nisfeb.talon.data.AppDatabase
 import io.nisfeb.talon.data.AssistantConversationEntity
 import io.nisfeb.talon.data.AssistantHistoryEntity
+import io.nisfeb.talon.data.LoopEntity
 import io.nisfeb.talon.data.newGid
 import io.nisfeb.talon.ui.ChatPaneScaffold
 import io.nisfeb.talon.ui.ContactMap
@@ -279,6 +280,10 @@ fun AssistantScreen(
     // is the visible pane. `listFraction` is the split ratio when wide.
     var sidebarTab by remember { mutableStateOf(SidebarTab.Conversations) }
     var mobileShowSidebar by remember { mutableStateOf(false) }
+    // Non-null while a job (from the Jobs tab) is open in the RIGHT pane —
+    // its detail / editor / run history render there instead of the
+    // transcript. id 0 = a new job (opens straight in the editor).
+    var openJob by remember { mutableStateOf<LoopEntity?>(null) }
     var listFraction by remember { mutableStateOf(DEFAULT_LIST_FRACTION) }
 
     LaunchedEffect(Unit) {
@@ -636,16 +641,44 @@ fun AssistantScreen(
             }
         }
 
+        // Right pane: a selected job's detail/editor (from the Jobs tab)
+        // takes over here; otherwise the transcript.
+        val rightPane: @Composable () -> Unit = {
+            val job = openJob
+            if (job != null) {
+                LoopDetail(
+                    db = db,
+                    initialLoop = job,
+                    scheduler = scheduler,
+                    settingsSync = settingsSync,
+                    onRunNow = onRunLoop,
+                    // Wide: back returns to the transcript. Narrow: reveal the
+                    // sidebar (the jobs list the user came from).
+                    onClose = {
+                        openJob = null
+                        if (!expanded) mobileShowSidebar = true
+                    },
+                    showBack = true,
+                )
+            } else {
+                transcriptPane()
+            }
+        }
         ChatPaneScaffold(
             list = {
                 AssistantSidebar(
                     expanded = expanded,
                     tab = sidebarTab,
-                    onTabChange = { sidebarTab = it },
+                    onTabChange = { tab ->
+                        sidebarTab = tab
+                        // Leaving Jobs → close any open job so the transcript
+                        // shows on the Conversations tab.
+                        if (tab != SidebarTab.Jobs) openJob = null
+                    },
                     jobsEnabled = jobsEnabled,
                     conversations = conversations,
                     currentConvId = currentConvId,
-                    onSelectConversation = { selectConversation(it) },
+                    onSelectConversation = { openJob = null; selectConversation(it) },
                     onNewConversation = { newConversation() },
                     onClearAll = {
                         scope.launch {
@@ -660,11 +693,13 @@ fun AssistantScreen(
                     onCloseSidebar = { mobileShowSidebar = false },
                     db = db,
                     scheduler = scheduler,
-                    onRunLoop = onRunLoop,
                     settingsSync = settingsSync,
+                    selectedJobId = openJob?.id,
+                    onSelectJob = { openJob = it; mobileShowSidebar = false },
+                    onNewJob = { openJob = blankLoop(); mobileShowSidebar = false },
                 )
             },
-            detail = if (!expanded && mobileShowSidebar) null else transcriptPane,
+            detail = if (!expanded && mobileShowSidebar) null else rightPane,
             listFraction = listFraction,
             onListFractionChange = { listFraction = it },
         )
@@ -698,8 +733,10 @@ private fun AssistantSidebar(
     onCloseSidebar: () -> Unit,
     db: AppDatabase,
     scheduler: LoopScheduler,
-    onRunLoop: (Long) -> Unit,
     settingsSync: SettingsSync?,
+    selectedJobId: Long?,
+    onSelectJob: (LoopEntity) -> Unit,
+    onNewJob: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Surface(modifier = modifier.fillMaxSize(), color = MaterialTheme.colorScheme.surface) {
@@ -744,17 +781,15 @@ private fun AssistantSidebar(
                     onClearAll = onClearAll,
                     modifier = Modifier.weight(1f),
                 )
-                SidebarTab.Jobs -> Column(Modifier.weight(1f).fillMaxWidth()) {
-                    RecentRunsFeed(db)
-                    HorizontalDivider()
-                    LoopsPanel(
-                        db = db,
-                        scheduler = scheduler,
-                        onRunNow = onRunLoop,
-                        settingsSync = settingsSync,
-                        modifier = Modifier.weight(1f),
-                    )
-                }
+                SidebarTab.Jobs -> LoopsList(
+                    db = db,
+                    scheduler = scheduler,
+                    settingsSync = settingsSync,
+                    selectedId = selectedJobId,
+                    onSelect = onSelectJob,
+                    onNew = onNewJob,
+                    modifier = Modifier.weight(1f),
+                )
             }
         }
     }
@@ -800,64 +835,6 @@ private fun ConversationsTab(
                         selected = conv.id == currentConvId,
                         onClick = { onSelect(conv) },
                     )
-                }
-            }
-        }
-    }
-}
-
-/** Cross-loop recent-runs feed — the latest handful of loop runs, newest
- *  first, as a compact fixed summary above the loops list. */
-@Composable
-private fun RecentRunsFeed(db: AppDatabase) {
-    val runs by remember(db) { db.loopRuns().streamRecent(6) }.collectAsState(initial = emptyList())
-    Column(
-        Modifier.fillMaxWidth().padding(12.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp),
-    ) {
-        Text("Recent runs", style = MaterialTheme.typography.labelLarge)
-        if (runs.isEmpty()) {
-            Text(
-                "No loop runs yet.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        } else {
-            val now = remember(runs) { System.currentTimeMillis() }
-            runs.forEach { r ->
-                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(
-                            if (r.ok) "✓" else "⚠",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = if (r.ok) MaterialTheme.colorScheme.onSurfaceVariant
-                            else MaterialTheme.colorScheme.error,
-                        )
-                        Text(
-                            r.loopName,
-                            style = MaterialTheme.typography.bodyMedium,
-                            modifier = Modifier.weight(1f),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                        Text(
-                            shortRelativeTime(r.ranAt, now),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    if (r.output.isNotBlank()) {
-                        Text(
-                            r.output.trim(),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
                 }
             }
         }
