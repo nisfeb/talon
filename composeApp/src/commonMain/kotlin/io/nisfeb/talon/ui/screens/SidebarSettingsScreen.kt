@@ -201,6 +201,9 @@ private fun sidebarRowState(
     RailItem.Statuses -> SidebarRowState("Statuses", null, false, false)
     RailItem.Bookmarks -> SidebarRowState("Bookmarks", null, false, false)
     RailItem.Activity -> SidebarRowState("Activity", null, false, false)
+    // Visibility preference only — whether the assistant appears at all is
+    // gated on it being enabled (App.kt / the kebab's onOpenAssistant).
+    RailItem.Assistant -> SidebarRowState("Assistant", null, false, false)
     RailItem.Profile -> SidebarRowState("My profile", null, false, false)
     RailItem.Watchwords -> SidebarRowState("Watchwords", null, false, false)
     RailItem.Administration -> SidebarRowState("Administration", null, false, false)

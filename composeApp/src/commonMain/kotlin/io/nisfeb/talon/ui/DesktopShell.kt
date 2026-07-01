@@ -42,7 +42,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 
 /**
  * Desktop / tablet-landscape host. Below [ExpandedThreshold] this is a
@@ -187,11 +189,20 @@ private fun RailIconButton(
         ) {
             Box {
                 IconButton(onClick = onClick) {
-                    Icon(
-                        imageVector = railIcon(item),
-                        contentDescription = label,
-                        tint = tint,
-                    )
+                    val icon = railIcon(item)
+                    if (icon != null) {
+                        Icon(imageVector = icon, contentDescription = label, tint = tint)
+                    } else {
+                        // The Assistant has no material glyph — render the
+                        // letter "A" so it sits in the panel like every other
+                        // feature (matching the icon's 24dp visual weight).
+                        Text(
+                            "A",
+                            color = tint,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 20.sp,
+                        )
+                    }
                 }
                 if (showBadge) {
                     // 8dp dot on the icon's top-right corner. The
@@ -214,7 +225,7 @@ private fun RailIconButton(
     }
 }
 
-private fun railIcon(item: RailItem): ImageVector = when (item) {
+private fun railIcon(item: RailItem): ImageVector? = when (item) {
     // All icons resolve to material-icons-core (verified by
     // unzipping the core jar at plan-write time). Safe with the
     // slim-jar strip; auditIconKeepList catches any drift.
@@ -222,6 +233,8 @@ private fun railIcon(item: RailItem): ImageVector = when (item) {
     RailItem.Statuses -> Icons.Filled.Person
     RailItem.Bookmarks -> Icons.Filled.Star
     RailItem.Activity -> Icons.Filled.Notifications
+    // Null → rendered as the letter "A" in RailIconButton.
+    RailItem.Assistant -> null
     RailItem.Profile -> Icons.Filled.AccountCircle
     RailItem.Watchwords -> Icons.Filled.Search
     RailItem.TodaysBrief -> Icons.Filled.DateRange
@@ -235,6 +248,7 @@ private fun railLabel(item: RailItem): String = when (item) {
     RailItem.Statuses -> "Statuses"
     RailItem.Bookmarks -> "Bookmarks"
     RailItem.Activity -> "Activity"
+    RailItem.Assistant -> "Assistant"
     RailItem.Profile -> "My profile"
     RailItem.Watchwords -> "Watchwords"
     RailItem.TodaysBrief -> "Today's brief"

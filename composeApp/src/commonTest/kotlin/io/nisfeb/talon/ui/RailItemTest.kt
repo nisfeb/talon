@@ -91,6 +91,7 @@ class RailItemTest {
             RailItem.TodaysBrief,
             RailItem.Administration,
             RailItem.Invites,
+            RailItem.Assistant,
         )
         assertEquals(custom, sanitizeRailItemOrder(custom))
     }

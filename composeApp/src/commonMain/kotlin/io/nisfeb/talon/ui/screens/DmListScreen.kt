@@ -46,7 +46,6 @@ import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -700,11 +699,8 @@ fun DmListScreen(
             IconButton(onClick = onOpenSearch) {
                 Icon(Icons.Filled.Search, contentDescription = "Search")
             }
-            onOpenAssistant?.let { open ->
-                IconButton(onClick = open) {
-                    Icon(Icons.Filled.Star, contentDescription = "Ask your Urbit")
-                }
-            }
+            // Assistant moved off the top bar — it's now a rail / kebab item
+            // ("A"), unifying it with the other panel-based features.
             IconButton(onClick = { editMode = !editMode }) {
                 Icon(
                     imageVector = if (editMode) Icons.Filled.Done else Icons.Filled.Edit,
@@ -784,6 +780,19 @@ fun DmListScreen(
                     expanded = menuOpen,
                     onDismissRequest = { menuOpen = false },
                 ) {
+                    // Assistant — opt-in, so gated on onOpenAssistant being
+                    // wired (null when unsupported / off / no key).
+                    if (RailItem.Assistant in kebabItems) {
+                        onOpenAssistant?.let { open ->
+                            DropdownMenuItem(
+                                text = { Text("Assistant") },
+                                onClick = {
+                                    menuOpen = false
+                                    open()
+                                },
+                            )
+                        }
+                    }
                     if (RailItem.Profile in kebabItems) {
                         DropdownMenuItem(
                             text = { Text("My profile") },

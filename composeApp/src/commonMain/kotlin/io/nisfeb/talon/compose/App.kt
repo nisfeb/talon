@@ -1479,13 +1479,22 @@ fun App(
                             ?.collectAsState()
                             ?.value
                             ?.enabled == true
-                        val enabledItems: List<RailItem> = remember(railVisibility, railItemOrder, dailyDigestEnabled) {
+                        // Opt-in assistant: only surface its rail / kebab entry
+                        // once it's supported, turned on, and has a key — the
+                        // same gate the old star icon used.
+                        val assistantEnabled = isAssistantSupported &&
+                            (aiState.askUrbitEnabled || aiState.agentEnabled) &&
+                            aiState.hasKey()
+                        val enabledItems: List<RailItem> = remember(
+                            railVisibility, railItemOrder, dailyDigestEnabled, assistantEnabled,
+                        ) {
                             railItemOrder.filter { item ->
                                 // Map.isVisible enforces the Chats always-on invariant
                                 // (regardless of map state) and falls back to true
                                 // for absent entries.
                                 val visible = railVisibility.isVisible(item)
-                                val gateOk = item != RailItem.TodaysBrief || dailyDigestEnabled
+                                val gateOk = (item != RailItem.TodaysBrief || dailyDigestEnabled) &&
+                                    (item != RailItem.Assistant || assistantEnabled)
                                 visible && gateOk
                             }
                         }
@@ -1570,6 +1579,7 @@ fun App(
                             item.toRailTab()?.let { tab ->
                                 uiSettings.setActiveRailTab(tab)
                             } ?: when (item) {
+                                RailItem.Assistant -> showAssistant = true
                                 RailItem.Profile -> showSelfProfile = true
                                 RailItem.Watchwords -> showWatchwords = true
                                 RailItem.TodaysBrief -> showDailyDigest = true
@@ -1600,10 +1610,7 @@ fun App(
                                         // Supported (true on both platforms) —
                                         // the embedder only enhances retrieval,
                                         // it isn't required to run.
-                                        onOpenAssistant = if (isAssistantSupported &&
-                                            (aiState.askUrbitEnabled || aiState.agentEnabled) &&
-                                            aiState.hasKey()
-                                        ) {
+                                        onOpenAssistant = if (assistantEnabled) {
                                             { showAssistant = true }
                                         } else null,
                                         onNewMessage = { showNewDm = true },
