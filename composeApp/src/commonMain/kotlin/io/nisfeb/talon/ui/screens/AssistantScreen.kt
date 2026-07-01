@@ -147,7 +147,9 @@ fun AssistantScreen(
     db: AppDatabase,
     aiSettings: AiSettingsRepository,
     embedder: SearchEmbedderClient?,
-    onBack: () -> Unit,
+    // Null hides the back arrow — used when the assistant renders inside the
+    // desktop shell (the rail is the way out). Non-null on narrow layouts.
+    onBack: (() -> Unit)? = null,
     onOpenMessage: (whom: String, postId: String, parentId: String?) -> Unit,
     repo: TlonChatRepo? = null,
     // Backs the Jobs sidebar tab. Android passes its AlarmManager-backed
@@ -478,8 +480,10 @@ fun AssistantScreen(
                     TopAppBar(
                         title = { Text("Assistant") },
                         navigationIcon = {
-                            IconButton(onClick = onBack) {
-                                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                            onBack?.let { back ->
+                                IconButton(onClick = back) {
+                                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                                }
                             }
                         },
                         actions = {

@@ -700,6 +700,7 @@ fun TalonApp(
         BackHandler(enabled = statusFeedOpen) { statusFeedOpen = false }
         BackHandler(enabled = bookmarksOpen) { bookmarksOpen = false }
         BackHandler(enabled = activityOpen) { activityOpen = false }
+        BackHandler(enabled = assistantOpen) { assistantOpen = false }
         BackHandler(enabled = contactsOpen) { contactsOpen = false }
         BackHandler(enabled = watchwordsOpen) { watchwordsOpen = false }
         BackHandler(enabled = digestOpen) { digestOpen = false }

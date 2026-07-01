@@ -394,6 +394,7 @@ fun App(
     }
     PlatformBackHandler(enabled = showBookmarks) { showBookmarks = false }
     PlatformBackHandler(enabled = showActivity) { showActivity = false }
+    PlatformBackHandler(enabled = showAssistant) { showAssistant = false }
     PlatformBackHandler(enabled = showSearch) { showSearch = false }
     PlatformBackHandler(enabled = showNewDm) { showNewDm = false }
     PlatformBackHandler(enabled = showWatchwords) { showWatchwords = false }
@@ -1153,30 +1154,10 @@ fun App(
                             openThreadReplyAnchor = replyId
                         },
                     )
-                    showAssistant -> AssistantScreen(
-                        db = db,
-                        aiSettings = aiSettings,
-                        embedder = searchEmbedderClient,
-                        repo = repo,
-                        // Desktop has no scheduler; the while-open ticker runs
-                        // loops and "Run now" goes straight to loopRunner.
-                        scheduler = io.nisfeb.talon.ai.LoopScheduler.Noop,
-                        onRunLoop = { loopId ->
-                            loopScope.launch {
-                                db.loops().get(loopId)?.let { loopRunner.runLoop(it) }
-                            }
-                        },
-                        onBack = { showAssistant = false },
-                        onOpenMessage = { whomTarget, postId, parentId ->
-                            showAssistant = false
-                            openChat = whomTarget
-                            if (parentId != null) {
-                                openThreadParent = parentId
-                            } else {
-                                openChatFocusMessageId = postId
-                            }
-                        },
-                    )
+                    // showAssistant is NOT a full-screen branch — it renders
+                    // inside DesktopShell's content (keeping the rail on wide;
+                    // full-screen with a back arrow on narrow). See the
+                    // DesktopShell `list`/`detail` override below.
                     showSearch -> SearchScreen(
                         db = db,
                         aiSettings = aiSettings,
@@ -1557,6 +1538,11 @@ fun App(
                             )
                         }
                         val onRailItemClicked: (RailItem) -> Unit = { item ->
+                            // Leaving the assistant: it renders in the shell
+                            // content with the rail still visible, so clicking
+                            // ANY rail item must close it (the Assistant case
+                            // below re-opens it, so clicking A is a no-op).
+                            showAssistant = false
                             // Clear the rail badge for items that show
                             // freshness signals — rail clicks were missing
                             // the markXSeen calls the kebab paths in
@@ -1748,8 +1734,38 @@ fun App(
                             activeRailTab = activeRailTab,
                             enabledItems = enabledItems,
                             onItemClicked = onRailItemClicked,
-                            list = railListSlot,
-                            detail = detailSlot,
+                            // When the assistant is open it takes over the
+                            // shell content (full-width; detail=null), leaving
+                            // the rail as navigation. On narrow, DesktopShell
+                            // renders list() full-screen and we keep a back
+                            // arrow; on wide the rail is the way out.
+                            list = if (showAssistant) {
+                                {
+                                    AssistantScreen(
+                                        db = db,
+                                        aiSettings = aiSettings,
+                                        embedder = searchEmbedderClient,
+                                        repo = repo,
+                                        scheduler = io.nisfeb.talon.ai.LoopScheduler.Noop,
+                                        onRunLoop = { loopId ->
+                                            loopScope.launch {
+                                                db.loops().get(loopId)?.let { loopRunner.runLoop(it) }
+                                            }
+                                        },
+                                        onBack = if (expanded) null else ({ showAssistant = false }),
+                                        onOpenMessage = { whomTarget, postId, parentId ->
+                                            showAssistant = false
+                                            openChat = whomTarget
+                                            if (parentId != null) {
+                                                openThreadParent = parentId
+                                            } else {
+                                                openChatFocusMessageId = postId
+                                            }
+                                        },
+                                    )
+                                }
+                            } else railListSlot,
+                            detail = if (showAssistant) null else detailSlot,
                             listFraction = listFraction,
                             onListFractionChange = { uiSettings.setChatPaneListFraction(it) },
                             menuBadges = menuBadges,
