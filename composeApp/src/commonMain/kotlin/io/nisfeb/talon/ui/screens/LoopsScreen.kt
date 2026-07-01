@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -415,16 +416,19 @@ private fun LoopRunHistory(db: AppDatabase, loopId: Long) {
         return
     }
     val now = remember(runs) { System.currentTimeMillis() }
-    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        runs.forEach { run ->
-            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text(
-                    (if (run.ok) "✓ " else "⚠ ") + shortRelativeTime(run.ranAt, now),
-                    style = MaterialTheme.typography.labelMedium,
-                    color = if (run.ok) MaterialTheme.colorScheme.onSurfaceVariant
-                    else MaterialTheme.colorScheme.error,
-                )
-                if (run.output.isNotBlank()) MarkdownText(run.output)
+    // Selectable so the output (esp. an error message) can be copied.
+    SelectionContainer {
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            runs.forEach { run ->
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(
+                        (if (run.ok) "✓ " else "⚠ ") + shortRelativeTime(run.ranAt, now),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = if (run.ok) MaterialTheme.colorScheme.onSurfaceVariant
+                        else MaterialTheme.colorScheme.error,
+                    )
+                    if (run.output.isNotBlank()) MarkdownText(run.output)
+                }
             }
         }
     }
