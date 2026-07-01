@@ -26,6 +26,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -60,6 +61,16 @@ fun NotebookComposeScreen(
     originalSentMs: Long = 0L,
 ) {
     val scope = rememberCoroutineScope()
+
+    // Keep this channel "focused" while composing — the notebook list is
+    // unmounted underneath (mutually-exclusive App.kt branches), so without
+    // this openWhom goes null and the channel's unread can re-bump / not
+    // clear on navigate-away. See GalleryPostScreen for the full rationale.
+    DisposableEffect(whom) {
+        repo.setOpenChat(whom)
+        onDispose { repo.setOpenChat(null) }
+    }
+
     val isEdit = editPostId != null
 
     var title by remember { mutableStateOf(initialTitle) }
