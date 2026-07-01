@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -34,6 +35,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -365,6 +367,49 @@ fun LoopDetail(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Text(loop.prompt, style = MaterialTheme.typography.bodyMedium)
+            // Write authorization is per-device and does NOT sync, so a job
+            // created/authorized on another device arrives read-only here —
+            // and silently can't post. Surface that, with a one-tap grant.
+            if (loop.writesAuthorized) {
+                Text(
+                    "Authorized to act on your ship (send messages, poke agents).",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            } else {
+                Surface(
+                    color = MaterialTheme.colorScheme.secondaryContainer,
+                    shape = RoundedCornerShape(8.dp),
+                ) {
+                    Column(
+                        Modifier.padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        Text(
+                            "Read-only on this device",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.onSecondaryContainer,
+                        )
+                        Text(
+                            "It can read your chats but can't send messages or act on your " +
+                                "ship. The write grant is per-device and doesn't sync, so a job " +
+                                "authorized on another device arrives read-only here. Enable it " +
+                                "only for prompts you trust — it then acts unattended, with no " +
+                                "confirmation.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSecondaryContainer,
+                        )
+                        TextButton(onClick = {
+                            scope.launch {
+                                val row = loop.copy(writesAuthorized = true)
+                                loopDao.upsert(row)
+                                scheduler.reschedule()
+                                loop = row
+                            }
+                        }) { Text("Authorize writes on this device") }
+                    }
+                }
+            }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(
                     onClick = {
