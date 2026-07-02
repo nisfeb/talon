@@ -189,8 +189,8 @@ tasks.withType<Test>().configureEach {
 // version inside derivePackageVersion and silently drifted — every
 // release between 0.7.14 and 0.7.23 shipped with stale .dmg/.msi/.deb
 // filenames because nobody updated both literals.
-val talonVersionCode = 181
-val talonVersionName = "0.14.0-rc31"
+val talonVersionCode = 182
+val talonVersionName = "0.14.0-rc32"
 
 // Surface the gradle-side version constants to commonMain code via a
 // generated Kotlin source file. Without this, the About section in
