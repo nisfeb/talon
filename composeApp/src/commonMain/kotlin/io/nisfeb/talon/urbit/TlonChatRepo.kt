@@ -1814,16 +1814,21 @@ class TlonChatRepo(
                 if (!resp.isSuccessful) error("memex upload-url failed: HTTP ${resp.code}")
                 val body = resp.body?.string() ?: error("empty memex response")
                 val obj = Json.parseToJsonElement(body).jsonObject
-                // Field names have drifted across memex/hosting versions
-                // (hostedUrl/uploadUrl vs url), which is what broke uploads
-                // for a Tlon-hosted ship whose response had neither key.
-                // Accept the known aliases; if the shape is still
-                // unrecognized, report the actual KEYS (not values — a value
-                // can be a short-lived presigned URL) so the next report
-                // pins the contract exactly.
+                // The memex wire response is { url, filePath }: `url` is the
+                // presigned PUT target (where the bytes go), `filePath` is the
+                // public URL to embed in the message. tlon-apps maps these as
+                // uploadUrl=data.url, hostedUrl=data.filePath (see
+                // packages/api/src/client/storageApi.ts). We used to fall the
+                // hosted URL back to `url` when there was no `hostedUrl` key —
+                // but `url` is the PUT-scoped presigned URL, so the posted
+                // image 404'd on GET ("unable to load image"). Read `filePath`
+                // for the src; the hostedUrl/uploadUrl aliases stay as
+                // defensive fallbacks for any other memex version. If the
+                // shape is still unrecognized, report the actual KEYS (not
+                // values — a value can be a short-lived presigned URL).
                 val upload = obj["uploadUrl"].asStr() ?: obj["url"].asStr()
                     ?: error("no upload url in memex response; keys=${obj.keys}")
-                val hosted = obj["hostedUrl"].asStr() ?: obj["url"].asStr()
+                val hosted = obj["hostedUrl"].asStr() ?: obj["filePath"].asStr()
                     ?: error("no hosted url in memex response; keys=${obj.keys}")
                 hosted to upload
             }
