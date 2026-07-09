@@ -1770,12 +1770,13 @@ class TlonChatRepo(
         fileName: String,
     ): String = withContext(Dispatchers.IO) {
         // Root guard for every upload path. ContentResolver reads of a
-        // not-yet-downloaded cloud photo return 0 bytes WITHOUT throwing,
+        // not-yet-downloaded cloud item return 0 bytes WITHOUT throwing,
         // and an uploaded blank object posts as an unrenderable message —
         // the Samsung report. Callers with a nicer UX (staging, pickers)
-        // reject earlier; this catches the paths that don't (share sheet).
+        // reject earlier; this catches the paths that don't (share sheet,
+        // which funnels FILES through here too — keep the wording generic).
         require(bytes.isNotEmpty()) {
-            "image came back empty — if it's an online/cloud photo, download it to the device first"
+            "the file came back empty — if it lives in cloud storage, download it to the device first"
         }
         val ch = channel ?: error("not connected")
         val client = http ?: error("not connected")

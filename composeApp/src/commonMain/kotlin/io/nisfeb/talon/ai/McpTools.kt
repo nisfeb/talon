@@ -13,11 +13,10 @@ package io.nisfeb.talon.ai
  *    loop's confirm gate fires before it runs. Unknown tools default to
  *    write (safe — worst case is an extra confirmation tap).
  *
- * To loosen later (e.g. allow eval), edit [MCP_HIDDEN_TOOLS].
+ * To loosen later (e.g. allow eval), add an explicit allowlist checked
+ * BEFORE the word-prefix rule in [mcpToolVisibility] — the rule hides
+ * anything eval/install-shaped, so there is no per-name knob to remove.
  */
-
-/** Never handed to the model. Matched on the unqualified tool name. */
-internal val MCP_HIDDEN_TOOLS = setOf("eval-thread-builder", "install-mcp-feature")
 
 /** Known read-only tools — exposed without the confirm gate. */
 internal val MCP_READ_TOOLS = setOf("scry-agent")
@@ -26,16 +25,14 @@ internal enum class McpVisibility { Hidden, Read, Write }
 
 internal fun mcpToolVisibility(name: String): McpVisibility {
     val short = name.substringAfterLast('/')
-    // Defence in depth: keep the arbitrary-code / install surface hidden
-    // even if a tool is renamed or namespaced differently. Match on word
-    // PREFIX: any word starting with "eval"/"install" hides the tool
-    // (`evaluate-code`, `hoon-evaluator`, `run-eval-now`), while
+    // The arbitrary-code / install surface stays hidden even if a tool is
+    // renamed or namespaced differently. Match on word PREFIX: any word
+    // starting with "eval"/"install" hides the tool (`eval-thread-builder`,
+    // `evaluate-code`, `hoon-evaluator`, `run-eval-now`), while
     // `retrieval-search` — "eval" mid-word — stays visible. When in doubt
     // this errs toward hiding.
     val words = short.split('-', '_', '.', ':')
-    if (short in MCP_HIDDEN_TOOLS ||
-        words.any { it.startsWith("eval") || it.startsWith("install") }
-    ) {
+    if (words.any { it.startsWith("eval") || it.startsWith("install") }) {
         return McpVisibility.Hidden
     }
     if (short in MCP_READ_TOOLS || short.startsWith("scry")) return McpVisibility.Read

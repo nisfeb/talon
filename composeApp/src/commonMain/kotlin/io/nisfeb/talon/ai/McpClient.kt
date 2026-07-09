@@ -64,17 +64,17 @@ data class McpToolDef(
  * see them until reconnect. Add an explicit refresh if that ever bites.
  */
 object McpSessions {
-    private var key: Pair<Int, String>? = null
+    // The OkHttpClient reference IS the identity (no equals override) —
+    // collision-proof where an identityHashCode Int is not, and the entry
+    // already transitively retains the pool/jar, so no new leak.
+    private var key: Pair<OkHttpClient, String>? = null
     private var entry: Pair<McpClient, List<McpToolDef>>? = null
 
-    private fun keyFor(http: OkHttpClient, baseUrl: String) =
-        System.identityHashCode(http) to baseUrl
-
     fun cached(http: OkHttpClient, baseUrl: String): Pair<McpClient, List<McpToolDef>>? =
-        entry.takeIf { key == keyFor(http, baseUrl) }
+        entry.takeIf { key == http to baseUrl }
 
     fun put(http: OkHttpClient, baseUrl: String, client: McpClient, defs: List<McpToolDef>) {
-        key = keyFor(http, baseUrl)
+        key = http to baseUrl
         entry = client to defs
     }
 }

@@ -191,22 +191,14 @@ fun AssistantScreen(
     // screen means the assistant is on. Read tools run free; pokes are
     // confirm-gated; eval/install stay hidden (see McpTools). Discovery
     // doubles as the gate — a ship with no MCP server just yields no tools.
-    val mcpClient = remember(repo) {
-        val http = repo?.shipHttp
-        val base = repo?.shipBaseUrl
-        if (http != null && base != null) {
-            McpClient(http, base)
-        } else {
-            null
-        }
-    }
     var mcpTools by remember { mutableStateOf<List<Tool>>(emptyList()) }
     // Surfaced in the UI + logged, so a failed connect is distinguishable
     // from "no server" (it used to silently collapse to an empty list).
     var mcpStatus by remember { mutableStateOf<String?>(null) }
-    LaunchedEffect(mcpClient) {
-        val client = mcpClient
-        if (client == null) {
+    LaunchedEffect(repo) {
+        val shipHttp = repo?.shipHttp
+        val shipBase = repo?.shipBaseUrl
+        if (shipHttp == null || shipBase == null) {
             mcpTools = emptyList()
             mcpStatus = null
             return@LaunchedEffect
@@ -222,24 +214,20 @@ fun AssistantScreen(
         // is discarded on close, so without the cache every reopen re-ran
         // initialize + tools/list against the ship. Keyed on the session's
         // http identity so a sign-out/re-login (new session, new cookie jar)
-        // misses and re-handshakes instead of reusing a dead client.
-        val cacheHttp = repo?.shipHttp
-        val cacheKey = repo?.shipBaseUrl?.toString()
-        val hit = if (cacheHttp != null && cacheKey != null) {
-            McpSessions.cached(cacheHttp, cacheKey)
-        } else null
-        if (hit != null) {
+        // misses and re-handshakes instead of reusing a dead client. The
+        // McpClient is only built on a miss — a hit uses the cached one.
+        val cacheKey = shipBase.toString()
+        McpSessions.cached(shipHttp, cacheKey)?.let { hit ->
             publish(hit.first, hit.second)
             return@LaunchedEffect
         }
         mcpStatus = "Connecting to ship tools…"
+        val client = McpClient(shipHttp, shipBase)
         runCatching {
             client.initialize()
             client.listTools()
         }.onSuccess { defs ->
-            if (cacheHttp != null && cacheKey != null) {
-                McpSessions.put(cacheHttp, cacheKey, client, defs)
-            }
+            McpSessions.put(shipHttp, cacheKey, client, defs)
             publish(client, defs)
         }.onFailure { e ->
             mcpTools = emptyList()
