@@ -73,6 +73,13 @@ import okhttp3.OkHttpClient
  * means a feature added here lights up both surfaces in lockstep.
  */
 
+/** The one thing an attachment can't recover from: no bytes. A cloud photo
+ *  that never downloaded reads as a valid-but-empty stream, and uploading it
+ *  posts a message pointing at a blank object. */
+private const val EMPTY_ATTACHMENT_ERROR =
+    "that came back empty (0 bytes) — if it's an online/cloud photo, open it " +
+        "in your gallery first so it downloads, then try again"
+
 /** A staged voice recording awaiting send confirmation. */
 data class PendingVoice(val path: String, val durationMs: Long)
 
@@ -206,25 +213,27 @@ fun ChatComposer(
     // anymore: the picked image is held in state.pendingAttachment and
     // shown as a preview so the user can confirm they grabbed the right
     // one before it goes out. [sendAttachment] finishes the job.
+    //
+    // The ONLY thing rejected is an empty read — a cloud photo that never
+    // downloaded, which would upload a blank object. We deliberately do NOT
+    // gate on decodeImageDimensions: that's a layout hint, not a validity
+    // oracle (desktop's ImageIO can't read WebP, which the picker offers and
+    // Coil renders fine), and the preview is the user's own check now.
+    val stage: (ByteArray, String, String, Boolean) -> Unit = { bytes, mime, name, isImage ->
+        if (bytes.isEmpty()) {
+            state.sendError = EMPTY_ATTACHMENT_ERROR
+        } else {
+            state.sendError = null
+            state.pendingAttachment = PendingAttachment(bytes, mime, name, isImage)
+        }
+    }
+
     val onPickImage: () -> Unit = {
         scope.launch {
             val picked = runCatching { pickImage() }
                 .onFailure { state.sendError = "couldn't read image: ${it.message ?: it::class.simpleName}" }
                 .getOrNull() ?: return@launch
-            // Validate at pick time — reject an empty/corrupt image before
-            // staging so the user gets the error immediately, not after they
-            // hit send. Gallery / notebook reject undecodable images too.
-            if (decodeImageDimensions(picked.bytes) == null) {
-                state.sendError = "that didn't decode as an image — try a different photo or a JPG/PNG"
-                return@launch
-            }
-            state.sendError = null
-            state.pendingAttachment = PendingAttachment(
-                bytes = picked.bytes,
-                mimeType = picked.mimeType,
-                displayName = picked.displayName,
-                isImage = true,
-            )
+            stage(picked.bytes, picked.mimeType, picked.displayName, true)
         }
     }
 
@@ -233,12 +242,9 @@ fun ChatComposer(
             val picked = runCatching { pickAnyFile() }
                 .onFailure { state.sendError = "couldn't read file: ${it.message ?: it::class.simpleName}" }
                 .getOrNull() ?: return@launch
-            state.sendError = null
-            state.pendingAttachment = PendingAttachment(
-                bytes = picked.bytes,
-                mimeType = picked.mimeType,
-                displayName = picked.displayName,
-                isImage = picked.mimeType.startsWith("image/"),
+            stage(
+                picked.bytes, picked.mimeType, picked.displayName,
+                picked.mimeType.startsWith("image/"),
             )
         }
     }
@@ -288,6 +294,13 @@ fun ChatComposer(
     // the user finalized a send, the textual draft is orphaned.
     val uploadAndSend: (DroppedFile) -> Unit = { file ->
         scope.launch {
+            if (file.bytes.isEmpty()) {
+                // Same guard the staged paths get — a multi-file drop was the
+                // one path that could still upload a blank object and post an
+                // empty message.
+                state.sendError = EMPTY_ATTACHMENT_ERROR
+                return@launch
+            }
             state.uploading = true
             state.sendError = null
             runCatching {
@@ -315,23 +328,9 @@ fun ChatComposer(
     // Stage a pasted / single-dropped file into the same review-before-send
     // preview the picker buttons use, so a paste doesn't fire off before the
     // user can see what landed. Multi-file drops stay on [uploadAndSend]
-    // (the preview holds one item), and validate the same way the pickers do.
+    // (the preview holds one item).
     val stageDropped: (DroppedFile) -> Unit = { file ->
-        when {
-            file.bytes.isEmpty() ->
-                state.sendError = "that came back empty (0 bytes)"
-            file.isImage && decodeImageDimensions(file.bytes) == null ->
-                state.sendError = "that didn't decode as an image — try a different one"
-            else -> {
-                state.sendError = null
-                state.pendingAttachment = PendingAttachment(
-                    bytes = file.bytes,
-                    mimeType = file.mimeType,
-                    displayName = file.name,
-                    isImage = file.isImage,
-                )
-            }
-        }
+        stage(file.bytes, file.mimeType, file.name, file.isImage)
     }
 
     val updateDraft: (TextFieldValue) -> Unit = { next ->

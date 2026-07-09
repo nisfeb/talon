@@ -1503,7 +1503,7 @@ class TlonChatRepo(
             db.reactions().clearForPost(nest, id)
             val rx = reacts.entries.mapNotNull { (author, emoji) ->
                 val e = emoji.asStr() ?: return@mapNotNull null
-                ReactionEntity(nest, id, author, e)
+                ReactionEntity(nest, id, author, ReactionPalette.normalize(e))
             }
             if (rx.isNotEmpty()) db.reactions().upsertAll(rx)
         }
@@ -2701,7 +2701,7 @@ class TlonChatRepo(
                 db.reactions().clearForPost(nest, intent.id)
                 val rx = intent.reacts.entries.mapNotNull { (author, emoji) ->
                     val e = emoji.asStr() ?: return@mapNotNull null
-                    ReactionEntity(nest, intent.id, author, e)
+                    ReactionEntity(nest, intent.id, author, ReactionPalette.normalize(e))
                 }
                 if (rx.isNotEmpty()) db.reactions().upsertAll(rx)
             }
@@ -2753,7 +2753,7 @@ class TlonChatRepo(
                 db.reactions().clearForPost(whom, replyId)
                 val rx = inner.reacts.entries.mapNotNull { (author, emoji) ->
                     val e = emoji.asStr() ?: return@mapNotNull null
-                    ReactionEntity(whom, replyId, author, e)
+                    ReactionEntity(whom, replyId, author, ReactionPalette.normalize(e))
                 }
                 if (rx.isNotEmpty()) db.reactions().upsertAll(rx)
             }

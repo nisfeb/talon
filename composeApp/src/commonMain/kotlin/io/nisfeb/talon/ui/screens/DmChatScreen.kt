@@ -1153,7 +1153,9 @@ private fun MessageRow(
     val avatarUrl = remember(m.author, contactMap) { contactMap.avatar(m.author) }
     val avatarColor = remember(m.author, contactMap) { contactMap.shipColor(m.author) }
     val grouped = remember(row.reactions) {
-        row.reactions.groupBy { it.emoji }
+        // Normalize on read too: rows stored before we normalized on write
+        // still carry FE0F, and would otherwise render as a separate chip.
+        row.reactions.groupBy { ReactionPalette.normalize(it.emoji) }
             .map { (emoji, rs) -> Triple(emoji, rs.size, rs.any { it.author == ourPatp }) }
     }
 

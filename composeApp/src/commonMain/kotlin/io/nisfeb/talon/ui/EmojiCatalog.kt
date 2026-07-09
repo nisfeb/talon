@@ -27,6 +27,13 @@ object EmojiCatalog {
         ":smile:" to ":slight_smile:",
         ":heart_eyes:" to ":heart_eyes:",
         ":smiling_face:" to ":slight_smile:",
+        // Codes this catalog used to carry as entries — kept as aliases so
+        // reactions already stored under them still render as a glyph.
+        ":shades:" to ":sunglasses:",
+        ":water:" to ":droplet:",
+        ":mushroom_red:" to ":mushroom:",
+        ":wrapped_gift:" to ":gift:",
+        ":thumbup:" to ":thumbsup:",
     )
 
     val entries: List<Entry> = listOf(

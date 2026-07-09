@@ -663,7 +663,9 @@ private fun ThreadMessage(
     val stamp = remember(m.sentMs) { TIME_FORMAT.format(Date(m.sentMs)) }
     val authorLabel = remember(m.author, contactMap) { contactMap.displayName(m.author) }
     val grouped = remember(reactions) {
-        reactions.groupBy { it.emoji }
+        // Normalize on read too: rows stored before we normalized on write
+        // still carry FE0F, and would otherwise render as a separate chip.
+        reactions.groupBy { ReactionPalette.normalize(it.emoji) }
             .map { (emoji, rs) -> Triple(emoji, rs.size, rs.any { it.author == ourPatp }) }
     }
     val flashAlpha = remember(m.id) { Animatable(0f) }
