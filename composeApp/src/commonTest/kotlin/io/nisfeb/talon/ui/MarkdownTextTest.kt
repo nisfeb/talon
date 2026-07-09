@@ -68,4 +68,24 @@ class MarkdownTextTest {
         // Not a link: no `](`. The text must come through untouched.
         assertEquals("[wat] a * b", inlineAnnotated("[wat] a * b", Color.Unspecified).text)
     }
+
+    @Test
+    fun `a bare bracketed token before a real link stays literal`() {
+        // Regression: '[' used to pair with the first '](' anywhere later,
+        // so "[1] see [docs](url)" rendered one link labeled "1] see [docs".
+        val a = inlineAnnotated("[1] see [docs](https://x.dev)", Color.Unspecified)
+        assertEquals("[1] see docs", a.text)
+        assertEquals(
+            listOf("https://x.dev"),
+            a.getLinkAnnotations(0, a.length).mapNotNull { (it.item as? LinkAnnotation.Url)?.url },
+        )
+    }
+
+    @Test
+    fun `spaced asterisks stay literal, hugging ones italicize`() {
+        // Regression: any two bare stars used to pair, so "2 * 3 * 4"
+        // rendered "2  3  4" with " 3 " italic.
+        assertEquals("compute 2 * 3 * 4", inlineAnnotated("compute 2 * 3 * 4", Color.Unspecified).text)
+        assertEquals("a b c", inlineAnnotated("a *b* c", Color.Unspecified).text)
+    }
 }

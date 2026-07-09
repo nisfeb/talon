@@ -5,6 +5,7 @@ import androidx.sqlite.driver.bundled.BundledSQLiteDriver
 import io.nisfeb.talon.ai.AiSettings
 import io.nisfeb.talon.ai.AiSettingsRepository
 import io.nisfeb.talon.ai.DailyDigestSettings
+import io.nisfeb.talon.data.ASSISTANT_HISTORY_KEEP
 import io.nisfeb.talon.data.AppDatabase
 import io.nisfeb.talon.data.AssistantConversationEntity
 import io.nisfeb.talon.data.AssistantHistoryEntity
@@ -933,12 +934,17 @@ class SettingsSyncApplyBucketTest {
         put("turnCount", turnCount)
     }
 
-    private fun turnVal(convGid: String, question: String, answer: String) = buildJsonObject {
+    private fun turnVal(
+        convGid: String,
+        question: String,
+        answer: String,
+        createdAt: Long = 150L,
+    ) = buildJsonObject {
         put("convGid", convGid)
         put("question", question)
         put("answer", answer)
         put("mode", "Assistant")
-        put("createdAt", 150L)
+        put("createdAt", createdAt)
     }
 
     @Test
@@ -1044,6 +1050,36 @@ class SettingsSyncApplyBucketTest {
         sync.applyBucket(SettingsSyncImpl.BUCKET_ASSISTANT_TURNS, bucket)
         val convId = db.assistantConversations().getByGid("c1")!!.id
         assertEquals(1, db.assistantHistory().forConversation(convId).size)
+    }
+
+    @Test
+    fun `applyBucket ASSISTANT_TURNS skips ship entries older than the trim horizon`() = runBlocking {
+        // At cap, a bucket entry older than the oldest local turn would be
+        // trimmed straight back out — bootstrap must not pay the insert.
+        val convId = db.assistantConversations().insert(
+            AssistantConversationEntity(
+                gid = "c1", title = "t", createdAt = 1, updatedAt = 1,
+                centroid = ByteArray(0), dim = 0, turnCount = 0,
+            ),
+        )
+        repeat(ASSISTANT_HISTORY_KEEP) { n ->
+            db.assistantHistory().insert(
+                AssistantHistoryEntity(
+                    gid = "local$n", mode = "Assistant", question = "q", answer = "a",
+                    createdAt = 1_000L + n, conversationId = convId, convGid = "c1",
+                ),
+            )
+        }
+        sync.applyBucket(
+            SettingsSyncImpl.BUCKET_ASSISTANT_TURNS,
+            buildJsonObject {
+                put("stale", turnVal("c1", "old", "a", createdAt = 500L))
+                put("fresh", turnVal("c1", "new", "a", createdAt = 2_000L))
+            },
+        )
+        assertNull(db.assistantHistory().getByGid("stale"), "below-horizon turn must be skipped")
+        assertNotNull(db.assistantHistory().getByGid("fresh"))
+        assertEquals(ASSISTANT_HISTORY_KEEP, db.assistantHistory().count())
     }
 
     @Test

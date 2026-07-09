@@ -103,10 +103,14 @@ internal fun inlineAnnotated(text: String, codeBg: Color): AnnotatedString = bui
                 }
             }
             text[i] == '*' -> {
-                // Single `*`: italic. The `**` case is matched above, so a
-                // lone star here is either an emphasis open or literal text.
+                // Single `*`: italic, but only when the stars hug the text
+                // (CommonMark flanking): `*word*` italicizes; the bare stars
+                // in `2 * 3 * 4` stay literal. The `**` case is matched
+                // above, so a lone star here never sees another adjacent.
                 val end = text.indexOf('*', i + 1)
-                if (end == -1 || end == i + 1) {
+                val opens = end > i + 1 &&
+                    !text[i + 1].isWhitespace() && !text[end - 1].isWhitespace()
+                if (!opens) {
                     append(text[i]); i++
                 } else {
                     withStyle(SpanStyle(fontStyle = FontStyle.Italic)) {
@@ -128,8 +132,12 @@ internal fun inlineAnnotated(text: String, codeBg: Color): AnnotatedString = bui
             }
             text[i] == '[' -> {
                 // `[label](url)` — the shape the assistant cites sources in.
-                val close = text.indexOf("](", i + 1)
-                val end = if (close == -1) -1 else text.indexOf(')', close + 2)
+                // The label ends at the FIRST ']', which must be immediately
+                // followed by '(' — otherwise a bare `[1]` earlier in the
+                // line would swallow everything up to a later real link.
+                val close = text.indexOf(']', i + 1)
+                val isLink = close != -1 && text.startsWith("](", close)
+                val end = if (isLink) text.indexOf(')', close + 2) else -1
                 if (end == -1) {
                     append(text[i]); i++
                 } else {

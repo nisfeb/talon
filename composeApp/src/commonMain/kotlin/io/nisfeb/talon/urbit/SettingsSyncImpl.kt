@@ -1204,12 +1204,23 @@ class SettingsSyncImpl(
                 }
             }
             BUCKET_ASSISTANT_TURNS -> {
+                // The ship's bucket is an append-only superset of what we
+                // keep locally, and bootstrap replays it on EVERY connect.
+                // Once we're at cap, an entry older than the oldest local
+                // turn is guaranteed to be trimmed straight back out (trim
+                // keeps the newest by createdAt) — skip it up front, or a
+                // long-lived ship pays O(bucket) insert+count+delete cycles
+                // per reconnect for zero net change.
+                val turnDao = db.assistantHistory()
+                val horizon = if (turnDao.count() >= io.nisfeb.talon.data.ASSISTANT_HISTORY_KEEP) {
+                    turnDao.oldestCreatedAt() ?: 0L
+                } else 0L
                 entries?.forEach { (gid, v) ->
-                    (unwrap(v) as? JsonObject)?.let { upsertAssistantTurn(gid, it) }
+                    val obj = unwrap(v) as? JsonObject ?: return@forEach
+                    if ((obj["createdAt"].asLong() ?: 0L) < horizon) return@forEach
+                    upsertAssistantTurn(gid, obj)
                 }
-                // The ship's bucket is an append-only superset of what we keep
-                // locally, so a bootstrap re-inserts every turn we'd trimmed.
-                // Re-apply the caps here or they're a no-op after the first
+                // Re-apply the caps or they're a no-op after the first
                 // sync and the tables grow to ship size forever.
                 db.assistantHistory().trim(io.nisfeb.talon.data.ASSISTANT_HISTORY_KEEP)
                 db.assistantConversations().trim(io.nisfeb.talon.data.ASSISTANT_CONV_KEEP)

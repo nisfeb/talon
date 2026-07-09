@@ -33,6 +33,15 @@ interface AssistantHistoryDao {
     @Query("SELECT COUNT(*) FROM assistant_history WHERE conversationId = :conversationId")
     suspend fun countForConversation(conversationId: Long): Int
 
+    /** Total turns held locally — with [oldestCreatedAt], the sync trim
+     *  horizon: at cap, a ship entry older than the oldest local row would
+     *  be trimmed straight back out, so applyBucket skips inserting it. */
+    @Query("SELECT COUNT(*) FROM assistant_history")
+    suspend fun count(): Int
+
+    @Query("SELECT MIN(createdAt) FROM assistant_history")
+    suspend fun oldestCreatedAt(): Long?
+
     /** Drop all turns of a conversation (cascade when it's deleted). */
     @Query("DELETE FROM assistant_history WHERE conversationId = :conversationId")
     suspend fun deleteForConversation(conversationId: Long)
