@@ -1056,6 +1056,9 @@ class SettingsSyncApplyBucketTest {
     fun `applyBucket ASSISTANT_TURNS skips ship entries older than the trim horizon`() = runBlocking {
         // At cap, a bucket entry older than the oldest local turn would be
         // trimmed straight back out — bootstrap must not pay the insert.
+        // The distinguishing observable (trim would erase the row either
+        // way): a SKIPPED turn never stubs its conversation, an inserted-
+        // then-trimmed one leaves the stub behind.
         val convId = db.assistantConversations().insert(
             AssistantConversationEntity(
                 gid = "c1", title = "t", createdAt = 1, updatedAt = 1,
@@ -1073,13 +1076,37 @@ class SettingsSyncApplyBucketTest {
         sync.applyBucket(
             SettingsSyncImpl.BUCKET_ASSISTANT_TURNS,
             buildJsonObject {
-                put("stale", turnVal("c1", "old", "a", createdAt = 500L))
+                put("stale", turnVal("cStale", "old", "a", createdAt = 500L))
                 put("fresh", turnVal("c1", "new", "a", createdAt = 2_000L))
             },
         )
         assertNull(db.assistantHistory().getByGid("stale"), "below-horizon turn must be skipped")
+        assertNull(
+            db.assistantConversations().getByGid("cStale"),
+            "a skipped turn must not stub its conversation — the stub proves the insert happened",
+        )
         assertNotNull(db.assistantHistory().getByGid("fresh"))
         assertEquals(ASSISTANT_HISTORY_KEEP, db.assistantHistory().count())
+    }
+
+    @Test
+    fun `fresh-device bootstrap only inserts the newest KEEP bucket entries`() = runBlocking {
+        // No local rows, so there is no local horizon — the bucket itself
+        // supplies one: only its KEEP newest entries can survive the trim,
+        // so older ones are skipped (again pinned via the absent conv stub).
+        val bucket = buildJsonObject {
+            put("old1", turnVal("cOld", "q", "a", createdAt = 1L))
+            put("old2", turnVal("cOld", "q", "a", createdAt = 2L))
+            repeat(ASSISTANT_HISTORY_KEEP) { n ->
+                put("t$n", turnVal("c1", "q$n", "a", createdAt = 1_000L + n))
+            }
+        }
+        sync.applyBucket(SettingsSyncImpl.BUCKET_ASSISTANT_TURNS, bucket)
+        assertEquals(ASSISTANT_HISTORY_KEEP, db.assistantHistory().count())
+        assertNull(db.assistantHistory().getByGid("old1"))
+        assertNull(db.assistantConversations().getByGid("cOld"), "skipped turns must not stub cOld")
+        // turnCount reflects the post-trim survivors, recounted once.
+        assertEquals(ASSISTANT_HISTORY_KEEP, db.assistantConversations().getByGid("c1")!!.turnCount)
     }
 
     @Test

@@ -1206,24 +1206,39 @@ class SettingsSyncImpl(
             BUCKET_ASSISTANT_TURNS -> {
                 // The ship's bucket is an append-only superset of what we
                 // keep locally, and bootstrap replays it on EVERY connect.
-                // Once we're at cap, an entry older than the oldest local
-                // turn is guaranteed to be trimmed straight back out (trim
-                // keeps the newest by createdAt) — skip it up front, or a
+                // Only the newest KEEP turns can survive the trim below, so
+                // skip everything below the horizon up front — or a
                 // long-lived ship pays O(bucket) insert+count+delete cycles
-                // per reconnect for zero net change.
+                // per reconnect (and a fresh device pays it on first sync)
+                // for zero net change. The horizon is the stricter of:
+                //  - the oldest LOCAL turn once we're at cap (locals are
+                //    never deleted mid-apply, so anything older loses);
+                //  - the KEEP-th newest createdAt among the bucket entries
+                //    themselves (covers the fresh-device bootstrap, where
+                //    there is no local horizon yet).
+                // Strict '<' — ties at the boundary must not be skipped.
                 val turnDao = db.assistantHistory()
-                val horizon = if (turnDao.count() >= io.nisfeb.talon.data.ASSISTANT_HISTORY_KEEP) {
+                val keep = io.nisfeb.talon.data.ASSISTANT_HISTORY_KEEP
+                val localHorizon = if (turnDao.count() >= keep) {
                     turnDao.oldestCreatedAt() ?: 0L
                 } else 0L
+                val bucketHorizon = entries?.values
+                    ?.mapNotNull { (unwrap(it) as? JsonObject)?.get("createdAt").asLong() }
+                    ?.sortedDescending()?.getOrNull(keep - 1) ?: 0L
+                val horizon = maxOf(localHorizon, bucketHorizon)
+                val touched = mutableSetOf<Long>()
                 entries?.forEach { (gid, v) ->
                     val obj = unwrap(v) as? JsonObject ?: return@forEach
                     if ((obj["createdAt"].asLong() ?: 0L) < horizon) return@forEach
-                    upsertAssistantTurn(gid, obj)
+                    upsertAssistantTurn(gid, obj)?.let(touched::add)
                 }
                 // Re-apply the caps or they're a no-op after the first
-                // sync and the tables grow to ship size forever.
-                db.assistantHistory().trim(io.nisfeb.talon.data.ASSISTANT_HISTORY_KEEP)
+                // sync and the tables grow to ship size forever. Recount
+                // AFTER the trims so turnCount reflects what survived —
+                // once per touched conversation, not once per insert.
+                turnDao.trim(keep)
                 db.assistantConversations().trim(io.nisfeb.talon.data.ASSISTANT_CONV_KEEP)
+                touched.forEach { recountConversation(it) }
             }
             BUCKET_LOOPS -> {
                 entries?.forEach { (gid, v) ->
@@ -1356,11 +1371,17 @@ class SettingsSyncImpl(
                 val ms = (unwrapped as? JsonObject)?.get("ms").asLong() ?: return
                 bumpStatusesSeen(ms)
             }
+            // Live put-entry facts must enforce the same caps applyBucket
+            // does, or a device that stays connected grows the tables one
+            // row per peer event until the next reconnect's bucket replay.
             BUCKET_ASSISTANT_CONVERSATIONS -> {
                 (unwrapped as? JsonObject)?.let { upsertAssistantConversation(entry, it) }
+                db.assistantConversations().trim(io.nisfeb.talon.data.ASSISTANT_CONV_KEEP)
             }
             BUCKET_ASSISTANT_TURNS -> {
-                (unwrapped as? JsonObject)?.let { upsertAssistantTurn(entry, it) }
+                val convId = (unwrapped as? JsonObject)?.let { upsertAssistantTurn(entry, it) }
+                db.assistantHistory().trim(io.nisfeb.talon.data.ASSISTANT_HISTORY_KEEP)
+                convId?.let { recountConversation(it) }
             }
             BUCKET_LOOPS -> {
                 (unwrapped as? JsonObject)?.let { upsertLoop(entry, it) }
@@ -1509,14 +1530,17 @@ class SettingsSyncImpl(
         rearmLoops()
     }
 
-    private suspend fun upsertAssistantTurn(gid: String, obj: JsonObject) {
-        if (gid.isBlank()) return
+    /** Insert a synced turn; returns the local conversation id when a row
+     *  was actually inserted (so the caller can recount turnCount once per
+     *  conversation AFTER trimming), or null when the turn was skipped. */
+    private suspend fun upsertAssistantTurn(gid: String, obj: JsonObject): Long? {
+        if (gid.isBlank()) return null
         val turnDao = db.assistantHistory()
-        if (turnDao.getByGid(gid) != null) return // append-only → idempotent
+        if (turnDao.getByGid(gid) != null) return null // append-only → idempotent
         val convGid = obj["convGid"].asStr()
         if (convGid == null) {
             Log.w(TAG, "assistant turn $gid missing convGid; dropped")
-            return
+            return null
         }
         val question = obj["question"].asStr() ?: ""
         val answer = obj["answer"].asStr() ?: ""
@@ -1539,13 +1563,18 @@ class SettingsSyncImpl(
                 createdAt = createdAt, conversationId = localConvId, convGid = convGid,
             ),
         )
-        // Keep turnCount tracking the turns this device actually holds. Count
-        // the rows rather than incrementing: re-applying the ship's superset
-        // after a local trim would otherwise bump the counter every bootstrap,
-        // inflating it without bound (and freezing the grouping centroid,
-        // which weights new vectors by 1/turnCount).
-        convDao.get(localConvId)?.let {
-            convDao.update(it.copy(turnCount = turnDao.countForConversation(localConvId)))
+        return localConvId
+    }
+
+    /** Set turnCount to the rows this device actually holds. Counting (not
+     *  incrementing) keeps re-applied ship supersets from inflating it
+     *  without bound and freezing the grouping centroid, which weights new
+     *  vectors by 1/turnCount. Run AFTER any trim so the count reflects
+     *  what survived. */
+    private suspend fun recountConversation(convId: Long) {
+        val convDao = db.assistantConversations()
+        convDao.get(convId)?.let {
+            convDao.update(it.copy(turnCount = db.assistantHistory().countForConversation(convId)))
         }
     }
 
