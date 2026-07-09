@@ -1464,7 +1464,7 @@ fun App(
                         // once it's supported, turned on, and has a key — the
                         // same gate the old star icon used.
                         val assistantEnabled = isAssistantSupported &&
-                            (aiState.askUrbitEnabled || aiState.agentEnabled) &&
+                            aiState.assistantOn() &&
                             aiState.hasKey()
                         val enabledItems: List<RailItem> = remember(
                             railVisibility, railItemOrder, dailyDigestEnabled, assistantEnabled,

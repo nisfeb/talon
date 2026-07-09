@@ -931,7 +931,7 @@ internal fun aiFeatureEnabled(state: AiSettings.Config, feature: AiSettings.Feat
         AiSettings.Feature.DailyDigest -> state.dailyDigestEnabled
         AiSettings.Feature.SmartFeatures -> state.smartFeaturesEnabled
         // Unified assistant: either legacy flag counts as enabled.
-        AiSettings.Feature.Agent -> state.agentEnabled || state.askUrbitEnabled
+        AiSettings.Feature.Agent -> state.assistantOn()
     }
 
 @Composable

@@ -1413,7 +1413,7 @@ fun TalonApp(
                 // App.kt's gate. isAssistantSupported is true on both
                 // platforms — the embedder only enhances retrieval.
                 onOpenAssistant = if (isAssistantSupported &&
-                    (aiState.askUrbitEnabled || aiState.agentEnabled) &&
+                    aiState.assistantOn() &&
                     aiState.hasKey()
                 ) {
                     { assistantOpen = true }

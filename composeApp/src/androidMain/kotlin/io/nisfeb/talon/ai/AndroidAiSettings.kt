@@ -59,7 +59,12 @@ class AndroidAiSettings(context: Context) : AiSettingsRepository {
     }
 
     override fun setFeature(feature: AiSettings.Feature, enabled: Boolean) {
-        prefs.edit().putBoolean(feature.key, enabled).apply()
+        val editor = prefs.edit().putBoolean(feature.key, enabled)
+        // Agent folds in the legacy "Ask your Urbit" flag, and read() ORs the
+        // two — so an explicit OFF must also clear the legacy key on disk, or
+        // it survives a restart and silently re-enables the assistant.
+        if (feature == AiSettings.Feature.Agent) editor.putBoolean(LEGACY_ASK_URBIT_KEY, enabled)
+        editor.apply()
         _state.value = when (feature) {
             AiSettings.Feature.CatchMeUp -> _state.value.copy(catchMeUpEnabled = enabled)
             AiSettings.Feature.DailyDigest -> _state.value.copy(dailyDigestEnabled = enabled)
@@ -101,7 +106,11 @@ class AndroidAiSettings(context: Context) : AiSettingsRepository {
             .putBoolean(AiSettings.Feature.DailyDigest.key, config.dailyDigestEnabled)
             .putBoolean(AiSettings.Feature.SmartFeatures.key, config.smartFeaturesEnabled)
             .putBoolean(AiSettings.Feature.Agent.key, config.agentEnabled)
-            .putBoolean(LEGACY_ASK_URBIT_KEY, config.agentEnabled)
+            // read() ORs feat_agent with the legacy key, so persist the legacy
+            // key from the SAME OR — writing only agentEnabled would drop an
+            // incoming askUrbitEnabled=true (from an older peer) and, after a
+            // restart, disable the assistant and re-push that disable to peers.
+            .putBoolean(LEGACY_ASK_URBIT_KEY, config.agentEnabled || config.askUrbitEnabled)
             .putString(KEY_BRAVE_API_KEY, config.braveApiKey)
             .putString(KEY_URBIT_KNOWLEDGE_PROMPT, config.urbitKnowledgePrompt)
             .putString(KEY_ASSISTANT_PROMPT, config.assistantPrompt)
@@ -162,7 +171,7 @@ class AndroidAiSettings(context: Context) : AiSettingsRepository {
             // returns the default when the key is absent.
             catchMeUpEnabled = prefs.getBoolean(AiSettings.Feature.CatchMeUp.key, true),
             dailyDigestEnabled = prefs.getBoolean(AiSettings.Feature.DailyDigest.key, true),
-            smartFeaturesEnabled = prefs.getBoolean(AiSettings.Feature.SmartFeatures.key, true),
+            smartFeaturesEnabled = readSmartFeatures(),
             askUrbitEnabled = assistantOn,
             agentEnabled = assistantOn,
             syncEnabled = prefs.getBoolean(KEY_SYNC, true),
@@ -172,6 +181,24 @@ class AndroidAiSettings(context: Context) : AiSettingsRepository {
             loopPrompt = prefs.getString(KEY_LOOP_PROMPT, "").orEmpty(),
             deviceId = deviceId(),
         )
+    }
+
+    /**
+     * SmartFeatures folded four pre-0.14 toggles (semantic search, topic
+     * clusters, important messages, entity actions) into one. Without a
+     * migration, a user who explicitly disabled the on-device embedder
+     * would silently get it back (and a model re-download) on upgrade —
+     * the new key is absent, so its default-true wins. Seed from the old
+     * keys: off only if the user had turned them all off.
+     */
+    private fun readSmartFeatures(): Boolean {
+        val newKey = AiSettings.Feature.SmartFeatures.key
+        if (prefs.contains(newKey)) return prefs.getBoolean(newKey, true)
+        val legacy = LEGACY_SMART_KEYS.filter { prefs.contains(it) }
+        if (legacy.isEmpty()) return true // fresh install → default on
+        val migrated = legacy.any { prefs.getBoolean(it, true) }
+        prefs.edit().putBoolean(newKey, migrated).apply()
+        return migrated
     }
 
     /** This device's stable id, generated + persisted on first read. */
@@ -200,5 +227,13 @@ class AndroidAiSettings(context: Context) : AiSettingsRepository {
         // Legacy "Ask your Urbit" key, folded into the unified assistant
         // (feat_agent). Read for migration + written in lockstep.
         private const val LEGACY_ASK_URBIT_KEY = "feat_ask_urbit"
+        // Pre-0.14 per-feature toggles, folded into SmartFeatures. Read once
+        // to migrate an explicit opt-out; never written.
+        private val LEGACY_SMART_KEYS = listOf(
+            "feat_semantic_search",
+            "feat_topic_clusters",
+            "feat_important_messages",
+            "feat_entity_actions",
+        )
     }
 }

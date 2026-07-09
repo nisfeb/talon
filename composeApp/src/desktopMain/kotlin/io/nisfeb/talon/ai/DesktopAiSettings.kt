@@ -29,19 +29,45 @@ class DesktopAiSettings : AiSettingsRepository {
     override var onStateChange: ((AiSettings.Config, Boolean) -> Unit)? = null
 
     private fun loadInitial(): AiSettings.Config {
-        if (!file.exists()) return defaultConfig()
-        return runCatching { JSON.decodeFromString<AiSettings.Config>(file.readText()) }
+        // Persist the fresh config immediately: defaultConfig() mints a new
+        // deviceId, and returning it unwritten means a new id every launch
+        // until some setting happens to save. The write-loop lease keys on
+        // deviceId, so a churning id makes this machine unable to recognize
+        // its own prior claim — it reads a "foreign" fresh holder and skips
+        // its own scheduled fire.
+        if (!file.exists()) return defaultConfig().also(::writeAtomically)
+        val raw = file.readText()
+        return runCatching { JSON.decodeFromString<AiSettings.Config>(raw) }
             .getOrElse {
                 // We're about to fall back to an empty config, and the
                 // next write overwrites the file — i.e. the user's key
                 // silently vanishes. Log it so a "key not persisted"
                 // report is diagnosable instead of mute.
                 Log.w(TAG, "ai_settings.json unreadable; falling back to defaults", it)
-                defaultConfig()
+                defaultConfig().also(::writeAtomically)
             }
+            // SmartFeatures folded four pre-0.14 toggles into one. The old
+            // fields are dropped by ignoreUnknownKeys and the new one defaults
+            // true, so without this an explicit opt-out of the on-device
+            // embedder silently reverts (and re-downloads the model) on
+            // upgrade. Read the legacy fields once from the raw JSON.
+            .let { cfg -> migrateSmartFeatures(cfg, raw) }
             // Back-fill a stable device id for configs written before it
             // existed, persisting so it stays put across launches.
             .let { if (it.deviceId.isBlank()) it.copy(deviceId = newDeviceId()).also(::writeAtomically) else it }
+    }
+
+    /** Seed smartFeaturesEnabled from the pre-0.14 per-feature fields when
+     *  the new field is absent; off only if the user had them all off. */
+    private fun migrateSmartFeatures(cfg: AiSettings.Config, raw: String): AiSettings.Config {
+        val obj = runCatching { Json.parseToJsonElement(raw) as? kotlinx.serialization.json.JsonObject }
+            .getOrNull() ?: return cfg
+        if (obj.containsKey("smartFeaturesEnabled")) return cfg
+        val legacy = LEGACY_SMART_FIELDS.mapNotNull { key ->
+            (obj[key] as? kotlinx.serialization.json.JsonPrimitive)?.content?.toBooleanStrictOrNull()
+        }
+        if (legacy.isEmpty()) return cfg
+        return cfg.copy(smartFeaturesEnabled = legacy.any { it }).also(::writeAtomically)
     }
 
     /**
@@ -152,5 +178,12 @@ class DesktopAiSettings : AiSettingsRepository {
         private const val TAG = "DesktopAiSettings"
         private val JSON = Json { ignoreUnknownKeys = true; prettyPrint = false }
         private fun newDeviceId(): String = java.util.UUID.randomUUID().toString()
+        // Pre-0.14 per-feature fields, folded into smartFeaturesEnabled.
+        private val LEGACY_SMART_FIELDS = listOf(
+            "semanticSearchEnabled",
+            "topicClustersEnabled",
+            "importantMessagesEnabled",
+            "entityActionsEnabled",
+        )
     }
 }
