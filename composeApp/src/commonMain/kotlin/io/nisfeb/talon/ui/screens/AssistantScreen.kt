@@ -220,9 +220,14 @@ fun AssistantScreen(
         }
         // Reuse the ship's already-handshaked client + tool list. This screen
         // is discarded on close, so without the cache every reopen re-ran
-        // initialize + tools/list against the ship.
+        // initialize + tools/list against the ship. Keyed on the session's
+        // http identity so a sign-out/re-login (new session, new cookie jar)
+        // misses and re-handshakes instead of reusing a dead client.
+        val cacheHttp = repo?.shipHttp
         val cacheKey = repo?.shipBaseUrl?.toString()
-        val hit = cacheKey?.let { McpSessions.cached(it) }
+        val hit = if (cacheHttp != null && cacheKey != null) {
+            McpSessions.cached(cacheHttp, cacheKey)
+        } else null
         if (hit != null) {
             publish(hit.first, hit.second)
             return@LaunchedEffect
@@ -232,7 +237,9 @@ fun AssistantScreen(
             client.initialize()
             client.listTools()
         }.onSuccess { defs ->
-            if (cacheKey != null) McpSessions.put(cacheKey, client, defs)
+            if (cacheHttp != null && cacheKey != null) {
+                McpSessions.put(cacheHttp, cacheKey, client, defs)
+            }
             publish(client, defs)
         }.onFailure { e ->
             mcpTools = emptyList()

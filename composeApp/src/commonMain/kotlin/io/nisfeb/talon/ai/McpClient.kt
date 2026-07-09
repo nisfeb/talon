@@ -48,22 +48,34 @@ data class McpToolDef(
 )
 
 /**
- * Ship-lifetime cache of the MCP handshake. The assistant screen is
+ * Session-lifetime cache of the MCP handshake. The assistant screen is
  * unmounted whenever it's closed, which used to discard its remembered
  * client and re-run initialize + tools/list (two ship round-trips, plus a
- * "Connecting to ship tools…" flash) on every reopen. Keyed by ship base
- * URL so a ship switch gets its own entry.
+ * "Connecting to ship tools…" flash) on every reopen.
+ *
+ * Keyed on the session's OkHttp identity, not just the ship URL: the
+ * McpClient copies the session's cookie jar, and sign-out clears that jar
+ * while re-login mints a NEW session + jar. A URL-only key kept serving
+ * the dead client — tools advertised, every call unauthenticated — until
+ * relaunch. New session ⇒ new http instance ⇒ cache miss ⇒ fresh
+ * handshake. Single entry, so stale sessions drop out on their own.
  *
  * ponytail: a ship that starts exposing new MCP tools mid-session won't
- * see them until relaunch. Add an explicit refresh if that ever bites.
+ * see them until reconnect. Add an explicit refresh if that ever bites.
  */
 object McpSessions {
-    private val cache = mutableMapOf<String, Pair<McpClient, List<McpToolDef>>>()
+    private var key: Pair<Int, String>? = null
+    private var entry: Pair<McpClient, List<McpToolDef>>? = null
 
-    fun cached(baseUrl: String): Pair<McpClient, List<McpToolDef>>? = cache[baseUrl]
+    private fun keyFor(http: OkHttpClient, baseUrl: String) =
+        System.identityHashCode(http) to baseUrl
 
-    fun put(baseUrl: String, client: McpClient, defs: List<McpToolDef>) {
-        cache[baseUrl] = client to defs
+    fun cached(http: OkHttpClient, baseUrl: String): Pair<McpClient, List<McpToolDef>>? =
+        entry.takeIf { key == keyFor(http, baseUrl) }
+
+    fun put(http: OkHttpClient, baseUrl: String, client: McpClient, defs: List<McpToolDef>) {
+        key = keyFor(http, baseUrl)
+        entry = client to defs
     }
 }
 

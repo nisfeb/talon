@@ -27,13 +27,14 @@ internal enum class McpVisibility { Hidden, Read, Write }
 internal fun mcpToolVisibility(name: String): McpVisibility {
     val short = name.substringAfterLast('/')
     // Defence in depth: keep the arbitrary-code / install surface hidden
-    // even if a tool is renamed or namespaced differently. Match the word,
-    // not the substring — `retrieval-search` is not an eval tool. A name
-    // that STARTS with the word still counts, so `evaluate-code` is hidden.
+    // even if a tool is renamed or namespaced differently. Match on word
+    // PREFIX: any word starting with "eval"/"install" hides the tool
+    // (`evaluate-code`, `hoon-evaluator`, `run-eval-now`), while
+    // `retrieval-search` — "eval" mid-word — stays visible. When in doubt
+    // this errs toward hiding.
     val words = short.split('-', '_', '.', ':')
     if (short in MCP_HIDDEN_TOOLS ||
-        short.startsWith("eval") || short.startsWith("install") ||
-        words.any { it == "eval" || it == "install" }
+        words.any { it.startsWith("eval") || it.startsWith("install") }
     ) {
         return McpVisibility.Hidden
     }

@@ -385,6 +385,18 @@ fun TalonApp(
     // `pendingShareTarget` auto-dispatch path (Sharing Shortcut)
     // doesn't have to duplicate it. Caller is responsible for
     // toggling openWhom and calling onShareConsumed afterward.
+    // The launches below swallowed failures whole: a share that couldn't
+    // read or upload just disappeared. Toast the reason (uploadImage's
+    // empty-bytes message names the cloud-photo fix) instead of going mute.
+    val shareFailedToast: (Throwable) -> Unit = { t ->
+        appScope.launch(kotlinx.coroutines.Dispatchers.Main) {
+            android.widget.Toast.makeText(
+                context,
+                "Share failed: ${t.message ?: "unknown error"}",
+                android.widget.Toast.LENGTH_LONG,
+            ).show()
+        }
+    }
     val dispatchShare: (ShareIntent, String) -> Unit = { share, whom ->
         when (share) {
             is ShareIntent.Text -> {
@@ -413,7 +425,7 @@ fun TalonApp(
                             height = 0,
                             alt = name,
                         )
-                    }
+                    }.onFailure { shareFailedToast(it) }
                 }
             }
             is ShareIntent.File -> {
@@ -430,7 +442,7 @@ fun TalonApp(
                             fileName = name,
                         )
                         app.repo.send(whom, "[📎 $name]($hostedUrl)")
-                    }
+                    }.onFailure { shareFailedToast(it) }
                 }
             }
         }

@@ -27,7 +27,10 @@ class McpToolsTest {
         assertEquals(McpVisibility.Hidden, mcpToolVisibility("install-desk"))
         assertEquals(McpVisibility.Hidden, mcpToolVisibility("run-eval-now"))
         assertEquals(McpVisibility.Hidden, mcpToolVisibility("evaluate-code"))
-        // ...but the word, not the substring: these are ordinary tools.
+        // Word PREFIX, so mid-name eval spellings stay hidden too…
+        assertEquals(McpVisibility.Hidden, mcpToolVisibility("hoon-evaluator"))
+        assertEquals(McpVisibility.Hidden, mcpToolVisibility("run-evaluate-now"))
+        // …but not mid-WORD: these are ordinary tools.
         assertEquals(McpVisibility.Write, mcpToolVisibility("retrieval-search"))
         assertEquals(McpVisibility.Write, mcpToolVisibility("uninstall-nothing"))
     }
