@@ -3,6 +3,7 @@ package io.nisfeb.talon
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import io.nisfeb.talon.util.Log
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -34,7 +35,11 @@ class BootReceiver : BroadcastReceiver() {
                     val wakeLock = app.loops.acquireWakeLock("loop-boot-rearm")
                     CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
                         try {
-                            app.loops.rescheduleNow()
+                            // Contain failures: an uncaught throw in a root
+                            // coroutine kills the app process — at boot that
+                            // means a crash on EVERY boot until it clears.
+                            runCatching { app.loops.rescheduleNow() }
+                                .onFailure { Log.w("BootReceiver", "loop re-arm failed", it) }
                         } finally {
                             runCatching { wakeLock.release() }
                             runCatching { pending.finish() }

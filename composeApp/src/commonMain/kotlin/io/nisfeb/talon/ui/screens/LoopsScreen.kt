@@ -320,10 +320,17 @@ fun LoopDetail(
                                 createdAt = now, updatedAt = now, lastRunAt = now,
                             )
                         } else {
+                            // Merge the form onto the FRESH row, not the pane's
+                            // snapshot — a background fire may have stamped
+                            // lastRunAt (and the list pane may have toggled
+                            // enabled) since this detail opened; writing the
+                            // stale snapshot would revert those, and a reverted
+                            // lastRunAt makes the loop immediately due again.
                             // Legacy loops predate sync (gid=""); stamp one on
                             // first edit so they start syncing.
-                            loop.copy(
-                                gid = loop.gid.ifBlank { newGid() },
+                            val fresh = loopDao.get(loop.id) ?: loop
+                            fresh.copy(
+                                gid = fresh.gid.ifBlank { newGid() },
                                 name = name, prompt = prompt, intervalMinutes = interval,
                                 writesAuthorized = writes,
                                 updatedAt = now,
@@ -332,7 +339,10 @@ fun LoopDetail(
                         val id = loopDao.upsert(row)
                         settingsSync?.pushLoop(row)
                         scheduler.reschedule()
-                        loop = row.copy(id = id)
+                        // @Upsert returns the rowId on INSERT but -1 on UPDATE —
+                        // adopt it only for a brand-new loop, or every action in
+                        // this pane (Run now, history, Delete) targets id -1.
+                        loop = if (row.id == 0L) row.copy(id = id) else row
                         editing = false
                     }
                 },
@@ -401,10 +411,14 @@ fun LoopDetail(
                         )
                         TextButton(onClick = {
                             scope.launch {
-                                val row = loop.copy(writesAuthorized = true)
-                                loopDao.upsert(row)
+                                // Partial update — a whole-row upsert of the
+                                // pane's snapshot would revert a lastRunAt
+                                // stamped by a concurrent fire, making the
+                                // loop immediately due for a duplicate,
+                                // now write-authorized, run.
+                                loopDao.setWritesAuthorized(loop.id, true)
                                 scheduler.reschedule()
-                                loop = row
+                                loop = loop.copy(writesAuthorized = true)
                             }
                         }) { Text("Authorize writes on this device") }
                     }

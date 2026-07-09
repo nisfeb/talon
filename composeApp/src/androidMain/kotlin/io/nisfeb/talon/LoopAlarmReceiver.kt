@@ -4,6 +4,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import io.nisfeb.talon.ai.Loops
+import io.nisfeb.talon.util.Log
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -29,7 +30,12 @@ class LoopAlarmReceiver : BroadcastReceiver() {
             val wakeLock = app.loops.acquireWakeLock("loop-fire")
             CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
                 try {
-                    app.loops.runDueNow()
+                    // Contain failures: an uncaught throw in a root coroutine
+                    // with no exception handler kills the whole app process
+                    // in the background (a transient Room/session failure
+                    // right after boot would crash us on every alarm).
+                    runCatching { app.loops.runDueNow() }
+                        .onFailure { Log.w("LoopAlarmReceiver", "loop fire failed", it) }
                 } finally {
                     runCatching { wakeLock.release() }
                     runCatching { pending.finish() }

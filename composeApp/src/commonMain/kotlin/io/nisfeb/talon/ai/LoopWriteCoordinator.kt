@@ -24,6 +24,12 @@ interface LoopWriteCoordinator {
     /** @return true if THIS device should run [loop]'s scheduled write fire. */
     suspend fun claim(loop: LoopEntity): Boolean = true
 
+    /** Whether the coordinator can reach the ship at all right now. False
+     *  (e.g. no %settings channel on a headless cold start) is a different
+     *  situation from losing a [claim] contest: NOBODY ran the fire, and
+     *  the caller should surface that instead of silently skipping. */
+    fun canCoordinate(): Boolean = true
+
     /** No coordination — run on every device. */
     companion object Noop : LoopWriteCoordinator
 }

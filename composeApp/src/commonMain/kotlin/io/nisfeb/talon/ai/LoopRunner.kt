@@ -72,6 +72,23 @@ class LoopRunner(
         val t = now()
         for (loop in loops.enabled()) {
             if (!LoopSchedule.isDue(t, loop.lastRunAt, loop.intervalMinutes)) continue
+            if (loop.writesAuthorized && !coordinator.canCoordinate()) {
+                // No ship connection to take the lease with — NOBODY ran this
+                // fire, unlike a lost contest below. Still advance the slot
+                // (retrying every wake would spin the alarm), but leave a
+                // visible failure instead of silence.
+                loops.markRan(loop.id, t)
+                runs.insert(
+                    LoopRunEntity(
+                        loopId = loop.id, ranAt = t, ok = false,
+                        output = "Skipped: couldn't reach your ship to coordinate " +
+                            "this write-authorized job. It will try again next interval.",
+                    ),
+                )
+                runs.pruneForLoop(loop.id, RUN_HISTORY_KEEP)
+                notify(loop.id, "Loop: ${loop.name}", "Skipped — couldn't reach your ship")
+                continue
+            }
             // Only one running device should perform a scheduled WRITE fire.
             // If we lose the lease, stamp lastRunAt locally so we treat this
             // slot as handled and don't re-contest every tick.

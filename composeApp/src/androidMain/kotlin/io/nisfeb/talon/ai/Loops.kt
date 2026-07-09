@@ -41,6 +41,8 @@ class Loops(
     private val getEmbedder: () -> SearchEmbedderClient?,
     private val aiSettings: AiSettingsRepository,
     private val scope: CoroutineScope,
+    // Lazy: the app builds Loops before it builds the UrbitSession.
+    private val getSession: () -> io.nisfeb.talon.urbit.UrbitSession,
 ) : LoopScheduler {
 
     private val alarmManager =
@@ -69,6 +71,23 @@ class Loops(
     suspend fun runDueNow() {
         try {
             if (sessionStore.activeShip() == null) return
+            // Headless cold start: the alarm can fire with no UI ever
+            // composed this process, so the repo session — and the %settings
+            // channel the write-lease (and any ship write) needs — was never
+            // started. start() is idempotent; when a write-authorized loop is
+            // due, wait briefly for the channel so the fire can actually
+            // coordinate + post instead of skipping every background wake.
+            runCatching { getRepo().start(getSession()) }
+            val t = System.currentTimeMillis()
+            val dueWrites = getDb().loops().enabled().any {
+                it.writesAuthorized && LoopSchedule.isDue(t, it.lastRunAt, it.intervalMinutes)
+            }
+            val sync = getRepo().settingsSync
+            if (dueWrites && sync != null && !sync.canCoordinate()) {
+                withTimeoutOrNull(CONNECT_WAIT_MS) {
+                    while (!sync.canCoordinate()) kotlinx.coroutines.delay(500)
+                }
+            }
             withTimeoutOrNull(RUN_BUDGET_MS) { runner().runDue() }
         } finally {
             runCatching { rearm() }
@@ -163,5 +182,9 @@ class Loops(
         // a safety ceiling, not a correctness knob.
         private val RUN_BUDGET_MS = TimeUnit.SECONDS.toMillis(120)
         private val WAKE_LOCK_MS = TimeUnit.SECONDS.toMillis(150)
+        // Bounded wait for the %settings channel on a cold headless fire
+        // with a write loop due — long enough for an SSE connect on mobile
+        // data, short enough to leave the run budget intact.
+        private val CONNECT_WAIT_MS = TimeUnit.SECONDS.toMillis(15)
     }
 }

@@ -258,6 +258,10 @@ class TalonApplication : Application() {
             getEmbedder = { searchEmbedderClient },
             aiSettings = aiSettings,
             scope = appScope,
+            // Lazy — session is built later in onCreate; the receiver path
+            // uses it to start the repo headless so write loops can reach
+            // the ship on a cold alarm fire.
+            getSession = { session },
         )
 
         // AI settings push hook. Originally meant to ride on a

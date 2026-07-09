@@ -8,7 +8,9 @@ import kotlinx.coroutines.flow.Flow
 @Dao
 interface LoopDao {
 
-    /** Insert or update by primary key; returns the row's id. */
+    /** Insert or update by primary key. Returns the new rowId on INSERT
+     *  but -1 on UPDATE — callers editing an existing row must keep the
+     *  id they already have, not adopt the return value. */
     @Upsert
     suspend fun upsert(loop: LoopEntity): Long
 
@@ -32,6 +34,12 @@ interface LoopDao {
 
     @Query("UPDATE loop SET lastRunAt = :ranAt WHERE id = :id")
     suspend fun markRan(id: Long, ranAt: Long)
+
+    /** Partial update for the per-device write grant — never a whole-row
+     *  upsert, which would clobber a lastRunAt stamped by a concurrent
+     *  fire (reverting it re-arms the loop for an immediate duplicate). */
+    @Query("UPDATE loop SET writesAuthorized = :authorized WHERE id = :id")
+    suspend fun setWritesAuthorized(id: Long, authorized: Boolean)
 
     @Query("DELETE FROM loop WHERE id = :id")
     suspend fun delete(id: Long)

@@ -680,6 +680,8 @@ class SettingsSyncImpl(
      * any ship error → I do NOT run: a write loop needs the ship anyway, so
      * a device that can't coordinate can't safely fire.
      */
+    override fun canCoordinate(): Boolean = channel != null
+
     override suspend fun claim(loop: io.nisfeb.talon.data.LoopEntity): Boolean {
         val ch = channel ?: return false
         if (loop.gid.isBlank()) return true // unsynced loop: single-device, nothing to race
@@ -804,6 +806,12 @@ class SettingsSyncImpl(
         } else features
 
         aiSettings.applyRemote(merged)
+        // applyRemote deliberately bypasses onStateChange (anti-pingpong),
+        // which is also the only rearm-on-key-change hook — so a key or
+        // feature toggle arriving via sync must re-arm the loop scheduler
+        // here, or a device whose alarm was disarmed for lack of a key
+        // stays disarmed until restart even though loops can now run.
+        rearmLoops()
     }
 
     override suspend fun addBookmark(whom: String, postId: String, ts: Long) {
@@ -1408,6 +1416,10 @@ class SettingsSyncImpl(
             BUCKET_LOOPS -> db.loops().getByGid(entry)?.let {
                 db.loops().delete(it.id)
                 db.loopRuns().deleteForLoop(it.id)
+                // Re-arm like upsertLoop/clearBucketLocally do — otherwise a
+                // stale alarm for the deleted loop stays armed (or, if it was
+                // the only loop, an alarm that should be cancelled survives).
+                rearmLoops()
             }
         }
     }
@@ -1468,7 +1480,13 @@ class SettingsSyncImpl(
                 writesAuthorized = existing?.writesAuthorized ?: false,
                 createdAt = obj["createdAt"].asLong() ?: 0L,
                 updatedAt = obj["updatedAt"].asLong() ?: 0L,
-                lastRunAt = existing?.lastRunAt ?: 0L,
+                // First arrival on this device: stamp lastRunAt=now so the
+                // first run is one interval out — matching the local create
+                // path. Inheriting 0 would make the loop due since 1970 and
+                // fire within a minute on EVERY peer device the definition
+                // syncs to (read-only loops don't take the write lease, so
+                // nothing would dedupe those surprise runs).
+                lastRunAt = existing?.lastRunAt ?: System.currentTimeMillis(),
             ),
         )
         rearmLoops()
