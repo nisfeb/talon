@@ -39,9 +39,12 @@ class DesktopAiSettings : AiSettingsRepository {
         val raw = runCatching { file.readText() }.getOrElse {
             // Transient I/O failure (permissions, FS hiccup). Don't touch
             // the file — it may be fine next launch and it holds the key.
-            // The unwritten deviceId churns until then; that's the lesser
-            // harm.
+            // But the in-memory state is now defaults, so the user's first
+            // settings write would clobber the healthy file: latch a .bak
+            // rename ahead of it. The unwritten deviceId churns until the
+            // next good launch; that's the lesser harm.
             Log.w(TAG, "ai_settings.json unreadable; starting with defaults", it)
+            backUpBeforeWrite = true
             return defaultConfig()
         }
         return runCatching { JSON.decodeFromString<AiSettings.Config>(raw) }
@@ -51,13 +54,7 @@ class DesktopAiSettings : AiSettingsRepository {
                 // clobbering, then persist fresh defaults — the write-loop
                 // lease keys on deviceId, so it must land on disk now.
                 Log.w(TAG, "ai_settings.json unparseable; kept as .bak, using defaults", it)
-                runCatching {
-                    Files.move(
-                        file.toPath(),
-                        File(file.parentFile, file.name + ".bak").toPath(),
-                        StandardCopyOption.REPLACE_EXISTING,
-                    )
-                }
+                runCatching { backUpExisting() }
                 defaultConfig().also(::writeAtomically)
             }
             // SmartFeatures folded four pre-0.14 toggles into one. The old
@@ -87,6 +84,20 @@ class DesktopAiSettings : AiSettingsRepository {
         return cfg.copy(smartFeaturesEnabled = migrated).also(::writeAtomically)
     }
 
+    /** Set when the config file existed but couldn't be READ: the state
+     *  fell back to defaults, so the first write derived from it would
+     *  overwrite a possibly-healthy file (and the key inside). */
+    @Volatile
+    private var backUpBeforeWrite = false
+
+    private fun backUpExisting() {
+        Files.move(
+            file.toPath(),
+            File(file.parentFile, file.name + ".bak").toPath(),
+            StandardCopyOption.REPLACE_EXISTING,
+        )
+    }
+
     /**
      * Atomic write — temp file + ATOMIC_MOVE. A crash (or an abrupt
      * process kill — more common on macOS app termination) mid-write
@@ -95,6 +106,10 @@ class DesktopAiSettings : AiSettingsRepository {
      * provider + API key.
      */
     private fun writeAtomically(cfg: AiSettings.Config) {
+        if (backUpBeforeWrite) {
+            backUpBeforeWrite = false
+            runCatching { backUpExisting() }
+        }
         val tmp = File(file.parentFile, file.name + ".tmp")
         tmp.writeText(JSON.encodeToString(cfg))
         Files.move(

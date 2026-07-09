@@ -132,10 +132,20 @@ internal fun inlineAnnotated(text: String, codeBg: Color): AnnotatedString = bui
             }
             text[i] == '[' -> {
                 // `[label](url)` — the shape the assistant cites sources in.
-                // The label ends at the FIRST ']', which must be immediately
+                // The label ends at the ']' that BALANCES this '[' (labels
+                // like `[[1]]` nest brackets), and it must be immediately
                 // followed by '(' — otherwise a bare `[1]` earlier in the
                 // line would swallow everything up to a later real link.
-                val close = text.indexOf(']', i + 1)
+                var depth = 1
+                var close = -1
+                var j = i + 1
+                while (j < text.length) {
+                    when (text[j]) {
+                        '[' -> depth++
+                        ']' -> { depth--; if (depth == 0) { close = j; break } }
+                    }
+                    j++
+                }
                 val isLink = close != -1 && text.startsWith("](", close)
                 val end = if (isLink) text.indexOf(')', close + 2) else -1
                 if (end == -1) {

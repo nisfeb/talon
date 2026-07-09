@@ -82,6 +82,18 @@ class MarkdownTextTest {
     }
 
     @Test
+    fun `a bracketed label still links`() {
+        // Regression of the regression fix: ending the label at the FIRST
+        // ']' broke the [[1]](url) citation shape LLMs emit constantly.
+        val a = inlineAnnotated("[[1]](https://x.dev) and [a [b] c](https://y.dev)", Color.Unspecified)
+        assertEquals("[1] and a [b] c", a.text)
+        assertEquals(
+            listOf("https://x.dev", "https://y.dev"),
+            a.getLinkAnnotations(0, a.length).mapNotNull { (it.item as? LinkAnnotation.Url)?.url },
+        )
+    }
+
+    @Test
     fun `spaced asterisks stay literal, hugging ones italicize`() {
         // Regression: any two bare stars used to pair, so "2 * 3 * 4"
         // rendered "2  3  4" with " 3 " italic.
