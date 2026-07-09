@@ -1207,6 +1207,12 @@ class SettingsSyncImpl(
                 entries?.forEach { (gid, v) ->
                     (unwrap(v) as? JsonObject)?.let { upsertAssistantTurn(gid, it) }
                 }
+                // The ship's bucket is an append-only superset of what we keep
+                // locally, so a bootstrap re-inserts every turn we'd trimmed.
+                // Re-apply the caps here or they're a no-op after the first
+                // sync and the tables grow to ship size forever.
+                db.assistantHistory().trim(io.nisfeb.talon.data.ASSISTANT_HISTORY_KEEP)
+                db.assistantConversations().trim(io.nisfeb.talon.data.ASSISTANT_CONV_KEEP)
             }
             BUCKET_LOOPS -> {
                 entries?.forEach { (gid, v) ->
@@ -1522,8 +1528,14 @@ class SettingsSyncImpl(
                 createdAt = createdAt, conversationId = localConvId, convGid = convGid,
             ),
         )
-        // Keep turnCount tracking the turns this device actually holds.
-        convDao.get(localConvId)?.let { convDao.update(it.copy(turnCount = it.turnCount + 1)) }
+        // Keep turnCount tracking the turns this device actually holds. Count
+        // the rows rather than incrementing: re-applying the ship's superset
+        // after a local trim would otherwise bump the counter every bootstrap,
+        // inflating it without bound (and freezing the grouping centroid,
+        // which weights new vectors by 1/turnCount).
+        convDao.get(localConvId)?.let {
+            convDao.update(it.copy(turnCount = turnDao.countForConversation(localConvId)))
+        }
     }
 
     internal suspend fun clearBucketLocally(bucket: String) {

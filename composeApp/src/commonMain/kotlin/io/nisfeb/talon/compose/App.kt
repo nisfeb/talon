@@ -491,20 +491,35 @@ fun App(
             createSearchEmbedderClient?.invoke(db)
         }
 
+        val aiState by aiSettings.state.collectAsState()
+
         // Desktop loop runner. No AlarmManager on desktop, so loops run
         // via a while-open ticker (below, inside the logged-in guard) plus
         // the "Run now" button. Built here so both the ticker and the
         // LoopsScreen branch share one instance. Full tool catalog —
         // LoopRunner keeps write tools only for loops that opted in.
-        val loopRunner = remember(db, repo, searchEmbedderClient) {
+        // Web access belongs to the assistant: with it off both web tools
+        // hard-refuse, so gate their PRESENCE (as AssistantScreen does)
+        // rather than hand a scheduled run a tool it can only fail with.
+        val loopWebOn = aiState.assistantOn()
+        val loopBraveOn = loopWebOn && aiState.braveApiKey.isNotBlank()
+        val loopRunner = remember(db, repo, searchEmbedderClient, loopWebOn, loopBraveOn) {
             val agentClient = io.nisfeb.talon.ai.AgentClient { aiSettings.state.value }
             io.nisfeb.talon.ai.LoopRunner(
                 loops = db.loops(),
                 runs = db.loopRuns(),
                 tools = io.nisfeb.talon.ai.ToolCatalog.default(
                     repo, db, searchEmbedderClient,
-                    braveSearch = io.nisfeb.talon.ai.BraveSearchClient { aiSettings.state.value },
-                    urlFetcher = io.nisfeb.talon.ai.UrlFetcher { aiSettings.state.value },
+                    braveSearch = if (loopBraveOn) {
+                        io.nisfeb.talon.ai.BraveSearchClient { aiSettings.state.value }
+                    } else {
+                        null
+                    },
+                    urlFetcher = if (loopWebOn) {
+                        io.nisfeb.talon.ai.UrlFetcher { aiSettings.state.value }
+                    } else {
+                        null
+                    },
                 ) { it },
                 completer = { sys, msgs, t -> agentClient.completeWithTools(sys, msgs, t) },
                 aiConfig = { aiSettings.state.value },
@@ -530,7 +545,6 @@ fun App(
         // state until the user happened to open Search. start() is a
         // no-op if already running, so flipping any toggle (or cold-
         // launching with one already on) just wakes the indexer once.
-        val aiState by aiSettings.state.collectAsState()
         LaunchedEffect(searchEmbedderClient, aiState.smartFeaturesEnabled) {
             val client = searchEmbedderClient ?: return@LaunchedEffect
             if (aiState.smartFeaturesEnabled) runCatching { client.start() }

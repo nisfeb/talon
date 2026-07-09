@@ -10,6 +10,7 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.runBlocking
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 
 /**
  * Pins the cross-device write-loop dedup contract:
@@ -86,6 +87,36 @@ class LoopWriteCoordinatorTest {
         assertEquals(1, b.runDao.inserted.size)
     }
 
+    @Test
+    fun `a write loop that cannot coordinate records a visible skip instead of running`() = runBlocking {
+        // The headless alarm path can fire with no %settings channel. That is
+        // NOT "another device holds the lease" — nobody ran the fire — so the
+        // slot is consumed but the user gets a failed run they can see.
+        val lease = FakeLease(t0)
+        val d = device("solo", lease, coordinator = NoChannelCoordinator())
+        d.runner.runDue()
+
+        assertEquals(1, d.runDao.inserted.size, "the skip is recorded as a run")
+        val run = d.runDao.inserted.single()
+        assertEquals(false, run.ok, "a can't-coordinate skip is a failure, not a success")
+        assertTrue(
+            run.output.contains("couldn't reach your ship", ignoreCase = true),
+            "the failure explains itself: ${run.output}",
+        )
+    }
+
+    @Test
+    fun `a read-only loop still runs when the coordinator cannot reach the ship`() = runBlocking {
+        // canCoordinate() gates only write loops — reads never take the lease.
+        val lease = FakeLease(t0)
+        val readOnly = writeLoop.copy(writesAuthorized = false)
+        val d = device("solo", lease, coordinator = NoChannelCoordinator(), loop = readOnly)
+        d.runner.runDue()
+
+        assertEquals(1, d.runDao.inserted.size)
+        assertEquals(true, d.runDao.inserted.single().ok, "read-only loop runs normally")
+    }
+
     // ── harness ──
 
     private class Device(val runner: LoopRunner, val runDao: LeaseFakeLoopRunDao)
@@ -109,6 +140,12 @@ class LoopWriteCoordinatorTest {
         )
         return Device(runner, runDao)
     }
+}
+
+/** A device with no %settings channel: it can't take the lease at all. */
+private class NoChannelCoordinator : LoopWriteCoordinator {
+    override fun canCoordinate(): Boolean = false
+    override suspend fun claim(loop: LoopEntity): Boolean = false
 }
 
 /** Shared ship-side lease store + clock for the simulated devices. */
@@ -143,6 +180,9 @@ private class LeaseFakeLoopDao(private var loop: LoopEntity) : LoopDao {
     override fun stream(): Flow<List<LoopEntity>> = flowOf(emptyList())
     override suspend fun getByGid(gid: String): LoopEntity? = loop.takeIf { it.gid == gid }
     override suspend fun setEnabled(id: Long, enabled: Boolean, now: Long) {}
+    override suspend fun setWritesAuthorized(id: Long, authorized: Boolean) {
+        loop = loop.copy(writesAuthorized = authorized)
+    }
     override suspend fun delete(id: Long) {}
     override suspend fun clearAll() {}
 }

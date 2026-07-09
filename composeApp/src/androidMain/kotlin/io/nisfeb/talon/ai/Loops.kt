@@ -132,10 +132,19 @@ class Loops(
         // Full catalog (reads + writes); LoopRunner keeps write tools only
         // for loops with writesAuthorized set. displayName is the raw patp —
         // headless we have no live ContactMap to resolve nicknames.
+        // Web access belongs to the assistant: with it off, both tools hard-
+        // refuse every call. Gate their PRESENCE (as AssistantScreen does) so
+        // a scheduled run never sees a tool it can only fail with.
+        val cfg = aiSettings.state.value
+        val webOn = cfg.assistantOn()
         val tools = ToolCatalog.default(
             getRepo(), db, getEmbedder(),
-            braveSearch = BraveSearchClient { aiSettings.state.value },
-            urlFetcher = UrlFetcher { aiSettings.state.value },
+            braveSearch = if (webOn && cfg.braveApiKey.isNotBlank()) {
+                BraveSearchClient { aiSettings.state.value }
+            } else {
+                null
+            },
+            urlFetcher = if (webOn) UrlFetcher { aiSettings.state.value } else null,
         ) { it }
         val agentClient = AgentClient { aiSettings.state.value }
         return LoopRunner(

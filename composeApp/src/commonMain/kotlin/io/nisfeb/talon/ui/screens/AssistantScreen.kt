@@ -66,6 +66,8 @@ import io.nisfeb.talon.ai.ConversationGrouper
 import io.nisfeb.talon.ai.LoopScheduler
 import io.nisfeb.talon.ai.UrlFetcher
 import io.nisfeb.talon.ai.McpClient
+import io.nisfeb.talon.ai.McpSessions
+import io.nisfeb.talon.ai.McpToolDef
 import io.nisfeb.talon.ai.mcpAgentTools
 import io.nisfeb.talon.ai.packEmbedding
 import io.nisfeb.talon.ai.SearchEmbedderClient
@@ -92,8 +94,11 @@ import io.nisfeb.talon.ui.suggestionsFor
 import io.nisfeb.talon.urbit.SettingsSync
 import io.nisfeb.talon.urbit.TlonChatRepo
 import io.nisfeb.talon.util.Log
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * Talon Assistant (docs/assistant.md). One opt-in agent: it answers
@@ -133,11 +138,13 @@ internal fun toExchanges(lines: List<Line>): List<List<Line>> {
 
 private data class Pending(val call: ToolCall, val tool: Tool, val gate: CompletableDeferred<Boolean>)
 
-/** How many turns to retain across all conversations. */
-private const val HISTORY_KEEP = 100
+/** How many turns to retain across all conversations. Defined with the DAO
+ *  so the sync path (which re-applies the cap after pulling the ship's
+ *  append-only superset) can't drift from this screen's value. */
+private const val HISTORY_KEEP = io.nisfeb.talon.data.ASSISTANT_HISTORY_KEEP
 
 /** How many topic conversations to retain. */
-private const val CONV_KEEP = 50
+private const val CONV_KEEP = io.nisfeb.talon.data.ASSISTANT_CONV_KEEP
 
 /** Max chars of the first question used as a conversation's title. */
 private const val CONV_TITLE_CHARS = 60
@@ -204,16 +211,29 @@ fun AssistantScreen(
             mcpStatus = null
             return@LaunchedEffect
         }
+        fun publish(c: McpClient, defs: List<McpToolDef>) {
+            val tools = mcpAgentTools(c, defs)
+            mcpTools = tools
+            val hidden = defs.size - tools.size
+            mcpStatus = "Ship tools: ${tools.size} available" +
+                if (hidden > 0) " · $hidden hidden" else ""
+        }
+        // Reuse the ship's already-handshaked client + tool list. This screen
+        // is discarded on close, so without the cache every reopen re-ran
+        // initialize + tools/list against the ship.
+        val cacheKey = repo?.shipBaseUrl?.toString()
+        val hit = cacheKey?.let { McpSessions.cached(it) }
+        if (hit != null) {
+            publish(hit.first, hit.second)
+            return@LaunchedEffect
+        }
         mcpStatus = "Connecting to ship tools…"
         runCatching {
             client.initialize()
             client.listTools()
         }.onSuccess { defs ->
-            val tools = mcpAgentTools(client, defs)
-            mcpTools = tools
-            val hidden = defs.size - tools.size
-            mcpStatus = "Ship tools: ${tools.size} available" +
-                if (hidden > 0) " · $hidden hidden" else ""
+            if (cacheKey != null) McpSessions.put(cacheKey, client, defs)
+            publish(client, defs)
         }.onFailure { e ->
             mcpTools = emptyList()
             mcpStatus = "Ship tools unavailable: ${e.message ?: e::class.simpleName}"
@@ -234,7 +254,12 @@ fun AssistantScreen(
     // its built-in default when the user hasn't customized it (set in
     // Settings). Keyed into the remember so editing a prompt part rebuilds
     // the loop with the new system message.
-    val systemPrompt = AgentPrompt.forAssistant(aiState)
+    // Built once per prompt change, not per recomposition — it's a multi-KB
+    // concat used as a remember key, so rebuilding it every frame also meant
+    // a full-length string compare every frame.
+    val systemPrompt = remember(aiState.urbitKnowledgePrompt, aiState.assistantPrompt) {
+        AgentPrompt.forAssistant(aiState)
+    }
     val agentLoop = remember(aiSettings, embedder, repo, contactMap, mcpTools, braveKeyPresent, systemPrompt) {
         // Needs a ship session for its tools; the embedder is optional
         // (search_history degrades to keyword-only, grouping to flat).
@@ -269,11 +294,23 @@ fun AssistantScreen(
     // the most recent one on open so a topic can continue over time.
     val historyDao = remember(db) { db.assistantHistory() }
     val convDao = remember(db) { db.assistantConversations() }
-    val conversations by convDao.recent(CONV_KEEP).collectAsState(initial = emptyList())
+    // remember the Flow: a Room DAO call returns a NEW Flow each invocation,
+    // and collectAsState keys on the instance — so an inline call re-queries
+    // and re-registers the invalidation observer on every recomposition.
+    val conversations by remember(convDao) { convDao.recent(CONV_KEEP) }
+        .collectAsState(initial = emptyList())
     var currentConvId by remember { mutableStateOf<Long?>(null) }
     var currentConvGid by remember { mutableStateOf<String?>(null) }
     var currentCentroid by remember { mutableStateOf<FloatArray?>(null) }
     var currentTurnCount by remember { mutableStateOf(0) }
+    // The user picked / resumed this conversation, so a follow-up continues it
+    // regardless of what the similarity heuristic thinks (and the heuristic
+    // can't judge at all without an embedder). Cleared by "New conversation".
+    var explicitConv by remember { mutableStateOf(false) }
+    // Bumped whenever the active conversation is re-pointed. A run that
+    // finishes after a switch must not write its turn into the newly
+    // selected conversation, nor clobber that conversation's live state.
+    var convGeneration by remember { mutableStateOf(0) }
 
     // Sidebar (master pane) state: which tab is showing, and — on narrow
     // screens where the panes stack — whether the sidebar or the transcript
@@ -292,6 +329,8 @@ fun AssistantScreen(
             currentConvGid = c.gid.ifBlank { null }
             currentCentroid = if (c.dim > 0) unpackEmbedding(c.centroid, c.dim) else null
             currentTurnCount = c.turnCount
+            // Resuming is an explicit continuation of that topic.
+            explicitConv = true
             // Replay the resumed conversation into the transcript so the
             // screen shows which topic you're continuing. Without this the
             // assistant opens blank even though a conversation is active,
@@ -314,6 +353,17 @@ fun AssistantScreen(
         busy = true; error = null
         transcript.add(Line.You(q))
         var finalAnswer = ""
+        // Snapshot the conversation this question belongs to. The run below
+        // suspends for seconds-to-minutes, during which the user can select
+        // another conversation (or hit New) — re-reading the live state after
+        // the run would file this turn into THAT conversation and merge this
+        // question's vector into its centroid.
+        val gen = convGeneration
+        val snapConvId = currentConvId
+        var snapConvGid = currentConvGid
+        var snapCentroid = currentCentroid
+        val snapTurnCount = currentTurnCount
+        val snapExplicit = explicitConv
         scope.launch {
             runCatching {
                 val qVec = embedder?.embed(q)
@@ -322,23 +372,27 @@ fun AssistantScreen(
                 // centroid (embeddings are device-local), so without this
                 // every follow-up to it would fork a new topic. Recompute
                 // once from its turns, persist, and reuse thereafter.
-                val activeConvId = currentConvId
-                if (qVec != null && activeConvId != null && currentCentroid == null && embedder != null) {
-                    val turns = historyDao.forConversation(activeConvId)
+                if (qVec != null && snapConvId != null && snapCentroid == null && embedder != null) {
+                    val turns = historyDao.forConversation(snapConvId)
                     val rebuilt = ConversationGrouper.centroidOf(turns.mapNotNull { embedder.embed(it.question) })
                     if (rebuilt != null) {
-                        currentCentroid = rebuilt
-                        convDao.get(activeConvId)?.let {
+                        snapCentroid = rebuilt
+                        if (convGeneration == gen) currentCentroid = rebuilt
+                        convDao.get(snapConvId)?.let {
                             convDao.update(it.copy(centroid = packEmbedding(rebuilt), dim = rebuilt.size))
                         }
                     }
                 }
-                // Continue the active topic if this question is on-topic,
-                // else start fresh — which also resets the model's context.
-                val continuing = currentConvId != null &&
-                    ConversationGrouper.continues(qVec, currentCentroid)
+                // Continue the active topic when the user explicitly opened it,
+                // when we can't judge (no embedder / no centroid — the
+                // heuristic returns false for both, which used to fork on every
+                // single question), or when the heuristic says it's on-topic.
+                // Otherwise start fresh, which also resets the model's context.
+                val canJudge = qVec != null && snapCentroid != null
+                val continuing = snapConvId != null &&
+                    (snapExplicit || !canJudge || ConversationGrouper.continues(qVec, snapCentroid))
                 val priorTurns = if (continuing) {
-                    historyDao.forConversation(currentConvId!!)
+                    historyDao.forConversation(snapConvId!!)
                         .takeLast(ConversationGrouper.CONTEXT_TURNS)
                         .flatMap {
                             listOf(
@@ -366,84 +420,99 @@ fun AssistantScreen(
                     },
                 )
 
-                val now = System.currentTimeMillis()
-                val vec = qVec ?: FloatArray(0)
-                val convEntity: AssistantConversationEntity = if (continuing) {
-                    val gid = currentConvGid ?: newGid().also { currentConvGid = it }
-                    val merged = currentCentroid
-                        ?.let { ConversationGrouper.updateCentroid(it, currentTurnCount, vec) }
-                        ?: vec
-                    currentCentroid = merged.takeIf { it.isNotEmpty() }
-                    currentTurnCount += 1
-                    val base = currentConvId?.let { convDao.get(it) }
-                    if (base != null) {
-                        val updated = base.copy(
-                            gid = gid,
-                            updatedAt = now,
-                            turnCount = currentTurnCount,
-                            centroid = packEmbedding(merged),
-                            dim = merged.size,
-                        )
-                        convDao.update(updated)
-                        updated
+                // Persist uncancellably: by here any confirmed write has
+                // already executed on the ship, so letting a navigation-away
+                // cancel us would lose the record of what the assistant did
+                // (the ship-side effect persists regardless).
+                withContext(NonCancellable) {
+                    val now = System.currentTimeMillis()
+                    val vec = qVec ?: FloatArray(0)
+                    val convEntity: AssistantConversationEntity = if (continuing) {
+                        val gid = snapConvGid ?: newGid().also { snapConvGid = it }
+                        val merged = snapCentroid
+                            ?.let { ConversationGrouper.updateCentroid(it, snapTurnCount, vec) }
+                            ?: vec
+                        val base = snapConvId?.let { convDao.get(it) }
+                        if (base != null) {
+                            val updated = base.copy(
+                                gid = gid,
+                                updatedAt = now,
+                                turnCount = snapTurnCount + 1,
+                                centroid = packEmbedding(merged),
+                                dim = merged.size,
+                            )
+                            convDao.update(updated)
+                            updated
+                        } else {
+                            // The conversation row was trimmed away under us;
+                            // recreate it (same gid) so the turn isn't orphaned.
+                            val row = AssistantConversationEntity(
+                                gid = gid, title = q.take(CONV_TITLE_CHARS).trim(),
+                                createdAt = now, updatedAt = now,
+                                centroid = packEmbedding(merged), dim = merged.size,
+                                turnCount = snapTurnCount + 1,
+                            )
+                            row.copy(id = convDao.insert(row))
+                        }
                     } else {
-                        // The conversation row was trimmed away under us;
-                        // recreate it (same gid) so the turn isn't orphaned.
                         val row = AssistantConversationEntity(
-                            gid = gid, title = q.take(CONV_TITLE_CHARS).trim(),
-                            createdAt = now, updatedAt = now,
-                            centroid = packEmbedding(merged), dim = merged.size,
-                            turnCount = currentTurnCount,
+                            gid = newGid(),
+                            title = q.take(CONV_TITLE_CHARS).trim(),
+                            createdAt = now,
+                            updatedAt = now,
+                            centroid = packEmbedding(vec),
+                            dim = vec.size,
+                            turnCount = 1,
                         )
-                        val newId = convDao.insert(row)
-                        currentConvId = newId
-                        row.copy(id = newId)
+                        row.copy(id = convDao.insert(row))
                     }
-                } else {
-                    val gid = newGid()
-                    val row = AssistantConversationEntity(
-                        gid = gid,
-                        title = q.take(CONV_TITLE_CHARS).trim(),
+                    convDao.trim(CONV_KEEP)
+
+                    // Only adopt this run's conversation as the active one if
+                    // the user hasn't moved on to another since we started.
+                    if (convGeneration == gen) {
+                        currentConvId = convEntity.id
+                        currentConvGid = convEntity.gid
+                        currentCentroid = if (convEntity.dim > 0) {
+                            unpackEmbedding(convEntity.centroid, convEntity.dim)
+                        } else {
+                            null
+                        }
+                        currentTurnCount = convEntity.turnCount
+                        explicitConv = true
+                    }
+
+                    val turnEntity = AssistantHistoryEntity(
+                        gid = newGid(),
+                        mode = "Assistant",
+                        question = q,
+                        answer = finalAnswer.ifBlank { "(no reply)" },
                         createdAt = now,
-                        updatedAt = now,
-                        centroid = packEmbedding(vec),
-                        dim = vec.size,
-                        turnCount = 1,
+                        conversationId = convEntity.id,
+                        convGid = convEntity.gid,
                     )
-                    val id = convDao.insert(row)
-                    currentConvId = id
-                    currentConvGid = gid
-                    currentCentroid = vec.takeIf { it.isNotEmpty() }
-                    currentTurnCount = 1
-                    row.copy(id = id)
+                    historyDao.insert(turnEntity)
+                    historyDao.trim(HISTORY_KEEP)
+
+                    // Replicate to the user's other devices. No-op without a
+                    // synced ship session; embeddings stay local (not pushed).
+                    runCatching { repo?.settingsSync?.pushAssistantTurn(convEntity, turnEntity) }
                 }
-                convDao.trim(CONV_KEEP)
-
-                val turnEntity = AssistantHistoryEntity(
-                    gid = newGid(),
-                    mode = "Assistant",
-                    question = q,
-                    answer = finalAnswer.ifBlank { "(no reply)" },
-                    createdAt = now,
-                    conversationId = convEntity.id,
-                    convGid = convEntity.gid,
-                )
-                historyDao.insert(turnEntity)
-                historyDao.trim(HISTORY_KEEP)
-
-                // Replicate to the user's other devices. No-op without a
-                // synced ship session; embeddings stay local (not pushed).
-                runCatching { repo?.settingsSync?.pushAssistantTurn(convEntity, turnEntity) }
-            }.onFailure { error = it.message ?: it::class.simpleName }
+            }.onFailure {
+                if (it is CancellationException) throw it
+                error = it.message ?: it::class.simpleName
+            }
             busy = false
         }
     }
 
     fun newConversation() {
+        convGeneration += 1
         currentConvId = null
         currentConvGid = null
         currentCentroid = null
         currentTurnCount = 0
+        explicitConv = false
         transcript.clear()
         error = null
         mobileShowSidebar = false
@@ -453,10 +522,13 @@ fun AssistantScreen(
     // old inline-expand. Restores the topic context (id/gid/centroid/turns)
     // so a follow-up continues it instead of forking, and replays its turns.
     fun selectConversation(c: AssistantConversationEntity) {
+        convGeneration += 1
         currentConvId = c.id
         currentConvGid = c.gid.ifBlank { null }
         currentCentroid = if (c.dim > 0) unpackEmbedding(c.centroid, c.dim) else null
         currentTurnCount = c.turnCount
+        // Picking a conversation means "continue this one".
+        explicitConv = true
         error = null
         transcript.clear()
         scope.launch {

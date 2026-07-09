@@ -18,16 +18,16 @@ object LoopPrompt {
         complete. Use only what the tools return; do not invent. If nothing
         relevant turns up, say so briefly.
 
-        - Default to reading (search_history, read_conversation, scry-agent).
-          If write tools are present at all, this loop has been authorized to
-          act on the ship unattended, with no confirmation — so take a write
-          or poke action only when the task explicitly calls for it, and
-          never a destructive one.
+        - Default to reading (search_history, read_conversation). If write
+          tools are present at all, this loop has been authorized to act on
+          the ship unattended, with no confirmation — so take a write action
+          only when the task explicitly calls for it, and never a destructive
+          one.
+        - A scheduled run has ONLY the tools listed for you. The ship's MCP
+          tools described above (scry-agent, poke-our-agent, dojo-command,
+          the file and desk tools) belong to the interactive assistant, NOT
+          to a scheduled run — never try to call them here.
     """.trimIndent()
-
-    /** The default loop prompt, fully composed (shared knowledge + loop
-     *  specifics). [forLoop] respects the user's per-part overrides. */
-    val system: String get() = composePrompt(AgentPrompt.urbitKnowledge, loop)
 
     /** Effective loop prompt: shared knowledge + loop specifics, each falling
      *  back to its built-in default when blank. */

@@ -1,5 +1,7 @@
 package io.nisfeb.talon.ai
 
+import kotlinx.coroutines.CancellationException
+
 /**
  * Drives the agentic conversation (Phase 2, docs/assistant.md):
  *
@@ -98,7 +100,13 @@ class AgentLoop(
             return ToolResult(call.id, call.name, "The user declined this action.")
         }
         val content = runCatching { tool.execute(call.args) }
-            .getOrElse { "Error: ${it.message ?: it::class.simpleName}" }
+            .getOrElse {
+                // Don't turn a cancellation into a fake tool error — that
+                // masks it as a result the model reasons about and keeps the
+                // loop stepping. Unwind instead (LoopRunner does the same).
+                if (it is CancellationException) throw it
+                "Error: ${it.message ?: it::class.simpleName}"
+            }
         onEvent(Event.ToolFinished(call, content))
         return ToolResult(call.id, call.name, content)
     }

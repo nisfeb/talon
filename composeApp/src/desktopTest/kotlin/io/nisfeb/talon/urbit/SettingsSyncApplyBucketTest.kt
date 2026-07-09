@@ -1109,13 +1109,26 @@ class SettingsSyncApplyBucketTest {
         // Security: an unattended-write grant must be made on THIS device.
         // A loop synced in (with writes=true on the wire) lands read-only
         // until the local user opts in.
+        val before = System.currentTimeMillis()
         sync.applyBucket(
             SettingsSyncImpl.BUCKET_LOOPS,
             buildJsonObject { put("g2", loopVal("fresh", "do it", 30, enabled = true, writes = true)) },
         )
         val row = db.loops().getByGid("g2")!!
         assertEquals("fresh", row.name)
-        assertEquals(0L, row.lastRunAt)
+        // A first-arrival loop starts its interval NOW, not at the epoch —
+        // lastRunAt=0 would make it due since 1970 and fire immediately on
+        // every peer the definition syncs to.
+        assertTrue(
+            row.lastRunAt >= before,
+            "a freshly-synced loop must not be immediately due (lastRunAt=${row.lastRunAt})",
+        )
+        assertTrue(
+            !io.nisfeb.talon.ai.LoopSchedule.isDue(
+                System.currentTimeMillis(), row.lastRunAt, row.intervalMinutes,
+            ),
+            "a freshly-synced loop must not fire on the next tick",
+        )
         assertEquals(false, row.writesAuthorized, "remote write-grant must not cross over to a new device")
         assertTrue(row.id != 0L, "insert assigns an autogen id")
     }

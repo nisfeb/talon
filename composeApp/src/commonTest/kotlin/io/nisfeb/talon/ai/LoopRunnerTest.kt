@@ -128,6 +128,7 @@ private class FakeLoopDao : LoopDao {
     override suspend fun getByGid(gid: String): LoopEntity? = null
     override suspend fun setEnabled(id: Long, enabled: Boolean, now: Long) {}
     override suspend fun markRan(id: Long, ranAt: Long) { lastMarkRan = id to ranAt }
+    override suspend fun setWritesAuthorized(id: Long, authorized: Boolean) {}
     override suspend fun delete(id: Long) {}
     override suspend fun clearAll() {}
 }

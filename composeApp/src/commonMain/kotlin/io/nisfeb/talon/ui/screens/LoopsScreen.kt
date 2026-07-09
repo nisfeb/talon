@@ -159,7 +159,9 @@ fun LoopsList(
     // null = the first DB emission is still in flight. Rendering the empty
     // state during that frame flashes "no loops / add a loop" when switching
     // to the Jobs tab before the list loads — so wait for the real value.
-    val loops by loopDao.stream().collectAsState(initial = null)
+    // remember the Flow — a DAO call returns a new instance each time, and
+    // collectAsState keys on it, so an inline call re-queries per recomposition.
+    val loops by remember(loopDao) { loopDao.stream() }.collectAsState(initial = null)
     val list = loops ?: return
 
     if (list.isEmpty()) {

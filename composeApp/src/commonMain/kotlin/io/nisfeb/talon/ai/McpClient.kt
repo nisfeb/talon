@@ -47,6 +47,26 @@ data class McpToolDef(
     val inputSchema: JsonObject,
 )
 
+/**
+ * Ship-lifetime cache of the MCP handshake. The assistant screen is
+ * unmounted whenever it's closed, which used to discard its remembered
+ * client and re-run initialize + tools/list (two ship round-trips, plus a
+ * "Connecting to ship tools…" flash) on every reopen. Keyed by ship base
+ * URL so a ship switch gets its own entry.
+ *
+ * ponytail: a ship that starts exposing new MCP tools mid-session won't
+ * see them until relaunch. Add an explicit refresh if that ever bites.
+ */
+object McpSessions {
+    private val cache = mutableMapOf<String, Pair<McpClient, List<McpToolDef>>>()
+
+    fun cached(baseUrl: String): Pair<McpClient, List<McpToolDef>>? = cache[baseUrl]
+
+    fun put(baseUrl: String, client: McpClient, defs: List<McpToolDef>) {
+        cache[baseUrl] = client to defs
+    }
+}
+
 class McpClient(
     parentHttp: OkHttpClient,
     baseUrl: HttpUrl,
