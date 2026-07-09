@@ -25,6 +25,11 @@ class McpToolsTest {
         // Defence-in-depth: renamed/namespaced eval or install stays hidden.
         assertEquals(McpVisibility.Hidden, mcpToolVisibility("custom/eval-hoon"))
         assertEquals(McpVisibility.Hidden, mcpToolVisibility("install-desk"))
+        assertEquals(McpVisibility.Hidden, mcpToolVisibility("run-eval-now"))
+        assertEquals(McpVisibility.Hidden, mcpToolVisibility("evaluate-code"))
+        // ...but the word, not the substring: these are ordinary tools.
+        assertEquals(McpVisibility.Write, mcpToolVisibility("retrieval-search"))
+        assertEquals(McpVisibility.Write, mcpToolVisibility("uninstall-nothing"))
     }
 
     @Test

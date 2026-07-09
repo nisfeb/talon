@@ -13,10 +13,14 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextLinkStyles
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.withLink
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 
@@ -24,9 +28,10 @@ import androidx.compose.ui.unit.dp
  * Tiny Markdown renderer for assistant output — just enough to make
  * answers readable: fenced code blocks (styled like chat's
  * [StoryRenderer] code, monospace on a surface), inline `code`, **bold**,
- * `#` headers, and `- ` bullet lists. Deliberately not a full CommonMark
- * implementation (no nested lists, tables, links) — the assistant rarely
- * needs more, and a real parser would be a dependency we don't want.
+ * *italic*, `[label](url)` links, `#` headers, and `- ` bullet lists.
+ * Deliberately not a full CommonMark implementation (no nested lists, no
+ * tables, no reference links) — the assistant rarely needs more, and a
+ * real parser would be a dependency we don't want.
  */
 internal sealed interface MdBlock {
     data class Code(val text: String) : MdBlock
@@ -83,8 +88,8 @@ internal fun parseMarkdownBlocks(src: String): List<MdBlock> {
     return out
 }
 
-/** Inline `code` + **bold** within one block. */
-private fun inlineAnnotated(text: String, codeBg: Color): AnnotatedString = buildAnnotatedString {
+/** Inline `code`, **bold**, *italic* and `[label](url)` within one block. */
+internal fun inlineAnnotated(text: String, codeBg: Color): AnnotatedString = buildAnnotatedString {
     var i = 0
     while (i < text.length) {
         when {
@@ -97,6 +102,19 @@ private fun inlineAnnotated(text: String, codeBg: Color): AnnotatedString = buil
                     i = end + 2
                 }
             }
+            text[i] == '*' -> {
+                // Single `*`: italic. The `**` case is matched above, so a
+                // lone star here is either an emphasis open or literal text.
+                val end = text.indexOf('*', i + 1)
+                if (end == -1 || end == i + 1) {
+                    append(text[i]); i++
+                } else {
+                    withStyle(SpanStyle(fontStyle = FontStyle.Italic)) {
+                        append(text.substring(i + 1, end))
+                    }
+                    i = end + 1
+                }
+            }
             text[i] == '`' -> {
                 val end = text.indexOf('`', i + 1)
                 if (end == -1) {
@@ -105,6 +123,22 @@ private fun inlineAnnotated(text: String, codeBg: Color): AnnotatedString = buil
                     withStyle(SpanStyle(fontFamily = FontFamily.Monospace, background = codeBg)) {
                         append(text.substring(i + 1, end))
                     }
+                    i = end + 1
+                }
+            }
+            text[i] == '[' -> {
+                // `[label](url)` — the shape the assistant cites sources in.
+                val close = text.indexOf("](", i + 1)
+                val end = if (close == -1) -1 else text.indexOf(')', close + 2)
+                if (end == -1) {
+                    append(text[i]); i++
+                } else {
+                    withLink(
+                        LinkAnnotation.Url(
+                            url = text.substring(close + 2, end),
+                            styles = TextLinkStyles(style = LINK_SPAN),
+                        ),
+                    ) { append(text.substring(i + 1, close)) }
                     i = end + 1
                 }
             }

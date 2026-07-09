@@ -1,5 +1,6 @@
 package io.nisfeb.talon.urbit
 
+import io.nisfeb.talon.util.decodeHtmlEntities
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -131,19 +132,6 @@ object LinkPreviewCache {
     private fun resolveUrl(base: String, ref: String): String = runCatching {
         java.net.URI(base).resolve(ref).toString()
     }.getOrElse { ref }
-
-    /**
-     * Decode the handful of HTML entities OG text uses heavily. Not a
-     * full HTML entity table — just what shows up in real-world titles.
-     */
-    private fun decodeHtmlEntities(s: String): String = s
-        .replace("&amp;", "&")
-        .replace("&lt;", "<")
-        .replace("&gt;", ">")
-        .replace("&quot;", "\"")
-        .replace("&#39;", "'")
-        .replace("&apos;", "'")
-        .replace("&nbsp;", " ")
 
     private const val CHUNK_SIZE = 8192
 

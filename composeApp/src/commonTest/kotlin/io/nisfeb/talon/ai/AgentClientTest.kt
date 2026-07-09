@@ -124,6 +124,17 @@ class AgentClientTest {
     }
 
     @Test
+    fun `parse openai content-parts array joins the text parts`() {
+        // OpenRouter and some OpenAI-compatible providers answer with an
+        // array of typed parts. `.jsonPrimitive` threw on it.
+        val body = json.parseToJsonElement(
+            """{"choices":[{"message":{"role":"assistant","content":[
+               {"type":"text","text":"hel"},{"type":"text","text":"lo"}]}}]}""",
+        ).jsonObject
+        assertEquals(AgentTurn.Final("hello"), parseOpenAiTurn(body))
+    }
+
+    @Test
     fun `extractApiError surfaces OpenRouter's wrapped upstream reason`() {
         // OpenRouter reports the upstream provider failure as a generic
         // "Provider returned error" with the real cause in error.metadata

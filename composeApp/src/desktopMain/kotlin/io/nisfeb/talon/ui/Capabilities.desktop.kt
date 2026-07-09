@@ -9,6 +9,8 @@ actual val isQrLoginScanSupported: Boolean = false
 // ceiling — loops only advance while the app is open, which the
 // screen's copy states (CLAUDE.md §3: gate, don't fake).
 actual val isLoopsSupported: Boolean = true
+// No AlarmManager analog: nothing fires with the window closed.
+actual val isBackgroundSchedulingSupported: Boolean = false
 // Off on desktop: horizontal-drag detectors swallow child clicks when
 // the mouse drifts a few px mid-click, and edge-swipe to open the
 // ship drawer is meaningless with a mouse (the logo opens it).

@@ -46,6 +46,15 @@ expect val isAssistantSupported: Boolean
 expect val isLoopsSupported: Boolean
 
 /**
+ * Whether scheduled work fires with the app closed. Android: true —
+ * AlarmManager + BootReceiver. Desktop: false — the ticker only runs
+ * while the window is open. Nothing is gated on this; it selects the
+ * honest wording on the Loops screen so a desktop user isn't promised a
+ * schedule the platform can't keep (CLAUDE.md §3).
+ */
+expect val isBackgroundSchedulingSupported: Boolean
+
+/**
  * Whether the platform can launch an in-app QR scanner for login
  * handoff (see [io.nisfeb.talon.login.TalonLoginUri]). Android: true
  * via ML Kit's GoogleCodeScanner (Play Services). Desktop: false —

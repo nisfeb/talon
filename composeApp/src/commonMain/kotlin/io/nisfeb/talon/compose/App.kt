@@ -542,6 +542,10 @@ fun App(
             )
         }
         val loopScope = rememberCoroutineScope()
+        // "Run now", from both the Loops screen and the assistant's jobs pane.
+        val runLoopNow: (Long) -> Unit = { loopId ->
+            loopScope.launch { db.loops().get(loopId)?.let { loopRunner.runLoop(it) } }
+        }
 
         // Kick off the embedder index as soon as ANY feature that
         // depends on it is enabled — smart search, topic clusters, or
@@ -1089,11 +1093,7 @@ fun App(
                     showLoops -> io.nisfeb.talon.ui.screens.LoopsScreen(
                         db = db,
                         scheduler = io.nisfeb.talon.ai.LoopScheduler.Noop,
-                        onRunNow = { loopId ->
-                            loopScope.launch {
-                                db.loops().get(loopId)?.let { loopRunner.runLoop(it) }
-                            }
-                        },
+                        onRunNow = runLoopNow,
                         onBack = { showLoops = false },
                         settingsSync = settingsSync,
                     )
@@ -1777,11 +1777,7 @@ fun App(
                                         embedder = searchEmbedderClient,
                                         repo = repo,
                                         scheduler = io.nisfeb.talon.ai.LoopScheduler.Noop,
-                                        onRunLoop = { loopId ->
-                                            loopScope.launch {
-                                                db.loops().get(loopId)?.let { loopRunner.runLoop(it) }
-                                            }
-                                        },
+                                        onRunLoop = runLoopNow,
                                         onBack = if (expanded) null else ({ showAssistant = false }),
                                         // Rail is showing → force the two-pane
                                         // layout so the 64dp rail can't trip the

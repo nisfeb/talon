@@ -1,22 +1,13 @@
 package io.nisfeb.talon.data
 
-import kotlin.random.Random
-
-private const val HEX = "0123456789abcdef"
+import java.util.UUID
 
 /**
  * A globally-unique id for a synced assistant conversation/turn. Local
  * autoincrement PKs collide across devices (device A and B both mint
- * id=1), so sync keys on this instead — 128 random bits, hex-encoded.
- * Matches the `lower(hex(randomblob(16)))` form the Room migration uses
- * to backfill rows that predate sync, so the two are interchangeable.
+ * id=1), so sync keys on this instead — a random UUID, hex-encoded with
+ * the dashes stripped. Matches the `lower(hex(randomblob(16)))` form the
+ * Room migration uses to backfill rows that predate sync, so the two are
+ * interchangeable (32 lowercase hex chars; v4 pins 6 of the 128 bits).
  */
-fun newGid(): String {
-    val bytes = Random.nextBytes(16)
-    val sb = StringBuilder(32)
-    for (b in bytes) {
-        val i = b.toInt() and 0xff
-        sb.append(HEX[i ushr 4]).append(HEX[i and 0x0f])
-    }
-    return sb.toString()
-}
+fun newGid(): String = UUID.randomUUID().toString().replace("-", "")

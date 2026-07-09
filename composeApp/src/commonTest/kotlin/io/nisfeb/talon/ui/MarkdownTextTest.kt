@@ -1,5 +1,7 @@
 package io.nisfeb.talon.ui
 
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.LinkAnnotation
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -53,5 +55,17 @@ class MarkdownTextTest {
         assertEquals(1, blocks.size)
         assertTrue(blocks.single() is MdBlock.Code)
         assertEquals("no close", (blocks.single() as MdBlock.Code).text)
+    }
+
+    @Test
+    fun `inline links and italics lose their markers, bare brackets survive`() {
+        val a = inlineAnnotated("see [docs](https://x.dev) and *this*", Color.Unspecified)
+        assertEquals("see docs and this", a.text)
+        assertEquals(
+            listOf("https://x.dev"),
+            a.getLinkAnnotations(0, a.length).mapNotNull { (it.item as? LinkAnnotation.Url)?.url },
+        )
+        // Not a link: no `](`. The text must come through untouched.
+        assertEquals("[wat] a * b", inlineAnnotated("[wat] a * b", Color.Unspecified).text)
     }
 }

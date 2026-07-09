@@ -309,13 +309,8 @@ class DailyDigest(
      * Acquire a partial wake lock for [tag] with a 60s timeout. The
      * receiver hands this back to the alarm subsystem in finally.
      */
-    fun acquireWakeLock(tag: String): PowerManager.WakeLock {
-        val pm = context.getSystemService(Context.POWER_SERVICE) as PowerManager
-        return pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "talon:$tag").apply {
-            setReferenceCounted(false)
-            acquire(TimeUnit.SECONDS.toMillis(60))
-        }
-    }
+    fun acquireWakeLock(tag: String): PowerManager.WakeLock =
+        context.acquireTalonWakeLock(tag, TimeUnit.SECONDS.toMillis(60))
 
     companion object {
         const val ACTION_DAILY_DIGEST_FIRE = "io.nisfeb.talon.action.DAILY_DIGEST_FIRE"

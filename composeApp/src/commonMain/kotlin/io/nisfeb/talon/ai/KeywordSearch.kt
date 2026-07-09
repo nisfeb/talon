@@ -3,6 +3,9 @@ package io.nisfeb.talon.ai
 import io.nisfeb.talon.data.AppDatabase
 import io.nisfeb.talon.data.MessageEntity
 import io.nisfeb.talon.data.escapeLikeNeedle
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.first
 
 /**
@@ -24,10 +27,14 @@ internal suspend fun keywordSearch(
     cap: Int = 40,
 ): List<MessageEntity> {
     if (terms.isEmpty()) return emptyList()
+    // One LIKE scan per term, and they don't depend on each other.
+    val perTerm = coroutineScope {
+        terms.map { term -> async { db.messages().search(escapeLikeNeedle(term)).first() } }
+            .awaitAll()
+    }
     val msgByKey = HashMap<String, MessageEntity>()
     val hitsByKey = HashMap<String, Int>()
-    for (term in terms) {
-        val rows = db.messages().search(escapeLikeNeedle(term)).first()
+    for (rows in perTerm) {
         for (m in rows) {
             val key = "${m.whom}:${m.id}"
             msgByKey[key] = m
@@ -48,9 +55,12 @@ internal suspend fun keywordSearch(
  * agent's `search_history` tool), so a specifically-worded message the
  * embedding model ranks low isn't missed. See [AskUrbit.mergeHits].
  */
-suspend fun SearchEmbedderClient.hybridSearch(query: String, k: Int): List<MessageEntity> {
-    val semantic = semanticSearch(query)
-    val terms = AskUrbit.salientTerms(query)
-    val lexical = if (terms.isEmpty()) emptyList() else keywordSearch(terms)
-    return AskUrbit.mergeHits(lexical = lexical, semantic = semantic, k = k)
-}
+suspend fun SearchEmbedderClient.hybridSearch(query: String, k: Int): List<MessageEntity> =
+    coroutineScope {
+        // Embed-then-vector-scan and the LIKE pass share no state; the merge
+        // needs both, so run them side by side instead of back to back.
+        val semantic = async { semanticSearch(query) }
+        val terms = AskUrbit.salientTerms(query)
+        val lexical = async { if (terms.isEmpty()) emptyList() else keywordSearch(terms) }
+        AskUrbit.mergeHits(lexical = lexical.await(), semantic = semantic.await(), k = k)
+    }

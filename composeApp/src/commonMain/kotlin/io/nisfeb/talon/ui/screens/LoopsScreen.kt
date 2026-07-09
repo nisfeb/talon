@@ -58,6 +58,7 @@ import io.nisfeb.talon.data.AppDatabase
 import io.nisfeb.talon.data.LoopEntity
 import io.nisfeb.talon.data.newGid
 import io.nisfeb.talon.ui.MarkdownText
+import io.nisfeb.talon.ui.isBackgroundSchedulingSupported
 import io.nisfeb.talon.ui.shortRelativeTime
 import io.nisfeb.talon.urbit.SettingsSync
 import kotlinx.coroutines.delay
@@ -179,7 +180,11 @@ fun LoopsList(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    "Runs on your LLM key, on this device.",
+                    if (isBackgroundSchedulingSupported) {
+                        "Runs on your LLM key, on this device."
+                    } else {
+                        "Runs on your LLM key, on this device — only while Talon is open."
+                    },
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.weight(1f),

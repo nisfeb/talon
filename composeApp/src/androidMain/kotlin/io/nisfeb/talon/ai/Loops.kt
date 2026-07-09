@@ -30,8 +30,9 @@ import java.util.concurrent.TimeUnit
  * permission.
  *
  * Android-only: no desktop analog — depends on AlarmManager / BootReceiver
- * (CLAUDE.md §6). Desktop's equivalent is a while-open ticker, gated off
- * via isLoopsSupported until it lands.
+ * (CLAUDE.md §6). Desktop runs the same [LoopRunner] on a while-open ticker
+ * in App.kt (with LoopScheduler.Noop), so jobs there only fire while Talon
+ * is running. Nothing to port unless desktop grows a background daemon.
  */
 class Loops(
     private val context: Context,
@@ -127,6 +128,14 @@ class Loops(
         alarmManager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, fireMs, pi)
     }
 
+    // Each of these owns an OkHttpClient (thread + connection pool). They read
+    // settings through a lambda, so one instance for the process lifetime
+    // never goes stale on a key change — and every wake-up reuses the pool
+    // instead of leaving a fresh one behind.
+    private val agentClient by lazy { AgentClient { aiSettings.state.value } }
+    private val braveClient by lazy { BraveSearchClient { aiSettings.state.value } }
+    private val urlFetcher by lazy { UrlFetcher { aiSettings.state.value } }
+
     private fun runner(): LoopRunner {
         val db = getDb()
         // Full catalog (reads + writes); LoopRunner keeps write tools only
@@ -139,14 +148,9 @@ class Loops(
         val webOn = cfg.assistantOn()
         val tools = ToolCatalog.default(
             getRepo(), db, getEmbedder(),
-            braveSearch = if (webOn && cfg.braveApiKey.isNotBlank()) {
-                BraveSearchClient { aiSettings.state.value }
-            } else {
-                null
-            },
-            urlFetcher = if (webOn) UrlFetcher { aiSettings.state.value } else null,
+            braveSearch = braveClient.takeIf { webOn && cfg.braveApiKey.isNotBlank() },
+            urlFetcher = urlFetcher.takeIf { webOn },
         ) { it }
-        val agentClient = AgentClient { aiSettings.state.value }
         return LoopRunner(
             loops = db.loops(),
             runs = db.loopRuns(),
@@ -174,13 +178,8 @@ class Loops(
         )
     }
 
-    fun acquireWakeLock(tag: String): PowerManager.WakeLock {
-        val pm = context.getSystemService(Context.POWER_SERVICE) as PowerManager
-        return pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "talon:$tag").apply {
-            setReferenceCounted(false)
-            acquire(WAKE_LOCK_MS)
-        }
-    }
+    fun acquireWakeLock(tag: String): PowerManager.WakeLock =
+        context.acquireTalonWakeLock(tag, WAKE_LOCK_MS)
 
     companion object {
         const val ACTION_LOOP_FIRE = "io.nisfeb.talon.action.LOOP_FIRE"

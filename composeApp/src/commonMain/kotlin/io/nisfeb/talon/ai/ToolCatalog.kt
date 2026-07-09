@@ -4,12 +4,11 @@ import io.nisfeb.talon.data.AppDatabase
 import io.nisfeb.talon.data.MessageEntity
 import io.nisfeb.talon.urbit.StoryCache
 import io.nisfeb.talon.urbit.TlonChatRepo
+import io.nisfeb.talon.urbit.asInt
+import io.nisfeb.talon.urbit.asText
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.add
 import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.contentOrNull
-import kotlinx.serialization.json.intOrNull
-import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
 
@@ -217,8 +216,11 @@ object ToolCatalog {
     }
 }
 
-private fun JsonObject.str(key: String): String? = this[key]?.jsonPrimitive?.contentOrNull
-private fun JsonObject.int(key: String): Int? = this[key]?.jsonPrimitive?.intOrNull
+// The model writes these args. `.jsonPrimitive` throws when it hands us an
+// object or array where a string belongs; the shared accessors degrade to
+// null, and every call site below already handles a missing arg.
+private fun JsonObject.str(key: String): String? = this[key].asText()
+private fun JsonObject.int(key: String): Int? = this[key].asInt()
 
 /** Build a JSON-Schema object for a tool's arguments. */
 private fun schema(

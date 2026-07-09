@@ -1,5 +1,6 @@
 package io.nisfeb.talon.ai
 
+import io.nisfeb.talon.urbit.asText
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -265,10 +266,16 @@ internal fun parseOpenAiTurn(body: JsonObject): AgentTurn {
     val msg = (body["choices"] as? JsonArray)?.firstOrNull()
         ?.jsonObject?.get("message")?.jsonObject
         ?: return AgentTurn.Final("")
-    // contentOrNull yields Kotlin null for a JSON `null` (JsonNull is a
-    // JsonPrimitive whose `.content` is the literal string "null"); the
-    // common tool-call turn sends "content": null.
-    val text = msg["content"]?.jsonPrimitive?.contentOrNull
+    // "content" is null on the common tool-call turn, a string on a plain
+    // answer, and — from OpenRouter and some OpenAI-compatible providers —
+    // an array of typed parts. asText() degrades the first two to null/text
+    // instead of throwing; the array we join like parseAnthropicTurn does.
+    val text = when (val c = msg["content"]) {
+        is JsonArray -> c.mapNotNull { (it as? JsonObject)?.get("text").asText() }
+            .joinToString("")
+            .ifEmpty { null }
+        else -> c.asText()
+    }
     val calls = (msg["tool_calls"] as? JsonArray)?.mapNotNull { tc ->
         val o = tc as? JsonObject ?: return@mapNotNull null
         val fn = o["function"]?.jsonObject ?: return@mapNotNull null

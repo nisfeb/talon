@@ -1,5 +1,6 @@
 package io.nisfeb.talon.ai
 
+import io.nisfeb.talon.util.decodeHtmlEntities
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.Dns
@@ -125,13 +126,7 @@ internal fun htmlToText(html: String): String {
     s = s.replace(Regex("(?s)<!--.*?-->"), " ")
     s = s.replace(Regex("(?i)<(br|/p|/div|/li|/h[1-6]|/tr)\\s*/?>"), "\n")
     s = s.replace(Regex("<[^>]+>"), " ")
-    s = s.replace("&nbsp;", " ")
-        .replace("&amp;", "&")
-        .replace("&lt;", "<")
-        .replace("&gt;", ">")
-        .replace("&quot;", "\"")
-        .replace("&#39;", "'")
-        .replace("&#x27;", "'")
+    s = decodeHtmlEntities(s)
     s = s.replace(Regex("[ \\t]+"), " ")
     s = s.replace(Regex("\\n{3,}"), "\n\n")
     return s.trim()

@@ -78,23 +78,26 @@ the cap + that no write fires without an approval flag). Offline.
 
 ## Phase 3 — Proactive (scheduled autonomy)
 
-Reuse the Daily Digest scheduling rails (`DigestAlarmReceiver`,
-`DailyDigestSchedule`) to run the agent on a trigger: "every morning, triage
-overnight activity and draft replies for my approval." Drafts queue as
-confirmation cards — still human-gated. Android-first (alarm path exists);
-desktop needs a scheduler analog → capability-flag it (mirror
-`isDailyDigestSupported`).
+Shipped as **Loops**: a saved prompt run on an interval, headless. Android
+uses AlarmManager + BootReceiver (`ai/Loops.kt`), so a loop fires with the app
+closed; desktop runs the same `LoopRunner` on a while-open ticker in `App.kt`.
+Writes are opt-in per loop and leased across devices (`LoopWriteCoordinator`)
+so only one device acts. `isBackgroundSchedulingSupported` is false on desktop
+— nothing is gated on it, it just picks the honest copy ("only while Talon is
+open") rather than promising a schedule the platform can't keep.
 
 ---
 
 ## Cross-cutting
 
-- Lives in `commonMain`, but retrieval needs the on-device embedder, which
-  today works on **Android only**. Desktop sets `isOnDeviceAiSupported = false`
-  (the DJL/ONNX Rust tokenizer JNI SIGSEGVs against modern libstdc++), so the
-  Assistant is gated on `isOnDeviceAiSupported` and is Android-only for now —
-  the same flag flips it on for desktop the day that stack lands (mirrors
-  smart-search). Both the Settings toggles and the entry point honor the gate.
+- Lives in `commonMain` and runs on **both platforms**: the assistant is gated
+  on `isAssistantSupported` (true everywhere — it needs a cloud key and a ship
+  session, nothing else). The on-device embedder only *enhances* retrieval, so
+  it has its own flag: `isOnDeviceAiSupported` is true on Android (MediaPipe)
+  and probe-gated on desktop (DJL/ONNX, whose Rust tokenizer JNI SIGSEGVs on a
+  few Linux libstdc++ ABIs). Without it the assistant falls back to keyword
+  search and flat history. Both the Settings toggles and the entry point honor
+  the gates.
 - Default model: a current tool-capable model per provider (`AiClient.kt`).
 - Index coverage: `EmbeddingIndexer` must cover history for retrieval to be
   trustworthy — surface index progress in the assistant UI.

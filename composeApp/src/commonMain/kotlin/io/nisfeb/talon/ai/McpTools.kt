@@ -27,8 +27,14 @@ internal enum class McpVisibility { Hidden, Read, Write }
 internal fun mcpToolVisibility(name: String): McpVisibility {
     val short = name.substringAfterLast('/')
     // Defence in depth: keep the arbitrary-code / install surface hidden
-    // even if a tool is renamed or namespaced differently.
-    if (short in MCP_HIDDEN_TOOLS || "eval" in short || short.startsWith("install")) {
+    // even if a tool is renamed or namespaced differently. Match the word,
+    // not the substring — `retrieval-search` is not an eval tool. A name
+    // that STARTS with the word still counts, so `evaluate-code` is hidden.
+    val words = short.split('-', '_', '.', ':')
+    if (short in MCP_HIDDEN_TOOLS ||
+        short.startsWith("eval") || short.startsWith("install") ||
+        words.any { it == "eval" || it == "install" }
+    ) {
         return McpVisibility.Hidden
     }
     if (short in MCP_READ_TOOLS || short.startsWith("scry")) return McpVisibility.Read
