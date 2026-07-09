@@ -273,6 +273,12 @@ fun App(
     var showActivity by remember { mutableStateOf(false) }
     var showSearch by remember { mutableStateOf(false) }
     var showAssistant by remember { mutableStateOf(false) }
+    /** The assistant claims the whole content area; a thread or group-info
+     *  pane left open would dock beside it and swallow clicks meant for it. */
+    val openAssistantAction: () -> Unit = {
+        closeRightPaneAction()
+        showAssistant = true
+    }
     var showNewDm by remember { mutableStateOf(false) }
     var showContacts by remember { mutableStateOf(false) }
     var showWatchwords by remember { mutableStateOf(false) }
@@ -1579,7 +1585,7 @@ fun App(
                             item.toRailTab()?.let { tab ->
                                 uiSettings.setActiveRailTab(tab)
                             } ?: when (item) {
-                                RailItem.Assistant -> showAssistant = true
+                                RailItem.Assistant -> openAssistantAction()
                                 RailItem.Profile -> showSelfProfile = true
                                 RailItem.Watchwords -> showWatchwords = true
                                 RailItem.TodaysBrief -> showDailyDigest = true
@@ -1611,7 +1617,7 @@ fun App(
                                         // the embedder only enhances retrieval,
                                         // it isn't required to run.
                                         onOpenAssistant = if (assistantEnabled) {
-                                            { showAssistant = true }
+                                            openAssistantAction
                                         } else null,
                                         onNewMessage = { showNewDm = true },
                                         onSignOut = {
@@ -1785,7 +1791,10 @@ fun App(
                                             showAssistant = false
                                             openChat = whomTarget
                                             if (parentId != null) {
+                                                // Anchor on the cited reply, not
+                                                // the top of the thread.
                                                 openThreadParent = parentId
+                                                openThreadReplyAnchor = postId
                                             } else {
                                                 openChatFocusMessageId = postId
                                             }
