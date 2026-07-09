@@ -91,6 +91,18 @@ object AiSettings {
     enum class PromptKind { UrbitKnowledge, Assistant, Loop }
 
     /**
+     * Migration policy for the pre-0.14 fold of four per-feature toggles
+     * into SmartFeatures, shared by both platform stores. [present] holds
+     * the legacy values that exist in storage; [total] is how many legacy
+     * toggles there were. Neither store ever wrote a toggle the user hadn't
+     * touched (Android writes per-key on change; desktop serialized with
+     * encodeDefaults=false), so an ABSENT toggle means default-true — the
+     * fold is off only when every toggle is present and false.
+     */
+    fun migratedSmartFeatures(present: List<Boolean>, total: Int): Boolean =
+        present.size < total || present.any { it }
+
+    /**
      * Per-feature toggles. SettingsScreen iterates this enum to render
      * the AI features section. Field-for-field copy of the production
      * enum at app/src/main/java/io/nisfeb/talon/ai/AiSettings.kt.

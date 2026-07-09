@@ -196,7 +196,12 @@ class AndroidAiSettings(context: Context) : AiSettingsRepository {
         if (prefs.contains(newKey)) return prefs.getBoolean(newKey, true)
         val legacy = LEGACY_SMART_KEYS.filter { prefs.contains(it) }
         if (legacy.isEmpty()) return true // fresh install → default on
-        val migrated = legacy.any { prefs.getBoolean(it, true) }
+        // setFeature only ever wrote the toggled key, so an absent key means
+        // the feature was on — the shared policy counts it as true.
+        val migrated = AiSettings.migratedSmartFeatures(
+            present = legacy.map { prefs.getBoolean(it, true) },
+            total = LEGACY_SMART_KEYS.size,
+        )
         prefs.edit().putBoolean(newKey, migrated).apply()
         return migrated
     }

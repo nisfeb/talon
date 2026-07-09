@@ -36,14 +36,28 @@ class DesktopAiSettings : AiSettingsRepository {
         // its own prior claim — it reads a "foreign" fresh holder and skips
         // its own scheduled fire.
         if (!file.exists()) return defaultConfig().also(::writeAtomically)
-        val raw = file.readText()
+        val raw = runCatching { file.readText() }.getOrElse {
+            // Transient I/O failure (permissions, FS hiccup). Don't touch
+            // the file — it may be fine next launch and it holds the key.
+            // The unwritten deviceId churns until then; that's the lesser
+            // harm.
+            Log.w(TAG, "ai_settings.json unreadable; starting with defaults", it)
+            return defaultConfig()
+        }
         return runCatching { JSON.decodeFromString<AiSettings.Config>(raw) }
             .getOrElse {
-                // We're about to fall back to an empty config, and the
-                // next write overwrites the file — i.e. the user's key
-                // silently vanishes. Log it so a "key not persisted"
-                // report is diagnosable instead of mute.
-                Log.w(TAG, "ai_settings.json unreadable; falling back to defaults", it)
+                // Unparseable (downgrade, hand-edit). The bytes hold the
+                // user's plaintext API key, so keep them as .bak instead of
+                // clobbering, then persist fresh defaults — the write-loop
+                // lease keys on deviceId, so it must land on disk now.
+                Log.w(TAG, "ai_settings.json unparseable; kept as .bak, using defaults", it)
+                runCatching {
+                    Files.move(
+                        file.toPath(),
+                        File(file.parentFile, file.name + ".bak").toPath(),
+                        StandardCopyOption.REPLACE_EXISTING,
+                    )
+                }
                 defaultConfig().also(::writeAtomically)
             }
             // SmartFeatures folded four pre-0.14 toggles into one. The old
@@ -58,7 +72,9 @@ class DesktopAiSettings : AiSettingsRepository {
     }
 
     /** Seed smartFeaturesEnabled from the pre-0.14 per-feature fields when
-     *  the new field is absent; off only if the user had them all off. */
+     *  the new field is absent; off only if the user had them all off. The
+     *  old JSON was written with encodeDefaults=false, so a default-true
+     *  field was simply omitted — the shared policy counts absence as on. */
     private fun migrateSmartFeatures(cfg: AiSettings.Config, raw: String): AiSettings.Config {
         val obj = runCatching { Json.parseToJsonElement(raw) as? kotlinx.serialization.json.JsonObject }
             .getOrNull() ?: return cfg
@@ -67,7 +83,8 @@ class DesktopAiSettings : AiSettingsRepository {
             (obj[key] as? kotlinx.serialization.json.JsonPrimitive)?.content?.toBooleanStrictOrNull()
         }
         if (legacy.isEmpty()) return cfg
-        return cfg.copy(smartFeaturesEnabled = legacy.any { it }).also(::writeAtomically)
+        val migrated = AiSettings.migratedSmartFeatures(legacy, LEGACY_SMART_FIELDS.size)
+        return cfg.copy(smartFeaturesEnabled = migrated).also(::writeAtomically)
     }
 
     /**
