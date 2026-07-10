@@ -24,6 +24,22 @@ kotlin {
     jvm("desktop") {
         compilerOptions { jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17) }
     }
+    // iOS targets. The framework nomac's Xcode project links is named
+    // ComposeApp; static linking avoids the embed-dynamic-framework
+    // dance. Device (arm64) + both simulator slices (Apple-silicon and
+    // Intel) so the same project builds on any Mac CI. These targets
+    // only compile on macOS — on this Linux dev box they configure but
+    // their compile/link tasks can't run; nomac builds them remotely.
+    listOf(iosX64(), iosArm64(), iosSimulatorArm64()).forEach { iosTarget ->
+        iosTarget.binaries.framework {
+            baseName = "ComposeApp"
+            isStatic = true
+        }
+    }
+    // Force the default source-set hierarchy now (it's applied at the end
+    // of the kotlin{} block otherwise) so `iosMain` exists for the
+    // `by getting` accessor below.
+    applyDefaultHierarchyTemplate()
 
     sourceSets {
         commonMain {
@@ -80,10 +96,9 @@ kotlin {
             implementation(libs.androidx.sqlite.bundled)
             // Coil 3 ships a multiplatform compose artifact that
             // commonMain Avatar.kt consumes via AsyncImage. The
-            // okhttp-network artifact wires Coil's image loader to
-            // the same OkHttp client we use elsewhere.
+            // network fetcher is per-leaf (okhttp on JVM, ktor+Darwin
+            // on iOS) since coil-network-okhttp is JVM-only.
             implementation(libs.coil.compose)
-            implementation(libs.coil.network.okhttp)
             // sh.calvin.reorderable supplies the
             // rememberReorderableLazyListState + ReorderableItem APIs
             // DmListScreen uses for drag-to-reorder folders/groups.
@@ -93,6 +108,8 @@ kotlin {
         androidMain.dependencies {
             // Ktor OkHttp engine — backs the shared HttpClient on Android.
             implementation(libs.ktor.client.okhttp)
+            // Coil network fetcher (JVM/Android only).
+            implementation(libs.coil.network.okhttp)
             implementation(libs.androidx.activity.compose)
             implementation(libs.androidx.core.ktx)
             implementation(libs.androidx.lifecycle.runtime.ktx)
@@ -146,6 +163,8 @@ kotlin {
             implementation(libs.kotlinx.coroutines.swing)
             // Ktor OkHttp engine — backs the shared HttpClient on desktop.
             implementation(libs.ktor.client.okhttp)
+            // Coil network fetcher (JVM only).
+            implementation(libs.coil.network.okhttp)
             // On-device sentence embedder for smart search +
             // important-message highlights. DJL (Deep Java Library)
             // wraps ONNX Runtime + HuggingFace tokenizers and resolves
@@ -160,6 +179,16 @@ kotlin {
             // QrCodeImage composable. No scanner on desktop (the user
             // is already at a keyboard; manual login is the fast path).
             implementation(libs.zxing.core)
+        }
+        // iOS leaf: Darwin (NSURLSession) HTTP engine + the ktor-based
+        // Coil network fetcher (coil-network-okhttp is JVM-only). The
+        // iosMain intermediate source set is created by the default
+        // hierarchy template once apple targets are declared.
+        val iosMain by getting {
+            dependencies {
+                implementation(libs.ktor.client.darwin)
+                implementation(libs.coil.network.ktor)
+            }
         }
         // commonTest carries shared kotlin.test assertions. Tests
         // here are picked up by both desktopTest and (when wired)
@@ -461,6 +490,12 @@ tasks.register<JavaExec>("embedderSmoke") {
 dependencies {
     add("kspAndroid", libs.androidx.room.compiler)
     add("kspDesktop", libs.androidx.room.compiler)
+    // Room's KSP processor runs per iOS target too, generating the
+    // native DAO impls + AppDatabase_Impl + AppDatabaseConstructor
+    // actual into each iOS source set.
+    add("kspIosX64", libs.androidx.room.compiler)
+    add("kspIosArm64", libs.androidx.room.compiler)
+    add("kspIosSimulatorArm64", libs.androidx.room.compiler)
 }
 
 ksp {
