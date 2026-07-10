@@ -1,4 +1,13 @@
 package io.nisfeb.talon.ui.screens
+import io.nisfeb.talon.util.formatMonthDay
+import io.nisfeb.talon.util.formatMonthDayTime
+import io.nisfeb.talon.util.formatMonthDayYear
+import kotlinx.datetime.Clock
+import kotlinx.datetime.DateTimeUnit
+import kotlinx.datetime.Instant
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.minus
+import kotlinx.datetime.toLocalDateTime
 import io.nisfeb.talon.util.nowMs
 
 import androidx.compose.animation.core.Animatable
@@ -150,7 +159,6 @@ import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
-import java.util.Locale
 
 @OptIn(
     ExperimentalFoundationApi::class,
@@ -1136,7 +1144,7 @@ private fun MessageRow(
 ) {
     val m = row.m
     val parts = remember(m.id, m.contentJson) { StoryCache.partsFor(m.id, m.contentJson) }
-    val stamp = remember(m.sentMs) { TIME_FORMAT.format(java.time.Instant.ofEpochMilli(m.sentMs)) }
+    val stamp = remember(m.sentMs) { formatMonthDayTime(m.sentMs) }
     val authorLabel = remember(m.author, contactMap) { contactMap.displayName(m.author) }
     val avatarUrl = remember(m.author, contactMap) { contactMap.avatar(m.author) }
     val avatarColor = remember(m.author, contactMap) { contactMap.shipColor(m.author) }
@@ -1502,10 +1510,6 @@ private fun DateDividerRow(label: String) {
 // Thread-safe formatter — message rendering happens on whatever
 // dispatcher Compose lands on, and `buildChatListItemsReusing`
 // runs on Dispatchers.Default with concurrent emissions in flight.
-private val TIME_FORMAT: java.time.format.DateTimeFormatter =
-    java.time.format.DateTimeFormatter.ofPattern("MMM d HH:mm", Locale.getDefault())
-        .withZone(java.time.ZoneId.systemDefault())
-
 private val AVATAR_SIZE = 36.dp
 private const val GROUP_GAP_MS = 5L * 60_000L
 
@@ -1629,26 +1633,17 @@ private fun dayKeyFor(cal: java.util.Calendar, ms: Long): String {
     return "$y-$d"
 }
 
-private val DIVIDER_DATE_FMT: java.time.format.DateTimeFormatter =
-    java.time.format.DateTimeFormatter.ofPattern("MMM d", Locale.getDefault())
-        .withZone(java.time.ZoneId.systemDefault())
-private val DIVIDER_DATE_FMT_OLD: java.time.format.DateTimeFormatter =
-    java.time.format.DateTimeFormatter.ofPattern("MMM d, yyyy", Locale.getDefault())
-        .withZone(java.time.ZoneId.systemDefault())
-
 private fun dividerLabel(ms: Long): String {
-    // Use java.time directly — LocalDate compares are cheaper than the
-    // 3-Calendar dance we did before, and this whole function runs
-    // once per date divider during chat-list rebuild on Dispatchers
-    // .Default (concurrent emissions in flight).
-    val zone = java.time.ZoneId.systemDefault()
-    val today = java.time.LocalDate.now(zone)
-    val then = java.time.Instant.ofEpochMilli(ms).atZone(zone).toLocalDate()
+    // LocalDate compares in the device zone — "Today"/"Yesterday" and
+    // an abbreviated date otherwise. Runs once per date divider during
+    // chat-list rebuild.
+    val zone = TimeZone.currentSystemDefault()
+    val today = Clock.System.now().toLocalDateTime(zone).date
+    val then = Instant.fromEpochMilliseconds(ms).toLocalDateTime(zone).date
     if (then == today) return "Today"
-    if (then == today.minusDays(1)) return "Yesterday"
-    val instant = java.time.Instant.ofEpochMilli(ms)
-    return if (then.year == today.year) DIVIDER_DATE_FMT.format(instant)
-    else DIVIDER_DATE_FMT_OLD.format(instant)
+    if (then == today.minus(1, DateTimeUnit.DAY)) return "Yesterday"
+    return if (then.year == today.year) formatMonthDay(ms)
+    else formatMonthDayYear(ms)
 }
 
 // ── MessageActionMenu ────────────────────────────────────────────────────────

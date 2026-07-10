@@ -1,9 +1,10 @@
 package io.nisfeb.talon.ui
+import io.nisfeb.talon.util.secureRandomBytes
+import kotlin.io.encoding.Base64
+import kotlin.io.encoding.ExperimentalEncodingApi
 import io.nisfeb.talon.util.ioDispatcher
 
 import io.nisfeb.talon.urbit.TlonChatRepo
-import java.security.SecureRandom
-import java.util.Base64
 
 /**
  * Outcome of running a slash command. UI side decides what to do:
@@ -340,10 +341,10 @@ private fun runTalk(args: List<String>): CommandResult {
 
 /** 32 random bytes, base64url-encoded (43 chars, no padding) — same
  *  format Brave Talk uses for its E2EE room keys. */
+@OptIn(ExperimentalEncodingApi::class)
 private fun randomTalkKey(): String {
-    val bytes = ByteArray(32)
-    SecureRandom().nextBytes(bytes)
-    return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes)
+    val bytes = secureRandomBytes(32)
+    return Base64.UrlSafe.withPadding(Base64.PaddingOption.ABSENT).encode(bytes)
 }
 
 private fun isValidTalkKey(s: String): Boolean =

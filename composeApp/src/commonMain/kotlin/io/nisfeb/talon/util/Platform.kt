@@ -21,3 +21,10 @@ fun nowMs(): Long = Clock.System.now().toEpochMilliseconds()
  * parallelism-limited Default (see the iosMain actual).
  */
 expect val ioDispatcher: CoroutineDispatcher
+
+/**
+ * Cryptographically-secure random bytes. Backs security-sensitive
+ * tokens (E2EE room keys) so it must NOT be kotlin.random.Random —
+ * JVM uses SecureRandom, iOS uses SecRandomCopyBytes.
+ */
+expect fun secureRandomBytes(n: Int): ByteArray

@@ -1,6 +1,7 @@
 package io.nisfeb.talon.data
 
-import java.util.UUID
+import kotlin.uuid.ExperimentalUuidApi
+import kotlin.uuid.Uuid
 
 /**
  * A globally-unique id for a synced assistant conversation/turn. Local
@@ -10,4 +11,5 @@ import java.util.UUID
  * Room migration uses to backfill rows that predate sync, so the two are
  * interchangeable (32 lowercase hex chars; v4 pins 6 of the 128 bits).
  */
-fun newGid(): String = UUID.randomUUID().toString().replace("-", "")
+@OptIn(ExperimentalUuidApi::class)
+fun newGid(): String = Uuid.random().toHexString()

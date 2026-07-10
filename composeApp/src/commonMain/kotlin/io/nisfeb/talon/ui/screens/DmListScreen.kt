@@ -1,4 +1,6 @@
 package io.nisfeb.talon.ui.screens
+import io.nisfeb.talon.util.formatMonthDay
+import io.nisfeb.talon.util.formatTime24
 import io.nisfeb.talon.util.nowMs
 
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -107,7 +109,6 @@ import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
 import sh.calvin.reorderable.ReorderableItem
 import sh.calvin.reorderable.rememberReorderableLazyListState
-import java.util.Locale
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -2040,10 +2041,6 @@ private fun MentionPlaceholderRow(
     }
 }
 
-// java.time.format.DateTimeFormatter is immutable and thread-safe;
-// SimpleDateFormat is neither, and chat-list rebuilds happen
-// concurrently from multiple flow emissions on Dispatchers.Default —
-// the SDF version was a thread-safety bug waiting to fire.
 /**
  * 8.dp filled dot in the theme's primary color — used as a "fresh
  * content" cue on the More-menu trailing slot and as a corner badge
@@ -2068,20 +2065,11 @@ private fun MenuBadgeDot(modifier: Modifier = Modifier) {
  *  pages of cached history. */
 private const val MENTION_SCAN_LIMIT = 50
 
-private val TIME_TODAY: java.time.format.DateTimeFormatter =
-    java.time.format.DateTimeFormatter.ofPattern("HH:mm", Locale.getDefault())
-        .withZone(java.time.ZoneId.systemDefault())
-private val DATE_OLD: java.time.format.DateTimeFormatter =
-    java.time.format.DateTimeFormatter.ofPattern("MMM d", Locale.getDefault())
-        .withZone(java.time.ZoneId.systemDefault())
-
 private fun formatRelative(ms: Long): String {
-    val now = nowMs()
-    val diff = now - ms
-    val instant = java.time.Instant.ofEpochMilli(ms)
+    val diff = nowMs() - ms
     return when {
-        diff < 24 * 3600_000L -> TIME_TODAY.format(instant)
-        else -> DATE_OLD.format(instant)
+        diff < 24 * 3600_000L -> formatTime24(ms)
+        else -> formatMonthDay(ms)
     }
 }
 
@@ -2128,7 +2116,7 @@ private fun SectionHeader(label: String) {
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
-            label.uppercase(Locale.getDefault()),
+            label.uppercase(),
             style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
