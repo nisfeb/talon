@@ -25,24 +25,25 @@ import java.security.MessageDigest
 object Mnemonym {
 
     /** Full nym for [ship], or null when the ship isn't a planet/moon/
-     *  comet or doesn't parse. Pure; verified against the reference
-     *  implementation's test vectors. */
-    fun forShip(ship: String): String? {
-        val bytes = patpBytes(ship) ?: return null
-        return encode(bytes, tweaked = true).takeIf { it.length > 1 }
-    }
+     *  comet or doesn't parse. Verified against the reference
+     *  implementation's test vectors. Memoized — displayName and the
+     *  mention matcher run per row/keystroke, and the answer never
+     *  changes. */
+    fun forShip(ship: String): String? = nymCache.getOrPut(ship) {
+        val bytes = patpBytes(ship) ?: return@getOrPut ""
+        encode(bytes, tweaked = true)
+    }.takeIf { it.length > 1 }
 
     /** Display form: planets keep all three words; moon/comet nyms are
      *  abridged to `.first...last` (the scheme's own abridge shape),
-     *  like the truncated comet @p users already know. Memoized —
-     *  displayName runs per row render, and the answer never changes. */
-    fun display(ship: String): String? = displayCache.getOrPut(ship) {
-        val nym = forShip(ship) ?: return@getOrPut ""
+     *  like the truncated comet @p users already know. */
+    fun display(ship: String): String? {
+        val nym = forShip(ship) ?: return null
         val words = nym.trimStart('.').split('.')
-        if (words.size <= 3) nym else ".${words.first()}...${words.last()}"
-    }.takeIf { it.isNotEmpty() }
+        return if (words.size <= 3) nym else ".${words.first()}...${words.last()}"
+    }
 
-    private val displayCache = java.util.concurrent.ConcurrentHashMap<String, String>()
+    private val nymCache = java.util.concurrent.ConcurrentHashMap<String, String>()
 
     /** Big-endian bytes of the value the @p syllables encode, or null
      *  for galaxies/stars/malformed input. */
