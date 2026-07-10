@@ -291,4 +291,55 @@ class ActivityFeedParserTest {
         assertEquals("Reacted", TlonChatRepo.parseActivityFeedBody(body).single().kind)
     }
 
+    /**
+     * feed/init answers `{all, mentions, replies, summaries}` in one
+     * scry. We used to read `all` and drop the other two on the floor.
+     * They are the ship's own filtered views, not subsets we could
+     * re-derive: a mention lives in `all` AND `mentions`.
+     */
+    @Test
+    fun `parseActivityFeed splits the three views the ship returns`() {
+        val body = buildJsonObject {
+            put("all", buildJsonArray {
+                add(oneBundle("ship/~zod", "post", "300"))
+                add(oneBundle("ship/~zod", "post-mention", "200"))
+            })
+            put("mentions", buildJsonArray { add(oneBundle("ship/~zod", "post-mention", "200")) })
+            put("replies", buildJsonArray { add(oneBundle("ship/~zod", "reply", "100")) })
+            put("summaries", buildJsonObject { })
+        }
+        val feed = TlonChatRepo.parseActivityFeed(body)
+        assertEquals(2, feed.all.size)
+        assertEquals(1, feed.mentions.size)
+        assertEquals(1, feed.replies.size)
+        assertEquals("Mentioned you", feed.mentions.single().kind)
+        assertEquals("Replied", feed.replies.single().kind)
+
+        assertEquals(feed.all, feed.forTab(TlonChatRepo.ActivityTab.ALL))
+        assertEquals(feed.mentions, feed.forTab(TlonChatRepo.ActivityTab.MENTIONS))
+        assertEquals(feed.replies, feed.forTab(TlonChatRepo.ActivityTab.REPLIES))
+    }
+
+    @Test
+    fun `a ship that omits mentions and replies yields empty tabs, not a crash`() {
+        val body = buildJsonObject { put("all", buildJsonArray { add(oneBundle("ship/~zod", "post", "1")) }) }
+        val feed = TlonChatRepo.parseActivityFeed(body)
+        assertEquals(1, feed.all.size)
+        assertEquals(emptyList(), feed.mentions)
+        assertEquals(emptyList(), feed.replies)
+        assertEquals(TlonChatRepo.ActivityFeed(), TlonChatRepo.parseActivityFeed(null))
+    }
+
+    private fun oneBundle(sourceKey: String, tag: String, time: String) = buildJsonObject {
+        put("source-key", sourceKey)
+        put("events", buildJsonArray {
+            add(buildJsonObject {
+                put("time", time)
+                put("event", buildJsonObject {
+                    put(tag, buildJsonObject { put("author", "~bus") })
+                })
+            })
+        })
+    }
+
 }

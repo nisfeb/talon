@@ -1475,6 +1475,30 @@ class TlonChatRepo(
     )
 
     /**
+     * The three views `%activity`'s `feed/init` returns together. They
+     * aren't subsets of one another: `all` is the firehose, while
+     * `mentions` and `replies` are the ship's own filtered views, so
+     * we render what it gives us rather than re-deriving them.
+     */
+    data class ActivityFeed(
+        val all: List<ActivityFeedItem> = emptyList(),
+        val mentions: List<ActivityFeedItem> = emptyList(),
+        val replies: List<ActivityFeedItem> = emptyList(),
+    ) {
+        fun forTab(tab: ActivityTab): List<ActivityFeedItem> = when (tab) {
+            ActivityTab.ALL -> all
+            ActivityTab.MENTIONS -> mentions
+            ActivityTab.REPLIES -> replies
+        }
+    }
+
+    enum class ActivityTab(val label: String) {
+        ALL("All"),
+        MENTIONS("Mentions"),
+        REPLIES("Replies"),
+    }
+
+    /**
      * Process-singleton cache of the activity feed. Null = never
      * loaded; non-null = last successful fetch. UI binds to this
      * StateFlow so reopening the Activity view shows instantly,
@@ -1483,10 +1507,10 @@ class TlonChatRepo(
      * ship switch (TlonChatRepo is per-ship — a new repo means a
      * fresh empty StateFlow).
      */
-    private val _activityFeed = MutableStateFlow<List<ActivityFeedItem>?>(null)
-    val activityFeedFlow: StateFlow<List<ActivityFeedItem>?> = _activityFeed.asStateFlow()
+    private val _activityFeed = MutableStateFlow<ActivityFeed?>(null)
+    val activityFeedFlow: StateFlow<ActivityFeed?> = _activityFeed.asStateFlow()
 
-    suspend fun fetchActivityFeed(): List<ActivityFeedItem> {
+    suspend fun fetchActivityFeed(): ActivityFeed {
         val ch = channel ?: error("not connected")
         // The feed's version namespace shifted under us in Tlon v11.4.0:
         // what /v6 now serves is what /v5 used to, and /v5 became the
@@ -1498,7 +1522,7 @@ class TlonChatRepo(
             listOf("/v6/feed/init/30", "/v5/feed/init/30"),
             "activity feed",
         ) as? JsonObject
-        val items = parseActivityFeedBody(body)
+        val items = parseActivityFeed(body)
         _activityFeed.value = items
         return items
     }
@@ -3691,9 +3715,24 @@ class TlonChatRepo(
          *   - any individual bundle / event with the wrong shape is
          *     skipped (not an error); the rest of the feed renders
          */
-        internal fun parseActivityFeedBody(body: JsonObject?): List<ActivityFeedItem> {
+        /**
+         * `feed/init` answers with all three views in one round-trip:
+         * `{all, mentions, replies, summaries}`. Split them so the UI
+         * can show the tabs Tlon's client does, rather than folding
+         * everything into one undifferentiated list.
+         */
+        internal fun parseActivityFeed(body: JsonObject?): ActivityFeed = ActivityFeed(
+            all = parseActivityFeedBody(body, "all"),
+            mentions = parseActivityFeedBody(body, "mentions"),
+            replies = parseActivityFeedBody(body, "replies"),
+        )
+
+        internal fun parseActivityFeedBody(
+            body: JsonObject?,
+            key: String = "all",
+        ): List<ActivityFeedItem> {
             if (body == null) return emptyList()
-            val all = body["all"] as? JsonArray ?: return emptyList()
+            val all = body[key] as? JsonArray ?: return emptyList()
             val items = mutableListOf<ActivityFeedItem>()
             for (bundleEl in all) {
                 val bundle = bundleEl as? JsonObject ?: continue

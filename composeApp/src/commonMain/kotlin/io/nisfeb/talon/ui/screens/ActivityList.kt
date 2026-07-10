@@ -14,6 +14,8 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Tab
+import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -21,6 +23,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -67,7 +70,8 @@ fun ActivityList(
     // from last-known-good. Null = never loaded; non-null (incl.
     // empty list) = at least one fetch has completed.
     val cached by repo.activityFeedFlow.collectAsState()
-    val items = cached ?: emptyList()
+    var tab by rememberSaveable { mutableStateOf(TlonChatRepo.ActivityTab.ALL) }
+    val items = cached?.forTab(tab) ?: emptyList()
     var refreshing by remember { mutableStateOf(cached == null) }
     var error by remember { mutableStateOf<String?>(null) }
 
@@ -83,6 +87,20 @@ fun ActivityList(
     }
 
     Column(modifier = modifier) {
+        // The ship computes `mentions` and `replies` itself and hands
+        // all three views back in the one feed/init scry — switching
+        // tabs is free, no refetch.
+        if (cached != null) {
+            TabRow(selectedTabIndex = tab.ordinal) {
+                TlonChatRepo.ActivityTab.entries.forEach { t ->
+                    Tab(
+                        selected = t == tab,
+                        onClick = { tab = t },
+                        text = { Text(t.label, style = MaterialTheme.typography.labelLarge) },
+                    )
+                }
+            }
+        }
         // Thin progress bar above the list while a background refresh
         // is in flight AND we already have cached content to show
         // underneath. The first-ever load uses the centered spinner
@@ -111,7 +129,12 @@ fun ActivityList(
             )
 
             items.isEmpty() -> Text(
-                "No activity yet. Mentions and replies to your posts will show up here.",
+                when (tab) {
+                    TlonChatRepo.ActivityTab.ALL ->
+                        "No activity yet. Mentions and replies to your posts will show up here."
+                    TlonChatRepo.ActivityTab.MENTIONS -> "Nobody has mentioned you yet."
+                    TlonChatRepo.ActivityTab.REPLIES -> "No replies to your posts yet."
+                },
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(24.dp),
