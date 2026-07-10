@@ -51,7 +51,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -72,10 +71,8 @@ import androidx.compose.ui.unit.dp
 import io.nisfeb.talon.data.AppDatabase
 import io.nisfeb.talon.data.MessageEntity
 import io.nisfeb.talon.data.ReactionEntity
-import io.nisfeb.talon.ui.CiteResolver
 import io.nisfeb.talon.ui.ContactMap
 import io.nisfeb.talon.ui.EmojiCatalog
-import io.nisfeb.talon.ui.LocalCiteResolver
 import io.nisfeb.talon.ui.ReactionPalette
 import io.nisfeb.talon.ui.StoryRenderer
 import io.nisfeb.talon.ui.combinedClickableWithSecondary
@@ -334,25 +331,7 @@ fun ThreadList(
     val onImageTap: (String) -> Unit = remember(onOpenImage) {
         { url -> onOpenImage(url) }
     }
-    val onCitationTap: (String) -> Unit = remember(onOpenConversation) {
-        { target -> onOpenConversation(target) }
-    }
 
-    val citeResolver = remember(db, repo) {
-        object : CiteResolver {
-            override suspend fun findLocal(whom: String, da: String): MessageEntity? =
-                db.messages().findByDa(whom, da)
-            override suspend fun fetchPost(whom: String, da: String): MessageEntity? =
-                repo.fetchCitePost(whom, da)
-            override suspend fun fetchReply(
-                whom: String,
-                postDa: String,
-                replyDa: String,
-            ): MessageEntity? = repo.fetchCiteReply(whom, postDa, replyDa)
-        }
-    }
-
-    CompositionLocalProvider(LocalCiteResolver provides citeResolver) {
     val chatDensity = io.nisfeb.talon.ui.LocalChatDensity.current
     // Per-row action-menu body. Composed only when the row's menu is
     // expanded (DropdownMenu's content composes lazily). Mirrors the
@@ -454,7 +433,6 @@ fun ThreadList(
                         onMentionTap = onMentionTap,
                         onLinkTap = onLinkTap,
                         onImageTap = onImageTap,
-                        onCitationTap = onCitationTap,
                         menuExpanded = actionTarget?.id == p.id,
                         onMenuExpand = { actionTarget = p },
                         onMenuDismiss = { actionTarget = null },
@@ -486,7 +464,6 @@ fun ThreadList(
                     onMentionTap = onMentionTap,
                     onLinkTap = onLinkTap,
                     onImageTap = onImageTap,
-                    onCitationTap = onCitationTap,
                     menuExpanded = actionTarget?.id == replyMsg.id,
                     onMenuExpand = { actionTarget = replyMsg },
                     onMenuDismiss = { actionTarget = null },
@@ -595,7 +572,6 @@ fun ThreadList(
             },
         )
     }
-    } // CompositionLocalProvider(LocalCiteResolver)
 }
 
 /**
@@ -640,7 +616,6 @@ private fun ThreadMessage(
     onMentionTap: (String) -> Unit,
     onLinkTap: (String) -> Unit,
     onImageTap: (String) -> Unit,
-    onCitationTap: (String) -> Unit,
     /** True when this row's action menu is open (driven by the
      *  screen-level `actionTarget` so only one menu shows at a time). */
     menuExpanded: Boolean,
@@ -729,7 +704,6 @@ private fun ThreadMessage(
                 onMentionTap = onMentionTap,
                 onLinkTap = onLinkTap,
                 onImageTap = onImageTap,
-                onCitationTap = onCitationTap,
                 reactions = reactions,
                 ourPatp = ourPatp,
                 onPollVote = { emoji -> onPollVote(m, reactions, emoji) },

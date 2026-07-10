@@ -850,12 +850,49 @@ fun App(
           val urbAwareUriHandler = remember(platformUriHandler, urbLinkHandler) {
               io.nisfeb.talon.ui.UrbAwareUriHandler(platformUriHandler, urbLinkHandler)
           }
+          val citeScope = rememberCoroutineScope()
+          val citeResolver = remember(db, repo) {
+              io.nisfeb.talon.ui.TalonCiteResolver(db, repo)
+          }
+          val openCitation: (io.nisfeb.talon.urbit.StoryPart.Citation) -> Unit =
+              remember(db, citeResolver) {
+                  { cite ->
+                      citeScope.launch {
+                          val jump = io.nisfeb.talon.ui.resolveCiteJump(cite, citeResolver) {
+                              runCatching { db.groups().channelGroupFor(it)?.groupFlag }.getOrNull()
+                          }
+                          when (jump) {
+                              is io.nisfeb.talon.ui.CiteJump.Group -> {
+                                  openChat = null
+                                  revealGroupRequest = jump.flag
+                              }
+                              is io.nisfeb.talon.ui.CiteJump.Message -> {
+                                  openConversationAction()
+                                  jump.groupFlag?.let { revealGroupRequest = it }
+                                  openChatFocusMessageId = jump.messageId
+                                  openChat = jump.whom
+                              }
+                              is io.nisfeb.talon.ui.CiteJump.Reply -> {
+                                  openConversationAction()
+                                  jump.groupFlag?.let { revealGroupRequest = it }
+                                  openChat = jump.whom
+                                  openThreadParent = jump.parentId
+                                  openThreadReplyAnchor = jump.replyId
+                              }
+                              null -> Unit
+                          }
+                      }
+                      Unit
+                  }
+              }
           androidx.compose.runtime.CompositionLocalProvider(
               io.nisfeb.talon.ui.LocalImageDownloader provides imageDownloader,
               io.nisfeb.talon.ui.LocalChatDensity provides chatDensity,
               androidx.compose.ui.platform.LocalDensity provides scaledDensity,
               io.nisfeb.talon.ui.LocalUrbLinkHandler provides urbLinkHandler,
               androidx.compose.ui.platform.LocalUriHandler provides urbAwareUriHandler,
+              io.nisfeb.talon.ui.LocalCiteResolver provides citeResolver,
+              io.nisfeb.talon.ui.LocalCitationOpen provides openCitation,
           ) {
             urbPromptUrl?.let {
                 io.nisfeb.talon.ui.InstallLatticeDialog(onDismiss = { urbPromptUrl = null })

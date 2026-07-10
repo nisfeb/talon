@@ -63,6 +63,14 @@ interface CiteResolver {
 val LocalCiteResolver = compositionLocalOf<CiteResolver?> { null }
 
 /**
+ * What a tap on a rendered citation does. Provided once at the app
+ * root, next to [LocalCiteResolver], so a cite behaves identically
+ * wherever it is rendered — chat, thread, notebook post, gallery. The
+ * default no-op keeps previews and tests renderable without a shell.
+ */
+val LocalCitationOpen = compositionLocalOf<(StoryPart.Citation) -> Unit> { {} }
+
+/**
  * Process-level cache + per-key dedup for citation resolution.
  * Without this, N visible citations to the same channel/post each
  * fire their own scry — a dense chat with 8 cites = 8 redundant
@@ -139,7 +147,6 @@ fun StoryRenderer(
     onMentionTap: (String) -> Unit = {},
     onLinkTap: (String) -> Unit = {},
     onImageTap: (String) -> Unit = {},
-    onCitationTap: (target: String) -> Unit = {},
     /** Reactions on this message, used by the poll widget to render
      *  per-option tallies. */
     reactions: List<io.nisfeb.talon.data.ReactionEntity> = emptyList(),
@@ -271,9 +278,7 @@ fun StoryRenderer(
                     onLinkTap(part.url)
                 }
 
-                is StoryPart.Citation -> InlineCitation(cite = part) {
-                    part.openTarget?.let(onCitationTap)
-                }
+                is StoryPart.Citation -> InlineCitation(cite = part)
 
                 is StoryPart.TzWidget -> TzWidgetBlock(
                     instantEpochMs = part.instantEpochMs,
@@ -475,12 +480,10 @@ private fun InlineLinkPreview(
 }
 
 @Composable
-private fun InlineCitation(
-    cite: StoryPart.Citation,
-    onTap: () -> Unit,
-) {
+private fun InlineCitation(cite: StoryPart.Citation) {
     val tappable = cite.openTarget != null
     val resolver = LocalCiteResolver.current
+    val open = LocalCitationOpen.current
 
     // Resolve cite → stored message, falling back to a channel scry
     // when the post isn't in our local window. Routes through
@@ -510,7 +513,7 @@ private fun InlineCitation(
             .widthIn(max = 420.dp)
             .clip(RoundedCornerShape(8.dp))
             .background(MaterialTheme.colorScheme.surfaceVariant)
-            .let { if (tappable) it.clickable(onClick = onTap) else it }
+            .let { if (tappable) it.clickable { open(cite) } else it }
             .padding(horizontal = 10.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {

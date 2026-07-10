@@ -678,6 +678,38 @@ fun TalonApp(
     val urbAwareUriHandler = remember(platformUriHandler, urbLinkHandler) {
         io.nisfeb.talon.ui.UrbAwareUriHandler(platformUriHandler, urbLinkHandler)
     }
+    val citeResolver = remember(app) { io.nisfeb.talon.ui.TalonCiteResolver(app.db, app.repo) }
+    val openCitation: (io.nisfeb.talon.urbit.StoryPart.Citation) -> Unit =
+        remember(citeResolver) {
+            { cite ->
+                appScope.launch {
+                    val jump = io.nisfeb.talon.ui.resolveCiteJump(cite, citeResolver) {
+                        runCatching { app.db.groups().channelGroupFor(it)?.groupFlag }.getOrNull()
+                    }
+                    when (jump) {
+                        is io.nisfeb.talon.ui.CiteJump.Group -> {
+                            openWhom = null
+                            revealGroupRequest = jump.flag
+                        }
+                        is io.nisfeb.talon.ui.CiteJump.Message -> {
+                            openConversationAction()
+                            jump.groupFlag?.let { revealGroupRequest = it }
+                            pendingScrollMessageId = jump.messageId
+                            openWhom = jump.whom
+                        }
+                        is io.nisfeb.talon.ui.CiteJump.Reply -> {
+                            openConversationAction()
+                            jump.groupFlag?.let { revealGroupRequest = it }
+                            openWhom = jump.whom
+                            pendingThreadAnchor = jump.replyId
+                            openThread = jump.parentId
+                        }
+                        null -> Unit
+                    }
+                }
+                Unit
+            }
+        }
     androidx.compose.runtime.CompositionLocalProvider(
         // Bind the real ExoPlayer-backed inline players for chat
         // messages. Without this, StoryRenderer falls back to a
@@ -695,6 +727,8 @@ fun TalonApp(
         // to Lattice. Also avoids an ActivityNotFoundException crash for
         // users without Lattice — they get the install prompt instead.
         androidx.compose.ui.platform.LocalUriHandler provides urbAwareUriHandler,
+        io.nisfeb.talon.ui.LocalCiteResolver provides citeResolver,
+        io.nisfeb.talon.ui.LocalCitationOpen provides openCitation,
     ) {
     urbPromptUrl?.let {
         io.nisfeb.talon.ui.InstallLatticeDialog(onDismiss = { urbPromptUrl = null })
