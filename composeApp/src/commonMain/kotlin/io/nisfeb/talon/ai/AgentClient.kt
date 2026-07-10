@@ -1,7 +1,19 @@
 package io.nisfeb.talon.ai
 import io.nisfeb.talon.util.ioDispatcher
 
+import io.ktor.client.plugins.timeout
+import io.ktor.client.request.HttpRequestBuilder
+import io.ktor.client.request.header
+import io.ktor.client.request.post
+import io.ktor.client.request.setBody
+import io.ktor.client.statement.bodyAsText
+import io.ktor.http.ContentType
+import io.ktor.http.Url
+import io.ktor.http.contentType
+import io.ktor.http.isSuccess
 import io.nisfeb.talon.urbit.asText
+import io.nisfeb.talon.util.createAppHttpClient
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -16,11 +28,6 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
-import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.OkHttpClient
-import okhttp3.Request
-import okhttp3.RequestBody.Companion.toRequestBody
-import java.util.concurrent.TimeUnit
 
 /**
  * Tool-use sibling of [AiClient]: one round-trip of an agentic
@@ -34,11 +41,7 @@ import java.util.concurrent.TimeUnit
  */
 class AgentClient(private val settingsProvider: () -> AiSettings.Config) {
 
-    private val http: OkHttpClient = OkHttpClient.Builder()
-        .callTimeout(120, TimeUnit.SECONDS)
-        .connectTimeout(15, TimeUnit.SECONDS)
-        .readTimeout(120, TimeUnit.SECONDS)
-        .build()
+    private val http = createAppHttpClient()
 
     suspend fun completeWithTools(
         system: String,
@@ -53,14 +56,14 @@ class AgentClient(private val settingsProvider: () -> AiSettings.Config) {
                     cfg.model ?: "claude-sonnet-4-5-20250929",
                     system, messages, tools, maxOutputTokens,
                 )
-                val req = Request.Builder()
-                    .url("https://api.anthropic.com/v1/messages")
-                    .header("x-api-key", cfg.apiKey)
-                    .header("anthropic-version", "2023-06-01")
-                    .header("content-type", "application/json")
-                    .post(payload.toString().toRequestBody(JSON_MEDIA))
-                    .build()
-                execute(req) { parseAnthropicTurn(it) }
+                execute(
+                    url = "https://api.anthropic.com/v1/messages",
+                    payload = payload.toString(),
+                    headers = {
+                        header("x-api-key", cfg.apiKey)
+                        header("anthropic-version", "2023-06-01")
+                    },
+                ) { parseAnthropicTurn(it) }
             }
             AiSettings.Provider.OpenRouter -> openai(
                 cfg, system, messages, tools, maxOutputTokens,
@@ -96,31 +99,40 @@ class AgentClient(private val settingsProvider: () -> AiSettings.Config) {
         model: String,
     ): AgentTurn {
         val payload = buildOpenAiRequest(model, system, messages, tools, maxTokens)
-        val req = Request.Builder()
-            .url(endpoint)
-            .header("Authorization", "Bearer ${cfg.apiKey}")
-            .header("content-type", "application/json")
-            .post(payload.toString().toRequestBody(JSON_MEDIA))
-            .build()
-        return execute(req) { parseOpenAiTurn(it) }
+        return execute(
+            url = endpoint,
+            payload = payload.toString(),
+            headers = { header("Authorization", "Bearer ${cfg.apiKey}") },
+        ) { parseOpenAiTurn(it) }
     }
 
-    private suspend fun execute(req: Request, parse: (JsonObject) -> AgentTurn): AgentTurn =
-        kotlinx.coroutines.withContext(ioDispatcher) {
-            http.newCall(req).execute().use { resp ->
-                val body = resp.body?.string().orEmpty()
-                val host = req.url.host
-                if (!resp.isSuccessful) {
-                    error(extractApiError(host, resp.code, body))
-                }
-                val obj = runCatching { JSON.parseToJsonElement(body).jsonObject }
-                    .getOrElse { error("$host bad JSON: ${body.take(300)}") }
-                parse(obj)
+    private suspend fun execute(
+        url: String,
+        payload: String,
+        headers: HttpRequestBuilder.() -> Unit,
+        parse: (JsonObject) -> AgentTurn,
+    ): AgentTurn = withContext(ioDispatcher) {
+        val resp = http.post(url) {
+            contentType(ContentType.Application.Json)
+            headers()
+            setBody(payload)
+            timeout {
+                requestTimeoutMillis = 120_000
+                socketTimeoutMillis = 120_000
+                connectTimeoutMillis = 15_000
             }
         }
+        val body = resp.bodyAsText()
+        val host = Url(url).host
+        if (!resp.status.isSuccess()) {
+            error(extractApiError(host, resp.status.value, body))
+        }
+        val obj = runCatching { JSON.parseToJsonElement(body).jsonObject }
+            .getOrElse { error("$host bad JSON: ${body.take(300)}") }
+        parse(obj)
+    }
 
     companion object {
-        private val JSON_MEDIA = "application/json".toMediaType()
         internal val JSON = Json { ignoreUnknownKeys = true }
     }
 }

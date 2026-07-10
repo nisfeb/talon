@@ -3,9 +3,12 @@ package io.nisfeb.talon.ui
 import androidx.room.Room
 import androidx.sqlite.driver.bundled.BundledSQLiteDriver
 import io.nisfeb.talon.data.AppDatabase
+import io.ktor.client.HttpClient
+import io.ktor.client.engine.mock.MockEngine
+import io.ktor.client.engine.mock.respond
+import io.ktor.http.HttpStatusCode
 import io.nisfeb.talon.urbit.TlonChatRepo
 import kotlinx.coroutines.runBlocking
-import okhttp3.OkHttpClient
 import org.junit.After
 import org.junit.Before
 import org.junit.Test
@@ -32,7 +35,9 @@ class SlashCommandsTest {
     private lateinit var tmpDir: File
     private lateinit var db: AppDatabase
     private lateinit var repo: TlonChatRepo
-    private val http: OkHttpClient = OkHttpClient()
+    // Only /hn touches the network; these tests never route there, so a
+    // mock engine that 200s on anything keeps the dispatcher tests offline.
+    private val http = HttpClient(MockEngine { respond("", HttpStatusCode.OK) })
 
     @Before
     fun setUp() {

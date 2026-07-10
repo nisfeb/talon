@@ -1,10 +1,12 @@
 package io.nisfeb.talon.ai
 
+import io.ktor.client.HttpClient
+import io.ktor.client.engine.mock.MockEngine
+import io.ktor.client.engine.mock.respond
+import io.ktor.http.HttpStatusCode
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonObject
-import okhttp3.HttpUrl.Companion.toHttpUrl
-import okhttp3.OkHttpClient
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -112,7 +114,10 @@ class McpToolsTest {
     fun `mcpAgentTools sanitizes names, de-dups, and drops hidden tools`() {
         val schema = JsonObject(emptyMap())
         // Dispatch closures are never invoked here, so a throwaway client is fine.
-        val client = McpClient(OkHttpClient(), "http://localhost".toHttpUrl())
+        val client = McpClient(
+            HttpClient(MockEngine { respond("", HttpStatusCode.OK) }),
+            "http://localhost",
+        )
         val defs = listOf(
             McpToolDef("chat/send", "send", schema),
             McpToolDef("chat:send", "send2", schema), // sanitizes to the same base

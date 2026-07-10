@@ -27,7 +27,7 @@ import io.nisfeb.talon.urbit.TlonChatRepo
 fun MediaListScreen(
     db: AppDatabase,
     repo: TlonChatRepo,
-    http: okhttp3.OkHttpClient,
+    http: io.ktor.client.HttpClient,
     whom: String,
     category: MediaCategory,
     onBack: () -> Unit,

@@ -1,4 +1,5 @@
 package io.nisfeb.talon.ui.screens
+import kotlin.concurrent.Volatile
 import io.nisfeb.talon.util.formatMonthDay
 import io.nisfeb.talon.util.formatTime24
 import io.nisfeb.talon.util.nowMs

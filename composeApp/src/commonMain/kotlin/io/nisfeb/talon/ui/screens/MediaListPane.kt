@@ -66,7 +66,7 @@ import kotlinx.coroutines.launch
 fun MediaListPane(
     db: AppDatabase,
     repo: TlonChatRepo,
-    http: okhttp3.OkHttpClient,
+    http: io.ktor.client.HttpClient,
     whom: String,
     category: MediaCategory,
     onOpenImageList: (urls: List<String>, initialIndex: Int) -> Unit,
@@ -216,7 +216,7 @@ private fun LinkList(
     items: List<MessageMediaEntity>,
     db: AppDatabase,
     repo: TlonChatRepo,
-    http: okhttp3.OkHttpClient,
+    http: io.ktor.client.HttpClient,
     onOpen: (MessageMediaEntity) -> Unit,
     modifier: Modifier = Modifier,
 ) {

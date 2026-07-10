@@ -1,19 +1,23 @@
 package io.nisfeb.talon.urbit
-import io.nisfeb.talon.util.ioDispatcher
+import kotlin.concurrent.Volatile
 
-import kotlinx.coroutines.Dispatchers
+import io.ktor.client.HttpClient
+import io.ktor.client.plugins.cookies.HttpCookies
+import io.ktor.client.plugins.sse.SSE
+import io.ktor.client.request.forms.submitForm
+import io.ktor.client.statement.bodyAsText
+import io.ktor.http.Cookie
+import io.ktor.http.CookieEncoding
+import io.ktor.http.Url
+import io.ktor.http.isSuccess
+import io.ktor.http.parameters
+import io.nisfeb.talon.util.ioDispatcher
+import kotlinx.atomicfu.locks.SynchronizedObject
+import kotlinx.atomicfu.locks.synchronized
 import kotlinx.coroutines.withContext
-import okhttp3.Cookie
-import okhttp3.CookieJar
-import okhttp3.FormBody
-import okhttp3.HttpUrl
-import okhttp3.HttpUrl.Companion.toHttpUrl
-import okhttp3.OkHttpClient
-import okhttp3.Request
-import java.util.concurrent.ConcurrentHashMap
 
 /**
- * Coerce a user-typed ship URL to one OkHttp's `toHttpUrl()` can parse.
+ * Coerce a user-typed ship URL to a well-formed absolute URL string.
  * If no scheme is present, prepend `https://` — matches the
  * security-preferred posture and means users only have to type
  * `http://` when they explicitly want cleartext (e.g. a LAN ship).
@@ -31,21 +35,31 @@ internal fun normalizeShipUrl(input: String): String {
 
 /**
  * Holds the session cookie for one authenticated Urbit ship and owns the
- * OkHttp client used for channel traffic. Call login() once; afterwards
+ * HttpClient used for channel traffic. Call login() once; afterwards
  * openChannel() returns an UrbitChannel configured with this session's
- * base URL and cookie jar.
+ * base URL and cookie storage.
  *
  * Not thread-safe across login/logout, but concurrent channel use is fine.
  */
 class UrbitSession(
-    parentClient: OkHttpClient,
+    parentClient: HttpClient,
     private val store: SessionStore,
 ) {
 
-    private val cookieJar = InMemoryCookieJar()
-    val http: OkHttpClient = parentClient.newBuilder().cookieJar(cookieJar).build()
+    private val cookieStorage = SessionCookieStorage()
 
-    @Volatile var baseUrl: HttpUrl? = null
+    /**
+     * A cookie-scoped derivative of the shared client, sharing its
+     * engine. HttpCookies captures the urbauth-~ cookie on login and
+     * replays it on every channel/scry/poke; SSE backs the channel
+     * event stream.
+     */
+    val http: HttpClient = parentClient.config {
+        install(HttpCookies) { storage = cookieStorage }
+        install(SSE)
+    }
+
+    @Volatile var baseUrl: String? = null
         private set
     @Volatile var shipName: String? = null
         private set
@@ -61,94 +75,78 @@ class UrbitSession(
     suspend fun login(shipUrl: String, code: String): Result<String> =
         withContext(ioDispatcher) {
             runCatching {
-                val url = normalizeShipUrl(shipUrl).toHttpUrl()
+                cookieStorage.clear()
+                val url = normalizeShipUrl(shipUrl)
                 // Urbit's /~/login takes `password=<code>` with dashes intact.
                 // Accept a leading `+` from users who paste verbatim from +code.
-                val body = FormBody.Builder()
-                    .add("password", code.trim().removePrefix("+"))
-                    .build()
-                val request = Request.Builder()
-                    .url(url.newBuilder().addPathSegments("~/login").build())
-                    .post(body)
-                    .build()
-                http.newCall(request).execute().use { resp ->
-                    if (!resp.isSuccessful) error("login HTTP ${resp.code}")
-                    val cookie = cookieJar.loadForRequest(url)
-                        .firstOrNull { it.name.startsWith("urbauth-~") }
-                        ?: error("no urbauth cookie returned")
-                    // Store with the leading ~ intact so post IDs and DmAction.ship
-                    // match Tlon's wire format without client reconstruction.
-                    val ship = cookie.name.removePrefix("urbauth-")
-                    baseUrl = url
-                    shipName = ship
-                    // makeActive=true is load-bearing: composeApp's
-                    // App() composable rebuilds session+repo on
-                    // ship change via key(loggedInShip) and the new
-                    // session calls tryRestore() which reads
-                    // store.active(). If save() ever defaults
-                    // makeActive=false, the post-login re-key would
-                    // not find the just-saved entry and repo.start
-                    // would crash on a half-initialized session.
-                    store.save(
-                        SavedSession(
-                            shipUrl = url.toString().trimEnd('/'),
-                            ship = ship,
-                            cookieName = cookie.name,
-                            cookieValue = cookie.value,
-                            cookieDomain = url.host,
-                        ),
-                        makeActive = true,
-                    )
-                    ship
+                val resp = http.submitForm(
+                    url = "$url/~/login",
+                    formParameters = parameters {
+                        append("password", code.trim().removePrefix("+"))
+                    },
+                )
+                if (!resp.status.isSuccess()) {
+                    // Drain the body so the engine can recycle the connection.
+                    resp.bodyAsText()
+                    error("login HTTP ${resp.status.value}")
                 }
+                val cookie = cookieStorage.snapshot()
+                    .firstOrNull { it.name.startsWith("urbauth-~") }
+                    ?: error("no urbauth cookie returned")
+                // Store with the leading ~ intact so post IDs and DmAction.ship
+                // match Tlon's wire format without client reconstruction.
+                val ship = cookie.name.removePrefix("urbauth-")
+                baseUrl = url
+                shipName = ship
+                store.save(
+                    SavedSession(
+                        shipUrl = url,
+                        ship = ship,
+                        cookieName = cookie.name,
+                        cookieValue = cookie.value,
+                        cookieDomain = Url(url).host,
+                    ),
+                    makeActive = true,
+                )
+                ship
             }
         }
 
     /**
      * Sign out the currently active ship. Removes just its entry from
-     * the session list — other saved ships stay. If a different ship
-     * remains, the caller can switch to it via
-     * [TalonApplication.switchShip]; if the list is empty, the UI
-     * returns to the login screen.
+     * the session list — other saved ships stay.
      */
     fun logout() {
         val s = shipName
         baseUrl = null
         shipName = null
-        cookieJar.clear()
+        cookieStorage.clear()
         if (s != null) store.remove(s) else store.clearAll()
     }
 
     /**
-     * Restore a previously saved session, if any. Returns the ship patp
-     * on success (both baseUrl/shipName and the cookie jar are now ready
-     * for channel use); null if no saved session exists. Doesn't verify
-     * the cookie with the server — call a cheap scry after if you need
-     * that.
-     */
-    /**
      * Restore the currently-active saved session, if any. Returns the
-     * ship patp on success. For multi-ship builds, the active ship is
-     * whichever one the user last switched to (falling back to the
-     * only ship if there's just one).
+     * ship patp on success. Doesn't verify the cookie with the server —
+     * call a cheap scry after if you need that.
      */
     fun tryRestore(ship: String? = null): String? {
         val saved = if (ship != null) {
             store.all().firstOrNull { it.ship == ship }
         } else store.active()
         if (saved == null) return null
-        val url = runCatching { saved.shipUrl.toHttpUrl() }.getOrNull() ?: return null
-        val cookie = Cookie.Builder()
-            .name(saved.cookieName)
-            .value(saved.cookieValue)
-            .domain(saved.cookieDomain)
-            .path("/")
-            .build()
-        // Fresh jar for this restore so no stale cookies from a prior
-        // ship's session bleed into the new host's requests.
-        cookieJar.clear()
-        cookieJar.saveFromResponse(url, listOf(cookie))
-        baseUrl = url
+        // Fresh cookie context so no stale cookies from a prior ship's
+        // session bleed into the new host's requests.
+        cookieStorage.clear()
+        cookieStorage.add(
+            Cookie(
+                name = saved.cookieName,
+                value = saved.cookieValue,
+                domain = saved.cookieDomain,
+                path = "/",
+                encoding = CookieEncoding.RAW,
+            ),
+        )
+        baseUrl = saved.shipUrl.trimEnd('/')
         shipName = saved.ship
         store.setActive(saved.ship)
         return saved.ship
@@ -168,33 +166,33 @@ class UrbitSession(
 }
 
 /**
- * Minimal in-memory cookie jar — no persistence, wiped on logout.
- *
- * The per-host list must be guarded: with concurrent HTTP calls
- * (parallel scries, uploads, pokes) two threads can hit the same host
- * at the same time, both call saveFromResponse, and corrupt the
- * ArrayList's size field — yielding ArrayIndexOutOfBoundsException
- * with negative dstPos out of arraycopy. Synchronizing on the inner
- * list serializes the read-modify-write and snapshotting on read keeps
- * loadForRequest off the lock's hot path.
+ * Minimal in-memory Ktor cookie storage — no persistence, wiped on
+ * logout. The session only ever talks to its own ship's host, so
+ * get() returns every stored cookie regardless of request URL (the
+ * urbauth cookie must ride every channel/scry/poke). Guarded because
+ * concurrent HTTP calls (parallel scries, uploads, pokes) hit it at
+ * once and a bare list would corrupt under concurrent structural
+ * modification.
  */
-private class InMemoryCookieJar : CookieJar {
-    private val store = ConcurrentHashMap<String, MutableList<Cookie>>()
+internal class SessionCookieStorage : io.ktor.client.plugins.cookies.CookiesStorage {
+    private val lock = SynchronizedObject()
+    private val cookies = mutableListOf<Cookie>()
 
-    override fun saveFromResponse(url: HttpUrl, cookies: List<Cookie>) {
-        val list = store.getOrPut(url.host) { mutableListOf() }
-        synchronized(list) {
-            list.removeAll { existing -> cookies.any { it.name == existing.name } }
-            list.addAll(cookies)
-        }
+    override suspend fun get(requestUrl: Url): List<Cookie> =
+        synchronized(lock) { cookies.toList() }
+
+    override suspend fun addCookie(requestUrl: Url, cookie: Cookie) {
+        add(cookie)
     }
 
-    override fun loadForRequest(url: HttpUrl): List<Cookie> {
-        val list = store[url.host] ?: return emptyList()
-        // Snapshot under the lock so the filter walks a stable list.
-        val snapshot = synchronized(list) { list.toList() }
-        return snapshot.filter { it.matches(url) }
+    override fun close() {}
+
+    fun add(cookie: Cookie) = synchronized(lock) {
+        cookies.removeAll { it.name == cookie.name }
+        cookies.add(cookie)
     }
 
-    fun clear() = store.clear()
+    fun snapshot(): List<Cookie> = synchronized(lock) { cookies.toList() }
+
+    fun clear() = synchronized(lock) { cookies.clear() }
 }

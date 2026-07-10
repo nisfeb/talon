@@ -100,7 +100,7 @@ import kotlinx.coroutines.launch
 fun ThreadList(
     db: AppDatabase,
     repo: TlonChatRepo,
-    http: okhttp3.OkHttpClient,
+    http: io.ktor.client.HttpClient,
     drafts: io.nisfeb.talon.ui.DraftStore,
     ourPatp: String,
     whom: String,

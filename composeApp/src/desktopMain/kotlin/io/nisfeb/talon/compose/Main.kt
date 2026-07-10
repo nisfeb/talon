@@ -45,6 +45,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import io.ktor.client.HttpClient
+import io.nisfeb.talon.util.createAppHttpClient
 import okhttp3.OkHttpClient
 import java.util.concurrent.TimeUnit
 
@@ -63,12 +65,17 @@ import java.util.concurrent.TimeUnit
  * parked.
  */
 private class DesktopAppGraph {
+    // OkHttp client for the desktop-only leaf consumers (image
+    // downloader). The session/repo/UI path uses [ktorHttp] instead.
     val http: OkHttpClient = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
         // long-lived SSE — no read timeout
         .readTimeout(0, TimeUnit.SECONDS)
         .writeTimeout(15, TimeUnit.SECONDS)
         .build()
+    // Shared multiplatform HTTP client threaded into common (UrbitSession,
+    // TlonChatRepo, link previews). Ktor over an OkHttp engine on desktop.
+    val ktorHttp: HttpClient = createAppHttpClient()
     val sessionStore: SessionStore = createSessionStore()
     val aiSettings: AiSettingsRepository = createAiSettings()
     val dailyDigestSettings: DailyDigestSettings = DesktopDailyDigestSettings()
@@ -162,7 +169,7 @@ private class DesktopAppGraph {
             }.onFailure { Log.w("UpdateChecker", "couldn't persist last-check ts: ${it.message}") }
         }
         val checker = HttpUpdateChecker(
-            http = http,
+            http = ktorHttp,
             url = "https://github.com/nisfeb/talon/releases/latest/download/latest.json",
             now = { System.currentTimeMillis() },
             lastCheckedAtMs = readLastChecked,
@@ -204,6 +211,7 @@ private class DesktopAppGraph {
             exec.awaitTermination(2, TimeUnit.SECONDS)
         }
         runCatching { http.connectionPool.evictAll() }
+        runCatching { ktorHttp.close() }
         runCatching { currentDb?.close() }
     }
 }
@@ -412,7 +420,7 @@ fun main() {
                     io.nisfeb.talon.ui.DesktopUriHandler,
             ) {
                 App(
-                    http = graph.http,
+                    http = graph.ktorHttp,
                     sessionStore = graph.sessionStore,
                     aiSettings = graph.aiSettings,
                     createDb = graph.createDb,

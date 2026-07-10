@@ -1,20 +1,27 @@
 package io.nisfeb.talon.ai
-import io.nisfeb.talon.util.ioDispatcher
 
+import io.ktor.client.plugins.timeout
+import io.ktor.client.request.HttpRequestBuilder
+import io.ktor.client.request.header
+import io.ktor.client.request.post
+import io.ktor.client.request.setBody
+import io.ktor.client.statement.bodyAsText
+import io.ktor.http.ContentType
+import io.ktor.http.Url
+import io.ktor.http.contentType
+import io.ktor.http.isSuccess
+import io.nisfeb.talon.util.createAppHttpClient
+import io.nisfeb.talon.util.ioDispatcher
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
-import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.OkHttpClient
-import okhttp3.Request
-import okhttp3.RequestBody.Companion.toRequestBody
-import java.util.concurrent.TimeUnit
 
 /**
  * Thin HTTP layer for Anthropic / OpenRouter / OpenAI completions.
@@ -23,17 +30,11 @@ import java.util.concurrent.TimeUnit
  * we dispatch by provider.
  *
  * Callers provide a system prompt + user prompt (everything the LLM
- * needs, no chat history); we return the text response. For anything
- * fancier (streaming, tool use, images) extend here.
+ * needs, no chat history); we return the text response.
  */
 class AiClient(private val settingsProvider: () -> AiSettings.Config) {
 
-    private val http: OkHttpClient = OkHttpClient.Builder()
-        .callTimeout(60, TimeUnit.SECONDS)
-        .connectTimeout(15, TimeUnit.SECONDS)
-        .readTimeout(60, TimeUnit.SECONDS)
-        .build()
-
+    private val http = createAppHttpClient()
     private val json = Json { ignoreUnknownKeys = true }
 
     /** One-shot completion. Throws on transport / HTTP error. */
@@ -58,17 +59,12 @@ class AiClient(private val settingsProvider: () -> AiSettings.Config) {
             AiSettings.Provider.Custom -> {
                 val base = cfg.baseUrl?.trimEnd('/')
                     ?: error("Custom provider requires a base URL")
-                // Accept either a base URL (".../v1") or a full
-                // endpoint (".../v1/chat/completions"); both are
-                // common in OpenAI-compatible docs.
                 val endpoint =
                     if (base.endsWith("/chat/completions")) base
                     else "$base/chat/completions"
                 openaiCompat(
                     cfg, systemPrompt, userPrompt, maxOutputTokens,
                     endpoint = endpoint,
-                    // No default — custom deployments dictate their
-                    // own model names, so model must be set.
                     defaultModel = cfg.model ?: error(
                         "Custom provider requires a model name",
                     ),
@@ -96,16 +92,16 @@ class AiClient(private val settingsProvider: () -> AiSettings.Config) {
                 })
             }
         }
-        val req = Request.Builder()
-            .url("https://api.anthropic.com/v1/messages")
-            .header("x-api-key", cfg.apiKey)
-            .header("anthropic-version", "2023-06-01")
-            .header("content-type", "application/json")
-            .post(payload.toString().toRequestBody(JSON_MEDIA))
-            .build()
-        return execute(req) { body ->
+        return execute(
+            url = "https://api.anthropic.com/v1/messages",
+            payload = payload.toString(),
+            headers = {
+                header("x-api-key", cfg.apiKey)
+                header("anthropic-version", "2023-06-01")
+            },
+        ) { body ->
             // Shape: { content: [{type:"text", text:"..."}], ... }
-            (body["content"] as? kotlinx.serialization.json.JsonArray)
+            (body["content"] as? JsonArray)
                 ?.firstOrNull()
                 ?.jsonObject
                 ?.get("text")
@@ -141,13 +137,11 @@ class AiClient(private val settingsProvider: () -> AiSettings.Config) {
                 })
             }
         }
-        val req = Request.Builder()
-            .url(endpoint)
-            .header("Authorization", "Bearer ${cfg.apiKey}")
-            .header("content-type", "application/json")
-            .post(payload.toString().toRequestBody(JSON_MEDIA))
-            .build()
-        return execute(req) { body ->
+        return execute(
+            url = endpoint,
+            payload = payload.toString(),
+            headers = { header("Authorization", "Bearer ${cfg.apiKey}") },
+        ) { body ->
             body["choices"]
                 ?.jsonArray?.firstOrNull()
                 ?.jsonObject?.get("message")
@@ -157,30 +151,32 @@ class AiClient(private val settingsProvider: () -> AiSettings.Config) {
         }
     }
 
-    private suspend fun <T> execute(req: Request, parse: (JsonObject) -> T): T =
-        kotlinx.coroutines.withContext(ioDispatcher) {
-            http.newCall(req).execute().use { resp ->
-                val body = resp.body?.string().orEmpty()
-                val host = req.url.host
-                if (!resp.isSuccessful) {
-                    // Try to extract a human message from the usual error
-                    // shapes (Anthropic + OpenAI-compat are similar enough).
-                    val pretty = runCatching {
-                        val obj = json.parseToJsonElement(body).jsonObject
-                        val err = (obj["error"] as? JsonObject)
-                        err?.get("message")?.jsonPrimitive?.content
-                            ?: obj["message"]?.jsonPrimitive?.content
-                    }.getOrNull()
-                    val msg = pretty ?: body.take(200)
-                    error("$host ${resp.code}: $msg")
-                }
-                val obj = runCatching { json.parseToJsonElement(body).jsonObject }
-                    .getOrElse { error("$host bad JSON: ${body.take(300)}") }
-                parse(obj)
-            }
+    private suspend fun <T> execute(
+        url: String,
+        payload: String,
+        headers: HttpRequestBuilder.() -> Unit,
+        parse: (JsonObject) -> T,
+    ): T = withContext(ioDispatcher) {
+        val resp = http.post(url) {
+            contentType(ContentType.Application.Json)
+            headers()
+            setBody(payload)
+            timeout { requestTimeoutMillis = 60_000 }
         }
-
-    companion object {
-        private val JSON_MEDIA = "application/json".toMediaType()
+        val body = resp.bodyAsText()
+        val host = Url(url).host
+        if (!resp.status.isSuccess()) {
+            val pretty = runCatching {
+                val obj = json.parseToJsonElement(body).jsonObject
+                val err = (obj["error"] as? JsonObject)
+                err?.get("message")?.jsonPrimitive?.content
+                    ?: obj["message"]?.jsonPrimitive?.content
+            }.getOrNull()
+            val msg = pretty ?: body.take(200)
+            error("$host ${resp.status.value}: $msg")
+        }
+        val obj = runCatching { json.parseToJsonElement(body).jsonObject }
+            .getOrElse { error("$host bad JSON: ${body.take(300)}") }
+        parse(obj)
     }
 }

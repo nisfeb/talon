@@ -24,13 +24,13 @@ import io.nisfeb.talon.data.AppDatabase
 import io.nisfeb.talon.ui.DraftStore
 import io.nisfeb.talon.ui.LocationProvider
 import io.nisfeb.talon.urbit.TlonChatRepo
-import okhttp3.OkHttpClient
+import io.ktor.client.HttpClient
 
 @Composable
 fun ThreadScreen(
     db: AppDatabase,
     repo: TlonChatRepo,
-    http: OkHttpClient,
+    http: HttpClient,
     drafts: DraftStore,
     ourPatp: String,
     whom: String,

@@ -1,4 +1,7 @@
 package io.nisfeb.talon.ui
+import io.ktor.client.request.get
+import io.ktor.client.statement.bodyAsText
+import io.ktor.http.isSuccess
 import io.nisfeb.talon.util.secureRandomBytes
 import kotlin.io.encoding.Base64
 import kotlin.io.encoding.ExperimentalEncodingApi
@@ -134,7 +137,7 @@ typealias LocationProvider = suspend () -> Result<Pair<Double, Double>>
 suspend fun runCommand(
     rawText: String,
     repo: TlonChatRepo,
-    http: okhttp3.OkHttpClient,
+    http: io.ktor.client.HttpClient,
     locationProvider: LocationProvider? = null,
     /** Per-device opt-in (UiSettings.powerFeaturesEnabled). When
      *  false, /poke returns an error directing the user to flip the
@@ -352,7 +355,7 @@ private fun isValidTalkKey(s: String): Boolean =
 
 // ─────────── /hn ───────────
 
-private suspend fun runHn(http: okhttp3.OkHttpClient): CommandResult {
+private suspend fun runHn(http: io.ktor.client.HttpClient): CommandResult {
     return runCatching {
         val ids = fetchJsonArray(http, "https://hacker-news.firebaseio.com/v0/topstories.json")
             ?: return CommandResult.Error("/hn: empty top-stories list")
@@ -370,33 +373,29 @@ private suspend fun runHn(http: okhttp3.OkHttpClient): CommandResult {
 }
 
 private suspend fun fetchJsonArray(
-    http: okhttp3.OkHttpClient,
+    http: io.ktor.client.HttpClient,
     url: String,
 ): kotlinx.serialization.json.JsonArray? = kotlinx.coroutines.withContext(ioDispatcher) {
-    val req = okhttp3.Request.Builder().url(url).get().build()
-    http.newCall(req).execute().use { resp ->
-        if (!resp.isSuccessful) return@withContext null
-        val body = resp.body?.string() ?: return@withContext null
-        val el = kotlinx.serialization.json.Json.parseToJsonElement(body)
-        el as? kotlinx.serialization.json.JsonArray
-    }
+    val resp = http.get(url)
+    if (!resp.status.isSuccess()) return@withContext null
+    val body = resp.bodyAsText()
+    val el = kotlinx.serialization.json.Json.parseToJsonElement(body)
+    el as? kotlinx.serialization.json.JsonArray
 }
 
 private suspend fun fetchJsonObject(
-    http: okhttp3.OkHttpClient,
+    http: io.ktor.client.HttpClient,
     url: String,
 ): Map<String, Any?>? = kotlinx.coroutines.withContext(ioDispatcher) {
-    val req = okhttp3.Request.Builder().url(url).get().build()
-    http.newCall(req).execute().use { resp ->
-        if (!resp.isSuccessful) return@withContext null
-        val body = resp.body?.string() ?: return@withContext null
-        val obj = kotlinx.serialization.json.Json.parseToJsonElement(body)
-            as? kotlinx.serialization.json.JsonObject ?: return@withContext null
-        obj.mapValues { (_, v) ->
-            val p = v as? kotlinx.serialization.json.JsonPrimitive
-            if (p == null) null
-            else if (p.isString) p.content
-            else p.content.toLongOrNull() ?: p.content
-        }
+    val resp = http.get(url)
+    if (!resp.status.isSuccess()) return@withContext null
+    val body = resp.bodyAsText()
+    val obj = kotlinx.serialization.json.Json.parseToJsonElement(body)
+        as? kotlinx.serialization.json.JsonObject ?: return@withContext null
+    obj.mapValues { (_, v) ->
+        val p = v as? kotlinx.serialization.json.JsonPrimitive
+        if (p == null) null
+        else if (p.isString) p.content
+        else p.content.toLongOrNull() ?: p.content
     }
 }

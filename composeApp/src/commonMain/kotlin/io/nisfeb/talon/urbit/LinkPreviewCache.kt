@@ -1,16 +1,24 @@
 package io.nisfeb.talon.urbit
-import io.nisfeb.talon.util.ioDispatcher
 
+import io.ktor.client.HttpClient
+import io.ktor.client.request.header
+import io.ktor.client.request.prepareGet
+import io.ktor.client.statement.bodyAsChannel
+import io.ktor.http.HttpHeaders
+import io.ktor.http.URLBuilder
+import io.ktor.http.Url
+import io.ktor.http.isSuccess
+import io.ktor.http.takeFrom
+import io.ktor.utils.io.readAvailable
 import io.nisfeb.talon.util.decodeHtmlEntities
+import io.nisfeb.talon.util.ioDispatcher
+import kotlinx.atomicfu.locks.SynchronizedObject
+import kotlinx.atomicfu.locks.synchronized
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import okhttp3.OkHttpClient
-import okhttp3.Request
-import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Minimal link-preview fetcher. For each requested URL we do one
@@ -26,50 +34,52 @@ object LinkPreviewCache {
         val imageUrl: String?,
     ) {
         val domain: String get() = runCatching {
-            java.net.URI(url).host?.removePrefix("www.")
-        }.getOrNull() ?: url
+            Url(url).host.removePrefix("www.")
+        }.getOrNull()?.takeIf { it.isNotBlank() } ?: url
     }
 
-    // ConcurrentHashMap rejects null values, so we wrap the result to
-    // distinguish "fetched, no preview" from "not fetched yet".
     private sealed interface Entry {
         object None : Entry
         data class Some(val preview: Preview) : Entry
     }
 
-    private val results = ConcurrentHashMap<String, Entry>()
-    private val inFlight = ConcurrentHashMap<String, Job>()
+    private val lock = SynchronizedObject()
+    private val results = HashMap<String, Entry>()
+    private val inFlight = HashMap<String, Job>()
     private val scope = CoroutineScope(SupervisorJob() + ioDispatcher)
 
-    private fun record(url: String, preview: Preview?) {
+    private fun record(url: String, preview: Preview?) = synchronized(lock) {
         results[url] = if (preview != null) Entry.Some(preview) else Entry.None
     }
 
     private fun cached(url: String): Preview? =
-        (results[url] as? Entry.Some)?.preview
+        synchronized(lock) { (results[url] as? Entry.Some)?.preview }
 
-    private fun hasAttempted(url: String): Boolean = results.containsKey(url)
+    private fun hasAttempted(url: String): Boolean =
+        synchronized(lock) { results.containsKey(url) }
 
     /**
      * Returns a cached preview if we have one, kicks off a fetch if not.
      * UI should poll this via a Compose-friendly mechanism (e.g. LaunchedEffect).
      * Returns null both for "still loading" and "no preview available".
      */
-    fun get(http: OkHttpClient, url: String): Preview? {
+    fun get(http: HttpClient, url: String): Preview? {
         if (hasAttempted(url)) return cached(url)
-        if (inFlight[url]?.isActive == true) return null
-        inFlight[url] = scope.launch {
-            val fetched = runCatching { fetch(http, url) }.getOrNull()
-            record(url, fetched)
-            inFlight.remove(url)
+        synchronized(lock) {
+            if (inFlight[url]?.isActive == true) return null
+            inFlight[url] = scope.launch {
+                val fetched = runCatching { fetch(http, url) }.getOrNull()
+                record(url, fetched)
+                synchronized(lock) { inFlight.remove(url) }
+            }
         }
         return null
     }
 
     /** Poll-friendly suspend variant: waits for an in-flight fetch. */
-    suspend fun await(http: OkHttpClient, url: String): Preview? {
+    suspend fun await(http: HttpClient, url: String): Preview? {
         if (hasAttempted(url)) return cached(url)
-        val job = inFlight[url]
+        val job = synchronized(lock) { inFlight[url] }
         if (job != null) {
             job.join()
             return cached(url)
@@ -81,33 +91,29 @@ object LinkPreviewCache {
         }
     }
 
-    private fun fetch(http: OkHttpClient, url: String): Preview? {
-        val req = Request.Builder()
-            .url(url)
-            .header(
-                "User-Agent",
+    private suspend fun fetch(http: HttpClient, url: String): Preview? {
+        return http.prepareGet(url) {
+            header(
+                HttpHeaders.UserAgent,
                 "Mozilla/5.0 (Android; Talon) AppleWebKit/537.36",
             )
-            .header("Accept", "text/html,application/xhtml+xml")
-            .get()
-            .build()
-        http.newCall(req).execute().use { resp ->
-            if (!resp.isSuccessful) return null
-            val type = resp.header("Content-Type").orEmpty()
-            if (!type.contains("html")) return null
+            header(HttpHeaders.Accept, "text/html,application/xhtml+xml")
+        }.execute { resp ->
+            if (!resp.status.isSuccess()) return@execute null
+            val type = resp.headers[HttpHeaders.ContentType].orEmpty()
+            if (!type.contains("html")) return@execute null
             // Only read the first ~64KB — OG tags are always in <head>.
-            val reader = resp.body?.byteStream()?.bufferedReader() ?: return null
-            val buf = CharArray(CHUNK_SIZE)
-            val sb = StringBuilder()
+            val limit = CHUNK_SIZE * 8
+            val channel = resp.bodyAsChannel()
+            val buf = ByteArray(limit)
             var total = 0
-            while (total < CHUNK_SIZE * 8) {
-                val n = reader.read(buf)
+            while (total < limit) {
+                val n = channel.readAvailable(buf, total, limit - total)
                 if (n <= 0) break
-                sb.append(buf, 0, n)
                 total += n
-                if (sb.contains("</head>", ignoreCase = true)) break
+                if (buf.decodeToString(0, total).contains("</head>", ignoreCase = true)) break
             }
-            val head = sb.toString()
+            val head = buf.decodeToString(0, total)
             val title = META_OG_TITLE.find(head)?.groupValues?.get(1)
                 ?: META_TW_TITLE.find(head)?.groupValues?.get(1)
                 ?: TITLE_TAG.find(head)?.groupValues?.get(1)
@@ -117,11 +123,10 @@ object LinkPreviewCache {
             val image = META_OG_IMAGE.find(head)?.groupValues?.get(1)
                 ?: META_TW_IMAGE.find(head)?.groupValues?.get(1)
             val normalizedImage = image?.let { resolveUrl(url, it) }
-            // Skip previews that have nothing useful to show.
             if (title.isNullOrBlank() && description.isNullOrBlank() && normalizedImage.isNullOrBlank()) {
-                return null
+                return@execute null
             }
-            return Preview(
+            Preview(
                 url = url,
                 title = title?.let(::decodeHtmlEntities),
                 description = description?.let(::decodeHtmlEntities),
@@ -131,13 +136,11 @@ object LinkPreviewCache {
     }
 
     private fun resolveUrl(base: String, ref: String): String = runCatching {
-        java.net.URI(base).resolve(ref).toString()
+        URLBuilder().takeFrom(base).takeFrom(ref).buildString()
     }.getOrElse { ref }
 
     private const val CHUNK_SIZE = 8192
 
-    // Capture the content= attribute without being pedantic about quote style
-    // or attribute order. Real OG tags are well-formed in practice.
     private val META_OG_TITLE = Regex(
         """<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']+)["']""",
         RegexOption.IGNORE_CASE,

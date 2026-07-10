@@ -21,13 +21,22 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import io.ktor.client.HttpClient
+import io.nisfeb.talon.util.createAppHttpClient
 import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
 import java.util.concurrent.TimeUnit
 
 class TalonApplication : Application() {
     // Always-on singletons — not ship-scoped.
+    // OkHttp client for the Android-only leaf consumers (image
+    // downloader, daily-digest weather fetch). Session/repo/UI use
+    // [ktorHttp] instead.
     lateinit var http: OkHttpClient
+        private set
+    // Shared multiplatform HTTP client threaded into common
+    // (UrbitSession, TlonChatRepo, link previews).
+    lateinit var ktorHttp: HttpClient
         private set
     lateinit var sessionStore: SessionStore
         private set
@@ -149,6 +158,7 @@ class TalonApplication : Application() {
             .readTimeout(0, TimeUnit.SECONDS) // long-lived SSE
             .writeTimeout(15, TimeUnit.SECONDS)
             .build()
+        ktorHttp = createAppHttpClient()
         sessionStore = io.nisfeb.talon.urbit.AndroidSessionStore(this)
         aiSettings = io.nisfeb.talon.ai.AndroidAiSettings(this)
         dailyDigestSettings = io.nisfeb.talon.ai.AndroidDailyDigestSettings(this)
@@ -174,7 +184,7 @@ class TalonApplication : Application() {
         )
         val updatePrefs = getSharedPreferences("update_state", MODE_PRIVATE)
         val httpChecker = HttpUpdateChecker(
-            http = http,
+            http = ktorHttp,
             url = "https://github.com/nisfeb/talon/releases/latest/download/latest.json",
             now = { System.currentTimeMillis() },
             lastCheckedAtMs = { updatePrefs.getLong("last_http_check_ms", 0L) },
@@ -347,7 +357,7 @@ class TalonApplication : Application() {
         val priorIndexer = if (::embeddingIndexer.isInitialized) embeddingIndexer else null
 
         db = io.nisfeb.talon.data.createAppDatabase(this, "talon-${ship}.db")
-        session = UrbitSession(http, sessionStore)
+        session = UrbitSession(ktorHttp, sessionStore)
         // Re-hydrate the cookie jar + baseUrl from the stored session
         // for this ship (if any). Skips silently for the placeholder
         // "none" ship used pre-login.

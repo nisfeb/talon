@@ -1163,7 +1163,7 @@ fun TalonApp(
                 }
                 val relayClient = remember(app) {
                     io.nisfeb.talon.notify.RelayClient(
-                        http = app.http,
+                        http = app.ktorHttp,
                         endpoint = { app.relaySettings.endpoint.value },
                     )
                 }
@@ -1229,7 +1229,7 @@ fun TalonApp(
             groupInfoDrilldown != null && groupInfoOpenFor != null -> MediaListScreen(
                 db = app.db,
                 repo = app.repo,
-                http = app.http,
+                http = app.ktorHttp,
                 whom = groupInfoOpenFor!!,
                 category = groupInfoDrilldown!!,
                 onBack = { closeDrilldownAction() },
@@ -1277,7 +1277,7 @@ fun TalonApp(
                 ThreadScreen(
                     db = app.db,
                     repo = app.repo,
-                    http = app.http,
+                    http = app.ktorHttp,
                     drafts = app.drafts,
                     ourPatp = loggedInShip ?: "",
                     whom = openWhom!!,
@@ -1398,7 +1398,7 @@ fun TalonApp(
                     db = app.db,
                     repo = app.repo,
                     drafts = app.drafts,
-                    http = app.http,
+                    http = app.ktorHttp,
                     aiSettings = app.aiSettings,
                     uiSettings = app.uiSettings,
                     ourPatp = loggedInShip ?: "",

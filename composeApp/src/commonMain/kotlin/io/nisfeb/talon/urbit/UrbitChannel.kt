@@ -1,8 +1,20 @@
 package io.nisfeb.talon.urbit
+
+import io.ktor.client.HttpClient
+import io.ktor.client.plugins.sse.sse
+import io.ktor.client.plugins.timeout
+import io.ktor.client.request.get
+import io.ktor.client.request.header
+import io.ktor.client.request.put
+import io.ktor.client.request.setBody
+import io.ktor.client.statement.bodyAsText
+import io.ktor.http.ContentType
+import io.ktor.http.HttpHeaders
+import io.ktor.http.contentType
+import io.ktor.http.isSuccess
 import io.nisfeb.talon.util.ioDispatcher
 import io.nisfeb.talon.util.nowMs
-
-import kotlinx.coroutines.Dispatchers
+import kotlinx.atomicfu.atomic
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
@@ -13,19 +25,9 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
-import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
-import okhttp3.HttpUrl
-import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.OkHttpClient
-import okhttp3.Request
-import okhttp3.RequestBody.Companion.toRequestBody
-import okhttp3.sse.EventSource
-import okhttp3.sse.EventSourceListener
-import okhttp3.sse.EventSources
-import java.util.concurrent.atomic.AtomicLong
 import kotlin.random.Random
 
 /**
@@ -37,16 +39,14 @@ import kotlin.random.Random
  * typed decoding per-agent.
  */
 class UrbitChannel internal constructor(
-    private val http: OkHttpClient,
-    private val baseUrl: HttpUrl,
+    private val http: HttpClient,
+    private val baseUrl: String,
     private val ship: String,
 ) {
     private val channelId = "${nowMs()}-${Random.nextLong().toString(16).take(8)}"
-    private val channelUrl: HttpUrl = baseUrl.newBuilder()
-        .addPathSegments("~/channel/$channelId")
-        .build()
+    private val channelUrl: String = "${baseUrl.trimEnd('/')}/~/channel/$channelId"
 
-    private val nextId = AtomicLong(1)
+    private val nextId = atomic(1L)
     private val json = Json { ignoreUnknownKeys = true }
 
     /** Unique message id generator. Urbit requires monotonically-increasing ids. */
@@ -64,43 +64,38 @@ class UrbitChannel internal constructor(
      */
     fun events(): Flow<UrbitEvent> = channelFlow {
         val inbox = Channel<UrbitEvent>(Channel.UNLIMITED)
-        val request = Request.Builder()
-            .url(channelUrl)
-            .header("Accept", "text/event-stream")
-            .build()
-        val listener = object : EventSourceListener() {
-            override fun onEvent(source: EventSource, id: String?, type: String?, data: String) {
-                val element = runCatching { json.parseToJsonElement(data) }.getOrNull() ?: return
-                // inbox is UNLIMITED so trySend only fails after close,
-                // at which point the whole flow is shutting down anyway.
-                inbox.trySend(UrbitEvent(id?.toLongOrNull(), element))
+        // Drive the SSE session on its own coroutine. The sse{} block
+        // stays suspended for the life of the connection; when this
+        // job is cancelled (awaitClose below) the session closes.
+        val reader = launch {
+            try {
+                http.sse(
+                    urlString = channelUrl,
+                    request = { header(HttpHeaders.Accept, "text/event-stream") },
+                ) {
+                    incoming.collect { ev ->
+                        val data = ev.data ?: return@collect
+                        val element = runCatching { json.parseToJsonElement(data) }.getOrNull()
+                            ?: return@collect
+                        // inbox is UNLIMITED so trySend only fails after close,
+                        // at which point the whole flow is shutting down anyway.
+                        inbox.trySend(UrbitEvent(ev.id?.toLongOrNull(), element))
+                    }
+                }
+                inbox.close()
+            } catch (t: Throwable) {
+                inbox.close(t)
             }
-            override fun onFailure(source: EventSource, t: Throwable?, response: okhttp3.Response?) {
-                inbox.close(t ?: RuntimeException("SSE closed: ${response?.code}"))
-            }
-            override fun onClosed(source: EventSource) { inbox.close() }
         }
-        val es = EventSources.createFactory(http).newEventSource(request, listener)
         // Drain the inbox into the channelFlow's send slot. Suspends when
-        // the collector is slow, but inbox is unlimited so the SSE callback
-        // never has to block on OkHttp's dispatcher thread.
+        // the collector is slow, but inbox is unlimited so the SSE reader
+        // never has to block on the engine's dispatcher.
         val forwarder = launch {
             for (event in inbox) send(event)
             close()
         }
         awaitClose {
-            // es.cancel() stops new events at the SSE source.
-            // inbox.close() terminates the forwarder's for-loop.
-            // forwarder.cancel() is belt-and-suspenders: if the
-            // forwarder is mid-send when the collector vanishes,
-            // channelFlow's send() throws CancellationException
-            // anyway and the loop unwinds naturally. The explicit
-            // cancel here covers the narrow race where send was
-            // about to be invoked. A double-deliver of one event
-            // is theoretically possible, but every Urbit event we
-            // ingest is idempotent (Room upserts on primary key),
-            // so harmless in practice.
-            es.cancel()
+            reader.cancel()
             inbox.close()
             forwarder.cancel()
         }
@@ -170,75 +165,52 @@ class UrbitChannel internal constructor(
         outputMark: String,
         body: JsonElement,
     ): JsonElement = withContext(ioDispatcher) {
-        val url = baseUrl.newBuilder()
-            .addPathSegments("spider/$desk/$inputMark/$threadName/$outputMark.json")
-            .build()
-        val request = Request.Builder()
-            .url(url)
-            .put(body.toString().toRequestBody(JSON_MEDIA_TYPE))
-            .build()
-        http.newCall(request).execute().use { resp ->
-            if (!resp.isSuccessful) error("thread $threadName: HTTP ${resp.code}")
-            val text = resp.body?.string().orEmpty()
-            if (text.isBlank()) JsonNull else json.parseToJsonElement(text)
+        val url = "${baseUrl.trimEnd('/')}/spider/$desk/$inputMark/$threadName/$outputMark.json"
+        val resp = http.put(url) {
+            contentType(ContentType.Application.Json)
+            setBody(body.toString())
         }
+        if (!resp.status.isSuccess()) error("thread $threadName: HTTP ${resp.status.value}")
+        val text = resp.bodyAsText()
+        if (text.isBlank()) JsonNull else json.parseToJsonElement(text)
     }
 
     /**
      * Synchronous scry — reads a noun path without subscribing.
      *
-     * [timeoutSecs] caps the *OkHttp* call duration. Defaults to
+     * [timeoutSecs] caps the per-request duration. Defaults to
      * [RPC_TIMEOUT_SECS] for the bootstrap / poke paths that can
      * legitimately take a few seconds on a slow ship; chat-refresh
      * probes pass a tighter value because they iterate up to 20
      * shape-fallback paths and any single one being slow blocks the
-     * loading indicator. A coroutine-level [withTimeout] doesn't help
-     * here — OkHttp's `execute()` is blocking and only `call.cancel()`
-     * (which the per-call timeout triggers internally) actually
-     * unwinds an in-flight request.
+     * loading indicator.
      */
     suspend fun scry(
         app: String,
         path: String,
         timeoutSecs: Long = RPC_TIMEOUT_SECS,
-    ): JsonElement =
-        withContext(ioDispatcher) {
-            val url = baseUrl.newBuilder()
-                .addPathSegments("~/scry/$app$path.json")
-                .build()
-            val request = Request.Builder().url(url).get().build()
-            http.newCall(request).withRpcTimeout(timeoutSecs).execute().use { resp ->
-                if (!resp.isSuccessful) error("scry $app$path: HTTP ${resp.code}")
-                val body = resp.body?.string() ?: error("empty scry body")
-                json.parseToJsonElement(body)
-            }
+    ): JsonElement = withContext(ioDispatcher) {
+        val url = "${baseUrl.trimEnd('/')}/~/scry/$app$path.json"
+        val resp = http.get(url) {
+            timeout { requestTimeoutMillis = timeoutSecs * 1000 }
         }
-
-    /** PUT a batch of channel actions. Runs on ioDispatcher. */
-    private suspend fun put(messages: JsonArray) = withContext(ioDispatcher) {
-        val request = Request.Builder()
-            .url(channelUrl)
-            .put(messages.toString().toRequestBody(JSON_MEDIA_TYPE))
-            .build()
-        http.newCall(request).withRpcTimeout().execute().use { resp ->
-            if (!resp.isSuccessful) error("channel PUT: HTTP ${resp.code}")
-        }
+        if (!resp.status.isSuccess()) error("scry $app$path: HTTP ${resp.status.value}")
+        val body = resp.bodyAsText()
+        if (body.isEmpty()) error("empty scry body")
+        json.parseToJsonElement(body)
     }
 
-    /**
-     * Cap one RPC call at [timeoutSecs]. The shared OkHttpClient uses
-     * readTimeout=0 so the SSE channel can stay open indefinitely;
-     * without a per-call cap, a hung scry or poke would wait forever
-     * (e.g. when the ship returns intermittent 504s on overload).
-     */
-    private fun okhttp3.Call.withRpcTimeout(
-        timeoutSecs: Long = RPC_TIMEOUT_SECS,
-    ): okhttp3.Call = apply {
-        timeout().timeout(timeoutSecs, java.util.concurrent.TimeUnit.SECONDS)
+    /** PUT a batch of channel actions. Runs on the IO dispatcher. */
+    private suspend fun put(messages: JsonArray) = withContext(ioDispatcher) {
+        val resp = http.put(channelUrl) {
+            contentType(ContentType.Application.Json)
+            setBody(messages.toString())
+            timeout { requestTimeoutMillis = RPC_TIMEOUT_SECS * 1000 }
+        }
+        if (!resp.status.isSuccess()) error("channel PUT: HTTP ${resp.status.value}")
     }
 
     companion object {
-        private val JSON_MEDIA_TYPE = "application/json".toMediaType()
         private const val RPC_TIMEOUT_SECS = 30L
     }
 }

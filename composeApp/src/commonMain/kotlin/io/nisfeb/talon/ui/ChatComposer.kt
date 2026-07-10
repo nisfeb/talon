@@ -60,7 +60,7 @@ import io.nisfeb.talon.util.Log
 import io.nisfeb.talon.util.decodeImageDimensions
 import io.nisfeb.talon.util.rememberImagePicker
 import kotlinx.coroutines.launch
-import okhttp3.OkHttpClient
+import io.ktor.client.HttpClient
 
 /**
  * Shared chat composer used by [DmChatScreen]'s main message input and
@@ -158,7 +158,7 @@ fun ChatComposer(
     state: ComposerState,
     db: AppDatabase,
     repo: TlonChatRepo,
-    http: OkHttpClient,
+    http: HttpClient,
     drafts: DraftStore,
     whom: String,
     contactMap: ContactMap,

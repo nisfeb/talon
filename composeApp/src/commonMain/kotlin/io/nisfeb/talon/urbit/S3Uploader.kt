@@ -1,16 +1,23 @@
 package io.nisfeb.talon.urbit
 
-import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.OkHttpClient
-import okhttp3.Request
-import okhttp3.RequestBody.Companion.toRequestBody
-import java.security.MessageDigest
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
-import java.util.TimeZone
-import javax.crypto.Mac
-import javax.crypto.spec.SecretKeySpec
+import io.ktor.client.HttpClient
+import io.ktor.client.plugins.timeout
+import io.ktor.client.request.header
+import io.ktor.client.request.put
+import io.ktor.client.request.setBody
+import io.ktor.client.statement.bodyAsText
+import io.ktor.http.ContentType
+import io.ktor.http.contentType
+import io.ktor.http.isSuccess
+import io.nisfeb.talon.util.ioDispatcher
+import kotlinx.coroutines.withContext
+import kotlinx.datetime.Clock
+import kotlinx.datetime.LocalDateTime
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.format.char
+import kotlinx.datetime.toLocalDateTime
+import okio.ByteString.Companion.encodeUtf8
+import okio.ByteString.Companion.toByteString
 
 /**
  * Minimal AWS SigV4 presigned PUT for S3-compatible object storage
@@ -29,12 +36,9 @@ import javax.crypto.spec.SecretKeySpec
  * — sending those to an AWS bucket fronted by a CDN tends to come
  * back as 502 Bad Gateway).
  *
- * TODO(port/ios): this file uses java.security.MessageDigest,
- * javax.crypto.{Mac, SecretKeySpec}, java.text.SimpleDateFormat, and
- * java.util.TimeZone — none of which exist on Kotlin/Native (iOS).
- * When iOS is added as a target, the SigV4 signing path needs an
- * expect/actual split (or a multiplatform crypto library substitution
- * like the kotlinx-crypto project).
+ * Crypto/date are multiplatform: okio for SHA-256 + HMAC-SHA256 and
+ * kotlinx-datetime for the UTC ISO-basic timestamps, so this signs
+ * identically on Android, JVM, and iOS with no expect/actual split.
  */
 object S3Uploader {
 
@@ -54,19 +58,19 @@ object S3Uploader {
      * PUT `bytes` to the configured bucket at `key`, return the public URL
      * to reference the object (either publicUrlBase/key or endpoint/bucket/key).
      */
-    fun put(
-        http: OkHttpClient,
+    suspend fun put(
+        http: HttpClient,
         creds: Credentials,
         config: Configuration,
         key: String,
         bytes: ByteArray,
         contentType: String,
-    ): String {
+    ): String = withContext(ioDispatcher) {
         val endpoint = prefixEndpoint(creds.endpoint).trimEnd('/')
         val baseUrl = "$endpoint/${config.bucket}/${encodePath(key)}"
         val host = baseUrl.toHttpHost()
 
-        val now = Date()
+        val now = Clock.System.now().toLocalDateTime(TimeZone.UTC)
         val amzDate = AMZ_DATE_FMT.format(now)
         val dateStamp = DATE_STAMP_FMT.format(now)
 
@@ -125,7 +129,7 @@ object S3Uploader {
             append("AWS4-HMAC-SHA256\n")
             append("$amzDate\n")
             append("$credentialScope\n")
-            append(sha256Hex(canonicalRequest.toByteArray(Charsets.UTF_8)))
+            append(sha256Hex(canonicalRequest.encodeToByteArray()))
         }
 
         val signingKey = deriveSigningKey(creds.secretAccessKey, dateStamp, config.region, "s3")
@@ -133,26 +137,24 @@ object S3Uploader {
 
         val presignedUrl = "$baseUrl?$canonicalQuery&X-Amz-Signature=$signature"
 
-        val requestBuilder = Request.Builder()
-            .url(presignedUrl)
-            .put(bytes.toRequestBody(contentType.toMediaType()))
-        // Only echo headers on the wire for DigitalOcean. Auth is in
-        // the query string; no Authorization header anywhere.
-        extraHeaders.forEach { (k, v) -> requestBuilder.header(k, v) }
-
-        // Cap the PUT at 60s — the shared client uses readTimeout=0 to
+        // Cap the PUT at 60s — the shared client uses no read timeout to
         // hold the SSE channel open, so without an explicit cap an
         // unresponsive S3 endpoint freezes the upload indefinitely.
-        http.newCall(requestBuilder.build())
-            .apply { timeout().timeout(60, java.util.concurrent.TimeUnit.SECONDS) }
-            .execute().use { resp ->
-                if (!resp.isSuccessful) {
-                    val body = resp.body?.string().orEmpty()
-                    error("S3 PUT failed: HTTP ${resp.code}${if (body.isNotBlank()) " — $body" else ""}")
-                }
-            }
+        val resp = http.put(presignedUrl) {
+            contentType(ContentType.parse(contentType))
+            // Only echo headers on the wire for DigitalOcean. Auth is in
+            // the query string; no Authorization header anywhere. Skip
+            // content-type here — it's already set from the body above.
+            extraHeaders.forEach { (k, v) -> if (k != "content-type") header(k, v) }
+            setBody(bytes)
+            timeout { requestTimeoutMillis = 60_000 }
+        }
+        if (!resp.status.isSuccess()) {
+            val body = resp.bodyAsText()
+            error("S3 PUT failed: HTTP ${resp.status.value}${if (body.isNotBlank()) " — $body" else ""}")
+        }
 
-        return publicUrl(config, endpoint, key)
+        publicUrl(config, endpoint, key)
     }
 
     private fun publicUrl(config: Configuration, endpoint: String, key: String): String {
@@ -171,16 +173,21 @@ object S3Uploader {
      * set: A–Z, a–z, 0–9, `-`, `_`, `.`, `~`). Used for canonical query
      * keys/values and for path segments — `/` is NOT preserved here, so
      * callers that need a path use `encodePath` to keep separators raw.
+     * ASCII-only unreserved set (not Char.isLetterOrDigit, which would
+     * treat Latin-1 high bytes as letters and leave them unencoded).
      */
     private fun uriEncode(value: String): String = buildString {
-        for (byte in value.toByteArray(Charsets.UTF_8)) {
+        for (byte in value.encodeToByteArray()) {
             val c = byte.toInt() and 0xff
             val ch = c.toChar()
-            if (ch.isLetterOrDigit() || ch == '-' || ch == '_' || ch == '.' || ch == '~') {
+            if (ch in 'A'..'Z' || ch in 'a'..'z' || ch in '0'..'9' ||
+                ch == '-' || ch == '_' || ch == '.' || ch == '~'
+            ) {
                 append(ch)
             } else {
                 append('%')
-                append(String.format(Locale.US, "%02X", c))
+                append(HEX_UPPER[c ushr 4])
+                append(HEX_UPPER[c and 0x0f])
             }
         }
     }
@@ -200,39 +207,30 @@ object S3Uploader {
         region: String,
         service: String,
     ): ByteArray {
-        val kDate = hmacSha256(("AWS4$secret").toByteArray(Charsets.UTF_8), dateStamp)
+        val kDate = hmacSha256(("AWS4$secret").encodeToByteArray(), dateStamp)
         val kRegion = hmacSha256(kDate, region)
         val kService = hmacSha256(kRegion, service)
         return hmacSha256(kService, "aws4_request")
     }
 
-    private fun hmacSha256(key: ByteArray, data: String): ByteArray {
-        val mac = Mac.getInstance("HmacSHA256")
-        mac.init(SecretKeySpec(key, "HmacSHA256"))
-        return mac.doFinal(data.toByteArray(Charsets.UTF_8))
-    }
+    private fun hmacSha256(key: ByteArray, data: String): ByteArray =
+        data.encodeUtf8().hmacSha256(key.toByteString()).toByteArray()
 
     private fun hmacSha256Hex(key: ByteArray, data: String): String =
-        hmacSha256(key, data).toHex()
+        data.encodeUtf8().hmacSha256(key.toByteString()).hex()
 
     private fun sha256Hex(bytes: ByteArray): String =
-        MessageDigest.getInstance("SHA-256").digest(bytes).toHex()
+        bytes.toByteString().sha256().hex()
 
-    private fun ByteArray.toHex(): String {
-        val chars = "0123456789abcdef".toCharArray()
-        val sb = StringBuilder(size * 2)
-        for (b in this) {
-            val v = b.toInt() and 0xff
-            sb.append(chars[v ushr 4])
-            sb.append(chars[v and 0x0f])
-        }
-        return sb.toString()
-    }
+    private val HEX_UPPER = "0123456789ABCDEF".toCharArray()
 
-    private val AMZ_DATE_FMT = SimpleDateFormat("yyyyMMdd'T'HHmmss'Z'", Locale.US).apply {
-        timeZone = TimeZone.getTimeZone("UTC")
+    private val AMZ_DATE_FMT = LocalDateTime.Format {
+        year(); monthNumber(); dayOfMonth()
+        char('T')
+        hour(); minute(); second()
+        char('Z')
     }
-    private val DATE_STAMP_FMT = SimpleDateFormat("yyyyMMdd", Locale.US).apply {
-        timeZone = TimeZone.getTimeZone("UTC")
+    private val DATE_STAMP_FMT = LocalDateTime.Format {
+        year(); monthNumber(); dayOfMonth()
     }
 }

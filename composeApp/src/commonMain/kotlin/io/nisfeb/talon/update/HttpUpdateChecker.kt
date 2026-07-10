@@ -1,13 +1,15 @@
 package io.nisfeb.talon.update
-import io.nisfeb.talon.util.ioDispatcher
 
+import io.ktor.client.HttpClient
+import io.ktor.client.plugins.timeout
+import io.ktor.client.request.get
+import io.ktor.client.request.header
+import io.ktor.client.statement.bodyAsText
+import io.ktor.http.isSuccess
 import io.nisfeb.talon.util.Log
+import io.nisfeb.talon.util.ioDispatcher
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import okhttp3.OkHttpClient
-import okhttp3.Request
-import java.util.concurrent.TimeUnit
 
 /**
  * Fetches latest.json from a fixed HTTPS URL. Caller injects clock
@@ -18,12 +20,12 @@ import java.util.concurrent.TimeUnit
  * launch; this guard keeps us honest if the app gets cold-started
  * many times in a short window.
  *
- * Owns a derived OkHttpClient with a 15s callTimeout — the shared
- * app client uses readTimeout(0) for long-lived SSE, which would
- * let a hung manifest fetch hold an IO thread indefinitely.
+ * Uses a 15s per-request timeout — the shared app client leaves the
+ * request timeout uncapped for long-lived SSE, which would let a hung
+ * manifest fetch hold a connection indefinitely.
  */
 class HttpUpdateChecker(
-    http: OkHttpClient,
+    private val http: HttpClient,
     private val url: String,
     private val now: () -> Long,
     private val lastCheckedAtMs: () -> Long,
@@ -31,29 +33,23 @@ class HttpUpdateChecker(
     private val minIntervalMs: Long,
 ) : UpdateChecker {
 
-    private val client: OkHttpClient = http.newBuilder()
-        .callTimeout(15, TimeUnit.SECONDS)
-        .build()
-
     override suspend fun check(): UpdateManifest? = withContext(ioDispatcher) {
         val nowMs = now()
         val last = lastCheckedAtMs()
         if (nowMs - last < minIntervalMs) return@withContext null
         runCatching {
-            val req = Request.Builder().url(url)
-                .header("User-Agent", "Talon-UpdateChecker")
-                .build()
-            client.newCall(req).execute().use { resp ->
-                if (!resp.isSuccessful) return@runCatching null
-                val body = resp.body?.string() ?: return@runCatching null
-                val m = UpdateManifest.parse(body) ?: return@runCatching null
-                recordCheckedAt(nowMs)
-                m
+            val resp = http.get(url) {
+                header("User-Agent", "Talon-UpdateChecker")
+                timeout { requestTimeoutMillis = 15_000 }
             }
+            if (!resp.status.isSuccess()) return@runCatching null
+            val body = resp.bodyAsText()
+            val m = UpdateManifest.parse(body) ?: return@runCatching null
+            recordCheckedAt(nowMs)
+            m
         }.onFailure {
             // Don't swallow cancellation — let the parent scope's
             // termination propagate so coroutine teardown is clean.
-            // See DailyDigest.kt for the same pattern.
             if (it is CancellationException) throw it
             Log.w(TAG, "check failed: ${it.message}")
         }.getOrNull()

@@ -58,16 +58,16 @@ kotlin {
             // Multiplatform locks + atomics (java.util.concurrent is
             // JVM-only): caches, monotonic ids, cookie jar.
             implementation(libs.atomicfu)
-            // OkHttp + okhttp-sse are pure JVM but both Android and
-            // desktop targets are JVM-backed, so declaring them in
-            // commonMain is correct here. UrbitChannel + UrbitSession
-            // + S3Uploader + AiClient + LinkPreviewCache all consume
-            // them. If a non-JVM target (iOS, Wasm) is ever added,
-            // these need to move out of commonMain and the file-by-
-            // file deps need expect/actual splits or replacement
-            // libraries (Ktor for HTTP).
-            implementation(libs.okhttp)
-            implementation(libs.okhttp.sse)
+            // Ktor client — the multiplatform HTTP stack that replaces
+            // OkHttp across commonMain. Engine is per-leaf (OkHttp on
+            // JVM, Darwin on iOS); core carries the SSE + cookies plugins
+            // the Urbit /~/channel transport needs.
+            // The Urbit /~/channel transport (UrbitChannel + UrbitSession),
+            // S3Uploader, AiClient, and LinkPreviewCache all speak HTTP
+            // through this multiplatform client — no okhttp in commonMain.
+            // Each leaf target binds the engine (OkHttp on JVM, Darwin on
+            // iOS) via the httpEngineFactory expect/actual.
+            implementation(libs.ktor.client.core)
             // Room 2.7 ships KMP-aware artifacts so the entities,
             // DAOs, and the @Database-annotated expect class can all
             // live in commonMain. Each leaf target (androidMain /
@@ -91,6 +91,8 @@ kotlin {
             implementation(libs.reorderable)
         }
         androidMain.dependencies {
+            // Ktor OkHttp engine — backs the shared HttpClient on Android.
+            implementation(libs.ktor.client.okhttp)
             implementation(libs.androidx.activity.compose)
             implementation(libs.androidx.core.ktx)
             implementation(libs.androidx.lifecycle.runtime.ktx)
@@ -142,6 +144,8 @@ kotlin {
         desktopMain.dependencies {
             implementation(compose.desktop.currentOs)
             implementation(libs.kotlinx.coroutines.swing)
+            // Ktor OkHttp engine — backs the shared HttpClient on desktop.
+            implementation(libs.ktor.client.okhttp)
             // On-device sentence embedder for smart search +
             // important-message highlights. DJL (Deep Java Library)
             // wraps ONNX Runtime + HuggingFace tokenizers and resolves
@@ -164,6 +168,7 @@ kotlin {
         // on every supported target.
         commonTest.dependencies {
             implementation(kotlin("test"))
+            implementation(libs.ktor.client.mock)
         }
         // JUnit-on-JVM for the desktop target's unit tests; the
         // common kotlin.test surface delegates to JUnit on JVM
@@ -175,6 +180,7 @@ kotlin {
             implementation(libs.junit)
             implementation(libs.kotlinx.coroutines.test)
             implementation(kotlin("test"))
+            implementation(libs.ktor.client.mock)
             implementation("com.squareup.okhttp3:mockwebserver:4.12.0")
             // Compose Multiplatform UI test runner — `runComposeUiTest`,
             // `onNodeWithText`, `onNodeWithTag`, `performMouseInput`,

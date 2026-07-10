@@ -1,7 +1,17 @@
 package io.nisfeb.talon.ai
 import io.nisfeb.talon.util.ioDispatcher
 
-import kotlinx.coroutines.Dispatchers
+import io.ktor.client.HttpClient
+import io.ktor.client.plugins.timeout
+import io.ktor.client.request.HttpRequestBuilder
+import io.ktor.client.request.header
+import io.ktor.client.request.post
+import io.ktor.client.request.setBody
+import io.ktor.client.statement.bodyAsText
+import io.ktor.http.ContentType
+import io.ktor.http.Url
+import io.ktor.http.contentType
+import kotlinx.atomicfu.atomic
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -16,20 +26,13 @@ import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
-import okhttp3.HttpUrl
-import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.OkHttpClient
-import okhttp3.Request
-import okhttp3.RequestBody.Companion.toRequestBody
-import java.util.concurrent.TimeUnit
-import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * Minimal client for the ship's MCP server (Gall agent `%mcp-server`,
  * see ~/software/groundwire/urbit-mcp-server). It's served through Eyre
  * at `/mcp` on the ship's normal HTTP host, authenticated by the same
  * Eyre session cookie Talon already holds — so we reuse the session's
- * OkHttp client + base URL and add no new auth.
+ * HTTP client + base URL and add no new auth.
  *
  * Transport note: despite advertising SSE, every JSON-RPC method on this
  * server replies as a single JSON body on the POST's own connection
@@ -54,8 +57,8 @@ data class McpToolDef(
  * client and re-run initialize + tools/list (two ship round-trips, plus a
  * "Connecting to ship tools…" flash) on every reopen.
  *
- * Keyed on the session's OkHttp identity, not just the ship URL: the
- * McpClient copies the session's cookie jar, and sign-out clears that jar
+ * Keyed on the session's HTTP-client identity, not just the ship URL: the
+ * McpClient shares the session's cookie jar, and sign-out clears that jar
  * while re-login mints a NEW session + jar. A URL-only key kept serving
  * the dead client — tools advertised, every call unauthenticated — until
  * relaunch. New session ⇒ new http instance ⇒ cache miss ⇒ fresh
@@ -65,43 +68,43 @@ data class McpToolDef(
  * see them until reconnect. Add an explicit refresh if that ever bites.
  */
 object McpSessions {
-    // The OkHttpClient reference IS the identity (no equals override) —
+    // The HttpClient reference IS the identity (no equals override) —
     // collision-proof where an identityHashCode Int is not, and the entry
     // already transitively retains the pool/jar, so no new leak.
-    private var key: Pair<OkHttpClient, String>? = null
+    private var key: Pair<HttpClient, String>? = null
     private var entry: Pair<McpClient, List<McpToolDef>>? = null
 
-    fun cached(http: OkHttpClient, baseUrl: String): Pair<McpClient, List<McpToolDef>>? =
+    fun cached(http: HttpClient, baseUrl: String): Pair<McpClient, List<McpToolDef>>? =
         entry.takeIf { key == http to baseUrl }
 
-    fun put(http: OkHttpClient, baseUrl: String, client: McpClient, defs: List<McpToolDef>) {
+    fun put(http: HttpClient, baseUrl: String, client: McpClient, defs: List<McpToolDef>) {
         key = http to baseUrl
         entry = client to defs
     }
 }
 
 class McpClient(
-    parentHttp: OkHttpClient,
-    baseUrl: HttpUrl,
+    private val http: HttpClient,
+    baseUrl: String,
 ) {
+    private val endpoint: String = baseUrl.trimEnd('/') + "/mcp"
+    private val endpointUrl: Url = Url(endpoint)
+    private val nextId = atomic(1)
+
+    private val initialized = atomic(false)
+
     // tools/call can be slow (a khan thread on the ship). The session's
-    // client carries readTimeout=0 for SSE; bound our calls instead.
-    private val http: OkHttpClient = parentHttp.newBuilder()
-        .callTimeout(120, TimeUnit.SECONDS)
-        .readTimeout(120, TimeUnit.SECONDS)
-        .build()
-    private val endpoint: HttpUrl = baseUrl.newBuilder().addPathSegment("mcp").build()
-    private val nextId = AtomicInteger(1)
-
-    @Volatile private var initialized = false
-
-    private fun post(payload: JsonObject): Request =
-        Request.Builder()
-            .url(endpoint)
-            .header("Accept", "application/json")
-            .header("MCP-Protocol-Version", MCP_PROTOCOL_VERSION)
-            .post(payload.toString().toRequestBody(JSON_MEDIA))
-            .build()
+    // client carries no read timeout for SSE; bound our calls per-request.
+    private fun HttpRequestBuilder.mcpPost(payload: JsonObject) {
+        header("Accept", "application/json")
+        header("MCP-Protocol-Version", MCP_PROTOCOL_VERSION)
+        contentType(ContentType.Application.Json)
+        setBody(payload.toString())
+        timeout {
+            requestTimeoutMillis = 120_000
+            socketTimeoutMillis = 120_000
+        }
+    }
 
     /** Issue one JSON-RPC call and return its `result`, throwing
      *  [McpException] on a JSON-RPC error frame. */
@@ -113,18 +116,17 @@ class McpClient(
                 put("method", method)
                 put("params", params)
             }
-            http.newCall(post(payload)).execute().use { resp ->
-                val body = resp.body?.string().orEmpty()
-                val obj = runCatching { Json.parseToJsonElement(body).jsonObject }.getOrNull()
-                    ?: error(diagnoseFailure(method, resp.code, body))
-                obj["error"]?.jsonObject?.let { err ->
-                    throw McpException(
-                        err["code"]?.jsonPrimitive?.intOrNull ?: -1,
-                        err["message"]?.jsonPrimitive?.contentOrNull ?: "MCP error",
-                    )
-                }
-                obj["result"] ?: JsonObject(emptyMap())
+            val resp = http.post(endpoint) { mcpPost(payload) }
+            val body = resp.bodyAsText()
+            val obj = runCatching { Json.parseToJsonElement(body).jsonObject }.getOrNull()
+                ?: error(diagnoseFailure(method, resp.status.value, body))
+            obj["error"]?.jsonObject?.let { err ->
+                throw McpException(
+                    err["code"]?.jsonPrimitive?.intOrNull ?: -1,
+                    err["message"]?.jsonPrimitive?.contentOrNull ?: "MCP error",
+                )
             }
+            obj["result"] ?: JsonObject(emptyMap())
         }
 
     /** Turn an unparseable HTTP response into an actionable message.
@@ -135,8 +137,8 @@ class McpClient(
     private fun diagnoseFailure(method: String, code: Int, body: String): String {
         val detail = body.trim().take(200)
         if (code == 400 && detail.isEmpty()) {
-            val hint = if (endpoint.scheme == "http" && !isLoopbackHost(endpoint.host)) {
-                "Talon is on http to ${endpoint.host} — reconnect using your ship's https:// URL."
+            val hint = if (endpointUrl.protocol.name == "http" && !isLoopbackHost(endpointUrl.host)) {
+                "Talon is on http to ${endpointUrl.host} — reconnect using your ship's https:// URL."
             } else {
                 "Your ship treated the request as insecure. If it's behind a reverse proxy " +
                     "(nginx), the proxy must send X-Forwarded-Proto and the MCP server must trust it."
@@ -154,13 +156,13 @@ class McpClient(
                 put("jsonrpc", "2.0")
                 put("method", method)
             }
-            runCatching { http.newCall(post(payload)).execute().close() }
+            runCatching { http.post(endpoint) { mcpPost(payload) } }
         }
     }
 
     /** MCP handshake. Idempotent — safe to call before each session. */
     suspend fun initialize() {
-        if (initialized) return
+        if (initialized.value) return
         rpc(
             "initialize",
             buildJsonObject {
@@ -176,7 +178,7 @@ class McpClient(
             },
         )
         notify("notifications/initialized")
-        initialized = true
+        initialized.value = true
     }
 
     suspend fun listTools(): List<McpToolDef> {
@@ -206,7 +208,6 @@ class McpClient(
 
     companion object {
         const val MCP_PROTOCOL_VERSION = "2025-11-25"
-        private val JSON_MEDIA = "application/json".toMediaType()
 
         /** Loopback host per the ship's own loopback-authority check, so
          *  Talon's diagnostic matches when the server's HTTPS gate fires. */

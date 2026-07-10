@@ -23,6 +23,7 @@
 @file:OptIn(kotlinx.serialization.ExperimentalSerializationApi::class)
 
 package io.nisfeb.talon.urbit
+import kotlin.concurrent.Volatile
 import com.ionspin.kotlin.bignum.integer.BigInteger
 import io.nisfeb.talon.util.ioDispatcher
 import io.nisfeb.talon.util.nowMs
@@ -75,10 +76,15 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
-import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.OkHttpClient
-import okhttp3.Request
-import okhttp3.RequestBody.Companion.toRequestBody
+import io.ktor.client.HttpClient
+import io.ktor.client.plugins.timeout
+import io.ktor.client.request.header
+import io.ktor.client.request.put
+import io.ktor.client.request.setBody
+import io.ktor.client.statement.bodyAsText
+import io.ktor.http.ContentType
+import io.ktor.http.contentType
+import io.ktor.http.isSuccess
 
 /**
  * Single-session owner of Urbit traffic + Room writes.
@@ -141,8 +147,8 @@ class TlonChatRepo(
     val pushScope = CoroutineScope(SupervisorJob() + ioDispatcher)
     @Volatile private var started = false
     @Volatile private var channel: UrbitChannel? = null
-    @Volatile private var http: OkHttpClient? = null
-    @Volatile private var baseUrl: okhttp3.HttpUrl? = null
+    @Volatile private var http: HttpClient? = null
+    @Volatile private var baseUrl: String? = null
     @Volatile private var ourPatp: String = ""
     @Volatile private var sessionJob: Job? = null
     @Volatile private var lastEventMs: Long = 0L
@@ -150,8 +156,8 @@ class TlonChatRepo(
     /** Authenticated client + base URL for the active ship (null until
      *  [start]). Lets ship-adjacent features — e.g. the MCP endpoint at
      *  `/mcp` — reuse the session without re-plumbing auth. */
-    val shipHttp: OkHttpClient? get() = http
-    val shipBaseUrl: okhttp3.HttpUrl? get() = baseUrl
+    val shipHttp: HttpClient? get() = http
+    val shipBaseUrl: String? get() = baseUrl
 
     // Admin-groups cache: populated by refreshAdminGroups(), consumed
     // by the Administration screen. Fetching the full per-group state
@@ -1888,7 +1894,7 @@ class TlonChatRepo(
 
     private suspend fun uploadViaMemex(
         ch: UrbitChannel,
-        client: OkHttpClient,
+        client: HttpClient,
         bytes: ByteArray,
         contentType: String,
         fileName: String,
@@ -1904,59 +1910,48 @@ class TlonChatRepo(
             put("fileName", fileName)
         }.toString()
 
-        val memexReq = Request.Builder()
-            .url("https://memex.tlon.network/v1/$bareShip/upload")
-            .put(memexBody.toRequestBody(JSON_MEDIA_TYPE))
-            .build()
-
-        val (hostedUrl, uploadUrl) = client.newCall(memexReq).withUploadTimeout()
-            .execute().use { resp ->
-                if (!resp.isSuccessful) error("memex upload-url failed: HTTP ${resp.code}")
-                val body = resp.body?.string() ?: error("empty memex response")
-                val obj = Json.parseToJsonElement(body).jsonObject
-                // The memex wire response is { url, filePath }: `url` is the
-                // presigned PUT target (where the bytes go), `filePath` is the
-                // public URL to embed in the message. tlon-apps maps these as
-                // uploadUrl=data.url, hostedUrl=data.filePath (see
-                // packages/api/src/client/storageApi.ts). We used to fall the
-                // hosted URL back to `url` when there was no `hostedUrl` key —
-                // but `url` is the PUT-scoped presigned URL, so the posted
-                // image 404'd on GET ("unable to load image"). Read `filePath`
-                // for the src; the hostedUrl/uploadUrl aliases stay as
-                // defensive fallbacks for any other memex version. If the
-                // shape is still unrecognized, report the actual KEYS (not
-                // values — a value can be a short-lived presigned URL).
-                val upload = obj["uploadUrl"].asStr() ?: obj["url"].asStr()
-                    ?: error("no upload url in memex response; keys=${obj.keys}")
-                val hosted = obj["hostedUrl"].asStr() ?: obj["filePath"].asStr()
-                    ?: error("no hosted url in memex response; keys=${obj.keys}")
-                hosted to upload
-            }
-
-        val uploadReq = Request.Builder()
-            .url(uploadUrl)
-            .put(bytes.toRequestBody(contentType.toMediaType()))
-            .header("Cache-Control", "public, max-age=3600")
-            .build()
-        client.newCall(uploadReq).withUploadTimeout().execute().use { resp ->
-            if (!resp.isSuccessful) error("memex PUT failed: HTTP ${resp.code}")
+        // Cap each upload call at 60s. The shared client uses no read
+        // timeout to keep the SSE channel alive forever, so without an
+        // explicit per-call cap an unresponsive memex / S3 endpoint would
+        // freeze the whole save flow indefinitely.
+        val memexResp = client.put("https://memex.tlon.network/v1/$bareShip/upload") {
+            contentType(ContentType.Application.Json)
+            setBody(memexBody)
+            timeout { requestTimeoutMillis = 60_000 }
         }
-        return hostedUrl
-    }
+        if (!memexResp.status.isSuccess()) error("memex upload-url failed: HTTP ${memexResp.status.value}")
+        val body = memexResp.bodyAsText().ifBlank { error("empty memex response") }
+        val obj = Json.parseToJsonElement(body).jsonObject
+        // The memex wire response is { url, filePath }: `url` is the
+        // presigned PUT target (where the bytes go), `filePath` is the
+        // public URL to embed in the message. tlon-apps maps these as
+        // uploadUrl=data.url, hostedUrl=data.filePath (see
+        // packages/api/src/client/storageApi.ts). We used to fall the
+        // hosted URL back to `url` when there was no `hostedUrl` key —
+        // but `url` is the PUT-scoped presigned URL, so the posted
+        // image 404'd on GET ("unable to load image"). Read `filePath`
+        // for the src; the hostedUrl/uploadUrl aliases stay as
+        // defensive fallbacks for any other memex version. If the
+        // shape is still unrecognized, report the actual KEYS (not
+        // values — a value can be a short-lived presigned URL).
+        val uploadUrl = obj["uploadUrl"].asStr() ?: obj["url"].asStr()
+            ?: error("no upload url in memex response; keys=${obj.keys}")
+        val hostedUrl = obj["hostedUrl"].asStr() ?: obj["filePath"].asStr()
+            ?: error("no hosted url in memex response; keys=${obj.keys}")
 
-    /**
-     * Cap any single image-upload HTTP call at 60s. The shared OkHttp
-     * client uses readTimeout=0 to keep the SSE channel alive forever,
-     * so without an explicit per-call cap an unresponsive memex / S3
-     * endpoint would freeze the whole save flow indefinitely.
-     */
-    private fun okhttp3.Call.withUploadTimeout(): okhttp3.Call = apply {
-        timeout().timeout(60, java.util.concurrent.TimeUnit.SECONDS)
+        val putResp = client.put(uploadUrl) {
+            contentType(ContentType.parse(contentType))
+            header("Cache-Control", "public, max-age=3600")
+            setBody(bytes)
+            timeout { requestTimeoutMillis = 60_000 }
+        }
+        if (!putResp.status.isSuccess()) error("memex PUT failed: HTTP ${putResp.status.value}")
+        return hostedUrl
     }
 
     private suspend fun uploadViaStorage(
         ch: UrbitChannel,
-        client: OkHttpClient,
+        client: HttpClient,
         bytes: ByteArray,
         contentType: String,
         fileName: String,
@@ -3813,7 +3808,6 @@ class TlonChatRepo(
 
     companion object {
         private const val TAG = "TlonChatRepo"
-        private val JSON_MEDIA_TYPE = "application/json".toMediaType()
 
         /**
          * Pure parser for the `%activity /v5/feed/init/30` scry

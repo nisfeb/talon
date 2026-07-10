@@ -35,7 +35,7 @@ import io.nisfeb.talon.urbit.LinkPreviewCache
 @Composable
 fun LinkPreviewCard(
     url: String,
-    http: okhttp3.OkHttpClient,
+    http: io.ktor.client.HttpClient,
     onOpen: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {

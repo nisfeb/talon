@@ -1,7 +1,13 @@
 package io.nisfeb.talon.ai
-import io.nisfeb.talon.util.ioDispatcher
 
-import kotlinx.coroutines.Dispatchers
+import io.ktor.client.plugins.timeout
+import io.ktor.client.request.get
+import io.ktor.client.request.header
+import io.ktor.client.request.parameter
+import io.ktor.client.statement.bodyAsText
+import io.ktor.http.isSuccess
+import io.nisfeb.talon.util.createAppHttpClient
+import io.nisfeb.talon.util.ioDispatcher
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
@@ -9,10 +15,6 @@ import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
-import okhttp3.HttpUrl.Companion.toHttpUrl
-import okhttp3.OkHttpClient
-import okhttp3.Request
-import java.util.concurrent.TimeUnit
 
 /**
  * Brave Search client backing the assistant's `web_search` tool.
@@ -26,11 +28,7 @@ import java.util.concurrent.TimeUnit
  */
 class BraveSearchClient(private val settings: () -> AiSettings.Config) {
 
-    private val http: OkHttpClient = OkHttpClient.Builder()
-        .callTimeout(30, TimeUnit.SECONDS)
-        .connectTimeout(15, TimeUnit.SECONDS)
-        .readTimeout(30, TimeUnit.SECONDS)
-        .build()
+    private val http = createAppHttpClient()
 
     suspend fun search(query: String, count: Int): String {
         val cfg = settings()
@@ -41,26 +39,22 @@ class BraveSearchClient(private val settings: () -> AiSettings.Config) {
         if (q.isBlank()) return "Error: query is required."
         val n = count.coerceIn(1, 20)
 
-        val url = "https://api.search.brave.com/res/v1/web/search".toHttpUrl().newBuilder()
-            .addQueryParameter("q", q)
-            .addQueryParameter("count", n.toString())
-            .build()
-        val req = Request.Builder()
-            .url(url)
-            .header("X-Subscription-Token", key)
-            .header("Accept", "application/json")
-            .build()
         return withContext(ioDispatcher) {
             runCatching {
-                http.newCall(req).execute().use { resp ->
-                    val body = resp.body?.string().orEmpty()
-                    if (!resp.isSuccessful) {
-                        // 401/403 = bad/missing key; 429 = quota. Surface the
-                        // code + a snippet so the user can tell which.
-                        "Brave Search error ${resp.code}: ${body.take(200)}"
-                    } else {
-                        parseBraveResults(body, n)
-                    }
+                val resp = http.get("https://api.search.brave.com/res/v1/web/search") {
+                    parameter("q", q)
+                    parameter("count", n.toString())
+                    header("X-Subscription-Token", key)
+                    header("Accept", "application/json")
+                    timeout { requestTimeoutMillis = 30_000 }
+                }
+                val body = resp.bodyAsText()
+                if (!resp.status.isSuccess()) {
+                    // 401/403 = bad/missing key; 429 = quota. Surface the
+                    // code + a snippet so the user can tell which.
+                    "Brave Search error ${resp.status.value}: ${body.take(200)}"
+                } else {
+                    parseBraveResults(body, n)
                 }
             }.getOrElse { "Web search failed: ${it.message ?: it::class.simpleName}" }
         }

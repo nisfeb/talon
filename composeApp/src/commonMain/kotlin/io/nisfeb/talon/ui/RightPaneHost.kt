@@ -41,7 +41,7 @@ fun RightPaneHost(
     content: RightPaneContent,
     db: AppDatabase,
     repo: TlonChatRepo,
-    http: okhttp3.OkHttpClient,
+    http: io.ktor.client.HttpClient,
     drafts: DraftStore,
     ourPatp: String,
     onClose: () -> Unit,

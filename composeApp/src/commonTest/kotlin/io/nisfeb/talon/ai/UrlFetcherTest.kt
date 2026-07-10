@@ -1,6 +1,5 @@
 package io.nisfeb.talon.ai
 
-import java.net.InetAddress
 import kotlinx.coroutines.runBlocking
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -8,9 +7,10 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 /**
- * Pins the fetch_url SSRF guard and HTML-to-text reduction. The address
- * checks use IP literals (InetAddress.getByName on a literal does NOT hit
- * DNS) so the test runs offline.
+ * Pins the fetch_url literal-hostname SSRF guard and HTML-to-text
+ * reduction — the pieces that live in common. The post-DNS IP guard
+ * ([isInternalAddress]) is JVM-only now, so its coverage lives in
+ * desktopTest's UrlFetcherInternalAddressTest.
  */
 class UrlFetcherTest {
 
@@ -24,26 +24,6 @@ class UrlFetcherTest {
         assertTrue(isBlockedName(""))
         assertFalse(isBlockedName("example.com"))
         assertFalse(isBlockedName("hacker-news.firebaseio.com"))
-    }
-
-    @Test
-    fun `blocks internal IP addresses, allows public ones`() {
-        // Loopback, cloud metadata, RFC1918 private ranges.
-        assertTrue(isInternalAddress(InetAddress.getByName("127.0.0.1")))
-        assertTrue(isInternalAddress(InetAddress.getByName("169.254.169.254")))
-        assertTrue(isInternalAddress(InetAddress.getByName("10.1.2.3")))
-        assertTrue(isInternalAddress(InetAddress.getByName("192.168.0.1")))
-        assertTrue(isInternalAddress(InetAddress.getByName("172.16.5.5")))
-        assertTrue(isInternalAddress(InetAddress.getByName("::1")))
-        assertTrue(isInternalAddress(InetAddress.getByName("0.0.0.0")))
-        // IPv6 unique-local (fc00::/7) — not caught by isSiteLocalAddress.
-        assertTrue(isInternalAddress(InetAddress.getByName("fd12:3456:789a::1")))
-        assertTrue(isInternalAddress(InetAddress.getByName("fc00::1")))
-        // Public addresses pass.
-        assertFalse(isInternalAddress(InetAddress.getByName("8.8.8.8")))
-        assertFalse(isInternalAddress(InetAddress.getByName("1.1.1.1")))
-        assertFalse(isInternalAddress(InetAddress.getByName("172.32.0.1"))) // outside 172.16/12
-        assertFalse(isInternalAddress(InetAddress.getByName("2001:4860:4860::8888"))) // public IPv6
     }
 
     @Test

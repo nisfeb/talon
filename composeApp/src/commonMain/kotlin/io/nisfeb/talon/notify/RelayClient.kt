@@ -1,15 +1,19 @@
 package io.nisfeb.talon.notify
-import io.nisfeb.talon.util.ioDispatcher
 
-import kotlinx.coroutines.Dispatchers
+import io.ktor.client.HttpClient
+import io.ktor.client.request.delete
+import io.ktor.client.request.get
+import io.ktor.client.request.post
+import io.ktor.client.request.setBody
+import io.ktor.client.statement.bodyAsText
+import io.ktor.http.ContentType
+import io.ktor.http.contentType
+import io.ktor.http.isSuccess
+import io.nisfeb.talon.util.ioDispatcher
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
-import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.OkHttpClient
-import okhttp3.Request
-import okhttp3.RequestBody.Companion.toRequestBody
 
 /**
  * Client for the Talon notification push relay (see relay/README.md).
@@ -21,7 +25,7 @@ import okhttp3.RequestBody.Companion.toRequestBody
  * stateless HTTP wrapper, not a connection-managing thing.
  */
 class RelayClient(
-    private val http: OkHttpClient,
+    private val http: HttpClient,
     private val endpoint: () -> String,
 ) {
 
@@ -58,15 +62,8 @@ class RelayClient(
      * a urbauth cookie, encrypts that with its master secret, and
      * forgets the +code. See `relay/README.md` § Trust model.
      *
-     * [existingDeviceId] is empty on first registration and the
-     * deviceId returned by the relay is the device's identity from
-     * then on. Pass it back on re-registration (e.g. when the FCM
-     * token rotates) to avoid creating a new row.
-     *
      * Returns the device id assigned by the relay, or null on any
-     * failure (network, 4xx, 5xx, malformed response). The caller
-     * surfaces a generic error to the user — we don't leak relay-
-     * side specifics.
+     * failure (network, 4xx, 5xx, malformed response).
      */
     suspend fun register(
         platform: String,
@@ -86,63 +83,43 @@ class RelayClient(
                 code = code,
             ),
         )
-        val req = Request.Builder()
-            .url("${endpoint().trimEnd('/')}/register")
-            .post(body.toRequestBody(JSON_MEDIA))
-            .build()
         runCatching {
-            http.newCall(req).execute().use { resp ->
-                if (!resp.isSuccessful) return@withContext null
-                val parsed = JSON.decodeFromString<RegisterResponse>(
-                    resp.body?.string().orEmpty(),
-                )
-                if (parsed.ok && parsed.deviceId.isNotBlank()) parsed.deviceId
-                else null
+            val resp = http.post("${endpoint().trimEnd('/')}/register") {
+                contentType(ContentType.Application.Json)
+                setBody(body)
             }
+            if (!resp.status.isSuccess()) return@withContext null
+            val parsed = JSON.decodeFromString<RegisterResponse>(resp.bodyAsText())
+            if (parsed.ok && parsed.deviceId.isNotBlank()) parsed.deviceId else null
         }.getOrNull()
     }
 
     /**
-     * Tell the relay to forget this device entirely. Stops every
-     * SSE connection the relay was holding for this id. Idempotent —
+     * Tell the relay to forget this device entirely. Idempotent —
      * a 404 is fine because "already gone" is the goal.
      */
     suspend fun unregister(deviceId: String): Boolean = withContext(ioDispatcher) {
         if (deviceId.isBlank()) return@withContext true
-        val req = Request.Builder()
-            .url("${endpoint().trimEnd('/')}/devices/$deviceId")
-            .delete()
-            .build()
         runCatching {
-            http.newCall(req).execute().use { resp ->
-                resp.isSuccessful || resp.code == 404
-            }
+            val resp = http.delete("${endpoint().trimEnd('/')}/devices/$deviceId")
+            resp.status.isSuccess() || resp.status.value == 404
         }.getOrDefault(false)
     }
 
     /**
      * Health check: returns the count of ships the relay is tracking
-     * for [deviceId]. Settings → Notification Health uses this for
-     * the "is the relay seeing my ship?" indicator. null on any
-     * failure (so the panel can render "unreachable" without
-     * needing to disambiguate which step failed).
+     * for [deviceId]. null on any failure.
      */
     suspend fun health(deviceId: String): HealthResponse? = withContext(ioDispatcher) {
         if (deviceId.isBlank()) return@withContext null
-        val req = Request.Builder()
-            .url("${endpoint().trimEnd('/')}/health/$deviceId")
-            .get()
-            .build()
         runCatching {
-            http.newCall(req).execute().use { resp ->
-                if (!resp.isSuccessful) return@withContext null
-                JSON.decodeFromString<HealthResponse>(resp.body?.string().orEmpty())
-            }
+            val resp = http.get("${endpoint().trimEnd('/')}/health/$deviceId")
+            if (!resp.status.isSuccess()) return@withContext null
+            JSON.decodeFromString<HealthResponse>(resp.bodyAsText())
         }.getOrNull()
     }
 
     private companion object {
-        private val JSON_MEDIA = "application/json".toMediaType()
         private val JSON = Json { ignoreUnknownKeys = true }
     }
 }

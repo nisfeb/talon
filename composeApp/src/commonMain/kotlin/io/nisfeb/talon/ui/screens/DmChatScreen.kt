@@ -158,7 +158,7 @@ import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.launch
-import okhttp3.OkHttpClient
+import io.ktor.client.HttpClient
 
 @OptIn(
     ExperimentalFoundationApi::class,
@@ -169,7 +169,7 @@ fun DmChatScreen(
     db: AppDatabase,
     repo: TlonChatRepo,
     drafts: DraftStore,
-    http: OkHttpClient,
+    http: HttpClient,
     aiSettings: AiSettingsRepository,
     uiSettings: io.nisfeb.talon.ui.UiSettings,
     ourPatp: String,
@@ -1114,7 +1114,7 @@ private fun MessageRow(
     row: DisplayRow,
     ourPatp: String,
     contactMap: ContactMap,
-    http: OkHttpClient,
+    http: HttpClient,
     /** True when this row's action menu is open. Source of truth is
      *  the screen-level `actionTarget` so opening one menu auto-closes
      *  any other. */

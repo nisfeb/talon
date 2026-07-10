@@ -1,4 +1,5 @@
 package io.nisfeb.talon.urbit
+import kotlin.concurrent.Volatile
 import io.nisfeb.talon.util.nowMs
 
 import io.nisfeb.talon.ai.AiSettings

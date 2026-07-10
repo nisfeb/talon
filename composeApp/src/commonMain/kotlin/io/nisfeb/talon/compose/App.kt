@@ -89,7 +89,7 @@ import io.nisfeb.talon.urbit.SettingsSync
 import io.nisfeb.talon.urbit.TlonChatRepo
 import io.nisfeb.talon.urbit.UrbitSession
 import io.nisfeb.talon.util.Log
-import okhttp3.OkHttpClient
+import io.ktor.client.HttpClient
 
 /**
  * Top-level shared app entry point. Both Android's MainActivity and
@@ -104,7 +104,7 @@ import okhttp3.OkHttpClient
  */
 @Composable
 fun App(
-    http: OkHttpClient,
+    http: HttpClient,
     sessionStore: SessionStore,
     aiSettings: AiSettingsRepository,
     /** Builds a per-ship AppDatabase. Called inside `key(shipKey)` so each
