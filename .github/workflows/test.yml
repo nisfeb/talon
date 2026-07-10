@@ -51,3 +51,26 @@ jobs:
             composeApp/build/reports/tests/
             composeApp/build/test-results/
           if-no-files-found: ignore
+
+  # iOS can only be verified on macOS — the Kotlin/Native Apple targets
+  # don't compile on the Linux/JVM path, so the unit-tests job above
+  # never touches iosMain. This job links the device framework
+  # (iosArm64), which forces KSP plus all of commonMain + iosMain to
+  # compile and link. It emits no shippable artifact (the .app is built
+  # from Xcode), so it lives here as a per-PR compile gate rather than
+  # in release.yml, which only runs at tag time and has nothing to
+  # package for iOS. macos-latest bills at 10x runner minutes; a link
+  # is a couple of them.
+  ios-compile:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Compile iOS framework (device arm64)
+        run: ./gradlew :composeApp:linkDebugFrameworkIosArm64 --stacktrace
