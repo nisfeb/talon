@@ -2188,9 +2188,17 @@ class TlonChatRepo(
         text: String,
         originalSentMs: Long,
         parentId: String? = null,
+        /** The post's current contentJson. Blocks the text editor can't
+         *  represent — a quoted post's cite, an image, a link preview —
+         *  are carried across the edit instead of being flattened into
+         *  literal text. Null re-parses [text] alone (legacy callers). */
+        originalContentJson: String? = null,
     ) {
         val ch = channel ?: error("not connected")
         if (!whom.startsWith("chat/")) error("edit only supported on channel chats")
+        val content = originalContentJson
+            ?.let { editedStory(it, text) }
+            ?: textToStory(text)
         // Preserve the original `sent` — the server sorts by it and
         // re-using our current time would bump the post to "just now".
         // Tlon keeps the original essay shell and only swaps content.
@@ -2201,7 +2209,7 @@ class TlonChatRepo(
             // the latter. Mirrors the `reply-essay` reads in the SSE
             // ingest path (see classifyReply / applyChatReplyDelta).
             val replyEssay = buildJsonObject {
-                put("content", textToStory(text))
+                put("content", content)
                 put("author", ourPatp)
                 put("sent", originalSentMs)
                 put("blob", JsonNull)
@@ -2220,7 +2228,7 @@ class TlonChatRepo(
                 })
             }
         } else {
-            val essay = buildEssay(textToStory(text), originalSentMs)
+            val essay = buildEssay(content, originalSentMs)
             buildJsonObject {
                 put("post", buildJsonObject {
                     // channel-action-2's `id` dejs is `(se %ud)` which runs

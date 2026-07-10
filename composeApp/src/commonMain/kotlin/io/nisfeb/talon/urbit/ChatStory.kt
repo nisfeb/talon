@@ -1,5 +1,6 @@
 package io.nisfeb.talon.urbit
 
+import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
@@ -35,6 +36,72 @@ import kotlinx.serialization.json.put
  * keeps a leaner surface so a plain `# hello` doesn't surprise users
  * with a header.
  */
+/**
+ * Editing a post round-trips its content through the plain-text editor,
+ * but only *some* of a Story survives that trip. Text verses do. Code
+ * blocks do — the ``` fences carry them. A cite (the quoted post), an
+ * image, or a server-enriched link preview does NOT: it flattens to a
+ * label like "~zod: hello" and gets re-posted as meaningless literal
+ * text, destroying the reference.
+ *
+ * So the editor edits the text and these blocks pass through untouched.
+ * [editableText] is what the dialog shows; [editedStory] rebuilds the
+ * content on save, keeping each preserved block where it sat relative
+ * to the text.
+ */
+private fun isPreservedBlock(verse: JsonObject): Boolean {
+    val block = verse["block"] as? JsonObject ?: return false
+    // Code is the one block the text form represents faithfully.
+    return !block.containsKey("code")
+}
+
+private fun versesOf(contentJson: String): List<JsonObject>? =
+    runCatching {
+        (STORY_JSON.parseToJsonElement(contentJson) as? JsonArray)
+            ?.mapNotNull { it as? JsonObject }
+    }.getOrNull()
+
+/** The text an edit dialog should open with: everything except the
+ *  blocks that can't survive a text round-trip (cites, images, links).
+ *  Falls back to the whole story's plain text if the content won't
+ *  parse — same as the pre-existing behaviour. */
+fun editableText(contentJson: String): String {
+    val verses = versesOf(contentJson)
+        ?: return Story.plainText(runCatching { STORY_JSON.parseToJsonElement(contentJson) }.getOrNull())
+    val editable = verses.filterNot(::isPreservedBlock)
+    return Story.plainText(buildJsonArray { editable.forEach { add(it) } })
+}
+
+/**
+ * Rebuild a post's content after an edit: [newText] re-parsed, with the
+ * original's preserved blocks threaded back in at their original
+ * position relative to the text (a quote above the message stays above
+ * it). When the original had no text at all, the new text lands last.
+ */
+fun editedStory(contentJson: String, newText: String): JsonArray {
+    val verses = versesOf(contentJson) ?: return chatTextToStory(newText)
+    val preserved = verses.filter(::isPreservedBlock)
+    if (preserved.isEmpty()) return chatTextToStory(newText)
+
+    val newVerses = chatTextToStory(newText)
+    return buildJsonArray {
+        var textEmitted = false
+        for (verse in verses) {
+            if (isPreservedBlock(verse)) {
+                add(verse)
+            } else if (!textEmitted) {
+                // First text/code verse: the whole edited body goes here,
+                // and the original's remaining text verses are dropped.
+                newVerses.forEach { add(it) }
+                textEmitted = true
+            }
+        }
+        if (!textEmitted) newVerses.forEach { add(it) }
+    }
+}
+
+private val STORY_JSON = Json { ignoreUnknownKeys = true }
+
 internal fun chatTextToStory(text: String): JsonArray {
     val lines = text.split('\n')
     val verses = mutableListOf<JsonObject>()

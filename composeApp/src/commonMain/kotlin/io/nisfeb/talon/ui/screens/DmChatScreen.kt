@@ -1023,12 +1023,22 @@ fun DmChatScreen(
 
     editing?.let { target ->
         EditMessageDialog(
-            initial = StoryCache.textFor(target.id, target.contentJson),
+            // Editable text only — a quoted post's cite (and images /
+            // link previews) ride along untouched via originalContentJson.
+            initial = io.nisfeb.talon.urbit.editableText(target.contentJson),
             onDismiss = { editing = null },
             onSave = { newText ->
                 editing = null
                 scope.launch {
-                    runCatching { repo.edit(whom, target.id, newText, target.sentMs) }
+                    runCatching {
+                        repo.edit(
+                            whom = whom,
+                            postId = target.id,
+                            text = newText,
+                            originalSentMs = target.sentMs,
+                            originalContentJson = target.contentJson,
+                        )
+                    }
                         .onFailure { composerState.sendError = "edit failed: ${it.message ?: it::class.simpleName}" }
                 }
             },

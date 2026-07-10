@@ -569,7 +569,9 @@ fun ThreadList(
 
     editing?.let { target ->
         EditThreadMessageDialog(
-            initial = StoryCache.textFor(target.id, target.contentJson),
+            // Editable text only — a quoted post's cite (and images /
+            // link previews) ride along untouched via originalContentJson.
+            initial = io.nisfeb.talon.urbit.editableText(target.contentJson),
             onDismiss = { editing = null },
             onSave = { newText ->
                 editing = null
@@ -583,6 +585,7 @@ fun ThreadList(
                             text = newText,
                             originalSentMs = target.sentMs,
                             parentId = target.parentId,
+                            originalContentJson = target.contentJson,
                         )
                     }.onFailure {
                         composerState.sendError =
