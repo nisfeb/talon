@@ -49,6 +49,15 @@ kotlin {
             // reach for JVM-only System.currentTimeMillis() — required
             // once the iOS target compiles this code.
             implementation(libs.kotlinx.datetime)
+            // Multiplatform BigInteger for Urbit @da time math + mnemonym
+            // encoding (java.math.BigInteger is JVM-only).
+            implementation(libs.bignum)
+            // Multiplatform hashing (SHA-256 / HMAC) for mnemonym
+            // checksums + S3 request signing — replaces java.security.
+            implementation(libs.okio)
+            // Multiplatform locks + atomics (java.util.concurrent is
+            // JVM-only): caches, monotonic ids, cookie jar.
+            implementation(libs.atomicfu)
             // OkHttp + okhttp-sse are pure JVM but both Android and
             // desktop targets are JVM-backed, so declaring them in
             // commonMain is correct here. UrbitChannel + UrbitSession

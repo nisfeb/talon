@@ -1,8 +1,10 @@
 package io.nisfeb.talon.ui
 
+import com.ionspin.kotlin.bignum.integer.BigInteger
+import kotlinx.atomicfu.locks.SynchronizedObject
+import kotlinx.atomicfu.locks.synchronized
 import kotlinx.coroutines.flow.MutableStateFlow
-import java.math.BigInteger
-import java.security.MessageDigest
+import okio.ByteString.Companion.toByteString
 
 /**
  * Mnemonym ship names — the friendlier fallback for ships without a
@@ -29,9 +31,11 @@ object Mnemonym {
      *  implementation's test vectors. Memoized — displayName and the
      *  mention matcher run per row/keystroke, and the answer never
      *  changes. */
-    fun forShip(ship: String): String? = nymCache.getOrPut(ship) {
-        val bytes = patpBytes(ship) ?: return@getOrPut ""
-        encode(bytes, tweaked = true)
+    fun forShip(ship: String): String? = synchronized(nymLock) {
+        nymCache.getOrPut(ship) {
+            val bytes = patpBytes(ship) ?: return@getOrPut ""
+            encode(bytes, tweaked = true)
+        }
     }.takeIf { it.length > 1 }
 
     /** Display form: planets keep all three words; moon/comet nyms are
@@ -43,7 +47,8 @@ object Mnemonym {
         return if (words.size <= 3) nym else ".${words.first()}...${words.last()}"
     }
 
-    private val nymCache = java.util.concurrent.ConcurrentHashMap<String, String>()
+    private val nymLock = SynchronizedObject()
+    private val nymCache = HashMap<String, String>()
 
     /** Big-endian bytes of the value the @p syllables encode, or null
      *  for galaxies/stars/malformed input. */
@@ -67,22 +72,24 @@ object Mnemonym {
     internal fun encode(bytes: ByteArray, tweaked: Boolean): String {
         val width = bytes.size * 8
         val csLen = width / 32
-        val sha = MessageDigest.getInstance("SHA-256").digest(bytes)
+        val sha = bytes.toByteString().sha256().toByteArray()
         val checksum = (sha[0].toInt() and 0xff) ushr (8 - csLen)
-        var combined = BigInteger(1, bytes)
-            .shiftLeft(csLen)
-            .or(BigInteger.valueOf(checksum.toLong()))
+        // Positive big-endian integer from the point bytes.
+        val value = bytes.fold(BigInteger.ZERO) { acc, b ->
+            acc.shl(8).or(BigInteger.fromInt(b.toInt() and 0xff))
+        }
+        var combined = value.shl(csLen).or(BigInteger.fromLong(checksum.toLong()))
         val total = (width + csLen) / 11
         val indices = IntArray(total)
         for (k in total - 1 downTo 0) {
-            indices[k] = combined.and(MASK_11).toInt()
-            combined = combined.shiftRight(11)
+            indices[k] = combined.and(MASK_11).intValue(exactRequired = false)
+            combined = combined.shr(11)
         }
         val words = indices.asList().dropWhile { it == 0 }.map { MNEMONYM_WORDS[it] }
         return (if (tweaked) "." else "..") + words.joinToString(".")
     }
 
-    private val MASK_11 = BigInteger.valueOf(0x7FF)
+    private val MASK_11 = BigInteger.fromInt(0x7FF)
     private val prefixIndex: Map<String, Int> =
         PATP_PREFIXES.withIndex().associate { (i, s) -> s to i }
     private val suffixIndex: Map<String, Int> =

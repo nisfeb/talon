@@ -23,6 +23,7 @@
 @file:OptIn(kotlinx.serialization.ExperimentalSerializationApi::class)
 
 package io.nisfeb.talon.urbit
+import com.ionspin.kotlin.bignum.integer.BigInteger
 import io.nisfeb.talon.util.ioDispatcher
 import io.nisfeb.talon.util.nowMs
 
@@ -1685,7 +1686,7 @@ class TlonChatRepo(
         val newest = db.messages().newestIdFor(whom)
         // In path form Urbit @ud atoms need dotted-decimal (3-digit groups).
         val dottedCursor = newest?.let {
-            runCatching { UrbitTime.daToUd(java.math.BigInteger(it)) }.getOrNull()
+            runCatching { UrbitTime.daToUd(BigInteger.parseString(it)) }.getOrNull()
         }
         val app = when {
             whom.startsWith("~") -> "chat"
@@ -1773,7 +1774,7 @@ class TlonChatRepo(
         if (paginationExhausted.contains(whom)) return false
         val cursor = db.messages().oldestIdFor(whom) ?: return false
 
-        val dotted = runCatching { UrbitTime.daToUd(java.math.BigInteger(cursor)) }
+        val dotted = runCatching { UrbitTime.daToUd(BigInteger.parseString(cursor)) }
             .getOrNull() ?: cursor
         val (app, paths, postsKey) = when {
             whom.startsWith("~") -> Triple(
@@ -3574,7 +3575,7 @@ class TlonChatRepo(
         // Statuses feed couldn't sort recent updates to the top.
         val digits = raw.replace(".", "")
         if (digits.isEmpty() || !digits.all { it.isDigit() }) return null
-        val da = runCatching { java.math.BigInteger(digits) }.getOrNull()
+        val da = runCatching { BigInteger.parseString(digits) }.getOrNull()
             ?: return null
         val ms = UrbitTime.daToUnixMs(da) ?: return null
         // Sanity-bound: 2020-01-01 .. 2100-01-01 in unix-ms — clips

@@ -1,6 +1,6 @@
 package io.nisfeb.talon.urbit
 
-import java.math.BigInteger
+import com.ionspin.kotlin.bignum.integer.BigInteger
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -11,7 +11,7 @@ class UrbitTimeTest {
     fun `da at unix epoch equals DA_UNIX_EPOCH`() {
         val da = UrbitTime.unixMsToDa(0L)
         assertEquals(
-            BigInteger("170141184475152167957503069145530368000"),
+            BigInteger.parseString("170141184475152167957503069145530368000"),
             da,
         )
     }
@@ -25,22 +25,22 @@ class UrbitTimeTest {
 
     @Test
     fun `daToUd groups digits in threes from right`() {
-        assertEquals("1.234", UrbitTime.daToUd(BigInteger.valueOf(1234)))
-        assertEquals("12.345", UrbitTime.daToUd(BigInteger.valueOf(12345)))
-        assertEquals("123.456", UrbitTime.daToUd(BigInteger.valueOf(123456)))
-        assertEquals("1.234.567", UrbitTime.daToUd(BigInteger.valueOf(1234567)))
+        assertEquals("1.234", UrbitTime.daToUd(BigInteger.fromInt(1234)))
+        assertEquals("12.345", UrbitTime.daToUd(BigInteger.fromInt(12345)))
+        assertEquals("123.456", UrbitTime.daToUd(BigInteger.fromInt(123456)))
+        assertEquals("1.234.567", UrbitTime.daToUd(BigInteger.fromInt(1234567)))
     }
 
     @Test
     fun `daToUd small numbers unchanged`() {
         assertEquals("0", UrbitTime.daToUd(BigInteger.ZERO))
-        assertEquals("42", UrbitTime.daToUd(BigInteger.valueOf(42)))
-        assertEquals("999", UrbitTime.daToUd(BigInteger.valueOf(999)))
+        assertEquals("42", UrbitTime.daToUd(BigInteger.fromInt(42)))
+        assertEquals("999", UrbitTime.daToUd(BigInteger.fromInt(999)))
     }
 
     @Test
     fun `formatPostId shape is author slash dotted-da`() {
-        val id = UrbitTime.formatPostId("~sampel-palnet", BigInteger.valueOf(1234567))
+        val id = UrbitTime.formatPostId("~sampel-palnet", BigInteger.fromInt(1234567))
         assertEquals("~sampel-palnet/1.234.567", id)
     }
 
@@ -63,13 +63,13 @@ class UrbitTimeTest {
 
     @Test
     fun `daToUnixMs at DA_UNIX_EPOCH returns zero`() {
-        val epoch = BigInteger("170141184475152167957503069145530368000")
+        val epoch = BigInteger.parseString("170141184475152167957503069145530368000")
         assertEquals(0L, UrbitTime.daToUnixMs(epoch))
     }
 
     @Test
     fun `daToUnixMs returns null for da before unix epoch`() {
-        val tooEarly = BigInteger.valueOf(1234)
+        val tooEarly = BigInteger.fromInt(1234)
         assertEquals(null, UrbitTime.daToUnixMs(tooEarly))
     }
 

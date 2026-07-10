@@ -1,6 +1,6 @@
 package io.nisfeb.talon.urbit
 
-import java.math.BigInteger
+import com.ionspin.kotlin.bignum.integer.BigInteger
 
 /**
  * Conversions between JS-style unix millis and Urbit's @da atom, plus
@@ -10,13 +10,13 @@ import java.math.BigInteger
  */
 object UrbitTime {
 
-    private val DA_SECOND: BigInteger = BigInteger.ONE.shiftLeft(64)
+    private val DA_SECOND: BigInteger = BigInteger.ONE.shl(64)
     private val DA_UNIX_EPOCH: BigInteger =
-        BigInteger("170141184475152167957503069145530368000")
-    private val ONE_THOUSAND: BigInteger = BigInteger.valueOf(1000)
+        BigInteger.parseString("170141184475152167957503069145530368000")
+    private val ONE_THOUSAND: BigInteger = BigInteger.fromInt(1000)
 
     fun unixMsToDa(ms: Long): BigInteger =
-        DA_UNIX_EPOCH + (BigInteger.valueOf(ms) * DA_SECOND) / ONE_THOUSAND
+        DA_UNIX_EPOCH + (BigInteger.fromLong(ms) * DA_SECOND) / ONE_THOUSAND
 
     /**
      * Inverse of [unixMsToDa]. Returns the unix-ms timestamp encoded
@@ -33,8 +33,8 @@ object UrbitTime {
      */
     fun daToUnixMs(da: BigInteger): Long? {
         if (da < DA_UNIX_EPOCH) return null
-        val ms = ((da - DA_UNIX_EPOCH) * ONE_THOUSAND + DA_SECOND.shiftRight(1)) / DA_SECOND
-        return ms.toLong()
+        val ms = ((da - DA_UNIX_EPOCH) * ONE_THOUSAND + DA_SECOND.shr(1)) / DA_SECOND
+        return ms.longValue(exactRequired = false)
     }
 
     /** Renders a @da as Urbit's dotted-decimal (3-digit groups, right-to-left). */
