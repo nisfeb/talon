@@ -896,6 +896,20 @@ fun App(
                       Unit
                   }
               }
+          // Root contact map so a quoted post's author resolves to the
+          // same nickname / mnemonym the rest of the app shows, rather
+          // than the bare @p the renderer would emit on its own.
+          val citeContacts by remember(db) {
+              io.nisfeb.talon.ui.contactMapFlow(
+                  db.contacts().stream(),
+                  db.clubs().stream(),
+                  db.groups().streamGroups(),
+                  db.groups().streamChannelGroups(),
+              )
+          }.collectAsState(initial = io.nisfeb.talon.ui.ContactMap.EMPTY)
+          val citeDisplayName: (String) -> String = remember(citeContacts) {
+              { ship -> citeContacts.displayName(ship) }
+          }
           androidx.compose.runtime.CompositionLocalProvider(
               io.nisfeb.talon.ui.LocalImageDownloader provides imageDownloader,
               io.nisfeb.talon.ui.LocalChatDensity provides chatDensity,
@@ -904,6 +918,7 @@ fun App(
               androidx.compose.ui.platform.LocalUriHandler provides urbAwareUriHandler,
               io.nisfeb.talon.ui.LocalCiteResolver provides citeResolver,
               io.nisfeb.talon.ui.LocalCitationOpen provides openCitation,
+              io.nisfeb.talon.ui.LocalDisplayName provides citeDisplayName,
           ) {
             urbPromptUrl?.let {
                 io.nisfeb.talon.ui.InstallLatticeDialog(onDismiss = { urbPromptUrl = null })

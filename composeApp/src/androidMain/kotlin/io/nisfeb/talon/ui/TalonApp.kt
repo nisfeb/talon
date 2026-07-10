@@ -740,6 +740,19 @@ fun TalonApp(
                 Unit
             }
         }
+    // Root contact map so a quoted post's author resolves to the same
+    // nickname / mnemonym the rest of the app shows, not the bare @p.
+    val citeContacts by remember(app) {
+        io.nisfeb.talon.ui.contactMapFlow(
+            app.db.contacts().stream(),
+            app.db.clubs().stream(),
+            app.db.groups().streamGroups(),
+            app.db.groups().streamChannelGroups(),
+        )
+    }.collectAsState(initial = io.nisfeb.talon.ui.ContactMap.EMPTY)
+    val citeDisplayName: (String) -> String = remember(citeContacts) {
+        { ship -> citeContacts.displayName(ship) }
+    }
     androidx.compose.runtime.CompositionLocalProvider(
         // Bind the real ExoPlayer-backed inline players for chat
         // messages. Without this, StoryRenderer falls back to a
@@ -759,6 +772,7 @@ fun TalonApp(
         androidx.compose.ui.platform.LocalUriHandler provides urbAwareUriHandler,
         io.nisfeb.talon.ui.LocalCiteResolver provides citeResolver,
         io.nisfeb.talon.ui.LocalCitationOpen provides openCitation,
+        io.nisfeb.talon.ui.LocalDisplayName provides citeDisplayName,
     ) {
     urbPromptUrl?.let {
         io.nisfeb.talon.ui.InstallLatticeDialog(onDismiss = { urbPromptUrl = null })

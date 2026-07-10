@@ -71,6 +71,17 @@ val LocalCiteResolver = compositionLocalOf<CiteResolver?> { null }
 val LocalCitationOpen = compositionLocalOf<(StoryPart.Citation) -> Unit> { {} }
 
 /**
+ * Resolve a ship to the name to show for it. The default applies the
+ * mnemonym fallback (`.hollow.mint.gecko` for a ship with no nick), so
+ * a quoted post's author never shows a bare @p even on a surface with
+ * no contact data. Chat surfaces override this with the full
+ * `ContactMap.displayName`, which prefers a nickname the viewer set.
+ */
+val LocalDisplayName = compositionLocalOf<(String) -> String> {
+    { ship -> if (MnemonymNames.enabled.value) Mnemonym.display(ship) ?: ship else ship }
+}
+
+/**
  * Process-level cache + per-key dedup for citation resolution.
  * Without this, N visible citations to the same channel/post each
  * fire their own scry — a dense chat with 8 cites = 8 redundant
@@ -530,7 +541,7 @@ private fun InlineCitation(cite: StoryPart.Citation) {
                     .take(240)
             }
             Text(
-                r.author,
+                LocalDisplayName.current(r.author),
                 style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
             )
             if (body.isNotBlank()) {
