@@ -92,6 +92,35 @@ class PresenceTest {
     }
 
     @Test
+    fun `a display text rides along and becomes the label`() {
+        val set = Presence.setAction("/dm/~bob", "~zod", Presence.TOPIC_COMPUTING, "uploading an image")
+        val disp = (set["set"] as JsonObject)["display"] as JsonObject
+        assertEquals("uploading an image", disp["text"].asStr())
+        // %computing asks for the minute timeout, not 30s.
+        assertEquals("~m1", (set["set"] as JsonObject)["timeout"].asStr())
+
+        val here = Presence.parseResponse(
+            obj(
+                """{"here":{"key":{"context":"/dm/~bob","ship":"~bob","topic":"computing"},
+                           "timing":{"since":"~2026.7.10","timeout":"~m1"},
+                           "display":{"icon":null,"text":"uploading an image","blob":null}}}""",
+            ),
+        )!!
+        val e = here.here.single()
+        assertEquals("uploading an image", e.text)
+        assertEquals("uploading an image", e.label, "a set text wins over the topic default")
+        assertEquals(60_000L, e.timeoutMs)
+    }
+
+    @Test
+    fun `topic drives the label when no text was set`() {
+        assertEquals("typing…", Presence.labelFor(Presence.TOPIC_TYPING, null))
+        assertEquals("thinking…", Presence.labelFor(Presence.TOPIC_COMPUTING, null))
+        assertEquals("active", Presence.labelFor(Presence.TOPIC_OTHER, ""))
+        assertEquals("recording audio", Presence.labelFor(Presence.TOPIC_OTHER, "recording audio"))
+    }
+
+    @Test
     fun `here and gone facts carry a key`() {
         val here = Presence.parseResponse(
             obj(

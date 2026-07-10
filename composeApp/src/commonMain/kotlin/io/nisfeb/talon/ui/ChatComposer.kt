@@ -54,6 +54,7 @@ import coil3.compose.AsyncImage
 import io.nisfeb.talon.data.AppDatabase
 import io.nisfeb.talon.data.MessageEntity
 import io.nisfeb.talon.urbit.StoryCache
+import io.nisfeb.talon.urbit.Presence
 import io.nisfeb.talon.urbit.TlonChatRepo
 import io.nisfeb.talon.util.Log
 import io.nisfeb.talon.util.decodeImageDimensions
@@ -346,7 +347,23 @@ fun ChatComposer(
     // clear every send path performs, retracts immediately: a timeout
     // never propagates to watchers, only an explicit clear does.
     LaunchedEffect(whom, state.draft.text) {
-        if (state.draft.text.isBlank()) repo.clearTyping(whom) else repo.setTyping(whom)
+        if (state.draft.text.isBlank()) {
+            repo.retractPresence(whom)
+        } else {
+            repo.announcePresence(whom)
+        }
+    }
+
+    // An upload is the one thing worth announcing that the peer would
+    // otherwise wait on with no explanation. %computing is exactly the
+    // topic for it; the display text says which.
+    LaunchedEffect(whom, state.uploading, state.pendingAttachment?.isImage) {
+        if (state.uploading) {
+            val what = if (state.pendingAttachment?.isImage != false) "an image" else "a file"
+            repo.announcePresence(whom, Presence.TOPIC_COMPUTING, "uploading $what")
+        } else {
+            repo.retractPresence(whom, Presence.TOPIC_COMPUTING)
+        }
     }
 
     // Belt-and-suspenders flush mirrored from the original DM body —
@@ -356,9 +373,10 @@ fun ChatComposer(
     DisposableEffect(whom) {
         onDispose {
             drafts.save(whom, state.draft.text)
-            // Leaving the screen mid-draft must not leave us typing
+            // Leaving the screen mid-draft must not leave us announcing
             // forever on the peer's side.
-            repo.clearTypingNow(whom)
+            repo.retractPresenceNow(whom)
+            repo.retractPresenceNow(whom, Presence.TOPIC_COMPUTING)
         }
     }
 

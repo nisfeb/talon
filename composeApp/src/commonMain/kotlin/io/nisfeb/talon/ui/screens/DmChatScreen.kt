@@ -2300,11 +2300,11 @@ private suspend fun clusterTopicsWithin(
 }
 
 /**
- * "~bob is typing…" — %presence, folded into the space just above the
- * composer. Renders nothing at all when nobody is typing, when the
- * conversation has no presence context (clubs), or when the ship is
- * older than Tlon v11.4.0 and doesn't run the agent: in every one of
- * those cases the flow is simply empty.
+ * "~bob is typing…" / "~bob is uploading an image" — %presence, folded
+ * into the space just above the composer. Renders nothing at all when
+ * nobody's active, when the conversation has no presence context
+ * (clubs), or when the ship is older than Tlon v11.4.0 and doesn't run
+ * the agent: in every one of those cases the flow is simply empty.
  */
 @Composable
 private fun TypingIndicator(
@@ -2312,15 +2312,24 @@ private fun TypingIndicator(
     repo: TlonChatRepo,
     contactMap: ContactMap,
 ) {
-    val typing by remember(whom, repo) { repo.typingIn(whom) }
-        .collectAsState(initial = emptySet())
-    if (typing.isEmpty()) return
+    val active by remember(whom, repo) { repo.presenceIn(whom) }
+        .collectAsState(initial = emptyMap())
+    if (active.isEmpty()) return
 
-    val names = typing.sorted().map { contactMap.displayName(it) }
-    val label = when (names.size) {
-        1 -> "${names[0]} is typing…"
-        2 -> "${names[0]} and ${names[1]} are typing…"
-        else -> "${names.size} people are typing…"
+    // `active` maps ship → what they're doing ("typing…", "recording
+    // audio"). One person: name their action verbatim. Several: only
+    // typing has a clean plural, so fall back to a count otherwise.
+    val label = if (active.size == 1) {
+        val (ship, verb) = active.entries.first()
+        "${contactMap.displayName(ship)} is $verb"
+    } else {
+        val names = active.keys.sorted().map { contactMap.displayName(it) }
+        if (active.values.all { it == "typing…" }) {
+            if (names.size == 2) "${names[0]} and ${names[1]} are typing…"
+            else "${names.size} people are typing…"
+        } else {
+            "${names.size} people are active"
+        }
     }
     Text(
         label,

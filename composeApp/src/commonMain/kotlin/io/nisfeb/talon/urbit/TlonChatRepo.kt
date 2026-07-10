@@ -3147,59 +3147,86 @@ class TlonChatRepo(
 
     // ───────── presence (typing indicators) ─────────
 
-    /** context → (ship → wall-clock ms at which the entry lapses). */
-    private val _presence = MutableStateFlow<Map<String, Map<String, Long>>>(emptyMap())
+    /** One peer's live presence in a context. */
+    private data class Live(val topic: String, val label: String, val expiresAtMs: Long)
+
+    /** A peer can announce more than one topic at once, so the inner
+     *  map is keyed by both. */
+    private data class PresenceKey(val ship: String, val topic: String)
+
+    /** context → ((ship, topic) → what they're doing, and until when). */
+    private val _presence = MutableStateFlow<Map<String, Map<PresenceKey, Live>>>(emptyMap())
     private var presenceReaper: Job? = null
 
-    /** Ships other than us currently typing in [whom]. */
-    fun typingIn(whom: String): Flow<Set<String>> {
-        val context = Presence.contextFor(whom) ?: return flowOf(emptySet())
-        return _presence.map { it[context]?.keys.orEmpty() }.distinctUntilChanged()
+    /**
+     * Who is doing what in [whom], as `ship → human label` ("typing…",
+     * "recording audio", "uploading an image"). Empty when nobody is,
+     * when the conversation has no presence context, or when the ship
+     * predates %presence.
+     */
+    fun presenceIn(whom: String): Flow<Map<String, String>> {
+        val context = Presence.contextFor(whom) ?: return flowOf(emptyMap())
+        return _presence.map { places ->
+            places[context].orEmpty()
+                .entries
+                .groupBy { it.key.ship }
+                .mapValues { (_, entries) ->
+                    // Show the most immediate thing they're doing.
+                    entries.minBy { Presence.topicPriority(it.value.topic) }.value.label
+                }
+        }.distinctUntilChanged()
     }
 
-    /** When we last told the ship we're typing, per context. */
-    private val lastTypingPoke = java.util.concurrent.ConcurrentHashMap<String, Long>()
+    /** When we last announced a given (context, topic). */
+    private val lastPresencePoke =
+        java.util.concurrent.ConcurrentHashMap<Pair<String, String>, Long>()
 
     /**
-     * Announce that we're typing in [whom]. Safe to call on every
+     * Announce that we're doing [topic] in [whom]. Safe to call on every
      * keystroke: the entry lives 30s server-side, so we re-poke at most
      * once per [Presence.REANNOUNCE_MS] and let it lapse on its own if
      * the user walks away.
      */
-    suspend fun setTyping(whom: String) {
+    suspend fun announcePresence(
+        whom: String,
+        topic: String = Presence.TOPIC_TYPING,
+        text: String? = null,
+    ) {
         val context = Presence.contextFor(whom) ?: return
+        val key = context to topic
         val now = System.currentTimeMillis()
-        val last = lastTypingPoke[context]
+        val last = lastPresencePoke[key]
         if (last != null && now - last < Presence.REANNOUNCE_MS) return
-        lastTypingPoke[context] = now
+        lastPresencePoke[key] = now
         val ch = channel ?: return
-        runCatching { ch.poke("presence", "presence-action-1", Presence.setAction(context, ourPatp)) }
-            .onFailure {
-                // Pre-v11.4.0 ship, or we're not a participant. Don't
-                // retry every keystroke.
-                lastTypingPoke[context] = now + 60_000L
-                Log.w(TAG, "presence set failed for $context", it)
-            }
+        runCatching {
+            ch.poke("presence", "presence-action-1", Presence.setAction(context, ourPatp, topic, text))
+        }.onFailure {
+            // Pre-v11.4.0 ship, or we're not a participant. Don't retry
+            // on every keystroke.
+            lastPresencePoke[key] = now + 60_000L
+            Log.w(TAG, "presence set failed for $context/$topic", it)
+        }
     }
 
     /**
-     * Retract our typing entry — on send, or when the composer empties.
-     * A timeout does not propagate to watchers, so without this the
-     * peer keeps seeing "typing" for up to 30s after we hit send.
+     * Retract our entry — on send, when the composer empties, when an
+     * upload finishes. A timeout does not propagate to watchers, so
+     * without this the peer keeps seeing us for up to 30s.
      */
-    suspend fun clearTyping(whom: String) {
+    suspend fun retractPresence(whom: String, topic: String = Presence.TOPIC_TYPING) {
         val context = Presence.contextFor(whom) ?: return
-        if (lastTypingPoke.remove(context) == null) return
+        if (lastPresencePoke.remove(context to topic) == null) return
         val ch = channel ?: return
         runCatching {
-            ch.poke("presence", "presence-action-1", Presence.clearAction(context, ourPatp))
-        }.onFailure { Log.w(TAG, "presence clear failed for $context", it) }
+            ch.poke("presence", "presence-action-1", Presence.clearAction(context, ourPatp, topic))
+        }.onFailure { Log.w(TAG, "presence clear failed for $context/$topic", it) }
     }
 
-    /** Fire-and-forget [clearTyping] for callers that can't suspend —
+    /** Fire-and-forget [retractPresence] for callers that can't suspend —
      *  notably a composer being disposed as the screen goes away. */
-    fun clearTypingNow(whom: String) {
-        scope.launch { clearTyping(whom) }
+    fun retractPresenceNow(whom: String, topic: String = Presence.TOPIC_TYPING) {
+        scope.launch { retractPresence(whom, topic) }
     }
 
     /** Apply one `%presence-response-1` fact. */
@@ -3209,17 +3236,17 @@ class TlonChatRepo(
         val next = if (update.snapshot) mutableMapOf() else _presence.value.toMutableMap()
 
         update.gone.forEach { e ->
-            val ships = next[e.context]?.toMutableMap() ?: return@forEach
-            ships.remove(e.ship)
-            if (ships.isEmpty()) next.remove(e.context) else next[e.context] = ships
+            val people = next[e.context]?.toMutableMap() ?: return@forEach
+            people.remove(PresenceKey(e.ship, e.topic))
+            if (people.isEmpty()) next.remove(e.context) else next[e.context] = people
         }
         update.here.forEach { e ->
-            // Our own entry echoes back on contexts we host; the UI
-            // must not tell the user they are typing.
-            if (e.ship == ourPatp || e.topic != Presence.TOPIC_TYPING) return@forEach
-            val ships = next[e.context]?.toMutableMap() ?: mutableMapOf()
-            ships[e.ship] = now + e.timeoutMs
-            next[e.context] = ships
+            // Our own entry echoes back on contexts we host; the UI must
+            // not tell the user that they are typing.
+            if (e.ship == ourPatp) return@forEach
+            val people = next[e.context]?.toMutableMap() ?: mutableMapOf()
+            people[PresenceKey(e.ship, e.topic)] = Live(e.topic, e.label, now + e.timeoutMs)
+            next[e.context] = people
         }
         _presence.value = next
         startPresenceReaper()
@@ -3237,7 +3264,7 @@ class TlonChatRepo(
                 delay(2_000L)
                 val now = System.currentTimeMillis()
                 val pruned = _presence.value
-                    .mapValues { (_, ships) -> ships.filterValues { it > now } }
+                    .mapValues { (_, people) -> people.filterValues { it.expiresAtMs > now } }
                     .filterValues { it.isNotEmpty() }
                 if (pruned != _presence.value) _presence.value = pruned
             }

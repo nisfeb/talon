@@ -2,6 +2,7 @@ package io.nisfeb.talon.urbit
 
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
@@ -31,22 +32,49 @@ import kotlinx.serialization.json.put
  */
 object Presence {
 
+    /**
+     * The agent's three topics. `other` is the escape hatch: it carries
+     * whatever `display.text` we put in it, which is how "recording
+     * audio" reaches a watcher without a new topic existing upstream.
+     */
     const val TOPIC_TYPING = "typing"
+    const val TOPIC_COMPUTING = "computing"
+    const val TOPIC_OTHER = "other"
 
     /** The agent's `+default-timeout`, in millis. */
     fun defaultTimeoutMs(topic: String): Long = when (topic) {
-        "computing" -> 60_000L
+        TOPIC_COMPUTING -> 60_000L
         else -> 30_000L // typing, other
     }
 
+    /** The `@dr` matching [defaultTimeoutMs], as `scot %dr` writes it. */
+    private fun timeoutDr(topic: String): String =
+        if (topic == TOPIC_COMPUTING) "~m1" else "~s30"
+
     /**
-     * Our own typing entry lapses after [defaultTimeoutMs]; re-announce
-     * at half that so a slow poke never leaves a gap.
+     * Our entry lapses after [defaultTimeoutMs]; re-announce at half
+     * that so a slow poke never leaves a gap.
      */
     const val REANNOUNCE_MS = 15_000L
 
-    /** The `@dr` we ask for. Matches the agent's typing default. */
-    private const val TYPING_TIMEOUT_DR = "~s30"
+    /**
+     * What a watcher should read. `display.text` wins when the peer set
+     * one — that's the whole point of the field — otherwise the topic
+     * carries the meaning.
+     */
+    fun labelFor(topic: String, text: String?): String = text?.takeIf { it.isNotBlank() }
+        ?: when (topic) {
+            TOPIC_TYPING -> "typing…"
+            TOPIC_COMPUTING -> "thinking…"
+            else -> "active"
+        }
+
+    /** Which topic to show when a peer somehow announces several. */
+    fun topicPriority(topic: String): Int = when (topic) {
+        TOPIC_TYPING -> 0
+        TOPIC_OTHER -> 1
+        else -> 2
+    }
 
     /**
      * The presence context for a Talon `whom`, or null when the
@@ -70,7 +98,8 @@ object Presence {
     }
 
     /**
-     * `%set`: announce that [ship] is doing [topic] in [context].
+     * `%set`: announce that [ship] is doing [topic] in [context], with
+     * an optional human [text] a watcher renders verbatim.
      * An empty `disclose` means public — everyone watching the context
      * sees it. `display` keys are all required, even when null.
      */
@@ -78,18 +107,19 @@ object Presence {
         context: String,
         ship: String,
         topic: String = TOPIC_TYPING,
+        text: String? = null,
     ): JsonObject = buildJsonObject {
         put(
             "set",
             buildJsonObject {
                 put("disclose", buildJsonArray { })
                 put("key", key(context, ship, topic))
-                put("timeout", TYPING_TIMEOUT_DR)
+                put("timeout", timeoutDr(topic))
                 put(
                     "display",
                     buildJsonObject {
                         put("icon", JsonNull)
-                        put("text", JsonNull)
+                        put("text", text?.let { JsonPrimitive(it) } ?: JsonNull)
                         put("blob", JsonNull)
                     },
                 )
@@ -135,7 +165,11 @@ object Presence {
         val ship: String,
         val topic: String,
         val timeoutMs: Long,
-    )
+        /** `display.text`, when the peer set one. */
+        val text: String? = null,
+    ) {
+        val label: String get() = labelFor(topic, text)
+    }
 
     /**
      * Interpret one `%presence-response-1` fact. Returns the entries it
@@ -154,15 +188,19 @@ object Presence {
         return parseDurationMs(timing?.get("timeout").asStr()) ?: defaultTimeoutMs(topic)
     }
 
+    private fun textOf(entry: JsonObject?): String? =
+        (entry?.get("display") as? JsonObject)?.get("text").asStr()
+
+    private fun entryOf(context: String, ship: String, topic: String, body: JsonObject?) =
+        Entry(context, ship, topic, timeoutOf(body, topic), textOf(body))
+
     fun parseResponse(payload: JsonObject): Update? {
         (payload["init"] as? JsonObject)?.let { places ->
             val entries = mutableListOf<Entry>()
             places.forEach { (context, topics) ->
                 (topics as? JsonObject)?.forEach { (topic, people) ->
                     (people as? JsonObject)?.forEach { (ship, body) ->
-                        entries.add(
-                            Entry(context, ship, topic, timeoutOf(body as? JsonObject, topic)),
-                        )
+                        entries.add(entryOf(context, ship, topic, body as? JsonObject))
                     }
                 }
             }
@@ -173,7 +211,7 @@ object Presence {
             val context = k["context"].asStr() ?: return null
             val ship = k["ship"].asStr() ?: return null
             val topic = k["topic"].asStr() ?: return null
-            return Update(here = listOf(Entry(context, ship, topic, timeoutOf(here, topic))))
+            return Update(here = listOf(entryOf(context, ship, topic, here)))
         }
         (payload["gone"] as? JsonObject)?.let { k ->
             val context = k["context"].asStr() ?: return null
