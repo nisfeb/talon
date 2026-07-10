@@ -46,10 +46,14 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -371,12 +375,17 @@ class TlonChatRepo(
         // Groups subscribe catches new channels added to existing
         // groups + meta edits — without it, channel-add is only picked
         // up on reconnect (bootstrap re-scry).
+        // %presence shipped with Tlon v11.4.0. On an older ship the
+        // agent isn't installed and this subscribe nacks — harmless,
+        // the nack is logged by applyEvent and typing simply never
+        // shows. Same for the pokes in setTyping/clearTyping.
         listOf(
             "chat" to "/v4",
             "channels" to "/v4",
             "activity" to "/v4",
             "contacts" to "/v1/news",
             "groups" to "/v1/groups",
+            "presence" to "/v1",
         ).map { (app, path) ->
             async {
                 runCatching { ch.subscribe(app, path) }
@@ -2522,6 +2531,16 @@ class TlonChatRepo(
             return
         }
 
+        // %presence /v1 — {init}, {here}, or {gone}.
+        if (
+            payload.containsKey("init") ||
+            payload.containsKey("here") ||
+            payload.containsKey("gone")
+        ) {
+            applyPresence(payload)
+            return
+        }
+
         // %settings events — wrapped as {put-entry|del-entry|put-bucket|…}.
         if (
             payload.containsKey("put-entry") ||
@@ -3050,6 +3069,105 @@ class TlonChatRepo(
                 Log.i(TAG, "markRead $whom gave up after $attempt attempts: ${err.message}")
             } else {
                 Log.w(TAG, "markRead poke failed for $whom", err)
+            }
+        }
+    }
+
+    // ───────── presence (typing indicators) ─────────
+
+    /** context → (ship → wall-clock ms at which the entry lapses). */
+    private val _presence = MutableStateFlow<Map<String, Map<String, Long>>>(emptyMap())
+    private var presenceReaper: Job? = null
+
+    /** Ships other than us currently typing in [whom]. */
+    fun typingIn(whom: String): Flow<Set<String>> {
+        val context = Presence.contextFor(whom) ?: return flowOf(emptySet())
+        return _presence.map { it[context]?.keys.orEmpty() }.distinctUntilChanged()
+    }
+
+    /** When we last told the ship we're typing, per context. */
+    private val lastTypingPoke = java.util.concurrent.ConcurrentHashMap<String, Long>()
+
+    /**
+     * Announce that we're typing in [whom]. Safe to call on every
+     * keystroke: the entry lives 30s server-side, so we re-poke at most
+     * once per [Presence.REANNOUNCE_MS] and let it lapse on its own if
+     * the user walks away.
+     */
+    suspend fun setTyping(whom: String) {
+        val context = Presence.contextFor(whom) ?: return
+        val now = System.currentTimeMillis()
+        val last = lastTypingPoke[context]
+        if (last != null && now - last < Presence.REANNOUNCE_MS) return
+        lastTypingPoke[context] = now
+        val ch = channel ?: return
+        runCatching { ch.poke("presence", "presence-action-1", Presence.setAction(context, ourPatp)) }
+            .onFailure {
+                // Pre-v11.4.0 ship, or we're not a participant. Don't
+                // retry every keystroke.
+                lastTypingPoke[context] = now + 60_000L
+                Log.w(TAG, "presence set failed for $context", it)
+            }
+    }
+
+    /**
+     * Retract our typing entry — on send, or when the composer empties.
+     * A timeout does not propagate to watchers, so without this the
+     * peer keeps seeing "typing" for up to 30s after we hit send.
+     */
+    suspend fun clearTyping(whom: String) {
+        val context = Presence.contextFor(whom) ?: return
+        if (lastTypingPoke.remove(context) == null) return
+        val ch = channel ?: return
+        runCatching {
+            ch.poke("presence", "presence-action-1", Presence.clearAction(context, ourPatp))
+        }.onFailure { Log.w(TAG, "presence clear failed for $context", it) }
+    }
+
+    /** Fire-and-forget [clearTyping] for callers that can't suspend —
+     *  notably a composer being disposed as the screen goes away. */
+    fun clearTypingNow(whom: String) {
+        scope.launch { clearTyping(whom) }
+    }
+
+    /** Apply one `%presence-response-1` fact. */
+    private fun applyPresence(payload: JsonObject) {
+        val update = Presence.parseResponse(payload) ?: return
+        val now = System.currentTimeMillis()
+        val next = if (update.snapshot) mutableMapOf() else _presence.value.toMutableMap()
+
+        update.gone.forEach { e ->
+            val ships = next[e.context]?.toMutableMap() ?: return@forEach
+            ships.remove(e.ship)
+            if (ships.isEmpty()) next.remove(e.context) else next[e.context] = ships
+        }
+        update.here.forEach { e ->
+            // Our own entry echoes back on contexts we host; the UI
+            // must not tell the user they are typing.
+            if (e.ship == ourPatp || e.topic != Presence.TOPIC_TYPING) return@forEach
+            val ships = next[e.context]?.toMutableMap() ?: mutableMapOf()
+            ships[e.ship] = now + e.timeoutMs
+            next[e.context] = ships
+        }
+        _presence.value = next
+        startPresenceReaper()
+    }
+
+    /**
+     * The host emits `%gone` only for an explicit `%clear` — an entry
+     * that simply times out is never retracted over the wire. So expire
+     * locally, or a peer who closes their app types forever.
+     */
+    private fun startPresenceReaper() {
+        if (presenceReaper?.isActive == true) return
+        presenceReaper = scope.launch {
+            while (isActive && _presence.value.isNotEmpty()) {
+                delay(2_000L)
+                val now = System.currentTimeMillis()
+                val pruned = _presence.value
+                    .mapValues { (_, ships) -> ships.filterValues { it > now } }
+                    .filterValues { it.isNotEmpty() }
+                if (pruned != _presence.value) _presence.value = pruned
             }
         }
     }

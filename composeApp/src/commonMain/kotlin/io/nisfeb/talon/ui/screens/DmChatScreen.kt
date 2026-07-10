@@ -101,6 +101,7 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
@@ -900,6 +901,7 @@ fun DmChatScreen(
             }
         }
         } // close empty-state Box
+        TypingIndicator(whom = whom, repo = repo, contactMap = contactMap)
         io.nisfeb.talon.ui.ChatComposer(
             state = composerState,
             db = db,
@@ -2295,4 +2297,37 @@ private suspend fun clusterTopicsWithin(
         )
     }
     return out.sortedByDescending { it.count }
+}
+
+/**
+ * "~bob is typing…" — %presence, folded into the space just above the
+ * composer. Renders nothing at all when nobody is typing, when the
+ * conversation has no presence context (clubs), or when the ship is
+ * older than Tlon v11.4.0 and doesn't run the agent: in every one of
+ * those cases the flow is simply empty.
+ */
+@Composable
+private fun TypingIndicator(
+    whom: String,
+    repo: TlonChatRepo,
+    contactMap: ContactMap,
+) {
+    val typing by remember(whom, repo) { repo.typingIn(whom) }
+        .collectAsState(initial = emptySet())
+    if (typing.isEmpty()) return
+
+    val names = typing.sorted().map { contactMap.displayName(it) }
+    val label = when (names.size) {
+        1 -> "${names[0]} is typing…"
+        2 -> "${names[0]} and ${names[1]} are typing…"
+        else -> "${names.size} people are typing…"
+    }
+    Text(
+        label,
+        style = MaterialTheme.typography.labelSmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 2.dp),
+    )
 }

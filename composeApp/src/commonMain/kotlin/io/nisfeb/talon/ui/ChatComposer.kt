@@ -27,6 +27,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Stable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -337,12 +338,28 @@ fun ChatComposer(
         state.draft = next
         drafts.save(whom, next.text)
     }
+
+    // Typing presence. Keying on the draft text means a keystroke
+    // re-announces (the repo throttles to one poke per 15s against a
+    // 30s server-side entry) and a pause simply lets it lapse — which
+    // is the semantics we want. Emptying the composer, including the
+    // clear every send path performs, retracts immediately: a timeout
+    // never propagates to watchers, only an explicit clear does.
+    LaunchedEffect(whom, state.draft.text) {
+        if (state.draft.text.isBlank()) repo.clearTyping(whom) else repo.setTyping(whom)
+    }
+
     // Belt-and-suspenders flush mirrored from the original DM body —
     // if the surface unmounts without onValueChange ever firing for
     // a clear, persist what we have so the conversation list and
     // the next mount agree.
     DisposableEffect(whom) {
-        onDispose { drafts.save(whom, state.draft.text) }
+        onDispose {
+            drafts.save(whom, state.draft.text)
+            // Leaving the screen mid-draft must not leave us typing
+            // forever on the peer's side.
+            repo.clearTypingNow(whom)
+        }
     }
 
     val mention = detectMentionQuery(state.draft.text, state.draft.selection.start)
