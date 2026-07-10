@@ -164,7 +164,14 @@ fun TalonApp(
     // plain `remember { mutableStateOf(initialX) }` would silently
     // ignore — that was the rc23-era "tap a notification, nothing
     // happens" bug.
-    var openWhom by remember { mutableStateOf<String?>(initialOpenWhom) }
+    // A "group:~host/name" deep link (group-invite notification) opens
+    // the group, not a chat, so keep it out of openWhom.
+    var openWhom by remember {
+        mutableStateOf(initialOpenWhom?.takeUnless { it.startsWith("group:") })
+    }
+    var openGroupFlag by remember {
+        mutableStateOf(initialOpenWhom?.takeIf { it.startsWith("group:") }?.removePrefix("group:"))
+    }
     // Scroll target is consumed once the chat screen actually uses it,
     // so navigating back and reopening doesn't re-snap to the same msg.
     var pendingScrollMessageId by remember { mutableStateOf(initialScrollMessageId) }
@@ -259,7 +266,14 @@ fun TalonApp(
             groupInfoDrilldown = null
         }
         if (initialOpenWhom != null) {
-            openWhom = initialOpenWhom
+            // A group-invite notification deep-links as "group:~host/name"
+            // — route it to the group screen, not openWhom (which only
+            // understands channel nests and DM ships).
+            if (initialOpenWhom.startsWith("group:")) {
+                openGroupFlag = initialOpenWhom.removePrefix("group:")
+            } else {
+                openWhom = initialOpenWhom
+            }
             consumed = true
         }
         if (initialScrollMessageId != null) {
@@ -334,7 +348,6 @@ fun TalonApp(
     var notebookEditSentMs by remember { mutableStateOf(0L) }
     var openGalleryPostId by remember { mutableStateOf<String?>(null) }
     var galleryComposeOpen by remember { mutableStateOf(false) }
-    var openGroupFlag by remember { mutableStateOf<String?>(null) }
 
     // Per-ship persistent store for the last-open conversation.
     // `remember(app)` keeps the same SharedPreferences-backed instance
@@ -586,9 +599,26 @@ fun TalonApp(
                 )
             }
         }
+        // New group invite → notify, same as a DM request. Tapping opens
+        // the group (its flag doubles as the whom via the "group:" route).
+        app.repo.groupInviteListener = { invite ->
+            appScope.launch {
+                val from = invite.inviter?.let { " from $it" } ?: ""
+                Notifications.showMessage(
+                    context = context,
+                    whom = "group:${invite.flag}",
+                    postId = invite.flag,
+                    parentId = null,
+                    title = invite.title ?: invite.flag,
+                    body = "invited you to a group$from",
+                    sentMs = System.currentTimeMillis(),
+                )
+            }
+        }
         onDispose {
             app.repo.messageListener = null
             app.repo.dmInviteListener = null
+            app.repo.groupInviteListener = null
         }
     }
 

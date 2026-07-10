@@ -261,6 +261,14 @@ class TlonChatRepo(
      */
     @Volatile var dmInviteListener: ((ship: String) -> Unit)? = null
 
+    /**
+     * Fired for each newly-arrived group invite (not ones already
+     * pending at launch). Mirrors [dmInviteListener] — the app wires it
+     * to a tray/system notification so a group invite is as hard to
+     * miss as a DM request.
+     */
+    @Volatile var groupInviteListener: ((InviteSummary) -> Unit)? = null
+
     fun start(session: UrbitSession) {
         if (started) return
         started = true
@@ -395,6 +403,15 @@ class TlonChatRepo(
             SubSpec("contacts", "/v1/news"),
             SubSpec("groups", "/v1/groups"),
             SubSpec("presence", "/v1"),
+            // Invites live here, not on the content subscriptions above:
+            // %chat pushes the pending-DM list on /dm/invited (never on
+            // /v4), and %groups pushes gang/invite updates on
+            // /gangs/updates. Without these two, a new invite only
+            // surfaced on the next reconnect's bootstrap scry — or, for
+            // groups, never, since refreshInvites ran only when the
+            // Invites screen was opened.
+            SubSpec("chat", "/dm/invited"),
+            SubSpec("groups", "/gangs/updates"),
         ).map { spec ->
             async {
                 runCatching { ch.subscribe(spec.app, spec.path) }
@@ -461,6 +478,15 @@ class TlonChatRepo(
                 runCatching { bootstrapDmInvites(ch) }
                     .onFailure { Log.e(TAG, "dm-invites scry failed", it) }
             }
+            // Group invites had no bootstrap at all — refreshInvites ran
+            // only when the Invites screen was opened, so an invite that
+            // arrived while you weren't looking never lit the badge.
+            // notify=false: populate the badge, don't fire a toast for
+            // invites that were already pending before this launch.
+            val groupInvitesJob = async {
+                runCatching { refreshInvites(notify = false) }
+                    .onFailure { Log.e(TAG, "group-invites scry failed", it) }
+            }
             val firstRunJobs = if (firstRun) {
                 listOf(
                     async {
@@ -473,7 +499,10 @@ class TlonChatRepo(
                     },
                 )
             } else emptyList()
-            (listOf(initJob, activityJob, contactsJob, ordersJob, dmInvitesJob) + firstRunJobs).awaitAll()
+            (
+                listOf(initJob, activityJob, contactsJob, ordersJob, dmInvitesJob, groupInvitesJob) +
+                    firstRunJobs
+                ).awaitAll()
         } finally {
             if (firstRun) _bootstrapping.value = false
         }
@@ -1203,8 +1232,14 @@ class TlonChatRepo(
      * init response also contains everything else the client needs,
      * but we only read `foreigns` here.
      */
-    suspend fun refreshInvites() {
+    suspend fun refreshInvites(notify: Boolean = false) {
         val ch = channel ?: error("not connected")
+        // Flags we already knew about, so a live refresh only toasts
+        // genuinely new invites — not the whole pending set every time
+        // %groups republishes it. Null (never loaded) counts as "knew
+        // nothing", but bootstrap passes notify=false so that first load
+        // stays quiet regardless.
+        val known = _invites.value?.mapTo(mutableSetOf()) { it.flag } ?: mutableSetOf()
         val body = runCatching {
             ch.scry("groups-ui", "/v7/init") as? JsonObject
         }.onFailure { Log.w(TAG, "scry groups-ui/v7/init failed", it) }.getOrNull()
@@ -1248,6 +1283,10 @@ class TlonChatRepo(
             )
         }
         _invites.value = out.sortedBy { (it.title ?: it.flag).lowercase() }
+        if (notify) {
+            out.filter { it.flag !in known }
+                .forEach { runCatching { groupInviteListener?.invoke(it) } }
+        }
     }
 
     /** Accept an inbound group invite via `group-join`. */
@@ -2625,6 +2664,18 @@ class TlonChatRepo(
             applyGroupEvent(payload)
             return
         }
+
+        // %groups /gangs/updates — a bare map of {flag: {claim, preview,
+        // invite}}. A gang gaining an invite means someone just invited
+        // us to a group. Re-scry the foreign list (cheap, and rare) to
+        // refresh the badge + list, and toast the new ones.
+        if (looksLikeGangsFact(payload)) {
+            scope.launch {
+                runCatching { refreshInvites(notify = true) }
+                    .onFailure { Log.w(TAG, "refreshInvites on gang update failed", it) }
+            }
+            return
+        }
     }
 
     private suspend fun applyGroupEvent(payload: JsonObject) {
@@ -3931,3 +3982,14 @@ internal fun directoryFields(entry: JsonObject): JsonObject {
     val mod = entry["mod"] as? JsonObject ?: return con
     return JsonObject(con + mod)
 }
+
+/**
+ * A `%groups /gangs/updates` fact is the only diff shaped as a bare
+ * `flag → object` map. Every other agent's fact carries literal keys
+ * (`whom`, `nest`, `flag`, `put-entry`, `init`, `here`…), whereas a
+ * gang fact's keys are the group flags themselves (`~ship/name`). So
+ * "every key is flag-shaped" identifies it without colliding with any
+ * other event the SSE stream delivers.
+ */
+internal fun looksLikeGangsFact(payload: JsonObject): Boolean =
+    payload.isNotEmpty() && payload.keys.all { it.startsWith("~") && '/' in it }

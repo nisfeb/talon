@@ -684,7 +684,18 @@ fun App(
                 repo.dmInviteListener = { ship ->
                     runCatching { notifier.notify(ship, "wants to message you") }
                 }
-                onDispose { repo.dmInviteListener = null }
+                // A new group invite is as easy to miss as a DM request —
+                // toast it the same way so it doesn't sit unseen behind a
+                // badge you have no reason to check.
+                repo.groupInviteListener = { invite ->
+                    val name = invite.title ?: invite.flag
+                    val from = invite.inviter?.let { " from $it" } ?: ""
+                    runCatching { notifier.notify(name, "invited you to a group$from") }
+                }
+                onDispose {
+                    repo.dmInviteListener = null
+                    repo.groupInviteListener = null
+                }
             }
 
             // OS notifications for incoming messages. Watches the
