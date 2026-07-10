@@ -252,13 +252,12 @@ fun ThreadList(
         set.toList()
     }
 
-    // Reply payloads use the same wire shapes as the main composer
-    // for plain text. Threads have no structured replyImage on the
-    // wire today, so an attached image embeds its hosted URL as
-    // markdown — Tlon clients render bare URLs to images inline, so
-    // the recipient still sees the image. Quote-into-thread is also
-    // not on the wire (`replyQuote` doesn't exist), so the strategy
-    // declines and the composer falls back to plain text.
+    // Reply payloads use the same wire shapes as the main composer. A
+    // reply's content is a full story, so an attached image goes as a
+    // structured image block and renders inline — same as a top-level
+    // post. Quote-into-thread is not on the wire (`replyQuote` doesn't
+    // exist), so the strategy declines and the composer falls back to
+    // plain text.
     val threadStrategy = remember(repo, whom, parentId) {
         object : io.nisfeb.talon.ui.ChatSendStrategy {
             override suspend fun sendText(text: String) {
@@ -270,7 +269,7 @@ fun ThreadList(
                 height: Int,
                 alt: String,
             ) {
-                repo.reply(whom, parentId, "[$alt]($src)")
+                repo.replyImage(whom, parentId, src, width, height, alt)
             }
             override val supportsQuote: Boolean = false
             override suspend fun sendQuote(

@@ -717,21 +717,7 @@ class TlonChatRepo(
         width: Int,
         height: Int,
         alt: String,
-    ): String {
-        val content = buildJsonArray {
-            add(buildJsonObject {
-                put("block", buildJsonObject {
-                    put("image", buildJsonObject {
-                        put("src", src)
-                        put("width", width)
-                        put("height", height)
-                        put("alt", alt)
-                    })
-                })
-            })
-        }
-        return postContent(whom, content)
-    }
+    ): String = postContent(whom, imageStory(src, width, height, alt))
 
     /**
      * Post a notebook entry to a `diary/~host/slug` channel. Title is
@@ -2196,7 +2182,27 @@ class TlonChatRepo(
      * Reply to a top-level post. `parentId` is the post being replied to.
      * Returns the minted reply id so callers can match the echo.
      */
-    suspend fun reply(whom: String, parentId: String, text: String): String {
+    suspend fun reply(whom: String, parentId: String, text: String): String =
+        replyContent(whom, parentId, textToStory(text))
+
+    /** Reply with a structured image block, so it renders inline in the
+     *  thread instead of as the markdown link the old text fallback
+     *  produced. A reply's content is a full story, same as a post's —
+     *  there was never a wire reason to degrade it. */
+    suspend fun replyImage(
+        whom: String,
+        parentId: String,
+        src: String,
+        width: Int,
+        height: Int,
+        alt: String,
+    ): String = replyContent(whom, parentId, imageStory(src, width, height, alt))
+
+    private suspend fun replyContent(
+        whom: String,
+        parentId: String,
+        content: JsonArray,
+    ): String {
         val ch = channel ?: error("not connected")
         val sent = System.currentTimeMillis()
         val da = UrbitTime.unixMsToDa(sent)
@@ -2208,7 +2214,7 @@ class TlonChatRepo(
             whom.startsWith("heap/")
         ) "local_${da}" else UrbitTime.formatPostId(ourPatp, da)
         val replyEssay = buildJsonObject {
-            put("content", textToStory(text))
+            put("content", content)
             put("author", ourPatp)
             put("sent", sent)
             put("blob", JsonNull)
@@ -3993,3 +3999,23 @@ internal fun directoryFields(entry: JsonObject): JsonObject {
  */
 internal fun looksLikeGangsFact(payload: JsonObject): Boolean =
     payload.isNotEmpty() && payload.keys.all { it.startsWith("~") && '/' in it }
+
+/**
+ * A one-verse story carrying a single image block — the structured form
+ * both top-level posts (repo.sendImage) and thread replies
+ * (repo.replyImage) use, so the image renders inline instead of as the
+ * `[alt](url)` markdown link the old thread fallback produced.
+ */
+internal fun imageStory(src: String, width: Int, height: Int, alt: String): JsonArray =
+    buildJsonArray {
+        add(buildJsonObject {
+            put("block", buildJsonObject {
+                put("image", buildJsonObject {
+                    put("src", src)
+                    put("width", width)
+                    put("height", height)
+                    put("alt", alt)
+                })
+            })
+        })
+    }

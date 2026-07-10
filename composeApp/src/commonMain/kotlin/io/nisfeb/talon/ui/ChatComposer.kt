@@ -142,9 +142,9 @@ fun rememberComposerState(whom: String, drafts: DraftStore): ComposerState =
 interface ChatSendStrategy {
     suspend fun sendText(text: String)
 
-    /** Send a structured image post when the surface supports it.
-     *  Threads don't have replyImage; their impl falls back to
-     *  embedding the URL as markdown via [sendText]. */
+    /** Send a structured image. Both surfaces carry a full story —
+     *  DM/post via repo.sendImage, thread via repo.replyImage — so the
+     *  image renders inline rather than as a link. */
     suspend fun sendImage(src: String, width: Int, height: Int, alt: String)
 
     val supportsQuote: Boolean
