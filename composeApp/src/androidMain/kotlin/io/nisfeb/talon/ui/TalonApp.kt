@@ -1125,6 +1125,11 @@ fun TalonApp(
                     onOpenSidebarSettings = { sidebarSettingsOpen = true },
                     onOpenShareLoginQr = { shareLoginQrOpen = true },
                     onOpenLoops = { loopsOpen = true },
+                    onMnemonymNamesChanged = { on ->
+                        appScope.launch {
+                            runCatching { app.repo.settingsSync?.pushMnemonymNames(on) }
+                        }
+                    },
                     modifier = mod,
                 )
             }

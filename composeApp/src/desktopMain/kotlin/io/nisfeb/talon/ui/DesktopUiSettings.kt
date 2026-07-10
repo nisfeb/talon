@@ -55,9 +55,18 @@ class DesktopUiSettings(
         val powerFeaturesEnabled: Boolean = false,
         val density: String = Density.Comfortable.name,
         val fontScale: Float = 1.0f,
+        val mnemonymNames: Boolean = true,
     )
 
     private val initial = loadInitial()
+
+    init {
+        // Mnemonym naming: the runtime switch lives in the shared
+        // [MnemonymNames] object (ContactMap reads it); this store just
+        // loads the persisted choice over the default and keeps writes.
+        MnemonymNames.enabled.value = initial.mnemonymNames
+        MnemonymNames.persist = { persistCurrent() }
+    }
     private val _hideComposerButtons = MutableStateFlow(initial.hideComposerButtons)
     override val hideComposerButtons: StateFlow<Boolean> =
         _hideComposerButtons.asStateFlow()
@@ -218,6 +227,7 @@ class DesktopUiSettings(
                 powerFeaturesEnabled = _powerFeaturesEnabled.value,
                 density = _density.value.name,
                 fontScale = _fontScale.value,
+                mnemonymNames = MnemonymNames.enabled.value,
             ),
         )
     }

@@ -1130,6 +1130,11 @@ fun App(
                             onOpenSidebarSettings = { showSidebarSettings = true },
                             onOpenShareLoginQr = { shareLoginQrOpen = true },
                             onOpenLoops = { showLoops = true },
+                            onMnemonymNamesChanged = { on ->
+                                repo.pushScope.launch {
+                                    runCatching { settingsSync?.pushMnemonymNames(on) }
+                                }
+                            },
                         )
                     }
                     showSelfProfile -> ProfileEditScreen(

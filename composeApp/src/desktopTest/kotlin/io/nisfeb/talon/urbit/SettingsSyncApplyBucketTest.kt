@@ -883,6 +883,39 @@ class SettingsSyncApplyBucketTest {
         assertEquals(0, rearmCount)
     }
 
+    // ── ui-prefs (mnemonym naming toggle) ───────────────────────────
+
+    @Test
+    fun `applyBucket UI_PREFS applies the mnemonym toggle, removeEntry restores the default`() = runBlocking {
+        io.nisfeb.talon.ui.MnemonymNames.set(true)
+        sync.applyBucket(
+            SettingsSyncImpl.BUCKET_UI_PREFS,
+            buildJsonObject {
+                put(
+                    SettingsSyncImpl.ENTRY_MNEMONYM_NAMES,
+                    buildJsonObject { put("enabled", false) },
+                )
+            },
+        )
+        assertEquals(false, io.nisfeb.talon.ui.MnemonymNames.enabled.value)
+
+        // Live put-entry flips it back on.
+        sync.applyEntry(
+            SettingsSyncImpl.BUCKET_UI_PREFS,
+            SettingsSyncImpl.ENTRY_MNEMONYM_NAMES,
+            buildJsonObject { put("enabled", true) },
+        )
+        assertEquals(true, io.nisfeb.talon.ui.MnemonymNames.enabled.value)
+
+        // Peer deleted the entry → back to the default (on).
+        io.nisfeb.talon.ui.MnemonymNames.set(false)
+        sync.removeEntry(
+            SettingsSyncImpl.BUCKET_UI_PREFS,
+            SettingsSyncImpl.ENTRY_MNEMONYM_NAMES,
+        )
+        assertEquals(true, io.nisfeb.talon.ui.MnemonymNames.enabled.value)
+    }
+
     // ── status-seen (cross-device fresh-status marker) ──────────────
 
     @Test

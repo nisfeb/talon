@@ -43,6 +43,10 @@ interface SettingsSync : io.nisfeb.talon.ai.LoopWriteCoordinator {
      *  the ship-side store. Default no-op. */
     suspend fun clearDailyDigestOnShip() {}
 
+    /** Push the mnemonym-naming preference (ui-prefs bucket) so every
+     *  device shows the same fallback ship names. Default no-op. */
+    suspend fun pushMnemonymNames(enabled: Boolean) {}
+
     // ───────── assistant history sync ─────────
     /**
      * Push one assistant turn + its conversation metadata to %settings

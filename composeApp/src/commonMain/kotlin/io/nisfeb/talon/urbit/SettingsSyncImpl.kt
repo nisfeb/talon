@@ -93,6 +93,10 @@ class SettingsSyncImpl(
         const val BUCKET_WATCHWORD_EXCLUDES = "watchword-excludes"
         const val BUCKET_DAILY_DIGEST = "daily-digest"
         const val BUCKET_STATUS_SEEN = "status-seen"
+        // Cross-device UI preferences that don't warrant a Room table.
+        // One entry per pref; today just the mnemonym-naming toggle.
+        const val BUCKET_UI_PREFS = "ui-prefs"
+        const val ENTRY_MNEMONYM_NAMES = "mnemonym-names"
         // Assistant history (Stage 2). Conversation metadata + append-only
         // turns, keyed by global id; embeddings stay device-local.
         const val BUCKET_ASSISTANT_CONVERSATIONS = "assistant-conversations"
@@ -144,6 +148,14 @@ class SettingsSyncImpl(
             BUCKET_STATUS_SEEN,
             STATUS_SEEN_ENTRY,
             buildJsonObject { put("ms", ms) },
+        )
+    }
+
+    override suspend fun pushMnemonymNames(enabled: Boolean) {
+        pokePutEntry(
+            BUCKET_UI_PREFS,
+            ENTRY_MNEMONYM_NAMES,
+            buildJsonObject { put("enabled", enabled) },
         )
     }
 
@@ -1198,6 +1210,12 @@ class SettingsSyncImpl(
                 val ms = (unwrap(v) as? JsonObject)?.get("ms").asLong() ?: return
                 bumpStatusesSeen(ms)
             }
+            BUCKET_UI_PREFS -> {
+                val v = entries?.get(ENTRY_MNEMONYM_NAMES) ?: return
+                (unwrap(v) as? JsonObject)?.get("enabled").asBool()?.let {
+                    io.nisfeb.talon.ui.MnemonymNames.set(it)
+                }
+            }
             BUCKET_ASSISTANT_CONVERSATIONS -> {
                 entries?.forEach { (gid, v) ->
                     (unwrap(v) as? JsonObject)?.let { upsertAssistantConversation(gid, it) }
@@ -1371,6 +1389,12 @@ class SettingsSyncImpl(
                 val ms = (unwrapped as? JsonObject)?.get("ms").asLong() ?: return
                 bumpStatusesSeen(ms)
             }
+            BUCKET_UI_PREFS -> {
+                if (entry != ENTRY_MNEMONYM_NAMES) return
+                (unwrapped as? JsonObject)?.get("enabled").asBool()?.let {
+                    io.nisfeb.talon.ui.MnemonymNames.set(it)
+                }
+            }
             // Live put-entry facts must enforce the same caps applyBucket
             // does, or a device that stays connected grows the tables one
             // row per peer event until the next reconnect's bucket replay.
@@ -1391,6 +1415,10 @@ class SettingsSyncImpl(
 
     internal suspend fun removeEntry(bucket: String, entry: String) {
         when (bucket) {
+            BUCKET_UI_PREFS -> {
+                // Entry deleted on the ship → back to the default (on).
+                if (entry == ENTRY_MNEMONYM_NAMES) io.nisfeb.talon.ui.MnemonymNames.set(true)
+            }
             BUCKET_GROUP_ORDERS -> db.groupOrders().remove(entry)
             BUCKET_FOLDERS -> {
                 val id = entry.toLongOrNull() ?: return
@@ -1580,6 +1608,7 @@ class SettingsSyncImpl(
 
     internal suspend fun clearBucketLocally(bucket: String) {
         when (bucket) {
+            BUCKET_UI_PREFS -> io.nisfeb.talon.ui.MnemonymNames.set(true)
             BUCKET_GROUP_ORDERS -> db.groupOrders().replaceAll(emptyList())
             BUCKET_FOLDERS -> db.folders().replaceAll(emptyList())
             BUCKET_FOLDER_MEMBERS -> db.folders().replaceAllMembers(emptyList())

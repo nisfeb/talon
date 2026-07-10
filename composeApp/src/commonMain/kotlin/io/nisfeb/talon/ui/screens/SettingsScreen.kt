@@ -120,6 +120,11 @@ fun SettingsScreen(
     /** Opens the Loops screen (scheduled agent prompts). Defaults to
      *  no-op; the row only renders where isLoopsSupported + a key. */
     onOpenLoops: () -> Unit = {},
+    /** Fired after the user flips the mnemonym-naming toggle; hosts
+     *  push the new value to %settings (ui-prefs bucket) so the choice
+     *  follows the user across devices. Local apply + persist happen
+     *  regardless via [io.nisfeb.talon.ui.MnemonymNames.set]. */
+    onMnemonymNamesChanged: (Boolean) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val aiState by aiSettings.state.collectAsState()
@@ -207,6 +212,21 @@ fun SettingsScreen(
                 }
             }
             Spacer(Modifier.height(8.dp))
+
+            // ── Ship naming ─────────────────────────────────────────
+            val mnemonymNames by io.nisfeb.talon.ui.MnemonymNames.enabled.collectAsState()
+            FeatureToggleRow(
+                label = "Word-based ship names",
+                description = "Ships without a nickname show as readable " +
+                    "words (~sampel-palnet → .accept.engulf.relents) " +
+                    "instead of the raw Urbit name. Synced across your " +
+                    "devices; off restores classic ~ship naming.",
+                enabled = mnemonymNames,
+                onChange = { on ->
+                    io.nisfeb.talon.ui.MnemonymNames.set(on)
+                    onMnemonymNamesChanged(on)
+                },
+            )
 
             // ── Accent color ────────────────────────────────────────
             FeatureToggleRow(
