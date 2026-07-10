@@ -4,8 +4,8 @@ import io.nisfeb.talon.urbit.Fuzz
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
-import java.time.Instant
-import java.time.ZoneId
+import kotlinx.datetime.Instant
+import kotlinx.datetime.TimeZone
 
 class DailyDigestFuzzTest {
 
@@ -17,21 +17,21 @@ class DailyDigestFuzzTest {
     @Test
     fun `nextFireMs never throws on arbitrary inputs`() {
         Fuzz.run(ITERATIONS, SEED) { rnd, _ ->
-            val now = Instant.ofEpochSecond(rnd.nextLong(0L, 4_000_000_000L))
+            val now = Instant.fromEpochSeconds(rnd.nextLong(0L, 4_000_000_000L))
             val hour = rnd.nextInt(0, 24)
             val minute = rnd.nextInt(0, 60)
-            DailyDigestSchedule.nextFireMs(now, hour, minute, ZoneId.of("UTC"))
+            DailyDigestSchedule.nextFireMs(now, hour, minute, TimeZone.of("UTC"))
         }
     }
 
     @Test
     fun `nextFireMs result is always strictly greater than now`() {
         Fuzz.run(ITERATIONS, SEED) { rnd, _ ->
-            val now = Instant.ofEpochSecond(rnd.nextLong(0L, 4_000_000_000L))
+            val now = Instant.fromEpochSeconds(rnd.nextLong(0L, 4_000_000_000L))
             val hour = rnd.nextInt(0, 24)
             val minute = rnd.nextInt(0, 60)
-            val next = DailyDigestSchedule.nextFireMs(now, hour, minute, ZoneId.of("UTC"))
-            assertTrue("next=$next now=${now.toEpochMilli()}", next > now.toEpochMilli())
+            val next = DailyDigestSchedule.nextFireMs(now, hour, minute, TimeZone.of("UTC"))
+            assertTrue("next=$next now=${now.toEpochMilliseconds()}", next > now.toEpochMilliseconds())
         }
     }
 
@@ -39,11 +39,11 @@ class DailyDigestFuzzTest {
     fun `nextFireMs result is at most 24h plus 1 hour from now`() {
         // 25h to allow for DST forward (which can stretch the day).
         Fuzz.run(ITERATIONS, SEED) { rnd, _ ->
-            val now = Instant.ofEpochSecond(rnd.nextLong(0L, 4_000_000_000L))
+            val now = Instant.fromEpochSeconds(rnd.nextLong(0L, 4_000_000_000L))
             val hour = rnd.nextInt(0, 24)
             val minute = rnd.nextInt(0, 60)
-            val next = DailyDigestSchedule.nextFireMs(now, hour, minute, ZoneId.of("UTC"))
-            val maxMs = now.toEpochMilli() + 25L * 60 * 60 * 1000
+            val next = DailyDigestSchedule.nextFireMs(now, hour, minute, TimeZone.of("UTC"))
+            val maxMs = now.toEpochMilliseconds() + 25L * 60 * 60 * 1000
             assertTrue("next=$next maxMs=$maxMs", next <= maxMs)
         }
     }

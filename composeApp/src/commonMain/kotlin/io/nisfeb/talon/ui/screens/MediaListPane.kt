@@ -1,4 +1,6 @@
 package io.nisfeb.talon.ui.screens
+import io.nisfeb.talon.util.formatMonthDay
+import io.nisfeb.talon.util.formatTime24
 import io.nisfeb.talon.util.nowMs
 
 import androidx.compose.foundation.clickable
@@ -42,10 +44,6 @@ import io.nisfeb.talon.ui.MediaKind
 import io.nisfeb.talon.ui.combinedClickableWithSecondary
 import io.nisfeb.talon.urbit.MediaCategory
 import io.nisfeb.talon.urbit.TlonChatRepo
-import java.time.Instant
-import java.time.ZoneId
-import java.time.format.DateTimeFormatter
-import java.util.Locale
 import kotlinx.coroutines.launch
 
 /**
@@ -377,22 +375,14 @@ private fun AuthorAndTimestamp(author: String, sentMs: Long) {
     )
 }
 
-private val POSTED_TIME_TODAY: DateTimeFormatter =
-    DateTimeFormatter.ofPattern("HH:mm", Locale.getDefault())
-        .withZone(ZoneId.systemDefault())
-private val POSTED_DATE_OLD: DateTimeFormatter =
-    DateTimeFormatter.ofPattern("MMM d", Locale.getDefault())
-        .withZone(ZoneId.systemDefault())
 
 /** Match DmListScreen's relative format: "HH:mm" if today, "MMM d"
  *  otherwise. Keeps timestamps short (info pane is narrow) without
  *  being ambiguous for older content. */
 private fun formatPostedAt(ms: Long): String {
-    val now = nowMs()
-    val diff = now - ms
-    val instant = Instant.ofEpochMilli(ms)
+    val diff = nowMs() - ms
     return when {
-        diff < 24 * 3600_000L -> POSTED_TIME_TODAY.format(instant)
-        else -> POSTED_DATE_OLD.format(instant)
+        diff < 24 * 3600_000L -> formatTime24(ms)
+        else -> formatMonthDay(ms)
     }
 }

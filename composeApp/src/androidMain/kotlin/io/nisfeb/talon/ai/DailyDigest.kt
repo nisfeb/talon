@@ -84,10 +84,10 @@ class DailyDigest(
             return
         }
         val fireMs = DailyDigestSchedule.nextFireMs(
-            now = Instant.now(),
+            now = kotlinx.datetime.Clock.System.now(),
             hourOfDay = st.hourOfDay,
             minuteOfDay = st.minuteOfDay,
-            zone = ZoneId.systemDefault(),
+            zone = kotlinx.datetime.TimeZone.currentSystemDefault(),
         )
         alarmManager.setAndAllowWhileIdle(
             AlarmManager.RTC_WAKEUP, fireMs, buildPendingIntent(),
