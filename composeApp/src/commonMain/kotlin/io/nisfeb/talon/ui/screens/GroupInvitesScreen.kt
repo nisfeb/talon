@@ -191,6 +191,20 @@ private fun InviteRow(
                     maxLines = 2,
                 )
             }
+            // What you're joining, before you commit: how many people are
+            // in it and whether it's public. Both come from the group
+            // preview the invite already carries.
+            val stats = listOfNotNull(
+                invite.memberCount?.let { "$it ${if (it == 1) "member" else "members"}" },
+                invite.privacy?.takeIf { it != "public" }?.replaceFirstChar(Char::uppercase),
+            )
+            if (stats.isNotEmpty()) {
+                Text(
+                    stats.joinToString(" · "),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
         Column(horizontalAlignment = Alignment.End) {
             Button(enabled = !busy, onClick = onAccept) { Text("Accept") }

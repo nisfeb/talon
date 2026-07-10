@@ -948,6 +948,8 @@ class TlonChatRepo(
         val image: String?,
         val cover: String?,
         val memberCount: Int?,
+        /** "public" / "private" / "secret", when the preview said. */
+        val privacy: String? = null,
     )
 
     /**
@@ -1229,6 +1231,11 @@ class TlonChatRepo(
             val meta = preview?.get("meta") as? JsonObject
             fun metaStr(k: String) = meta?.get(k).asStr()
                 ?.takeIf { it.isNotBlank() }
+            // member-count + privacy are siblings of `meta` in the group
+            // preview (sur/groups.hoon +$preview). Older ships spell the
+            // count `count`; either way it's a plain JSON number.
+            val memberCount = (preview?.get("member-count") ?: preview?.get("count"))
+                ?.let { (it as? JsonPrimitive)?.content?.toIntOrNull() }
             out += InviteSummary(
                 flag = flag,
                 inviter = inviter,
@@ -1236,7 +1243,8 @@ class TlonChatRepo(
                 description = metaStr("description"),
                 image = metaStr("image"),
                 cover = metaStr("cover"),
-                memberCount = null,
+                memberCount = memberCount,
+                privacy = preview?.get("privacy").asStr()?.takeIf { it.isNotBlank() },
             )
         }
         _invites.value = out.sortedBy { (it.title ?: it.flag).lowercase() }
