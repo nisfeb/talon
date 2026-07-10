@@ -1123,6 +1123,9 @@ fun DmListScreen(
                                 // change and rendered groups overlapped/compacted.
                                 ReorderableItem(reorderState, key = row.key, enabled = editMode) { _ ->
                                     Column {
+                                        val groupActive by remember(row.flag) {
+                                            repo.groupPresenceCountByFlag(row.flag)
+                                        }.collectAsState(initial = 0)
                                         GroupHeaderRow(
                                             flag = row.flag,
                                             title = row.title,
@@ -1130,6 +1133,7 @@ fun DmListScreen(
                                             childCount = row.childCount,
                                             totalUnread = row.totalUnread,
                                             expanded = row.expanded,
+                                            activeCount = groupActive,
                                             onToggle = onGroupHeadToggle,
                                             onLongClick = if (editMode) null else onGroupHeadLongPress,
                                             editMode = editMode,
@@ -1248,6 +1252,9 @@ fun DmListScreen(
                                 // change and rendered groups overlapped/compacted.
                                 ReorderableItem(reorderState, key = row.key, enabled = editMode) { _ ->
                                     Column {
+                                        val groupActive by remember(row.flag) {
+                                            repo.groupPresenceCountByFlag(row.flag)
+                                        }.collectAsState(initial = 0)
                                         GroupHeaderRow(
                                             flag = row.flag,
                                             title = row.title,
@@ -1255,6 +1262,7 @@ fun DmListScreen(
                                             childCount = row.childCount,
                                             totalUnread = row.totalUnread,
                                             expanded = row.expanded,
+                                            activeCount = groupActive,
                                             onToggle = onGroupHeadToggle,
                                             onLongClick = if (editMode) null else onGroupHeadLongPress,
                                             editMode = editMode,
@@ -2134,6 +2142,7 @@ private fun GroupHeaderRow(
     childCount: Int,
     totalUnread: Int,
     expanded: Boolean,
+    activeCount: Int,
     onToggle: (String) -> Unit,
     editMode: Boolean = false,
     dragHandleModifier: Modifier = Modifier,
@@ -2173,10 +2182,17 @@ private fun GroupHeaderRow(
                 style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
                 maxLines = 1,
             )
+            val channelsLabel = "$childCount channel${if (childCount == 1) "" else "s"}"
             Text(
-                "$childCount channel${if (childCount == 1) "" else "s"}",
+                // "· N active" rides the channel-count line when anyone is
+                // present (typing/uploading) in one of the group's
+                // channels — the only place a member sees this, since
+                // tapping the group toggles the accordion rather than
+                // opening a group screen.
+                if (activeCount > 0) "$channelsLabel · $activeCount active" else channelsLabel,
                 style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = if (activeCount > 0) MaterialTheme.colorScheme.primary
+                else MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
         if (totalUnread > 0 && !expanded) {

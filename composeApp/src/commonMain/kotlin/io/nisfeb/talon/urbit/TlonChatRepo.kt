@@ -52,6 +52,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
@@ -3258,6 +3259,18 @@ class TlonChatRepo(
             }.size
         }.distinctUntilChanged()
     }
+
+    /**
+     * [groupPresenceCount] for a group flag — resolves its channels from
+     * the DB so the home-list group row can show the count without the
+     * caller threading nests. Re-resolves if the group's channel set
+     * changes.
+     */
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    fun groupPresenceCountByFlag(flag: String): Flow<Int> =
+        db.groups().streamChannelsForGroup(flag)
+            .flatMapLatest { chans -> groupPresenceCount(chans.map { it.nest }) }
+            .distinctUntilChanged()
 
     /** When we last announced a given (context, topic). */
     private val lastPresencePoke =
