@@ -379,17 +379,29 @@ class TlonChatRepo(
         // agent isn't installed and this subscribe nacks — harmless,
         // the nack is logged by applyEvent and typing simply never
         // shows. Same for the pokes in setTyping/clearTyping.
+        //
+        // %activity /v5 is where %react and %dm-react events live:
+        // /v4's down-conversion returns ~ for them, so the agent emits
+        // no v4 fact at all and reaction notifications never arrive.
+        // But /v5 only exists on v11.4.0+, and an older ship's watch
+        // arm crashes on it — which would cost us *every* activity
+        // event, not just reactions. So ask for /v5 and let the nack
+        // walk us back to /v4.
+        subFallbacks.clear()
         listOf(
-            "chat" to "/v4",
-            "channels" to "/v4",
-            "activity" to "/v4",
-            "contacts" to "/v1/news",
-            "groups" to "/v1/groups",
-            "presence" to "/v1",
-        ).map { (app, path) ->
+            SubSpec("chat", "/v4"),
+            SubSpec("channels", "/v4"),
+            SubSpec("activity", "/v5", fallback = "/v4"),
+            SubSpec("contacts", "/v1/news"),
+            SubSpec("groups", "/v1/groups"),
+            SubSpec("presence", "/v1"),
+        ).map { spec ->
             async {
-                runCatching { ch.subscribe(app, path) }
-                    .onFailure { Log.e(TAG, "$app subscribe failed", it) }
+                runCatching { ch.subscribe(spec.app, spec.path) }
+                    .onSuccess { id ->
+                        spec.fallback?.let { subFallbacks[id] = spec.app to it }
+                    }
+                    .onFailure { Log.e(TAG, "${spec.app} subscribe failed", it) }
             }
         }.awaitAll()
 
@@ -1476,7 +1488,16 @@ class TlonChatRepo(
 
     suspend fun fetchActivityFeed(): List<ActivityFeedItem> {
         val ch = channel ?: error("not connected")
-        val body = ch.scry("activity", "/v5/feed/init/30") as? JsonObject
+        // The feed's version namespace shifted under us in Tlon v11.4.0:
+        // what /v6 now serves is what /v5 used to, and /v5 became the
+        // down-converted view that silently drops every %react and
+        // %dm-react event. Ask for the richest the ship will answer.
+        val body = scryFirstMatching(
+            ch,
+            "activity",
+            listOf("/v6/feed/init/30", "/v5/feed/init/30"),
+            "activity feed",
+        ) as? JsonObject
         val items = parseActivityFeedBody(body)
         _activityFeed.value = items
         return items
@@ -2464,6 +2485,18 @@ class TlonChatRepo(
             val pokeIdLong = outer["id"].asLong()
             if (err != null && err !is JsonNull) {
                 Log.w(TAG, "$response nack id=${outer["id"]} err=$err")
+                // A rejected subscribe may just mean the ship is older
+                // than the wire version we asked for. Retry the path we
+                // registered as this request's fallback, once.
+                if (response == "subscribe" && pokeIdLong != null) {
+                    subFallbacks.remove(pokeIdLong)?.let { (app, path) ->
+                        Log.w(TAG, "$app subscribe rejected; falling back to $path")
+                        scope.launch {
+                            runCatching { channel?.subscribe(app, path) }
+                                .onFailure { Log.e(TAG, "$app fallback subscribe failed", it) }
+                        }
+                    }
+                }
                 // Channel-post NACK: flip the optimistic local twin
                 // from "pending" → "failed" so the UI surfaces the
                 // failure (small "!" indicator). DM/club rows aren't
@@ -3073,6 +3106,21 @@ class TlonChatRepo(
         }
     }
 
+    /**
+     * One subscription, and the path to retry on if the ship rejects
+     * it. Lets us ask for a newer wire version without betting the
+     * whole stream on the ship being new enough to serve it.
+     */
+    private data class SubSpec(
+        val app: String,
+        val path: String,
+        val fallback: String? = null,
+    )
+
+    /** subscribe request id → (app, fallback path), pending a nack. */
+    private val subFallbacks =
+        java.util.concurrent.ConcurrentHashMap<Long, Pair<String, String>>()
+
     // ───────── presence (typing indicators) ─────────
 
     /** context → (ship → wall-clock ms at which the entry lapses). */
@@ -3679,6 +3727,12 @@ class TlonChatRepo(
                         "dm-invite" -> "Invited you to a DM"
                         "group-ask" -> "Requested group access"
                         "group-invite" -> "Invited you to a group"
+                        // %react / %dm-react reach us only on the v5+
+                        // wire; the v4 down-conversion drops them.
+                        "react", "dm-react" ->
+                            eventObj["react"].asStr()
+                                ?.let { "Reacted ${ReactionPalette.display(it)}" }
+                                ?: "Reacted"
                         else -> tag
                     }
                     val author = eventObj["mention-author"].asStr()
