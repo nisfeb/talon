@@ -3057,19 +3057,35 @@ class TlonChatRepo(
     // ───────── contacts ─────────
 
     /**
-     * Load peer contact directory + self profile. Tlon's /v1/all scry
-     * returns Record<ship, ContactFields> where fields are typed values
-     * like `{type: 'text', value: 'Alice'}`. We pluck just nickname, bio
-     * and avatar for the UI.
+     * Load peer contact directory + self profile. Each entry's fields are
+     * typed values like `{type: 'text', value: 'Alice'}`; we pluck just
+     * nickname, bio and avatar for the UI.
+     *
+     * The directory scry moved in Tlon v11.4.0 (2026-07-02): `/v1/all`
+     * was renamed `/v1/directory` with no back-compat arm, and the entry
+     * shape changed from a flat field map to `{isContact, contact, mod}`
+     * (tloncorp/tlon-apps@c2be4a06). Probe the new path first and fall
+     * back — ships on v11.3.0 and earlier only answer the old one, and
+     * both are live in the wild. A silent `runCatching`-to-null here is
+     * what let the rename go unnoticed: every peer outside the contact
+     * book just lost its nickname. scryFirstMatching logs on total
+     * failure, so the next rename is loud.
      */
     private suspend fun bootstrapContacts(channel: UrbitChannel) = coroutineScope {
-        // /v1/all (every known peer) and /v1/self (our own contact card)
-        // are independent network round-trips. Run them in parallel so
-        // the whole bootstrap doesn't pay both serially.
-        val allJob = async { runCatching { channel.scry("contacts", "/v1/all") }.getOrNull() }
+        // The directory (every known peer) and /v1/self (our own contact
+        // card) are independent network round-trips. Run them in parallel
+        // so the whole bootstrap doesn't pay both serially.
+        val allJob = async {
+            scryFirstMatching(
+                channel,
+                "contacts",
+                listOf("/v1/directory", "/v1/all"),
+                "contacts directory",
+            )
+        }
         val selfJob = async { runCatching { channel.scry("contacts", "/v1/self") }.getOrNull() }
         // /v1/book is our curated contact book (kip -> [con, mod] page),
-        // a subset of /v1/all. Drives `bookContacts` + the Contacts screen.
+        // a subset of the directory. Drives `bookContacts` + Contacts screen.
         val bookJob = async { runCatching { channel.scry("contacts", "/v1/book") }.getOrNull() }
         val allBody = allJob.await()
         val selfBody = selfJob.await()
@@ -3079,17 +3095,11 @@ class TlonChatRepo(
 
         (allBody as? JsonObject)?.forEach { (ship, entry) ->
             val obj = entry as? JsonObject ?: return@forEach
-            // Newer ships wrap each entry as {contact: {...fields},
-            // mod-at: "..."}; older ones emit the flat field map.
-            val wrapped = obj["contact"] as? JsonObject
-            val fields = wrapped ?: obj
-            fresh.add(parseContact(ship, fields, parseContactModAt(obj)))
+            fresh.add(parseContact(ship, directoryFields(obj), parseContactModAt(obj)))
         }
 
         (selfBody as? JsonObject)?.let { obj ->
-            val wrapped = obj["contact"] as? JsonObject
-            val fields = wrapped ?: obj
-            fresh.add(parseContact(ourPatp, fields, parseContactModAt(obj)))
+            fresh.add(parseContact(ourPatp, directoryFields(obj), parseContactModAt(obj)))
         }
 
         // Book: keys are `~ship` (or `0v<cid>` for id-pages, which we
@@ -3639,4 +3649,22 @@ class TlonChatRepo(
         return entity
     }
 
+}
+
+/**
+ * Flatten one entry of a %contacts directory scry into the flat field
+ * map `parseContact` expects. Three shapes are live in the wild:
+ *
+ *  - v11.4.0 `/v1/directory`: `{isContact, contact: {…}, mod: {…}}`,
+ *    where `mod` is our local overlay — a pet-name we set for them.
+ *  - older `/v1/all` variants: `{contact: {…}, mod-at: "…"}`.
+ *  - oldest `/v1/all`: the flat field map itself.
+ *
+ * `mod` wins over `contact`, the same precedence `pageFields` gives the
+ * book's `[con, mod]` page.
+ */
+internal fun directoryFields(entry: JsonObject): JsonObject {
+    val con = entry["contact"] as? JsonObject ?: return entry
+    val mod = entry["mod"] as? JsonObject ?: return con
+    return JsonObject(con + mod)
 }
