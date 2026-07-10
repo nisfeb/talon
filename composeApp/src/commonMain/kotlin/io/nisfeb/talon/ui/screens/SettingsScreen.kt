@@ -1,4 +1,5 @@
 package io.nisfeb.talon.ui.screens
+import kotlinx.datetime.toLocalDateTime
 import io.nisfeb.talon.util.nowMs
 
 import androidx.compose.foundation.background
@@ -929,18 +930,17 @@ private fun DailyDigestSection(
 
 /** Wallclock-friendly "Next: 7:30 AM" / "Tomorrow at 7:30 AM" string. */
 private fun formatNextFire(hourOfDay: Int, minuteOfDay: Int): String {
-    val now = java.util.Calendar.getInstance()
-    val target = (now.clone() as java.util.Calendar).apply {
-        set(java.util.Calendar.HOUR_OF_DAY, hourOfDay)
-        set(java.util.Calendar.MINUTE, minuteOfDay)
-        set(java.util.Calendar.SECOND, 0)
-        set(java.util.Calendar.MILLISECOND, 0)
-    }
-    val tomorrow = target.timeInMillis <= now.timeInMillis
-    if (tomorrow) target.add(java.util.Calendar.DAY_OF_MONTH, 1)
-    val fmt = java.text.SimpleDateFormat("h:mm a", java.util.Locale.getDefault())
-    val timeStr = fmt.format(target.time)
-    return if (tomorrow) "Tomorrow at $timeStr" else "Today at $timeStr"
+    val zone = kotlinx.datetime.TimeZone.currentSystemDefault()
+    val now = kotlinx.datetime.Clock.System.now()
+    // Reuse the digest scheduler's next-fire math so the label and the
+    // actual alarm never disagree.
+    val fireMs = io.nisfeb.talon.ai.DailyDigestSchedule
+        .nextFireMs(now, hourOfDay, minuteOfDay, zone)
+    val timeStr = io.nisfeb.talon.util.formatTime12(fireMs)
+    val today = now.toLocalDateTime(zone).date
+    val fireDate = kotlinx.datetime.Instant.fromEpochMilliseconds(fireMs)
+        .toLocalDateTime(zone).date
+    return if (fireDate != today) "Tomorrow at $timeStr" else "Today at $timeStr"
 }
 
 /** Single source of truth for "is this feature toggle on?" — keeps the

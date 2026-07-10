@@ -58,8 +58,8 @@ class SlashCommandFuzzTest {
             val r = parseCalText(Fuzz.randomString(rnd, maxLen = 200))
             if (r is CalParseResult.Ok) {
                 assertTrue(
-                    "end (${r.end}) must be >= start (${r.start}) — title=${r.title}",
-                    !r.end.before(r.start),
+                    "end (${r.endMs}) must be >= start (${r.startMs}) — title=${r.title}",
+                    r.endMs >= r.startMs,
                 )
             }
         }
@@ -109,18 +109,18 @@ class SlashCommandFuzzTest {
         // now. The result must therefore be >= now within a day window.
         // Allow a tiny clock-skew slack since parseTzInput captures
         // its own `now` snapshot internally.
-        val now = java.util.Date()
+        val now = io.nisfeb.talon.util.nowMs()
         Fuzz.run(ITERATIONS, SEED) { rnd, _ ->
             val r = parseTzInput(Fuzz.randomString(rnd, maxLen = 100), now)
             if (r is TzParseResult.Ok) {
                 assertFalse(
-                    "instant ${r.instant} must not be before now ($now)",
-                    r.instant.before(now),
+                    "instant ${r.instantMs} must not be before now ($now)",
+                    r.instantMs < now,
                 )
                 val msInTwoDays = 2L * 24L * 60L * 60L * 1000L
                 assertTrue(
-                    "instant ${r.instant} more than 2 days past now",
-                    r.instant.time - now.time < msInTwoDays,
+                    "instant ${r.instantMs} more than 2 days past now",
+                    r.instantMs - now < msInTwoDays,
                 )
             }
         }

@@ -1,4 +1,5 @@
 package io.nisfeb.talon.ui
+import kotlinx.datetime.toLocalDateTime
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -99,8 +100,9 @@ val LocalDisplayName = compositionLocalOf<(String) -> String> {
  * so simultaneous renders coalesce into one network call.
  */
 internal object CiteCache {
-    private val cache = java.util.concurrent.ConcurrentHashMap<Pair<String, String>, MessageEntity>()
-    private val mutexes = java.util.concurrent.ConcurrentHashMap<Pair<String, String>, kotlinx.coroutines.sync.Mutex>()
+    private val lock = kotlinx.atomicfu.locks.SynchronizedObject()
+    private val cache = HashMap<Pair<String, String>, MessageEntity>()
+    private val mutexes = HashMap<Pair<String, String>, kotlinx.coroutines.sync.Mutex>()
 
     suspend fun resolve(
         whom: String,
@@ -108,13 +110,18 @@ internal object CiteCache {
         load: suspend () -> MessageEntity?,
     ): MessageEntity? {
         val key = whom to da
-        cache[key]?.let { return it }
-        val mutex = mutexes.getOrPut(key) { kotlinx.coroutines.sync.Mutex() }
+        kotlinx.atomicfu.locks.synchronized(lock) { cache[key] }?.let { return it }
+        val mutex = kotlinx.atomicfu.locks.synchronized(lock) {
+            mutexes.getOrPut(key) { kotlinx.coroutines.sync.Mutex() }
+        }
         return mutex.withLock {
-            cache[key]?.let { return@withLock it }
+            val cached = kotlinx.atomicfu.locks.synchronized(lock) { cache[key] }
+            if (cached != null) return@withLock cached
             val result = load()
-            if (result != null) cache[key] = result
-            mutexes.remove(key)
+            kotlinx.atomicfu.locks.synchronized(lock) {
+                if (result != null) cache[key] = result
+                mutexes.remove(key)
+            }
             result
         }
     }
@@ -714,9 +721,7 @@ private fun CalWidgetBlock(
     endEpochMs: Long,
     title: String,
 ) {
-    val start = remember(startEpochMs) { java.util.Date(startEpochMs) }
-    val end = remember(endEpochMs) { java.util.Date(endEpochMs) }
-    val summary = remember(startEpochMs, endEpochMs) { formatCalSummary(start, end) }
+    val summary = remember(startEpochMs, endEpochMs) { formatCalSummary(startEpochMs, endEpochMs) }
     Surface(
         shape = RoundedCornerShape(10.dp),
         color = MaterialTheme.colorScheme.surfaceVariant,
@@ -776,27 +781,21 @@ private fun TzWidgetBlock(
     instantEpochMs: Long,
     sourceLabel: String,
 ) {
-    val instant = remember(instantEpochMs) { java.util.Date(instantEpochMs) }
     val zones = remember {
         // Ordered: viewer's own zone first (when not already in the
         // canon list), then canonical US + UTC.
         val canon = listOf(
-            "Eastern" to java.util.TimeZone.getTimeZone("America/New_York"),
-            "Central" to java.util.TimeZone.getTimeZone("America/Chicago"),
-            "Pacific" to java.util.TimeZone.getTimeZone("America/Los_Angeles"),
-            "UTC" to java.util.TimeZone.getTimeZone("UTC"),
+            "Eastern" to "America/New_York",
+            "Central" to "America/Chicago",
+            "Pacific" to "America/Los_Angeles",
+            "UTC" to "UTC",
         )
-        val viewer = java.util.TimeZone.getDefault()
-        val viewerId = viewer.id
-        val alreadyThere = canon.any { it.second.id == viewerId }
-        if (alreadyThere) canon
+        val viewerId = kotlinx.datetime.TimeZone.currentSystemDefault().id
+        if (canon.any { it.second == viewerId }) canon
         else {
-            val label = viewer.getDisplayName(
-                viewer.inDaylightTime(java.util.Date()),
-                java.util.TimeZone.SHORT,
-                java.util.Locale.getDefault(),
-            ).ifEmpty { viewerId }
-            listOf(label to viewer) + canon
+            val label = io.nisfeb.talon.util.timeZoneShortLabel(viewerId, io.nisfeb.talon.util.nowMs())
+                .ifEmpty { viewerId }
+            listOf(label to viewerId) + canon
         }
     }
     Surface(
@@ -810,7 +809,7 @@ private fun TzWidgetBlock(
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            for ((label, zone) in zones) {
+            for ((label, zoneId) in zones) {
                 Row(
                     modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
                 ) {
@@ -822,7 +821,7 @@ private fun TzWidgetBlock(
                         modifier = Modifier.widthIn(min = 72.dp),
                     )
                     Text(
-                        formatInZone(instant, zone),
+                        formatInZone(instantEpochMs, zoneId),
                         style = MaterialTheme.typography.bodyMedium,
                     )
                 }
@@ -831,12 +830,18 @@ private fun TzWidgetBlock(
     }
 }
 
+private fun icsUtc(ms: Long): String {
+    val dt = kotlinx.datetime.Instant.fromEpochMilliseconds(ms)
+        .toLocalDateTime(kotlinx.datetime.TimeZone.UTC)
+    fun p(n: Int, w: Int) = n.toString().padStart(w, '0')
+    return "${p(dt.year, 4)}${p(dt.monthNumber, 2)}${p(dt.dayOfMonth, 2)}T" +
+        "${p(dt.hour, 2)}${p(dt.minute, 2)}${p(dt.second, 2)}Z"
+}
+
 private fun buildIcs(startEpochMs: Long, endEpochMs: Long, title: String): String {
-    val tz = java.util.TimeZone.getTimeZone("UTC")
-    val fmt = java.text.SimpleDateFormat("yyyyMMdd'T'HHmmss'Z'").apply { timeZone = tz }
-    val dtStamp = fmt.format(java.util.Date())
-    val dtStart = fmt.format(java.util.Date(startEpochMs))
-    val dtEnd = fmt.format(java.util.Date(endEpochMs))
+    val dtStamp = icsUtc(io.nisfeb.talon.util.nowMs())
+    val dtStart = icsUtc(startEpochMs)
+    val dtEnd = icsUtc(endEpochMs)
     val uid = "talon-${startEpochMs}-${title.hashCode()}@talon"
     val safeTitle = title.replace("\\", "\\\\").replace(",", "\\,")
         .replace(";", "\\;").replace("\n", "\\n")

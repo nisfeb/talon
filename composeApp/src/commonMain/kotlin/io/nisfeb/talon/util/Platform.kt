@@ -28,3 +28,11 @@ expect val ioDispatcher: CoroutineDispatcher
  * JVM uses SecureRandom, iOS uses SecRandomCopyBytes.
  */
 expect fun secureRandomBytes(n: Int): ByteArray
+
+/**
+ * Short zone abbreviation (e.g. "EDT", "PDT") for [zoneId] at the given
+ * instant — kotlinx-datetime only exposes offsets, not the tz database's
+ * short names. JVM uses java.util.TimeZone; iOS uses NSTimeZone. Falls
+ * back to the zone id when no abbreviation is available.
+ */
+expect fun timeZoneShortLabel(zoneId: String, atMs: Long): String

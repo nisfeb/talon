@@ -209,8 +209,8 @@ private fun runCal(args: List<String>): CommandResult {
     return when (val r = parseCalText(raw)) {
         is CalParseResult.Err -> CommandResult.Error("/cal: ${r.error}")
         is CalParseResult.Ok -> {
-            val summary = formatCalSummary(r.start, r.end)
-            val tag = encodeCalTag(r.start, r.end, r.title)
+            val summary = formatCalSummary(r.startMs, r.endMs)
+            val tag = encodeCalTag(r.startMs, r.endMs, r.title)
             CommandResult.Send("📅 ${r.title}\n$summary\n$tag")
         }
     }
@@ -223,9 +223,9 @@ private fun runTz(args: List<String>): CommandResult {
     return when (val r = parseTzInput(raw)) {
         is TzParseResult.Err -> CommandResult.Error("/tz: ${r.error}")
         is TzParseResult.Ok -> {
-            val senderLocal = formatInZone(r.instant, r.sourceZone)
+            val senderLocal = formatInZone(r.instantMs, r.sourceZoneId)
             val header = "🕒 $senderLocal ${r.sourceLabel}"
-            val tag = encodeTzTag(formatIsoUtc(r.instant), r.sourceLabel)
+            val tag = encodeTzTag(formatIsoUtc(r.instantMs), r.sourceLabel)
             CommandResult.Send("$header\n$tag")
         }
     }

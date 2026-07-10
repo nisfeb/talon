@@ -1,22 +1,30 @@
 package io.nisfeb.talon.ui
 
-import java.net.URLEncoder
-import java.text.DateFormatSymbols
-import java.text.SimpleDateFormat
-import java.util.Calendar
-import java.util.Date
-import java.util.Locale
+import io.nisfeb.talon.util.formatTime12
+import io.nisfeb.talon.util.formatWeekdayMonthDay
+import io.nisfeb.talon.util.nowMs
+import io.nisfeb.talon.util.percentDecodeComponent
+import io.nisfeb.talon.util.percentEncodeComponent
+import kotlinx.datetime.DateTimeUnit
+import kotlinx.datetime.Instant
+import kotlinx.datetime.LocalDate
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.atTime
+import kotlinx.datetime.isoDayNumber
+import kotlinx.datetime.plus
+import kotlinx.datetime.toInstant
+import kotlinx.datetime.toLocalDateTime
 
 /**
  * Forgiving natural-language calendar parsing for the `/cal` command.
  * Input is arbitrary user text like "thurs 2-3p Meet John"; output is
- * (start, end, title). Mirrors yap/ui/src/util/cal.ts — see that file
- * for the source commentary.
+ * (startMs, endMs, title) as epoch-millis. Mirrors yap/ui/src/util/cal.ts
+ * — see that file for the source commentary.
  */
 sealed interface CalParseResult {
     data class Ok(
-        val start: Date,
-        val end: Date,
+        val startMs: Long,
+        val endMs: Long,
         val title: String,
         val defaultDate: Boolean,
         val defaultDuration: Boolean,
@@ -39,29 +47,8 @@ private val NOISE: Set<String> = setOf("at", "on", "from", "to", "by", "around",
 
 private const val DEFAULT_DURATION_MS: Long = 60L * 60L * 1000L
 
-private fun startOfDay(d: Date): Date {
-    val c = Calendar.getInstance()
-    c.time = d
-    c.set(Calendar.HOUR_OF_DAY, 0)
-    c.set(Calendar.MINUTE, 0)
-    c.set(Calendar.SECOND, 0)
-    c.set(Calendar.MILLISECOND, 0)
-    return c.time
-}
-
-private fun addDays(d: Date, n: Int): Date {
-    val c = Calendar.getInstance()
-    c.time = d
-    c.add(Calendar.DAY_OF_YEAR, n)
-    return c.time
-}
-
-private fun calendarDayOfWeek(d: Date): Int {
-    // Calendar.SUNDAY = 1 … SATURDAY = 7; yap uses 0..6 with Sunday=0.
-    val c = Calendar.getInstance()
-    c.time = d
-    return c.get(Calendar.DAY_OF_WEEK) - 1
-}
+/** yap's day-of-week scheme: Sunday=0 … Saturday=6. */
+private fun dow0(d: LocalDate): Int = d.dayOfWeek.isoDayNumber % 7
 
 private fun normalizeAmpm(x: String?): String? {
     if (x == null) return null
@@ -77,23 +64,19 @@ private fun applyAmpm(h: Int, ap: String?): Int {
     return h
 }
 
-private fun parseDateToken(tok: String, now: Date): Date? {
+private fun parseDateToken(tok: String, today: LocalDate): LocalDate? {
     val t = tok.lowercase().trimEnd('.', ',')
-    if (t == "today" || t == "tonight") return startOfDay(now)
-    if (t == "tomorrow" || t == "tmrw" || t == "tmw") return addDays(startOfDay(now), 1)
+    if (t == "today" || t == "tonight") return today
+    if (t == "tomorrow" || t == "tmrw" || t == "tmw") return today.plus(1, DateTimeUnit.DAY)
     WEEKDAYS[t]?.let { wd ->
-        val d0 = startOfDay(now)
-        val diff = (wd - calendarDayOfWeek(d0) + 7) % 7
-        return addDays(d0, diff)
+        val diff = (wd - dow0(today) + 7) % 7
+        return today.plus(diff, DateTimeUnit.DAY)
     }
     // ISO YYYY-MM-DD
     val iso = Regex("^(\\d{4})-(\\d{1,2})-(\\d{1,2})$").find(t)
     if (iso != null) {
         val (y, m, d) = iso.destructured
-        val c = Calendar.getInstance()
-        c.clear()
-        c.set(y.toInt(), m.toInt() - 1, d.toInt())
-        return c.time
+        return runCatching { LocalDate(y.toInt(), m.toInt(), d.toInt()) }.getOrNull()
     }
     // US-ish M/D[/YY|YYYY]
     val mdy = Regex("^(\\d{1,2})/(\\d{1,2})(?:/(\\d{2}|\\d{4}))?$").find(t)
@@ -101,16 +84,13 @@ private fun parseDateToken(tok: String, now: Date): Date? {
         val m = mdy.groupValues[1].toInt()
         val d = mdy.groupValues[2].toInt()
         val yraw = mdy.groupValues[3].ifEmpty { null }
-        var y = Calendar.getInstance().apply { time = now }.get(Calendar.YEAR)
+        var y = today.year
         if (yraw != null) {
             y = yraw.toInt()
             if (y < 100) y += 2000
         }
         if (m in 1..12 && d in 1..31) {
-            val c = Calendar.getInstance()
-            c.clear()
-            c.set(y, m - 1, d)
-            return c.time
+            return runCatching { LocalDate(y, m, d) }.getOrNull()
         }
     }
     return null
@@ -158,19 +138,23 @@ internal fun parseTimeToken(tok: String): TimeRange? {
     return null
 }
 
-fun parseCalText(raw: String, now: Date = Date()): CalParseResult {
+fun parseCalText(raw: String, nowMs: Long = nowMs()): CalParseResult {
     val input = raw.trim()
     if (input.isEmpty()) return CalParseResult.Err("missing event details")
 
+    val zone = TimeZone.currentSystemDefault()
+    val nowLdt = Instant.fromEpochMilliseconds(nowMs).toLocalDateTime(zone)
+    val today = nowLdt.date
+
     val tokens = input.split(Regex("\\s+"))
-    var dateTok: Date? = null
+    var dateTok: LocalDate? = null
     var timeTok: TimeRange? = null
     val titleToks = mutableListOf<String>()
 
     for (tok in tokens) {
         if (tok.lowercase() in NOISE) continue
         if (dateTok == null) {
-            val d = parseDateToken(tok, now)
+            val d = parseDateToken(tok, today)
             if (d != null) { dateTok = d; continue }
         }
         if (timeTok == null) {
@@ -182,42 +166,35 @@ fun parseCalText(raw: String, now: Date = Date()): CalParseResult {
 
     val usedDefaultDate = dateTok == null
     val usedDefaultDur = timeTok?.end == null
-    if (dateTok == null) dateTok = startOfDay(now)
-    if (timeTok == null) {
-        val nextHour = (Calendar.getInstance().apply { time = now }
-            .get(Calendar.HOUR_OF_DAY) + 1) % 24
-        timeTok = TimeRange(HM(nextHour, 0), null)
-    }
+    var date = dateTok ?: today
+    val range = timeTok ?: TimeRange(HM((nowLdt.hour + 1) % 24, 0), null)
 
-    val start = Calendar.getInstance().apply {
-        time = dateTok!!
-        set(Calendar.HOUR_OF_DAY, timeTok!!.start.h)
-        set(Calendar.MINUTE, timeTok!!.start.m)
-        set(Calendar.SECOND, 0)
-        set(Calendar.MILLISECOND, 0)
-    }
-    if (!usedDefaultDate && start.time.before(now)) {
+    fun msAt(d: LocalDate, hm: HM): Long =
+        d.atTime(hm.h, hm.m).toInstant(zone).toEpochMilliseconds()
+
+    var startMs = msAt(date, range.start)
+    if (!usedDefaultDate && startMs < nowMs) {
         val lowered = input.lowercase()
         val weekdayUsed = WEEKDAYS.keys.any { lowered.contains(it) }
-        if (weekdayUsed) start.add(Calendar.DAY_OF_YEAR, 7)
+        if (weekdayUsed) {
+            date = date.plus(7, DateTimeUnit.DAY)
+            startMs = msAt(date, range.start)
+        }
     }
-    val end = Calendar.getInstance().apply { time = start.time }
-    val te = timeTok!!.end
-    if (te != null) {
-        end.set(Calendar.HOUR_OF_DAY, te.h)
-        end.set(Calendar.MINUTE, te.m)
-        end.set(Calendar.SECOND, 0)
-        end.set(Calendar.MILLISECOND, 0)
-        if (!end.time.after(start.time)) end.add(Calendar.DAY_OF_YEAR, 1)
+
+    val te = range.end
+    val endMs = if (te != null) {
+        val e = msAt(date, te)
+        if (e <= startMs) msAt(date.plus(1, DateTimeUnit.DAY), te) else e
     } else {
-        end.timeInMillis = start.timeInMillis + DEFAULT_DURATION_MS
+        startMs + DEFAULT_DURATION_MS
     }
 
     val title = titleToks.joinToString(" ").trim().ifEmpty { "Event" }
 
     return CalParseResult.Ok(
-        start = start.time,
-        end = end.time,
+        startMs = startMs,
+        endMs = endMs,
         title = title,
         defaultDate = usedDefaultDate,
         defaultDuration = usedDefaultDur,
@@ -225,31 +202,24 @@ fun parseCalText(raw: String, now: Date = Date()): CalParseResult {
 }
 
 /** Human summary line for the chat body, e.g. "Thu, Apr 24 · 2:00 PM – 3:00 PM". */
-fun formatCalSummary(start: Date, end: Date): String {
-    val day = SimpleDateFormat("EEE, MMM d", Locale.getDefault()).format(start)
-    val startT = SimpleDateFormat("h:mm a", Locale.getDefault()).format(start)
-    val endT = SimpleDateFormat("h:mm a", Locale.getDefault()).format(end)
-    return "$day · $startT – $endT"
+fun formatCalSummary(startMs: Long, endMs: Long): String {
+    val day = formatWeekdayMonthDay(startMs)
+    return "$day · ${formatTime12(startMs)} – ${formatTime12(endMs)}"
 }
 
 /** Machine-readable tag appended to the chat body. */
-fun encodeCalTag(start: Date, end: Date, title: String): String {
-    val iso = { d: Date -> SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US).apply {
-        timeZone = java.util.TimeZone.getTimeZone("UTC")
-    }.format(d) }
-    val enc = URLEncoder.encode(title, "UTF-8")
-    return "[cal|${iso(start)}|${iso(end)}|$enc]"
-}
+fun encodeCalTag(startMs: Long, endMs: Long, title: String): String =
+    "[cal|${formatIsoUtc(startMs)}|${formatIsoUtc(endMs)}|${percentEncodeComponent(title)}]"
 
 val CAL_TAG_RE: Regex = Regex("\\[cal\\|([^|]+)\\|([^|]+)\\|([^\\]\\n]*)\\]")
 
-data class DecodedCal(val start: Date, val end: Date, val title: String)
+data class DecodedCal(val startMs: Long, val endMs: Long, val title: String)
 
 fun decodeCalTag(text: String): DecodedCal? {
     val m = CAL_TAG_RE.find(text) ?: return null
     val start = parseIsoUtc(m.groupValues[1]) ?: return null
     val end = parseIsoUtc(m.groupValues[2]) ?: return null
-    val title = runCatching { java.net.URLDecoder.decode(m.groupValues[3], "UTF-8") }
-        .getOrNull()?.takeIf { it.isNotBlank() } ?: "Event"
+    val title = percentDecodeComponent(m.groupValues[3])
+        ?.takeIf { it.isNotBlank() } ?: "Event"
     return DecodedCal(start, end, title)
 }
