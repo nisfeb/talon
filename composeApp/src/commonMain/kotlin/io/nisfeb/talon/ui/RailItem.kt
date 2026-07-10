@@ -17,6 +17,7 @@ enum class RailItem(val isPaneTab: Boolean) {
     Statuses(true),
     Bookmarks(true),
     Activity(true),
+    Assistant(false),
     Profile(false),
     Watchwords(false),
     TodaysBrief(false),

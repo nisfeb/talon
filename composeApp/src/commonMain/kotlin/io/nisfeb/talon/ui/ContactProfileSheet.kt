@@ -1,5 +1,6 @@
 package io.nisfeb.talon.ui
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -25,9 +26,15 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import io.nisfeb.talon.data.ContactEntity
@@ -83,11 +90,38 @@ fun ContactProfileSheet(
                         .copy(fontWeight = FontWeight.SemiBold),
                 )
             }
+            // @p and (when the naming setting is on) the full mnemonym,
+            // each tap-to-copy — the profile sheet is where you go to
+            // grab someone's exact name.
+            val clipboard = LocalClipboardManager.current
+            var copied by remember { mutableStateOf<String?>(null) }
+            fun copyRow(text: String): () -> Unit = {
+                clipboard.setText(AnnotatedString(text))
+                copied = text
+            }
             Text(
                 ship,
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.clickable(onClick = copyRow(ship)),
             )
+            val mnemonymOn by MnemonymNames.enabled.collectAsState()
+            val nym = remember(ship) { Mnemonym.forShip(ship) }
+            if (mnemonymOn && nym != null) {
+                Text(
+                    nym,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.clickable(onClick = copyRow(nym)),
+                )
+            }
+            copied?.let {
+                Text(
+                    "Copied $it",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
             if (!contact?.status.isNullOrBlank()) {
                 Text(
                     text = linkifyStatus(contact!!.status!!),

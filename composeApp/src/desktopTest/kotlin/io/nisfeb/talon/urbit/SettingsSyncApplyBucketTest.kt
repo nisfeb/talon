@@ -5,7 +5,10 @@ import androidx.sqlite.driver.bundled.BundledSQLiteDriver
 import io.nisfeb.talon.ai.AiSettings
 import io.nisfeb.talon.ai.AiSettingsRepository
 import io.nisfeb.talon.ai.DailyDigestSettings
+import io.nisfeb.talon.data.ASSISTANT_HISTORY_KEEP
 import io.nisfeb.talon.data.AppDatabase
+import io.nisfeb.talon.data.AssistantConversationEntity
+import io.nisfeb.talon.data.AssistantHistoryEntity
 import io.nisfeb.talon.data.BookmarkEntity
 import io.nisfeb.talon.data.BookmarkFolderEntity
 import io.nisfeb.talon.data.BookmarkFolderMemberEntity
@@ -295,7 +298,7 @@ class SettingsSyncApplyBucketTest {
                     put("provider", "OpenAi")
                     put("apiKey", "sk-secret")
                     put("model", "gpt-4")
-                    put("emojiReactEnabled", "false")
+                    put("catchMeUpEnabled", "false")
                     put("dailyDigestEnabled", "true")
                 })
             }
@@ -305,15 +308,113 @@ class SettingsSyncApplyBucketTest {
             assertEquals(AiSettings.Provider.OpenAi, cfg.provider)
             assertEquals("sk-secret", cfg.apiKey)
             assertEquals("gpt-4", cfg.model)
-            assertEquals(false, cfg.emojiReactEnabled)
+            assertEquals(false, cfg.catchMeUpEnabled)
             assertEquals(true, cfg.dailyDigestEnabled)
+        }
+
+    @Test
+    fun `applyBucket AI_SETTINGS preserves a locally-enabled assistant toggle the entry omits`() =
+        runBlocking {
+            // Regression: the ai-settings round-trip didn't carry
+            // askUrbit/agent, so an entry lacking them (e.g. written by
+            // an older client) must NOT reset a locally-true value back
+            // to false — which would silently hide the assistant.
+            aiSettings.applyRemote(
+                AiSettings.Config(
+                    provider = AiSettings.Provider.Anthropic,
+                    apiKey = "sk-local",
+                    model = null,
+                    syncEnabled = true,
+                    askUrbitEnabled = true,
+                ),
+            )
+            val bucket = buildJsonObject {
+                put("config", buildJsonObject {
+                    put("schemaVersion", 2)
+                    put("provider", "Anthropic")
+                    put("apiKey", "sk-local")
+                    // no askUrbitEnabled / agentEnabled keys
+                })
+            }
+            sync.applyBucket(SettingsSyncImpl.BUCKET_AI_SETTINGS, bucket)
+            assertEquals(true, aiSettings.state.value.askUrbitEnabled)
+        }
+
+    @Test
+    fun `applyBucket AI_SETTINGS applies the assistant toggles from a v2 entry`() =
+        runBlocking {
+            aiSettings.applyRemote(
+                AiSettings.Config(AiSettings.Provider.Anthropic, "sk-local", null, syncEnabled = true),
+            )
+            val bucket = buildJsonObject {
+                put("config", buildJsonObject {
+                    put("schemaVersion", 2)
+                    put("provider", "Anthropic")
+                    put("apiKey", "sk-local")
+                    put("askUrbitEnabled", "true")
+                    put("agentEnabled", "true")
+                })
+            }
+            sync.applyBucket(SettingsSyncImpl.BUCKET_AI_SETTINGS, bucket)
+            assertEquals(true, aiSettings.state.value.askUrbitEnabled)
+            assertEquals(true, aiSettings.state.value.agentEnabled)
+        }
+
+    @Test
+    fun `applyBucket AI_SETTINGS does not blank a saved key when the entry omits apiKey`() =
+        runBlocking {
+            // A peer push with syncEnabled=false omits apiKey; the old
+            // orEmpty() blanked the local key → silently disabled AI.
+            aiSettings.applyRemote(
+                AiSettings.Config(AiSettings.Provider.Anthropic, "sk-keep", null, syncEnabled = true),
+            )
+            val bucket = buildJsonObject {
+                put("config", buildJsonObject {
+                    put("schemaVersion", 2)
+                    put("provider", "Anthropic")
+                    put("catchMeUpEnabled", "false")
+                    // no apiKey
+                })
+            }
+            sync.applyBucket(SettingsSyncImpl.BUCKET_AI_SETTINGS, bucket)
+            assertEquals("sk-keep", aiSettings.state.value.apiKey)
+        }
+
+    @Test
+    fun `applyBucket AI_SETTINGS does not blank a saved key when the entry carries an empty apiKey`() =
+        runBlocking {
+            // Regression for the "keys not persisted" data loss: an older
+            // client seeded the ship with apiKey:"" / braveApiKey:"".
+            // asStr() returns "" (non-null) for an empty string, so the
+            // bare ?: guard didn't catch it and applying the entry blanked
+            // a good local key. Present-but-empty must be treated as absent.
+            aiSettings.applyRemote(
+                AiSettings.Config(
+                    provider = AiSettings.Provider.Anthropic,
+                    apiKey = "sk-keep",
+                    model = null,
+                    syncEnabled = true,
+                    braveApiKey = "brave-keep",
+                ),
+            )
+            val bucket = buildJsonObject {
+                put("config", buildJsonObject {
+                    put("schemaVersion", 2)
+                    put("provider", "Anthropic")
+                    put("apiKey", "")
+                    put("braveApiKey", "")
+                })
+            }
+            sync.applyBucket(SettingsSyncImpl.BUCKET_AI_SETTINGS, bucket)
+            assertEquals("sk-keep", aiSettings.state.value.apiKey)
+            assertEquals("brave-keep", aiSettings.state.value.braveApiKey)
         }
 
     @Test
     fun `applyBucket AI_SETTINGS applies feature toggles even when sync is off`() =
         runBlocking {
             // Per-feature toggles always sync — a peer device that
-            // turned on emoji-react should propagate to this device
+            // turned on catch-me-up should propagate to this device
             // regardless of whether this device opted into key sync.
             // The cloud-key fields, however, MUST NOT cross over
             // without local consent (next test pins that).
@@ -326,20 +427,72 @@ class SettingsSyncApplyBucketTest {
                     put("schemaVersion", 2)
                     put("provider", "OpenAi")
                     put("apiKey", "sk-secret")
-                    put("emojiReactEnabled", "false")
-                    put("topicClustersEnabled", "true")
+                    put("catchMeUpEnabled", "false")
+                    put("smartFeaturesEnabled", "true")
                 })
             }
             sync.applyBucket(SettingsSyncImpl.BUCKET_AI_SETTINGS, bucket)
 
             val cfg = aiSettings.state.value
-            assertEquals(false, cfg.emojiReactEnabled)
-            assertEquals(true, cfg.topicClustersEnabled)
+            assertEquals(false, cfg.catchMeUpEnabled)
+            assertEquals(true, cfg.smartFeaturesEnabled)
             // Cloud-key fields stayed at the prior local values —
             // syncEnabled was off, so the wire's provider/apiKey
             // never cross into local state.
             assertEquals(before.provider, cfg.provider)
             assertEquals(before.apiKey, cfg.apiKey)
+        }
+
+    @Test
+    fun `applyBucket AI_SETTINGS applies and resets the custom system prompts`() =
+        runBlocking {
+            aiSettings.applyRemote(
+                AiSettings.Config(
+                    provider = AiSettings.Provider.Anthropic,
+                    apiKey = "k",
+                    model = null,
+                    syncEnabled = true,
+                    urbitKnowledgePrompt = "old shared",
+                    assistantPrompt = "old assistant",
+                    loopPrompt = "old loop",
+                ),
+            )
+            // A peer set custom prompts → adopt each independently.
+            sync.applyBucket(
+                SettingsSyncImpl.BUCKET_AI_SETTINGS,
+                buildJsonObject {
+                    put("config", buildJsonObject {
+                        put("schemaVersion", 2)
+                        put("urbitKnowledgePrompt", "peer shared")
+                        put("assistantPrompt", "peer assistant")
+                        put("loopPrompt", "peer loop")
+                    })
+                },
+            )
+            aiSettings.state.value.let {
+                assertEquals("peer shared", it.urbitKnowledgePrompt)
+                assertEquals("peer assistant", it.assistantPrompt)
+                assertEquals("peer loop", it.loopPrompt)
+            }
+
+            // A peer reset to default ("") → the reset propagates (unlike a
+            // credential, an empty prompt is a valid "use built-in" state).
+            sync.applyBucket(
+                SettingsSyncImpl.BUCKET_AI_SETTINGS,
+                buildJsonObject {
+                    put("config", buildJsonObject {
+                        put("schemaVersion", 2)
+                        put("urbitKnowledgePrompt", "")
+                        put("assistantPrompt", "")
+                        put("loopPrompt", "")
+                    })
+                },
+            )
+            aiSettings.state.value.let {
+                assertEquals("", it.urbitKnowledgePrompt)
+                assertEquals("", it.assistantPrompt)
+                assertEquals("", it.loopPrompt)
+            }
         }
 
     @Test
@@ -416,7 +569,7 @@ class SettingsSyncApplyBucketTest {
                     put("schemaVersion", 2)
                     put("provider", "NotARealProvider")
                     put("apiKey", "key")
-                    put("emojiReactEnabled", "false")
+                    put("catchMeUpEnabled", "false")
                 })
             }
             sync.applyBucket(SettingsSyncImpl.BUCKET_AI_SETTINGS, bucket)
@@ -425,7 +578,7 @@ class SettingsSyncApplyBucketTest {
             assertEquals(before.provider, cfg.provider)
             assertEquals(before.apiKey, cfg.apiKey)
             // Feature toggle from the bucket still landed.
-            assertEquals(false, cfg.emojiReactEnabled)
+            assertEquals(false, cfg.catchMeUpEnabled)
         }
 
     @Test
@@ -442,25 +595,18 @@ class SettingsSyncApplyBucketTest {
             // pattern across rc27/28/29/30 — toggles flipped on,
             // reinstall, toggles back off.
             val localDefaults = aiSettings.state.value
-            assertEquals(true, localDefaults.entityActionsEnabled)
-            assertEquals(true, localDefaults.semanticSearchEnabled)
+            assertEquals(true, localDefaults.smartFeaturesEnabled)
             val legacyBucket = buildJsonObject {
                 put("config", buildJsonObject {
                     // Note: no `schemaVersion` key. Mirrors the wire
                     // shape pushed by every rc before rc33.
-                    put("entityActionsEnabled", false)
-                    put("semanticSearchEnabled", false)
-                    put("topicClustersEnabled", false)
-                    put("importantMessagesEnabled", false)
+                    put("smartFeaturesEnabled", false)
                 })
             }
             sync.applyBucket(SettingsSyncImpl.BUCKET_AI_SETTINGS, legacyBucket)
 
             val cfg = aiSettings.state.value
-            assertEquals(true, cfg.entityActionsEnabled)
-            assertEquals(true, cfg.semanticSearchEnabled)
-            assertEquals(true, cfg.topicClustersEnabled)
-            assertEquals(true, cfg.importantMessagesEnabled)
+            assertEquals(true, cfg.smartFeaturesEnabled)
         }
 
     // ── daily-digest ────────────────────────────────────────────────
@@ -737,6 +883,39 @@ class SettingsSyncApplyBucketTest {
         assertEquals(0, rearmCount)
     }
 
+    // ── ui-prefs (mnemonym naming toggle) ───────────────────────────
+
+    @Test
+    fun `applyBucket UI_PREFS applies the mnemonym toggle, removeEntry restores the default`() = runBlocking {
+        io.nisfeb.talon.ui.MnemonymNames.set(true)
+        sync.applyBucket(
+            SettingsSyncImpl.BUCKET_UI_PREFS,
+            buildJsonObject {
+                put(
+                    SettingsSyncImpl.ENTRY_MNEMONYM_NAMES,
+                    buildJsonObject { put("enabled", false) },
+                )
+            },
+        )
+        assertEquals(false, io.nisfeb.talon.ui.MnemonymNames.enabled.value)
+
+        // Live put-entry flips it back on.
+        sync.applyEntry(
+            SettingsSyncImpl.BUCKET_UI_PREFS,
+            SettingsSyncImpl.ENTRY_MNEMONYM_NAMES,
+            buildJsonObject { put("enabled", true) },
+        )
+        assertEquals(true, io.nisfeb.talon.ui.MnemonymNames.enabled.value)
+
+        // Peer deleted the entry → back to the default (on).
+        io.nisfeb.talon.ui.MnemonymNames.set(false)
+        sync.removeEntry(
+            SettingsSyncImpl.BUCKET_UI_PREFS,
+            SettingsSyncImpl.ENTRY_MNEMONYM_NAMES,
+        )
+        assertEquals(true, io.nisfeb.talon.ui.MnemonymNames.enabled.value)
+    }
+
     // ── status-seen (cross-device fresh-status marker) ──────────────
 
     @Test
@@ -778,6 +957,310 @@ class SettingsSyncApplyBucketTest {
         sync.applySettingsEvent(payload)
         assertEquals(1_700_000_000_123L, sync.statusesSeenMs.value)
     }
+
+    // ── assistant history (Stage 2) ─────────────────────────────────
+
+    private fun convMeta(title: String, turnCount: Int) = buildJsonObject {
+        put("title", title)
+        put("createdAt", 100L)
+        put("updatedAt", 200L)
+        put("turnCount", turnCount)
+    }
+
+    private fun turnVal(
+        convGid: String,
+        question: String,
+        answer: String,
+        createdAt: Long = 150L,
+    ) = buildJsonObject {
+        put("convGid", convGid)
+        put("question", question)
+        put("answer", answer)
+        put("mode", "Assistant")
+        put("createdAt", createdAt)
+    }
+
+    @Test
+    fun `applyBucket ASSISTANT_CONVERSATIONS upserts by gid, preserves the local centroid and turnCount`() = runBlocking {
+        // A conversation this device already learned a centroid for.
+        db.assistantConversations().insert(
+            AssistantConversationEntity(
+                gid = "c1", title = "old", createdAt = 1, updatedAt = 1,
+                centroid = byteArrayOf(1, 2, 3, 4), dim = 1, turnCount = 1,
+            ),
+        )
+        sync.applyBucket(
+            SettingsSyncImpl.BUCKET_ASSISTANT_CONVERSATIONS,
+            buildJsonObject { put("c1", convMeta("new title", turnCount = 3)) },
+        )
+        val row = db.assistantConversations().getByGid("c1")!!
+        assertEquals("new title", row.title)
+        // Embeddings aren't on the wire — the update must not wipe them.
+        assertTrue(byteArrayOf(1, 2, 3, 4).contentEquals(row.centroid))
+        assertEquals(1, row.dim)
+        // turnCount is local-derived, not taken from the wire's claim of 3.
+        assertEquals(1, row.turnCount)
+    }
+
+    @Test
+    fun `turnCount tracks the turns this device holds, not the wire claim`() = runBlocking {
+        // Metadata claims 5 turns (peer total), but only one turn syncs here.
+        sync.applyBucket(
+            SettingsSyncImpl.BUCKET_ASSISTANT_CONVERSATIONS,
+            buildJsonObject { put("c1", convMeta("topic", turnCount = 5)) },
+        )
+        sync.applyBucket(
+            SettingsSyncImpl.BUCKET_ASSISTANT_TURNS,
+            buildJsonObject { put("t1", turnVal("c1", "q1", "a1")) },
+        )
+        val row = db.assistantConversations().getByGid("c1")!!
+        assertEquals(1, row.turnCount)
+        assertEquals(1, db.assistantHistory().forConversation(row.id).size)
+    }
+
+    @Test
+    fun `metadata arriving after a stub turn does not inflate turnCount`() = runBlocking {
+        // Out-of-order: turn first (stub, count->1), then metadata claiming 5.
+        sync.applyBucket(
+            SettingsSyncImpl.BUCKET_ASSISTANT_TURNS,
+            buildJsonObject { put("t1", turnVal("c1", "q1", "a1")) },
+        )
+        sync.applyBucket(
+            SettingsSyncImpl.BUCKET_ASSISTANT_CONVERSATIONS,
+            buildJsonObject { put("c1", convMeta("topic", turnCount = 5)) },
+        )
+        assertEquals(1, db.assistantConversations().getByGid("c1")!!.turnCount)
+    }
+
+    @Test
+    fun `clearBucketLocally for an assistant bucket wipes conversations and turns`() = runBlocking {
+        sync.applyBucket(
+            SettingsSyncImpl.BUCKET_ASSISTANT_CONVERSATIONS,
+            buildJsonObject { put("c1", convMeta("topic", turnCount = 1)) },
+        )
+        sync.applyBucket(
+            SettingsSyncImpl.BUCKET_ASSISTANT_TURNS,
+            buildJsonObject { put("t1", turnVal("c1", "q1", "a1")) },
+        )
+        // A peer's "clear history" arrives as del-bucket → clearBucketLocally.
+        sync.clearBucketLocally(SettingsSyncImpl.BUCKET_ASSISTANT_CONVERSATIONS)
+        assertNull(db.assistantConversations().getByGid("c1"))
+        assertTrue(db.assistantHistory().recent(10).first().isEmpty())
+    }
+
+    @Test
+    fun `applyBucket ASSISTANT_TURNS links the turn to its conversation`() = runBlocking {
+        sync.applyBucket(
+            SettingsSyncImpl.BUCKET_ASSISTANT_CONVERSATIONS,
+            buildJsonObject { put("c1", convMeta("topic", turnCount = 1)) },
+        )
+        sync.applyBucket(
+            SettingsSyncImpl.BUCKET_ASSISTANT_TURNS,
+            buildJsonObject { put("t1", turnVal("c1", "q1", "a1")) },
+        )
+        val convId = db.assistantConversations().getByGid("c1")!!.id
+        val turns = db.assistantHistory().forConversation(convId)
+        assertEquals(listOf("q1"), turns.map { it.question })
+        assertEquals("c1", turns.single().convGid)
+    }
+
+    @Test
+    fun `applyBucket ASSISTANT_TURNS stubs a conversation when the turn arrives first`() = runBlocking {
+        // Out-of-order delivery: the turn must still have a home.
+        sync.applyBucket(
+            SettingsSyncImpl.BUCKET_ASSISTANT_TURNS,
+            buildJsonObject { put("t1", turnVal("c2", "orphan question", "a")) },
+        )
+        val conv = db.assistantConversations().getByGid("c2")
+        assertNotNull(conv)
+        assertEquals(1, db.assistantHistory().forConversation(conv.id).size)
+    }
+
+    @Test
+    fun `applyBucket ASSISTANT_TURNS is idempotent on a repeated gid`() = runBlocking {
+        val bucket = buildJsonObject { put("t1", turnVal("c1", "q1", "a1")) }
+        sync.applyBucket(SettingsSyncImpl.BUCKET_ASSISTANT_TURNS, bucket)
+        sync.applyBucket(SettingsSyncImpl.BUCKET_ASSISTANT_TURNS, bucket)
+        val convId = db.assistantConversations().getByGid("c1")!!.id
+        assertEquals(1, db.assistantHistory().forConversation(convId).size)
+    }
+
+    @Test
+    fun `applyBucket ASSISTANT_TURNS skips ship entries older than the trim horizon`() = runBlocking {
+        // At cap, a bucket entry older than the oldest local turn would be
+        // trimmed straight back out — bootstrap must not pay the insert.
+        // The distinguishing observable (trim would erase the row either
+        // way): a SKIPPED turn never stubs its conversation, an inserted-
+        // then-trimmed one leaves the stub behind.
+        val convId = db.assistantConversations().insert(
+            AssistantConversationEntity(
+                gid = "c1", title = "t", createdAt = 1, updatedAt = 1,
+                centroid = ByteArray(0), dim = 0, turnCount = 0,
+            ),
+        )
+        repeat(ASSISTANT_HISTORY_KEEP) { n ->
+            db.assistantHistory().insert(
+                AssistantHistoryEntity(
+                    gid = "local$n", mode = "Assistant", question = "q", answer = "a",
+                    createdAt = 1_000L + n, conversationId = convId, convGid = "c1",
+                ),
+            )
+        }
+        sync.applyBucket(
+            SettingsSyncImpl.BUCKET_ASSISTANT_TURNS,
+            buildJsonObject {
+                put("stale", turnVal("cStale", "old", "a", createdAt = 500L))
+                put("fresh", turnVal("c1", "new", "a", createdAt = 2_000L))
+            },
+        )
+        assertNull(db.assistantHistory().getByGid("stale"), "below-horizon turn must be skipped")
+        assertNull(
+            db.assistantConversations().getByGid("cStale"),
+            "a skipped turn must not stub its conversation — the stub proves the insert happened",
+        )
+        assertNotNull(db.assistantHistory().getByGid("fresh"))
+        assertEquals(ASSISTANT_HISTORY_KEEP, db.assistantHistory().count())
+    }
+
+    @Test
+    fun `fresh-device bootstrap only inserts the newest KEEP bucket entries`() = runBlocking {
+        // No local rows, so there is no local horizon — the bucket itself
+        // supplies one: only its KEEP newest entries can survive the trim,
+        // so older ones are skipped (again pinned via the absent conv stub).
+        val bucket = buildJsonObject {
+            put("old1", turnVal("cOld", "q", "a", createdAt = 1L))
+            put("old2", turnVal("cOld", "q", "a", createdAt = 2L))
+            repeat(ASSISTANT_HISTORY_KEEP) { n ->
+                put("t$n", turnVal("c1", "q$n", "a", createdAt = 1_000L + n))
+            }
+        }
+        sync.applyBucket(SettingsSyncImpl.BUCKET_ASSISTANT_TURNS, bucket)
+        assertEquals(ASSISTANT_HISTORY_KEEP, db.assistantHistory().count())
+        assertNull(db.assistantHistory().getByGid("old1"))
+        assertNull(db.assistantConversations().getByGid("cOld"), "skipped turns must not stub cOld")
+        // turnCount reflects the post-trim survivors, recounted once.
+        assertEquals(ASSISTANT_HISTORY_KEEP, db.assistantConversations().getByGid("c1")!!.turnCount)
+    }
+
+    @Test
+    fun `removeEntry ASSISTANT_CONVERSATIONS cascades to the conversation's turns`() = runBlocking {
+        sync.applyBucket(
+            SettingsSyncImpl.BUCKET_ASSISTANT_CONVERSATIONS,
+            buildJsonObject { put("c1", convMeta("topic", turnCount = 1)) },
+        )
+        sync.applyBucket(
+            SettingsSyncImpl.BUCKET_ASSISTANT_TURNS,
+            buildJsonObject { put("t1", turnVal("c1", "q1", "a1")) },
+        )
+        val convId = db.assistantConversations().getByGid("c1")!!.id
+        sync.removeEntry(SettingsSyncImpl.BUCKET_ASSISTANT_CONVERSATIONS, "c1")
+        assertNull(db.assistantConversations().getByGid("c1"))
+        assertTrue(db.assistantHistory().forConversation(convId).isEmpty())
+    }
+
+    // ── loops (definition sync) ─────────────────────────────────────
+
+    private fun loopVal(name: String, prompt: String, interval: Int, enabled: Boolean, writes: Boolean) =
+        buildJsonObject {
+            put("name", name)
+            put("prompt", prompt)
+            put("intervalMinutes", interval)
+            put("enabled", enabled)
+            put("writesAuthorized", writes)
+            put("createdAt", 100L)
+            put("updatedAt", 200L)
+        }
+
+    @Test
+    fun `applyBucket LOOPS upserts the definition but keeps lastRunAt and the local write-grant`() = runBlocking {
+        // A loop this device already ran (lastRunAt set) and granted write
+        // access to. The synced definition must update name/prompt/etc but
+        // NEVER reset the local schedule clock (else a sync re-fires the
+        // loop) and NEVER honor the wire's writesAuthorized (the wire says
+        // false here, but the local true must stand — and conversely a wire
+        // `true` must not flip a local false; see the insert test).
+        db.loops().upsert(
+            io.nisfeb.talon.data.LoopEntity(
+                gid = "g1", name = "old", prompt = "old prompt", intervalMinutes = 60,
+                enabled = false, writesAuthorized = true,
+                createdAt = 1, updatedAt = 1, lastRunAt = 12_345L,
+            ),
+        )
+        sync.applyBucket(
+            SettingsSyncImpl.BUCKET_LOOPS,
+            buildJsonObject { put("g1", loopVal("new", "new prompt", 180, enabled = true, writes = false)) },
+        )
+        val row = db.loops().getByGid("g1")!!
+        assertEquals("new", row.name)
+        assertEquals("new prompt", row.prompt)
+        assertEquals(180, row.intervalMinutes)
+        assertEquals(true, row.enabled)
+        // Invariants: device-local fields untouched by the wire.
+        assertEquals(12_345L, row.lastRunAt)
+        assertEquals(true, row.writesAuthorized)
+    }
+
+    @Test
+    fun `applyBucket LOOPS inserts a fresh loop read-only even when the wire says writes are authorized`() = runBlocking {
+        // Security: an unattended-write grant must be made on THIS device.
+        // A loop synced in (with writes=true on the wire) lands read-only
+        // until the local user opts in.
+        val before = System.currentTimeMillis()
+        sync.applyBucket(
+            SettingsSyncImpl.BUCKET_LOOPS,
+            buildJsonObject { put("g2", loopVal("fresh", "do it", 30, enabled = true, writes = true)) },
+        )
+        val row = db.loops().getByGid("g2")!!
+        assertEquals("fresh", row.name)
+        // A first-arrival loop starts its interval NOW, not at the epoch —
+        // lastRunAt=0 would make it due since 1970 and fire immediately on
+        // every peer the definition syncs to.
+        assertTrue(
+            row.lastRunAt >= before,
+            "a freshly-synced loop must not be immediately due (lastRunAt=${row.lastRunAt})",
+        )
+        assertTrue(
+            !io.nisfeb.talon.ai.LoopSchedule.isDue(
+                System.currentTimeMillis(), row.lastRunAt, row.intervalMinutes,
+            ),
+            "a freshly-synced loop must not fire on the next tick",
+        )
+        assertEquals(false, row.writesAuthorized, "remote write-grant must not cross over to a new device")
+        assertTrue(row.id != 0L, "insert assigns an autogen id")
+    }
+
+    @Test
+    fun `clearBucketLocally LOOPS wipes all loops and run history`() = runBlocking {
+        val id = db.loops().upsert(
+            io.nisfeb.talon.data.LoopEntity(
+                gid = "g", name = "x", prompt = "p", intervalMinutes = 60,
+                createdAt = 1, updatedAt = 1,
+            ),
+        )
+        db.loopRuns().insert(
+            io.nisfeb.talon.data.LoopRunEntity(loopId = id, ranAt = 1, ok = true, output = "o"),
+        )
+        // A peer's del-bucket for loops arrives → clearBucketLocally.
+        sync.clearBucketLocally(SettingsSyncImpl.BUCKET_LOOPS)
+        assertTrue(db.loops().stream().first().isEmpty())
+        assertTrue(db.loopRuns().streamForLoop(id, 10).first().isEmpty())
+    }
+
+    @Test
+    fun `removeEntry LOOPS deletes the loop and its run history`() = runBlocking {
+        val id = db.loops().upsert(
+            io.nisfeb.talon.data.LoopEntity(
+                gid = "g3", name = "x", prompt = "p", intervalMinutes = 60,
+                createdAt = 1, updatedAt = 1,
+            ),
+        )
+        db.loopRuns().insert(
+            io.nisfeb.talon.data.LoopRunEntity(loopId = id, ranAt = 1, ok = true, output = "out"),
+        )
+        sync.removeEntry(SettingsSyncImpl.BUCKET_LOOPS, "g3")
+        assertNull(db.loops().getByGid("g3"))
+        assertTrue(db.loopRuns().streamForLoop(id, 10).first().isEmpty())
+    }
 }
 
 // ──────────────────────────────────────────────────────────────────
@@ -801,6 +1284,12 @@ internal class FakeAiSettings : AiSettingsRepository {
         baseUrl: String?,
     ) { /* unused */ }
     override fun setFeature(feature: AiSettings.Feature, enabled: Boolean) {}
+    override fun setBraveApiKey(key: String) {
+        _state.value = _state.value.copy(braveApiKey = key)
+    }
+    override fun setPrompt(kind: AiSettings.PromptKind, value: String) {
+        _state.value = _state.value.withPrompt(kind, value)
+    }
     override fun setSyncEnabled(enabled: Boolean) {
         _state.value = _state.value.copy(syncEnabled = enabled)
     }

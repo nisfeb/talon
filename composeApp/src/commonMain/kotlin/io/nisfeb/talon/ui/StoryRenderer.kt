@@ -63,6 +63,25 @@ interface CiteResolver {
 val LocalCiteResolver = compositionLocalOf<CiteResolver?> { null }
 
 /**
+ * What a tap on a rendered citation does. Provided once at the app
+ * root, next to [LocalCiteResolver], so a cite behaves identically
+ * wherever it is rendered — chat, thread, notebook post, gallery. The
+ * default no-op keeps previews and tests renderable without a shell.
+ */
+val LocalCitationOpen = compositionLocalOf<(StoryPart.Citation) -> Unit> { {} }
+
+/**
+ * Resolve a ship to the name to show for it. The default applies the
+ * mnemonym fallback (`.hollow.mint.gecko` for a ship with no nick), so
+ * a quoted post's author never shows a bare @p even on a surface with
+ * no contact data. Chat surfaces override this with the full
+ * `ContactMap.displayName`, which prefers a nickname the viewer set.
+ */
+val LocalDisplayName = compositionLocalOf<(String) -> String> {
+    { ship -> if (MnemonymNames.enabled.value) Mnemonym.display(ship) ?: ship else ship }
+}
+
+/**
  * Process-level cache + per-key dedup for citation resolution.
  * Without this, N visible citations to the same channel/post each
  * fire their own scry — a dense chat with 8 cites = 8 redundant
@@ -139,7 +158,6 @@ fun StoryRenderer(
     onMentionTap: (String) -> Unit = {},
     onLinkTap: (String) -> Unit = {},
     onImageTap: (String) -> Unit = {},
-    onCitationTap: (target: String) -> Unit = {},
     /** Reactions on this message, used by the poll widget to render
      *  per-option tallies. */
     reactions: List<io.nisfeb.talon.data.ReactionEntity> = emptyList(),
@@ -164,8 +182,9 @@ fun StoryRenderer(
     // Android. The action sheet used to be wired to long-press here
     // and on the parent row; both paths were removed so Compose's
     // selection gesture has unobstructed ownership of long-press
-    // inside text. Sheet access moves to the row's trailing ellipsis
-    // (MessageActionsButton) plus desktop right-click on the row.
+    // inside text. The action menu is reached by tapping the row on
+    // touch (onMessageTap) and by the row's hover "⋯" on desktop —
+    // right-click can't be used here, this SelectionContainer eats it.
     SelectionContainer(modifier = modifier) {
     Column(
         verticalArrangement = Arrangement.spacedBy(6.dp),
@@ -270,9 +289,7 @@ fun StoryRenderer(
                     onLinkTap(part.url)
                 }
 
-                is StoryPart.Citation -> InlineCitation(cite = part) {
-                    part.openTarget?.let(onCitationTap)
-                }
+                is StoryPart.Citation -> InlineCitation(cite = part)
 
                 is StoryPart.TzWidget -> TzWidgetBlock(
                     instantEpochMs = part.instantEpochMs,
@@ -474,12 +491,10 @@ private fun InlineLinkPreview(
 }
 
 @Composable
-private fun InlineCitation(
-    cite: StoryPart.Citation,
-    onTap: () -> Unit,
-) {
+private fun InlineCitation(cite: StoryPart.Citation) {
     val tappable = cite.openTarget != null
     val resolver = LocalCiteResolver.current
+    val open = LocalCitationOpen.current
 
     // Resolve cite → stored message, falling back to a channel scry
     // when the post isn't in our local window. Routes through
@@ -509,7 +524,7 @@ private fun InlineCitation(
             .widthIn(max = 420.dp)
             .clip(RoundedCornerShape(8.dp))
             .background(MaterialTheme.colorScheme.surfaceVariant)
-            .let { if (tappable) it.clickable(onClick = onTap) else it }
+            .let { if (tappable) it.clickable { open(cite) } else it }
             .padding(horizontal = 10.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {
@@ -526,7 +541,7 @@ private fun InlineCitation(
                     .take(240)
             }
             Text(
-                r.author,
+                LocalDisplayName.current(r.author),
                 style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
             )
             if (body.isNotBlank()) {

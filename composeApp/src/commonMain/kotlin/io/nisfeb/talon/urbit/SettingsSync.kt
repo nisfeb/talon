@@ -19,7 +19,7 @@ private val ZERO_STATUSES_SEEN: StateFlow<Long> = MutableStateFlow(0L).asStateFl
  * Desktop passes `null` and the relevant code paths short-circuit
  * until a desktop %settings bridge is wired.
  */
-interface SettingsSync {
+interface SettingsSync : io.nisfeb.talon.ai.LoopWriteCoordinator {
     fun attach(channel: UrbitChannel)
     suspend fun bootstrap()
     suspend fun applySettingsEvent(payload: JsonObject)
@@ -42,6 +42,43 @@ interface SettingsSync {
      *  transitions sync off and we need to drop their schedule from
      *  the ship-side store. Default no-op. */
     suspend fun clearDailyDigestOnShip() {}
+
+    /** Push the mnemonym-naming preference (ui-prefs bucket) so every
+     *  device shows the same fallback ship names. Default no-op. */
+    suspend fun pushMnemonymNames(enabled: Boolean) {}
+
+    // ───────── assistant history sync ─────────
+    /**
+     * Push one assistant turn + its conversation metadata to %settings
+     * so the exchange shows up on the user's other devices. Turns are
+     * append-only (keyed by [io.nisfeb.talon.data.AssistantHistoryEntity.gid])
+     * so concurrent writes from two devices can't clobber each other.
+     * Embeddings are NOT pushed — only the conversation's title/counts
+     * and the turn's text. Default no-op.
+     */
+    suspend fun pushAssistantTurn(
+        conversation: io.nisfeb.talon.data.AssistantConversationEntity,
+        turn: io.nisfeb.talon.data.AssistantHistoryEntity,
+    ) {}
+
+    /** Drop all assistant conversations + turns from the ship — the
+     *  user-initiated "clear history" action. Default no-op. */
+    suspend fun clearAssistantHistoryOnShip() {}
+
+    // ───────── loop definition sync ─────────
+    /**
+     * Push one loop's *definition* (name, prompt, interval, enabled,
+     * timestamps) to %settings, keyed by
+     * [io.nisfeb.talon.data.LoopEntity.gid], so it follows the ship to
+     * other devices. lastRunAt, run history, AND the writesAuthorized
+     * grant are device-local and never travel (the unattended-write grant
+     * is a per-device decision). Default no-op for hosts without loop sync.
+     */
+    suspend fun pushLoop(loop: io.nisfeb.talon.data.LoopEntity) {}
+
+    /** Remove a loop from the ship's %settings store by gid. Default
+     *  no-op. */
+    suspend fun deleteLoop(gid: String) {}
 
     // ───────── home-list reorder hooks ─────────
     // Called from DmListScreen drag callbacks. The Android impl writes

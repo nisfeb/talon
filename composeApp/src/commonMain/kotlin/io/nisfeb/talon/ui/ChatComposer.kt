@@ -1,6 +1,7 @@
 package io.nisfeb.talon.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -26,6 +27,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Stable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -34,7 +36,9 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.isCtrlPressed
@@ -46,9 +50,11 @@ import androidx.compose.ui.input.key.type
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
+import coil3.compose.AsyncImage
 import io.nisfeb.talon.data.AppDatabase
 import io.nisfeb.talon.data.MessageEntity
 import io.nisfeb.talon.urbit.StoryCache
+import io.nisfeb.talon.urbit.Presence
 import io.nisfeb.talon.urbit.TlonChatRepo
 import io.nisfeb.talon.util.Log
 import io.nisfeb.talon.util.decodeImageDimensions
@@ -69,8 +75,35 @@ import okhttp3.OkHttpClient
  * means a feature added here lights up both surfaces in lockstep.
  */
 
+/** The one thing an attachment can't recover from: no bytes. A cloud photo
+ *  that never downloaded reads as a valid-but-empty stream, and uploading it
+ *  posts a message pointing at a blank object. */
+private const val EMPTY_ATTACHMENT_ERROR =
+    "that came back empty (0 bytes) — if it's an online/cloud photo, open it " +
+        "in your gallery first so it downloads, then try again"
+
 /** A staged voice recording awaiting send confirmation. */
 data class PendingVoice(val path: String, val durationMs: Long)
+
+/**
+ * A staged image / file awaiting send confirmation — the "review
+ * before posting" step so the user can see they picked the right
+ * thing before it goes out. Bytes are already read + validated; the
+ * upload + send happens when they confirm. Held in memory only (no
+ * temp file to clean up, unlike [PendingVoice]).
+ */
+data class PendingAttachment(
+    val bytes: ByteArray,
+    val mimeType: String,
+    val displayName: String,
+    val isImage: Boolean,
+) {
+    // ByteArray in a data class defaults to reference equals/hashCode;
+    // this flows through Compose state once and disappears, so identity
+    // is the right (and cheapest) comparison. Mirrors PickedImage.
+    override fun equals(other: Any?): Boolean = this === other
+    override fun hashCode(): Int = System.identityHashCode(this)
+}
 
 /**
  * Mutable composer state hoisted out of the screen body so the
@@ -84,6 +117,7 @@ class ComposerState(initialDraftText: String) {
     var draft by mutableStateOf(TextFieldValue(initialDraftText))
     var pendingQuote by mutableStateOf<MessageEntity?>(null)
     var pendingVoice by mutableStateOf<PendingVoice?>(null)
+    var pendingAttachment by mutableStateOf<PendingAttachment?>(null)
     var sendError by mutableStateOf<String?>(null)
     var uploading by mutableStateOf(false)
 }
@@ -108,9 +142,9 @@ fun rememberComposerState(whom: String, drafts: DraftStore): ComposerState =
 interface ChatSendStrategy {
     suspend fun sendText(text: String)
 
-    /** Send a structured image post when the surface supports it.
-     *  Threads don't have replyImage; their impl falls back to
-     *  embedding the URL as markdown via [sendText]. */
+    /** Send a structured image. Both surfaces carry a full story —
+     *  DM/post via repo.sendImage, thread via repo.replyImage — so the
+     *  image renders inline rather than as a link. */
     suspend fun sendImage(src: String, width: Int, height: Int, alt: String)
 
     val supportsQuote: Boolean
@@ -177,46 +211,79 @@ fun ChatComposer(
         }
     }
 
-    val onPickAndSendImage: () -> Unit = {
-        scope.launch {
-            val picked = pickImage() ?: return@launch
-            state.uploading = true
+    // Pick → validate → STAGE. The upload + send doesn't happen here
+    // anymore: the picked image is held in state.pendingAttachment and
+    // shown as a preview so the user can confirm they grabbed the right
+    // one before it goes out. [sendAttachment] finishes the job.
+    //
+    // The ONLY thing rejected is an empty read — a cloud photo that never
+    // downloaded, which would upload a blank object. We deliberately do NOT
+    // gate on decodeImageDimensions: that's a layout hint, not a validity
+    // oracle (desktop's ImageIO can't read WebP, which the picker offers and
+    // Coil renders fine), and the preview is the user's own check now.
+    val stage: (ByteArray, String, String, Boolean) -> Unit = { bytes, mime, name, isImage ->
+        if (bytes.isEmpty()) {
+            state.sendError = EMPTY_ATTACHMENT_ERROR
+        } else {
             state.sendError = null
-            runCatching {
-                val dims = decodeImageDimensions(picked.bytes)
-                val hostedUrl = repo.uploadImage(picked.bytes, picked.mimeType, picked.displayName)
-                strategy.sendImage(
-                    src = hostedUrl,
-                    width = dims?.first ?: 0,
-                    height = dims?.second ?: 0,
-                    alt = picked.displayName,
-                )
-                // Image-attach is a send action even though the user
-                // may have typed unrelated text first — clear so the
-                // conversation list doesn't keep advertising "Draft:".
-                state.draft = TextFieldValue("")
-                drafts.clear(whom)
-            }.onFailure { err ->
-                state.sendError = "image failed: ${err.message ?: err::class.simpleName}"
-            }
-            state.uploading = false
+            state.pendingAttachment = PendingAttachment(bytes, mime, name, isImage)
         }
     }
 
-    val onPickAndSendFile: () -> Unit = {
+    val onPickImage: () -> Unit = {
         scope.launch {
-            val picked = pickAnyFile() ?: return@launch
+            val picked = runCatching { pickImage() }
+                .onFailure { state.sendError = "couldn't read image: ${it.message ?: it::class.simpleName}" }
+                .getOrNull() ?: return@launch
+            stage(picked.bytes, picked.mimeType, picked.displayName, true)
+        }
+    }
+
+    val onPickFile: () -> Unit = {
+        scope.launch {
+            val picked = runCatching { pickAnyFile() }
+                .onFailure { state.sendError = "couldn't read file: ${it.message ?: it::class.simpleName}" }
+                .getOrNull() ?: return@launch
+            stage(
+                picked.bytes, picked.mimeType, picked.displayName,
+                picked.mimeType.startsWith("image/"),
+            )
+        }
+    }
+
+    // Confirm the staged attachment: upload + send. On failure we keep
+    // the attachment staged (error shows above) so the user can retry
+    // the send instead of re-picking.
+    val sendAttachment: () -> Unit = {
+        val pending = state.pendingAttachment
+        if (pending != null) {
             state.uploading = true
             state.sendError = null
-            runCatching {
-                val hostedUrl = repo.uploadImage(picked.bytes, picked.mimeType, picked.displayName)
-                strategy.sendText(hostedUrl)
-                state.draft = TextFieldValue("")
-                drafts.clear(whom)
-            }.onFailure { err ->
-                state.sendError = "file failed: ${err.message ?: err::class.simpleName}"
+            scope.launch {
+                runCatching {
+                    val hostedUrl = repo.uploadImage(pending.bytes, pending.mimeType, pending.displayName)
+                    if (pending.isImage) {
+                        val dims = decodeImageDimensions(pending.bytes)
+                        strategy.sendImage(
+                            src = hostedUrl,
+                            width = dims?.first ?: 0,
+                            height = dims?.second ?: 0,
+                            alt = pending.displayName,
+                        )
+                    } else {
+                        strategy.sendText(hostedUrl)
+                    }
+                    // Sent — clear the stage and the orphaned text draft so
+                    // the conversation list stops advertising "Draft:".
+                    state.pendingAttachment = null
+                    state.draft = TextFieldValue("")
+                    drafts.clear(whom)
+                }.onFailure { err ->
+                    val kind = if (pending.isImage) "image" else "file"
+                    state.sendError = "$kind failed: ${err.message ?: err::class.simpleName}"
+                }
+                state.uploading = false
             }
-            state.uploading = false
         }
     }
 
@@ -229,6 +296,13 @@ fun ChatComposer(
     // the user finalized a send, the textual draft is orphaned.
     val uploadAndSend: (DroppedFile) -> Unit = { file ->
         scope.launch {
+            if (file.bytes.isEmpty()) {
+                // Same guard the staged paths get — a multi-file drop was the
+                // one path that could still upload a blank object and post an
+                // empty message.
+                state.sendError = EMPTY_ATTACHMENT_ERROR
+                return@launch
+            }
             state.uploading = true
             state.sendError = null
             runCatching {
@@ -253,16 +327,57 @@ fun ChatComposer(
         }
     }
 
+    // Stage a pasted / single-dropped file into the same review-before-send
+    // preview the picker buttons use, so a paste doesn't fire off before the
+    // user can see what landed. Multi-file drops stay on [uploadAndSend]
+    // (the preview holds one item).
+    val stageDropped: (DroppedFile) -> Unit = { file ->
+        stage(file.bytes, file.mimeType, file.name, file.isImage)
+    }
+
     val updateDraft: (TextFieldValue) -> Unit = { next ->
         state.draft = next
         drafts.save(whom, next.text)
     }
+
+    // Typing presence. Keying on the draft text means a keystroke
+    // re-announces (the repo throttles to one poke per 15s against a
+    // 30s server-side entry) and a pause simply lets it lapse — which
+    // is the semantics we want. Emptying the composer, including the
+    // clear every send path performs, retracts immediately: a timeout
+    // never propagates to watchers, only an explicit clear does.
+    LaunchedEffect(whom, state.draft.text) {
+        if (state.draft.text.isBlank()) {
+            repo.retractPresence(whom)
+        } else {
+            repo.announcePresence(whom)
+        }
+    }
+
+    // An upload is the one thing worth announcing that the peer would
+    // otherwise wait on with no explanation. %computing is exactly the
+    // topic for it; the display text says which.
+    LaunchedEffect(whom, state.uploading, state.pendingAttachment?.isImage) {
+        if (state.uploading) {
+            val what = if (state.pendingAttachment?.isImage != false) "an image" else "a file"
+            repo.announcePresence(whom, Presence.TOPIC_COMPUTING, "uploading $what")
+        } else {
+            repo.retractPresence(whom, Presence.TOPIC_COMPUTING)
+        }
+    }
+
     // Belt-and-suspenders flush mirrored from the original DM body —
     // if the surface unmounts without onValueChange ever firing for
     // a clear, persist what we have so the conversation list and
     // the next mount agree.
     DisposableEffect(whom) {
-        onDispose { drafts.save(whom, state.draft.text) }
+        onDispose {
+            drafts.save(whom, state.draft.text)
+            // Leaving the screen mid-draft must not leave us announcing
+            // forever on the peer's side.
+            repo.retractPresenceNow(whom)
+            repo.retractPresenceNow(whom, Presence.TOPIC_COMPUTING)
+        }
     }
 
     val mention = detectMentionQuery(state.draft.text, state.draft.selection.start)
@@ -305,8 +420,20 @@ fun ChatComposer(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .fileDropTarget(enabled = canSend && !state.uploading) { files ->
-                files.forEach(uploadAndSend)
+            // Disabled while a staged preview (attachment or voice) has
+            // replaced the composer via early-return: the drop target sits on
+            // this outer Column, so without the guard a drop would land
+            // "behind" the preview — sending a stray file and flickering the
+            // preview's Send/Discard buttons. (Fixes the same pre-existing
+            // hole for the voice preview.)
+            .fileDropTarget(
+                enabled = canSend && !state.uploading &&
+                    state.pendingAttachment == null && state.pendingVoice == null,
+            ) { files ->
+                // A single drop stages into the preview like a paste; a
+                // multi-file drop still sends immediately (one preview slot).
+                if (files.size == 1) stageDropped(files.first())
+                else files.forEach(uploadAndSend)
             },
     ) {
         if (state.sendError != null) {
@@ -357,10 +484,10 @@ fun ChatComposer(
             val handledInUi = when {
                 quote != null -> false
                 firstWord == "/img" -> {
-                    onPickAndSendImage(); true
+                    onPickImage(); true
                 }
                 firstWord == "/file" -> {
-                    onPickAndSendFile(); true
+                    onPickFile(); true
                 }
                 firstWord == "/mic" -> {
                     if (onSlashMic != null) {
@@ -464,6 +591,18 @@ fun ChatComposer(
             return
         }
 
+        val pa = state.pendingAttachment
+        if (pa != null) {
+            AttachmentPreviewRow(
+                pending = pa,
+                sending = state.uploading,
+                sendAccent = sendAccent,
+                onCancel = { state.pendingAttachment = null },
+                onSend = sendAttachment,
+            )
+            return
+        }
+
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -473,7 +612,7 @@ fun ChatComposer(
         ) {
             if (!hideComposerButtons) {
                 IconButton(
-                    onClick = onPickAndSendImage,
+                    onClick = onPickImage,
                     enabled = canSend && !state.uploading,
                     modifier = Modifier.size(36.dp),
                 ) {
@@ -491,7 +630,7 @@ fun ChatComposer(
                     }
                 }
                 IconButton(
-                    onClick = onPickAndSendFile,
+                    onClick = onPickFile,
                     enabled = canSend && !state.uploading,
                     modifier = Modifier.size(36.dp),
                 ) {
@@ -524,7 +663,7 @@ fun ChatComposer(
                     // path as drag-drop and the picker.
                     .imagePasteTarget(
                         enabled = canSend && !state.uploading,
-                        onImage = uploadAndSend,
+                        onImage = stageDropped,
                     )
                     .onPreviewKeyEvent { e ->
                         if (e.type != KeyEventType.KeyDown) {
@@ -574,17 +713,17 @@ fun ChatComposer(
                         }
                         // Ctrl+V (or Cmd+V on macOS) — if the
                         // clipboard holds an image, intercept the
-                        // paste, upload + send, and consume the
-                        // event so the text field doesn't ALSO try
-                        // to paste (which would insert garbage like
-                        // the file path or nothing). Plain text
+                        // paste, stage it into the review preview, and
+                        // consume the event so the text field doesn't
+                        // ALSO try to paste (which would insert garbage
+                        // like the file path or nothing). Plain text
                         // paste falls through normally.
                         val pasteCombo = e.key == Key.V &&
                             (e.isCtrlPressed || e.isMetaPressed)
                         if (pasteCombo && canSend && !state.uploading) {
                             val img = readClipboardImageOrNull()
                             if (img != null) {
-                                uploadAndSend(img)
+                                stageDropped(img)
                                 return@onPreviewKeyEvent true
                             }
                         }
@@ -678,6 +817,95 @@ private fun QuotePreviewRow(
                 contentDescription = "Cancel quote",
                 modifier = Modifier.size(18.dp),
             )
+        }
+    }
+}
+
+@Composable
+private fun AttachmentPreviewRow(
+    pending: PendingAttachment,
+    sending: Boolean,
+    sendAccent: Color,
+    onCancel: () -> Unit,
+    onSend: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 8.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        if (pending.isImage) {
+            // Coil 3 renders a ByteArray model directly — no upload / temp
+            // file needed to preview the picked photo.
+            AsyncImage(
+                model = pending.bytes,
+                contentDescription = pending.displayName,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier
+                    .size(56.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(MaterialTheme.colorScheme.surfaceVariant),
+            )
+        } else {
+            Box(
+                modifier = Modifier
+                    .size(56.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(MaterialTheme.colorScheme.surfaceVariant),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    Icons.Filled.AttachFile,
+                    contentDescription = null,
+                    modifier = Modifier.size(24.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                pending.displayName,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+            )
+            Text(
+                if (pending.isImage) "Image · tap send to post" else "File · tap send to post",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        IconButton(
+            onClick = onCancel,
+            enabled = !sending,
+            modifier = Modifier.size(36.dp),
+        ) {
+            Icon(
+                Icons.Filled.Close,
+                contentDescription = "Discard attachment",
+                modifier = Modifier.size(22.dp),
+            )
+        }
+        IconButton(
+            onClick = onSend,
+            enabled = !sending,
+            modifier = Modifier.size(36.dp),
+        ) {
+            if (sending) {
+                CircularProgressIndicator(
+                    strokeWidth = 2.dp,
+                    modifier = Modifier.size(20.dp),
+                )
+            } else {
+                Icon(
+                    Icons.AutoMirrored.Filled.Send,
+                    contentDescription = "Send attachment",
+                    modifier = Modifier.size(22.dp),
+                    tint = sendAccent,
+                )
+            }
         }
     }
 }

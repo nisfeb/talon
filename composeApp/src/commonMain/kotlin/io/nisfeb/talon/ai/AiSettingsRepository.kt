@@ -32,6 +32,14 @@ interface AiSettingsRepository {
     fun setFeature(feature: AiSettings.Feature, enabled: Boolean)
     fun setSyncEnabled(enabled: Boolean)
 
+    /** Set the Brave Search API credential (web_search tool). Separate from
+     *  the LLM key set via [update]. */
+    fun setBraveApiKey(key: String)
+
+    /** Override one editable system-prompt part. Blank restores that part's
+     *  built-in default. Synced like a preference, not a credential. */
+    fun setPrompt(kind: AiSettings.PromptKind, value: String)
+
     /**
      * Apply a snapshot received from %settings. Bypasses onStateChange
      * so we don't pingpong back to the ship.

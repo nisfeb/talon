@@ -67,8 +67,9 @@ private val URL_RE = Regex("""(?i)\b(?:https?://|urb://|www\.)[^\s<>"'`]+""")
 private val TRAILING_PUNCT = setOf('.', ',', ';', ':', '!', '?', ')', ']')
 
 // Same blue + underline that Story.kt uses for inline `<a>` links so
-// linkified statuses match the chat-message link affordance.
-private val LINK_SPAN = SpanStyle(
+// linkified statuses match the chat-message link affordance. Shared with
+// [MarkdownText]'s inline `[label](url)` spans.
+internal val LINK_SPAN = SpanStyle(
     color = Color(0xFF2962FF),
     textDecoration = TextDecoration.Underline,
 )

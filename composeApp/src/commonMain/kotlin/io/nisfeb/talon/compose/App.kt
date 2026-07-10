@@ -38,6 +38,7 @@ import io.nisfeb.talon.ui.PlatformBackHandler
 import io.nisfeb.talon.ui.RailItem
 import io.nisfeb.talon.ui.RailTab
 import io.nisfeb.talon.ui.invitesSnapshot
+import io.nisfeb.talon.ui.isAssistantSupported
 import io.nisfeb.talon.ui.isVisible
 import io.nisfeb.talon.ui.RightPaneContent
 import io.nisfeb.talon.ui.RightPaneState
@@ -45,6 +46,7 @@ import io.nisfeb.talon.ui.RightPaneStateReducer
 import io.nisfeb.talon.ui.RightPaneHost
 import io.nisfeb.talon.ui.UiSettings
 import io.nisfeb.talon.ui.screens.ActivityList
+import io.nisfeb.talon.ui.screens.AssistantScreen
 import io.nisfeb.talon.ui.screens.BookmarksList
 import io.nisfeb.talon.ui.screens.DmChatScreen
 import io.nisfeb.talon.ui.screens.DmListScreen
@@ -197,6 +199,7 @@ fun App(
     var loggedInShip by remember { mutableStateOf(sessionStore.active()?.ship) }
     var showSettings by remember { mutableStateOf(false) }
     var showSidebarSettings by remember { mutableStateOf(false) }
+    var showLoops by remember { mutableStateOf(false) }
     var openChat by remember { mutableStateOf<String?>(null) }
     // Optional message id to scroll-and-flash when DmChatScreen mounts /
     // re-mounts on a new whom. Set when navigating from bookmarks (or any
@@ -269,6 +272,13 @@ fun App(
     var showBookmarks by remember { mutableStateOf(false) }
     var showActivity by remember { mutableStateOf(false) }
     var showSearch by remember { mutableStateOf(false) }
+    var showAssistant by remember { mutableStateOf(false) }
+    /** The assistant claims the whole content area; a thread or group-info
+     *  pane left open would dock beside it and swallow clicks meant for it. */
+    val openAssistantAction: () -> Unit = {
+        closeRightPaneAction()
+        showAssistant = true
+    }
     var showNewDm by remember { mutableStateOf(false) }
     var showContacts by remember { mutableStateOf(false) }
     var showWatchwords by remember { mutableStateOf(false) }
@@ -390,6 +400,7 @@ fun App(
     }
     PlatformBackHandler(enabled = showBookmarks) { showBookmarks = false }
     PlatformBackHandler(enabled = showActivity) { showActivity = false }
+    PlatformBackHandler(enabled = showAssistant) { showAssistant = false }
     PlatformBackHandler(enabled = showSearch) { showSearch = false }
     PlatformBackHandler(enabled = showNewDm) { showNewDm = false }
     PlatformBackHandler(enabled = showWatchwords) { showWatchwords = false }
@@ -417,6 +428,9 @@ fun App(
     }
     PlatformBackHandler(enabled = showSidebarSettings) {
         showSidebarSettings = false
+    }
+    PlatformBackHandler(enabled = showLoops) {
+        showLoops = false
     }
 
     // Ship-scoped graph. Re-keyed on (loggedInShip ?: "__loggedout__")
@@ -483,6 +497,56 @@ fun App(
             createSearchEmbedderClient?.invoke(db)
         }
 
+        val aiState by aiSettings.state.collectAsState()
+
+        // Desktop loop runner. No AlarmManager on desktop, so loops run
+        // via a while-open ticker (below, inside the logged-in guard) plus
+        // the "Run now" button. Built here so both the ticker and the
+        // LoopsScreen branch share one instance. Full tool catalog —
+        // LoopRunner keeps write tools only for loops that opted in.
+        // Web access belongs to the assistant: with it off both web tools
+        // hard-refuse, so gate their PRESENCE (as AssistantScreen does)
+        // rather than hand a scheduled run a tool it can only fail with.
+        val loopWebOn = aiState.assistantOn()
+        val loopBraveOn = loopWebOn && aiState.braveApiKey.isNotBlank()
+        val loopRunner = remember(db, repo, searchEmbedderClient, loopWebOn, loopBraveOn) {
+            val agentClient = io.nisfeb.talon.ai.AgentClient { aiSettings.state.value }
+            io.nisfeb.talon.ai.LoopRunner(
+                loops = db.loops(),
+                runs = db.loopRuns(),
+                tools = io.nisfeb.talon.ai.ToolCatalog.default(
+                    repo, db, searchEmbedderClient,
+                    braveSearch = if (loopBraveOn) {
+                        io.nisfeb.talon.ai.BraveSearchClient { aiSettings.state.value }
+                    } else {
+                        null
+                    },
+                    urlFetcher = if (loopWebOn) {
+                        io.nisfeb.talon.ai.UrlFetcher { aiSettings.state.value }
+                    } else {
+                        null
+                    },
+                ) { it },
+                completer = { sys, msgs, t -> agentClient.completeWithTools(sys, msgs, t) },
+                aiConfig = { aiSettings.state.value },
+                // One device runs a scheduled write fire — the %settings lease
+                // (SettingsSyncImpl implements LoopWriteCoordinator). Noop when
+                // there's no sync channel (a write loop needs the ship anyway).
+                coordinator = settingsSync ?: io.nisfeb.talon.ai.LoopWriteCoordinator.Noop,
+                // loopId is dropped: the desktop Notifier (tray balloon /
+                // notify-send) has no per-notification tag, so loops can't
+                // group/replace like Android's id-tagged notifications. A
+                // tag param on Notifier.notify is the upgrade path if it
+                // matters; for now each loop run is a standalone toast.
+                notify = { _, title, body -> notifier.notify(title, body) },
+            )
+        }
+        val loopScope = rememberCoroutineScope()
+        // "Run now", from both the Loops screen and the assistant's jobs pane.
+        val runLoopNow: (Long) -> Unit = { loopId ->
+            loopScope.launch { db.loops().get(loopId)?.let { loopRunner.runLoop(it) } }
+        }
+
         // Kick off the embedder index as soon as ANY feature that
         // depends on it is enabled — smart search, topic clusters, or
         // important-message highlights. Previously start() only ran
@@ -491,14 +555,9 @@ fun App(
         // state until the user happened to open Search. start() is a
         // no-op if already running, so flipping any toggle (or cold-
         // launching with one already on) just wakes the indexer once.
-        val aiState by aiSettings.state.collectAsState()
-        LaunchedEffect(searchEmbedderClient, aiState.semanticSearchEnabled,
-            aiState.topicClustersEnabled, aiState.importantMessagesEnabled) {
+        LaunchedEffect(searchEmbedderClient, aiState.smartFeaturesEnabled) {
             val client = searchEmbedderClient ?: return@LaunchedEffect
-            val needsIndex = aiState.semanticSearchEnabled ||
-                aiState.topicClustersEnabled ||
-                aiState.importantMessagesEnabled
-            if (needsIndex) runCatching { client.start() }
+            if (aiState.smartFeaturesEnabled) runCatching { client.start() }
         }
 
         // Populate message_media for messages that pre-date Task 2.3's
@@ -592,6 +651,20 @@ fun App(
                 }
             }
 
+            // Desktop loop scheduler. Android arms an AlarmManager wake-up;
+            // desktop has none, so loops run on a while-open ticker that
+            // fires due loops once a minute. Bounded to the logged-in
+            // session and cancelled on ship re-key / app exit. runDue
+            // no-ops without an AI key or when nothing is due, so an idle
+            // tick is cheap. (isLoopsSupported is now true on desktop.)
+            LaunchedEffect(loopRunner) {
+                while (true) {
+                    runCatching { loopRunner.runDue() }
+                        .onFailure { if (it is kotlinx.coroutines.CancellationException) throw it }
+                    kotlinx.coroutines.delay(60_000)
+                }
+            }
+
             // Desktop "is the user actually here" signal = window focus.
             // Drives the repo's auto-mark-read gate so a chat left open in
             // an unfocused / minimized window doesn't silently read its
@@ -611,7 +684,18 @@ fun App(
                 repo.dmInviteListener = { ship ->
                     runCatching { notifier.notify(ship, "wants to message you") }
                 }
-                onDispose { repo.dmInviteListener = null }
+                // A new group invite is as easy to miss as a DM request —
+                // toast it the same way so it doesn't sit unseen behind a
+                // badge you have no reason to check.
+                repo.groupInviteListener = { invite ->
+                    val name = invite.title ?: invite.flag
+                    val from = invite.inviter?.let { " from $it" } ?: ""
+                    runCatching { notifier.notify(name, "invited you to a group$from") }
+                }
+                onDispose {
+                    repo.dmInviteListener = null
+                    repo.groupInviteListener = null
+                }
             }
 
             // OS notifications for incoming messages. Watches the
@@ -777,12 +861,64 @@ fun App(
           val urbAwareUriHandler = remember(platformUriHandler, urbLinkHandler) {
               io.nisfeb.talon.ui.UrbAwareUriHandler(platformUriHandler, urbLinkHandler)
           }
+          val citeScope = rememberCoroutineScope()
+          val citeResolver = remember(db, repo) {
+              io.nisfeb.talon.ui.TalonCiteResolver(db, repo)
+          }
+          val openCitation: (io.nisfeb.talon.urbit.StoryPart.Citation) -> Unit =
+              remember(db, citeResolver) {
+                  { cite ->
+                      citeScope.launch {
+                          val jump = io.nisfeb.talon.ui.resolveCiteJump(cite, citeResolver) {
+                              runCatching { db.groups().channelGroupFor(it)?.groupFlag }.getOrNull()
+                          }
+                          when (jump) {
+                              is io.nisfeb.talon.ui.CiteJump.Group -> {
+                                  openChat = null
+                                  revealGroupRequest = jump.flag
+                              }
+                              is io.nisfeb.talon.ui.CiteJump.Message -> {
+                                  openConversationAction()
+                                  jump.groupFlag?.let { revealGroupRequest = it }
+                                  openChatFocusMessageId = jump.messageId
+                                  openChat = jump.whom
+                              }
+                              is io.nisfeb.talon.ui.CiteJump.Reply -> {
+                                  openConversationAction()
+                                  jump.groupFlag?.let { revealGroupRequest = it }
+                                  openChat = jump.whom
+                                  openThreadParent = jump.parentId
+                                  openThreadReplyAnchor = jump.replyId
+                              }
+                              null -> Unit
+                          }
+                      }
+                      Unit
+                  }
+              }
+          // Root contact map so a quoted post's author resolves to the
+          // same nickname / mnemonym the rest of the app shows, rather
+          // than the bare @p the renderer would emit on its own.
+          val citeContacts by remember(db) {
+              io.nisfeb.talon.ui.contactMapFlow(
+                  db.contacts().stream(),
+                  db.clubs().stream(),
+                  db.groups().streamGroups(),
+                  db.groups().streamChannelGroups(),
+              )
+          }.collectAsState(initial = io.nisfeb.talon.ui.ContactMap.EMPTY)
+          val citeDisplayName: (String) -> String = remember(citeContacts) {
+              { ship -> citeContacts.displayName(ship) }
+          }
           androidx.compose.runtime.CompositionLocalProvider(
               io.nisfeb.talon.ui.LocalImageDownloader provides imageDownloader,
               io.nisfeb.talon.ui.LocalChatDensity provides chatDensity,
               androidx.compose.ui.platform.LocalDensity provides scaledDensity,
               io.nisfeb.talon.ui.LocalUrbLinkHandler provides urbLinkHandler,
               androidx.compose.ui.platform.LocalUriHandler provides urbAwareUriHandler,
+              io.nisfeb.talon.ui.LocalCiteResolver provides citeResolver,
+              io.nisfeb.talon.ui.LocalCitationOpen provides openCitation,
+              io.nisfeb.talon.ui.LocalDisplayName provides citeDisplayName,
           ) {
             urbPromptUrl?.let {
                 io.nisfeb.talon.ui.InstallLatticeDialog(onDismiss = { urbPromptUrl = null })
@@ -1011,6 +1147,19 @@ fun App(
                             onBack = { showSidebarSettings = false },
                         )
                     }
+                    // Ordered before showSettings so Back from Loops pops
+                    // to Settings (same breadcrumb rationale as Sidebar).
+                    // Desktop has no AlarmManager, so there's no scheduler to
+                    // re-arm — the while-open ticker (above) drives runs and
+                    // "Run now" goes straight to loopRunner. Noop scheduler
+                    // satisfies the screen's reschedule() calls.
+                    showLoops -> io.nisfeb.talon.ui.screens.LoopsScreen(
+                        db = db,
+                        scheduler = io.nisfeb.talon.ai.LoopScheduler.Noop,
+                        onRunNow = runLoopNow,
+                        onBack = { showLoops = false },
+                        settingsSync = settingsSync,
+                    )
                     showSettings -> {
                         val relayClient = remember(http) {
                             io.nisfeb.talon.notify.RelayClient(
@@ -1043,6 +1192,12 @@ fun App(
                             // when the production MainActivity migrates here.
                             onOpenSidebarSettings = { showSidebarSettings = true },
                             onOpenShareLoginQr = { shareLoginQrOpen = true },
+                            onOpenLoops = { showLoops = true },
+                            onMnemonymNamesChanged = { on ->
+                                repo.pushScope.launch {
+                                    runCatching { settingsSync?.pushMnemonymNames(on) }
+                                }
+                            },
                         )
                     }
                     showSelfProfile -> ProfileEditScreen(
@@ -1087,6 +1242,10 @@ fun App(
                             openThreadReplyAnchor = replyId
                         },
                     )
+                    // showAssistant is NOT a full-screen branch — it renders
+                    // inside DesktopShell's content (keeping the rail on wide;
+                    // full-screen with a back arrow on narrow). See the
+                    // DesktopShell `list`/`detail` override below.
                     showSearch -> SearchScreen(
                         db = db,
                         aiSettings = aiSettings,
@@ -1389,13 +1548,22 @@ fun App(
                             ?.collectAsState()
                             ?.value
                             ?.enabled == true
-                        val enabledItems: List<RailItem> = remember(railVisibility, railItemOrder, dailyDigestEnabled) {
+                        // Opt-in assistant: only surface its rail / kebab entry
+                        // once it's supported, turned on, and has a key — the
+                        // same gate the old star icon used.
+                        val assistantEnabled = isAssistantSupported &&
+                            aiState.assistantOn() &&
+                            aiState.hasKey()
+                        val enabledItems: List<RailItem> = remember(
+                            railVisibility, railItemOrder, dailyDigestEnabled, assistantEnabled,
+                        ) {
                             railItemOrder.filter { item ->
                                 // Map.isVisible enforces the Chats always-on invariant
                                 // (regardless of map state) and falls back to true
                                 // for absent entries.
                                 val visible = railVisibility.isVisible(item)
-                                val gateOk = item != RailItem.TodaysBrief || dailyDigestEnabled
+                                val gateOk = (item != RailItem.TodaysBrief || dailyDigestEnabled) &&
+                                    (item != RailItem.Assistant || assistantEnabled)
                                 visible && gateOk
                             }
                         }
@@ -1458,6 +1626,11 @@ fun App(
                             )
                         }
                         val onRailItemClicked: (RailItem) -> Unit = { item ->
+                            // Leaving the assistant: it renders in the shell
+                            // content with the rail still visible, so clicking
+                            // ANY rail item must close it (the Assistant case
+                            // below re-opens it, so clicking A is a no-op).
+                            showAssistant = false
                             // Clear the rail badge for items that show
                             // freshness signals — rail clicks were missing
                             // the markXSeen calls the kebab paths in
@@ -1480,6 +1653,7 @@ fun App(
                             item.toRailTab()?.let { tab ->
                                 uiSettings.setActiveRailTab(tab)
                             } ?: when (item) {
+                                RailItem.Assistant -> openAssistantAction()
                                 RailItem.Profile -> showSelfProfile = true
                                 RailItem.Watchwords -> showWatchwords = true
                                 RailItem.TodaysBrief -> showDailyDigest = true
@@ -1504,6 +1678,15 @@ fun App(
                                             openChat = whom
                                         },
                                         onOpenSearch = { showSearch = true },
+                                        // Opt-in + key-gated, so the entry
+                                        // point stays hidden by default during
+                                        // rc rollout. Gated on isAssistant-
+                                        // Supported (true on both platforms) —
+                                        // the embedder only enhances retrieval,
+                                        // it isn't required to run.
+                                        onOpenAssistant = if (assistantEnabled) {
+                                            openAssistantAction
+                                        } else null,
                                         onNewMessage = { showNewDm = true },
                                         onSignOut = {
                                             // session.logout() already removes just
@@ -1637,6 +1820,10 @@ fun App(
                         }
                         DesktopShell(
                             activeRailTab = activeRailTab,
+                            // Assistant is a modal destination that keeps the
+                            // rail — highlight its "A" (and dim the pane-tab)
+                            // while it's open.
+                            activeModalItem = if (showAssistant) RailItem.Assistant else null,
                             enabledItems = enabledItems,
                             onItemClicked = onRailItemClicked,
                             list = railListSlot,
@@ -1644,6 +1831,41 @@ fun App(
                             listFraction = listFraction,
                             onListFractionChange = { uiSettings.setChatPaneListFraction(it) },
                             menuBadges = menuBadges,
+                            // The assistant takes over the whole area beside the
+                            // rail and manages its OWN panes (conversations/jobs
+                            // list left, transcript right) — so it gets full
+                            // width here instead of being crammed into the 30%
+                            // list slot. Rail stays for navigation; back arrow
+                            // only on narrow (where DesktopShell stacks it).
+                            content = if (showAssistant) {
+                                {
+                                    AssistantScreen(
+                                        db = db,
+                                        aiSettings = aiSettings,
+                                        embedder = searchEmbedderClient,
+                                        repo = repo,
+                                        scheduler = io.nisfeb.talon.ai.LoopScheduler.Noop,
+                                        onRunLoop = runLoopNow,
+                                        onBack = if (expanded) null else ({ showAssistant = false }),
+                                        // Rail is showing → force the two-pane
+                                        // layout so the 64dp rail can't trip the
+                                        // stacked/hamburger fallback.
+                                        forceExpanded = expanded,
+                                        onOpenMessage = { whomTarget, postId, parentId ->
+                                            showAssistant = false
+                                            openChat = whomTarget
+                                            if (parentId != null) {
+                                                // Anchor on the cited reply, not
+                                                // the top of the thread.
+                                                openThreadParent = parentId
+                                                openThreadReplyAnchor = postId
+                                            } else {
+                                                openChatFocusMessageId = postId
+                                            }
+                                        },
+                                    )
+                                }
+                            } else null,
                             rightSidebar = rightPaneContent?.let { content ->
                                 {
                                     RightPaneHost(

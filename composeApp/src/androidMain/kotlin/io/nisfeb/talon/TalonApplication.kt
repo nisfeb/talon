@@ -52,6 +52,8 @@ class TalonApplication : Application() {
         private set
     lateinit var dailyDigest: io.nisfeb.talon.ai.DailyDigest
         private set
+    lateinit var loops: io.nisfeb.talon.ai.Loops
+        private set
     lateinit var updateState: UpdateState
         private set
 
@@ -199,12 +201,6 @@ class TalonApplication : Application() {
             },
         )
 
-        // Pre-warm the ML Kit Entity Extraction model so the first
-        // chat to render isn't blocked on a one-off ~12MB download.
-        // Best-effort; failures (no Play Services, etc.) just mean
-        // chips don't appear until the model lands later.
-        runCatching { io.nisfeb.talon.ai.EntityActions.warmup() }
-
         // Pick the ship to open with — the most-recently-active one,
         // or the single saved ship if exactly one exists, or the
         // first in the list as a safe fallback.
@@ -251,6 +247,23 @@ class TalonApplication : Application() {
             receiverClass = io.nisfeb.talon.DigestAlarmReceiver::class.java,
         )
 
+        // User loops — headless scheduled agent runs. Ship-scoped deps
+        // resolved lazily (getDb/getRepo/getEmbedder) like dailyDigest, so
+        // a ship switch is picked up on the next run rather than captured.
+        loops = io.nisfeb.talon.ai.Loops(
+            context = this,
+            sessionStore = sessionStore,
+            getDb = { db },
+            getRepo = { repo },
+            getEmbedder = { searchEmbedderClient },
+            aiSettings = aiSettings,
+            scope = appScope,
+            // Lazy — session is built later in onCreate; the receiver path
+            // uses it to start the repo headless so write loops can reach
+            // the ship on a cold alarm fire.
+            getSession = { session },
+        )
+
         // AI settings push hook. Originally meant to ride on a
         // commonMain App.kt LaunchedEffect — but Android calls
         // TalonApp.kt, not App.kt, so the wiring never ran here. Every
@@ -263,6 +276,9 @@ class TalonApplication : Application() {
         aiSettings.onStateChange = { _, _ ->
             appScope.launch {
                 runCatching { settingsSync.pushAiSettings() }
+                // Loops can only run with a key; re-arm so adding a key
+                // arms the schedule and removing it disarms (see Loops.rearm).
+                runCatching { loops.reschedule() }
             }
         }
 
@@ -307,6 +323,8 @@ class TalonApplication : Application() {
         // app start — belt-and-suspenders against the receiver being killed
         // before it finished re-arming yesterday).
         runCatching { dailyDigest.scheduleNext() }
+        // Same for loops: re-arm the earliest due loop on every start.
+        runCatching { loops.reschedule() }
     }
 
     /**
@@ -347,6 +365,12 @@ class TalonApplication : Application() {
                 // lambda only fires from inbound %settings events long after
                 // initialization, so the runtime guard is sufficient.
                 runCatching { dailyDigest.scheduleNext() }
+            },
+            rearmLoops = {
+                // A loop synced in from another device may change the
+                // next-fire time; re-arm the single loop alarm. `loops` is
+                // always-on and built before buildShipScoped runs.
+                runCatching { loops.reschedule() }
             },
             watchwordExcludeRouter = { whom, excluded ->
                 // Route to Watchwords.excludeChat so backfill cleanup +

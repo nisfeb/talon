@@ -227,6 +227,7 @@ private fun railLabel(item: RailItem): String = when (item) {
     RailItem.Statuses -> "Statuses"
     RailItem.Bookmarks -> "Bookmarks"
     RailItem.Activity -> "Activity"
+    RailItem.Assistant -> "Assistant"
     RailItem.Profile -> "My profile"
     RailItem.Watchwords -> "Watchwords"
     RailItem.TodaysBrief -> "Today's brief"

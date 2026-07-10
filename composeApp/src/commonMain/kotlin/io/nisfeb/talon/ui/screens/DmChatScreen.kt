@@ -6,6 +6,10 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.hoverable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsHoveredAsState
+import androidx.compose.ui.draw.alpha
 import androidx.compose.foundation.combinedClickable
 import io.nisfeb.talon.ui.combinedClickableWithSecondary
 import io.nisfeb.talon.ui.onSecondaryClick
@@ -44,6 +48,7 @@ import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.NotificationsOff
@@ -68,7 +73,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.runtime.DisposableEffect
@@ -97,6 +101,7 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
@@ -112,7 +117,6 @@ import io.nisfeb.talon.data.ReactionEntity
 import io.nisfeb.talon.data.ReactionUsageEntity
 import io.nisfeb.talon.data.ReplyCount
 import io.nisfeb.talon.ui.Avatar
-import io.nisfeb.talon.ui.CiteResolver
 import io.nisfeb.talon.ui.CommandResult
 import io.nisfeb.talon.ui.ContactMap
 import io.nisfeb.talon.ui.ContactProfileSheet
@@ -120,7 +124,6 @@ import io.nisfeb.talon.ui.DraftStore
 import io.nisfeb.talon.ui.EmojiCatalog
 import io.nisfeb.talon.ui.EmojiPickerDropdown
 import io.nisfeb.talon.ui.LinkPreviewCard
-import io.nisfeb.talon.ui.LocalCiteResolver
 import io.nisfeb.talon.ui.firstLinkUrl
 import io.nisfeb.talon.ui.MentionPicker
 import io.nisfeb.talon.ui.ReactionPalette
@@ -172,11 +175,10 @@ fun DmChatScreen(
     onOpenSelfProfile: () -> Unit,
     /** Optional Android-only platform widget slots. Each replaces a
      *  former expect/actual shim; desktop and tests pass null and the
-     *  surface degrades gracefully (no chips, no voice button, no GPS
-     *  for /loc, no voice preview playback). The platform entry point
-     *  that creates App() supplies these — Main.kt stays null, the
-     *  future MainActivity will pass real Composables. */
-    entityChips: (@Composable (text: String, modifier: Modifier) -> Unit)? = null,
+     *  surface degrades gracefully (no voice button, no GPS for /loc, no
+     *  voice preview playback). The platform entry point that creates
+     *  App() supplies these — Main.kt stays null, the future MainActivity
+     *  will pass real Composables. */
     voiceComposer: (@Composable (
         enabled: Boolean,
         onRecorded: (path: String, durationMs: Long) -> Unit,
@@ -214,7 +216,6 @@ fun DmChatScreen(
     var catchUpSummary by remember(whom) { mutableStateOf<String?>(null) }
     var catchingUp by remember(whom) { mutableStateOf(false) }
     var catchUpError by remember(whom) { mutableStateOf<String?>(null) }
-    var aiEmojiWorking by remember { mutableStateOf(false) }
     var topicsSheetOpen by remember(whom) { mutableStateOf(false) }
     val composerState = io.nisfeb.talon.ui.rememberComposerState(whom, drafts)
     val rows by remember(whom) {
@@ -561,20 +562,6 @@ fun DmChatScreen(
 
     var profileSheetShip by remember { mutableStateOf<String?>(null) }
 
-    val citeResolver = remember(db, repo) {
-        object : CiteResolver {
-            override suspend fun findLocal(whom: String, da: String): MessageEntity? =
-                db.messages().findByDa(whom, da)
-            override suspend fun fetchPost(whom: String, da: String): MessageEntity? =
-                repo.fetchCitePost(whom, da)
-            override suspend fun fetchReply(
-                whom: String,
-                postDa: String,
-                replyDa: String,
-            ): MessageEntity? = repo.fetchCiteReply(whom, postDa, replyDa)
-        }
-    }
-
     val currentOnOpenThread by rememberUpdatedState(onOpenThread)
     val currentOnOpenConversation by rememberUpdatedState(onOpenConversation)
     val currentOnOpenImage by rememberUpdatedState(onOpenImage)
@@ -596,18 +583,17 @@ fun DmChatScreen(
             else runCatching { uriHandler.openUri(url) }
         }
     }
-    val onCitationTap: (String) -> Unit = remember {
-        { target -> currentOnOpenConversation(target) }
-    }
     val onReactionForMessage: (MessageEntity, List<ReactionEntity>, String) -> Unit =
         remember(ourPatp) {
             { m, reactions, emoji ->
-                // Compare on glyph: outbound reactions are normalized to
-                // unicode in TlonChatRepo.react(), so the DB row for our
-                // own reaction is a glyph even when the picker hands us
-                // a shortcode.
-                val ours = ReactionPalette.display(emoji)
-                val mineSame = reactions.any { it.author == ourPatp && it.emoji == ours }
+                // Compare on the canonical key: react() stores the
+                // variation-selector-stripped form, and the picker may
+                // hand us a shortcode or a glyph — normalize both sides
+                // so tapping our own reaction toggles it off reliably.
+                val ours = ReactionPalette.normalize(emoji)
+                val mineSame = reactions.any {
+                    it.author == ourPatp && ReactionPalette.normalize(it.emoji) == ours
+                }
                 scope.launch {
                     runCatching {
                         if (mineSame) repo.unreact(m.whom, m.id)
@@ -620,439 +606,417 @@ fun DmChatScreen(
             }
         }
 
-    CompositionLocalProvider(LocalCiteResolver provides citeResolver) {
-        Column(
-            modifier = modifier
-                .windowInsetsPadding(WindowInsets.safeDrawing),
+    Column(
+        modifier = modifier
+            .windowInsetsPadding(WindowInsets.safeDrawing),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
+            IconButton(onClick = onBack) {
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+            }
+            Text(
+                contactMap.conversationLabel(whom),
+                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
+                modifier = Modifier.weight(1f).padding(start = 4.dp),
+            )
+            // Group/channel chats only for v1 — clubs (`0v...`) don't
+            // map to a single group flag, so GroupInfoPane's "View
+            // members" handler (which resolves channel-nest →
+            // group-flag via `db.groups().channelGroupFor`) silently
+            // no-ops for them. DMs (`~ship`) likewise have no
+            // group-info concept in v1 (architecture is chat-shape-
+            // aware so club + DM support is additive later).
+            val hasInfoPane = onOpenGroupInfo != null && whom.startsWith("chat/")
+            if (hasInfoPane) {
+                IconButton(onClick = onOpenGroupInfo) {
+                    Icon(Icons.Filled.Info, contentDescription = "Info")
+                }
+            }
+            // Hide the topic icon entirely on platforms where the
+            // on-device embedder isn't supported — otherwise the
+            // user gets an icon that opens a sheet stuck saying
+            // "Indexer hasn't started yet" forever. The flag also
+            // gates Settings rendering, so feature stays
+            // discoverable on platforms that do support it.
+            if (aiConfigured.smartFeaturesEnabled &&
+                io.nisfeb.talon.ui.isOnDeviceAiFeatureSupported(
+                    io.nisfeb.talon.ai.AiSettings.Feature.SmartFeatures,
+                )
             ) {
-                IconButton(onClick = onBack) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-                }
-                Text(
-                    contactMap.conversationLabel(whom),
-                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
-                    modifier = Modifier.weight(1f).padding(start = 4.dp),
-                )
-                // Group/channel chats only for v1 — clubs (`0v...`) don't
-                // map to a single group flag, so GroupInfoPane's "View
-                // members" handler (which resolves channel-nest →
-                // group-flag via `db.groups().channelGroupFor`) silently
-                // no-ops for them. DMs (`~ship`) likewise have no
-                // group-info concept in v1 (architecture is chat-shape-
-                // aware so club + DM support is additive later).
-                val hasInfoPane = onOpenGroupInfo != null && whom.startsWith("chat/")
-                if (hasInfoPane) {
-                    IconButton(onClick = onOpenGroupInfo) {
-                        Icon(Icons.Filled.Info, contentDescription = "Info")
-                    }
-                }
-                // Hide the topic icon entirely on platforms where the
-                // on-device embedder isn't supported — otherwise the
-                // user gets an icon that opens a sheet stuck saying
-                // "Indexer hasn't started yet" forever. The flag also
-                // gates Settings rendering, so feature stays
-                // discoverable on platforms that do support it.
-                if (aiConfigured.topicClustersEnabled &&
-                    io.nisfeb.talon.ui.isOnDeviceAiFeatureSupported(
-                        io.nisfeb.talon.ai.AiSettings.Feature.TopicClusters,
-                    )
-                ) {
-                    IconButton(onClick = { topicsSheetOpen = true }) {
-                        Icon(Icons.Filled.Topic, contentDescription = "Topics in this chat")
-                    }
-                }
-                // For group channels, the Info pane already exposes the
-                // notification settings — duplicating the dropdown in
-                // the header is just clutter. DMs / clubs have no Info
-                // pane, so the dropdown stays in the header for them.
-                if (!hasInfoPane) {
-                    NotifyLevelDropdown(
-                        level = notifyLevel,
-                        enabled = repo.settingsSync != null,
-                        isExcludedFromWatchwords = isExcludedFromWatchwords,
-                        onSelect = { level ->
-                            scope.launch {
-                                runCatching { repo.settingsSync?.setNotifyLevel(whom, level) }
-                                    .onFailure { composerState.sendError = "notify failed: ${it.message ?: it::class.simpleName}" }
-                            }
-                        },
-                        onToggleWatchwordExclude = {
-                            scope.launch {
-                                runCatching {
-                                    repo.settingsSync?.setWatchwordExclude(whom, !isExcludedFromWatchwords)
-                                }.onFailure {
-                                    composerState.sendError = "watchword toggle failed: ${it.message ?: it::class.simpleName}"
-                                }
-                            }
-                        },
-                    )
+                IconButton(onClick = { topicsSheetOpen = true }) {
+                    Icon(Icons.Filled.Topic, contentDescription = "Topics in this chat")
                 }
             }
-            HorizontalDivider()
-            if (refreshing && rows.isEmpty()) {
-                androidx.compose.material3.LinearProgressIndicator(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(2.dp),
-                )
-            }
-            val showCatchUp = aiConfigured.hasKey() &&
-                aiConfigured.catchMeUpEnabled &&
-                (unreadSnapshot ?: 0) >= CATCH_UP_MIN_UNREAD &&
-                catchUpSummary == null
-            if (showCatchUp) {
-                CatchMeUpBanner(
-                    count = unreadSnapshot ?: 0,
-                    loading = catchingUp,
-                    onClick = {
-                        if (catchingUp) return@CatchMeUpBanner
-                        catchingUp = true
-                        catchUpError = null
+            // For group channels, the Info pane already exposes the
+            // notification settings — duplicating the dropdown in
+            // the header is just clutter. DMs / clubs have no Info
+            // pane, so the dropdown stays in the header for them.
+            if (!hasInfoPane) {
+                NotifyLevelDropdown(
+                    level = notifyLevel,
+                    enabled = repo.settingsSync != null,
+                    isExcludedFromWatchwords = isExcludedFromWatchwords,
+                    onSelect = { level ->
+                        scope.launch {
+                            runCatching { repo.settingsSync?.setNotifyLevel(whom, level) }
+                                .onFailure { composerState.sendError = "notify failed: ${it.message ?: it::class.simpleName}" }
+                        }
+                    },
+                    onToggleWatchwordExclude = {
                         scope.launch {
                             runCatching {
-                                val count = (unreadSnapshot ?: 0).coerceIn(1, 60)
-                                val latest = db.messages().latestFor(whom, count)
-                                val ordered = latest.asReversed()
-                                aiFeatures.catchMeUp(ordered) { patp ->
-                                    contactMap.displayName(patp)
-                                }
-                            }.onSuccess { catchUpSummary = it }
-                                .onFailure { catchUpError = it.message ?: it::class.simpleName }
-                            catchingUp = false
-                        }
-                    },
-                )
-            }
-            // Pinned-post banner — chat channels only, surfaces just
-            // above the message list when an admin has pinned a post.
-            // Subtle on purpose: surfaceVariant background, small pin
-            // icon, single-line preview. Tap → scroll to the message.
-            pinnedPostId?.let { pinId ->
-                PinnedPostBanner(
-                    whom = whom,
-                    postId = pinId,
-                    db = db,
-                    contactMap = contactMap,
-                    onTap = {
-                        val idx = displayRows.indexOfFirst {
-                            it is ChatListItem.Message && it.row.m.id == pinId
-                        }
-                        if (idx >= 0) {
-                            val reverseIdx = displayRows.size - 1 - idx
-                            scope.launch { listState.animateScrollToItem(reverseIdx) }
-                            flashMessageId = pinId
-                        }
-                    },
-                )
-            }
-            Box(modifier = Modifier.weight(1f).fillMaxSize()) {
-            // Empty-state placeholder. Triggers when the refresh has
-            // finished and we still have no rows — usually a
-            // never-DMed peer where the ship has no writ history. We
-            // keep the composer enabled below; the first send creates
-            // the DM on the ship side, so "say hi" is the literal fix.
-            if (!refreshing && displayRows.isEmpty()) {
-                EmptyChatPlaceholder(
-                    label = contactMap.conversationLabel(whom),
-                    isDm = whom.startsWith("~"),
-                    modifier = Modifier.align(Alignment.Center).padding(horizontal = 24.dp),
-                )
-            }
-            val chatDensity = io.nisfeb.talon.ui.LocalChatDensity.current
-            // Admin-groups cache for the pin gate. Null until the
-            // bootstrap refresh in App.kt completes; we fall back to
-            // "is the user the group host?" until it lands so the
-            // option still appears immediately for host-admins. See
-            // [io.nisfeb.talon.urbit.canPinInGroup].
-            val adminGroups by repo.adminGroupsFlow.collectAsState()
-            // Per-row action-menu body. Wired here so the slot's
-            // closure captures repo / scope / composerState / pinned
-            // state without exploding [MessageRow]'s parameter list.
-            // The slot is composed only when a row's menu is expanded
-            // (DropdownMenu's content composes lazily), so the
-            // bookmark/pinned lookups don't run for every list row.
-            val clipboardManager = LocalClipboardManager.current
-            val messageActionMenuFor: @Composable (MessageEntity) -> Unit = { target ->
-                val isBookmarked by remember(target.whom, target.id) {
-                    db.bookmarks().isBookmarked(target.whom, target.id)
-                }.collectAsState(initial = false)
-                val canBookmark = repo.settingsSync != null
-
-                MessageActionMenu(
-                    db = db,
-                    message = target,
-                    ourPatp = ourPatp,
-                    isChannel = whom.startsWith("chat/"),
-                    isBookmarked = isBookmarked,
-                    isPinned = pinnedPostId == target.id,
-                    canBookmark = canBookmark,
-                    canPin = whom.startsWith("chat/") && target.parentId == null &&
-                        io.nisfeb.talon.urbit.canPinInGroup(
-                            ourPatp = ourPatp,
-                            groupFlag = contactMap.groupOfChannel(whom),
-                            adminGroups = adminGroups,
-                        ),
-                    canQuote = whom.startsWith("chat/") && target.parentId == null,
-                    onDismiss = { actionTarget = null },
-                    onPickReaction = { emoji ->
-                        actionTarget = null
-                        scope.launch {
-                            runCatching { repo.react(whom, target.id, emoji) }
-                                .onFailure {
-                                    composerState.sendError =
-                                        "react failed: ${it.message ?: it::class.simpleName}"
-                                }
-                        }
-                    },
-                    onReply = {
-                        actionTarget = null
-                        onOpenThread(target.id)
-                    },
-                    onQuote = {
-                        actionTarget = null
-                        composerState.pendingQuote = target
-                    },
-                    onCopy = {
-                        actionTarget = null
-                        val text = StoryCache.textFor(target.id, target.contentJson)
-                        clipboardManager.setText(AnnotatedString(text))
-                    },
-                    onCopyMarkdown = {
-                        actionTarget = null
-                        val md = io.nisfeb.talon.urbit.RawMarkdown
-                            .fromStoryJson(target.contentJson)
-                        clipboardManager.setText(AnnotatedString(md))
-                    },
-                    onToggleBookmark = {
-                        actionTarget = null
-                        scope.launch {
-                            if (isBookmarked) {
-                                repo.settingsSync?.removeBookmark(target.whom, target.id)
-                            } else {
-                                repo.settingsSync?.addBookmark(
-                                    target.whom,
-                                    target.id,
-                                    System.currentTimeMillis(),
-                                )
-                            }
-                        }
-                    },
-                    onEdit = {
-                        actionTarget = null
-                        editing = target
-                    },
-                    onDelete = {
-                        actionTarget = null
-                        confirmingDelete = target
-                    },
-                    onTogglePin = {
-                        val wasPinned = pinnedPostId == target.id
-                        actionTarget = null
-                        scope.launch {
-                            runCatching {
-                                if (wasPinned) repo.unpinPost(whom)
-                                else repo.pinPost(whom, target.id)
+                                repo.settingsSync?.setWatchwordExclude(whom, !isExcludedFromWatchwords)
                             }.onFailure {
-                                composerState.sendError =
-                                    "pin failed: ${it.message ?: it::class.simpleName}"
+                                composerState.sendError = "watchword toggle failed: ${it.message ?: it::class.simpleName}"
                             }
-                        }
-                    },
-                    showAiEmoji = aiConfigured.hasKey() && aiConfigured.emojiReactEnabled,
-                    aiEmojiWorking = aiEmojiWorking,
-                    onAiEmoji = {
-                        if (aiEmojiWorking) return@MessageActionMenu
-                        aiEmojiWorking = true
-                        scope.launch {
-                            runCatching {
-                                val text = StoryCache.textFor(target.id, target.contentJson)
-                                aiFeatures.suggestEmojiReact(text)
-                            }.onSuccess { code ->
-                                if (code != null) {
-                                    runCatching { repo.react(whom, target.id, code) }
-                                        .onFailure {
-                                            composerState.sendError =
-                                                "react failed: ${it.message ?: it::class.simpleName}"
-                                        }
-                                } else {
-                                    composerState.sendError = "AI didn't return a known reaction"
-                                }
-                            }.onFailure {
-                                composerState.sendError =
-                                    "AI react failed: ${it.message ?: it::class.simpleName}"
-                            }
-                            aiEmojiWorking = false
-                            actionTarget = null
                         }
                     },
                 )
             }
+        }
+        HorizontalDivider()
+        if (refreshing && rows.isEmpty()) {
+            androidx.compose.material3.LinearProgressIndicator(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(2.dp),
+            )
+        }
+        val showCatchUp = aiConfigured.hasKey() &&
+            aiConfigured.catchMeUpEnabled &&
+            (unreadSnapshot ?: 0) >= CATCH_UP_MIN_UNREAD &&
+            catchUpSummary == null
+        if (showCatchUp) {
+            CatchMeUpBanner(
+                count = unreadSnapshot ?: 0,
+                loading = catchingUp,
+                onClick = {
+                    if (catchingUp) return@CatchMeUpBanner
+                    catchingUp = true
+                    catchUpError = null
+                    scope.launch {
+                        runCatching {
+                            val count = (unreadSnapshot ?: 0).coerceIn(1, 60)
+                            val latest = db.messages().latestFor(whom, count)
+                            val ordered = latest.asReversed()
+                            aiFeatures.catchMeUp(ordered) { patp ->
+                                contactMap.displayName(patp)
+                            }
+                        }.onSuccess { catchUpSummary = it }
+                            .onFailure { catchUpError = it.message ?: it::class.simpleName }
+                        catchingUp = false
+                    }
+                },
+            )
+        }
+        // Pinned-post banner — chat channels only, surfaces just
+        // above the message list when an admin has pinned a post.
+        // Subtle on purpose: surfaceVariant background, small pin
+        // icon, single-line preview. Tap → scroll to the message.
+        pinnedPostId?.let { pinId ->
+            PinnedPostBanner(
+                whom = whom,
+                postId = pinId,
+                db = db,
+                contactMap = contactMap,
+                onTap = {
+                    val idx = displayRows.indexOfFirst {
+                        it is ChatListItem.Message && it.row.m.id == pinId
+                    }
+                    if (idx >= 0) {
+                        val reverseIdx = displayRows.size - 1 - idx
+                        scope.launch { listState.animateScrollToItem(reverseIdx) }
+                        flashMessageId = pinId
+                    }
+                },
+            )
+        }
+        Box(modifier = Modifier.weight(1f).fillMaxSize()) {
+        // Empty-state placeholder. Triggers when the refresh has
+        // finished and we still have no rows — usually a
+        // never-DMed peer where the ship has no writ history. We
+        // keep the composer enabled below; the first send creates
+        // the DM on the ship side, so "say hi" is the literal fix.
+        if (!refreshing && displayRows.isEmpty()) {
+            EmptyChatPlaceholder(
+                label = contactMap.conversationLabel(whom),
+                isDm = whom.startsWith("~"),
+                modifier = Modifier.align(Alignment.Center).padding(horizontal = 24.dp),
+            )
+        }
+        val chatDensity = io.nisfeb.talon.ui.LocalChatDensity.current
+        // Admin-groups cache for the pin gate. Null until the
+        // bootstrap refresh in App.kt completes; we fall back to
+        // "is the user the group host?" until it lands so the
+        // option still appears immediately for host-admins. See
+        // [io.nisfeb.talon.urbit.canPinInGroup].
+        val adminGroups by repo.adminGroupsFlow.collectAsState()
+        // Per-row action-menu body. Wired here so the slot's
+        // closure captures repo / scope / composerState / pinned
+        // state without exploding [MessageRow]'s parameter list.
+        // The slot is composed only when a row's menu is expanded
+        // (DropdownMenu's content composes lazily), so the
+        // bookmark/pinned lookups don't run for every list row.
+        val clipboardManager = LocalClipboardManager.current
+        val messageActionMenuFor: @Composable (MessageEntity) -> Unit = { target ->
+            val isBookmarked by remember(target.whom, target.id) {
+                db.bookmarks().isBookmarked(target.whom, target.id)
+            }.collectAsState(initial = false)
+            val canBookmark = repo.settingsSync != null
 
-            LazyColumn(
-                state = listState,
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
-                reverseLayout = true,
-                verticalArrangement = Arrangement.spacedBy(chatDensity.messageSpacing),
-            ) {
-                items(
-                    items = displayRows.asReversed(),
-                    key = { it.key },
-                    contentType = { it.contentType },
-                ) { item ->
-                    when (item) {
-                        is ChatListItem.DateDivider -> DateDividerRow(item.label)
-                        is ChatListItem.UnreadDivider ->
-                            io.nisfeb.talon.ui.UnreadDividerRow(faded = dividerFaded)
-                        is ChatListItem.Message -> {
-                            val rowMsg = item.row.m
-                            MessageRow(
-                                row = item.row,
-                                ourPatp = ourPatp,
-                                contactMap = contactMap,
-                                http = http,
-                                menuExpanded = actionTarget?.id == rowMsg.id,
-                                onMenuExpand = { actionTarget = rowMsg },
-                                onMenuDismiss = { actionTarget = null },
-                                actionMenu = {
-                                    // Per-row menu body. State lookups
-                                    // (bookmark flag) live in here so they
-                                    // only fire for the row whose menu is
-                                    // open. All callbacks dismiss via
-                                    // `actionTarget = null` to mirror the
-                                    // old bottom-sheet's auto-close.
-                                    messageActionMenuFor(rowMsg)
-                                },
-                                onOpenThread = onOpenThreadForMessage,
-                                onReactionTap = onReactionForMessage,
-                                onReactionLongPress = { reactions ->
-                                    reactionDetailsTarget = reactions
-                                },
-                                onMentionTap = onMentionTap,
-                                onLinkTap = onLinkTap,
-                                onImageTap = currentOnOpenImage,
-                                onAvatarTap = onAvatarTap,
-                                onCitationTap = onCitationTap,
-                                entityActionsEnabled = aiConfigured.entityActionsEnabled,
-                                entityChips = entityChips,
-                                flashAmber = item.row.m.id == flashMessageId,
+            MessageActionMenu(
+                db = db,
+                message = target,
+                ourPatp = ourPatp,
+                isChannel = whom.startsWith("chat/"),
+                isBookmarked = isBookmarked,
+                isPinned = pinnedPostId == target.id,
+                canBookmark = canBookmark,
+                canPin = whom.startsWith("chat/") && target.parentId == null &&
+                    io.nisfeb.talon.urbit.canPinInGroup(
+                        ourPatp = ourPatp,
+                        groupFlag = contactMap.groupOfChannel(whom),
+                        adminGroups = adminGroups,
+                    ),
+                canQuote = whom.startsWith("chat/") && target.parentId == null,
+                onDismiss = { actionTarget = null },
+                onPickReaction = { emoji ->
+                    actionTarget = null
+                    scope.launch {
+                        runCatching { repo.react(whom, target.id, emoji) }
+                            .onFailure {
+                                composerState.sendError =
+                                    "react failed: ${it.message ?: it::class.simpleName}"
+                            }
+                    }
+                },
+                onReply = {
+                    actionTarget = null
+                    onOpenThread(target.id)
+                },
+                onQuote = {
+                    actionTarget = null
+                    composerState.pendingQuote = target
+                },
+                onCopy = {
+                    actionTarget = null
+                    val text = StoryCache.textFor(target.id, target.contentJson)
+                    clipboardManager.setText(AnnotatedString(text))
+                },
+                onCopyMarkdown = {
+                    actionTarget = null
+                    val md = io.nisfeb.talon.urbit.RawMarkdown
+                        .fromStoryJson(target.contentJson)
+                    clipboardManager.setText(AnnotatedString(md))
+                },
+                onToggleBookmark = {
+                    actionTarget = null
+                    scope.launch {
+                        if (isBookmarked) {
+                            repo.settingsSync?.removeBookmark(target.whom, target.id)
+                        } else {
+                            repo.settingsSync?.addBookmark(
+                                target.whom,
+                                target.id,
+                                System.currentTimeMillis(),
                             )
                         }
                     }
+                },
+                onEdit = {
+                    actionTarget = null
+                    editing = target
+                },
+                onDelete = {
+                    actionTarget = null
+                    confirmingDelete = target
+                },
+                onTogglePin = {
+                    val wasPinned = pinnedPostId == target.id
+                    actionTarget = null
+                    scope.launch {
+                        runCatching {
+                            if (wasPinned) repo.unpinPost(whom)
+                            else repo.pinPost(whom, target.id)
+                        }.onFailure {
+                            composerState.sendError =
+                                "pin failed: ${it.message ?: it::class.simpleName}"
+                        }
+                    }
+                },
+            )
+        }
+
+        LazyColumn(
+            state = listState,
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+            reverseLayout = true,
+            verticalArrangement = Arrangement.spacedBy(chatDensity.messageSpacing),
+        ) {
+            items(
+                items = displayRows.asReversed(),
+                key = { it.key },
+                contentType = { it.contentType },
+            ) { item ->
+                when (item) {
+                    is ChatListItem.DateDivider -> DateDividerRow(item.label)
+                    is ChatListItem.UnreadDivider ->
+                        io.nisfeb.talon.ui.UnreadDividerRow(faded = dividerFaded)
+                    is ChatListItem.Message -> {
+                        val rowMsg = item.row.m
+                        MessageRow(
+                            row = item.row,
+                            ourPatp = ourPatp,
+                            contactMap = contactMap,
+                            http = http,
+                            menuExpanded = actionTarget?.id == rowMsg.id,
+                            onMenuExpand = { actionTarget = rowMsg },
+                            onMenuDismiss = { actionTarget = null },
+                            actionMenu = {
+                                // Per-row menu body. State lookups
+                                // (bookmark flag) live in here so they
+                                // only fire for the row whose menu is
+                                // open. All callbacks dismiss via
+                                // `actionTarget = null` to mirror the
+                                // old bottom-sheet's auto-close.
+                                messageActionMenuFor(rowMsg)
+                            },
+                            onOpenThread = onOpenThreadForMessage,
+                            onReactionTap = onReactionForMessage,
+                            onReactionLongPress = { reactions ->
+                                reactionDetailsTarget = reactions
+                            },
+                            onMentionTap = onMentionTap,
+                            onLinkTap = onLinkTap,
+                            onImageTap = currentOnOpenImage,
+                            onAvatarTap = onAvatarTap,
+                            flashAmber = item.row.m.id == flashMessageId,
+                        )
+                    }
                 }
             }
-            } // close empty-state Box
-            io.nisfeb.talon.ui.ChatComposer(
-                state = composerState,
-                db = db,
-                repo = repo,
-                http = http,
-                drafts = drafts,
-                whom = whom,
-                contactMap = contactMap,
-                allShips = allShips,
-                canSend = canSend,
-                hideComposerButtons = hideComposerButtons,
-                placeholder = "Message",
-                locationProvider = locationProvider,
-                voiceComposer = voiceComposer,
-                voicePlayer = voicePlayer,
-                onSlashMic = onSlashMic,
-                powerFeaturesEnabled = powerFeaturesEnabled,
-                // Up-arrow-on-empty-composer edits your most recent
-                // message. Same predicate as the Edit menu action
-                // (mine, channel chat, top-level) so it can only open
-                // an edit the action menu would also allow. Null on
-                // non-channel chats — %chat DMs ignore edit pokes.
-                onEditLast = if (whom.startsWith("chat/")) {
-                    {
-                        rows.asSequence()
-                            .filterIsInstance<ChatListItem.Message>()
-                            .map { it.row.m }
-                            .filter { it.author == ourPatp && it.parentId == null }
-                            .maxByOrNull { it.sentMs }
-                            ?.let { editing = it }
-                    }
-                } else null,
-                onBeforeLocalEcho = {
-                    // Capture the row count synchronously BEFORE the
-                    // optimistic upsert can land, then bump the
-                    // force-bottom tick. The self-send-scroll
-                    // heuristic uses these to detect "the user just
-                    // sent" and snap to bottom regardless of how far
-                    // up they had scrolled. Setting the baseline here
-                    // (vs. inside a LaunchedEffect) is load-bearing —
-                    // see decideAutoScroll's docs and the rc23 fix.
-                    pendingSendBaselineSize = rows.size
-                    forceBottomTick += 1
-                },
-                strategy = dmStrategy,
-            )
         }
+        } // close empty-state Box
+        TypingIndicator(whom = whom, repo = repo, contactMap = contactMap)
+        io.nisfeb.talon.ui.ChatComposer(
+            state = composerState,
+            db = db,
+            repo = repo,
+            http = http,
+            drafts = drafts,
+            whom = whom,
+            contactMap = contactMap,
+            allShips = allShips,
+            canSend = canSend,
+            hideComposerButtons = hideComposerButtons,
+            placeholder = "Message",
+            locationProvider = locationProvider,
+            voiceComposer = voiceComposer,
+            voicePlayer = voicePlayer,
+            onSlashMic = onSlashMic,
+            powerFeaturesEnabled = powerFeaturesEnabled,
+            // Up-arrow-on-empty-composer edits your most recent
+            // message. Same predicate as the Edit menu action
+            // (mine, channel chat, top-level) so it can only open
+            // an edit the action menu would also allow. Null on
+            // non-channel chats — %chat DMs ignore edit pokes.
+            onEditLast = if (whom.startsWith("chat/")) {
+                {
+                    rows.asSequence()
+                        .filterIsInstance<ChatListItem.Message>()
+                        .map { it.row.m }
+                        .filter { it.author == ourPatp && it.parentId == null }
+                        .maxByOrNull { it.sentMs }
+                        ?.let { editing = it }
+                }
+            } else null,
+            onBeforeLocalEcho = {
+                // Capture the row count synchronously BEFORE the
+                // optimistic upsert can land, then bump the
+                // force-bottom tick. The self-send-scroll
+                // heuristic uses these to detect "the user just
+                // sent" and snap to bottom regardless of how far
+                // up they had scrolled. Setting the baseline here
+                // (vs. inside a LaunchedEffect) is load-bearing —
+                // see decideAutoScroll's docs and the rc23 fix.
+                pendingSendBaselineSize = rows.size
+                forceBottomTick += 1
+            },
+            strategy = dmStrategy,
+        )
+    }
 
-        reactionDetailsTarget?.let { reactions ->
-            io.nisfeb.talon.ui.ReactionDetailsSheet(
-                reactions = reactions,
-                contactMap = contactMap,
-                onDismiss = { reactionDetailsTarget = null },
-                onOpenProfile = { ship ->
-                    reactionDetailsTarget = null
-                    profileSheetShip = ship
-                },
-            )
-        }
+    reactionDetailsTarget?.let { reactions ->
+        io.nisfeb.talon.ui.ReactionDetailsSheet(
+            reactions = reactions,
+            contactMap = contactMap,
+            onDismiss = { reactionDetailsTarget = null },
+            onOpenProfile = { ship ->
+                reactionDetailsTarget = null
+                profileSheetShip = ship
+            },
+        )
+    }
 
-        profileSheetShip?.let { ship ->
-            // Pull the live entity rather than reading from contactMap:
-            // the upstream contactMap flow now suppresses status-only
-            // emissions for perf, so contactMap.contact(ship)?.status
-            // can be stale by minutes. The profile sheet is the one
-            // surface that wants fresh status / bio.
-            val freshContact by remember(ship) {
-                db.contacts().streamOne(ship)
-            }.collectAsState(initial = null)
-            val bookContacts by repo.bookContacts.collectAsState()
-            ContactProfileSheet(
-                ship = ship,
-                self = ship == ourPatp,
-                contact = freshContact,
-                isInBook = ship in bookContacts,
-                onAddContact = {
-                    val target = ship
-                    profileSheetShip = null
-                    scope.launch { runCatching { repo.addContact(target) } }
-                },
-                onRemoveContact = {
-                    val target = ship
-                    profileSheetShip = null
-                    scope.launch { runCatching { repo.removeContact(target) } }
-                },
-                onMessage = {
-                    profileSheetShip = null
-                    currentOnOpenConversation(ship)
-                },
-                onEditSelf = {
-                    profileSheetShip = null
-                    onOpenSelfProfile()
-                },
-                onDismiss = { profileSheetShip = null },
-            )
-        }
-
+    profileSheetShip?.let { ship ->
+        // Pull the live entity rather than reading from contactMap:
+        // the upstream contactMap flow now suppresses status-only
+        // emissions for perf, so contactMap.contact(ship)?.status
+        // can be stale by minutes. The profile sheet is the one
+        // surface that wants fresh status / bio.
+        val freshContact by remember(ship) {
+            db.contacts().streamOne(ship)
+        }.collectAsState(initial = null)
+        val bookContacts by repo.bookContacts.collectAsState()
+        ContactProfileSheet(
+            ship = ship,
+            self = ship == ourPatp,
+            contact = freshContact,
+            isInBook = ship in bookContacts,
+            onAddContact = {
+                val target = ship
+                profileSheetShip = null
+                scope.launch { runCatching { repo.addContact(target) } }
+            },
+            onRemoveContact = {
+                val target = ship
+                profileSheetShip = null
+                scope.launch { runCatching { repo.removeContact(target) } }
+            },
+            onMessage = {
+                profileSheetShip = null
+                currentOnOpenConversation(ship)
+            },
+            onEditSelf = {
+                profileSheetShip = null
+                onOpenSelfProfile()
+            },
+            onDismiss = { profileSheetShip = null },
+        )
     }
 
     editing?.let { target ->
         EditMessageDialog(
-            initial = StoryCache.textFor(target.id, target.contentJson),
+            // Editable text only — a quoted post's cite (and images /
+            // link previews) ride along untouched via originalContentJson.
+            initial = io.nisfeb.talon.urbit.editableText(target.contentJson),
             onDismiss = { editing = null },
             onSave = { newText ->
                 editing = null
                 scope.launch {
-                    runCatching { repo.edit(whom, target.id, newText, target.sentMs) }
+                    runCatching {
+                        repo.edit(
+                            whom = whom,
+                            postId = target.id,
+                            text = newText,
+                            originalSentMs = target.sentMs,
+                            originalContentJson = target.contentJson,
+                        )
+                    }
                         .onFailure { composerState.sendError = "edit failed: ${it.message ?: it::class.simpleName}" }
                 }
             },
@@ -1167,9 +1131,6 @@ private fun MessageRow(
     onLinkTap: (String) -> Unit,
     onImageTap: (String) -> Unit,
     onAvatarTap: (String) -> Unit,
-    onCitationTap: (String) -> Unit,
-    entityActionsEnabled: Boolean,
-    entityChips: (@Composable (text: String, modifier: Modifier) -> Unit)? = null,
     flashAmber: Boolean = false,
 ) {
     val m = row.m
@@ -1179,7 +1140,9 @@ private fun MessageRow(
     val avatarUrl = remember(m.author, contactMap) { contactMap.avatar(m.author) }
     val avatarColor = remember(m.author, contactMap) { contactMap.shipColor(m.author) }
     val grouped = remember(row.reactions) {
-        row.reactions.groupBy { it.emoji }
+        // Normalize on read too: rows stored before we normalized on write
+        // still carry FE0F, and would otherwise render as a separate chip.
+        row.reactions.groupBy { ReactionPalette.normalize(it.emoji) }
             .map { (emoji, rs) -> Triple(emoji, rs.size, rs.any { it.author == ourPatp }) }
     }
 
@@ -1195,22 +1158,38 @@ private fun MessageRow(
     }
     val flashColor = Color(0xFFFFC107).copy(alpha = 0.30f * flashAlpha.value)
 
+    // Desktop only: track row hover so the trailing "⋯" can reveal on
+    // hover (the touch path opens the menu by tapping the row instead).
+    val interactionSource = remember { MutableInteractionSource() }
+    val hovered by interactionSource.collectIsHoveredAsState()
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .hoverable(interactionSource)
             .background(flashColor)
-            // Accent tint while this message's menu is open — shows
-            // which message you're acting on.
+            // Accent tint while this message's menu is open, plus a subtle
+            // hover tint (desktop) so it's clear which message the trailing
+            // "⋯" acts on when rows are short or the window is wide.
             .background(
-                if (menuExpanded) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
-                else Color.Transparent,
+                when {
+                    menuExpanded -> MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
+                    hovered -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.05f)
+                    else -> Color.Transparent
+                },
             )
-            // Single tap anywhere on the row opens the action menu;
-            // children that handle their own taps (avatar, reactions,
-            // thread pill, images, links) consume first. Long-press is
-            // still text selection (SelectionContainer); right-click
-            // also opens the menu on desktop.
-            .clickable { onMenuExpand() }
+            // Touch only: a left-tap anywhere on the row opens the action
+            // menu (children that handle their own taps — avatar, reactions,
+            // thread pill, images, links — consume first). On desktop this
+            // clickable is OFF so a left-press-drag reaches the message
+            // text's SelectionContainer instead of being swallowed and
+            // popping the menu on mouse-up; desktop opens the menu via
+            // right-click below. (isTapToOpenMenuSupported)
+            .then(
+                if (io.nisfeb.talon.ui.isTapToOpenMenuSupported) {
+                    Modifier.clickable { onMenuExpand() }
+                } else Modifier,
+            )
             .onSecondaryClick { onMenuExpand() }
             .graphicsLayer {
                 translationX = offsetX.value
@@ -1297,13 +1276,14 @@ private fun MessageRow(
                 onMentionTap = onMentionTap,
                 onLinkTap = onLinkTap,
                 onImageTap = onImageTap,
-                onCitationTap = onCitationTap,
                 reactions = row.reactions,
                 ourPatp = ourPatp,
                 onPollVote = { emoji -> onReactionTap(m, row.reactions, emoji) },
-                // Tapping the message text (off any link) opens the
-                // action menu — same as tapping the row background.
-                onMessageTap = onMenuExpand,
+                // Touch only: tapping the message text (off any link) opens
+                // the action menu — same as tapping the row background. Null
+                // on desktop so a left-press-drag in text selects rather than
+                // opening the menu (right-click opens it instead).
+                onMessageTap = if (io.nisfeb.talon.ui.isTapToOpenMenuSupported) onMenuExpand else null,
             )
             val firstLink = remember(parts) { firstLinkUrl(parts) }
             if (firstLink != null) {
@@ -1313,15 +1293,6 @@ private fun MessageRow(
                     onOpen = onLinkTap,
                     modifier = Modifier.padding(top = 6.dp),
                 )
-            }
-            // ML Kit entity extraction is Android-only; the desktop
-            // actual is a no-op so this composable is safe to call from
-            // commonMain. Toggle gated on the user's AI settings.
-            if (entityActionsEnabled) {
-                val plainText = remember(m.id, m.contentJson) {
-                    StoryCache.textFor(m.id, m.contentJson)
-                }
-                entityChips?.invoke(plainText, Modifier.padding(top = 4.dp))
             }
             if (grouped.isNotEmpty()) {
                 FlowRow(
@@ -1356,10 +1327,11 @@ private fun MessageRow(
                     modifier = Modifier.padding(top = 4.dp),
                 )
             }
-            // Action menu, anchored to the message. Opened by a single
-            // tap on the row (see the row-level clickable + the
-            // StoryRenderer onMessageTap above) and by right-click on
-            // desktop — the trailing "⋯" button it replaced is gone.
+            // Action menu, anchored to the message. On touch, opened by a
+            // single tap on the row (see the gated row clickable + the
+            // StoryRenderer onMessageTap above); on desktop, by the trailing
+            // hover "⋯" below (left-click/drag is reserved for text selection,
+            // and right-click is eaten by the text's SelectionContainer).
             androidx.compose.material3.DropdownMenu(
                 expanded = menuExpanded,
                 onDismissRequest = onMenuDismiss,
@@ -1367,6 +1339,26 @@ private fun MessageRow(
             ) {
                 actionMenu()
             }
+        }
+        // Desktop affordance: a hover-revealed "⋯" is the reliable way to
+        // open the menu when tap-to-open is off. Without it the menu is
+        // unreachable over a message's text (selection owns left-drag;
+        // SelectionContainer swallows the row's right-click). A plain Icon,
+        // NOT IconButton — the latter's 48dp min touch size inflates short
+        // rows. Top-aligned + alpha-toggled so the slot never shifts.
+        if (!io.nisfeb.talon.ui.isTapToOpenMenuSupported) {
+            Icon(
+                Icons.Filled.MoreVert,
+                contentDescription = "Message actions",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier
+                    .align(Alignment.Top)
+                    .alpha(if (hovered || menuExpanded) 1f else 0f)
+                    .clip(RoundedCornerShape(6.dp))
+                    .clickable(onClick = onMenuExpand)
+                    .padding(2.dp)
+                    .size(20.dp),
+            )
         }
     }
 }
@@ -1672,7 +1664,6 @@ private fun dividerLabel(ms: Long): String {
 //  - windowInsetsPadding(WindowInsets.navigationBars) kept — no-ops on
 //    desktop but harmless.
 
-
 @Composable
 private fun CatchMeUpBanner(
     count: Int,
@@ -1850,9 +1841,6 @@ private fun MessageActionMenu(
     onEdit: () -> Unit,
     onDelete: () -> Unit,
     onTogglePin: () -> Unit,
-    showAiEmoji: Boolean,
-    aiEmojiWorking: Boolean,
-    onAiEmoji: () -> Unit,
 ) {
     val isMine = message.author == ourPatp
     val canReply = message.parentId == null
@@ -1880,12 +1868,20 @@ private fun MessageActionMenu(
                 if (searchOpen) searchFocus.requestFocus()
             }
 
-            // Merge usage-ranked codes with the default palette so the
-            // row is always 8 wide even before the user has reacted much.
+            // Merge usage-ranked reactions with the default palette so
+            // the row is always 8 wide even before the user has reacted
+            // much. De-dupe by canonical reaction (normalize) so a glyph
+            // already in history (❤️) and its palette code (:heart:) don't
+            // both show as separate-looking options. Usage rows rank
+            // first, then the palette fills the rest.
             val suggested = remember(topUsage) {
-                val used = topUsage.map { it.shortcode }
-                val fallback = ReactionPalette.picker.map { it.first }
-                (used + fallback.filter { it !in used }).take(8)
+                val seen = mutableSetOf<String>()
+                val out = mutableListOf<String>()
+                (topUsage.map { it.shortcode } + ReactionPalette.picker.map { it.first })
+                    .forEach { item ->
+                        if (seen.add(ReactionPalette.normalize(item))) out.add(item)
+                    }
+                out.take(8)
             }
 
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1908,22 +1904,6 @@ private fun MessageActionMenu(
                         contentDescription = "Search emojis",
                         modifier = Modifier.size(18.dp),
                     )
-                }
-                if (showAiEmoji) {
-                    TextButton(
-                        onClick = onAiEmoji,
-                        enabled = !aiEmojiWorking,
-                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
-                    ) {
-                        if (aiEmojiWorking) {
-                            CircularProgressIndicator(
-                                strokeWidth = 2.dp,
-                                modifier = Modifier.size(12.dp),
-                            )
-                            Spacer(Modifier.width(6.dp))
-                        }
-                        Text("🤖 AI pick", style = MaterialTheme.typography.labelMedium)
-                    }
                 }
             }
             FlowRow(
@@ -2317,4 +2297,46 @@ private suspend fun clusterTopicsWithin(
         )
     }
     return out.sortedByDescending { it.count }
+}
+
+/**
+ * "~bob is typing…" / "~bob is uploading an image" — %presence, folded
+ * into the space just above the composer. Renders nothing at all when
+ * nobody's active, when the conversation has no presence context
+ * (clubs), or when the ship is older than Tlon v11.4.0 and doesn't run
+ * the agent: in every one of those cases the flow is simply empty.
+ */
+@Composable
+private fun TypingIndicator(
+    whom: String,
+    repo: TlonChatRepo,
+    contactMap: ContactMap,
+) {
+    val active by remember(whom, repo) { repo.presenceIn(whom) }
+        .collectAsState(initial = emptyMap())
+    if (active.isEmpty()) return
+
+    // `active` maps ship → what they're doing ("typing…", "recording
+    // audio"). One person: name their action verbatim. Several: only
+    // typing has a clean plural, so fall back to a count otherwise.
+    val label = if (active.size == 1) {
+        val (ship, verb) = active.entries.first()
+        "${contactMap.displayName(ship)} is $verb"
+    } else {
+        val names = active.keys.sorted().map { contactMap.displayName(it) }
+        if (active.values.all { it == "typing…" }) {
+            if (names.size == 2) "${names[0]} and ${names[1]} are typing…"
+            else "${names.size} people are typing…"
+        } else {
+            "${names.size} people are active"
+        }
+    }
+    Text(
+        label,
+        style = MaterialTheme.typography.labelSmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 2.dp),
+    )
 }

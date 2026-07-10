@@ -125,6 +125,22 @@ fun GroupHomeScreen(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
                     )
+                } else {
+                    // When the group was last active — newest message
+                    // across its channels. Durable, unlike the transient
+                    // typing presence, and consistent with the home-list
+                    // group row.
+                    val lastActive by remember(flag, repo) {
+                        repo.groupLastActive(flag)
+                    }.collectAsState(initial = null)
+                    lastActive?.let {
+                        Text(
+                            "Active ${io.nisfeb.talon.ui.shortRelativeTime(it, System.currentTimeMillis())}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                        )
+                    }
                 }
             }
             // Overflow menu only makes sense for members — for

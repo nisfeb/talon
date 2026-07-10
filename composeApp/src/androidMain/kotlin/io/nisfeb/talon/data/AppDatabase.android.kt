@@ -32,6 +32,10 @@ actual abstract class AppDatabase : RoomDatabase() {
     actual abstract fun messageMedia(): MessageMediaDao
     actual abstract fun railItemPrefs(): RailItemPrefDao
     actual abstract fun dmInvites(): DmInviteDao
+    actual abstract fun assistantHistory(): AssistantHistoryDao
+    actual abstract fun assistantConversations(): AssistantConversationDao
+    actual abstract fun loops(): LoopDao
+    actual abstract fun loopRuns(): LoopRunDao
 }
 
 /**
@@ -53,7 +57,8 @@ fun createAppDatabase(context: Context, name: String): AppDatabase {
             MIGRATION_20_21, MIGRATION_21_22, MIGRATION_22_23,
             MIGRATION_23_24, MIGRATION_24_25, MIGRATION_25_26,
             MIGRATION_26_27, MIGRATION_27_28, MIGRATION_28_29,
-            MIGRATION_29_30, MIGRATION_30_31,
+            MIGRATION_29_30, MIGRATION_30_31, MIGRATION_34_35, MIGRATION_35_36,
+            MIGRATION_36_37, MIGRATION_37_38,
         )
         // dropAllTables = true preserves the pre-2.7 behaviour: when
         // Room can't find a migration path, drop everything and rebuild.
@@ -260,6 +265,110 @@ private val MIGRATION_30_31 = object : Migration(30, 31) {
                 visible INTEGER NOT NULL
             )
             """.trimIndent()
+        )
+    }
+}
+
+// New table only — everyone on the current release sits at 34, so this
+// one hop spares their (expensive) on-device embeddings from a
+// destructive rebuild. Older installs still fall back to drop+rebuild.
+private val MIGRATION_34_35 = object : Migration(34, 35) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS assistant_history (
+                id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+                mode TEXT NOT NULL,
+                question TEXT NOT NULL,
+                answer TEXT NOT NULL,
+                createdAt INTEGER NOT NULL
+            )
+            """.trimIndent()
+        )
+    }
+}
+
+// Conversation grouping: a conversations table + a conversationId on
+// each turn (default 0 = legacy ungrouped). Additive, non-destructive.
+private val MIGRATION_35_36 = object : Migration(35, 36) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE assistant_history ADD COLUMN conversationId INTEGER NOT NULL DEFAULT 0")
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS assistant_conversation (
+                id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+                title TEXT NOT NULL,
+                createdAt INTEGER NOT NULL,
+                updatedAt INTEGER NOT NULL,
+                centroid BLOB NOT NULL,
+                dim INTEGER NOT NULL,
+                turnCount INTEGER NOT NULL
+            )
+            """.trimIndent()
+        )
+    }
+}
+
+// Cross-device sync for assistant history: a global id (gid) on each
+// conversation + turn, plus convGid on a turn to re-link it to its
+// conversation on a peer device. Backfill existing rows with random
+// 128-bit ids (matching data.newGid()'s format) so pre-sync history is
+// addressable too. Additive, non-destructive.
+private val MIGRATION_36_37 = object : Migration(36, 37) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE assistant_conversation ADD COLUMN gid TEXT NOT NULL DEFAULT ''")
+        db.execSQL("UPDATE assistant_conversation SET gid = lower(hex(randomblob(16))) WHERE gid = ''")
+        db.execSQL("ALTER TABLE assistant_history ADD COLUMN gid TEXT NOT NULL DEFAULT ''")
+        db.execSQL("ALTER TABLE assistant_history ADD COLUMN convGid TEXT NOT NULL DEFAULT ''")
+        db.execSQL("UPDATE assistant_history SET gid = lower(hex(randomblob(16))) WHERE gid = ''")
+        // COALESCE to '' so a turn whose conversation row is missing
+        // (orphaned conversationId) backfills to '' rather than NULL —
+        // convGid is NOT NULL, and a NULL here would fail the migration
+        // and brick app startup.
+        db.execSQL(
+            "UPDATE assistant_history SET convGid = COALESCE(" +
+                "(SELECT c.gid FROM assistant_conversation c WHERE c.id = assistant_history.conversationId), '') " +
+                "WHERE convGid = '' AND conversationId != 0",
+        )
+    }
+}
+
+// User-defined loops: a definition table + a local run-history table.
+// Two new tables only, so installs on the current version keep their
+// (expensive) embeddings rather than hitting destructive fallback.
+// No DEFAULT clauses — matches the entity-derived schema (Kotlin
+// constructor defaults are not SQL defaults), mirroring MIGRATION_35_36.
+private val MIGRATION_37_38 = object : Migration(37, 38) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS loop (
+                id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+                gid TEXT NOT NULL,
+                name TEXT NOT NULL,
+                prompt TEXT NOT NULL,
+                intervalMinutes INTEGER NOT NULL,
+                enabled INTEGER NOT NULL,
+                writesAuthorized INTEGER NOT NULL,
+                createdAt INTEGER NOT NULL,
+                updatedAt INTEGER NOT NULL,
+                lastRunAt INTEGER NOT NULL
+            )
+            """.trimIndent(),
+        )
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS loop_run (
+                id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+                loopId INTEGER NOT NULL,
+                ranAt INTEGER NOT NULL,
+                ok INTEGER NOT NULL,
+                output TEXT NOT NULL
+            )
+            """.trimIndent(),
+        )
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS index_loop_run_loopId_ranAt ON loop_run (loopId, ranAt)",
         )
     }
 }

@@ -51,6 +51,11 @@ class SettingsSyncImpl(
      *  avoid bouncing the change back to the ship (pingpong), but that
      *  also skips the local re-arm — this callback restores it. */
     private val rearmDailyDigest: () -> Unit = {},
+    /** Re-arm the loop alarm after a remote-applied loop change (enabled/
+     *  interval can shift the next-fire time). commonMain can't reach the
+     *  Android Loops facade, so the host injects this. No-op on desktop /
+     *  tests (the while-open ticker re-reads loops every tick). */
+    private val rearmLoops: () -> Unit = {},
     /** Toggle a chat's watchword-exclusion through the Android-only
      *  Watchwords class (which fires backfill cleanup + onChange →
      *  %settings push). commonMain can't reference Watchwords directly
@@ -88,6 +93,29 @@ class SettingsSyncImpl(
         const val BUCKET_WATCHWORD_EXCLUDES = "watchword-excludes"
         const val BUCKET_DAILY_DIGEST = "daily-digest"
         const val BUCKET_STATUS_SEEN = "status-seen"
+        // Cross-device UI preferences that don't warrant a Room table.
+        // One entry per pref; today just the mnemonym-naming toggle.
+        const val BUCKET_UI_PREFS = "ui-prefs"
+        const val ENTRY_MNEMONYM_NAMES = "mnemonym-names"
+        // Assistant history (Stage 2). Conversation metadata + append-only
+        // turns, keyed by global id; embeddings stay device-local.
+        const val BUCKET_ASSISTANT_CONVERSATIONS = "assistant-conversations"
+        const val BUCKET_ASSISTANT_TURNS = "assistant-turns"
+        // Loop definitions, keyed by gid. lastRunAt + run history are
+        // device-local and never sync — only the definition travels.
+        const val BUCKET_LOOPS = "loops"
+        // Cross-device write-loop lease, keyed by loop gid:
+        // { holder: <deviceId>, claimedAt: <ms> }. Pure coordination state,
+        // not a user pref — it rides the desk scry but no applyBucket /
+        // applyEntry branch maps it, so it never touches Room. See claim().
+        const val BUCKET_AUTOMATION_CLAIMS = "automation-claims"
+        // How long to let concurrent claims settle on the ship before
+        // deciding the winner. Load-bearing: too short and two devices can
+        // both read themselves as holder and double-fire.
+        // ponytail: last-write-wins + settle. If it ever double-fires,
+        // upgrade to per-device claim sub-keys (<gid>~<deviceId>, lowest id
+        // wins) — deterministic, no settle window.
+        private const val CLAIM_SETTLE_MS = 3_000L
         // Single-entry bucket: the seen high-water mark is global to the
         // user, not per-anything, so one stable key holds it.
         private const val STATUS_SEEN_ENTRY = "me"
@@ -120,6 +148,14 @@ class SettingsSyncImpl(
             BUCKET_STATUS_SEEN,
             STATUS_SEEN_ENTRY,
             buildJsonObject { put("ms", ms) },
+        )
+    }
+
+    override suspend fun pushMnemonymNames(enabled: Boolean) {
+        pokePutEntry(
+            BUCKET_UI_PREFS,
+            ENTRY_MNEMONYM_NAMES,
+            buildJsonObject { put("enabled", enabled) },
         )
     }
 
@@ -187,6 +223,15 @@ class SettingsSyncImpl(
             applyBucket(BUCKET_WATCHWORD_EXCLUDES, deskMap[BUCKET_WATCHWORD_EXCLUDES] as? JsonObject)
             applyBucket(BUCKET_DAILY_DIGEST, deskMap[BUCKET_DAILY_DIGEST] as? JsonObject)
             applyBucket(BUCKET_STATUS_SEEN, deskMap[BUCKET_STATUS_SEEN] as? JsonObject)
+            // Assistant history. Upsert (not replace-all) so conversations
+            // created offline on this device aren't wiped; conversations
+            // before turns so turns resolve their convGid (a stub is
+            // created either way if they arrive out of order).
+            applyBucket(BUCKET_ASSISTANT_CONVERSATIONS, deskMap[BUCKET_ASSISTANT_CONVERSATIONS] as? JsonObject)
+            applyBucket(BUCKET_ASSISTANT_TURNS, deskMap[BUCKET_ASSISTANT_TURNS] as? JsonObject)
+            // Loop definitions. Upsert (not replace-all) so loops created
+            // offline on this device survive; lastRunAt is preserved per row.
+            applyBucket(BUCKET_LOOPS, deskMap[BUCKET_LOOPS] as? JsonObject)
         }
 
         // Per-bucket recovery: catch buckets that aren't on the ship
@@ -503,8 +548,8 @@ class SettingsSyncImpl(
 
     /**
      * Push the current AI settings to %settings. Per-feature toggles
-     * (catchMeUp, emojiReact, dailyDigest, entityActions, semantic
-     * search, topic clusters, important messages) ALWAYS push — they
+     * (catchMeUp, dailyDigest, smartFeatures, the assistant)
+     * ALWAYS push — they
      * are user preferences with no security cost and should follow
      * the user across devices. Cloud-key fields (provider / apiKey /
      * model / baseUrl) only push when the user has explicitly opted
@@ -526,17 +571,27 @@ class SettingsSyncImpl(
                 put("schemaVersion", AI_SCHEMA_V2)
                 if (cfg.syncEnabled) {
                     put("provider", cfg.provider.name)
-                    put("apiKey", cfg.apiKey)
+                    // Only ship a credential we actually have. Emitting "" would
+                    // make the ship's entry authoritatively key-less, and a
+                    // later pull (here or on a peer) then blanks a real local
+                    // key — the "keys not persisted" data loss. Absent ≠ empty.
+                    if (cfg.apiKey.isNotBlank()) put("apiKey", cfg.apiKey)
                     cfg.model?.let { put("model", it) }
                     cfg.baseUrl?.let { put("baseUrl", it) }
+                    // Brave key rides the same opt-in gate as the LLM key —
+                    // both are service credentials; same don't-ship-empty rule.
+                    if (cfg.braveApiKey.isNotBlank()) put("braveApiKey", cfg.braveApiKey)
                 }
                 put("catchMeUpEnabled", cfg.catchMeUpEnabled)
-                put("emojiReactEnabled", cfg.emojiReactEnabled)
                 put("dailyDigestEnabled", cfg.dailyDigestEnabled)
-                put("entityActionsEnabled", cfg.entityActionsEnabled)
-                put("semanticSearchEnabled", cfg.semanticSearchEnabled)
-                put("topicClustersEnabled", cfg.topicClustersEnabled)
-                put("importantMessagesEnabled", cfg.importantMessagesEnabled)
+                put("smartFeaturesEnabled", cfg.smartFeaturesEnabled)
+                put("askUrbitEnabled", cfg.askUrbitEnabled)
+                put("agentEnabled", cfg.agentEnabled)
+                // User's custom agent system-prompt parts (blank = built-in
+                // default). Preferences, not credentials — always push.
+                put("urbitKnowledgePrompt", cfg.urbitKnowledgePrompt)
+                put("assistantPrompt", cfg.assistantPrompt)
+                put("loopPrompt", cfg.loopPrompt)
             },
         )
     }
@@ -559,6 +614,130 @@ class SettingsSyncImpl(
             .onFailure { Log.w(TAG, "del-bucket ai-settings failed", it) }
     }
 
+    override suspend fun pushAssistantTurn(
+        conversation: io.nisfeb.talon.data.AssistantConversationEntity,
+        turn: io.nisfeb.talon.data.AssistantHistoryEntity,
+    ) {
+        if (conversation.gid.isBlank() || turn.gid.isBlank()) return
+        pokePutEntry(
+            BUCKET_ASSISTANT_CONVERSATIONS, conversation.gid,
+            buildJsonObject {
+                put("title", conversation.title)
+                put("createdAt", conversation.createdAt)
+                put("updatedAt", conversation.updatedAt)
+                put("turnCount", conversation.turnCount)
+            },
+        )
+        pokePutEntry(
+            BUCKET_ASSISTANT_TURNS, turn.gid,
+            buildJsonObject {
+                // `mode` is intentionally not pushed — it's a vestigial
+                // local field; the applier defaults it to "Assistant".
+                put("convGid", conversation.gid)
+                put("question", turn.question)
+                put("answer", turn.answer)
+                put("createdAt", turn.createdAt)
+            },
+        )
+    }
+
+    override suspend fun clearAssistantHistoryOnShip() {
+        val ch = channel ?: return
+        for (bucket in listOf(BUCKET_ASSISTANT_CONVERSATIONS, BUCKET_ASSISTANT_TURNS)) {
+            val payload = buildJsonObject {
+                put("del-bucket", buildJsonObject {
+                    put("desk", DESK)
+                    put("bucket-key", bucket)
+                })
+            }
+            runCatching { ch.poke(app = "settings", mark = "settings-event", payload = payload) }
+                .onFailure { Log.w(TAG, "del-bucket $bucket failed", it) }
+        }
+    }
+
+    override suspend fun pushLoop(loop: io.nisfeb.talon.data.LoopEntity) {
+        if (loop.gid.isBlank()) return
+        pokePutEntry(
+            BUCKET_LOOPS, loop.gid,
+            buildJsonObject {
+                // Definition only. id + lastRunAt + run history stay local;
+                // so does writesAuthorized — the unattended-write grant is a
+                // per-device decision (see upsertLoop), so we don't ship it.
+                put("name", loop.name)
+                put("prompt", loop.prompt)
+                put("intervalMinutes", loop.intervalMinutes)
+                put("enabled", loop.enabled)
+                put("createdAt", loop.createdAt)
+                put("updatedAt", loop.updatedAt)
+            },
+        )
+    }
+
+    override suspend fun deleteLoop(gid: String) {
+        if (gid.isBlank()) return
+        pokeDelEntry(BUCKET_LOOPS, gid)
+        // Drop any lease so a recreated loop with the same gid starts clean.
+        pokeDelEntry(BUCKET_AUTOMATION_CLAIMS, gid)
+    }
+
+    /**
+     * Cross-device lease so exactly one running device performs a scheduled
+     * write-loop fire (see [io.nisfeb.talon.ai.LoopWriteCoordinator]). The
+     * lease lives in %settings/[BUCKET_AUTOMATION_CLAIMS] keyed by gid; it
+     * holds the current runner's device id + when it last claimed.
+     *
+     * I run if I already hold it (and refresh), or if it's unclaimed/stale
+     * (holder went offline ~2 intervals) and I win the contest after a
+     * settle. A fresh holder that isn't me → I skip. No channel, no gid, or
+     * any ship error → I do NOT run: a write loop needs the ship anyway, so
+     * a device that can't coordinate can't safely fire.
+     */
+    override fun canCoordinate(): Boolean = channel != null
+
+    override suspend fun claim(loop: io.nisfeb.talon.data.LoopEntity): Boolean {
+        val ch = channel ?: return false
+        if (loop.gid.isBlank()) return true // unsynced loop: single-device, nothing to race
+        val me = aiSettings.state.value.deviceId
+        if (me.isBlank()) return true       // no id (not a real platform store) — don't block
+        val now = System.currentTimeMillis()
+        // Stale after ~2 missed fires, clamped so sub-hour loops still fail
+        // over reasonably and long loops don't pin a dead holder for days.
+        val staleMs = (loop.intervalMinutes.toLong() * 2).coerceIn(30, 720) * 60_000L
+
+        return when (io.nisfeb.talon.ai.decideClaim(readClaim(ch, loop.gid), me, now, staleMs)) {
+            io.nisfeb.talon.ai.ClaimDecision.RUN -> { writeClaim(loop.gid, me, now); true }
+            io.nisfeb.talon.ai.ClaimDecision.SKIP -> false
+            io.nisfeb.talon.ai.ClaimDecision.CONTEST -> {
+                // Stake a claim, let concurrent claimants settle on the ship,
+                // then run only if I'm still the holder.
+                writeClaim(loop.gid, me, now)
+                kotlinx.coroutines.delay(CLAIM_SETTLE_MS)
+                readClaim(ch, loop.gid)?.first == me
+            }
+        }
+    }
+
+    /** Read the lease for [gid] → (holder deviceId, claimedAt ms), or null
+     *  if unclaimed / unreadable. */
+    private suspend fun readClaim(ch: UrbitChannel, gid: String): Pair<String, Long>? {
+        val body = runCatching { ch.scry("settings", "/desk/$DESK") }.getOrNull() as? JsonObject
+        val deskMap = (body?.get("desk") as? JsonObject) ?: body
+        val claims = deskMap?.get(BUCKET_AUTOMATION_CLAIMS) as? JsonObject ?: return null
+        val obj = unwrap(claims[gid]) as? JsonObject ?: return null
+        val holder = obj["holder"].asStr()?.takeIf { it.isNotBlank() } ?: return null
+        return holder to (obj["claimedAt"].asLong() ?: 0L)
+    }
+
+    private suspend fun writeClaim(gid: String, holder: String, at: Long) {
+        pokePutEntry(
+            BUCKET_AUTOMATION_CLAIMS, gid,
+            buildJsonObject {
+                put("holder", holder)
+                put("claimedAt", at)
+            },
+        )
+    }
+
     private fun applyAiEntry(obj: JsonObject) {
         val current = aiSettings.state.value
         fun bool(key: String, default: Boolean) =
@@ -579,17 +758,29 @@ class SettingsSyncImpl(
         // device. Cloud-key fields stay on the same wire-or-local
         // path because they're already gated on local syncEnabled.
         val schemaVersion = obj["schemaVersion"].asInt() ?: 0
-        Log.i(TAG, "applyAiEntry schemaVersion=$schemaVersion obj=$obj")
+        // Redact the service credentials before logging — the toggle values
+        // are the useful part of this debug line; apiKey/braveApiKey are
+        // secrets and the log sink (unlike the EncryptedSharedPreferences
+        // store) isn't encrypted.
+        val redacted = JsonObject(
+            obj.mapValues { (k, v) ->
+                if (k == "apiKey" || k == "braveApiKey") JsonPrimitive("***") else v
+            },
+        )
+        Log.i(TAG, "applyAiEntry schemaVersion=$schemaVersion obj=$redacted")
 
         val features = if (schemaVersion >= AI_SCHEMA_V2) {
             current.copy(
                 catchMeUpEnabled = bool("catchMeUpEnabled", current.catchMeUpEnabled),
-                emojiReactEnabled = bool("emojiReactEnabled", current.emojiReactEnabled),
                 dailyDigestEnabled = bool("dailyDigestEnabled", current.dailyDigestEnabled),
-                entityActionsEnabled = bool("entityActionsEnabled", current.entityActionsEnabled),
-                semanticSearchEnabled = bool("semanticSearchEnabled", current.semanticSearchEnabled),
-                topicClustersEnabled = bool("topicClustersEnabled", current.topicClustersEnabled),
-                importantMessagesEnabled = bool("importantMessagesEnabled", current.importantMessagesEnabled),
+                smartFeaturesEnabled = bool("smartFeaturesEnabled", current.smartFeaturesEnabled),
+                askUrbitEnabled = bool("askUrbitEnabled", current.askUrbitEnabled),
+                agentEnabled = bool("agentEnabled", current.agentEnabled),
+                // Absent → keep local; present (even blank) → adopt, so a
+                // peer's reset-to-default ("") propagates too.
+                urbitKnowledgePrompt = obj["urbitKnowledgePrompt"].asStr() ?: current.urbitKnowledgePrompt,
+                assistantPrompt = obj["assistantPrompt"].asStr() ?: current.assistantPrompt,
+                loopPrompt = obj["loopPrompt"].asStr() ?: current.loopPrompt,
             )
         } else {
             Log.i(TAG, "applyAiEntry ignoring legacy feature toggles; keeping local defaults")
@@ -609,14 +800,30 @@ class SettingsSyncImpl(
             if (provider != null) {
                 features.copy(
                     provider = provider,
-                    apiKey = obj["apiKey"].asStr().orEmpty(),
+                    // Only overwrite the key when the entry actually
+                    // carries one — a peer push with syncEnabled=false
+                    // omits apiKey, and orEmpty() would blank a good
+                    // local key (data loss → silently disables AI).
+                    // Treat present-but-empty ("") as absent too: asStr()
+                    // returns "" (non-null) for an empty string, so the
+                    // ?: guard alone wouldn't catch a ship entry that was
+                    // seeded with apiKey:"" by an older client.
+                    apiKey = obj["apiKey"].asStr()?.takeIf { it.isNotBlank() } ?: current.apiKey,
                     model = obj["model"].asStr(),
                     baseUrl = obj["baseUrl"].asStr(),
+                    // Same "only overwrite when present and non-empty" guard.
+                    braveApiKey = obj["braveApiKey"].asStr()?.takeIf { it.isNotBlank() } ?: current.braveApiKey,
                 )
             } else features
         } else features
 
         aiSettings.applyRemote(merged)
+        // applyRemote deliberately bypasses onStateChange (anti-pingpong),
+        // which is also the only rearm-on-key-change hook — so a key or
+        // feature toggle arriving via sync must re-arm the loop scheduler
+        // here, or a device whose alarm was disarmed for lack of a key
+        // stays disarmed until restart even though loops can now run.
+        rearmLoops()
     }
 
     override suspend fun addBookmark(whom: String, postId: String, ts: Long) {
@@ -1003,6 +1210,59 @@ class SettingsSyncImpl(
                 val ms = (unwrap(v) as? JsonObject)?.get("ms").asLong() ?: return
                 bumpStatusesSeen(ms)
             }
+            BUCKET_UI_PREFS -> {
+                val v = entries?.get(ENTRY_MNEMONYM_NAMES) ?: return
+                (unwrap(v) as? JsonObject)?.get("enabled").asBool()?.let {
+                    io.nisfeb.talon.ui.MnemonymNames.set(it)
+                }
+            }
+            BUCKET_ASSISTANT_CONVERSATIONS -> {
+                entries?.forEach { (gid, v) ->
+                    (unwrap(v) as? JsonObject)?.let { upsertAssistantConversation(gid, it) }
+                }
+            }
+            BUCKET_ASSISTANT_TURNS -> {
+                // The ship's bucket is an append-only superset of what we
+                // keep locally, and bootstrap replays it on EVERY connect.
+                // Only the newest KEEP turns can survive the trim below, so
+                // skip everything below the horizon up front — or a
+                // long-lived ship pays O(bucket) insert+count+delete cycles
+                // per reconnect (and a fresh device pays it on first sync)
+                // for zero net change. The horizon is the stricter of:
+                //  - the oldest LOCAL turn once we're at cap (locals are
+                //    never deleted mid-apply, so anything older loses);
+                //  - the KEEP-th newest createdAt among the bucket entries
+                //    themselves (covers the fresh-device bootstrap, where
+                //    there is no local horizon yet).
+                // Strict '<' — ties at the boundary must not be skipped.
+                val turnDao = db.assistantHistory()
+                val keep = io.nisfeb.talon.data.ASSISTANT_HISTORY_KEEP
+                val localHorizon = if (turnDao.count() >= keep) {
+                    turnDao.oldestCreatedAt() ?: 0L
+                } else 0L
+                val bucketHorizon = entries?.values
+                    ?.mapNotNull { (unwrap(it) as? JsonObject)?.get("createdAt").asLong() }
+                    ?.sortedDescending()?.getOrNull(keep - 1) ?: 0L
+                val horizon = maxOf(localHorizon, bucketHorizon)
+                val touched = mutableSetOf<Long>()
+                entries?.forEach { (gid, v) ->
+                    val obj = unwrap(v) as? JsonObject ?: return@forEach
+                    if ((obj["createdAt"].asLong() ?: 0L) < horizon) return@forEach
+                    upsertAssistantTurn(gid, obj)?.let(touched::add)
+                }
+                // Re-apply the caps or they're a no-op after the first
+                // sync and the tables grow to ship size forever. Recount
+                // AFTER the trims so turnCount reflects what survived —
+                // once per touched conversation, not once per insert.
+                turnDao.trim(keep)
+                db.assistantConversations().trim(io.nisfeb.talon.data.ASSISTANT_CONV_KEEP)
+                touched.forEach { recountConversation(it) }
+            }
+            BUCKET_LOOPS -> {
+                entries?.forEach { (gid, v) ->
+                    (unwrap(v) as? JsonObject)?.let { upsertLoop(gid, it) }
+                }
+            }
         }
     }
 
@@ -1129,11 +1389,36 @@ class SettingsSyncImpl(
                 val ms = (unwrapped as? JsonObject)?.get("ms").asLong() ?: return
                 bumpStatusesSeen(ms)
             }
+            BUCKET_UI_PREFS -> {
+                if (entry != ENTRY_MNEMONYM_NAMES) return
+                (unwrapped as? JsonObject)?.get("enabled").asBool()?.let {
+                    io.nisfeb.talon.ui.MnemonymNames.set(it)
+                }
+            }
+            // Live put-entry facts must enforce the same caps applyBucket
+            // does, or a device that stays connected grows the tables one
+            // row per peer event until the next reconnect's bucket replay.
+            BUCKET_ASSISTANT_CONVERSATIONS -> {
+                (unwrapped as? JsonObject)?.let { upsertAssistantConversation(entry, it) }
+                db.assistantConversations().trim(io.nisfeb.talon.data.ASSISTANT_CONV_KEEP)
+            }
+            BUCKET_ASSISTANT_TURNS -> {
+                val convId = (unwrapped as? JsonObject)?.let { upsertAssistantTurn(entry, it) }
+                db.assistantHistory().trim(io.nisfeb.talon.data.ASSISTANT_HISTORY_KEEP)
+                convId?.let { recountConversation(it) }
+            }
+            BUCKET_LOOPS -> {
+                (unwrapped as? JsonObject)?.let { upsertLoop(entry, it) }
+            }
         }
     }
 
     internal suspend fun removeEntry(bucket: String, entry: String) {
         when (bucket) {
+            BUCKET_UI_PREFS -> {
+                // Entry deleted on the ship → back to the default (on).
+                if (entry == ENTRY_MNEMONYM_NAMES) io.nisfeb.talon.ui.MnemonymNames.set(true)
+            }
             BUCKET_GROUP_ORDERS -> db.groupOrders().remove(entry)
             BUCKET_FOLDERS -> {
                 val id = entry.toLongOrNull() ?: return
@@ -1186,11 +1471,144 @@ class SettingsSyncImpl(
                 }
                 rearmDailyDigest()
             }
+            BUCKET_ASSISTANT_CONVERSATIONS -> {
+                // Deleting a conversation cascades to its turns locally.
+                db.assistantConversations().getByGid(entry)?.let {
+                    db.assistantHistory().deleteForConversation(it.id)
+                }
+                db.assistantConversations().deleteByGid(entry)
+            }
+            BUCKET_ASSISTANT_TURNS -> db.assistantHistory().deleteByGid(entry)
+            BUCKET_LOOPS -> db.loops().getByGid(entry)?.let {
+                db.loops().delete(it.id)
+                db.loopRuns().deleteForLoop(it.id)
+                // Re-arm like upsertLoop/clearBucketLocally do — otherwise a
+                // stale alarm for the deleted loop stays armed (or, if it was
+                // the only loop, an alarm that should be cancelled survives).
+                rearmLoops()
+            }
+        }
+    }
+
+    // ───────── assistant history upsert (sync apply) ─────────
+    // Upsert, not replace — a peer's bucket is merged into local state so
+    // conversations created offline here survive.
+
+    private suspend fun upsertAssistantConversation(gid: String, obj: JsonObject) {
+        if (gid.isBlank()) return
+        val dao = db.assistantConversations()
+        val title = obj["title"].asStr() ?: ""
+        val createdAt = obj["createdAt"].asLong() ?: 0L
+        val updatedAt = obj["updatedAt"].asLong() ?: createdAt
+        val existing = dao.getByGid(gid)
+        if (existing != null) {
+            // Preserve centroid/dim (device-local, not on the wire) AND
+            // turnCount (derived from the turns THIS device actually holds,
+            // maintained in upsertAssistantTurn) — the wire's turnCount
+            // counts a peer's turns that may not have synced here yet, so
+            // trusting it would claim more turns than exist locally.
+            dao.update(existing.copy(title = title, updatedAt = updatedAt))
+        } else {
+            // turnCount starts at 0; each synced turn bumps it so it always
+            // matches the local row count, never the peer's claim.
+            dao.insert(
+                io.nisfeb.talon.data.AssistantConversationEntity(
+                    gid = gid, title = title, createdAt = createdAt,
+                    updatedAt = updatedAt, centroid = ByteArray(0), dim = 0, turnCount = 0,
+                ),
+            )
+        }
+    }
+
+    private suspend fun upsertLoop(gid: String, obj: JsonObject) {
+        if (gid.isBlank()) return
+        val dao = db.loops()
+        val existing = dao.getByGid(gid)
+        // Preserve the local id (so @Upsert updates rather than inserts a
+        // dup) and lastRunAt (device-local schedule state, never on the
+        // wire). Everything else comes from the synced definition — EXCEPT
+        // writesAuthorized: that grant gives a loop unattended write access
+        // to the ship, so it's a per-device decision the local user must
+        // make here. We never honor it from the wire (a peer or anyone with
+        // ship access could otherwise flip a read-only loop into one that
+        // posts unattended). A freshly-synced loop arrives read-only; an
+        // existing one keeps whatever this device granted. Mirrors how AI
+        // cloud-key fields gate on local syncEnabled rather than crossing
+        // over from a peer.
+        dao.upsert(
+            io.nisfeb.talon.data.LoopEntity(
+                id = existing?.id ?: 0L,
+                gid = gid,
+                name = obj["name"].asStr() ?: "",
+                prompt = obj["prompt"].asStr() ?: "",
+                intervalMinutes = obj["intervalMinutes"].asInt() ?: 60,
+                enabled = (obj["enabled"] as? JsonPrimitive)?.booleanOrNull ?: true,
+                writesAuthorized = existing?.writesAuthorized ?: false,
+                createdAt = obj["createdAt"].asLong() ?: 0L,
+                updatedAt = obj["updatedAt"].asLong() ?: 0L,
+                // First arrival on this device: stamp lastRunAt=now so the
+                // first run is one interval out — matching the local create
+                // path. Inheriting 0 would make the loop due since 1970 and
+                // fire within a minute on EVERY peer device the definition
+                // syncs to (read-only loops don't take the write lease, so
+                // nothing would dedupe those surprise runs).
+                lastRunAt = existing?.lastRunAt ?: System.currentTimeMillis(),
+            ),
+        )
+        rearmLoops()
+    }
+
+    /** Insert a synced turn; returns the local conversation id when a row
+     *  was actually inserted (so the caller can recount turnCount once per
+     *  conversation AFTER trimming), or null when the turn was skipped. */
+    private suspend fun upsertAssistantTurn(gid: String, obj: JsonObject): Long? {
+        if (gid.isBlank()) return null
+        val turnDao = db.assistantHistory()
+        if (turnDao.getByGid(gid) != null) return null // append-only → idempotent
+        val convGid = obj["convGid"].asStr()
+        if (convGid == null) {
+            Log.w(TAG, "assistant turn $gid missing convGid; dropped")
+            return null
+        }
+        val question = obj["question"].asStr() ?: ""
+        val answer = obj["answer"].asStr() ?: ""
+        val mode = obj["mode"].asStr() ?: "Assistant"
+        val createdAt = obj["createdAt"].asLong() ?: 0L
+        val convDao = db.assistantConversations()
+        // The turn may arrive before its conversation's metadata — stub a
+        // conversation (turnCount=0) so the turn always has a home; the
+        // real metadata upserts (preserving this id) when it arrives.
+        val conv = convDao.getByGid(convGid)
+        val localConvId = conv?.id ?: convDao.insert(
+            io.nisfeb.talon.data.AssistantConversationEntity(
+                gid = convGid, title = question.take(60).trim(), createdAt = createdAt,
+                updatedAt = createdAt, centroid = ByteArray(0), dim = 0, turnCount = 0,
+            ),
+        )
+        turnDao.insert(
+            io.nisfeb.talon.data.AssistantHistoryEntity(
+                gid = gid, mode = mode, question = question, answer = answer,
+                createdAt = createdAt, conversationId = localConvId, convGid = convGid,
+            ),
+        )
+        return localConvId
+    }
+
+    /** Set turnCount to the rows this device actually holds. Counting (not
+     *  incrementing) keeps re-applied ship supersets from inflating it
+     *  without bound and freezing the grouping centroid, which weights new
+     *  vectors by 1/turnCount. Run AFTER any trim so the count reflects
+     *  what survived. */
+    private suspend fun recountConversation(convId: Long) {
+        val convDao = db.assistantConversations()
+        convDao.get(convId)?.let {
+            convDao.update(it.copy(turnCount = db.assistantHistory().countForConversation(convId)))
         }
     }
 
     internal suspend fun clearBucketLocally(bucket: String) {
         when (bucket) {
+            BUCKET_UI_PREFS -> io.nisfeb.talon.ui.MnemonymNames.set(true)
             BUCKET_GROUP_ORDERS -> db.groupOrders().replaceAll(emptyList())
             BUCKET_FOLDERS -> db.folders().replaceAll(emptyList())
             BUCKET_FOLDER_MEMBERS -> db.folders().replaceAllMembers(emptyList())
@@ -1212,6 +1630,21 @@ class SettingsSyncImpl(
                 // del-bucket from ship: revert to defaults locally.
                 dailyDigestSettings.applyRemote(enabled = false, hourOfDay = 6, minuteOfDay = 0)
                 rearmDailyDigest()
+            }
+            // A peer cleared assistant history (del-bucket) — mirror it
+            // locally. Either bucket's del-bucket wipes both tables; turns
+            // can't outlive their conversations.
+            BUCKET_ASSISTANT_CONVERSATIONS, BUCKET_ASSISTANT_TURNS -> {
+                db.assistantHistory().clearAll()
+                db.assistantConversations().clearAll()
+            }
+            // A peer cleared all loops (del-bucket) — wipe definitions and
+            // their local run history, then re-arm (the scheduler should
+            // disarm when nothing is left).
+            BUCKET_LOOPS -> {
+                db.loops().clearAll()
+                db.loopRuns().clearAll()
+                rearmLoops()
             }
         }
     }

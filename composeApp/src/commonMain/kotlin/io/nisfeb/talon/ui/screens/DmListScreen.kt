@@ -93,6 +93,7 @@ import io.nisfeb.talon.ui.FolderAssignmentSheet
 import io.nisfeb.talon.ui.RailItem
 import io.nisfeb.talon.ui.UpdateBanner
 import io.nisfeb.talon.ui.contactMapFlow
+import io.nisfeb.talon.ui.shortRelativeTime
 import io.nisfeb.talon.update.UpdateStatus
 import io.nisfeb.talon.ai.DailyDigestMentionMatcher
 import io.nisfeb.talon.urbit.StoryCache
@@ -116,6 +117,10 @@ fun DmListScreen(
     updateState: UpdateState,
     onOpenConversation: (whom: String) -> Unit,
     onOpenSearch: () -> Unit,
+    /** Opt-in assistant entry point. Null hides the affordance — passed
+     *  non-null only when the "Ask your Urbit" feature is on and a key
+     *  is configured, so it stays invisible during rc rollout. */
+    onOpenAssistant: (() -> Unit)? = null,
     onNewMessage: () -> Unit,
     onSignOut: () -> Unit,
     onOpenSelfProfile: () -> Unit,
@@ -695,6 +700,8 @@ fun DmListScreen(
             IconButton(onClick = onOpenSearch) {
                 Icon(Icons.Filled.Search, contentDescription = "Search")
             }
+            // Assistant moved off the top bar — it's now a rail / kebab item
+            // ("A"), unifying it with the other panel-based features.
             IconButton(onClick = { editMode = !editMode }) {
                 Icon(
                     imageVector = if (editMode) Icons.Filled.Done else Icons.Filled.Edit,
@@ -774,6 +781,19 @@ fun DmListScreen(
                     expanded = menuOpen,
                     onDismissRequest = { menuOpen = false },
                 ) {
+                    // Assistant — opt-in, so gated on onOpenAssistant being
+                    // wired (null when unsupported / off / no key).
+                    if (RailItem.Assistant in kebabItems) {
+                        onOpenAssistant?.let { open ->
+                            DropdownMenuItem(
+                                text = { Text("Assistant") },
+                                onClick = {
+                                    menuOpen = false
+                                    open()
+                                },
+                            )
+                        }
+                    }
                     if (RailItem.Profile in kebabItems) {
                         DropdownMenuItem(
                             text = { Text("My profile") },
@@ -1104,6 +1124,9 @@ fun DmListScreen(
                                 // change and rendered groups overlapped/compacted.
                                 ReorderableItem(reorderState, key = row.key, enabled = editMode) { _ ->
                                     Column {
+                                        val lastActive by remember(row.flag) {
+                                            repo.groupLastActive(row.flag)
+                                        }.collectAsState(initial = null)
                                         GroupHeaderRow(
                                             flag = row.flag,
                                             title = row.title,
@@ -1111,6 +1134,7 @@ fun DmListScreen(
                                             childCount = row.childCount,
                                             totalUnread = row.totalUnread,
                                             expanded = row.expanded,
+                                            lastActiveMs = lastActive,
                                             onToggle = onGroupHeadToggle,
                                             onLongClick = if (editMode) null else onGroupHeadLongPress,
                                             editMode = editMode,
@@ -1229,6 +1253,9 @@ fun DmListScreen(
                                 // change and rendered groups overlapped/compacted.
                                 ReorderableItem(reorderState, key = row.key, enabled = editMode) { _ ->
                                     Column {
+                                        val lastActive by remember(row.flag) {
+                                            repo.groupLastActive(row.flag)
+                                        }.collectAsState(initial = null)
                                         GroupHeaderRow(
                                             flag = row.flag,
                                             title = row.title,
@@ -1236,6 +1263,7 @@ fun DmListScreen(
                                             childCount = row.childCount,
                                             totalUnread = row.totalUnread,
                                             expanded = row.expanded,
+                                            lastActiveMs = lastActive,
                                             onToggle = onGroupHeadToggle,
                                             onLongClick = if (editMode) null else onGroupHeadLongPress,
                                             editMode = editMode,
@@ -2115,6 +2143,7 @@ private fun GroupHeaderRow(
     childCount: Int,
     totalUnread: Int,
     expanded: Boolean,
+    lastActiveMs: Long?,
     onToggle: (String) -> Unit,
     editMode: Boolean = false,
     dragHandleModifier: Modifier = Modifier,
@@ -2154,8 +2183,17 @@ private fun GroupHeaderRow(
                 style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
                 maxLines = 1,
             )
+            val channelsLabel = "$childCount channel${if (childCount == 1) "" else "s"}"
+            // "· active Nm ago" rides the channel-count line, from the
+            // newest message across the group's channels. Durable
+            // history, not transient presence — the only place a member
+            // sees group liveness, since tapping toggles the accordion
+            // rather than opening a group screen.
+            val activeLabel = lastActiveMs?.let {
+                "$channelsLabel · active ${shortRelativeTime(it, System.currentTimeMillis())}"
+            } ?: channelsLabel
             Text(
-                "$childCount channel${if (childCount == 1) "" else "s"}",
+                activeLabel,
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

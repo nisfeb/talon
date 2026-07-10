@@ -37,6 +37,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -74,6 +75,15 @@ fun NotebookPostScreen(
     modifier: Modifier = Modifier,
 ) {
     val scope = rememberCoroutineScope()
+
+    // Keep this channel "focused" while the post is open. The notebook list
+    // unmounts underneath (mutually-exclusive App.kt branches), so without
+    // this openWhom goes null and the channel's unread can re-bump / not
+    // clear on navigate-away. See GalleryPostScreen for the full rationale.
+    DisposableEffect(whom) {
+        repo.setOpenChat(whom)
+        onDispose { repo.setOpenChat(null) }
+    }
 
     // Suppress Room's invalidation-tracker re-emissions on unrelated
     // messages-table writes — without this the post body and replies

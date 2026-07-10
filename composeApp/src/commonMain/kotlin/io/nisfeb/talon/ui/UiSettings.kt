@@ -88,7 +88,7 @@ interface UiSettings {
     /**
      * Per-device "use smart search by default" preference. Drives the
      * Search screen's smart-mode chip selection so it persists across
-     * navigation. Independent of [io.nisfeb.talon.ai.AiSettings.Feature.SemanticSearch]
+     * navigation. Independent of [io.nisfeb.talon.ai.AiSettings.Feature.SmartFeatures]
      * — that flag controls whether the feature is *available* (and
      * runs the indexer); this one tracks whether the user wants it
      * *active for their searches*. Only meaningful when the AI flag is

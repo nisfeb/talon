@@ -6,6 +6,10 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.hoverable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsHoveredAsState
+import androidx.compose.ui.draw.alpha
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -32,6 +36,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -46,7 +51,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -67,10 +71,8 @@ import androidx.compose.ui.unit.dp
 import io.nisfeb.talon.data.AppDatabase
 import io.nisfeb.talon.data.MessageEntity
 import io.nisfeb.talon.data.ReactionEntity
-import io.nisfeb.talon.ui.CiteResolver
 import io.nisfeb.talon.ui.ContactMap
 import io.nisfeb.talon.ui.EmojiCatalog
-import io.nisfeb.talon.ui.LocalCiteResolver
 import io.nisfeb.talon.ui.ReactionPalette
 import io.nisfeb.talon.ui.StoryRenderer
 import io.nisfeb.talon.ui.combinedClickableWithSecondary
@@ -250,13 +252,12 @@ fun ThreadList(
         set.toList()
     }
 
-    // Reply payloads use the same wire shapes as the main composer
-    // for plain text. Threads have no structured replyImage on the
-    // wire today, so an attached image embeds its hosted URL as
-    // markdown — Tlon clients render bare URLs to images inline, so
-    // the recipient still sees the image. Quote-into-thread is also
-    // not on the wire (`replyQuote` doesn't exist), so the strategy
-    // declines and the composer falls back to plain text.
+    // Reply payloads use the same wire shapes as the main composer. A
+    // reply's content is a full story, so an attached image goes as a
+    // structured image block and renders inline — same as a top-level
+    // post. Quote-into-thread is not on the wire (`replyQuote` doesn't
+    // exist), so the strategy declines and the composer falls back to
+    // plain text.
     val threadStrategy = remember(repo, whom, parentId) {
         object : io.nisfeb.talon.ui.ChatSendStrategy {
             override suspend fun sendText(text: String) {
@@ -268,7 +269,7 @@ fun ThreadList(
                 height: Int,
                 alt: String,
             ) {
-                repo.reply(whom, parentId, "[$alt]($src)")
+                repo.replyImage(whom, parentId, src, width, height, alt)
             }
             override val supportsQuote: Boolean = false
             override suspend fun sendQuote(
@@ -295,12 +296,14 @@ fun ThreadList(
     val onReactionForMessage: (MessageEntity, List<ReactionEntity>, String) -> Unit =
         remember(ourPatp, whom, repo) {
             { m, rs, emoji ->
-                // Compare on glyph: outbound reactions are normalized to
-                // unicode in TlonChatRepo.react(), so the DB row for our
-                // own reaction is a glyph even when the picker hands us
-                // a shortcode.
-                val ours = ReactionPalette.display(emoji)
-                val mineSame = rs.any { it.author == ourPatp && it.emoji == ours }
+                // Compare on the canonical key (see DmChatScreen): react()
+                // stores the variation-selector-stripped form, and the
+                // picker may hand us a shortcode or a glyph — normalize
+                // both sides so our own reaction toggles off reliably.
+                val ours = ReactionPalette.normalize(emoji)
+                val mineSame = rs.any {
+                    it.author == ourPatp && ReactionPalette.normalize(it.emoji) == ours
+                }
                 scope.launch {
                     runCatching {
                         if (mineSame) repo.unreact(whom, m.id)
@@ -327,25 +330,7 @@ fun ThreadList(
     val onImageTap: (String) -> Unit = remember(onOpenImage) {
         { url -> onOpenImage(url) }
     }
-    val onCitationTap: (String) -> Unit = remember(onOpenConversation) {
-        { target -> onOpenConversation(target) }
-    }
 
-    val citeResolver = remember(db, repo) {
-        object : CiteResolver {
-            override suspend fun findLocal(whom: String, da: String): MessageEntity? =
-                db.messages().findByDa(whom, da)
-            override suspend fun fetchPost(whom: String, da: String): MessageEntity? =
-                repo.fetchCitePost(whom, da)
-            override suspend fun fetchReply(
-                whom: String,
-                postDa: String,
-                replyDa: String,
-            ): MessageEntity? = repo.fetchCiteReply(whom, postDa, replyDa)
-        }
-    }
-
-    CompositionLocalProvider(LocalCiteResolver provides citeResolver) {
     val chatDensity = io.nisfeb.talon.ui.LocalChatDensity.current
     // Per-row action-menu body. Composed only when the row's menu is
     // expanded (DropdownMenu's content composes lazily). Mirrors the
@@ -428,9 +413,11 @@ fun ThreadList(
             val onPollVoteHandler: (MessageEntity, List<ReactionEntity>, String) -> Unit =
                 { msg, rs, emoji ->
                     val mine = rs.firstOrNull { it.author == ourPatp }?.emoji
+                    val same = mine != null &&
+                        ReactionPalette.normalize(mine) == ReactionPalette.normalize(emoji)
                     scope.launch {
                         runCatching {
-                            if (mine == emoji) repo.unreact(whom, msg.id)
+                            if (same) repo.unreact(whom, msg.id)
                             else repo.react(whom, msg.id, emoji)
                         }
                     }
@@ -445,7 +432,6 @@ fun ThreadList(
                         onMentionTap = onMentionTap,
                         onLinkTap = onLinkTap,
                         onImageTap = onImageTap,
-                        onCitationTap = onCitationTap,
                         menuExpanded = actionTarget?.id == p.id,
                         onMenuExpand = { actionTarget = p },
                         onMenuDismiss = { actionTarget = null },
@@ -477,7 +463,6 @@ fun ThreadList(
                     onMentionTap = onMentionTap,
                     onLinkTap = onLinkTap,
                     onImageTap = onImageTap,
-                    onCitationTap = onCitationTap,
                     menuExpanded = actionTarget?.id == replyMsg.id,
                     onMenuExpand = { actionTarget = replyMsg },
                     onMenuDismiss = { actionTarget = null },
@@ -560,7 +545,9 @@ fun ThreadList(
 
     editing?.let { target ->
         EditThreadMessageDialog(
-            initial = StoryCache.textFor(target.id, target.contentJson),
+            // Editable text only — a quoted post's cite (and images /
+            // link previews) ride along untouched via originalContentJson.
+            initial = io.nisfeb.talon.urbit.editableText(target.contentJson),
             onDismiss = { editing = null },
             onSave = { newText ->
                 editing = null
@@ -574,6 +561,7 @@ fun ThreadList(
                             text = newText,
                             originalSentMs = target.sentMs,
                             parentId = target.parentId,
+                            originalContentJson = target.contentJson,
                         )
                     }.onFailure {
                         composerState.sendError =
@@ -583,7 +571,6 @@ fun ThreadList(
             },
         )
     }
-    } // CompositionLocalProvider(LocalCiteResolver)
 }
 
 /**
@@ -628,7 +615,6 @@ private fun ThreadMessage(
     onMentionTap: (String) -> Unit,
     onLinkTap: (String) -> Unit,
     onImageTap: (String) -> Unit,
-    onCitationTap: (String) -> Unit,
     /** True when this row's action menu is open (driven by the
      *  screen-level `actionTarget` so only one menu shows at a time). */
     menuExpanded: Boolean,
@@ -654,7 +640,9 @@ private fun ThreadMessage(
     val stamp = remember(m.sentMs) { TIME_FORMAT.format(Date(m.sentMs)) }
     val authorLabel = remember(m.author, contactMap) { contactMap.displayName(m.author) }
     val grouped = remember(reactions) {
-        reactions.groupBy { it.emoji }
+        // Normalize on read too: rows stored before we normalized on write
+        // still carry FE0F, and would otherwise render as a separate chip.
+        reactions.groupBy { ReactionPalette.normalize(it.emoji) }
             .map { (emoji, rs) -> Triple(emoji, rs.size, rs.any { it.author == ourPatp }) }
     }
     val flashAlpha = remember(m.id) { Animatable(0f) }
@@ -667,20 +655,35 @@ private fun ThreadMessage(
     val baseColor = if (highlighted) MaterialTheme.colorScheme.surfaceVariant
         else MaterialTheme.colorScheme.surface
     val flashOverlay = Color(0xFFFFC107).copy(alpha = 0.30f * flashAlpha.value)
-    // Single tap on the row opens the action menu (and tints the row
-    // with the accent to show which message); right-click also opens
-    // it on desktop. Long-press stays text selection (Selection
-    // Container). The trailing "⋯" button is gone.
+    // Desktop only: track row hover so the trailing "⋯" can reveal on
+    // hover (matches DmChatScreen.MessageRow).
+    val interactionSource = remember { MutableInteractionSource() }
+    val hovered by interactionSource.collectIsHoveredAsState()
+    // Touch: a single tap on the row opens the action menu (and tints the
+    // row to show which message). On desktop that clickable is OFF so a
+    // left-press-drag reaches the text's SelectionContainer instead of
+    // popping the menu; desktop opens it via the hover "⋯" below.
+    // (isTapToOpenMenuSupported — see DmChatScreen.MessageRow.)
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable { onMenuExpand() }
+            .hoverable(interactionSource)
+            .then(
+                if (io.nisfeb.talon.ui.isTapToOpenMenuSupported) {
+                    Modifier.clickable { onMenuExpand() }
+                } else Modifier,
+            )
             .onSecondaryClick { onMenuExpand() }
             .background(baseColor)
             .background(flashOverlay)
+            // Accent tint while this message's menu is open, plus a subtle
+            // hover tint (desktop) so it's clear which message the "⋯" acts on.
             .background(
-                if (menuExpanded) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
-                else Color.Transparent,
+                when {
+                    menuExpanded -> MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
+                    hovered -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.05f)
+                    else -> Color.Transparent
+                },
             )
             .padding(top = if (showHeader) 10.dp else 2.dp, bottom = 2.dp),
     ) {
@@ -700,11 +703,12 @@ private fun ThreadMessage(
                 onMentionTap = onMentionTap,
                 onLinkTap = onLinkTap,
                 onImageTap = onImageTap,
-                onCitationTap = onCitationTap,
                 reactions = reactions,
                 ourPatp = ourPatp,
                 onPollVote = { emoji -> onPollVote(m, reactions, emoji) },
-                onMessageTap = onMenuExpand,
+                // Touch only: null on desktop so a left-press-drag selects
+                // text rather than opening the menu (hover "⋯" opens it).
+                onMessageTap = if (io.nisfeb.talon.ui.isTapToOpenMenuSupported) onMenuExpand else null,
             )
             if (grouped.isNotEmpty()) {
                 FlowRow(
@@ -743,7 +747,8 @@ private fun ThreadMessage(
                     }
                 }
             }
-            // Action menu anchored to the message (tap / right-click).
+            // Action menu, anchored to the message. Opened by tapping the
+            // row on touch and by the hover "⋯" below on desktop.
             androidx.compose.material3.DropdownMenu(
                 expanded = menuExpanded,
                 onDismissRequest = onMenuDismiss,
@@ -751,6 +756,26 @@ private fun ThreadMessage(
             ) {
                 actionMenu()
             }
+        }
+        // Desktop affordance: a hover-revealed "⋯" — the reliable way to
+        // open the menu when tap-to-open is off (selection owns left-drag;
+        // SelectionContainer eats the row's right-click). A plain Icon, NOT
+        // IconButton — its 48dp min touch size inflates short rows.
+        // Top-aligned + alpha-toggled so the slot never shifts. Mirrors
+        // DmChatScreen.MessageRow.
+        if (!io.nisfeb.talon.ui.isTapToOpenMenuSupported) {
+            Icon(
+                Icons.Filled.MoreVert,
+                contentDescription = "Message actions",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier
+                    .align(Alignment.Top)
+                    .alpha(if (hovered || menuExpanded) 1f else 0f)
+                    .clip(RoundedCornerShape(6.dp))
+                    .clickable(onClick = onMenuExpand)
+                    .padding(2.dp)
+                    .size(20.dp),
+            )
         }
     }
 }
@@ -798,10 +823,16 @@ private fun ThreadActionMenu(
             val topUsage by remember {
                 db.reactionUsage().streamTop(8)
             }.collectAsState(initial = emptyList())
+            // De-dupe by canonical reaction (normalize) so a used glyph
+            // and its palette code don't both show — see DmChatScreen.
             val suggested = remember(topUsage) {
-                val used = topUsage.map { it.shortcode }
-                val fallback = ReactionPalette.picker.map { it.first }
-                (used + fallback.filter { it !in used }).take(8)
+                val seen = mutableSetOf<String>()
+                val out = mutableListOf<String>()
+                (topUsage.map { it.shortcode } + ReactionPalette.picker.map { it.first })
+                    .forEach { item ->
+                        if (seen.add(ReactionPalette.normalize(item))) out.add(item)
+                    }
+                out.take(8)
             }
 
             var searchOpen by remember { mutableStateOf(false) }

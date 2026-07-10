@@ -4,6 +4,7 @@ import io.nisfeb.talon.data.MessageDao
 import io.nisfeb.talon.data.MessageEntity
 import io.nisfeb.talon.data.MessageMediaDao
 import io.nisfeb.talon.data.ReactionEntity
+import io.nisfeb.talon.ui.ReactionPalette
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -52,7 +53,10 @@ internal fun ingestedPost(whom: String, post: JsonElement): IngestedPost {
 
     (seal["reacts"] as? JsonObject)?.forEach { (author, emoji) ->
         val e = emoji.asText() ?: return@forEach
-        rx += ReactionEntity(whom, id, author, e)
+        // Store the canonical glyph — chips group by the stored string, so an
+        // FE0F-bearing wire value would split into its own chip alongside the
+        // normalized one we write from react() / the live add-react handlers.
+        rx += ReactionEntity(whom, id, author, ReactionPalette.normalize(e))
     }
 
     (seal["replies"] as? JsonObject)?.forEach { (_, replyEl) ->
@@ -68,7 +72,7 @@ internal fun ingestedPost(whom: String, post: JsonElement): IngestedPost {
         msgs += pureReplyEntity(whom, id, rid, rEssay)
         (rSeal["reacts"] as? JsonObject)?.forEach { (author, emoji) ->
             val e = emoji.asText() ?: return@forEach
-            rx += ReactionEntity(whom, rid, author, e)
+            rx += ReactionEntity(whom, rid, author, ReactionPalette.normalize(e))
         }
     }
     return IngestedPost(msgs, rx, tombs)

@@ -42,7 +42,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 
 /**
  * Desktop / tablet-landscape host. Below [ExpandedThreshold] this is a
@@ -62,6 +64,10 @@ import androidx.compose.ui.unit.dp
 @Composable
 fun DesktopShell(
     activeRailTab: RailTab,
+    // A modal rail item (e.g. Assistant) whose destination is currently
+    // showing — highlighted instead of the active pane-tab so the rail
+    // reflects where you are. Null when a pane-tab is the active surface.
+    activeModalItem: RailItem? = null,
     enabledItems: List<RailItem>,
     onItemClicked: (RailItem) -> Unit,
     list: @Composable () -> Unit,
@@ -70,18 +76,28 @@ fun DesktopShell(
     onListFractionChange: (Float) -> Unit,
     rightSidebar: (@Composable () -> Unit)? = null,
     menuBadges: MenuBadges = MenuBadges(),
+    // Full-width content that takes over the whole area beside the rail,
+    // bypassing the list/detail split — for a screen that manages its own
+    // panes (e.g. the assistant: its own conversations/jobs sidebar + a
+    // transcript). Keeps the rail visible for navigation.
+    content: (@Composable () -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     BoxWithConstraints(modifier = modifier.fillMaxSize()) {
         val expanded = maxWidth >= ExpandedThreshold
         if (!expanded) {
             // Compact: rail/sidebar collapsed; identical to Phase 1.
-            if (detail != null) detail() else list()
+            when {
+                content != null -> content()
+                detail != null -> detail()
+                else -> list()
+            }
             return@BoxWithConstraints
         }
         Row(modifier = Modifier.fillMaxSize()) {
             DesktopRail(
                 activeTab = activeRailTab,
+                activeModalItem = activeModalItem,
                 enabledItems = enabledItems,
                 onItemClicked = onItemClicked,
                 menuBadges = menuBadges,
@@ -95,12 +111,16 @@ fun DesktopShell(
             // drawer was open and its panel happened to clip against
             // the list-pane bounds.
             Box(modifier = Modifier.weight(1f).fillMaxHeight()) {
-                ChatPaneScaffold(
-                    list = list,
-                    detail = detail,
-                    listFraction = listFraction,
-                    onListFractionChange = onListFractionChange,
-                )
+                if (content != null) {
+                    content()
+                } else {
+                    ChatPaneScaffold(
+                        list = list,
+                        detail = detail,
+                        listFraction = listFraction,
+                        onListFractionChange = onListFractionChange,
+                    )
+                }
             }
             // Right sidebar — Phase 3's thread / group-info / media-
             // drilldown surface. Fixed 360dp width when present; when
@@ -124,6 +144,7 @@ fun DesktopShell(
 @Composable
 private fun DesktopRail(
     activeTab: RailTab,
+    activeModalItem: RailItem?,
     enabledItems: List<RailItem>,
     onItemClicked: (RailItem) -> Unit,
     menuBadges: MenuBadges,
@@ -139,7 +160,13 @@ private fun DesktopRail(
             modifier = Modifier.fillMaxHeight().padding(vertical = 8.dp),
         ) {
             for (item in enabledItems) {
-                val isSelected = item.isPaneTab && item.toRailTab() == activeTab
+                // A modal destination (Assistant) wins the highlight while
+                // it's showing, so the previously-active pane-tab goes dark.
+                val isSelected = if (activeModalItem != null) {
+                    item == activeModalItem
+                } else {
+                    item.isPaneTab && item.toRailTab() == activeTab
+                }
                 RailIconButton(
                     item = item,
                     isSelected = isSelected,
@@ -187,11 +214,20 @@ private fun RailIconButton(
         ) {
             Box {
                 IconButton(onClick = onClick) {
-                    Icon(
-                        imageVector = railIcon(item),
-                        contentDescription = label,
-                        tint = tint,
-                    )
+                    val icon = railIcon(item)
+                    if (icon != null) {
+                        Icon(imageVector = icon, contentDescription = label, tint = tint)
+                    } else {
+                        // The Assistant has no material glyph — render the
+                        // letter "A" so it sits in the panel like every other
+                        // feature (matching the icon's 24dp visual weight).
+                        Text(
+                            "A",
+                            color = tint,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 20.sp,
+                        )
+                    }
                 }
                 if (showBadge) {
                     // 8dp dot on the icon's top-right corner. The
@@ -214,7 +250,7 @@ private fun RailIconButton(
     }
 }
 
-private fun railIcon(item: RailItem): ImageVector = when (item) {
+private fun railIcon(item: RailItem): ImageVector? = when (item) {
     // All icons resolve to material-icons-core (verified by
     // unzipping the core jar at plan-write time). Safe with the
     // slim-jar strip; auditIconKeepList catches any drift.
@@ -222,6 +258,8 @@ private fun railIcon(item: RailItem): ImageVector = when (item) {
     RailItem.Statuses -> Icons.Filled.Person
     RailItem.Bookmarks -> Icons.Filled.Star
     RailItem.Activity -> Icons.Filled.Notifications
+    // Null → rendered as the letter "A" in RailIconButton.
+    RailItem.Assistant -> null
     RailItem.Profile -> Icons.Filled.AccountCircle
     RailItem.Watchwords -> Icons.Filled.Search
     RailItem.TodaysBrief -> Icons.Filled.DateRange
@@ -235,6 +273,7 @@ private fun railLabel(item: RailItem): String = when (item) {
     RailItem.Statuses -> "Statuses"
     RailItem.Bookmarks -> "Bookmarks"
     RailItem.Activity -> "Activity"
+    RailItem.Assistant -> "Assistant"
     RailItem.Profile -> "My profile"
     RailItem.Watchwords -> "Watchwords"
     RailItem.TodaysBrief -> "Today's brief"

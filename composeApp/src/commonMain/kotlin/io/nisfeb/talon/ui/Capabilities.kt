@@ -11,7 +11,48 @@ package io.nisfeb.talon.ui
  */
 expect val isDailyDigestSupported: Boolean
 expect val isVoiceMessagesSupported: Boolean
+
+/**
+ * Whether the **on-device embedder** runs on this platform — the
+ * backbone for semantic search, important-message highlights, and the
+ * assistant's auto topic-grouping. Android: true (MediaPipe, 100-dim).
+ * Desktop: the [io.nisfeb.talon.ai.EmbedderProbe] verdict (DJL ONNX,
+ * 384-dim) — works on most hosts but SIGSEGVs on a few Linux libstdc++
+ * ABIs, so it's gated on a one-time child-process probe. This is NOT
+ * the gate for the assistant itself (see [isAssistantSupported]); the
+ * assistant degrades to keyword search + flat history without it.
+ */
 expect val isOnDeviceAiSupported: Boolean
+
+/**
+ * Whether the AI **assistant** can be offered at all. True on both
+ * Android and desktop: the assistant only needs a cloud LLM key + a
+ * ship session, both of which every platform has. Retrieval and
+ * topic-grouping are *enhanced* by [isOnDeviceAiSupported] but degrade
+ * gracefully (lexical keyword search, flat history) where it's off.
+ * Gates the assistant entry point and the Agent/Mcp settings toggles.
+ */
+expect val isAssistantSupported: Boolean
+
+/**
+ * Whether user-defined **Loops** (a saved prompt run on a schedule
+ * through the assistant agent, headless) are offered. Android: true —
+ * AlarmManager fires the loop even with the app closed. Desktop: true —
+ * a coroutine ticker (App.kt) runs due loops while the window is open;
+ * loops only advance with the app running, which the screen's copy
+ * states (CLAUDE.md §3: an honest ceiling, not a faked schedule).
+ * Gates the Loops screen + nav entry (which also require an LLM key).
+ */
+expect val isLoopsSupported: Boolean
+
+/**
+ * Whether scheduled work fires with the app closed. Android: true —
+ * AlarmManager + BootReceiver. Desktop: false — the ticker only runs
+ * while the window is open. Nothing is gated on this; it selects the
+ * honest wording on the Loops screen so a desktop user isn't promised a
+ * schedule the platform can't keep (CLAUDE.md §3).
+ */
+expect val isBackgroundSchedulingSupported: Boolean
 
 /**
  * Whether the platform can launch an in-app QR scanner for login
@@ -39,6 +80,18 @@ expect val isQrLoginScanSupported: Boolean
 expect val isTouchSwipeNavSupported: Boolean
 
 /**
+ * Whether a plain left-tap on a message opens its action menu.
+ * Android: true — tap-anywhere is the menu affordance (no right mouse
+ * button, and long-press is reserved for text selection). Desktop:
+ * false — a left-press-drag belongs to the SelectionContainer (select
+ * message text); a row-level clickable would swallow that drag and pop
+ * the menu on mouse-up instead. Desktop opens the menu via right-click
+ * (onSecondaryClick) on the row. Gates the row clickable + StoryRenderer
+ * onMessageTap in DmChatScreen.MessageRow.
+ */
+expect val isTapToOpenMenuSupported: Boolean
+
+/**
  * Short human-readable name for the host platform — surfaced in the
  * About panel so the user can see at a glance which build they're on.
  * Android returns "Android"; desktop returns the os.name (e.g. "Linux",
@@ -50,8 +103,9 @@ expect val platformLabel: String
  * Per-feature supported predicate. The [isOnDeviceAiSupported] flag
  * gates whether the on-device-AI section of SettingsScreen renders
  * at all; this finer predicate then hides individual toggles whose
- * platform impl hasn't landed (e.g. EntityActions wants ML Kit on
- * Android, no equivalent on desktop yet).
+ * platform impl hasn't landed. (Currently the on-device feature is
+ * SmartFeatures — the embedder suite — supported wherever the
+ * embedder is.)
  */
 expect fun isOnDeviceAiFeatureSupported(
     feature: io.nisfeb.talon.ai.AiSettings.Feature,

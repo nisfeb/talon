@@ -26,7 +26,6 @@ import io.nisfeb.talon.TalonSyncService
 import io.nisfeb.talon.ui.RailItem
 import io.nisfeb.talon.ui.BatteryExemptionBanner
 import io.nisfeb.talon.ui.CalendarLauncher
-import io.nisfeb.talon.ui.EntityActionChips
 import io.nisfeb.talon.ui.InlineAudioPlayer
 import io.nisfeb.talon.ui.InlineVideoPlayer
 import io.nisfeb.talon.ui.LocalCalendarLauncher
@@ -165,7 +164,14 @@ fun TalonApp(
     // plain `remember { mutableStateOf(initialX) }` would silently
     // ignore — that was the rc23-era "tap a notification, nothing
     // happens" bug.
-    var openWhom by remember { mutableStateOf<String?>(initialOpenWhom) }
+    // A "group:~host/name" deep link (group-invite notification) opens
+    // the group, not a chat, so keep it out of openWhom.
+    var openWhom by remember {
+        mutableStateOf(initialOpenWhom?.takeUnless { it.startsWith("group:") })
+    }
+    var openGroupFlag by remember {
+        mutableStateOf(initialOpenWhom?.takeIf { it.startsWith("group:") }?.removePrefix("group:"))
+    }
     // Scroll target is consumed once the chat screen actually uses it,
     // so navigating back and reopening doesn't re-snap to the same msg.
     var pendingScrollMessageId by remember { mutableStateOf(initialScrollMessageId) }
@@ -190,10 +196,16 @@ fun TalonApp(
     // Curated contact book (%contacts /v1/book) — gates add affordances
     // and backs the Contacts screen.
     val bookContacts by app.repo.bookContacts.collectAsState()
+    // AI settings — gates the assistant entry point (see DmListScreen
+    // onOpenAssistant below); collected here so a toggle/key change
+    // recomposes the gate live.
+    val aiState by app.aiSettings.state.collectAsState()
     // Daily Digest screen — initialOpenDigest non-null means we
     // arrived from a notification tap, so route straight there.
     var digestOpen by remember { mutableStateOf(initialOpenDigest != null) }
     var settingsOpen by remember { mutableStateOf(false) }
+    var assistantOpen by remember { mutableStateOf(false) }
+    var loopsOpen by remember { mutableStateOf(false) }
     var sidebarSettingsOpen by remember { mutableStateOf(false) }
     var adminListOpen by remember { mutableStateOf(false) }
     var adminGroupFlag by remember { mutableStateOf<String?>(null) }
@@ -254,7 +266,14 @@ fun TalonApp(
             groupInfoDrilldown = null
         }
         if (initialOpenWhom != null) {
-            openWhom = initialOpenWhom
+            // A group-invite notification deep-links as "group:~host/name"
+            // — route it to the group screen, not openWhom (which only
+            // understands channel nests and DM ships).
+            if (initialOpenWhom.startsWith("group:")) {
+                openGroupFlag = initialOpenWhom.removePrefix("group:")
+            } else {
+                openWhom = initialOpenWhom
+            }
             consumed = true
         }
         if (initialScrollMessageId != null) {
@@ -329,7 +348,6 @@ fun TalonApp(
     var notebookEditSentMs by remember { mutableStateOf(0L) }
     var openGalleryPostId by remember { mutableStateOf<String?>(null) }
     var galleryComposeOpen by remember { mutableStateOf(false) }
-    var openGroupFlag by remember { mutableStateOf<String?>(null) }
 
     // Per-ship persistent store for the last-open conversation.
     // `remember(app)` keeps the same SharedPreferences-backed instance
@@ -380,6 +398,18 @@ fun TalonApp(
     // `pendingShareTarget` auto-dispatch path (Sharing Shortcut)
     // doesn't have to duplicate it. Caller is responsible for
     // toggling openWhom and calling onShareConsumed afterward.
+    // The launches below swallowed failures whole: a share that couldn't
+    // read or upload just disappeared. Toast the reason (uploadImage's
+    // empty-bytes message names the cloud-photo fix) instead of going mute.
+    val shareFailedToast: (Throwable) -> Unit = { t ->
+        appScope.launch(kotlinx.coroutines.Dispatchers.Main) {
+            android.widget.Toast.makeText(
+                context,
+                "Share failed: ${t.message ?: "unknown error"}",
+                android.widget.Toast.LENGTH_LONG,
+            ).show()
+        }
+    }
     val dispatchShare: (ShareIntent, String) -> Unit = { share, whom ->
         when (share) {
             is ShareIntent.Text -> {
@@ -408,7 +438,7 @@ fun TalonApp(
                             height = 0,
                             alt = name,
                         )
-                    }
+                    }.onFailure { shareFailedToast(it) }
                 }
             }
             is ShareIntent.File -> {
@@ -425,7 +455,7 @@ fun TalonApp(
                             fileName = name,
                         )
                         app.repo.send(whom, "[📎 $name]($hostedUrl)")
-                    }
+                    }.onFailure { shareFailedToast(it) }
                 }
             }
         }
@@ -458,7 +488,7 @@ fun TalonApp(
             // has opted in. Indexer is idempotent so it's safe to call
             // every launch — but if the feature is off we skip the
             // model download + CPU entirely.
-            if (app.aiSettings.state.value.semanticSearchEnabled) {
+            if (app.aiSettings.state.value.smartFeaturesEnabled) {
                 app.embeddingIndexer.start()
             }
         }
@@ -569,9 +599,26 @@ fun TalonApp(
                 )
             }
         }
+        // New group invite → notify, same as a DM request. Tapping opens
+        // the group (its flag doubles as the whom via the "group:" route).
+        app.repo.groupInviteListener = { invite ->
+            appScope.launch {
+                val from = invite.inviter?.let { " from $it" } ?: ""
+                Notifications.showMessage(
+                    context = context,
+                    whom = "group:${invite.flag}",
+                    postId = invite.flag,
+                    parentId = null,
+                    title = invite.title ?: invite.flag,
+                    body = "invited you to a group$from",
+                    sentMs = System.currentTimeMillis(),
+                )
+            }
+        }
         onDispose {
             app.repo.messageListener = null
             app.repo.dmInviteListener = null
+            app.repo.groupInviteListener = null
         }
     }
 
@@ -661,6 +708,51 @@ fun TalonApp(
     val urbAwareUriHandler = remember(platformUriHandler, urbLinkHandler) {
         io.nisfeb.talon.ui.UrbAwareUriHandler(platformUriHandler, urbLinkHandler)
     }
+    val citeResolver = remember(app) { io.nisfeb.talon.ui.TalonCiteResolver(app.db, app.repo) }
+    val openCitation: (io.nisfeb.talon.urbit.StoryPart.Citation) -> Unit =
+        remember(citeResolver) {
+            { cite ->
+                appScope.launch {
+                    val jump = io.nisfeb.talon.ui.resolveCiteJump(cite, citeResolver) {
+                        runCatching { app.db.groups().channelGroupFor(it)?.groupFlag }.getOrNull()
+                    }
+                    when (jump) {
+                        is io.nisfeb.talon.ui.CiteJump.Group -> {
+                            openWhom = null
+                            revealGroupRequest = jump.flag
+                        }
+                        is io.nisfeb.talon.ui.CiteJump.Message -> {
+                            openConversationAction()
+                            jump.groupFlag?.let { revealGroupRequest = it }
+                            pendingScrollMessageId = jump.messageId
+                            openWhom = jump.whom
+                        }
+                        is io.nisfeb.talon.ui.CiteJump.Reply -> {
+                            openConversationAction()
+                            jump.groupFlag?.let { revealGroupRequest = it }
+                            openWhom = jump.whom
+                            pendingThreadAnchor = jump.replyId
+                            openThread = jump.parentId
+                        }
+                        null -> Unit
+                    }
+                }
+                Unit
+            }
+        }
+    // Root contact map so a quoted post's author resolves to the same
+    // nickname / mnemonym the rest of the app shows, not the bare @p.
+    val citeContacts by remember(app) {
+        io.nisfeb.talon.ui.contactMapFlow(
+            app.db.contacts().stream(),
+            app.db.clubs().stream(),
+            app.db.groups().streamGroups(),
+            app.db.groups().streamChannelGroups(),
+        )
+    }.collectAsState(initial = io.nisfeb.talon.ui.ContactMap.EMPTY)
+    val citeDisplayName: (String) -> String = remember(citeContacts) {
+        { ship -> citeContacts.displayName(ship) }
+    }
     androidx.compose.runtime.CompositionLocalProvider(
         // Bind the real ExoPlayer-backed inline players for chat
         // messages. Without this, StoryRenderer falls back to a
@@ -678,6 +770,9 @@ fun TalonApp(
         // to Lattice. Also avoids an ActivityNotFoundException crash for
         // users without Lattice — they get the install prompt instead.
         androidx.compose.ui.platform.LocalUriHandler provides urbAwareUriHandler,
+        io.nisfeb.talon.ui.LocalCiteResolver provides citeResolver,
+        io.nisfeb.talon.ui.LocalCitationOpen provides openCitation,
+        io.nisfeb.talon.ui.LocalDisplayName provides citeDisplayName,
     ) {
     urbPromptUrl?.let {
         io.nisfeb.talon.ui.InstallLatticeDialog(onDismiss = { urbPromptUrl = null })
@@ -699,6 +794,8 @@ fun TalonApp(
         BackHandler(enabled = watchwordsOpen) { watchwordsOpen = false }
         BackHandler(enabled = digestOpen) { digestOpen = false }
         BackHandler(enabled = settingsOpen) { settingsOpen = false }
+        BackHandler(enabled = assistantOpen) { assistantOpen = false }
+        BackHandler(enabled = loopsOpen) { loopsOpen = false }
         BackHandler(enabled = sidebarSettingsOpen) { sidebarSettingsOpen = false }
         BackHandler(enabled = adminGroupFlag != null) { adminGroupFlag = null }
         BackHandler(enabled = adminListOpen && adminGroupFlag == null) {
@@ -753,6 +850,8 @@ fun TalonApp(
             invitesOpen -> "Invites"
             openGroupFlag != null -> "GroupHome($openGroupFlag)"
             sidebarSettingsOpen -> "SidebarSettings"
+            assistantOpen -> "Assistant"
+            loopsOpen -> "Loops"
             settingsOpen -> "Settings"
             pendingShare != null -> "ShareTarget"
             openThread != null && openWhom != null -> "Thread($openWhom/$openThread)"
@@ -1019,6 +1118,36 @@ fun TalonApp(
                 )
             }
 
+            assistantOpen -> io.nisfeb.talon.ui.screens.AssistantScreen(
+                db = app.db,
+                aiSettings = app.aiSettings,
+                embedder = app.searchEmbedderClient,
+                repo = app.repo,
+                scheduler = app.loops,
+                onRunLoop = { app.loops.runOneNow(it) },
+                onBack = { assistantOpen = false },
+                onOpenMessage = { whom, postId, parentId ->
+                    assistantOpen = false
+                    openWhom = whom
+                    if (parentId != null) {
+                        pendingThreadAnchor = postId
+                        openThread = parentId
+                    } else {
+                        pendingScrollMessageId = postId
+                    }
+                },
+                modifier = mod,
+            )
+
+            loopsOpen -> io.nisfeb.talon.ui.screens.LoopsScreen(
+                db = app.db,
+                scheduler = app.loops,
+                onRunNow = { app.loops.runOneNow(it) },
+                onBack = { loopsOpen = false },
+                settingsSync = app.settingsSync,
+                modifier = mod,
+            )
+
             settingsOpen -> {
                 // Observe via the app-level flows so a ship switch
                 // re-renders the panel with the new ship's preview.
@@ -1073,6 +1202,12 @@ fun TalonApp(
                     onTestDigest = { app.dailyDigest.generateAndNotifyAsync("user_test") },
                     onOpenSidebarSettings = { sidebarSettingsOpen = true },
                     onOpenShareLoginQr = { shareLoginQrOpen = true },
+                    onOpenLoops = { loopsOpen = true },
+                    onMnemonymNamesChanged = { on ->
+                        appScope.launch {
+                            runCatching { app.repo.settingsSync?.pushMnemonymNames(on) }
+                        }
+                    },
                     modifier = mod,
                 )
             }
@@ -1283,7 +1418,6 @@ fun TalonApp(
                     // Android-only platform widgets — desktop hosts pass null
                     // and the screen degrades gracefully. Wired via
                     // composable slots so commonMain has no Android deps.
-                    entityChips = { text, m -> EntityActionChips(text, m) },
                     voiceComposer = { enabled, onRecorded ->
                         VoiceRecordButton(
                             enabled = enabled,
@@ -1369,6 +1503,15 @@ fun TalonApp(
                 menuSeen = app.menuSeen,
                 onOpenConversation = { openWhom = it },
                 onOpenSearch = { searchOpen = true },
+                // Opt-in + key-gated assistant entry point. Mirrors
+                // App.kt's gate. isAssistantSupported is true on both
+                // platforms — the embedder only enhances retrieval.
+                onOpenAssistant = if (isAssistantSupported &&
+                    aiState.assistantOn() &&
+                    aiState.hasKey()
+                ) {
+                    { assistantOpen = true }
+                } else null,
                 onNewMessage = { newDmOpen = true },
                 onOpenSelfProfile = { editingProfile = true },
                 onOpenStatusFeed = { statusFeedOpen = true },

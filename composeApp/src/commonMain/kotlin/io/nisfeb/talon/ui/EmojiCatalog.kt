@@ -18,14 +18,22 @@ object EmojiCatalog {
 
     /** Alias → canonical shortcode (for alternate names Tlon might emit). */
     private val aliases: Map<String, String> = mapOf(
-        ":thumbsup:" to ":+1:",
-        ":thumbsdown:" to ":-1:",
+        // Deprecated GitHub-style codes → Tlon's current canonical ones.
+        ":+1:" to ":thumbsup:",
+        ":-1:" to ":thumbsdown:",
         ":joy:" to ":laughing:",
         ":grin:" to ":grinning:",
         ":grinning_face:" to ":grinning:",
         ":smile:" to ":slight_smile:",
         ":heart_eyes:" to ":heart_eyes:",
         ":smiling_face:" to ":slight_smile:",
+        // Codes this catalog used to carry as entries — kept as aliases so
+        // reactions already stored under them still render as a glyph.
+        ":shades:" to ":sunglasses:",
+        ":water:" to ":droplet:",
+        ":mushroom_red:" to ":mushroom:",
+        ":wrapped_gift:" to ":gift:",
+        ":thumbup:" to ":thumbsup:",
     )
 
     val entries: List<Entry> = listOf(
@@ -74,7 +82,6 @@ object EmojiCatalog {
         Entry(":cowboy:", "🤠", listOf("cowboy", "yeehaw")),
         Entry(":partying:", "🥳", listOf("party", "celebrate", "birthday")),
         Entry(":disguised:", "🥸", listOf("disguise", "groucho")),
-        Entry(":shades:", "😎", listOf("cool", "sunglasses")),
         Entry(":nerd:", "🤓", listOf("nerd", "smart", "glasses")),
         Entry(":monocle:", "🧐", listOf("monocle", "inspect")),
         Entry(":confused:", "😕", listOf("confused")),
@@ -116,8 +123,8 @@ object EmojiCatalog {
         Entry(":dog_face:", "🐶", listOf("dog", "puppy")),
 
         // --- Gestures / body ---
-        Entry(":+1:", "👍", listOf("thumbs", "up", "yes", "ok")),
-        Entry(":-1:", "👎", listOf("thumbs", "down", "no", "nope")),
+        Entry(":thumbsup:", "👍", listOf("thumbs", "up", "yes", "ok")),
+        Entry(":thumbsdown:", "👎", listOf("thumbs", "down", "no", "nope")),
         Entry(":ok_hand:", "👌", listOf("ok", "okay")),
         Entry(":pinched:", "🤌", listOf("pinched", "italian")),
         Entry(":pinch:", "🤏", listOf("pinch", "small", "little")),
@@ -295,12 +302,11 @@ object EmojiCatalog {
         Entry(":tomato:", "🍅", listOf("tomato")),
         Entry(":avocado:", "🥑", listOf("avocado")),
         Entry(":corn:", "🌽", listOf("corn")),
-        Entry(":mushroom:", "🍄", listOf("mushroom")),
+        Entry(":mushroom:", "🍄", listOf("mushroom", "red")),
         Entry(":chili:", "🌶️", listOf("chili", "pepper", "hot", "spicy")),
         Entry(":cheese:", "🧀", listOf("cheese")),
         Entry(":bottle:", "🍼", listOf("bottle", "baby")),
         Entry(":milk:", "🥛", listOf("milk")),
-        Entry(":water:", "💧", listOf("water", "drop")),
 
         // --- Nature / animals ---
         Entry(":dog:", "🐕", listOf("dog")),
@@ -354,7 +360,6 @@ object EmojiCatalog {
         Entry(":tulip:", "🌷", listOf("tulip", "flower")),
         Entry(":leaves:", "🍃", listOf("leaves", "wind")),
         Entry(":fallen_leaf:", "🍂", listOf("leaf", "fall", "autumn")),
-        Entry(":mushroom_red:", "🍄", listOf("mushroom", "red")),
         Entry(":globe:", "🌍", listOf("globe", "earth", "world")),
         Entry(":earth_americas:", "🌎", listOf("earth", "americas")),
         Entry(":earth_asia:", "🌏", listOf("earth", "asia")),
@@ -403,7 +408,6 @@ object EmojiCatalog {
         Entry(":rainbow_flag:", "🏳️‍🌈", listOf("flag", "rainbow", "pride")),
         Entry(":checkered_flag:", "🏁", listOf("flag", "checkered", "finish")),
         Entry(":ribbon:", "🎀", listOf("ribbon")),
-        Entry(":wrapped_gift:", "🎁", listOf("gift", "present")),
         Entry(":tophat:", "🎩", listOf("tophat", "hat")),
         Entry(":graduation:", "🎓", listOf("graduation", "cap")),
         Entry(":baby:", "👶", listOf("baby")),
@@ -415,7 +419,6 @@ object EmojiCatalog {
         Entry(":older_man:", "👴", listOf("older", "man", "grandpa")),
         Entry(":older_woman:", "👵", listOf("older", "woman", "grandma")),
         Entry(":technologist:", "🧑‍💻", listOf("technologist", "developer", "coder")),
-        Entry(":thumbup:", "👍", listOf("thumb", "up")),
     )
 
     /** Fast lookup by canonical shortcode. */

@@ -236,4 +236,110 @@ class ActivityFeedParserTest {
             }
         }
     }
+    /**
+     * %react / %dm-react only reach us on the v5+ activity wire — v4's
+     * down-conversion returns ~ for them, so the agent emits no v4 fact
+     * at all. Shapes below are `++enjs` in desk/lib/activity-json.hoon:
+     * `key` is the reacted-to message, `parent` is present only when
+     * that message was itself a reply.
+     */
+    @Test
+    fun `a react on a top-level post labels with the glyph and targets the post`() {
+        val body = buildBody {
+            bundle(sourceKey = "ship/~zod") {
+                event(tag = "react", time = "100", eventObj = buildJsonObject {
+                    put("key", buildJsonObject { put("id", "~bus/1.000") })
+                    put("parent", kotlinx.serialization.json.JsonNull)
+                    put("author", "~bus")
+                    put("react", ":sparkles:")
+                })
+            }
+        }
+        val item = TlonChatRepo.parseActivityFeedBody(body).single()
+        assertTrue(item.kind.startsWith("Reacted"), "got '${item.kind}'")
+        assertEquals("~bus", item.author)
+        assertEquals("~bus/1.000".replace(".", ""), item.postId)
+        assertEquals(null, item.parentPostId, "a top-level react has no thread to open")
+    }
+
+    @Test
+    fun `a react on a reply opens the parent thread anchored on the reply`() {
+        val body = buildBody {
+            bundle(sourceKey = "ship/~zod") {
+                event(tag = "dm-react", time = "100", eventObj = buildJsonObject {
+                    put("key", buildJsonObject { put("id", "~bus/2.000") })
+                    put("parent", buildJsonObject { put("id", "~bus/1.000") })
+                    put("author", "~bus")
+                    put("react", "\uD83C\uDF89")
+                })
+            }
+        }
+        val item = TlonChatRepo.parseActivityFeedBody(body).single()
+        assertEquals("~bus/2000", item.postId, "the reply that was reacted to")
+        assertEquals("~bus/1000", item.parentPostId, "its parent post")
+    }
+
+    @Test
+    fun `a react with no glyph still labels`() {
+        val body = buildBody {
+            bundle(sourceKey = "ship/~zod") {
+                event(tag = "react", time = "100", eventObj = buildJsonObject {
+                    put("key", buildJsonObject { put("id", "~bus/1.000") })
+                })
+            }
+        }
+        assertEquals("Reacted", TlonChatRepo.parseActivityFeedBody(body).single().kind)
+    }
+
+    /**
+     * feed/init answers `{all, mentions, replies, summaries}` in one
+     * scry. We used to read `all` and drop the other two on the floor.
+     * They are the ship's own filtered views, not subsets we could
+     * re-derive: a mention lives in `all` AND `mentions`.
+     */
+    @Test
+    fun `parseActivityFeed splits the three views the ship returns`() {
+        val body = buildJsonObject {
+            put("all", buildJsonArray {
+                add(oneBundle("ship/~zod", "post", "300"))
+                add(oneBundle("ship/~zod", "post-mention", "200"))
+            })
+            put("mentions", buildJsonArray { add(oneBundle("ship/~zod", "post-mention", "200")) })
+            put("replies", buildJsonArray { add(oneBundle("ship/~zod", "reply", "100")) })
+            put("summaries", buildJsonObject { })
+        }
+        val feed = TlonChatRepo.parseActivityFeed(body)
+        assertEquals(2, feed.all.size)
+        assertEquals(1, feed.mentions.size)
+        assertEquals(1, feed.replies.size)
+        assertEquals("Mentioned you", feed.mentions.single().kind)
+        assertEquals("Replied", feed.replies.single().kind)
+
+        assertEquals(feed.all, feed.forTab(TlonChatRepo.ActivityTab.ALL))
+        assertEquals(feed.mentions, feed.forTab(TlonChatRepo.ActivityTab.MENTIONS))
+        assertEquals(feed.replies, feed.forTab(TlonChatRepo.ActivityTab.REPLIES))
+    }
+
+    @Test
+    fun `a ship that omits mentions and replies yields empty tabs, not a crash`() {
+        val body = buildJsonObject { put("all", buildJsonArray { add(oneBundle("ship/~zod", "post", "1")) }) }
+        val feed = TlonChatRepo.parseActivityFeed(body)
+        assertEquals(1, feed.all.size)
+        assertEquals(emptyList(), feed.mentions)
+        assertEquals(emptyList(), feed.replies)
+        assertEquals(TlonChatRepo.ActivityFeed(), TlonChatRepo.parseActivityFeed(null))
+    }
+
+    private fun oneBundle(sourceKey: String, tag: String, time: String) = buildJsonObject {
+        put("source-key", sourceKey)
+        put("events", buildJsonArray {
+            add(buildJsonObject {
+                put("time", time)
+                put("event", buildJsonObject {
+                    put(tag, buildJsonObject { put("author", "~bus") })
+                })
+            })
+        })
+    }
+
 }

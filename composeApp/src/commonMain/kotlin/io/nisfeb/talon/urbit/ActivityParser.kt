@@ -242,7 +242,11 @@ internal fun parseActivityEventTarget(tag: String, eventObj: JsonObject): Activi
         ?: eventObj["id"].asStr()
     val parentId = (eventObj["parent"] as? JsonObject)?.get("id").asStr()
         ?: (eventObj["top"] as? JsonObject)?.get("id").asStr()
-    val isReplyTag = tag.contains("reply")
+    // A %react / %dm-react names the reacted-to message in `key` and
+    // carries `parent` only when that message was itself a reply. So a
+    // react with a parent deep-links exactly like a reply does; one
+    // without is a react on a top-level post.
+    val isReplyTag = tag.contains("reply") || (tag.endsWith("react") && parentId != null)
     return when {
         isReplyTag && parentId != null ->
             ActivityEventTarget(keyId?.let(::undotAtom), parentId.let(::undotAtom))

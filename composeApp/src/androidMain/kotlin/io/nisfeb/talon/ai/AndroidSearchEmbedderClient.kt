@@ -62,6 +62,12 @@ class AndroidSearchEmbedderClient(
         return hits.mapNotNull { db.messages().getOne(it.whom, it.id) }
     }
 
+    override suspend fun keywordSearch(terms: List<String>): List<MessageEntity> =
+        io.nisfeb.talon.ai.keywordSearch(db, terms)
+
+    override suspend fun embed(text: String): FloatArray? =
+        withContext(Dispatchers.Default) { embedder.embed(text) }
+
     override suspend fun computeHighlights(): List<MessageEntity> =
         io.nisfeb.talon.ai.computeHighlights(db)
 }

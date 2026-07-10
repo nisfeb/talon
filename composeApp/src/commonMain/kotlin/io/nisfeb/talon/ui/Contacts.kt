@@ -24,6 +24,10 @@ data class ContactMap(
     val clubs: List<ClubEntity> = emptyList(),
     val groups: List<GroupEntity> = emptyList(),
     val channelGroups: List<ChannelGroupEntity> = emptyList(),
+    /** Ships without a nickname fall back to their mnemonym (see
+     *  [Mnemonym]) instead of the raw @p. Synced via %settings
+     *  (ui-prefs bucket); flip off in Settings for classic naming. */
+    val mnemonymNames: Boolean = true,
 ) {
     private val byShip: Map<String, ContactEntity> =
         contacts.associateBy(ContactEntity::ship)
@@ -41,7 +45,10 @@ data class ContactMap(
 
     fun nickname(ship: String): String? = byShip[ship]?.nickname
     fun avatar(ship: String): String? = byShip[ship]?.avatarUrl
-    fun displayName(ship: String): String = nickname(ship) ?: ship
+    fun displayName(ship: String): String =
+        nickname(ship)
+            ?: (if (mnemonymNames) Mnemonym.display(ship) else null)
+            ?: ship
     fun contact(ship: String): ContactEntity? = byShip[ship]
     fun shipColor(ship: String): String? = byShip[ship]?.color
 
@@ -115,12 +122,17 @@ fun contactMapFlow(
     clubsFlow: Flow<List<ClubEntity>>,
     groupsFlow: Flow<List<GroupEntity>>,
     channelGroupsFlow: Flow<List<ChannelGroupEntity>>,
+    // Defaulted to the app-wide switch so the ~17 call sites don't
+    // each have to thread a UiSettings reference through; flipping
+    // the setting re-emits every ContactMap and re-renders names.
+    mnemonymNamesFlow: Flow<Boolean> = MnemonymNames.enabled,
 ): Flow<ContactMap> = combine(
     contactsFlow.distinctUntilChanged(::sameContactDisplay),
     clubsFlow.distinctUntilChanged(),
     groupsFlow.distinctUntilChanged(),
     channelGroupsFlow.distinctUntilChanged(),
-) { c, cl, g, cg -> ContactMap(c, cl, g, cg) }
+    mnemonymNamesFlow.distinctUntilChanged(),
+) { c, cl, g, cg, mn -> ContactMap(c, cl, g, cg, mn) }
     .flowOn(Dispatchers.Default)
     // Conflate so cascading bootstrap emissions (e.g. all four DAOs
     // streaming initial values within a frame of each other) collapse

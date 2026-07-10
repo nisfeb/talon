@@ -46,10 +46,15 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -134,9 +139,16 @@ class TlonChatRepo(
     @Volatile private var started = false
     @Volatile private var channel: UrbitChannel? = null
     @Volatile private var http: OkHttpClient? = null
+    @Volatile private var baseUrl: okhttp3.HttpUrl? = null
     @Volatile private var ourPatp: String = ""
     @Volatile private var sessionJob: Job? = null
     @Volatile private var lastEventMs: Long = 0L
+
+    /** Authenticated client + base URL for the active ship (null until
+     *  [start]). Lets ship-adjacent features — e.g. the MCP endpoint at
+     *  `/mcp` — reuse the session without re-plumbing auth. */
+    val shipHttp: OkHttpClient? get() = http
+    val shipBaseUrl: okhttp3.HttpUrl? get() = baseUrl
 
     // Admin-groups cache: populated by refreshAdminGroups(), consumed
     // by the Administration screen. Fetching the full per-group state
@@ -250,11 +262,20 @@ class TlonChatRepo(
      */
     @Volatile var dmInviteListener: ((ship: String) -> Unit)? = null
 
+    /**
+     * Fired for each newly-arrived group invite (not ones already
+     * pending at launch). Mirrors [dmInviteListener] — the app wires it
+     * to a tray/system notification so a group invite is as hard to
+     * miss as a DM request.
+     */
+    @Volatile var groupInviteListener: ((InviteSummary) -> Unit)? = null
+
     fun start(session: UrbitSession) {
         if (started) return
         started = true
         ourPatp = session.ourPatp
         http = session.http
+        baseUrl = session.baseUrl
         scope.launch {
             // One-shot cleanup for anyone whose DM history was doubled
             // by the applyChatDelta dotted-id bug. Idempotent: on a
@@ -363,16 +384,42 @@ class TlonChatRepo(
         // Groups subscribe catches new channels added to existing
         // groups + meta edits — without it, channel-add is only picked
         // up on reconnect (bootstrap re-scry).
+        // %presence shipped with Tlon v11.4.0. On an older ship the
+        // agent isn't installed and this subscribe nacks — harmless,
+        // the nack is logged by applyEvent and typing simply never
+        // shows. Same for the pokes in setTyping/clearTyping.
+        //
+        // %activity /v5 is where %react and %dm-react events live:
+        // /v4's down-conversion returns ~ for them, so the agent emits
+        // no v4 fact at all and reaction notifications never arrive.
+        // But /v5 only exists on v11.4.0+, and an older ship's watch
+        // arm crashes on it — which would cost us *every* activity
+        // event, not just reactions. So ask for /v5 and let the nack
+        // walk us back to /v4.
+        subFallbacks.clear()
         listOf(
-            "chat" to "/v4",
-            "channels" to "/v4",
-            "activity" to "/v4",
-            "contacts" to "/v1/news",
-            "groups" to "/v1/groups",
-        ).map { (app, path) ->
+            SubSpec("chat", "/v4"),
+            SubSpec("channels", "/v4"),
+            SubSpec("activity", "/v5", fallback = "/v4"),
+            SubSpec("contacts", "/v1/news"),
+            SubSpec("groups", "/v1/groups"),
+            SubSpec("presence", "/v1"),
+            // Invites live here, not on the content subscriptions above:
+            // %chat pushes the pending-DM list on /dm/invited (never on
+            // /v4), and %groups pushes gang/invite updates on
+            // /gangs/updates. Without these two, a new invite only
+            // surfaced on the next reconnect's bootstrap scry — or, for
+            // groups, never, since refreshInvites ran only when the
+            // Invites screen was opened.
+            SubSpec("chat", "/dm/invited"),
+            SubSpec("groups", "/gangs/updates"),
+        ).map { spec ->
             async {
-                runCatching { ch.subscribe(app, path) }
-                    .onFailure { Log.e(TAG, "$app subscribe failed", it) }
+                runCatching { ch.subscribe(spec.app, spec.path) }
+                    .onSuccess { id ->
+                        spec.fallback?.let { subFallbacks[id] = spec.app to it }
+                    }
+                    .onFailure { Log.e(TAG, "${spec.app} subscribe failed", it) }
             }
         }.awaitAll()
 
@@ -432,6 +479,15 @@ class TlonChatRepo(
                 runCatching { bootstrapDmInvites(ch) }
                     .onFailure { Log.e(TAG, "dm-invites scry failed", it) }
             }
+            // Group invites had no bootstrap at all — refreshInvites ran
+            // only when the Invites screen was opened, so an invite that
+            // arrived while you weren't looking never lit the badge.
+            // notify=false: populate the badge, don't fire a toast for
+            // invites that were already pending before this launch.
+            val groupInvitesJob = async {
+                runCatching { refreshInvites(notify = false) }
+                    .onFailure { Log.e(TAG, "group-invites scry failed", it) }
+            }
             val firstRunJobs = if (firstRun) {
                 listOf(
                     async {
@@ -444,7 +500,10 @@ class TlonChatRepo(
                     },
                 )
             } else emptyList()
-            (listOf(initJob, activityJob, contactsJob, ordersJob, dmInvitesJob) + firstRunJobs).awaitAll()
+            (
+                listOf(initJob, activityJob, contactsJob, ordersJob, dmInvitesJob, groupInvitesJob) +
+                    firstRunJobs
+                ).awaitAll()
         } finally {
             if (firstRun) _bootstrapping.value = false
         }
@@ -659,21 +718,7 @@ class TlonChatRepo(
         width: Int,
         height: Int,
         alt: String,
-    ): String {
-        val content = buildJsonArray {
-            add(buildJsonObject {
-                put("block", buildJsonObject {
-                    put("image", buildJsonObject {
-                        put("src", src)
-                        put("width", width)
-                        put("height", height)
-                        put("alt", alt)
-                    })
-                })
-            })
-        }
-        return postContent(whom, content)
-    }
+    ): String = postContent(whom, imageStory(src, width, height, alt))
 
     /**
      * Post a notebook entry to a `diary/~host/slug` channel. Title is
@@ -919,6 +964,8 @@ class TlonChatRepo(
         val image: String?,
         val cover: String?,
         val memberCount: Int?,
+        /** "public" / "private" / "secret", when the preview said. */
+        val privacy: String? = null,
     )
 
     /**
@@ -1172,8 +1219,14 @@ class TlonChatRepo(
      * init response also contains everything else the client needs,
      * but we only read `foreigns` here.
      */
-    suspend fun refreshInvites() {
+    suspend fun refreshInvites(notify: Boolean = false) {
         val ch = channel ?: error("not connected")
+        // Flags we already knew about, so a live refresh only toasts
+        // genuinely new invites — not the whole pending set every time
+        // %groups republishes it. Null (never loaded) counts as "knew
+        // nothing", but bootstrap passes notify=false so that first load
+        // stays quiet regardless.
+        val known = _invites.value?.mapTo(mutableSetOf()) { it.flag } ?: mutableSetOf()
         val body = runCatching {
             ch.scry("groups-ui", "/v7/init") as? JsonObject
         }.onFailure { Log.w(TAG, "scry groups-ui/v7/init failed", it) }.getOrNull()
@@ -1200,6 +1253,11 @@ class TlonChatRepo(
             val meta = preview?.get("meta") as? JsonObject
             fun metaStr(k: String) = meta?.get(k).asStr()
                 ?.takeIf { it.isNotBlank() }
+            // member-count + privacy are siblings of `meta` in the group
+            // preview (sur/groups.hoon +$preview). Older ships spell the
+            // count `count`; either way it's a plain JSON number.
+            val memberCount = (preview?.get("member-count") ?: preview?.get("count"))
+                ?.let { (it as? JsonPrimitive)?.content?.toIntOrNull() }
             out += InviteSummary(
                 flag = flag,
                 inviter = inviter,
@@ -1207,10 +1265,15 @@ class TlonChatRepo(
                 description = metaStr("description"),
                 image = metaStr("image"),
                 cover = metaStr("cover"),
-                memberCount = null,
+                memberCount = memberCount,
+                privacy = preview?.get("privacy").asStr()?.takeIf { it.isNotBlank() },
             )
         }
         _invites.value = out.sortedBy { (it.title ?: it.flag).lowercase() }
+        if (notify) {
+            out.filter { it.flag !in known }
+                .forEach { runCatching { groupInviteListener?.invoke(it) } }
+        }
     }
 
     /** Accept an inbound group invite via `group-join`. */
@@ -1446,6 +1509,30 @@ class TlonChatRepo(
     )
 
     /**
+     * The three views `%activity`'s `feed/init` returns together. They
+     * aren't subsets of one another: `all` is the firehose, while
+     * `mentions` and `replies` are the ship's own filtered views, so
+     * we render what it gives us rather than re-deriving them.
+     */
+    data class ActivityFeed(
+        val all: List<ActivityFeedItem> = emptyList(),
+        val mentions: List<ActivityFeedItem> = emptyList(),
+        val replies: List<ActivityFeedItem> = emptyList(),
+    ) {
+        fun forTab(tab: ActivityTab): List<ActivityFeedItem> = when (tab) {
+            ActivityTab.ALL -> all
+            ActivityTab.MENTIONS -> mentions
+            ActivityTab.REPLIES -> replies
+        }
+    }
+
+    enum class ActivityTab(val label: String) {
+        ALL("All"),
+        MENTIONS("Mentions"),
+        REPLIES("Replies"),
+    }
+
+    /**
      * Process-singleton cache of the activity feed. Null = never
      * loaded; non-null = last successful fetch. UI binds to this
      * StateFlow so reopening the Activity view shows instantly,
@@ -1454,13 +1541,22 @@ class TlonChatRepo(
      * ship switch (TlonChatRepo is per-ship — a new repo means a
      * fresh empty StateFlow).
      */
-    private val _activityFeed = MutableStateFlow<List<ActivityFeedItem>?>(null)
-    val activityFeedFlow: StateFlow<List<ActivityFeedItem>?> = _activityFeed.asStateFlow()
+    private val _activityFeed = MutableStateFlow<ActivityFeed?>(null)
+    val activityFeedFlow: StateFlow<ActivityFeed?> = _activityFeed.asStateFlow()
 
-    suspend fun fetchActivityFeed(): List<ActivityFeedItem> {
+    suspend fun fetchActivityFeed(): ActivityFeed {
         val ch = channel ?: error("not connected")
-        val body = ch.scry("activity", "/v5/feed/init/30") as? JsonObject
-        val items = parseActivityFeedBody(body)
+        // The feed's version namespace shifted under us in Tlon v11.4.0:
+        // what /v6 now serves is what /v5 used to, and /v5 became the
+        // down-converted view that silently drops every %react and
+        // %dm-react event. Ask for the richest the ship will answer.
+        val body = scryFirstMatching(
+            ch,
+            "activity",
+            listOf("/v6/feed/init/30", "/v5/feed/init/30"),
+            "activity feed",
+        ) as? JsonObject
+        val items = parseActivityFeed(body)
         _activityFeed.value = items
         return items
     }
@@ -1495,7 +1591,7 @@ class TlonChatRepo(
             db.reactions().clearForPost(nest, id)
             val rx = reacts.entries.mapNotNull { (author, emoji) ->
                 val e = emoji.asStr() ?: return@mapNotNull null
-                ReactionEntity(nest, id, author, e)
+                ReactionEntity(nest, id, author, ReactionPalette.normalize(e))
             }
             if (rx.isNotEmpty()) db.reactions().upsertAll(rx)
         }
@@ -1761,6 +1857,15 @@ class TlonChatRepo(
         contentType: String,
         fileName: String,
     ): String = withContext(Dispatchers.IO) {
+        // Root guard for every upload path. ContentResolver reads of a
+        // not-yet-downloaded cloud item return 0 bytes WITHOUT throwing,
+        // and an uploaded blank object posts as an unrenderable message —
+        // the Samsung report. Callers with a nicer UX (staging, pickers)
+        // reject earlier; this catches the paths that don't (share sheet,
+        // which funnels FILES through here too — keep the wording generic).
+        require(bytes.isNotEmpty()) {
+            "the file came back empty — if it lives in cloud storage, download it to the device first"
+        }
         val ch = channel ?: error("not connected")
         val client = http ?: error("not connected")
 
@@ -1806,10 +1911,22 @@ class TlonChatRepo(
                 if (!resp.isSuccessful) error("memex upload-url failed: HTTP ${resp.code}")
                 val body = resp.body?.string() ?: error("empty memex response")
                 val obj = Json.parseToJsonElement(body).jsonObject
-                val hosted = obj["hostedUrl"].asStr()
-                    ?: error("no hostedUrl in memex response")
-                val upload = obj["uploadUrl"].asStr()
-                    ?: error("no uploadUrl in memex response")
+                // The memex wire response is { url, filePath }: `url` is the
+                // presigned PUT target (where the bytes go), `filePath` is the
+                // public URL to embed in the message. tlon-apps maps these as
+                // uploadUrl=data.url, hostedUrl=data.filePath (see
+                // packages/api/src/client/storageApi.ts). We used to fall the
+                // hosted URL back to `url` when there was no `hostedUrl` key —
+                // but `url` is the PUT-scoped presigned URL, so the posted
+                // image 404'd on GET ("unable to load image"). Read `filePath`
+                // for the src; the hostedUrl/uploadUrl aliases stay as
+                // defensive fallbacks for any other memex version. If the
+                // shape is still unrecognized, report the actual KEYS (not
+                // values — a value can be a short-lived presigned URL).
+                val upload = obj["uploadUrl"].asStr() ?: obj["url"].asStr()
+                    ?: error("no upload url in memex response; keys=${obj.keys}")
+                val hosted = obj["hostedUrl"].asStr() ?: obj["filePath"].asStr()
+                    ?: error("no hosted url in memex response; keys=${obj.keys}")
                 hosted to upload
             }
 
@@ -1890,17 +2007,23 @@ class TlonChatRepo(
 
     /**
      * Add or replace our reaction on a post. The caller may pass either
-     * a shortcode (`:+1:`) or a unicode glyph (`👍`); we normalize to a
-     * glyph here because Tlon migrated reactions away from shortcodes
-     * to unicode in 2025 — every other Tlon client now sends glyphs on
-     * the wire, so emitting a shortcode would fragment reaction
-     * grouping (a `:+1:` from us and a `👍` from web Tlon become two
+     * a shortcode (`:thumbsup:`) or a unicode glyph (`👍`); we normalize
+     * to a glyph here because Tlon migrated reactions away from
+     * shortcodes to unicode in 2025 — every other Tlon client now sends
+     * glyphs on the wire, so emitting a shortcode would fragment reaction
+     * grouping (a `:thumbsup:` from us and a `👍` from web Tlon become two
      * separate chips). `ReactionPalette.display` is shortcode→glyph
      * with a passthrough fallback, so glyphs in stay glyphs out.
      */
     suspend fun react(whom: String, postId: String, emoji: String) {
         val ch = channel ?: error("not connected")
+        // Wire: the emoji-presentation glyph (FE0F-bearing), to match
+        // what every other Tlon client sends. Local DB + usage: the
+        // variation-selector-stripped canonical form so our optimistic
+        // row groups with the same reaction arriving from any client
+        // (and with the ship's echo of this very poke).
         val glyph = ReactionPalette.display(emoji)
+        val canonical = ReactionPalette.normalize(glyph)
         val delta = buildJsonObject {
             put("add-react", buildJsonObject {
                 put("author", ourPatp)
@@ -1938,8 +2061,8 @@ class TlonChatRepo(
             )
             else -> error("unsupported whom: $whom")
         }
-        db.reactions().upsert(ReactionEntity(whom, postId, ourPatp, glyph))
-        runCatching { db.reactionUsage().bump(glyph) }
+        db.reactions().upsert(ReactionEntity(whom, postId, ourPatp, canonical))
+        runCatching { db.reactionUsage().bump(canonical) }
     }
 
     /** Remove our reaction from a post. */
@@ -2060,7 +2183,27 @@ class TlonChatRepo(
      * Reply to a top-level post. `parentId` is the post being replied to.
      * Returns the minted reply id so callers can match the echo.
      */
-    suspend fun reply(whom: String, parentId: String, text: String): String {
+    suspend fun reply(whom: String, parentId: String, text: String): String =
+        replyContent(whom, parentId, textToStory(text))
+
+    /** Reply with a structured image block, so it renders inline in the
+     *  thread instead of as the markdown link the old text fallback
+     *  produced. A reply's content is a full story, same as a post's —
+     *  there was never a wire reason to degrade it. */
+    suspend fun replyImage(
+        whom: String,
+        parentId: String,
+        src: String,
+        width: Int,
+        height: Int,
+        alt: String,
+    ): String = replyContent(whom, parentId, imageStory(src, width, height, alt))
+
+    private suspend fun replyContent(
+        whom: String,
+        parentId: String,
+        content: JsonArray,
+    ): String {
         val ch = channel ?: error("not connected")
         val sent = System.currentTimeMillis()
         val da = UrbitTime.unixMsToDa(sent)
@@ -2072,7 +2215,7 @@ class TlonChatRepo(
             whom.startsWith("heap/")
         ) "local_${da}" else UrbitTime.formatPostId(ourPatp, da)
         val replyEssay = buildJsonObject {
-            put("content", textToStory(text))
+            put("content", content)
             put("author", ourPatp)
             put("sent", sent)
             put("blob", JsonNull)
@@ -2153,9 +2296,17 @@ class TlonChatRepo(
         text: String,
         originalSentMs: Long,
         parentId: String? = null,
+        /** The post's current contentJson. Blocks the text editor can't
+         *  represent — a quoted post's cite, an image, a link preview —
+         *  are carried across the edit instead of being flattened into
+         *  literal text. Null re-parses [text] alone (legacy callers). */
+        originalContentJson: String? = null,
     ) {
         val ch = channel ?: error("not connected")
         if (!whom.startsWith("chat/")) error("edit only supported on channel chats")
+        val content = originalContentJson
+            ?.let { editedStory(it, text) }
+            ?: textToStory(text)
         // Preserve the original `sent` — the server sorts by it and
         // re-using our current time would bump the post to "just now".
         // Tlon keeps the original essay shell and only swaps content.
@@ -2166,7 +2317,7 @@ class TlonChatRepo(
             // the latter. Mirrors the `reply-essay` reads in the SSE
             // ingest path (see classifyReply / applyChatReplyDelta).
             val replyEssay = buildJsonObject {
-                put("content", textToStory(text))
+                put("content", content)
                 put("author", ourPatp)
                 put("sent", originalSentMs)
                 put("blob", JsonNull)
@@ -2185,7 +2336,7 @@ class TlonChatRepo(
                 })
             }
         } else {
-            val essay = buildEssay(textToStory(text), originalSentMs)
+            val essay = buildEssay(content, originalSentMs)
             buildJsonObject {
                 put("post", buildJsonObject {
                     // channel-action-2's `id` dejs is `(se %ud)` which runs
@@ -2412,6 +2563,18 @@ class TlonChatRepo(
             val pokeIdLong = outer["id"].asLong()
             if (err != null && err !is JsonNull) {
                 Log.w(TAG, "$response nack id=${outer["id"]} err=$err")
+                // A rejected subscribe may just mean the ship is older
+                // than the wire version we asked for. Retry the path we
+                // registered as this request's fallback, once.
+                if (response == "subscribe" && pokeIdLong != null) {
+                    subFallbacks.remove(pokeIdLong)?.let { (app, path) ->
+                        Log.w(TAG, "$app subscribe rejected; falling back to $path")
+                        scope.launch {
+                            runCatching { channel?.subscribe(app, path) }
+                                .onFailure { Log.e(TAG, "$app fallback subscribe failed", it) }
+                        }
+                    }
+                }
                 // Channel-post NACK: flip the optimistic local twin
                 // from "pending" → "failed" so the UI surfaces the
                 // failure (small "!" indicator). DM/club rows aren't
@@ -2479,6 +2642,16 @@ class TlonChatRepo(
             return
         }
 
+        // %presence /v1 — {init}, {here}, or {gone}.
+        if (
+            payload.containsKey("init") ||
+            payload.containsKey("here") ||
+            payload.containsKey("gone")
+        ) {
+            applyPresence(payload)
+            return
+        }
+
         // %settings events — wrapped as {put-entry|del-entry|put-bucket|…}.
         if (
             payload.containsKey("put-entry") ||
@@ -2496,6 +2669,18 @@ class TlonChatRepo(
         // reconnect triggers bootstrapGroups.
         if (payload.containsKey("flag") && payload.containsKey("r-group")) {
             applyGroupEvent(payload)
+            return
+        }
+
+        // %groups /gangs/updates — a bare map of {flag: {claim, preview,
+        // invite}}. A gang gaining an invite means someone just invited
+        // us to a group. Re-scry the foreign list (cheap, and rare) to
+        // refresh the badge + list, and toast the new ones.
+        if (looksLikeGangsFact(payload)) {
+            scope.launch {
+                runCatching { refreshInvites(notify = true) }
+                    .onFailure { Log.w(TAG, "refreshInvites on gang update failed", it) }
+            }
             return
         }
     }
@@ -2579,7 +2764,7 @@ class TlonChatRepo(
         (response["add-react"] as? JsonObject)?.let { ar ->
             val author = ar["author"].asStr() ?: return@let
             val react = ar["react"].asStr() ?: return@let
-            db.reactions().upsert(ReactionEntity(whom, id, author, react))
+            db.reactions().upsert(ReactionEntity(whom, id, author, ReactionPalette.normalize(react)))
             return
         }
         response["del-react"].asStr()?.let { author ->
@@ -2623,7 +2808,7 @@ class TlonChatRepo(
         (delta["add-react"] as? JsonObject)?.let { ar ->
             val author = ar["author"].asStr() ?: return@let
             val react = ar["react"].asStr() ?: return@let
-            db.reactions().upsert(ReactionEntity(whom, replyId, author, react))
+            db.reactions().upsert(ReactionEntity(whom, replyId, author, ReactionPalette.normalize(react)))
             return
         }
         delta["del-react"].asStr()?.let { author ->
@@ -2675,7 +2860,7 @@ class TlonChatRepo(
                 db.reactions().clearForPost(nest, intent.id)
                 val rx = intent.reacts.entries.mapNotNull { (author, emoji) ->
                     val e = emoji.asStr() ?: return@mapNotNull null
-                    ReactionEntity(nest, intent.id, author, e)
+                    ReactionEntity(nest, intent.id, author, ReactionPalette.normalize(e))
                 }
                 if (rx.isNotEmpty()) db.reactions().upsertAll(rx)
             }
@@ -2727,7 +2912,7 @@ class TlonChatRepo(
                 db.reactions().clearForPost(whom, replyId)
                 val rx = inner.reacts.entries.mapNotNull { (author, emoji) ->
                     val e = emoji.asStr() ?: return@mapNotNull null
-                    ReactionEntity(whom, replyId, author, e)
+                    ReactionEntity(whom, replyId, author, ReactionPalette.normalize(e))
                 }
                 if (rx.isNotEmpty()) db.reactions().upsertAll(rx)
             }
@@ -3011,22 +3196,196 @@ class TlonChatRepo(
         }
     }
 
+    /**
+     * One subscription, and the path to retry on if the ship rejects
+     * it. Lets us ask for a newer wire version without betting the
+     * whole stream on the ship being new enough to serve it.
+     */
+    private data class SubSpec(
+        val app: String,
+        val path: String,
+        val fallback: String? = null,
+    )
+
+    /** subscribe request id → (app, fallback path), pending a nack. */
+    private val subFallbacks =
+        java.util.concurrent.ConcurrentHashMap<Long, Pair<String, String>>()
+
+    // ───────── presence (typing indicators) ─────────
+
+    /** One peer's live presence in a context. */
+    private data class Live(val topic: String, val label: String, val expiresAtMs: Long)
+
+    /** A peer can announce more than one topic at once, so the inner
+     *  map is keyed by both. */
+    private data class PresenceKey(val ship: String, val topic: String)
+
+    /** context → ((ship, topic) → what they're doing, and until when). */
+    private val _presence = MutableStateFlow<Map<String, Map<PresenceKey, Live>>>(emptyMap())
+    private var presenceReaper: Job? = null
+
+    /**
+     * Who is doing what in [whom], as `ship → human label` ("typing…",
+     * "recording audio", "uploading an image"). Empty when nobody is,
+     * when the conversation has no presence context, or when the ship
+     * predates %presence.
+     */
+    fun presenceIn(whom: String): Flow<Map<String, String>> {
+        val context = Presence.contextFor(whom) ?: return flowOf(emptyMap())
+        return _presence.map { places ->
+            places[context].orEmpty()
+                .entries
+                .groupBy { it.key.ship }
+                .mapValues { (_, entries) ->
+                    // Show the most immediate thing they're doing.
+                    entries.minBy { Presence.topicPriority(it.value.topic) }.value.label
+                }
+        }.distinctUntilChanged()
+    }
+
+    /**
+     * When a group was last active — the newest message across any of
+     * its channels — as a Flow so the home-list row updates live. Null
+     * until it has any message. This is durable message history, not
+     * transient presence: it needs no v11.4.0 peer and doesn't flicker,
+     * unlike the typing signal [presenceIn] drives inside a channel.
+     */
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    fun groupLastActive(flag: String): Flow<Long?> =
+        db.groups().streamChannelsForGroup(flag)
+            .flatMapLatest { chans ->
+                val nests = chans.map { it.nest }
+                if (nests.isEmpty()) flowOf(null)
+                else db.messages().streamLatestSentMsAcross(nests)
+            }
+            .distinctUntilChanged()
+
+    /** When we last announced a given (context, topic). */
+    private val lastPresencePoke =
+        java.util.concurrent.ConcurrentHashMap<Pair<String, String>, Long>()
+
+    /**
+     * Announce that we're doing [topic] in [whom]. Safe to call on every
+     * keystroke: the entry lives 30s server-side, so we re-poke at most
+     * once per [Presence.REANNOUNCE_MS] and let it lapse on its own if
+     * the user walks away.
+     */
+    suspend fun announcePresence(
+        whom: String,
+        topic: String = Presence.TOPIC_TYPING,
+        text: String? = null,
+    ) {
+        val context = Presence.contextFor(whom) ?: return
+        val key = context to topic
+        val now = System.currentTimeMillis()
+        val last = lastPresencePoke[key]
+        if (last != null && now - last < Presence.REANNOUNCE_MS) return
+        lastPresencePoke[key] = now
+        val ch = channel ?: return
+        runCatching {
+            ch.poke("presence", "presence-action-1", Presence.setAction(context, ourPatp, topic, text))
+        }.onFailure {
+            // Pre-v11.4.0 ship, or we're not a participant. Don't retry
+            // on every keystroke.
+            lastPresencePoke[key] = now + 60_000L
+            Log.w(TAG, "presence set failed for $context/$topic", it)
+        }
+    }
+
+    /**
+     * Retract our entry — on send, when the composer empties, when an
+     * upload finishes. A timeout does not propagate to watchers, so
+     * without this the peer keeps seeing us for up to 30s.
+     */
+    suspend fun retractPresence(whom: String, topic: String = Presence.TOPIC_TYPING) {
+        val context = Presence.contextFor(whom) ?: return
+        if (lastPresencePoke.remove(context to topic) == null) return
+        val ch = channel ?: return
+        runCatching {
+            ch.poke("presence", "presence-action-1", Presence.clearAction(context, ourPatp, topic))
+        }.onFailure { Log.w(TAG, "presence clear failed for $context/$topic", it) }
+    }
+
+    /** Fire-and-forget [retractPresence] for callers that can't suspend —
+     *  notably a composer being disposed as the screen goes away. */
+    fun retractPresenceNow(whom: String, topic: String = Presence.TOPIC_TYPING) {
+        scope.launch { retractPresence(whom, topic) }
+    }
+
+    /** Apply one `%presence-response-1` fact. */
+    private fun applyPresence(payload: JsonObject) {
+        val update = Presence.parseResponse(payload) ?: return
+        val now = System.currentTimeMillis()
+        val next = if (update.snapshot) mutableMapOf() else _presence.value.toMutableMap()
+
+        update.gone.forEach { e ->
+            val people = next[e.context]?.toMutableMap() ?: return@forEach
+            people.remove(PresenceKey(e.ship, e.topic))
+            if (people.isEmpty()) next.remove(e.context) else next[e.context] = people
+        }
+        update.here.forEach { e ->
+            // Our own entry echoes back on contexts we host; the UI must
+            // not tell the user that they are typing.
+            if (e.ship == ourPatp) return@forEach
+            val people = next[e.context]?.toMutableMap() ?: mutableMapOf()
+            people[PresenceKey(e.ship, e.topic)] = Live(e.topic, e.label, now + e.timeoutMs)
+            next[e.context] = people
+        }
+        _presence.value = next
+        startPresenceReaper()
+    }
+
+    /**
+     * The host emits `%gone` only for an explicit `%clear` — an entry
+     * that simply times out is never retracted over the wire. So expire
+     * locally, or a peer who closes their app types forever.
+     */
+    private fun startPresenceReaper() {
+        if (presenceReaper?.isActive == true) return
+        presenceReaper = scope.launch {
+            while (isActive && _presence.value.isNotEmpty()) {
+                delay(2_000L)
+                val now = System.currentTimeMillis()
+                val pruned = _presence.value
+                    .mapValues { (_, people) -> people.filterValues { it.expiresAtMs > now } }
+                    .filterValues { it.isNotEmpty() }
+                if (pruned != _presence.value) _presence.value = pruned
+            }
+        }
+    }
+
     // ───────── contacts ─────────
 
     /**
-     * Load peer contact directory + self profile. Tlon's /v1/all scry
-     * returns Record<ship, ContactFields> where fields are typed values
-     * like `{type: 'text', value: 'Alice'}`. We pluck just nickname, bio
-     * and avatar for the UI.
+     * Load peer contact directory + self profile. Each entry's fields are
+     * typed values like `{type: 'text', value: 'Alice'}`; we pluck just
+     * nickname, bio and avatar for the UI.
+     *
+     * The directory scry moved in Tlon v11.4.0 (2026-07-02): `/v1/all`
+     * was renamed `/v1/directory` with no back-compat arm, and the entry
+     * shape changed from a flat field map to `{isContact, contact, mod}`
+     * (tloncorp/tlon-apps@c2be4a06). Probe the new path first and fall
+     * back — ships on v11.3.0 and earlier only answer the old one, and
+     * both are live in the wild. A silent `runCatching`-to-null here is
+     * what let the rename go unnoticed: every peer outside the contact
+     * book just lost its nickname. scryFirstMatching logs on total
+     * failure, so the next rename is loud.
      */
     private suspend fun bootstrapContacts(channel: UrbitChannel) = coroutineScope {
-        // /v1/all (every known peer) and /v1/self (our own contact card)
-        // are independent network round-trips. Run them in parallel so
-        // the whole bootstrap doesn't pay both serially.
-        val allJob = async { runCatching { channel.scry("contacts", "/v1/all") }.getOrNull() }
+        // The directory (every known peer) and /v1/self (our own contact
+        // card) are independent network round-trips. Run them in parallel
+        // so the whole bootstrap doesn't pay both serially.
+        val allJob = async {
+            scryFirstMatching(
+                channel,
+                "contacts",
+                listOf("/v1/directory", "/v1/all"),
+                "contacts directory",
+            )
+        }
         val selfJob = async { runCatching { channel.scry("contacts", "/v1/self") }.getOrNull() }
         // /v1/book is our curated contact book (kip -> [con, mod] page),
-        // a subset of /v1/all. Drives `bookContacts` + the Contacts screen.
+        // a subset of the directory. Drives `bookContacts` + Contacts screen.
         val bookJob = async { runCatching { channel.scry("contacts", "/v1/book") }.getOrNull() }
         val allBody = allJob.await()
         val selfBody = selfJob.await()
@@ -3036,17 +3395,11 @@ class TlonChatRepo(
 
         (allBody as? JsonObject)?.forEach { (ship, entry) ->
             val obj = entry as? JsonObject ?: return@forEach
-            // Newer ships wrap each entry as {contact: {...fields},
-            // mod-at: "..."}; older ones emit the flat field map.
-            val wrapped = obj["contact"] as? JsonObject
-            val fields = wrapped ?: obj
-            fresh.add(parseContact(ship, fields, parseContactModAt(obj)))
+            fresh.add(parseContact(ship, directoryFields(obj), parseContactModAt(obj)))
         }
 
         (selfBody as? JsonObject)?.let { obj ->
-            val wrapped = obj["contact"] as? JsonObject
-            val fields = wrapped ?: obj
-            fresh.add(parseContact(ourPatp, fields, parseContactModAt(obj)))
+            fresh.add(parseContact(ourPatp, directoryFields(obj), parseContactModAt(obj)))
         }
 
         // Book: keys are `~ship` (or `0v<cid>` for id-pages, which we
@@ -3472,9 +3825,24 @@ class TlonChatRepo(
          *   - any individual bundle / event with the wrong shape is
          *     skipped (not an error); the rest of the feed renders
          */
-        internal fun parseActivityFeedBody(body: JsonObject?): List<ActivityFeedItem> {
+        /**
+         * `feed/init` answers with all three views in one round-trip:
+         * `{all, mentions, replies, summaries}`. Split them so the UI
+         * can show the tabs Tlon's client does, rather than folding
+         * everything into one undifferentiated list.
+         */
+        internal fun parseActivityFeed(body: JsonObject?): ActivityFeed = ActivityFeed(
+            all = parseActivityFeedBody(body, "all"),
+            mentions = parseActivityFeedBody(body, "mentions"),
+            replies = parseActivityFeedBody(body, "replies"),
+        )
+
+        internal fun parseActivityFeedBody(
+            body: JsonObject?,
+            key: String = "all",
+        ): List<ActivityFeedItem> {
             if (body == null) return emptyList()
-            val all = body["all"] as? JsonArray ?: return emptyList()
+            val all = body[key] as? JsonArray ?: return emptyList()
             val items = mutableListOf<ActivityFeedItem>()
             for (bundleEl in all) {
                 val bundle = bundleEl as? JsonObject ?: continue
@@ -3508,6 +3876,12 @@ class TlonChatRepo(
                         "dm-invite" -> "Invited you to a DM"
                         "group-ask" -> "Requested group access"
                         "group-invite" -> "Invited you to a group"
+                        // %react / %dm-react reach us only on the v5+
+                        // wire; the v4 down-conversion drops them.
+                        "react", "dm-react" ->
+                            eventObj["react"].asStr()
+                                ?.let { "Reacted ${ReactionPalette.display(it)}" }
+                                ?: "Reacted"
                         else -> tag
                     }
                     val author = eventObj["mention-author"].asStr()
@@ -3597,3 +3971,52 @@ class TlonChatRepo(
     }
 
 }
+
+/**
+ * Flatten one entry of a %contacts directory scry into the flat field
+ * map `parseContact` expects. Three shapes are live in the wild:
+ *
+ *  - v11.4.0 `/v1/directory`: `{isContact, contact: {…}, mod: {…}}`,
+ *    where `mod` is our local overlay — a pet-name we set for them.
+ *  - older `/v1/all` variants: `{contact: {…}, mod-at: "…"}`.
+ *  - oldest `/v1/all`: the flat field map itself.
+ *
+ * `mod` wins over `contact`, the same precedence `pageFields` gives the
+ * book's `[con, mod]` page.
+ */
+internal fun directoryFields(entry: JsonObject): JsonObject {
+    val con = entry["contact"] as? JsonObject ?: return entry
+    val mod = entry["mod"] as? JsonObject ?: return con
+    return JsonObject(con + mod)
+}
+
+/**
+ * A `%groups /gangs/updates` fact is the only diff shaped as a bare
+ * `flag → object` map. Every other agent's fact carries literal keys
+ * (`whom`, `nest`, `flag`, `put-entry`, `init`, `here`…), whereas a
+ * gang fact's keys are the group flags themselves (`~ship/name`). So
+ * "every key is flag-shaped" identifies it without colliding with any
+ * other event the SSE stream delivers.
+ */
+internal fun looksLikeGangsFact(payload: JsonObject): Boolean =
+    payload.isNotEmpty() && payload.keys.all { it.startsWith("~") && '/' in it }
+
+/**
+ * A one-verse story carrying a single image block — the structured form
+ * both top-level posts (repo.sendImage) and thread replies
+ * (repo.replyImage) use, so the image renders inline instead of as the
+ * `[alt](url)` markdown link the old thread fallback produced.
+ */
+internal fun imageStory(src: String, width: Int, height: Int, alt: String): JsonArray =
+    buildJsonArray {
+        add(buildJsonObject {
+            put("block", buildJsonObject {
+                put("image", buildJsonObject {
+                    put("src", src)
+                    put("width", width)
+                    put("height", height)
+                    put("alt", alt)
+                })
+            })
+        })
+    }

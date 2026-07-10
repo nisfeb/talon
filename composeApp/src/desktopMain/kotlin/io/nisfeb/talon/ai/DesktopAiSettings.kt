@@ -1,6 +1,7 @@
 package io.nisfeb.talon.ai
 
 import io.nisfeb.talon.util.AppDirs
+import io.nisfeb.talon.util.Log
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -28,18 +29,87 @@ class DesktopAiSettings : AiSettingsRepository {
     override var onStateChange: ((AiSettings.Config, Boolean) -> Unit)? = null
 
     private fun loadInitial(): AiSettings.Config {
-        if (!file.exists()) return defaultConfig()
-        return runCatching { JSON.decodeFromString<AiSettings.Config>(file.readText()) }
-            .getOrElse { defaultConfig() }
+        // Persist the fresh config immediately: defaultConfig() mints a new
+        // deviceId, and returning it unwritten means a new id every launch
+        // until some setting happens to save. The write-loop lease keys on
+        // deviceId, so a churning id makes this machine unable to recognize
+        // its own prior claim — it reads a "foreign" fresh holder and skips
+        // its own scheduled fire.
+        if (!file.exists()) return defaultConfig().also(::writeAtomically)
+        val raw = runCatching { file.readText() }.getOrElse {
+            // Transient I/O failure (permissions, FS hiccup). Don't touch
+            // the file — it may be fine next launch and it holds the key.
+            // But the in-memory state is now defaults, so the user's first
+            // settings write would clobber the healthy file: latch a .bak
+            // rename ahead of it. The unwritten deviceId churns until the
+            // next good launch; that's the lesser harm.
+            Log.w(TAG, "ai_settings.json unreadable; starting with defaults", it)
+            backUpBeforeWrite = true
+            return defaultConfig()
+        }
+        return runCatching { JSON.decodeFromString<AiSettings.Config>(raw) }
+            .getOrElse {
+                // Unparseable (downgrade, hand-edit). The bytes hold the
+                // user's plaintext API key, so keep them as .bak instead of
+                // clobbering, then persist fresh defaults — the write-loop
+                // lease keys on deviceId, so it must land on disk now.
+                Log.w(TAG, "ai_settings.json unparseable; kept as .bak, using defaults", it)
+                runCatching { backUpExisting() }
+                defaultConfig().also(::writeAtomically)
+            }
+            // SmartFeatures folded four pre-0.14 toggles into one. The old
+            // fields are dropped by ignoreUnknownKeys and the new one defaults
+            // true, so without this an explicit opt-out of the on-device
+            // embedder silently reverts (and re-downloads the model) on
+            // upgrade. Read the legacy fields once from the raw JSON.
+            .let { cfg -> migrateSmartFeatures(cfg, raw) }
+            // Back-fill a stable device id for configs written before it
+            // existed, persisting so it stays put across launches.
+            .let { if (it.deviceId.isBlank()) it.copy(deviceId = newDeviceId()).also(::writeAtomically) else it }
+    }
+
+    /** Seed smartFeaturesEnabled from the pre-0.14 per-feature fields when
+     *  the new field is absent; off only if the user had them all off. The
+     *  old JSON was written with encodeDefaults=false, so a default-true
+     *  field was simply omitted — the shared policy counts absence as on. */
+    private fun migrateSmartFeatures(cfg: AiSettings.Config, raw: String): AiSettings.Config {
+        val obj = runCatching { Json.parseToJsonElement(raw) as? kotlinx.serialization.json.JsonObject }
+            .getOrNull() ?: return cfg
+        if (obj.containsKey("smartFeaturesEnabled")) return cfg
+        val legacy = LEGACY_SMART_FIELDS.mapNotNull { key ->
+            (obj[key] as? kotlinx.serialization.json.JsonPrimitive)?.content?.toBooleanStrictOrNull()
+        }
+        if (legacy.isEmpty()) return cfg
+        val migrated = AiSettings.migratedSmartFeatures(legacy, LEGACY_SMART_FIELDS.size)
+        return cfg.copy(smartFeaturesEnabled = migrated).also(::writeAtomically)
+    }
+
+    /** Set when the config file existed but couldn't be READ: the state
+     *  fell back to defaults, so the first write derived from it would
+     *  overwrite a possibly-healthy file (and the key inside). */
+    @Volatile
+    private var backUpBeforeWrite = false
+
+    private fun backUpExisting() {
+        Files.move(
+            file.toPath(),
+            File(file.parentFile, file.name + ".bak").toPath(),
+            StandardCopyOption.REPLACE_EXISTING,
+        )
     }
 
     /**
-     * Atomic write — temp file + ATOMIC_MOVE. A JVM crash mid-write
+     * Atomic write — temp file + ATOMIC_MOVE. A crash (or an abrupt
+     * process kill — more common on macOS app termination) mid-write
      * would otherwise leave a truncated config and the next launch
      * would fall back to defaults, silently dropping the user's
      * provider + API key.
      */
-    private fun persist(cfg: AiSettings.Config) {
+    private fun writeAtomically(cfg: AiSettings.Config) {
+        if (backUpBeforeWrite) {
+            backUpBeforeWrite = false
+            runCatching { backUpExisting() }
+        }
         val tmp = File(file.parentFile, file.name + ".tmp")
         tmp.writeText(JSON.encodeToString(cfg))
         Files.move(
@@ -47,6 +117,10 @@ class DesktopAiSettings : AiSettingsRepository {
             StandardCopyOption.ATOMIC_MOVE,
             StandardCopyOption.REPLACE_EXISTING,
         )
+    }
+
+    private fun persist(cfg: AiSettings.Config) {
+        writeAtomically(cfg)
         _state.value = cfg
     }
 
@@ -70,13 +144,24 @@ class DesktopAiSettings : AiSettingsRepository {
         val cur = _state.value
         val cfg = when (feature) {
             AiSettings.Feature.CatchMeUp -> cur.copy(catchMeUpEnabled = enabled)
-            AiSettings.Feature.EmojiReact -> cur.copy(emojiReactEnabled = enabled)
             AiSettings.Feature.DailyDigest -> cur.copy(dailyDigestEnabled = enabled)
-            AiSettings.Feature.EntityActions -> cur.copy(entityActionsEnabled = enabled)
-            AiSettings.Feature.SemanticSearch -> cur.copy(semanticSearchEnabled = enabled)
-            AiSettings.Feature.TopicClusters -> cur.copy(topicClustersEnabled = enabled)
-            AiSettings.Feature.ImportantMessages -> cur.copy(importantMessagesEnabled = enabled)
+            AiSettings.Feature.SmartFeatures -> cur.copy(smartFeaturesEnabled = enabled)
+            // Unified assistant — keep the legacy askUrbit flag mirrored.
+            AiSettings.Feature.Agent ->
+                cur.copy(agentEnabled = enabled, askUrbitEnabled = enabled)
         }
+        persist(cfg)
+        onStateChange?.invoke(cfg, false)
+    }
+
+    override fun setBraveApiKey(key: String) {
+        val cfg = _state.value.copy(braveApiKey = key)
+        persist(cfg)
+        onStateChange?.invoke(cfg, false)
+    }
+
+    override fun setPrompt(kind: AiSettings.PromptKind, value: String) {
+        val cfg = _state.value.withPrompt(kind, value)
         persist(cfg)
         onStateChange?.invoke(cfg, false)
     }
@@ -92,7 +177,9 @@ class DesktopAiSettings : AiSettingsRepository {
     override fun applyRemote(config: AiSettings.Config) {
         // applyRemote is called from %settings sync; persist without
         // re-firing onStateChange so we don't pingpong back to the ship.
-        file.writeText(JSON.encodeToString(config))
+        // Atomic (same as persist) so a kill mid-write can't truncate
+        // the file and wipe the key on next launch.
+        writeAtomically(config)
         _state.value = config
     }
 
@@ -111,16 +198,24 @@ class DesktopAiSettings : AiSettingsRepository {
         // a fresh install starts with the full feature set enabled.
         // Capability flags hide unsupported features per-platform.
         catchMeUpEnabled = true,
-        emojiReactEnabled = true,
         dailyDigestEnabled = true,
-        entityActionsEnabled = true,
-        semanticSearchEnabled = true,
-        topicClustersEnabled = true,
-        importantMessagesEnabled = true,
+        smartFeaturesEnabled = true,
+        askUrbitEnabled = false,
+        agentEnabled = false,
         syncEnabled = true,
+        deviceId = newDeviceId(),
     )
 
     private companion object {
+        private const val TAG = "DesktopAiSettings"
         private val JSON = Json { ignoreUnknownKeys = true; prettyPrint = false }
+        private fun newDeviceId(): String = java.util.UUID.randomUUID().toString()
+        // Pre-0.14 per-feature fields, folded into smartFeaturesEnabled.
+        private val LEGACY_SMART_FIELDS = listOf(
+            "semanticSearchEnabled",
+            "topicClustersEnabled",
+            "importantMessagesEnabled",
+            "entityActionsEnabled",
+        )
     }
 }

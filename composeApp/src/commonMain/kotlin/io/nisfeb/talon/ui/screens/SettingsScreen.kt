@@ -34,6 +34,10 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Surface
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -54,10 +58,14 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.material3.FilterChip
+import io.nisfeb.talon.ai.AgentPrompt
 import io.nisfeb.talon.ai.AiSettings
 import io.nisfeb.talon.ai.AiSettingsRepository
+import io.nisfeb.talon.ai.LoopPrompt
 import io.nisfeb.talon.ui.UiSettings
 import io.nisfeb.talon.ui.isOnDeviceAiFeatureSupported
+import io.nisfeb.talon.ui.isAssistantSupported
+import io.nisfeb.talon.ui.isLoopsSupported
 import io.nisfeb.talon.ui.isOnDeviceAiSupported
 import io.nisfeb.talon.ui.theme.ThemePreference
 
@@ -109,6 +117,14 @@ fun SettingsScreen(
      *  hosts that haven't wired the share screen yet (tests, older
      *  call sites) don't render the row. */
     onOpenShareLoginQr: () -> Unit = {},
+    /** Opens the Loops screen (scheduled agent prompts). Defaults to
+     *  no-op; the row only renders where isLoopsSupported + a key. */
+    onOpenLoops: () -> Unit = {},
+    /** Fired after the user flips the mnemonym-naming toggle; hosts
+     *  push the new value to %settings (ui-prefs bucket) so the choice
+     *  follows the user across devices. Local apply + persist happen
+     *  regardless via [io.nisfeb.talon.ui.MnemonymNames.set]. */
+    onMnemonymNamesChanged: (Boolean) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val aiState by aiSettings.state.collectAsState()
@@ -131,6 +147,9 @@ fun SettingsScreen(
     var baseUrl by remember { mutableStateOf(aiState.baseUrl.orEmpty()) }
     var revealKey by remember { mutableStateOf(false) }
     var providerMenuOpen by remember { mutableStateOf(false) }
+    var braveKey by remember { mutableStateOf(aiState.braveApiKey) }
+    var revealBrave by remember { mutableStateOf(false) }
+    var promptEditorKind by remember { mutableStateOf<AiSettings.PromptKind?>(null) }
 
     val dirty = provider != aiState.provider ||
         apiKey != aiState.apiKey ||
@@ -193,6 +212,21 @@ fun SettingsScreen(
                 }
             }
             Spacer(Modifier.height(8.dp))
+
+            // ── Ship naming ─────────────────────────────────────────
+            val mnemonymNames by io.nisfeb.talon.ui.MnemonymNames.enabled.collectAsState()
+            FeatureToggleRow(
+                label = "Word-based ship names",
+                description = "Ships without a nickname show as readable " +
+                    "words (~sampel-palnet → .accept.engulf.relents) " +
+                    "instead of the raw Urbit name. Synced across your " +
+                    "devices; off restores classic ~ship naming.",
+                enabled = mnemonymNames,
+                onChange = { on ->
+                    io.nisfeb.talon.ui.MnemonymNames.set(on)
+                    onMnemonymNamesChanged(on)
+                },
+            )
 
             // ── Accent color ────────────────────────────────────────
             FeatureToggleRow(
@@ -571,6 +605,9 @@ fun SettingsScreen(
                 )
                 AiSettings.Feature.values()
                     .filter { it.requiresCloudKey }
+                    // The Assistant needs the embedder host (isAssistantSupported);
+                    // the other cloud features run anywhere a key is set.
+                    .filter { isAssistantSupported || it != AiSettings.Feature.Agent }
                     .forEach { feature ->
                         FeatureToggleRow(
                             label = feature.label,
@@ -579,6 +616,83 @@ fun SettingsScreen(
                             onChange = { aiSettings.setFeature(feature, it) },
                         )
                     }
+
+                // The assistant subsumes MCP (ship tools) and web access —
+                // no separate toggles. When it's on, offer the optional
+                // Brave key that powers its web search (it can open URLs
+                // without one).
+                if (isAssistantSupported && aiFeatureEnabled(aiState, AiSettings.Feature.Agent)) {
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "Assistant web search",
+                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
+                    )
+                    OutlinedTextField(
+                        value = braveKey,
+                        onValueChange = { braveKey = it },
+                        label = { Text("Brave Search API key (optional)") },
+                        singleLine = true,
+                        visualTransformation = if (revealBrave) VisualTransformation.None
+                        else PasswordVisualTransformation(),
+                        trailingIcon = {
+                            IconButton(onClick = { revealBrave = !revealBrave }) {
+                                Icon(
+                                    imageVector = if (revealBrave) Icons.Filled.VisibilityOff
+                                    else Icons.Filled.Visibility,
+                                    contentDescription = if (revealBrave) "Hide key" else "Show key",
+                                )
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(
+                            onClick = { aiSettings.setBraveApiKey(braveKey.trim()) },
+                            enabled = braveKey.trim() != aiState.braveApiKey,
+                        ) { Text("Save key") }
+                    }
+                    Text(
+                        "Optional — a Brave Search API key lets the assistant search " +
+                            "the web (it can already open URLs without one). " +
+                            "Get a free key at search.brave.com/help/api.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "System prompts",
+                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
+                    )
+                    Text(
+                        "The instructions the AI follows. Urbit knowledge is shared by " +
+                            "the assistant and scheduled jobs; each also has its own. " +
+                            "Customizing changes behavior; edits sync across your devices.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    PROMPT_PARTS.forEach { part ->
+                        OutlinedButton(onClick = { promptEditorKind = part.kind }) {
+                            Text(
+                                if (aiState.prompt(part.kind).isBlank()) "Edit ${part.label}"
+                                else "Edit ${part.label} (customized)",
+                            )
+                        }
+                    }
+                    promptEditorKind?.let { kind ->
+                        val part = PROMPT_PARTS.first { it.kind == kind }
+                        SystemPromptEditorDialog(
+                            title = part.label,
+                            current = aiState.prompt(kind),
+                            default = part.default,
+                            onSave = {
+                                aiSettings.setPrompt(kind, it)
+                                promptEditorKind = null
+                            },
+                            onDismiss = { promptEditorKind = null },
+                        )
+                    }
+                }
             }
 
             // On-device features — gated behind isOnDeviceAiSupported.
@@ -621,6 +735,38 @@ fun SettingsScreen(
                     settings = dailyDigestSettings,
                     onTestDigest = onTestDigest,
                 )
+            }
+
+            // Loops — scheduled agent prompts. Needs a cloud key (it runs
+            // the agent) and a platform that can fire it, so it's gated on
+            // isLoopsSupported (Android via AlarmManager; desktop via the
+            // while-open ticker — both true).
+            if (isLoopsSupported && aiState.hasKey()) {
+                Spacer(Modifier.height(16.dp))
+                HorizontalDivider()
+                Spacer(Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable(onClick = onOpenLoops)
+                        .padding(vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Loops", style = MaterialTheme.typography.bodyLarge)
+                        Text(
+                            "Run a saved prompt over your chats on a schedule.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Icon(
+                        Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
 
             Spacer(Modifier.height(16.dp))
@@ -802,12 +948,10 @@ private fun formatNextFire(hourOfDay: Int, minuteOfDay: Int): String {
 internal fun aiFeatureEnabled(state: AiSettings.Config, feature: AiSettings.Feature): Boolean =
     when (feature) {
         AiSettings.Feature.CatchMeUp -> state.catchMeUpEnabled
-        AiSettings.Feature.EmojiReact -> state.emojiReactEnabled
         AiSettings.Feature.DailyDigest -> state.dailyDigestEnabled
-        AiSettings.Feature.EntityActions -> state.entityActionsEnabled
-        AiSettings.Feature.SemanticSearch -> state.semanticSearchEnabled
-        AiSettings.Feature.TopicClusters -> state.topicClustersEnabled
-        AiSettings.Feature.ImportantMessages -> state.importantMessagesEnabled
+        AiSettings.Feature.SmartFeatures -> state.smartFeaturesEnabled
+        // Unified assistant: either legacy flag counts as enabled.
+        AiSettings.Feature.Agent -> state.assistantOn()
     }
 
 @Composable
@@ -1285,4 +1429,81 @@ private fun ThemePreference.Mode.label(): String = when (this) {
     ThemePreference.Mode.System -> "System"
     ThemePreference.Mode.Light -> "Light"
     ThemePreference.Mode.Dark -> "Dark"
+}
+
+/** The three editable prompt parts, with the built-in default each falls
+ *  back to when blank. Drives both the Settings buttons and the editor. */
+private class PromptPart(
+    val kind: AiSettings.PromptKind,
+    val label: String,
+    val default: String,
+)
+
+private val PROMPT_PARTS = listOf(
+    PromptPart(AiSettings.PromptKind.UrbitKnowledge, "Urbit knowledge (shared)", AgentPrompt.urbitKnowledge),
+    PromptPart(AiSettings.PromptKind.Assistant, "assistant prompt", AgentPrompt.assistant),
+    PromptPart(AiSettings.PromptKind.Loop, "scheduled-job prompt", LoopPrompt.loop),
+)
+
+/**
+ * Full-height editor for the assistant's system prompt. Pre-fills with the
+ * current override, or the built-in [default] when none is set so the user
+ * edits from a real starting point. Saving text identical to the default
+ * stores "" — that keeps the user tracking the maintained default instead
+ * of freezing a copy. [onSave] receives the value to persist (sync handles
+ * propagation).
+ */
+@Composable
+private fun SystemPromptEditorDialog(
+    title: String,
+    current: String,
+    default: String,
+    onSave: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var text by remember { mutableStateOf(current.ifBlank { default }) }
+    Dialog(
+        onDismissRequest = onDismiss,
+        // Default-width dialogs cap at ~280dp — too narrow to edit a
+        // multi-paragraph prompt. Let the Surface size itself instead.
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        Surface(
+            shape = RoundedCornerShape(16.dp),
+            tonalElevation = 6.dp,
+            modifier = Modifier.fillMaxWidth(0.95f).fillMaxHeight(0.9f),
+        ) {
+            Column(
+                Modifier.padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Text(
+                    title.replaceFirstChar { it.uppercase() },
+                    style = MaterialTheme.typography.titleMedium,
+                )
+                Text(
+                    "Instructions the AI follows. Tailor it to change behavior, " +
+                        "or reset to the built-in default. Edits sync across your devices.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                OutlinedTextField(
+                    value = text,
+                    onValueChange = { text = it },
+                    modifier = Modifier.fillMaxWidth().weight(1f),
+                    textStyle = MaterialTheme.typography.bodySmall,
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(onClick = {
+                        // Unchanged default → store "" so future default
+                        // improvements still reach this user.
+                        onSave(if (text.trim() == default.trim()) "" else text)
+                    }) { Text("Save") }
+                    OutlinedButton(onClick = { text = default }) { Text("Reset to default") }
+                    Spacer(Modifier.weight(1f))
+                    TextButton(onClick = onDismiss) { Text("Cancel") }
+                }
+            }
+        }
+    }
 }

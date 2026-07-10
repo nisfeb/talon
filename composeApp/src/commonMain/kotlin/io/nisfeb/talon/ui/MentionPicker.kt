@@ -56,7 +56,10 @@ fun MentionPicker(
                             )
                         }
                         Text(
-                            s.ship,
+                            // Keep the exact @p visible next to the friendly
+                            // name — the row is how users verify WHICH ship
+                            // they're about to mention.
+                            s.mnemonym?.let { "${s.ship} · $it" } ?: s.ship,
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -68,7 +71,13 @@ fun MentionPicker(
     }
 }
 
-data class Suggestion(val ship: String, val nickname: String?)
+data class Suggestion(
+    val ship: String,
+    val nickname: String?,
+    /** Mnemonym shown alongside the patp when the naming setting is
+     *  on; null otherwise (or for galaxies/stars). */
+    val mnemonym: String? = null,
+)
 
 /**
  * Inspect the composer text + caret position for an active mention
@@ -78,7 +87,8 @@ data class Suggestion(val ship: String, val nickname: String?)
  *
  * Rules: the trigger must be word-initial (preceded by start-of-text or
  * whitespace) and the query chars so far must be patp-shaped
- * (lowercase letters + dashes).
+ * (lowercase letters + dashes) or mnemonym-shaped (words joined by
+ * dots — see [Mnemonym]).
  */
 fun detectMentionQuery(text: String, cursor: Int): Pair<String, Int>? {
     if (cursor == 0 || cursor > text.length) return null
@@ -87,7 +97,7 @@ fun detectMentionQuery(text: String, cursor: Int): Pair<String, Int>? {
         val c = text[i]
         if (c == '@' || c == '~') break
         if (c == ' ' || c == '\n' || c == '\t') return null
-        if (!(c.isLetter() || c == '-')) return null
+        if (!(c.isLetter() || c == '-' || c == '.')) return null
         i--
     }
     if (i < 0) return null
@@ -99,27 +109,40 @@ fun detectMentionQuery(text: String, cursor: Int): Pair<String, Int>? {
 
 /**
  * Shortlist contacts matching a query (case-insensitive). Matches
- * against both the nickname and the raw patp. Capped at 6 entries.
+ * against the nickname, the raw patp, and — when mnemonym naming is
+ * on — the ship's mnemonym, so `@sam`, `@sampel` and `@accept.eng`
+ * all find the same ship. Capped at 6 entries.
  */
 fun suggestionsFor(
     query: String,
     contactMap: ContactMap,
     allShips: Collection<String>,
 ): List<Suggestion> {
+    val mnemonyms = contactMap.mnemonymNames
+    fun nymOf(ship: String) = if (mnemonyms) Mnemonym.forShip(ship) else null
+
     val q = query.lowercase()
     if (q.isEmpty()) {
         return allShips.asSequence()
             .take(6)
-            .map { Suggestion(it, contactMap.nickname(it)) }
+            .map { Suggestion(it, contactMap.nickname(it), nymOf(it)) }
             .toList()
     }
+    // ponytail: whole-nym prefix match (leading dots stripped), so
+    // "@accept", "@.accept" and "@accept.eng" all hit — a mid-nym word
+    // like "@engulf" doesn't. Widen to per-word prefixes if it bites.
+    val qNym = q.trimStart('.')
     val matches = mutableListOf<Suggestion>()
     for (ship in allShips) {
         if (matches.size >= 6) break
         val shipLower = ship.lowercase().removePrefix("~")
         val nick = contactMap.nickname(ship)
-        if (shipLower.startsWith(q) || nick?.lowercase()?.contains(q) == true) {
-            matches += Suggestion(ship, nick)
+        val nym = nymOf(ship)
+        if (shipLower.startsWith(q) ||
+            nick?.lowercase()?.contains(q) == true ||
+            (qNym.isNotEmpty() && nym?.trimStart('.')?.startsWith(qNym) == true)
+        ) {
+            matches += Suggestion(ship, nick, nym)
         }
     }
     return matches

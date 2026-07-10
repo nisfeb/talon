@@ -68,9 +68,12 @@ fun Avatar(
 }
 
 private fun monogramFor(label: String): String {
-    val cleaned = label.removePrefix("~").removePrefix("#").trim()
+    // trimStart('.') — mnemonym fallback names are dot-joined words
+    // (".accept.engulf.relents"): use the words for the monogram, not
+    // the leading dot.
+    val cleaned = label.removePrefix("~").removePrefix("#").trimStart('.').trim()
     if (cleaned.isEmpty()) return "?"
-    val parts = cleaned.split('-', ' ', '_').filter { it.isNotEmpty() }
+    val parts = cleaned.split('-', ' ', '_', '.').filter { it.isNotEmpty() }
     return when (parts.size) {
         0 -> cleaned.take(1).uppercase()
         1 -> parts[0].take(2).uppercase()
