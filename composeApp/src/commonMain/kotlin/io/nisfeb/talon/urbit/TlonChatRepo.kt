@@ -3185,6 +3185,23 @@ class TlonChatRepo(
         }.distinctUntilChanged()
     }
 
+    /**
+     * How many distinct people are active in any of [nests] right now.
+     * The presence agent only feeds DM and channel contexts — never a
+     * group context — so "who's in this group" is the union of its
+     * channels' presence, not a group-level signal we could subscribe
+     * to. Reuses the channel presence every open chat already receives.
+     */
+    fun groupPresenceCount(nests: List<String>): Flow<Int> {
+        if (nests.isEmpty()) return flowOf(0)
+        val contexts = nests.mapNotNull(Presence::contextFor).toSet()
+        return _presence.map { places ->
+            buildSet {
+                contexts.forEach { ctx -> places[ctx]?.keys?.forEach { add(it.ship) } }
+            }.size
+        }.distinctUntilChanged()
+    }
+
     /** When we last announced a given (context, topic). */
     private val lastPresencePoke =
         java.util.concurrent.ConcurrentHashMap<Pair<String, String>, Long>()

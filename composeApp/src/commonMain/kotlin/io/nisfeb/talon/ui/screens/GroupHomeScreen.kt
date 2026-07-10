@@ -125,6 +125,21 @@ fun GroupHomeScreen(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
                     )
+                } else {
+                    // Live count of people active in any of this group's
+                    // channels, from %presence. Zero renders nothing —
+                    // an empty "0 active" line is just noise.
+                    val activeCount by remember(channels, repo) {
+                        repo.groupPresenceCount(channels.map { it.nest })
+                    }.collectAsState(initial = 0)
+                    if (activeCount > 0) {
+                        Text(
+                            "$activeCount active now",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary,
+                            maxLines = 1,
+                        )
+                    }
                 }
             }
             // Overflow menu only makes sense for members — for
