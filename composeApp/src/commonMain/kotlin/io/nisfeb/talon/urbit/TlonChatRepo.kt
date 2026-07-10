@@ -3244,32 +3244,20 @@ class TlonChatRepo(
     }
 
     /**
-     * How many distinct people are active in any of [nests] right now.
-     * The presence agent only feeds DM and channel contexts — never a
-     * group context — so "who's in this group" is the union of its
-     * channels' presence, not a group-level signal we could subscribe
-     * to. Reuses the channel presence every open chat already receives.
-     */
-    fun groupPresenceCount(nests: List<String>): Flow<Int> {
-        if (nests.isEmpty()) return flowOf(0)
-        val contexts = nests.mapNotNull(Presence::contextFor).toSet()
-        return _presence.map { places ->
-            buildSet {
-                contexts.forEach { ctx -> places[ctx]?.keys?.forEach { add(it.ship) } }
-            }.size
-        }.distinctUntilChanged()
-    }
-
-    /**
-     * [groupPresenceCount] for a group flag — resolves its channels from
-     * the DB so the home-list group row can show the count without the
-     * caller threading nests. Re-resolves if the group's channel set
-     * changes.
+     * When a group was last active — the newest message across any of
+     * its channels — as a Flow so the home-list row updates live. Null
+     * until it has any message. This is durable message history, not
+     * transient presence: it needs no v11.4.0 peer and doesn't flicker,
+     * unlike the typing signal [presenceIn] drives inside a channel.
      */
     @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
-    fun groupPresenceCountByFlag(flag: String): Flow<Int> =
+    fun groupLastActive(flag: String): Flow<Long?> =
         db.groups().streamChannelsForGroup(flag)
-            .flatMapLatest { chans -> groupPresenceCount(chans.map { it.nest }) }
+            .flatMapLatest { chans ->
+                val nests = chans.map { it.nest }
+                if (nests.isEmpty()) flowOf(null)
+                else db.messages().streamLatestSentMsAcross(nests)
+            }
             .distinctUntilChanged()
 
     /** When we last announced a given (context, topic). */

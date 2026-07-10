@@ -93,6 +93,7 @@ import io.nisfeb.talon.ui.FolderAssignmentSheet
 import io.nisfeb.talon.ui.RailItem
 import io.nisfeb.talon.ui.UpdateBanner
 import io.nisfeb.talon.ui.contactMapFlow
+import io.nisfeb.talon.ui.shortRelativeTime
 import io.nisfeb.talon.update.UpdateStatus
 import io.nisfeb.talon.ai.DailyDigestMentionMatcher
 import io.nisfeb.talon.urbit.StoryCache
@@ -1123,9 +1124,9 @@ fun DmListScreen(
                                 // change and rendered groups overlapped/compacted.
                                 ReorderableItem(reorderState, key = row.key, enabled = editMode) { _ ->
                                     Column {
-                                        val groupActive by remember(row.flag) {
-                                            repo.groupPresenceCountByFlag(row.flag)
-                                        }.collectAsState(initial = 0)
+                                        val lastActive by remember(row.flag) {
+                                            repo.groupLastActive(row.flag)
+                                        }.collectAsState(initial = null)
                                         GroupHeaderRow(
                                             flag = row.flag,
                                             title = row.title,
@@ -1133,7 +1134,7 @@ fun DmListScreen(
                                             childCount = row.childCount,
                                             totalUnread = row.totalUnread,
                                             expanded = row.expanded,
-                                            activeCount = groupActive,
+                                            lastActiveMs = lastActive,
                                             onToggle = onGroupHeadToggle,
                                             onLongClick = if (editMode) null else onGroupHeadLongPress,
                                             editMode = editMode,
@@ -1252,9 +1253,9 @@ fun DmListScreen(
                                 // change and rendered groups overlapped/compacted.
                                 ReorderableItem(reorderState, key = row.key, enabled = editMode) { _ ->
                                     Column {
-                                        val groupActive by remember(row.flag) {
-                                            repo.groupPresenceCountByFlag(row.flag)
-                                        }.collectAsState(initial = 0)
+                                        val lastActive by remember(row.flag) {
+                                            repo.groupLastActive(row.flag)
+                                        }.collectAsState(initial = null)
                                         GroupHeaderRow(
                                             flag = row.flag,
                                             title = row.title,
@@ -1262,7 +1263,7 @@ fun DmListScreen(
                                             childCount = row.childCount,
                                             totalUnread = row.totalUnread,
                                             expanded = row.expanded,
-                                            activeCount = groupActive,
+                                            lastActiveMs = lastActive,
                                             onToggle = onGroupHeadToggle,
                                             onLongClick = if (editMode) null else onGroupHeadLongPress,
                                             editMode = editMode,
@@ -2142,7 +2143,7 @@ private fun GroupHeaderRow(
     childCount: Int,
     totalUnread: Int,
     expanded: Boolean,
-    activeCount: Int,
+    lastActiveMs: Long?,
     onToggle: (String) -> Unit,
     editMode: Boolean = false,
     dragHandleModifier: Modifier = Modifier,
@@ -2183,16 +2184,18 @@ private fun GroupHeaderRow(
                 maxLines = 1,
             )
             val channelsLabel = "$childCount channel${if (childCount == 1) "" else "s"}"
+            // "· active Nm ago" rides the channel-count line, from the
+            // newest message across the group's channels. Durable
+            // history, not transient presence — the only place a member
+            // sees group liveness, since tapping toggles the accordion
+            // rather than opening a group screen.
+            val activeLabel = lastActiveMs?.let {
+                "$channelsLabel · active ${shortRelativeTime(it, System.currentTimeMillis())}"
+            } ?: channelsLabel
             Text(
-                // "· N active" rides the channel-count line when anyone is
-                // present (typing/uploading) in one of the group's
-                // channels — the only place a member sees this, since
-                // tapping the group toggles the accordion rather than
-                // opening a group screen.
-                if (activeCount > 0) "$channelsLabel · $activeCount active" else channelsLabel,
+                activeLabel,
                 style = MaterialTheme.typography.labelSmall,
-                color = if (activeCount > 0) MaterialTheme.colorScheme.primary
-                else MaterialTheme.colorScheme.onSurfaceVariant,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
         if (totalUnread > 0 && !expanded) {

@@ -93,6 +93,16 @@ abstract class MessageDao {
     """)
     abstract suspend fun latestAnyFor(whom: String, count: Int): List<MessageEntity>
 
+    /** Wall-clock of the newest non-deleted message across a set of
+     *  conversations — drives the "active Nm ago" liveness line on a
+     *  group's home-list row (its channels as [whoms]). Null when none
+     *  have any message. */
+    @Query("""
+        SELECT MAX(sentMs) FROM messages
+        WHERE whom IN (:whoms) AND isDeleted = 0
+    """)
+    abstract fun streamLatestSentMsAcross(whoms: List<String>): Flow<Long?>
+
     /** Newest non-deleted top-level post id for a conversation (refresh cursor). */
     @Query("""
         SELECT id FROM messages

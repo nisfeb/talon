@@ -126,17 +126,18 @@ fun GroupHomeScreen(
                         maxLines = 1,
                     )
                 } else {
-                    // Live count of people active in any of this group's
-                    // channels, from %presence. Zero renders nothing —
-                    // an empty "0 active" line is just noise.
-                    val activeCount by remember(channels, repo) {
-                        repo.groupPresenceCount(channels.map { it.nest })
-                    }.collectAsState(initial = 0)
-                    if (activeCount > 0) {
+                    // When the group was last active — newest message
+                    // across its channels. Durable, unlike the transient
+                    // typing presence, and consistent with the home-list
+                    // group row.
+                    val lastActive by remember(flag, repo) {
+                        repo.groupLastActive(flag)
+                    }.collectAsState(initial = null)
+                    lastActive?.let {
                         Text(
-                            "$activeCount active now",
+                            "Active ${io.nisfeb.talon.ui.shortRelativeTime(it, System.currentTimeMillis())}",
                             style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.primary,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                             maxLines = 1,
                         )
                     }
