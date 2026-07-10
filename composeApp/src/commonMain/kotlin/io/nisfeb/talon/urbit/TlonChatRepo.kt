@@ -23,6 +23,8 @@
 @file:OptIn(kotlinx.serialization.ExperimentalSerializationApi::class)
 
 package io.nisfeb.talon.urbit
+import io.nisfeb.talon.util.ioDispatcher
+import io.nisfeb.talon.util.nowMs
 
 import io.nisfeb.talon.util.Log
 import io.nisfeb.talon.data.AppDatabase
@@ -117,7 +119,7 @@ class TlonChatRepo(
         io.nisfeb.talon.notify.NotificationHealth(),
 ) {
 
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val scope = CoroutineScope(SupervisorJob() + ioDispatcher)
     /**
      * Scope for fire-and-forget ship pokes (folder reorder,
      * watchword exclude, etc.) that should complete even if the
@@ -135,7 +137,7 @@ class TlonChatRepo(
      * correct: the previous ship's cookie is gone, those pushes
      * would 401).
      */
-    val pushScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    val pushScope = CoroutineScope(SupervisorJob() + ioDispatcher)
     @Volatile private var started = false
     @Volatile private var channel: UrbitChannel? = null
     @Volatile private var http: OkHttpClient? = null
@@ -367,7 +369,7 @@ class TlonChatRepo(
         Log.i(TAG, "opening channel (firstRun=$firstRun)")
         val ch = session.openChannel()
         channel = ch
-        lastEventMs = System.currentTimeMillis()
+        lastEventMs = nowMs()
         notificationHealth.markSseConnected(true)
         notificationHealth.markSseEvent(lastEventMs)
         // Pagination markers are per-(channel, ship). A new channel
@@ -555,7 +557,7 @@ class TlonChatRepo(
         // collect job so runSessionLoop reconnects.
         val collectJob = launch {
             ch.events().collect { event ->
-                lastEventMs = System.currentTimeMillis()
+                lastEventMs = nowMs()
                 notificationHealth.markSseEvent(lastEventMs)
                 runCatching { applyEvent(event.body) }
                     .onFailure {
@@ -575,7 +577,7 @@ class TlonChatRepo(
         val watchdogJob = launch {
             while (isActive && collectJob.isActive) {
                 delay(30_000L)
-                val idleMs = System.currentTimeMillis() - lastEventMs
+                val idleMs = nowMs() - lastEventMs
                 if (idleMs > 90_000L) {
                     Log.w(TAG, "watchdog: ${idleMs}ms without event; force-reconnect")
                     notificationHealth.incrementForceReconnects()
@@ -604,7 +606,7 @@ class TlonChatRepo(
      * legitimate doze-recovery reconnects still go through.
      */
     fun forceReconnect() {
-        val now = System.currentTimeMillis()
+        val now = nowMs()
         if (now - lastReconnectMs < FORCE_RECONNECT_DEBOUNCE_MS) {
             Log.i(TAG, "forceReconnect skipped (recent)")
             return
@@ -763,7 +765,7 @@ class TlonChatRepo(
         meta: JsonObject? = null,
     ): String {
         val ch = channel ?: error("not connected")
-        val sent = System.currentTimeMillis()
+        val sent = nowMs()
         val da = UrbitTime.unixMsToDa(sent)
         // %channels mints post ids with its own entropy (not purely a
         // function of essay.sent), so we can't predict the server id
@@ -977,17 +979,17 @@ class TlonChatRepo(
      * @param force bypass the TTL check (pull-to-refresh)
      */
     suspend fun refreshAdminGroups(force: Boolean = false) {
-        val fresh = System.currentTimeMillis() - adminGroupsFetchedMs < ADMIN_CACHE_TTL_MS
+        val fresh = nowMs() - adminGroupsFetchedMs < ADMIN_CACHE_TTL_MS
         if (!force && fresh && _adminGroups.value != null) return
         adminGroupsMutex.withLock {
             // Re-check after acquiring — another caller may have
             // refreshed while we were waiting on the mutex.
-            val nowFresh = System.currentTimeMillis() - adminGroupsFetchedMs < ADMIN_CACHE_TTL_MS
+            val nowFresh = nowMs() - adminGroupsFetchedMs < ADMIN_CACHE_TTL_MS
             if (!force && nowFresh && _adminGroups.value != null) return
             runCatching { fetchAdminGroupsLive() }
                 .onSuccess {
                     _adminGroups.value = it
-                    adminGroupsFetchedMs = System.currentTimeMillis()
+                    adminGroupsFetchedMs = nowMs()
                 }
                 .onFailure { Log.w(TAG, "refreshAdminGroups failed", it) }
         }
@@ -1453,7 +1455,7 @@ class TlonChatRepo(
                 bio = bio?.takeIf { it.isNotBlank() } ?: current?.bio,
                 avatarUrl = avatarUrl?.takeIf { it.isNotBlank() } ?: current?.avatarUrl,
                 status = newStatus,
-                statusUpdatedMs = if (statusChanged) System.currentTimeMillis()
+                statusUpdatedMs = if (statusChanged) nowMs()
                     else current?.statusUpdatedMs,
                 color = color?.takeIf { it.isNotBlank() } ?: current?.color,
             )
@@ -1856,7 +1858,7 @@ class TlonChatRepo(
         bytes: ByteArray,
         contentType: String,
         fileName: String,
-    ): String = withContext(Dispatchers.IO) {
+    ): String = withContext(ioDispatcher) {
         // Root guard for every upload path. ContentResolver reads of a
         // not-yet-downloaded cloud item return 0 bytes WITHOUT throwing,
         // and an uploaded blank object posts as an unrenderable message —
@@ -1985,7 +1987,7 @@ class TlonChatRepo(
         }
 
         val safeName = fileName.replace(Regex("[^A-Za-z0-9._-]"), "_")
-        val key = "talon/${UrbitTime.unixMsToDa(System.currentTimeMillis())}-$safeName"
+        val key = "talon/${UrbitTime.unixMsToDa(nowMs())}-$safeName"
 
         return S3Uploader.put(
             http = client,
@@ -2205,7 +2207,7 @@ class TlonChatRepo(
         content: JsonArray,
     ): String {
         val ch = channel ?: error("not connected")
-        val sent = System.currentTimeMillis()
+        val sent = nowMs()
         val da = UrbitTime.unixMsToDa(sent)
         // Same local-sentinel id rule as postContent — %channels assigns
         // unpredictable post ids so we can't pre-compute them.
@@ -3063,7 +3065,7 @@ class TlonChatRepo(
         val added = incoming - existing
         val removed = existing - incoming
         if (added.isNotEmpty()) {
-            val now = System.currentTimeMillis()
+            val now = nowMs()
             db.dmInvites().upsertAll(added.map { DmInviteEntity(ship = it, receivedMs = now) })
         }
         removed.forEach { db.dmInvites().delete(it) }
@@ -3130,7 +3132,7 @@ class TlonChatRepo(
                 whom = whom,
                 count = 0,
                 notifyCount = 0,
-                recencyMs = System.currentTimeMillis(),
+                recencyMs = nowMs(),
             )
         )
         // NOTE: deliberately does NOT clear per-thread unread rows here.
@@ -3277,7 +3279,7 @@ class TlonChatRepo(
     ) {
         val context = Presence.contextFor(whom) ?: return
         val key = context to topic
-        val now = System.currentTimeMillis()
+        val now = nowMs()
         val last = lastPresencePoke[key]
         if (last != null && now - last < Presence.REANNOUNCE_MS) return
         lastPresencePoke[key] = now
@@ -3315,7 +3317,7 @@ class TlonChatRepo(
     /** Apply one `%presence-response-1` fact. */
     private fun applyPresence(payload: JsonObject) {
         val update = Presence.parseResponse(payload) ?: return
-        val now = System.currentTimeMillis()
+        val now = nowMs()
         val next = if (update.snapshot) mutableMapOf() else _presence.value.toMutableMap()
 
         update.gone.forEach { e ->
@@ -3345,7 +3347,7 @@ class TlonChatRepo(
         presenceReaper = scope.launch {
             while (isActive && _presence.value.isNotEmpty()) {
                 delay(2_000L)
-                val now = System.currentTimeMillis()
+                val now = nowMs()
                 val pruned = _presence.value
                     .mapValues { (_, people) -> people.filterValues { it.expiresAtMs > now } }
                     .filterValues { it.isNotEmpty() }
@@ -3453,7 +3455,7 @@ class TlonChatRepo(
             // Prefer the server-provided mod-at. Fall back to our own
             // observation time — we know the status just changed since
             // this fact is the change event itself.
-            val modAt = parseContactModAt(page) ?: System.currentTimeMillis()
+            val modAt = parseContactModAt(page) ?: nowMs()
             db.contacts().upsert(mergeContact(parseContact(kip, contact, modAt)))
             return
         }
@@ -3469,7 +3471,7 @@ class TlonChatRepo(
             val who = peer["who"].asStr() ?: return
             if (!who.startsWith("~")) return
             val contact = peer["contact"] as? JsonObject ?: return
-            val modAt = parseContactModAt(peer) ?: System.currentTimeMillis()
+            val modAt = parseContactModAt(peer) ?: nowMs()
             db.contacts().upsert(mergeContact(parseContact(who, contact, modAt)))
             return
         }
@@ -3503,7 +3505,7 @@ class TlonChatRepo(
                 incoming.status.isNullOrBlank() -> null
                 incoming.statusUpdatedMs != null -> incoming.statusUpdatedMs
                 existing?.statusUpdatedMs != null -> existing.statusUpdatedMs
-                else -> System.currentTimeMillis()
+                else -> nowMs()
             },
         )
     }
@@ -3784,10 +3786,10 @@ class TlonChatRepo(
         paths: List<String>,
         label: String,
     ): JsonElement? {
-        val deadline = System.currentTimeMillis() + SCRY_PROBE_BUDGET_MS
+        val deadline = nowMs() + SCRY_PROBE_BUDGET_MS
         var lastErr: Throwable? = null
         for (path in paths) {
-            if (System.currentTimeMillis() >= deadline) {
+            if (nowMs() >= deadline) {
                 Log.w(TAG, "$label: ${SCRY_PROBE_BUDGET_MS}ms budget exhausted, giving up; last err: ${lastErr?.message}")
                 return null
             }

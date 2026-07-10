@@ -1,4 +1,5 @@
 package io.nisfeb.talon.ui.screens
+import io.nisfeb.talon.util.nowMs
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -353,7 +354,7 @@ private fun MediaRowMenuWrapper(
                                 sync.addBookmark(
                                     item.whom,
                                     item.messageId,
-                                    System.currentTimeMillis(),
+                                    nowMs(),
                                 )
                             }
                         }
@@ -387,7 +388,7 @@ private val POSTED_DATE_OLD: DateTimeFormatter =
  *  otherwise. Keeps timestamps short (info pane is narrow) without
  *  being ambiguous for older content. */
 private fun formatPostedAt(ms: Long): String {
-    val now = System.currentTimeMillis()
+    val now = nowMs()
     val diff = now - ms
     val instant = Instant.ofEpochMilli(ms)
     return when {

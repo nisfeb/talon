@@ -1,4 +1,5 @@
 package io.nisfeb.talon.ai
+import io.nisfeb.talon.util.ioDispatcher
 
 import io.nisfeb.talon.urbit.asText
 import kotlinx.serialization.json.Json
@@ -105,7 +106,7 @@ class AgentClient(private val settingsProvider: () -> AiSettings.Config) {
     }
 
     private suspend fun execute(req: Request, parse: (JsonObject) -> AgentTurn): AgentTurn =
-        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        kotlinx.coroutines.withContext(ioDispatcher) {
             http.newCall(req).execute().use { resp ->
                 val body = resp.body?.string().orEmpty()
                 val host = req.url.host

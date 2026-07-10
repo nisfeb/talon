@@ -1,4 +1,5 @@
 package io.nisfeb.talon.urbit
+import io.nisfeb.talon.util.ioDispatcher
 
 import io.nisfeb.talon.util.decodeHtmlEntities
 import kotlinx.coroutines.CoroutineScope
@@ -38,7 +39,7 @@ object LinkPreviewCache {
 
     private val results = ConcurrentHashMap<String, Entry>()
     private val inFlight = ConcurrentHashMap<String, Job>()
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val scope = CoroutineScope(SupervisorJob() + ioDispatcher)
 
     private fun record(url: String, preview: Preview?) {
         results[url] = if (preview != null) Entry.Some(preview) else Entry.None
@@ -73,7 +74,7 @@ object LinkPreviewCache {
             job.join()
             return cached(url)
         }
-        return withContext(Dispatchers.IO) {
+        return withContext(ioDispatcher) {
             val fetched = runCatching { fetch(http, url) }.getOrNull()
             record(url, fetched)
             fetched

@@ -1,4 +1,5 @@
 package io.nisfeb.talon.ui.screens
+import io.nisfeb.talon.util.nowMs
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -116,7 +117,7 @@ fun ManageTermsSheet(
                                     WatchwordEntity(
                                         term = trimmed,
                                         notify = draftNotify,
-                                        createdMs = System.currentTimeMillis(),
+                                        createdMs = nowMs(),
                                     )
                                 )
                             }

@@ -1,4 +1,5 @@
 package io.nisfeb.talon.ai
+import io.nisfeb.talon.util.ioDispatcher
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -105,7 +106,7 @@ class McpClient(
     /** Issue one JSON-RPC call and return its `result`, throwing
      *  [McpException] on a JSON-RPC error frame. */
     private suspend fun rpc(method: String, params: JsonObject): JsonElement =
-        withContext(Dispatchers.IO) {
+        withContext(ioDispatcher) {
             val payload = buildJsonObject {
                 put("jsonrpc", "2.0")
                 put("id", nextId.getAndIncrement())
@@ -148,7 +149,7 @@ class McpClient(
 
     /** Fire a notification (no id, no response body expected). */
     private suspend fun notify(method: String) {
-        withContext(Dispatchers.IO) {
+        withContext(ioDispatcher) {
             val payload = buildJsonObject {
                 put("jsonrpc", "2.0")
                 put("method", method)

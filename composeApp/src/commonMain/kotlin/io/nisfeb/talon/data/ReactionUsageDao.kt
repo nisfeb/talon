@@ -1,4 +1,5 @@
 package io.nisfeb.talon.data
+import io.nisfeb.talon.util.nowMs
 
 import androidx.room.Dao
 import androidx.room.Query
@@ -24,7 +25,7 @@ interface ReactionUsageDao {
     suspend fun upsert(code: String, count: Int, now: Long)
 
     @Transaction
-    suspend fun bump(code: String, now: Long = System.currentTimeMillis()) {
+    suspend fun bump(code: String, now: Long = nowMs()) {
         val current = countFor(code) ?: 0
         upsert(code, current + 1, now)
     }

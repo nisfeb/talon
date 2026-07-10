@@ -1,4 +1,5 @@
 package io.nisfeb.talon.urbit
+import io.nisfeb.talon.util.ioDispatcher
 
 import io.nisfeb.talon.data.AppDatabase
 import io.nisfeb.talon.data.MessageEntity
@@ -14,7 +15,7 @@ import kotlinx.coroutines.launch
  * fix to [MediaClassifier], in which case the developer manually
  * truncates `message_media` and re-populates).
  *
- * Runs on [Dispatchers.IO] in 1000-message chunks so the UI thread
+ * Runs on [ioDispatcher] in 1000-message chunks so the UI thread
  * doesn't block. Each chunk commits in its own transaction; Room's
  * flows fire as the chunks land, so the group-info stats grid
  * updates live as the backfill progresses.
@@ -29,7 +30,7 @@ object MediaBackfillWorker {
      * after the first completes.
      */
     fun launchIfNeeded(scope: CoroutineScope, db: AppDatabase) {
-        scope.launch(Dispatchers.IO) {
+        scope.launch(ioDispatcher) {
             runIfNeeded(db)
         }
     }

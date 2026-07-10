@@ -1,4 +1,5 @@
 package io.nisfeb.talon.ai
+import io.nisfeb.talon.util.ioDispatcher
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -49,7 +50,7 @@ class BraveSearchClient(private val settings: () -> AiSettings.Config) {
             .header("X-Subscription-Token", key)
             .header("Accept", "application/json")
             .build()
-        return withContext(Dispatchers.IO) {
+        return withContext(ioDispatcher) {
             runCatching {
                 http.newCall(req).execute().use { resp ->
                     val body = resp.body?.string().orEmpty()

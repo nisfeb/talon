@@ -1,4 +1,5 @@
 package io.nisfeb.talon.ai
+import io.nisfeb.talon.util.nowMs
 
 import io.nisfeb.talon.data.LoopDao
 import io.nisfeb.talon.data.LoopEntity
@@ -33,7 +34,7 @@ class LoopRunner(
     // Noop runs everywhere; the host wires the %settings lease so several
     // devices don't all run the same write automation.
     private val coordinator: LoopWriteCoordinator = LoopWriteCoordinator.Noop,
-    private val now: () -> Long = { System.currentTimeMillis() },
+    private val now: () -> Long = { nowMs() },
 ) {
 
     /** Run one loop now and record the result. Both the run-now button and

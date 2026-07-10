@@ -1,4 +1,5 @@
 package io.nisfeb.talon.ui.screens
+import io.nisfeb.talon.util.nowMs
 
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
@@ -821,7 +822,7 @@ fun DmChatScreen(
                             repo.settingsSync?.addBookmark(
                                 target.whom,
                                 target.id,
-                                System.currentTimeMillis(),
+                                nowMs(),
                             )
                         }
                     }
@@ -1321,7 +1322,7 @@ private fun MessageRow(
                     lastSentMs = row.lastReplySentMs,
                     lastAuthor = row.lastReplyAuthor,
                     contactMap = contactMap,
-                    nowMs = System.currentTimeMillis(),
+                    nowMs = nowMs(),
                     onClick = { onOpenThread(m) },
                     hasUnread = row.threadHasUnread,
                     modifier = Modifier.padding(top = 4.dp),
@@ -2259,7 +2260,7 @@ private suspend fun clusterTopicsWithin(
 ): List<TopicClusterRow> {
     val embeddings = db.embeddings().forWhom(whom)
     if (embeddings.size < 6) return emptyList()
-    val cutoffMs = windowMs?.let { System.currentTimeMillis() - it }
+    val cutoffMs = windowMs?.let { nowMs() - it }
     data class Row(
         val embedding: io.nisfeb.talon.data.MessageEmbeddingEntity,
         val message: io.nisfeb.talon.data.MessageEntity,

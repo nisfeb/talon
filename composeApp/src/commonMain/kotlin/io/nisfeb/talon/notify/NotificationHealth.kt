@@ -1,4 +1,5 @@
 package io.nisfeb.talon.notify
+import io.nisfeb.talon.util.nowMs
 
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -25,7 +26,7 @@ class NotificationHealth {
      */
     private val _lastSseEventMs = MutableStateFlow(0L)
     val lastSseEventMs: StateFlow<Long> = _lastSseEventMs.asStateFlow()
-    fun markSseEvent(ms: Long = System.currentTimeMillis()) {
+    fun markSseEvent(ms: Long = nowMs()) {
         _lastSseEventMs.value = ms
     }
 
@@ -36,7 +37,7 @@ class NotificationHealth {
      */
     private val _lastReconcileMs = MutableStateFlow(0L)
     val lastReconcileMs: StateFlow<Long> = _lastReconcileMs.asStateFlow()
-    fun markReconcileSuccess(ms: Long = System.currentTimeMillis()) {
+    fun markReconcileSuccess(ms: Long = nowMs()) {
         _lastReconcileMs.value = ms
     }
 

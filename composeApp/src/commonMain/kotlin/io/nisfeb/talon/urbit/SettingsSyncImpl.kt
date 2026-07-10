@@ -1,4 +1,5 @@
 package io.nisfeb.talon.urbit
+import io.nisfeb.talon.util.nowMs
 
 import io.nisfeb.talon.ai.AiSettings
 import io.nisfeb.talon.ai.AiSettingsRepository
@@ -699,7 +700,7 @@ class SettingsSyncImpl(
         if (loop.gid.isBlank()) return true // unsynced loop: single-device, nothing to race
         val me = aiSettings.state.value.deviceId
         if (me.isBlank()) return true       // no id (not a real platform store) — don't block
-        val now = System.currentTimeMillis()
+        val now = nowMs()
         // Stale after ~2 missed fires, clamped so sub-hour loops still fail
         // over reasonably and long loops don't pin a dead holder for days.
         val staleMs = (loop.intervalMinutes.toLong() * 2).coerceIn(30, 720) * 60_000L
@@ -1158,7 +1159,7 @@ class SettingsSyncImpl(
                     val termText = obj["term"].asStr() ?: return@mapNotNull null
                     val notify = (obj["notify"] as? JsonPrimitive)?.booleanOrNull ?: true
                     val createdMs = (obj["createdMs"] as? JsonPrimitive)?.longOrNull
-                        ?: System.currentTimeMillis()
+                        ?: nowMs()
                     Triple(key, termText, notify to createdMs)
                 }.orEmpty()
                 val incomingTermTexts = incoming.map { it.second }.toHashSet()
@@ -1332,7 +1333,7 @@ class SettingsSyncImpl(
                 val termText = obj["term"].asStr() ?: return
                 val notify = (obj["notify"] as? JsonPrimitive)?.booleanOrNull ?: true
                 val createdMs = (obj["createdMs"] as? JsonPrimitive)?.longOrNull
-                    ?: System.currentTimeMillis()
+                    ?: nowMs()
                 // Upsert via term-text uniqueness — preserves local id.
                 val existing = db.watchwords().getTermByText(termText)
                 if (existing == null) {
@@ -1552,7 +1553,7 @@ class SettingsSyncImpl(
                 // fire within a minute on EVERY peer device the definition
                 // syncs to (read-only loops don't take the write lease, so
                 // nothing would dedupe those surprise runs).
-                lastRunAt = existing?.lastRunAt ?: System.currentTimeMillis(),
+                lastRunAt = existing?.lastRunAt ?: nowMs(),
             ),
         )
         rearmLoops()

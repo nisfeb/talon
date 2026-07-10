@@ -1,4 +1,5 @@
 package io.nisfeb.talon.update
+import io.nisfeb.talon.util.ioDispatcher
 
 import io.nisfeb.talon.util.Log
 import kotlinx.coroutines.CancellationException
@@ -34,7 +35,7 @@ class HttpUpdateChecker(
         .callTimeout(15, TimeUnit.SECONDS)
         .build()
 
-    override suspend fun check(): UpdateManifest? = withContext(Dispatchers.IO) {
+    override suspend fun check(): UpdateManifest? = withContext(ioDispatcher) {
         val nowMs = now()
         val last = lastCheckedAtMs()
         if (nowMs - last < minIntervalMs) return@withContext null

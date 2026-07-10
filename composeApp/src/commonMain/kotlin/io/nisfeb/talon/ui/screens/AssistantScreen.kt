@@ -1,4 +1,5 @@
 package io.nisfeb.talon.ui.screens
+import io.nisfeb.talon.util.nowMs
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -420,7 +421,7 @@ fun AssistantScreen(
                 // cancel us would lose the record of what the assistant did
                 // (the ship-side effect persists regardless).
                 withContext(NonCancellable) {
-                    val now = System.currentTimeMillis()
+                    val now = nowMs()
                     val vec = qVec ?: FloatArray(0)
                     val convEntity: AssistantConversationEntity = if (continuing) {
                         val gid = snapConvGid ?: newGid().also { snapConvGid = it }
@@ -890,7 +891,7 @@ private fun ConversationsTab(
                 modifier = Modifier.padding(horizontal = 12.dp),
             )
         } else {
-            val now = remember(conversations) { System.currentTimeMillis() }
+            val now = remember(conversations) { nowMs() }
             LazyColumn(
                 Modifier.fillMaxSize().padding(horizontal = 8.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp),

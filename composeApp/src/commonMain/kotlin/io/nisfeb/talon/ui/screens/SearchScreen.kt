@@ -1,4 +1,5 @@
 package io.nisfeb.talon.ui.screens
+import io.nisfeb.talon.util.nowMs
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -85,7 +86,7 @@ fun SearchScreen(
     // searchFiltered method takes nullable params so the conditional
     // SQL plan unfilters legs the user didn't supply.
     val filter = remember(debouncedTrimmed) {
-        io.nisfeb.talon.ui.parseSearchFilter(debouncedTrimmed, System.currentTimeMillis())
+        io.nisfeb.talon.ui.parseSearchFilter(debouncedTrimmed, nowMs())
     }
     val escapedNeedle = remember(filter) {
         if (filter.needle.length < 2) null

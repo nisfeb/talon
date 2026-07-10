@@ -10,6 +10,7 @@ sqliteBundled = "2.5.0"
 okhttp = "4.12.0"
 kotlinxSerialization = "1.7.2"
 kotlinxCoroutines = "1.8.1"
+kotlinxDatetime = "0.6.1"
 coil = "3.0.4"
 media3 = "1.4.1"
 lifecycle = "2.8.6"
@@ -57,6 +58,7 @@ okhttp-sse = { group = "com.squareup.okhttp3", name = "okhttp-sse", version.ref 
 
 kotlinx-serialization-json = { group = "org.jetbrains.kotlinx", name = "kotlinx-serialization-json", version.ref = "kotlinxSerialization" }
 kotlinx-coroutines-core = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-core", version.ref = "kotlinxCoroutines" }
+kotlinx-datetime = { group = "org.jetbrains.kotlinx", name = "kotlinx-datetime", version.ref = "kotlinxDatetime" }
 kotlinx-coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-android", version.ref = "kotlinxCoroutines" }
 kotlinx-coroutines-swing = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-swing", version.ref = "kotlinxCoroutines" }
 

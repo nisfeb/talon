@@ -1,4 +1,5 @@
 package io.nisfeb.talon.ui.screens
+import io.nisfeb.talon.util.nowMs
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -135,7 +136,7 @@ fun GroupHomeScreen(
                     }.collectAsState(initial = null)
                     lastActive?.let {
                         Text(
-                            "Active ${io.nisfeb.talon.ui.shortRelativeTime(it, System.currentTimeMillis())}",
+                            "Active ${io.nisfeb.talon.ui.shortRelativeTime(it, nowMs())}",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             maxLines = 1,

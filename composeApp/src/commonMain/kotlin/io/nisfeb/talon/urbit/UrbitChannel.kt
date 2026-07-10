@@ -1,4 +1,6 @@
 package io.nisfeb.talon.urbit
+import io.nisfeb.talon.util.ioDispatcher
+import io.nisfeb.talon.util.nowMs
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
@@ -39,7 +41,7 @@ class UrbitChannel internal constructor(
     private val baseUrl: HttpUrl,
     private val ship: String,
 ) {
-    private val channelId = "${System.currentTimeMillis()}-${Random.nextLong().toString(16).take(8)}"
+    private val channelId = "${nowMs()}-${Random.nextLong().toString(16).take(8)}"
     private val channelUrl: HttpUrl = baseUrl.newBuilder()
         .addPathSegments("~/channel/$channelId")
         .build()
@@ -167,7 +169,7 @@ class UrbitChannel internal constructor(
         threadName: String,
         outputMark: String,
         body: JsonElement,
-    ): JsonElement = withContext(Dispatchers.IO) {
+    ): JsonElement = withContext(ioDispatcher) {
         val url = baseUrl.newBuilder()
             .addPathSegments("spider/$desk/$inputMark/$threadName/$outputMark.json")
             .build()
@@ -200,7 +202,7 @@ class UrbitChannel internal constructor(
         path: String,
         timeoutSecs: Long = RPC_TIMEOUT_SECS,
     ): JsonElement =
-        withContext(Dispatchers.IO) {
+        withContext(ioDispatcher) {
             val url = baseUrl.newBuilder()
                 .addPathSegments("~/scry/$app$path.json")
                 .build()
@@ -212,8 +214,8 @@ class UrbitChannel internal constructor(
             }
         }
 
-    /** PUT a batch of channel actions. Runs on Dispatchers.IO. */
-    private suspend fun put(messages: JsonArray) = withContext(Dispatchers.IO) {
+    /** PUT a batch of channel actions. Runs on ioDispatcher. */
+    private suspend fun put(messages: JsonArray) = withContext(ioDispatcher) {
         val request = Request.Builder()
             .url(channelUrl)
             .put(messages.toString().toRequestBody(JSON_MEDIA_TYPE))

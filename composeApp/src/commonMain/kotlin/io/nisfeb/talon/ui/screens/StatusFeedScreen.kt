@@ -1,4 +1,5 @@
 package io.nisfeb.talon.ui.screens
+import io.nisfeb.talon.util.nowMs
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -224,7 +225,7 @@ private val TIME_TODAY = SimpleDateFormat("HH:mm", Locale.getDefault())
 private val DATE_OLD = SimpleDateFormat("MMM d", Locale.getDefault())
 
 private fun formatRelative(ms: Long): String {
-    val diff = System.currentTimeMillis() - ms
+    val diff = nowMs() - ms
     return when {
         diff < 60_000L -> "now"
         diff < 3600_000L -> "${diff / 60_000L}m"

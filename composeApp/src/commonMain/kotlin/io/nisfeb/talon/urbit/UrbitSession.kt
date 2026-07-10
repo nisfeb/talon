@@ -1,4 +1,5 @@
 package io.nisfeb.talon.urbit
+import io.nisfeb.talon.util.ioDispatcher
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -58,7 +59,7 @@ class UrbitSession(
      * to type `http://` when they explicitly want cleartext.
      */
     suspend fun login(shipUrl: String, code: String): Result<String> =
-        withContext(Dispatchers.IO) {
+        withContext(ioDispatcher) {
             runCatching {
                 val url = normalizeShipUrl(shipUrl).toHttpUrl()
                 // Urbit's /~/login takes `password=<code>` with dashes intact.

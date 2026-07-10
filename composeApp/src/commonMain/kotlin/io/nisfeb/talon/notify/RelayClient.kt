@@ -1,4 +1,5 @@
 package io.nisfeb.talon.notify
+import io.nisfeb.talon.util.ioDispatcher
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -74,7 +75,7 @@ class RelayClient(
         shipUrl: String,
         patp: String,
         code: String,
-    ): String? = withContext(Dispatchers.IO) {
+    ): String? = withContext(ioDispatcher) {
         val body = JSON.encodeToString(
             RegisterRequest(
                 platform = platform,
@@ -106,7 +107,7 @@ class RelayClient(
      * SSE connection the relay was holding for this id. Idempotent —
      * a 404 is fine because "already gone" is the goal.
      */
-    suspend fun unregister(deviceId: String): Boolean = withContext(Dispatchers.IO) {
+    suspend fun unregister(deviceId: String): Boolean = withContext(ioDispatcher) {
         if (deviceId.isBlank()) return@withContext true
         val req = Request.Builder()
             .url("${endpoint().trimEnd('/')}/devices/$deviceId")
@@ -126,7 +127,7 @@ class RelayClient(
      * failure (so the panel can render "unreachable" without
      * needing to disambiguate which step failed).
      */
-    suspend fun health(deviceId: String): HealthResponse? = withContext(Dispatchers.IO) {
+    suspend fun health(deviceId: String): HealthResponse? = withContext(ioDispatcher) {
         if (deviceId.isBlank()) return@withContext null
         val req = Request.Builder()
             .url("${endpoint().trimEnd('/')}/health/$deviceId")

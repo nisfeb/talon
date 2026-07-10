@@ -1,4 +1,5 @@
 package io.nisfeb.talon.update
+import io.nisfeb.talon.util.ioDispatcher
 
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -65,7 +66,7 @@ class UpdateState(
 
     fun startDownload(manifest: UpdateManifest) {
         _status.value = UpdateStatus.Downloading(manifest, 0)
-        scope.launch(Dispatchers.IO) {
+        scope.launch(ioDispatcher) {
             installer.download(
                 manifest = manifest,
                 onProgress = { pct ->

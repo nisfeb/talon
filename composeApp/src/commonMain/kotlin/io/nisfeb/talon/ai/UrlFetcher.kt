@@ -1,4 +1,5 @@
 package io.nisfeb.talon.ai
+import io.nisfeb.talon.util.ioDispatcher
 
 import io.nisfeb.talon.util.decodeHtmlEntities
 import kotlinx.coroutines.Dispatchers
@@ -40,7 +41,7 @@ class UrlFetcher(private val settings: () -> AiSettings.Config) {
         if (!settings().assistantOn()) return "Web access is part of the assistant, which is off in Settings."
         val parsed = url.trim().toHttpUrlOrNull()
             ?: return "Error: not a valid http(s) URL: ${url.take(120)}"
-        return withContext(Dispatchers.IO) {
+        return withContext(ioDispatcher) {
             runCatching {
                 val req = Request.Builder()
                     .url(parsed)

@@ -1,4 +1,5 @@
 package io.nisfeb.talon.ui.screens
+import io.nisfeb.talon.util.nowMs
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -1136,7 +1137,7 @@ private fun HealthRow(
 
 private fun formatHealthAge(ms: Long): String {
     if (ms <= 0L) return "never"
-    val now = System.currentTimeMillis()
+    val now = nowMs()
     val ageMs = (now - ms).coerceAtLeast(0L)
     return when {
         ageMs < 60_000L -> "${ageMs / 1000}s ago"

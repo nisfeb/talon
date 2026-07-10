@@ -1,4 +1,6 @@
 package io.nisfeb.talon.compose
+import io.nisfeb.talon.util.ioDispatcher
+import io.nisfeb.talon.util.nowMs
 
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -753,7 +755,7 @@ fun App(
                                 // scratch) — without this, all of them
                                 // fire as "new". Backlog has old sentMs
                                 // and is dropped; live messages pass.
-                                nowMs = System.currentTimeMillis(),
+                                nowMs = nowMs(),
                                 freshnessMaxAgeMs = 5L * 60_000L,
                             )
                         lastSeenIds = diff.newLastSeen
@@ -847,7 +849,7 @@ fun App(
           val urbLinkHandler: (String) -> Unit = remember(urbLinkLauncher) {
               { url ->
                   urbScope.launch {
-                      val r = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                      val r = kotlinx.coroutines.withContext(ioDispatcher) {
                           urbLinkLauncher.open(url)
                       }
                       if (r != io.nisfeb.talon.urbit.UrbLaunchResult.Opened) urbPromptUrl = url
@@ -1638,7 +1640,7 @@ fun App(
                             // until the user opened the kebab.
                             when (item) {
                                 RailItem.Statuses -> {
-                                    val now = System.currentTimeMillis()
+                                    val now = nowMs()
                                     menuSeen.markStatusesSeenAt(now)
                                     repo.pushScope.launch {
                                         runCatching { repo.settingsSync?.pushStatusesSeen(now) }

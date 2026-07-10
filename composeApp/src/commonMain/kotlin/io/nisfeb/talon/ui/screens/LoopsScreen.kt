@@ -1,4 +1,5 @@
 package io.nisfeb.talon.ui.screens
+import io.nisfeb.talon.util.nowMs
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -200,7 +201,7 @@ fun LoopsList(
                 onClick = { onSelect(loop) },
                 onToggleEnabled = { on ->
                     scope.launch {
-                        loopDao.setEnabled(loop.id, on, System.currentTimeMillis())
+                        loopDao.setEnabled(loop.id, on, nowMs())
                         // setEnabled is a partial UPDATE, so `loop` is stale for
                         // enabled/updatedAt — re-read the fresh row before pushing.
                         loopDao.get(loop.id)?.let { settingsSync?.pushLoop(it) }
@@ -251,7 +252,7 @@ private fun LoopListRow(
                         run?.let {
                             append("  ·  ")
                             append(if (it.ok) "✓ " else "⚠ ")
-                            append(shortRelativeTime(it.ranAt, System.currentTimeMillis()))
+                            append(shortRelativeTime(it.ranAt, nowMs()))
                         }
                     },
                     style = MaterialTheme.typography.bodySmall,
@@ -318,7 +319,7 @@ fun LoopDetail(
                 onCancel = { if (loop.id == 0L) onClose() else editing = false },
                 onSave = { name, prompt, interval, writes ->
                     scope.launch {
-                        val now = System.currentTimeMillis()
+                        val now = nowMs()
                         val row = if (loop.id == 0L) {
                             loop.copy(
                                 gid = newGid(),
@@ -434,7 +435,7 @@ fun LoopDetail(
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(
                     onClick = {
-                        runStartedAt = System.currentTimeMillis()
+                        runStartedAt = nowMs()
                         onRunNow(loop.id)
                     },
                     enabled = !running,
@@ -481,7 +482,7 @@ private fun LoopRunHistory(db: AppDatabase, loopId: Long) {
         )
         return
     }
-    val now = remember(runs) { System.currentTimeMillis() }
+    val now = remember(runs) { nowMs() }
     // Selectable so the output (esp. an error message) can be copied.
     SelectionContainer {
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {

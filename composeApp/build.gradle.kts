@@ -45,6 +45,10 @@ kotlin {
             implementation(compose.components.resources)
             implementation(libs.kotlinx.coroutines.core)
             implementation(libs.kotlinx.serialization.json)
+            // Multiplatform clock/epoch-millis so commonMain doesn't
+            // reach for JVM-only System.currentTimeMillis() — required
+            // once the iOS target compiles this code.
+            implementation(libs.kotlinx.datetime)
             // OkHttp + okhttp-sse are pure JVM but both Android and
             // desktop targets are JVM-backed, so declaring them in
             // commonMain is correct here. UrbitChannel + UrbitSession

@@ -1,4 +1,5 @@
 package io.nisfeb.talon.ui.screens
+import io.nisfeb.talon.util.nowMs
 
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
@@ -811,7 +812,7 @@ fun DmListScreen(
                             },
                             onClick = {
                                 menuOpen = false
-                                val now = System.currentTimeMillis()
+                                val now = nowMs()
                                 menuSeen.markStatusesSeenAt(now)
                                 repo.pushScope.launch {
                                     runCatching { repo.settingsSync?.pushStatusesSeen(now) }
@@ -2075,7 +2076,7 @@ private val DATE_OLD: java.time.format.DateTimeFormatter =
         .withZone(java.time.ZoneId.systemDefault())
 
 private fun formatRelative(ms: Long): String {
-    val now = System.currentTimeMillis()
+    val now = nowMs()
     val diff = now - ms
     val instant = java.time.Instant.ofEpochMilli(ms)
     return when {
@@ -2190,7 +2191,7 @@ private fun GroupHeaderRow(
             // sees group liveness, since tapping toggles the accordion
             // rather than opening a group screen.
             val activeLabel = lastActiveMs?.let {
-                "$channelsLabel · active ${shortRelativeTime(it, System.currentTimeMillis())}"
+                "$channelsLabel · active ${shortRelativeTime(it, nowMs())}"
             } ?: channelsLabel
             Text(
                 activeLabel,

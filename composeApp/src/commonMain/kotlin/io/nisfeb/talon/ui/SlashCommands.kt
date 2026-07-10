@@ -1,4 +1,5 @@
 package io.nisfeb.talon.ui
+import io.nisfeb.talon.util.ioDispatcher
 
 import io.nisfeb.talon.urbit.TlonChatRepo
 import java.security.SecureRandom
@@ -370,7 +371,7 @@ private suspend fun runHn(http: okhttp3.OkHttpClient): CommandResult {
 private suspend fun fetchJsonArray(
     http: okhttp3.OkHttpClient,
     url: String,
-): kotlinx.serialization.json.JsonArray? = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+): kotlinx.serialization.json.JsonArray? = kotlinx.coroutines.withContext(ioDispatcher) {
     val req = okhttp3.Request.Builder().url(url).get().build()
     http.newCall(req).execute().use { resp ->
         if (!resp.isSuccessful) return@withContext null
@@ -383,7 +384,7 @@ private suspend fun fetchJsonArray(
 private suspend fun fetchJsonObject(
     http: okhttp3.OkHttpClient,
     url: String,
-): Map<String, Any?>? = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+): Map<String, Any?>? = kotlinx.coroutines.withContext(ioDispatcher) {
     val req = okhttp3.Request.Builder().url(url).get().build()
     http.newCall(req).execute().use { resp ->
         if (!resp.isSuccessful) return@withContext null
