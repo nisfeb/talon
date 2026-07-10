@@ -1,4 +1,5 @@
 package io.nisfeb.talon.ui.screens
+import io.nisfeb.talon.util.formatMonthDayTime
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -35,9 +36,6 @@ import io.nisfeb.talon.ui.ContactMap
 import io.nisfeb.talon.ui.contactMapFlow
 import io.nisfeb.talon.urbit.StoryCache
 import io.nisfeb.talon.urbit.TlonChatRepo
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 
 /**
  * The list body of [ActivityFeedScreen], extracted so the desktop /
@@ -186,7 +184,7 @@ private fun ActivityRow(
         }
     }
     val timestamp = remember(item.sentMs) {
-        if (item.sentMs > 0) DATE_FORMAT.format(Date(item.sentMs)) else ""
+        if (item.sentMs > 0) formatMonthDayTime(item.sentMs) else ""
     }
 
     Row(
@@ -232,4 +230,3 @@ private fun ActivityRow(
     }
 }
 
-private val DATE_FORMAT = SimpleDateFormat("MMM d HH:mm", Locale.getDefault())

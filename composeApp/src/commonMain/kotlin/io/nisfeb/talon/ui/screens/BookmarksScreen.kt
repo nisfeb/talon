@@ -1,4 +1,5 @@
 package io.nisfeb.talon.ui.screens
+import io.nisfeb.talon.util.formatMonthDayTime
 
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
@@ -48,9 +49,6 @@ import io.nisfeb.talon.ui.Avatar
 import io.nisfeb.talon.ui.ContactMap
 import io.nisfeb.talon.urbit.StoryCache
 import io.nisfeb.talon.urbit.TlonChatRepo
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -224,7 +222,7 @@ internal fun BookmarkRow(
     val body = remember(fullBody) { fullBody.replace('\n', ' ') }
     val title = remember(b.whom, contactMap) { contactMap.conversationLabel(b.whom) }
     val authorLabel = remember(b.author, contactMap) { contactMap.displayName(b.author) }
-    val sentStamp = remember(b.sentMs) { DATE_FORMAT.format(Date(b.sentMs)) }
+    val sentStamp = remember(b.sentMs) { formatMonthDayTime(b.sentMs) }
     val avatar = remember(b.whom, contactMap) { contactMap.conversationAvatar(b.whom) }
     val clipboard = LocalClipboardManager.current
     var menuOpen by remember(b.id, b.whom) { mutableStateOf(false) }
@@ -285,4 +283,3 @@ internal fun BookmarkRow(
     }
 }
 
-private val DATE_FORMAT = SimpleDateFormat("MMM d HH:mm", Locale.getDefault())

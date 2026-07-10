@@ -1,4 +1,6 @@
 package io.nisfeb.talon.ui.screens
+import io.nisfeb.talon.util.formatMonthDay
+import io.nisfeb.talon.util.formatTime24
 import io.nisfeb.talon.util.nowMs
 
 import androidx.compose.foundation.clickable
@@ -39,9 +41,6 @@ import io.nisfeb.talon.data.ContactEntity
 import io.nisfeb.talon.ui.Avatar
 import io.nisfeb.talon.ui.linkifyStatus
 import io.nisfeb.talon.urbit.TlonChatRepo
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 
 /**
  * Rolling feed of contact statuses sorted by when we last noticed
@@ -221,15 +220,13 @@ internal fun StatusRow(c: ContactEntity, onClick: () -> Unit) {
     }
 }
 
-private val TIME_TODAY = SimpleDateFormat("HH:mm", Locale.getDefault())
-private val DATE_OLD = SimpleDateFormat("MMM d", Locale.getDefault())
 
 private fun formatRelative(ms: Long): String {
     val diff = nowMs() - ms
     return when {
         diff < 60_000L -> "now"
         diff < 3600_000L -> "${diff / 60_000L}m"
-        diff < 24 * 3600_000L -> TIME_TODAY.format(Date(ms))
-        else -> DATE_OLD.format(Date(ms))
+        diff < 24 * 3600_000L -> formatTime24(ms)
+        else -> formatMonthDay(ms)
     }
 }

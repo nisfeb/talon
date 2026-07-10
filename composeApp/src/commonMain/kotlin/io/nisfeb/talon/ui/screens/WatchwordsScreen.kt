@@ -1,4 +1,5 @@
 package io.nisfeb.talon.ui.screens
+import io.nisfeb.talon.util.formatMonthDayTime
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -45,9 +46,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flowOn
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 
 @Composable
 fun WatchwordsScreen(
@@ -208,7 +206,7 @@ private fun HitRow(
     onClick: () -> Unit,
 ) {
     val convoLabel = remember(hit.whom, contactMap) { contactMap.conversationLabel(hit.whom) }
-    val timeLabel = remember(hit.sentMs) { DATE_FMT.format(Date(hit.sentMs)) }
+    val timeLabel = remember(hit.sentMs) { formatMonthDayTime(hit.sentMs) }
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -263,4 +261,3 @@ private fun EmptyHits(termCount: Int) {
     }
 }
 
-private val DATE_FMT = SimpleDateFormat("MMM d HH:mm", Locale.getDefault())

@@ -1,4 +1,5 @@
 package io.nisfeb.talon.ui.screens
+import io.nisfeb.talon.util.formatMonthDayYear
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -51,9 +52,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 
 /**
  * Lists notebook (%diary) entries in a channel. Newest first; tap a
@@ -228,8 +226,7 @@ private fun plainTextExcerpt(id: String, contentJson: String, limit: Int): Strin
     return if (text.length <= limit) text else text.take(limit - 1) + "…"
 }
 
-private val DATE_FMT = SimpleDateFormat("MMM d, yyyy", Locale.getDefault())
-private fun formatDate(ms: Long): String = DATE_FMT.format(Date(ms))
+private fun formatDate(ms: Long): String = formatMonthDayYear(ms)
 
 // TODO(port-d5-followup): URL opener — production keeps a `sharePost(Intent)`
 // stub so a future "share post" feature can wire through Android's share

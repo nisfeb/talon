@@ -1,4 +1,5 @@
 package io.nisfeb.talon.ui.screens
+import io.nisfeb.talon.util.formatMonthDayTime
 
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
@@ -87,9 +88,6 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.launch
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 
 /**
  * Body of [ThreadScreen]: the parent message + replies list, the
@@ -637,7 +635,7 @@ private fun ThreadMessage(
     flashAmber: Boolean = false,
 ) {
     val parts = remember(m.id, m.contentJson) { StoryCache.partsFor(m.id, m.contentJson) }
-    val stamp = remember(m.sentMs) { TIME_FORMAT.format(Date(m.sentMs)) }
+    val stamp = remember(m.sentMs) { formatMonthDayTime(m.sentMs) }
     val authorLabel = remember(m.author, contactMap) { contactMap.displayName(m.author) }
     val grouped = remember(reactions) {
         // Normalize on read too: rows stored before we normalized on write
@@ -780,7 +778,6 @@ private fun ThreadMessage(
     }
 }
 
-private val TIME_FORMAT = SimpleDateFormat("MMM d HH:mm", Locale.getDefault())
 
 private const val THREAD_GROUP_GAP_MS = 5L * 60_000L
 

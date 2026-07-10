@@ -1,4 +1,5 @@
 package io.nisfeb.talon.ui.screens
+import io.nisfeb.talon.util.formatMonthDayYear
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -52,9 +53,6 @@ import io.nisfeb.talon.urbit.StoryCache
 import io.nisfeb.talon.urbit.TlonChatRepo
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 
 /**
  * Detail view for one %heap (gallery) post. Shows the item at full
@@ -287,5 +285,4 @@ fun GalleryPostScreen(
     }
 }
 
-private val DATE_FMT = SimpleDateFormat("MMM d, yyyy", Locale.getDefault())
-private fun formatDate(ms: Long): String = DATE_FMT.format(Date(ms))
+private fun formatDate(ms: Long): String = formatMonthDayYear(ms)

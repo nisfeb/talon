@@ -1,4 +1,5 @@
 package io.nisfeb.talon.ui.screens
+import io.nisfeb.talon.util.formatMonthDayTime
 import io.nisfeb.talon.util.nowMs
 
 import androidx.compose.foundation.clickable
@@ -42,9 +43,6 @@ import io.nisfeb.talon.ui.ContactMap
 import io.nisfeb.talon.ui.contactMapFlow
 import io.nisfeb.talon.urbit.StoryCache
 import kotlinx.coroutines.flow.flowOf
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 
 @Composable
 fun SearchScreen(
@@ -352,7 +350,7 @@ private fun ResultRow(m: MessageEntity, contactMap: ContactMap, onClick: () -> U
     }
     val title = remember(m.whom, contactMap) { contactMap.conversationLabel(m.whom) }
     val authorLabel = remember(m.author, contactMap) { contactMap.displayName(m.author) }
-    val stamp = remember(m.sentMs) { DATE_FORMAT.format(Date(m.sentMs)) }
+    val stamp = remember(m.sentMs) { formatMonthDayTime(m.sentMs) }
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -369,12 +367,11 @@ private fun ResultRow(m: MessageEntity, contactMap: ContactMap, onClick: () -> U
     }
 }
 
-private val DATE_FORMAT = SimpleDateFormat("MMM d HH:mm", Locale.getDefault())
 
 @Composable
 private fun SectionHeader(label: String) {
     Text(
-        label.uppercase(Locale.getDefault()),
+        label.uppercase(),
         style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
