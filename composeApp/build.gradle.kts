@@ -448,6 +448,15 @@ fun derivePackageVersion(): String {
 tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompilationTask<*>>().configureEach {
     dependsOn(generateTalonBuild)
 }
+// KSP2 runs symbol processing in a standalone KspAATask, not a
+// KotlinCompilationTask, so the withType() above misses it. Those tasks
+// read the same generated commonMain source dir, so without this Gradle's
+// validation fails: "kspDebugKotlinAndroid uses output of generateTalonBuild
+// without declaring a dependency." Match by name to cover every target's
+// ksp task (kspKotlinDesktop, kspDebugKotlinAndroid, kspKotlinIosArm64, …).
+tasks.matching { it.name.startsWith("ksp") }.configureEach {
+    dependsOn(generateTalonBuild)
+}
 
 // Manual smoke task for the desktop notifier — emits a real native
 // notification so the path can be verified against the user's DE.
