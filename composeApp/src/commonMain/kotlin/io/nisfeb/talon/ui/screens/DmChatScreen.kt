@@ -7,7 +7,9 @@ import kotlinx.datetime.Clock
 import kotlinx.datetime.DateTimeUnit
 import kotlinx.datetime.Instant
 import kotlinx.datetime.TimeZone
+import kotlinx.datetime.atStartOfDayIn
 import kotlinx.datetime.minus
+import kotlinx.datetime.plus
 import kotlinx.datetime.toLocalDateTime
 import io.nisfeb.talon.util.nowMs
 
@@ -1581,11 +1583,11 @@ private fun buildChatListItemsReusing(
 ): Pair<List<ChatListItem>, Map<String, DisplayRow>> {
     val out = ArrayList<ChatListItem>(messages.size + 8)
     val nextMap = HashMap<String, DisplayRow>(messages.size)
-    val tz = TimeZone.currentSystemDefault()
+    val dayKeyer = DayKeyer(TimeZone.currentSystemDefault())
     var lastDayKey: String? = null
     var prevMsg: MessageEntity? = null
     for (m in messages) {
-        val dayKey = dayKeyFor(tz, m.sentMs)
+        val dayKey = dayKeyer.keyFor(m.sentMs)
         if (dayKey != lastDayKey) {
             out.add(ChatListItem.DateDivider(label = dividerLabel(m.sentMs), dayKey = dayKey))
             lastDayKey = dayKey
@@ -1627,9 +1629,27 @@ private fun buildChatListItemsReusing(
     return out to nextMap
 }
 
-private fun dayKeyFor(tz: TimeZone, ms: Long): String {
-    val dt = Instant.fromEpochMilliseconds(ms).toLocalDateTime(tz)
-    return "${dt.year}-${dt.dayOfYear}"
+/**
+ * Assigns each message a stable per-local-day key. Messages arrive
+ * time-ordered, so we cache the current day's [start, end) epoch-ms
+ * window and key every message inside it with a bare range check — only
+ * crossing midnight pays for a LocalDateTime conversion. Keeps the
+ * full-history chat-list rebuild at O(distinct days) instead of an
+ * allocating, DST-table-hitting toLocalDateTime per message, which
+ * regressed rebuild time (and post latency) on large channels.
+ */
+internal class DayKeyer(private val tz: TimeZone) {
+    private var startMs = Long.MAX_VALUE
+    private var endMs = Long.MIN_VALUE
+    private var key = ""
+    fun keyFor(ms: Long): String {
+        if (ms in startMs until endMs) return key
+        val date = Instant.fromEpochMilliseconds(ms).toLocalDateTime(tz).date
+        startMs = date.atStartOfDayIn(tz).toEpochMilliseconds()
+        endMs = date.plus(1, DateTimeUnit.DAY).atStartOfDayIn(tz).toEpochMilliseconds()
+        key = "${date.year}-${date.dayOfYear}"
+        return key
+    }
 }
 
 private fun dividerLabel(ms: Long): String {

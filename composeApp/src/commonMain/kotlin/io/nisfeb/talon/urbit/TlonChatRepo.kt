@@ -49,6 +49,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -565,24 +566,44 @@ class TlonChatRepo(
         // Watchdog: if we don't see an event for 90s, the SSE is likely
         // a zombie (doze-frozen or server-side dropped). Cancel the
         // collect job so runSessionLoop reconnects.
+        // Acks ride their own queue instead of being awaited inline. Each
+        // ack is a network PUT to the ship; awaiting it after every event
+        // capped ingestion at one round-trip per event, so a burst of
+        // events (and the poke-echo that un-greys a just-sent message)
+        // drained only as fast as we could ack — the "pending stays on
+        // screen long after it posted" lag. Draining acks on a separate
+        // coroutine lets applyEvent (which does the reap) run at DB speed;
+        // the single consumer keeps acks in order and Eyre tolerates them
+        // arriving a beat behind ingestion.
+        val ackQueue = Channel<Long>(Channel.UNLIMITED)
+        val ackJob = launch {
+            for (id in ackQueue) runCatching { ch.ack(id) }
+        }
         val collectJob = launch {
-            ch.events().collect { event ->
-                lastEventMs = nowMs()
-                notificationHealth.markSseEvent(lastEventMs)
-                runCatching { applyEvent(event.body) }
-                    .onFailure {
-                        // Rethrow cancellation so structured-concurrency
-                        // children of applyEvent can propagate properly;
-                        // without this any future child coroutine that
-                        // gets cancelled would silently fall through and
-                        // the caller would see a "stuck" UI.
-                        if (it is kotlinx.coroutines.CancellationException) throw it
-                        Log.w(TAG, "apply event failed", it)
-                    }
-                event.id?.let { runCatching { ch.ack(it) } }
+            try {
+                ch.events().collect { event ->
+                    lastEventMs = nowMs()
+                    notificationHealth.markSseEvent(lastEventMs)
+                    runCatching { applyEvent(event.body) }
+                        .onFailure {
+                            // Rethrow cancellation so structured-concurrency
+                            // children of applyEvent can propagate properly;
+                            // without this any future child coroutine that
+                            // gets cancelled would silently fall through and
+                            // the caller would see a "stuck" UI.
+                            if (it is kotlinx.coroutines.CancellationException) throw it
+                            Log.w(TAG, "apply event failed", it)
+                        }
+                    event.id?.let { ackQueue.trySend(it) }
+                }
+            } finally {
+                // Close on normal completion AND cancellation so the ack
+                // consumer drains what's queued and exits with us.
+                ackQueue.close()
             }
             Log.w(TAG, "event stream completed; will reconnect")
         }
+        collectJob.invokeOnCompletion { ackJob.cancel() }
         sessionJob = collectJob
         val watchdogJob = launch {
             while (isActive && collectJob.isActive) {
