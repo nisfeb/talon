@@ -20,16 +20,12 @@ fun createAppHttpClient(): HttpClient = HttpClient(httpEngineFactory()) {
     expectSuccess = false
     followRedirects = true
     install(HttpTimeout) {
+        // No socket (read) timeout here: the platform engine is configured
+        // with an infinite read timeout (see httpEngineFactory) so the SSE
+        // channel stays open forever and pokes/scries are bounded only by
+        // their own per-call requestTimeoutMillis — the pre-Ktor behaviour.
+        // Leaving OkHttp's 10s default in place is what made slow-ship pokes
+        // die with "socket timeout has expired".
         connectTimeoutMillis = 15_000
-        // socketTimeoutMillis is the max gap between reads, not the total
-        // request time. Left unset, the engine default (OkHttp = 10s) leaks
-        // in and undercuts every per-call requestTimeoutMillis — a poke to a
-        // slow ship that stays silent >10s dies with "socket timeout has
-        // expired" long before its own 30s budget. Streaming (SSE, AI) never
-        // hit it because bytes keep arriving. Raise it well past the longest
-        // per-call budget (MCP = 120s) so the per-call timeout is the real
-        // authority; the SSE already tolerates the old 10s, so this only
-        // relaxes it.
-        socketTimeoutMillis = 180_000
     }
 }
