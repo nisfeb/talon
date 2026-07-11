@@ -64,3 +64,4 @@ dist/
 # session-local settings overrides). Personal to the developer's
 # machine, not source-controlled.
 .claude/
+.gradle-ios-heap/

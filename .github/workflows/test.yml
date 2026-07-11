@@ -78,6 +78,15 @@ jobs:
       # Kotlin compile in the Kotlin daemon — so a heap OOM there reproduces
       # here for free instead of costing a nomac build. Signing is disabled;
       # we only care that it compiles + archives.
+      # Simulate a hostile builder (nomac/Codemagic) that pins a too-small
+      # org.gradle.jvmargs in GRADLE_USER_HOME, outranking our project file.
+      # The framework run-script must override this via its own
+      # project-local GRADLE_USER_HOME, or the archive below OOMs.
+      - name: Simulate a low builder heap default
+        run: |
+          mkdir -p "$HOME/.gradle"
+          printf 'org.gradle.jvmargs=-Xmx2g\n' >> "$HOME/.gradle/gradle.properties"
+
       - name: Archive iOS app (unsigned, mirrors the TestFlight path)
         run: |
           set -o pipefail
