@@ -34,10 +34,17 @@ class AndroidDraftStore(context: Context, ship: String) : DraftStore() {
         prefs.edit {
             if (draft.isBlank()) remove(whom) else putString(whom, draft)
         }
+        // Refresh backing ourselves rather than waiting on the change
+        // listener. edit{} updates the in-memory prefs synchronously, so
+        // snapshot() already reflects the write; the listener is async and
+        // can miss callbacks, which left the conversation list advertising
+        // "Draft:" after a send had already cleared it.
+        backing.value = snapshot()
     }
 
     override fun clear(whom: String) {
         prefs.edit { remove(whom) }
+        backing.value = snapshot()
     }
 
     private fun snapshot(): Map<String, String> = prefs.all
