@@ -72,9 +72,21 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      # Release (not Debug) link: it's the config the TestFlight/App Store
-      # archive uses, and its whole-program optimization is heavier — it's
-      # where the framework OOMed at -Xmx4g. Building it here catches
-      # release-only failures for free before spending a nomac build.
-      - name: Compile iOS framework (device arm64, release)
-        run: ./gradlew :composeApp:linkReleaseFrameworkIosArm64 --stacktrace
+      # Archive via xcodebuild (unsigned), NOT a plain `gradlew linkRelease`.
+      # This runs the exact path the TestFlight build uses — xcodebuild ->
+      # the "Compile Kotlin Framework" run-script -> embedAndSign, with the
+      # Kotlin compile in the Kotlin daemon — so a heap OOM there reproduces
+      # here for free instead of costing a nomac build. Signing is disabled;
+      # we only care that it compiles + archives.
+      - name: Archive iOS app (unsigned, mirrors the TestFlight path)
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project iosApp/iosApp.xcodeproj \
+            -scheme iosApp \
+            -configuration Release \
+            -sdk iphoneos \
+            -archivePath "$RUNNER_TEMP/Talon.xcarchive" \
+            archive \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            | tail -500
