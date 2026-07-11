@@ -169,6 +169,7 @@ class UrbitChannel internal constructor(
         val resp = http.put(url) {
             contentType(ContentType.Application.Json)
             setBody(body.toString())
+            timeout { requestTimeoutMillis = RPC_TIMEOUT_SECS * 1000 }
         }
         if (!resp.status.isSuccess()) error("thread $threadName: HTTP ${resp.status.value}")
         val text = resp.bodyAsText()

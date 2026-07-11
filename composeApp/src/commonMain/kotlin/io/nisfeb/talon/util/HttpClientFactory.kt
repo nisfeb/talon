@@ -21,5 +21,15 @@ fun createAppHttpClient(): HttpClient = HttpClient(httpEngineFactory()) {
     followRedirects = true
     install(HttpTimeout) {
         connectTimeoutMillis = 15_000
+        // socketTimeoutMillis is the max gap between reads, not the total
+        // request time. Left unset, the engine default (OkHttp = 10s) leaks
+        // in and undercuts every per-call requestTimeoutMillis — a poke to a
+        // slow ship that stays silent >10s dies with "socket timeout has
+        // expired" long before its own 30s budget. Streaming (SSE, AI) never
+        // hit it because bytes keep arriving. Raise it well past the longest
+        // per-call budget (MCP = 120s) so the per-call timeout is the real
+        // authority; the SSE already tolerates the old 10s, so this only
+        // relaxes it.
+        socketTimeoutMillis = 180_000
     }
 }

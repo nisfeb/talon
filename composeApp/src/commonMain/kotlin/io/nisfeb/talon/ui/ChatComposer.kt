@@ -1,6 +1,7 @@
 package io.nisfeb.talon.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -39,6 +40,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.isCtrlPressed
@@ -442,11 +445,15 @@ fun ChatComposer(
             },
     ) {
         if (state.sendError != null) {
+            val clipboard = LocalClipboardManager.current
+            val err = state.sendError!!
             Text(
-                state.sendError!!,
+                "$err · tap to copy",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.error,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+                modifier = Modifier
+                    .clickable { clipboard.setText(AnnotatedString(err)) }
+                    .padding(horizontal = 16.dp, vertical = 4.dp),
             )
         }
         if (slashSuggestions.isNotEmpty() && slashTrigger != null) {
