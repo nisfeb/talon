@@ -5,15 +5,17 @@
 // `[loc|…]` widgets in StoryRenderer.
 package io.nisfeb.talon.ui
 
+import io.nisfeb.talon.util.formatDecimals
+
 fun osmViewerUrl(lat: Double, lng: Double, zoom: Int = 15): String {
-    val la = "%.5f".format(lat)
-    val ln = "%.5f".format(lng)
+    val la = lat.formatDecimals(5)
+    val ln = lng.formatDecimals(5)
     return "https://www.openstreetmap.org/?mlat=$la&mlon=$ln#map=$zoom/$la/$ln"
 }
 
 fun encodeLocTag(lat: Double, lng: Double): String {
-    val la = "%.5f".format(lat)
-    val ln = "%.5f".format(lng)
+    val la = lat.formatDecimals(5)
+    val ln = lng.formatDecimals(5)
     return "[loc|$la|$ln]"
 }
 

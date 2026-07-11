@@ -25,6 +25,9 @@
 package io.nisfeb.talon.urbit
 import kotlin.concurrent.Volatile
 import com.ionspin.kotlin.bignum.integer.BigInteger
+import io.nisfeb.talon.util.ConcurrentMap
+import io.nisfeb.talon.util.ConcurrentSet
+import io.nisfeb.talon.util.isTransientNetworkError
 import io.nisfeb.talon.util.ioDispatcher
 import io.nisfeb.talon.util.nowMs
 
@@ -1838,7 +1841,7 @@ class TlonChatRepo(
         return hasMore
     }
 
-    private val paginationExhausted = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+    private val paginationExhausted = ConcurrentSet<String>()
 
     /**
      * Tracks in-flight channel-post pokes so the SSE poke-ack listener
@@ -1851,9 +1854,7 @@ class TlonChatRepo(
      * UI doesn't render a status indicator and there's no useful
      * delivery signal beyond our own ship's ack anyway).
      */
-    private val pendingChannelPokes:
-        java.util.concurrent.ConcurrentHashMap<Long, Pair<String, String>> =
-        java.util.concurrent.ConcurrentHashMap()
+    private val pendingChannelPokes = ConcurrentMap<Long, Pair<String, String>>()
 
     /**
      * Upload an image. Tries memex first (Tlon-hosted ships with %genuine
@@ -3173,9 +3174,7 @@ class TlonChatRepo(
             }
             if (outcome.isSuccess) return
             lastErr = outcome.exceptionOrNull()
-            val transient = lastErr is java.io.InterruptedIOException ||
-                lastErr is java.net.SocketException ||
-                lastErr?.cause is java.net.SocketException
+            val transient = isTransientNetworkError(lastErr)
             if (!transient) break
             attempt += 1
             if (attempt < maxAttempts) {
@@ -3183,9 +3182,7 @@ class TlonChatRepo(
             }
         }
         lastErr?.let { err ->
-            val transient = err is java.io.InterruptedIOException ||
-                err is java.net.SocketException ||
-                err.cause is java.net.SocketException
+            val transient = isTransientNetworkError(err)
             if (transient) {
                 Log.i(TAG, "markRead $whom gave up after $attempt attempts: ${err.message}")
             } else {
@@ -3206,8 +3203,7 @@ class TlonChatRepo(
     )
 
     /** subscribe request id → (app, fallback path), pending a nack. */
-    private val subFallbacks =
-        java.util.concurrent.ConcurrentHashMap<Long, Pair<String, String>>()
+    private val subFallbacks = ConcurrentMap<Long, Pair<String, String>>()
 
     // ───────── presence (typing indicators) ─────────
 
@@ -3259,8 +3255,7 @@ class TlonChatRepo(
             .distinctUntilChanged()
 
     /** When we last announced a given (context, topic). */
-    private val lastPresencePoke =
-        java.util.concurrent.ConcurrentHashMap<Pair<String, String>, Long>()
+    private val lastPresencePoke = ConcurrentMap<Pair<String, String>, Long>()
 
     /**
      * Announce that we're doing [topic] in [whom]. Safe to call on every
@@ -3793,12 +3788,8 @@ class TlonChatRepo(
             if (attempt.isSuccess) return attempt.getOrNull()
             val err = attempt.exceptionOrNull()
             lastErr = err
-            if (err is java.io.InterruptedIOException ||
-                err?.cause is java.io.InterruptedIOException ||
-                err is java.net.SocketException ||
-                err?.cause is java.net.SocketException
-            ) {
-                Log.w(TAG, "$label: network timeout, giving up; err: ${err.message}")
+            if (isTransientNetworkError(err)) {
+                Log.w(TAG, "$label: network timeout, giving up; err: ${err?.message}")
                 return null
             }
         }

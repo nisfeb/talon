@@ -58,6 +58,9 @@ import io.nisfeb.talon.urbit.Presence
 import io.nisfeb.talon.urbit.TlonChatRepo
 import io.nisfeb.talon.util.Log
 import io.nisfeb.talon.util.decodeImageDimensions
+import io.nisfeb.talon.util.deleteFile
+import io.nisfeb.talon.util.fileName
+import io.nisfeb.talon.util.readFileBytes
 import io.nisfeb.talon.util.rememberImagePicker
 import kotlinx.coroutines.launch
 import io.ktor.client.HttpClient
@@ -102,7 +105,9 @@ data class PendingAttachment(
     // this flows through Compose state once and disappears, so identity
     // is the right (and cheapest) comparison. Mirrors PickedImage.
     override fun equals(other: Any?): Boolean = this === other
-    override fun hashCode(): Int = System.identityHashCode(this)
+    // Any.hashCode() is identity-based on both JVM and Kotlin/Native —
+    // consistent with the reference-equals above, no System.identityHashCode.
+    override fun hashCode(): Int = super.hashCode()
 }
 
 /**
@@ -206,7 +211,7 @@ fun ChatComposer(
     // used to do this manually; the composer owns it now.
     DisposableEffect(whom) {
         onDispose {
-            state.pendingVoice?.let { java.io.File(it.path).delete() }
+            state.pendingVoice?.let { deleteFile(it.path) }
             state.pendingVoice = null
         }
     }
@@ -557,7 +562,7 @@ fun ChatComposer(
                 voicePlayer = voicePlayer,
                 sendAccent = sendAccent,
                 onCancel = {
-                    java.io.File(pv.path).delete()
+                    deleteFile(pv.path)
                     state.pendingVoice = null
                 },
                 onSend = {
@@ -568,17 +573,16 @@ fun ChatComposer(
                     drafts.clear(whom)
                     scope.launch {
                         runCatching {
-                            val file = java.io.File(pv.path)
-                            val bytes = file.readBytes()
+                            val bytes = readFileBytes(pv.path)
                             val hostedUrl = repo.uploadImage(
                                 bytes = bytes,
                                 contentType = "audio/mp4",
-                                fileName = file.name,
+                                fileName = fileName(pv.path),
                             )
                             val seconds = (pv.durationMs / 1000L).coerceAtLeast(1L)
                             val label = "🎙 Voice ${seconds}s"
                             strategy.sendText("[$label]($hostedUrl)")
-                            file.delete()
+                            deleteFile(pv.path)
                         }.onFailure { err ->
                             Log.e("ChatComposer", "voice send failed", err)
                             state.sendError =

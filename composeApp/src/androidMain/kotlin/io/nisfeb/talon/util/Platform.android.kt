@@ -16,3 +16,9 @@ actual fun timeZoneShortLabel(zoneId: String, atMs: Long): String {
         java.util.Locale.getDefault(),
     )
 }
+
+// No desktop keyboard; Cmd-modifier logic never applies on Android.
+actual val isMacOsHost: Boolean = false
+
+actual val tempDirPath: String =
+    System.getProperty("java.io.tmpdir")?.trimEnd('/') ?: "/data/local/tmp"

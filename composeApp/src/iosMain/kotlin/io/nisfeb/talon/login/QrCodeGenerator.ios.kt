@@ -15,7 +15,7 @@ import platform.CoreImage.CIContext
 import platform.CoreImage.CIFilter
 import platform.CoreImage.createCGImage
 import platform.CoreImage.filterWithName
-import platform.CoreImage.outputImage
+import platform.Foundation.setValue
 
 /**
  * iOS QR generator using CoreImage's `CIQRCodeGenerator`, rendered to a

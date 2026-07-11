@@ -1,5 +1,6 @@
 package io.nisfeb.talon.ui.screens
 import kotlin.concurrent.Volatile
+import io.nisfeb.talon.util.ConcurrentMap
 import io.nisfeb.talon.util.formatMonthDay
 import io.nisfeb.talon.util.formatTime24
 import io.nisfeb.talon.util.nowMs
@@ -2455,7 +2456,7 @@ fun resetHomeListSnapshot() { /* no-op; per-ship snapshots replace this */ }
  * catches up behind whatever repo.start is doing on IO.
  */
 private object HomeListSnapshot {
-    private val perShip = java.util.concurrent.ConcurrentHashMap<String, ShipSnapshot>()
+    private val perShip = ConcurrentMap<String, ShipSnapshot>()
 
     @Volatile var active: ShipSnapshot? = null
 

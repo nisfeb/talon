@@ -16,3 +16,11 @@ actual fun timeZoneShortLabel(zoneId: String, atMs: Long): String {
         java.util.Locale.getDefault(),
     )
 }
+
+actual val isMacOsHost: Boolean = run {
+    val os = System.getProperty("os.name")?.lowercase().orEmpty()
+    "mac" in os || "darwin" in os
+}
+
+actual val tempDirPath: String =
+    System.getProperty("java.io.tmpdir")?.trimEnd('/') ?: "/tmp"

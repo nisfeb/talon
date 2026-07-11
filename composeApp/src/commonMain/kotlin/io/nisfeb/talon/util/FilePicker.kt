@@ -42,5 +42,6 @@ data class PickedImage(
     // and disappears), but Kotlin's data class default for ByteArray
     // is reference equality which would break test fixtures.
     override fun equals(other: Any?): Boolean = this === other
-    override fun hashCode(): Int = System.identityHashCode(this)
+    // Any.hashCode() is identity-based on JVM and Kotlin/Native alike.
+    override fun hashCode(): Int = super.hashCode()
 }

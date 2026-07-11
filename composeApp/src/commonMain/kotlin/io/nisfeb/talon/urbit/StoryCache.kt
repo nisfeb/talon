@@ -1,5 +1,7 @@
 package io.nisfeb.talon.urbit
 
+import kotlinx.atomicfu.locks.SynchronizedObject
+import kotlinx.atomicfu.locks.synchronized
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 
@@ -30,17 +32,31 @@ object StoryCache {
      *  scrolls through hundreds of channels in one session. */
     private const val MAX_ENTRIES = 4096
 
-    /** Synchronized LRU. LinkedHashMap with `accessOrder = true` evicts
-     *  least-recently-touched on overflow; cheap, no extra deps. */
-    private class Lru<V>(private val maxEntries: Int) :
-        LinkedHashMap<String, V>(maxEntries, 0.75f, /* accessOrder = */ true) {
-        override fun removeEldestEntry(eldest: Map.Entry<String, V>?): Boolean =
-            size > maxEntries
+    /** Access-order LRU. Plain [LinkedHashMap] (insertion-order) plus
+     *  manual move-to-most-recent on touch and eldest-eviction on
+     *  overflow — Kotlin/Native has no `LinkedHashMap(accessOrder=true)`
+     *  / `removeEldestEntry` (those are java.util). Guarded by [lock]. */
+    private class Lru<V>(private val maxEntries: Int) {
+        private val map = LinkedHashMap<String, V>()
+        operator fun get(key: String): V? {
+            val v = map.remove(key) ?: return null
+            map[key] = v // reinsert → most-recently-used
+            return v
+        }
+        operator fun set(key: String, value: V) {
+            map.remove(key)
+            map[key] = value
+            while (map.size > maxEntries) {
+                val eldest = map.keys.firstOrNull() ?: break
+                map.remove(eldest)
+            }
+        }
+        fun remove(key: String) { map.remove(key) }
     }
 
-    private val parts: MutableMap<String, Pair<Int, List<StoryPart>>> = Lru(MAX_ENTRIES)
-    private val previews: MutableMap<String, Pair<Int, String>> = Lru(MAX_ENTRIES)
-    private val lock = Any()
+    private val parts = Lru<Pair<Int, List<StoryPart>>>(MAX_ENTRIES)
+    private val previews = Lru<Pair<Int, String>>(MAX_ENTRIES)
+    private val lock = SynchronizedObject()
 
     /**
      * Pre-warm the parts cache with an already-parsed [tree]. Called by

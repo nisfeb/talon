@@ -7,8 +7,8 @@ import kotlinx.cinterop.usePinned
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import platform.Foundation.NSDate
+import platform.Foundation.NSTemporaryDirectory
 import platform.Foundation.NSTimeZone
-import platform.Foundation.abbreviationForDate
 import platform.Foundation.dateWithTimeIntervalSince1970
 import platform.Foundation.timeZoneWithName
 import platform.posix.arc4random_buf
@@ -35,3 +35,8 @@ actual fun timeZoneShortLabel(zoneId: String, atMs: Long): String {
     val date = NSDate.dateWithTimeIntervalSince1970(atMs / 1000.0)
     return tz.abbreviationForDate(date) ?: zoneId
 }
+
+// iOS is not a macOS desktop host; Cmd-modifier logic never applies.
+actual val isMacOsHost: Boolean = false
+
+actual val tempDirPath: String = NSTemporaryDirectory().trimEnd('/')

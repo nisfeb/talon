@@ -1,5 +1,6 @@
 package io.nisfeb.talon.ui.screens
 import io.nisfeb.talon.util.formatMonthDay
+import io.nisfeb.talon.util.ConcurrentMap
 import io.nisfeb.talon.util.formatMonthDayTime
 import io.nisfeb.talon.util.formatMonthDayYear
 import kotlinx.datetime.Clock
@@ -1566,7 +1567,7 @@ private data class DisplayRow(
 )
 
 private object ChatRowsSnapshot {
-    private val byWhom = java.util.concurrent.ConcurrentHashMap<String, List<ChatListItem>>()
+    private val byWhom = ConcurrentMap<String, List<ChatListItem>>()
     fun get(whom: String): List<ChatListItem> = byWhom[whom].orEmpty()
     fun put(whom: String, rows: List<ChatListItem>) { byWhom[whom] = rows }
 }
@@ -1580,11 +1581,11 @@ private fun buildChatListItemsReusing(
 ): Pair<List<ChatListItem>, Map<String, DisplayRow>> {
     val out = ArrayList<ChatListItem>(messages.size + 8)
     val nextMap = HashMap<String, DisplayRow>(messages.size)
-    val cal = java.util.Calendar.getInstance()
+    val tz = TimeZone.currentSystemDefault()
     var lastDayKey: String? = null
     var prevMsg: MessageEntity? = null
     for (m in messages) {
-        val dayKey = dayKeyFor(cal, m.sentMs)
+        val dayKey = dayKeyFor(tz, m.sentMs)
         if (dayKey != lastDayKey) {
             out.add(ChatListItem.DateDivider(label = dividerLabel(m.sentMs), dayKey = dayKey))
             lastDayKey = dayKey
@@ -1626,11 +1627,9 @@ private fun buildChatListItemsReusing(
     return out to nextMap
 }
 
-private fun dayKeyFor(cal: java.util.Calendar, ms: Long): String {
-    cal.timeInMillis = ms
-    val y = cal.get(java.util.Calendar.YEAR)
-    val d = cal.get(java.util.Calendar.DAY_OF_YEAR)
-    return "$y-$d"
+private fun dayKeyFor(tz: TimeZone, ms: Long): String {
+    val dt = Instant.fromEpochMilliseconds(ms).toLocalDateTime(tz)
+    return "${dt.year}-${dt.dayOfYear}"
 }
 
 private fun dividerLabel(ms: Long): String {

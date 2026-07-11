@@ -1,4 +1,7 @@
 package io.nisfeb.talon.ui
+
+import io.nisfeb.talon.util.createTempFileUri
+import io.nisfeb.talon.util.formatDecimals
 import kotlinx.datetime.toLocalDateTime
 
 import androidx.compose.foundation.background
@@ -470,8 +473,10 @@ private fun InlineLinkPreview(
             verticalArrangement = Arrangement.spacedBy(2.dp),
         ) {
             val caption = preview.siteName
-                ?: runCatching { java.net.URI(preview.url).host?.removePrefix("www.") }
-                    .getOrNull()
+                ?: runCatching {
+                    io.ktor.http.Url(preview.url).host.removePrefix("www.")
+                        .takeIf { it.isNotBlank() }
+                }.getOrNull()
                 ?: preview.url
             Text(
                 caption,
@@ -690,7 +695,7 @@ private fun LocWidgetBlock(
                     ),
                 )
                 Text(
-                    "%.5f, %.5f".format(lat, lng),
+                    "${lat.formatDecimals(5)}, ${lng.formatDecimals(5)}",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -758,11 +763,7 @@ private fun CalWidgetBlock(
                         calendarLauncher.launch(startEpochMs, endEpochMs, title)
                     } else {
                         val ics = buildIcs(startEpochMs, endEpochMs, title)
-                        val tmp = java.io.File.createTempFile("talon-event-", ".ics").apply {
-                            deleteOnExit()
-                            writeText(ics, Charsets.UTF_8)
-                        }
-                        uriHandlerCal.openUri(tmp.toURI().toString())
+                        uriHandlerCal.openUri(createTempFileUri("talon-event-", ".ics", ics))
                     }
                 }
             }) { Text("Add") }

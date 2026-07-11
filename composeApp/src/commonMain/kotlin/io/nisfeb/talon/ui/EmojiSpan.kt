@@ -47,6 +47,24 @@ private fun isEmojiCodepoint(cp: Int): Boolean = when {
  * Non-emoji text is unstyled — it inherits whatever fontFamily the
  * containing [androidx.compose.material3.Text] already provides.
  */
+/**
+ * Surrogate-aware codepoint read. Kotlin/Native has no public
+ * `String.codePointAt` (the JVM leaned on java.lang.String's), so decode
+ * the UTF-16 pair by hand: a high surrogate followed by a low surrogate
+ * combines into a single supplementary codepoint, otherwise it's the
+ * char's own code.
+ */
+internal fun CharSequence.codePointAtCommon(index: Int): Int {
+    val high = this[index]
+    if (high.isHighSurrogate() && index + 1 < length) {
+        val low = this[index + 1]
+        if (low.isLowSurrogate()) {
+            return 0x10000 + ((high.code - 0xD800) shl 10) + (low.code - 0xDC00)
+        }
+    }
+    return high.code
+}
+
 fun String.applyEmojiSpans(): AnnotatedString {
     val text = this
     if (text.isEmpty()) return AnnotatedString(text)
@@ -54,7 +72,7 @@ fun String.applyEmojiSpans(): AnnotatedString {
         append(text)
         var i = 0
         while (i < text.length) {
-            val cp = text.codePointAt(i)
+            val cp = text.codePointAtCommon(i)
             val len = if (cp >= 0x10000) 2 else 1  // surrogate-pair aware step
             if (isEmojiCodepoint(cp)) {
                 addStyle(SpanStyle(fontFamily = EmojiFontFamily), i, i + len)
@@ -79,7 +97,7 @@ fun AnnotatedString.applyEmojiSpans(): AnnotatedString {
         var i = 0
         val text = source.text
         while (i < text.length) {
-            val cp = text.codePointAt(i)
+            val cp = text.codePointAtCommon(i)
             val len = if (cp >= 0x10000) 2 else 1
             if (isEmojiCodepoint(cp)) {
                 addStyle(SpanStyle(fontFamily = EmojiFontFamily), i, i + len)

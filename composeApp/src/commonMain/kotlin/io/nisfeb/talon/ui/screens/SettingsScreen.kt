@@ -890,7 +890,10 @@ private fun DailyDigestSection(
         ) {
             Text("Fire time", Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
             TextButton(onClick = { showTimePicker = true }) {
-                Text("%02d:%02d".format(ddState.hourOfDay, ddState.minuteOfDay))
+                Text(
+                    "${ddState.hourOfDay.toString().padStart(2, '0')}:" +
+                        ddState.minuteOfDay.toString().padStart(2, '0'),
+                )
             }
         }
 

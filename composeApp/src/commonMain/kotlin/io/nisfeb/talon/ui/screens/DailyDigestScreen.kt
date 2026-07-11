@@ -1,5 +1,7 @@
 package io.nisfeb.talon.ui.screens
 
+import kotlinx.datetime.toLocalDateTime
+
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -220,4 +222,6 @@ private fun EmptyDigest(onGenerateNow: () -> Unit) {
 private val JSON = Json { ignoreUnknownKeys = true }
 
 private fun isTodayLocal(dateLocal: String): Boolean =
-    dateLocal == java.time.LocalDate.now(java.time.ZoneId.systemDefault()).toString()
+    dateLocal == kotlinx.datetime.Clock.System.now()
+        .toLocalDateTime(kotlinx.datetime.TimeZone.currentSystemDefault())
+        .date.toString()

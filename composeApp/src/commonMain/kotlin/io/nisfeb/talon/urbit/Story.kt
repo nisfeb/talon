@@ -9,6 +9,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import io.nisfeb.talon.ui.EmojiCatalog
 import io.nisfeb.talon.util.Log
+import io.nisfeb.talon.util.formatDecimals
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
@@ -725,10 +726,10 @@ object Story {
     private fun humanFileSize(bytes: Long): String {
         if (bytes < 1024) return "$bytes B"
         val kb = bytes / 1024.0
-        if (kb < 1024) return "%.1f KB".format(kb)
+        if (kb < 1024) return "${kb.formatDecimals(1)} KB"
         val mb = kb / 1024.0
-        if (mb < 1024) return "%.1f MB".format(mb)
-        return "%.2f GB".format(mb / 1024.0)
+        if (mb < 1024) return "${mb.formatDecimals(1)} MB"
+        return "${(mb / 1024.0).formatDecimals(2)} GB"
     }
 
     // ───────── style constants ─────────

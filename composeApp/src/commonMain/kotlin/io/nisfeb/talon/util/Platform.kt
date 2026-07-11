@@ -36,3 +36,18 @@ expect fun secureRandomBytes(n: Int): ByteArray
  * back to the zone id when no abbreviation is available.
  */
 expect fun timeZoneShortLabel(zoneId: String, atMs: Long): String
+
+/**
+ * True when the desktop host is macOS — drives the Cmd-vs-Ctrl keyboard
+ * modifier in App. JVM reads `os.name`; Android and iOS return false
+ * (no hardware Cmd key in play). Replaces a commonMain
+ * System.getProperty("os.name") call.
+ */
+expect val isMacOsHost: Boolean
+
+/**
+ * Platform temp directory as an absolute path (no trailing slash
+ * required). JVM uses `java.io.tmpdir`; iOS uses NSTemporaryDirectory().
+ * Backs [createTempFileUri].
+ */
+expect val tempDirPath: String

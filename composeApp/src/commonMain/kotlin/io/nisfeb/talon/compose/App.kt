@@ -1,5 +1,8 @@
+@file:OptIn(DelicateCoroutinesApi::class)
+
 package io.nisfeb.talon.compose
 import io.nisfeb.talon.util.ioDispatcher
+import io.nisfeb.talon.util.isMacOsHost
 import io.nisfeb.talon.util.nowMs
 
 import androidx.compose.foundation.focusable
@@ -23,6 +26,9 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.DelicateCoroutinesApi
+import kotlinx.coroutines.GlobalScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import io.nisfeb.talon.ai.AiSettingsRepository
 import io.nisfeb.talon.ui.parseHexColor
@@ -327,10 +333,7 @@ fun App(
 
     // Used by the onPreviewKeyEvent handler to pick the right modifier
     // key (Cmd on macOS, Ctrl everywhere else).
-    val isMacHost = remember {
-        val osName = System.getProperty("os.name") ?: ""
-        "mac" in osName.lowercase() || "darwin" in osName.lowercase()
-    }
+    val isMacHost = isMacOsHost
 
     // Seed openChat from the store when we (re)land on a ship — so
     // wide windows restore the user's last conversation instead of
@@ -579,10 +582,13 @@ fun App(
                 // SQLiteException spam in the brief overlap window.
                 // Matches production's TalonApplication.scheduleShipScopedTeardown.
                 val dying = db
-                Thread {
-                    try { Thread.sleep(2_000) } catch (_: InterruptedException) {}
+                // Fire-and-forget deferred close that must outlive this
+                // composition (a re-key) — GlobalScope is deliberate, the
+                // daemon Thread this replaces had the same lifetime.
+                GlobalScope.launch(ioDispatcher) {
+                    delay(2_000)
                     runCatching { dying.close() }
-                }.apply { isDaemon = true; name = "Talon-db-close-$shipKey" }.start()
+                }
             }
         }
 

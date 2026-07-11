@@ -69,4 +69,4 @@ val NoopMenuSeenStore: MenuSeenStore = InMemoryMenuSeenStore()
  * compare against an identical canonical form.
  */
 fun invitesSnapshot(flags: Iterable<String>): String =
-    flags.toSortedSet().joinToString(",")
+    flags.distinct().sorted().joinToString(",")
