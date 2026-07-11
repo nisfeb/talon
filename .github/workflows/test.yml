@@ -72,5 +72,9 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: Compile iOS framework (device arm64)
-        run: ./gradlew :composeApp:linkDebugFrameworkIosArm64 --stacktrace
+      # Release (not Debug) link: it's the config the TestFlight/App Store
+      # archive uses, and its whole-program optimization is heavier — it's
+      # where the framework OOMed at -Xmx4g. Building it here catches
+      # release-only failures for free before spending a nomac build.
+      - name: Compile iOS framework (device arm64, release)
+        run: ./gradlew :composeApp:linkReleaseFrameworkIosArm64 --stacktrace

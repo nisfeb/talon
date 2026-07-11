@@ -34,6 +34,10 @@ kotlin {
         iosTarget.binaries.framework {
             baseName = "ComposeApp"
             isStatic = true
+            // Kotlin/Native can't infer a bundle id from our package layout
+            // (it warns and falls back to the framework name). Set it
+            // explicitly so the release archive step doesn't print the warning.
+            binaryOption("bundleId", "io.nisfeb.talon.ComposeApp")
         }
     }
     // Force the default source-set hierarchy now (it's applied at the end
