@@ -152,7 +152,27 @@ abstract class MessageDao {
           AND sentMs = :sentMs
           AND id LIKE 'local_%'
     """)
-    abstract suspend fun reapLocalTwin(whom: String, author: String, sentMs: Long)
+    abstract suspend fun reapLocalTwin(whom: String, author: String, sentMs: Long): Int
+
+    /**
+     * Fallback reap for our own echo when [reapLocalTwin]'s exact
+     * (whom, author, sentMs) match found nothing — e.g. the host didn't
+     * round-trip essay.sent byte-for-byte. Removes the single oldest
+     * still-pending local twin for this channel. Echoes arrive in
+     * send order, so oldest-first is the right one; the caller only
+     * invokes this after confirming an exact miss, so a re-delivered
+     * echo (whose twin is already gone) can't clobber a different
+     * in-flight post.
+     */
+    @Query("""
+        DELETE FROM messages
+        WHERE whom = :whom AND id = (
+            SELECT id FROM messages
+            WHERE whom = :whom AND author = :author AND id LIKE 'local_%'
+            ORDER BY sentMs ASC LIMIT 1
+        )
+    """)
+    abstract suspend fun reapOldestLocalTwin(whom: String, author: String): Int
 
     /**
      * Set the send-state column for one row. Used by the channels

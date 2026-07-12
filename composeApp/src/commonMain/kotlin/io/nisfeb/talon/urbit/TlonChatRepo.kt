@@ -2836,6 +2836,30 @@ class TlonChatRepo(
         }
     }
 
+    /**
+     * Remove our optimistic grey (`local_*`) twin once the host echoes
+     * the post back under its real id, so the message flips grey→white
+     * in place instead of showing as a grey+white duplicate.
+     *
+     * The exact (whom, author, sentMs) match is the normal path. If the
+     * host didn't round-trip essay.sent byte-for-byte it misses, so for
+     * a *fresh* echo (the recency guard keeps a re-delivered old history
+     * item from clobbering a different in-flight post) fall back to
+     * reaping the oldest still-pending twin — echoes arrive in send
+     * order, so oldest-first is the right one. The log distinguishes a
+     * sent-skew miss from a merely slow reap.
+     */
+    private suspend fun reapOwnEchoTwin(whom: String, sentMs: Long) {
+        val reaped = db.messages().reapLocalTwin(whom, ourPatp, sentMs)
+        db.messageMedia().reapLocalTwinMedia(whom, ourPatp, sentMs)
+        if (reaped == 0 && nowMs() - sentMs < 60_000) {
+            val fallback = db.messages().reapOldestLocalTwin(whom, ourPatp)
+            if (fallback > 0) {
+                Log.w(TAG, "reap exact miss whom=$whom sentMs=$sentMs; FIFO fallback cleared grey twin")
+            }
+        }
+    }
+
     private suspend fun applyChannelDelta(nest: String, response: JsonObject) {
         // Classification lives in ChannelEventRouter (pure, tested).
         // This function only dispatches intents into DB/listener writes.
@@ -2859,8 +2883,7 @@ class TlonChatRepo(
                     db.reactions().upsertAll(rx)
                 }
                 msgs.firstOrNull { it.id == intent.id && it.author == ourPatp }?.let {
-                    db.messages().reapLocalTwin(nest, ourPatp, it.sentMs)
-                    db.messageMedia().reapLocalTwinMedia(nest, ourPatp, it.sentMs)
+                    reapOwnEchoTwin(nest, it.sentMs)
                 }
                 msgs.firstOrNull { it.id == intent.id && it.parentId == null }
                     ?.takeIf { it.author != ourPatp }
@@ -2915,8 +2938,7 @@ class TlonChatRepo(
                 val entity = toReplyEntity(whom, parentId, replyId, inner.replyEssay)
                 db.messages().upsertWithMedia(db.messageMedia(), entity)
                 if (entity.author == ourPatp) {
-                    db.messages().reapLocalTwin(whom, ourPatp, entity.sentMs)
-                    db.messageMedia().reapLocalTwinMedia(whom, ourPatp, entity.sentMs)
+                    reapOwnEchoTwin(whom, entity.sentMs)
                 } else {
                     val parent = db.messages().getOne(whom, parentId)
                     val replyToUs = parent?.author == ourPatp
