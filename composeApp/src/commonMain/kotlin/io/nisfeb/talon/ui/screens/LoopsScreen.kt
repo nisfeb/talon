@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -315,6 +316,7 @@ fun LoopDetail(
                 modifier = Modifier.padding(start = 16.dp, top = 16.dp),
             )
             LoopForm(
+                modifier = Modifier.weight(1f),
                 initial = loop,
                 onCancel = { if (loop.id == 0L) onClose() else editing = false },
                 onSave = { name, prompt, interval, writes ->
@@ -507,14 +509,22 @@ private fun LoopForm(
     initial: LoopEntity,
     onCancel: () -> Unit,
     onSave: (name: String, prompt: String, intervalMinutes: Int, writesAuthorized: Boolean) -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     var name by remember { mutableStateOf(initial.name) }
     var prompt by remember { mutableStateOf(initial.prompt) }
     var interval by remember { mutableStateOf(initial.intervalMinutes.takeIf { it > 0 } ?: 60) }
     var writesAuthorized by remember { mutableStateOf(initial.writesAuthorized) }
 
+    // Scroll the whole form: a long prompt otherwise grows the field past
+    // the bottom of the screen and pushes Save out of reach with no way to
+    // get to it. imePadding keeps Save above the keyboard while editing.
     Column(
-        Modifier.fillMaxSize().padding(16.dp),
+        modifier
+            .fillMaxWidth()
+            .imePadding()
+            .verticalScroll(rememberScrollState())
+            .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         OutlinedTextField(
