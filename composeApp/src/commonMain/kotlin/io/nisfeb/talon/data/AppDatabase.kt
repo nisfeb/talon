@@ -55,7 +55,7 @@ import androidx.room.RoomDatabaseConstructor
         LoopEntity::class,
         LoopRunEntity::class,
     ],
-    version = 38,
+    version = 39,
     exportSchema = false,
 )
 @ConstructedBy(AppDatabaseConstructor::class)

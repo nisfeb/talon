@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -727,6 +728,11 @@ fun AssistantScreen(
                         if (!expanded) mobileShowSidebar = true
                     },
                     showBack = true,
+                    // Unlike the transcript pane (which insets itself), this
+                    // pane has no Scaffold, so the editor would draw under the
+                    // status bar. Inset for the system bars; LoopForm's own
+                    // imePadding still handles the keyboard.
+                    modifier = Modifier.windowInsetsPadding(WindowInsets.systemBars),
                 )
             } else {
                 transcriptPane()

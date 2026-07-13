@@ -36,4 +36,17 @@ data class LoopEntity(
     val createdAt: Long,
     val updatedAt: Long,
     val lastRunAt: Long = 0,
+    /**
+     * Schedule shape. `"interval"` (default) fires every
+     * [intervalMinutes]; `"weekly"` fires at [atMinuteOfDay] on the
+     * weekdays in [daysMask]. New columns default to the interval
+     * behavior so pre-existing loops are unchanged. See
+     * [io.nisfeb.talon.ai.LoopSchedule].
+     */
+    val scheduleKind: String = "interval",
+    /** For `"weekly"`: minutes since local midnight (e.g. 360 = 06:00). */
+    val atMinuteOfDay: Int = 0,
+    /** For `"weekly"`: bitmask of active weekdays, bit = DayOfWeek.ordinal
+     *  (Mon=0 … Sun=6). 0 means every day at [atMinuteOfDay]. */
+    val daysMask: Int = 0,
 )

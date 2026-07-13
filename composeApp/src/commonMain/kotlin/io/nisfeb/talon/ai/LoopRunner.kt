@@ -5,7 +5,9 @@ import io.nisfeb.talon.data.LoopDao
 import io.nisfeb.talon.data.LoopEntity
 import io.nisfeb.talon.data.LoopRunDao
 import io.nisfeb.talon.data.LoopRunEntity
+import io.nisfeb.talon.util.formatFullLocal
 import kotlinx.coroutines.CancellationException
+import kotlinx.datetime.TimeZone
 
 /**
  * Runs a [LoopEntity]'s prompt through the assistant agent, headless:
@@ -51,9 +53,13 @@ class LoopRunner(
         // both means a non-authorized loop can't write even if a tool is
         // mis-tagged or the catalog changes.
         val active = if (loop.writesAuthorized) tools else tools.filter { !it.write }
+        // Stamp the run with the current local date/day/time so the agent
+        // can reason about "now" (e.g. "what happened today?") — a headless
+        // run has no other way to know when it fired.
+        val question = "Current local date and time: ${formatFullLocal(ts)}.\n\n${loop.prompt}"
         val outcome = runCatching {
             AgentLoop(completer = completer, tools = active, systemPrompt = LoopPrompt.forLoop(aiConfig()))
-                .run(question = loop.prompt, confirm = { _, _ -> loop.writesAuthorized })
+                .run(question = question, confirm = { _, _ -> loop.writesAuthorized })
         }
         val ok = outcome.isSuccess
         val output = outcome.getOrElse {
@@ -71,8 +77,9 @@ class LoopRunner(
     suspend fun runDue() {
         if (!aiConfig().hasKey()) return
         val t = now()
+        val zone = TimeZone.currentSystemDefault()
         for (loop in loops.enabled()) {
-            if (!LoopSchedule.isDue(t, loop.lastRunAt, loop.intervalMinutes)) continue
+            if (!LoopSchedule.isDue(t, loop, zone)) continue
             if (loop.writesAuthorized && !coordinator.canCoordinate()) {
                 // No ship connection to take the lease with — NOBODY ran this
                 // fire, unlike a lost contest below. Still advance the slot

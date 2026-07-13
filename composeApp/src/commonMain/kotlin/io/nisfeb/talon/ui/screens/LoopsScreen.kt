@@ -41,7 +41,9 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TimeInput
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.rememberTimePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -249,7 +251,7 @@ private fun LoopListRow(
                 )
                 Text(
                     buildString {
-                        append("Every ${intervalLabel(loop.intervalMinutes)}")
+                        append(scheduleLabel(loop))
                         run?.let {
                             append("  ·  ")
                             append(if (it.ok) "✓ " else "⚠ ")
@@ -319,14 +321,18 @@ fun LoopDetail(
                 modifier = Modifier.weight(1f),
                 initial = loop,
                 onCancel = { if (loop.id == 0L) onClose() else editing = false },
-                onSave = { name, prompt, interval, writes ->
+                onSave = { r ->
                     scope.launch {
                         val now = nowMs()
                         val row = if (loop.id == 0L) {
                             loop.copy(
                                 gid = newGid(),
-                                name = name, prompt = prompt, intervalMinutes = interval,
-                                writesAuthorized = writes,
+                                name = r.name, prompt = r.prompt,
+                                intervalMinutes = r.intervalMinutes,
+                                scheduleKind = r.scheduleKind,
+                                atMinuteOfDay = r.atMinuteOfDay,
+                                daysMask = r.daysMask,
+                                writesAuthorized = r.writesAuthorized,
                                 createdAt = now, updatedAt = now, lastRunAt = now,
                             )
                         } else {
@@ -341,8 +347,12 @@ fun LoopDetail(
                             val fresh = loopDao.get(loop.id) ?: loop
                             fresh.copy(
                                 gid = fresh.gid.ifBlank { newGid() },
-                                name = name, prompt = prompt, intervalMinutes = interval,
-                                writesAuthorized = writes,
+                                name = r.name, prompt = r.prompt,
+                                intervalMinutes = r.intervalMinutes,
+                                scheduleKind = r.scheduleKind,
+                                atMinuteOfDay = r.atMinuteOfDay,
+                                daysMask = r.daysMask,
+                                writesAuthorized = r.writesAuthorized,
                                 updatedAt = now,
                             )
                         }
@@ -381,8 +391,7 @@ fun LoopDetail(
                 Text(loop.name, style = MaterialTheme.typography.titleLarge)
             }
             Text(
-                "Every ${intervalLabel(loop.intervalMinutes)}" +
-                    if (loop.enabled) "" else " · paused",
+                scheduleLabel(loop) + if (loop.enabled) "" else " · paused",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -508,13 +517,22 @@ private fun LoopRunHistory(db: AppDatabase, loopId: Long) {
 private fun LoopForm(
     initial: LoopEntity,
     onCancel: () -> Unit,
-    onSave: (name: String, prompt: String, intervalMinutes: Int, writesAuthorized: Boolean) -> Unit,
+    onSave: (LoopFormResult) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var name by remember { mutableStateOf(initial.name) }
     var prompt by remember { mutableStateOf(initial.prompt) }
     var interval by remember { mutableStateOf(initial.intervalMinutes.takeIf { it > 0 } ?: 60) }
     var writesAuthorized by remember { mutableStateOf(initial.writesAuthorized) }
+    var scheduleKind by remember {
+        mutableStateOf(initial.scheduleKind.ifBlank { LoopSchedule.KIND_INTERVAL })
+    }
+    val timeState = rememberTimePickerState(
+        initialHour = initial.atMinuteOfDay / 60,
+        initialMinute = initial.atMinuteOfDay % 60,
+        is24Hour = true,
+    )
+    var daysMask by remember { mutableStateOf(initial.daysMask) }
 
     // Scroll the whole form: a long prompt otherwise grows the field past
     // the bottom of the screen and pushes Save out of reach with no way to
@@ -541,17 +559,49 @@ private fun LoopForm(
             label = { Text("Prompt — what should this loop do?") },
             minLines = 3,
         )
-        Text("How often", style = MaterialTheme.typography.labelMedium)
-        FlowRow(
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            LoopSchedule.PRESET_MINUTES.forEach { m ->
-                FilterChip(
-                    selected = interval == m,
-                    onClick = { interval = m },
-                    label = { Text(intervalLabel(m)) },
-                )
+        Text("Schedule", style = MaterialTheme.typography.labelMedium)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FilterChip(
+                selected = scheduleKind == LoopSchedule.KIND_INTERVAL,
+                onClick = { scheduleKind = LoopSchedule.KIND_INTERVAL },
+                label = { Text("Every so often") },
+            )
+            FilterChip(
+                selected = scheduleKind == LoopSchedule.KIND_WEEKLY,
+                onClick = { scheduleKind = LoopSchedule.KIND_WEEKLY },
+                label = { Text("At a set time") },
+            )
+        }
+        if (scheduleKind == LoopSchedule.KIND_INTERVAL) {
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                LoopSchedule.PRESET_MINUTES.forEach { m ->
+                    FilterChip(
+                        selected = interval == m,
+                        onClick = { interval = m },
+                        label = { Text(intervalLabel(m)) },
+                    )
+                }
+            }
+        } else {
+            TimeInput(state = timeState)
+            Text(
+                "On these days (none = every day)",
+                style = MaterialTheme.typography.labelMedium,
+            )
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                LoopSchedule.WEEKDAYS.forEach { (label, bit) ->
+                    FilterChip(
+                        selected = (daysMask and bit) != 0,
+                        onClick = { daysMask = daysMask xor bit },
+                        label = { Text(label) },
+                    )
+                }
             }
         }
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -573,7 +623,19 @@ private fun LoopForm(
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Button(
-                onClick = { onSave(name.trim(), prompt.trim(), interval, writesAuthorized) },
+                onClick = {
+                    onSave(
+                        LoopFormResult(
+                            name = name.trim(),
+                            prompt = prompt.trim(),
+                            writesAuthorized = writesAuthorized,
+                            scheduleKind = scheduleKind,
+                            intervalMinutes = interval,
+                            atMinuteOfDay = timeState.hour * 60 + timeState.minute,
+                            daysMask = daysMask,
+                        ),
+                    )
+                },
                 enabled = name.isNotBlank() && prompt.isNotBlank(),
             ) { Text("Save") }
             OutlinedButton(onClick = onCancel) { Text("Cancel") }
@@ -601,6 +663,31 @@ private fun EmptyLoops(onAdd: () -> Unit) {
 internal fun blankLoop() = LoopEntity(
     name = "", prompt = "", intervalMinutes = 60, createdAt = 0, updatedAt = 0,
 )
+
+/** Carries the editor's fields back to [LoopDetail.onSave] — beats a
+ *  7-arg lambda now that a loop can be interval- or time-scheduled. */
+private data class LoopFormResult(
+    val name: String,
+    val prompt: String,
+    val writesAuthorized: Boolean,
+    val scheduleKind: String,
+    val intervalMinutes: Int,
+    val atMinuteOfDay: Int,
+    val daysMask: Int,
+)
+
+private fun scheduleLabel(loop: LoopEntity): String =
+    if (loop.scheduleKind == LoopSchedule.KIND_WEEKLY) {
+        val time = (loop.atMinuteOfDay / 60).toString().padStart(2, '0') + ":" +
+            (loop.atMinuteOfDay % 60).toString().padStart(2, '0')
+        val days = if (loop.daysMask == 0) "every day"
+        else LoopSchedule.WEEKDAYS
+            .filter { (_, bit) -> (loop.daysMask and bit) != 0 }
+            .joinToString(", ") { it.first }
+        "At $time · $days"
+    } else {
+        "Every ${intervalLabel(loop.intervalMinutes)}"
+    }
 
 private fun intervalLabel(min: Int): String = when (min) {
     15 -> "15m"

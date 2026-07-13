@@ -53,6 +53,11 @@ private val TIME_12 = LocalDateTime.Format {
 private val WEEKDAY_SHORT = LocalDateTime.Format {
     dayOfWeek(DayOfWeekNames.ENGLISH_ABBREVIATED)
 }
+private val FULL_LOCAL = LocalDateTime.Format {
+    dayOfWeek(DayOfWeekNames.ENGLISH_FULL); chars(", ")
+    monthName(MonthNames.ENGLISH_FULL); char(' '); dayOfMonth(Padding.NONE); char(' '); year()
+    chars(" at "); hour(); char(':'); minute()
+}
 
 /** "MMM d HH:mm" — e.g. "Jul 10 13:26". */
 fun formatMonthDayTime(ms: Long): String = MONTH_DAY_TIME.format(local(ms))
@@ -77,3 +82,7 @@ fun formatTime12(ms: Long, zone: TimeZone): String = TIME_12.format(localIn(ms, 
 
 /** "EEE" weekday in a specific zone, e.g. "Mon". */
 fun formatWeekdayShort(ms: Long, zone: TimeZone): String = WEEKDAY_SHORT.format(localIn(ms, zone))
+
+/** "EEEE, MMMM d yyyy at HH:mm" — e.g. "Sunday, July 12 2026 at 06:00".
+ *  Injected into each loop run so the agent knows the current moment. */
+fun formatFullLocal(ms: Long): String = FULL_LOCAL.format(local(ms))

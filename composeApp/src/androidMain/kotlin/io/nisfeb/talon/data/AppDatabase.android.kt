@@ -58,7 +58,7 @@ fun createAppDatabase(context: Context, name: String): AppDatabase {
             MIGRATION_23_24, MIGRATION_24_25, MIGRATION_25_26,
             MIGRATION_26_27, MIGRATION_27_28, MIGRATION_28_29,
             MIGRATION_29_30, MIGRATION_30_31, MIGRATION_34_35, MIGRATION_35_36,
-            MIGRATION_36_37, MIGRATION_37_38,
+            MIGRATION_36_37, MIGRATION_37_38, MIGRATION_38_39,
         )
         // dropAllTables = true preserves the pre-2.7 behaviour: when
         // Room can't find a migration path, drop everything and rebuild.
@@ -370,6 +370,18 @@ private val MIGRATION_37_38 = object : Migration(37, 38) {
         db.execSQL(
             "CREATE INDEX IF NOT EXISTS index_loop_run_loopId_ranAt ON loop_run (loopId, ranAt)",
         )
+    }
+}
+
+// Weekly (time-of-day + weekday) scheduling for loops. Three columns
+// added to the existing loop table; DEFAULTs keep every pre-existing
+// loop on its current interval behavior. Additive, so installs keep
+// their data instead of hitting destructive fallback.
+private val MIGRATION_38_39 = object : Migration(38, 39) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE loop ADD COLUMN scheduleKind TEXT NOT NULL DEFAULT 'interval'")
+        db.execSQL("ALTER TABLE loop ADD COLUMN atMinuteOfDay INTEGER NOT NULL DEFAULT 0")
+        db.execSQL("ALTER TABLE loop ADD COLUMN daysMask INTEGER NOT NULL DEFAULT 0")
     }
 }
 

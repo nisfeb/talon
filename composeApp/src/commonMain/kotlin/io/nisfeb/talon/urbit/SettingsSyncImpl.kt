@@ -671,6 +671,9 @@ class SettingsSyncImpl(
                 put("enabled", loop.enabled)
                 put("createdAt", loop.createdAt)
                 put("updatedAt", loop.updatedAt)
+                put("scheduleKind", loop.scheduleKind)
+                put("atMinuteOfDay", loop.atMinuteOfDay)
+                put("daysMask", loop.daysMask)
             },
         )
     }
@@ -1555,6 +1558,11 @@ class SettingsSyncImpl(
                 // syncs to (read-only loops don't take the write lease, so
                 // nothing would dedupe those surprise runs).
                 lastRunAt = existing?.lastRunAt ?: nowMs(),
+                // Schedule shape travels with the definition; absent fields
+                // (a legacy peer) default to the interval behavior.
+                scheduleKind = obj["scheduleKind"].asStr() ?: "interval",
+                atMinuteOfDay = obj["atMinuteOfDay"].asInt() ?: 0,
+                daysMask = obj["daysMask"].asInt() ?: 0,
             ),
         )
         rearmLoops()

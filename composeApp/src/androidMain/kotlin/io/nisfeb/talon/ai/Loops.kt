@@ -80,8 +80,9 @@ class Loops(
             // coordinate + post instead of skipping every background wake.
             runCatching { getRepo().start(getSession()) }
             val t = System.currentTimeMillis()
+            val zone = kotlinx.datetime.TimeZone.currentSystemDefault()
             val dueWrites = getDb().loops().enabled().any {
-                it.writesAuthorized && LoopSchedule.isDue(t, it.lastRunAt, it.intervalMinutes)
+                it.writesAuthorized && LoopSchedule.isDue(t, it, zone)
             }
             val sync = getRepo().settingsSync
             if (dueWrites && sync != null && !sync.canCoordinate()) {
@@ -122,8 +123,9 @@ class Loops(
         if (enabled.isEmpty()) {
             alarmManager.cancel(pi); return
         }
+        val zone = kotlinx.datetime.TimeZone.currentSystemDefault()
         val fireMs = enabled.minOf {
-            LoopSchedule.nextFireMs(it.lastRunAt, it.intervalMinutes)
+            LoopSchedule.nextFireMs(it, zone)
         }
         alarmManager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, fireMs, pi)
     }
