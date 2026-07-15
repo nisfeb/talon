@@ -839,12 +839,27 @@ class TlonChatRepo(
                 app = "chat", mark = "chat-club-action-2",
                 payload = clubAction(whom, id, addDelta),
             )
-            isChannel -> ch.poke(
-                app = "channels", mark = "channel-action-2",
-                payload = channelAction(whom, buildJsonObject {
-                    put("post", buildJsonObject { put("add", essay) })
-                }),
-            )
+            isChannel -> {
+                // Time the poke's HTTP PUT (returns when eyre accepts it,
+                // before %channels processes it). Splits the round-trip:
+                // putMs = network + eyre-accept; the reap's latencyMs minus
+                // this = ship poke-processing + SSE echo delivery. Tells us
+                // whether the ~2s is on our wire or the ship's compute.
+                val putStart = nowMs()
+                ch.poke(
+                    app = "channels", mark = "channel-action-2",
+                    payload = channelAction(whom, buildJsonObject {
+                        put("post", buildJsonObject { put("add", essay) })
+                    }),
+                ).also {
+                    // eyre holds the channel PUT until %channels finishes
+                    // processing the post, so this is the ship's compute
+                    // time (network RTT to the ship is ~150ms). A slow
+                    // number here means a heavy/loaded ship, not our wire.
+                    val putMs = nowMs() - putStart
+                    if (putMs > 1_000) Log.w(TAG, "slow poke PUT whom=$whom putMs=$putMs (ship busy)")
+                }
+            }
             else -> error("unsupported whom: $whom")
         }
         if (isChannel) pendingChannelPokes[pokeId] = whom to id
@@ -2887,11 +2902,15 @@ class TlonChatRepo(
         db.messageMedia().reapLocalTwinMedia(whom, ourPatp, sentMs)
         if (reaped > 0) {
             // Round-trip: sentMs is stamped at poke time, so this is the
-            // full send→echo→grey-clears latency. The single number that
-            // says whether "slow sending" is the network round-trip or
-            // our own ingest/reap. (Only logged when a real grey twin was
-            // actually cleared, so re-delivered history doesn't spam.)
-            Log.i(TAG, "own post reaped whom=$whom latencyMs=${nowMs() - sentMs}")
+            // full send→echo→grey-clears latency. Investigation showed
+            // this is dominated by the ship's poke-processing time (a
+            // heavy ship is slow to accept a channel post), not our
+            // ingest/reap. Only warn when it's actually slow, so a normal
+            // send doesn't spam the log but a laggy ship is self-evident.
+            val latencyMs = nowMs() - sentMs
+            if (latencyMs > 1_000) {
+                Log.w(TAG, "slow send whom=$whom latencyMs=$latencyMs (ship poke-processing)")
+            }
         } else if (nowMs() - sentMs < 60_000) {
             val fallback = db.messages().reapOldestLocalTwin(whom, ourPatp)
             if (fallback > 0) {
