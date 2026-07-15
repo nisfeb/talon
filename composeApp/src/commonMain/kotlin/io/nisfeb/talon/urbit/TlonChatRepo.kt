@@ -2885,10 +2885,17 @@ class TlonChatRepo(
     private suspend fun reapOwnEchoTwin(whom: String, sentMs: Long) {
         val reaped = db.messages().reapLocalTwin(whom, ourPatp, sentMs)
         db.messageMedia().reapLocalTwinMedia(whom, ourPatp, sentMs)
-        if (reaped == 0 && nowMs() - sentMs < 60_000) {
+        if (reaped > 0) {
+            // Round-trip: sentMs is stamped at poke time, so this is the
+            // full send→echo→grey-clears latency. The single number that
+            // says whether "slow sending" is the network round-trip or
+            // our own ingest/reap. (Only logged when a real grey twin was
+            // actually cleared, so re-delivered history doesn't spam.)
+            Log.i(TAG, "own post reaped whom=$whom latencyMs=${nowMs() - sentMs}")
+        } else if (nowMs() - sentMs < 60_000) {
             val fallback = db.messages().reapOldestLocalTwin(whom, ourPatp)
             if (fallback > 0) {
-                Log.w(TAG, "reap exact miss whom=$whom sentMs=$sentMs; FIFO fallback cleared grey twin")
+                Log.w(TAG, "reap exact miss whom=$whom sentMs=$sentMs latencyMs=${nowMs() - sentMs}; FIFO fallback cleared grey twin")
             }
         }
     }
@@ -2905,6 +2912,14 @@ class TlonChatRepo(
                 }
                 if (messages.isNotEmpty()) db.messages().upsertAllWithMedia(db.messageMedia(), messages)
                 if (reactions.isNotEmpty()) db.reactions().upsertAll(reactions)
+                // Reap our own grey twins for any echo that arrived batched
+                // (SSE reconnect / paginated catch-up) rather than as a
+                // singular PostSet — otherwise those grey duplicates linger
+                // until the next full bootstrap. reapOwnEchoTwin's exact-
+                // sentMs match no-ops on re-delivered history, so this is
+                // safe to run over every own post in the batch.
+                messages.filter { it.author == ourPatp && it.parentId == null }
+                    .forEach { reapOwnEchoTwin(nest, it.sentMs) }
             }
             is ChannelDeltaIntent.PostSet -> {
                 val msgs = mutableListOf<MessageEntity>()
