@@ -1,7 +1,7 @@
 package io.nisfeb.talon.util
 
 import kotlinx.coroutines.CoroutineDispatcher
-import kotlinx.datetime.Clock
+import kotlin.time.Clock
 
 /**
  * Multiplatform replacements for JVM-only primitives that commonMain

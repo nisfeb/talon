@@ -5,7 +5,7 @@ import io.nisfeb.talon.util.formatWeekdayShort
 import io.nisfeb.talon.util.nowMs
 import io.nisfeb.talon.util.timeZoneShortLabel
 import kotlinx.datetime.DateTimeUnit
-import kotlinx.datetime.Instant
+import kotlin.time.Instant
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.atTime
 import kotlinx.datetime.plus

@@ -18,6 +18,10 @@ plugins {
 }
 
 kotlin {
+    // kotlinx-datetime 0.7 delegates Instant/Clock to kotlin.time, still
+    // @ExperimentalTime in Kotlin 2.2.20. Opt in once for all targets
+    // rather than annotating every date/time call site.
+    compilerOptions { optIn.add("kotlin.time.ExperimentalTime") }
     androidTarget {
         compilerOptions { jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17) }
     }
@@ -26,11 +30,12 @@ kotlin {
     }
     // iOS targets. The framework nomac's Xcode project links is named
     // ComposeApp; static linking avoids the embed-dynamic-framework
-    // dance. Device (arm64) + both simulator slices (Apple-silicon and
-    // Intel) so the same project builds on any Mac CI. These targets
-    // only compile on macOS — on this Linux dev box they configure but
-    // their compile/link tasks can't run; nomac builds them remotely.
-    listOf(iosX64(), iosArm64(), iosSimulatorArm64()).forEach { iosTarget ->
+    // dance. Device (arm64) + the Apple-silicon simulator slice. Compose
+    // Multiplatform 1.11 dropped the Intel-simulator target (iosX64), so
+    // it's gone — every Mac worth building on is Apple silicon now. These
+    // targets only compile on macOS — on this Linux dev box they configure
+    // but their compile/link tasks can't run; nomac builds them remotely.
+    listOf(iosArm64(), iosSimulatorArm64()).forEach { iosTarget ->
         iosTarget.binaries.framework {
             baseName = "ComposeApp"
             isStatic = true
@@ -506,7 +511,6 @@ dependencies {
     // Room's KSP processor runs per iOS target too, generating the
     // native DAO impls + AppDatabase_Impl + AppDatabaseConstructor
     // actual into each iOS source set.
-    add("kspIosX64", libs.androidx.room.compiler)
     add("kspIosArm64", libs.androidx.room.compiler)
     add("kspIosSimulatorArm64", libs.androidx.room.compiler)
 }

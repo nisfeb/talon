@@ -934,14 +934,14 @@ private fun DailyDigestSection(
 /** Wallclock-friendly "Next: 7:30 AM" / "Tomorrow at 7:30 AM" string. */
 private fun formatNextFire(hourOfDay: Int, minuteOfDay: Int): String {
     val zone = kotlinx.datetime.TimeZone.currentSystemDefault()
-    val now = kotlinx.datetime.Clock.System.now()
+    val now = kotlin.time.Clock.System.now()
     // Reuse the digest scheduler's next-fire math so the label and the
     // actual alarm never disagree.
     val fireMs = io.nisfeb.talon.ai.DailyDigestSchedule
         .nextFireMs(now, hourOfDay, minuteOfDay, zone)
     val timeStr = io.nisfeb.talon.util.formatTime12(fireMs)
     val today = now.toLocalDateTime(zone).date
-    val fireDate = kotlinx.datetime.Instant.fromEpochMilliseconds(fireMs)
+    val fireDate = kotlin.time.Instant.fromEpochMilliseconds(fireMs)
         .toLocalDateTime(zone).date
     return if (fireDate != today) "Tomorrow at $timeStr" else "Today at $timeStr"
 }

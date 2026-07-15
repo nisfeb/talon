@@ -222,6 +222,6 @@ private fun EmptyDigest(onGenerateNow: () -> Unit) {
 private val JSON = Json { ignoreUnknownKeys = true }
 
 private fun isTodayLocal(dateLocal: String): Boolean =
-    dateLocal == kotlinx.datetime.Clock.System.now()
+    dateLocal == kotlin.time.Clock.System.now()
         .toLocalDateTime(kotlinx.datetime.TimeZone.currentSystemDefault())
         .date.toString()

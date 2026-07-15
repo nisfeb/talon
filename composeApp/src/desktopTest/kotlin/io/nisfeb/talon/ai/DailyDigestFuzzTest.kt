@@ -4,7 +4,7 @@ import io.nisfeb.talon.urbit.Fuzz
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
-import kotlinx.datetime.Instant
+import kotlin.time.Instant
 import kotlinx.datetime.TimeZone
 
 class DailyDigestFuzzTest {

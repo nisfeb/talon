@@ -84,7 +84,7 @@ class DailyDigest(
             return
         }
         val fireMs = DailyDigestSchedule.nextFireMs(
-            now = kotlinx.datetime.Clock.System.now(),
+            now = kotlin.time.Clock.System.now(),
             hourOfDay = st.hourOfDay,
             minuteOfDay = st.minuteOfDay,
             zone = kotlinx.datetime.TimeZone.currentSystemDefault(),
