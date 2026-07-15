@@ -281,7 +281,7 @@ val generateTalonBuild = tasks.register("generateTalonBuild") {
 
 android {
     namespace = "io.nisfeb.talon"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "io.nisfeb.talon"
@@ -289,7 +289,7 @@ android {
         // Play Store requires new apps to target "latest API - 1". 35
         // matches what RELEASE.md already documents and opts us into
         // Android 15 behavior changes (16 KB page sizes, edge-to-edge).
-        targetSdk = 35
+        targetSdk = 36
         versionCode = talonVersionCode
         versionName = talonVersionName
     }
