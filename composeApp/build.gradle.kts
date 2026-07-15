@@ -756,7 +756,7 @@ val auditIconKeepList = tasks.register("auditIconKeepList") {
     // Capture the resolved core jar path lazily via a Provider so the
     // configuration cache stays valid (no project state captured into
     // the action).
-    val coreJarProvider: Provider<File?> = providers.provider {
+    val coreJarProvider: Provider<File> = providers.provider {
         configurations
             .filter { it.isCanBeResolved && it.name.startsWith("desktop") }
             .firstNotNullOfOrNull { conf ->
