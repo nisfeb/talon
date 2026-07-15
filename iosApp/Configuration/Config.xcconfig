@@ -1,3 +1,9 @@
 TEAM_ID=
 BUNDLE_ID=io.nisfeb.talon
 APP_NAME=Talon
+
+// Compose Multiplatform 1.11 dropped the iosX64 (Intel-simulator) Kotlin
+// target, so the ComposeApp framework only builds arm64. Without this,
+// an Apple-silicon simulator build still requests x86_64 and
+// syncComposeResourcesForIos dies: "Unknown iOS simulator arch: 'x86_64'".
+EXCLUDED_ARCHS[sdk=iphonesimulator*] = x86_64
