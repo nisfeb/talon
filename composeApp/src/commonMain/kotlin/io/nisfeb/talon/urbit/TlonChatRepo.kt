@@ -1354,14 +1354,23 @@ class TlonChatRepo(
      * `leaveGroup`: poke %groups with `group-leave`, payload is the
      * flag string. The ship side handles cleanup; channels and
      * unreads drain via the next %activity / %channels delta.
+     *
+     * %groups sends the *leaving* member no `r-group: {delete}` fact
+     * (unlike a host deleting the group), so the home list would keep
+     * showing a left group until the next full /v2/groups reconcile —
+     * i.e. an app restart. Register the poke id so the SSE poke-ack
+     * listener can drop the group locally the moment the ship ACKs the
+     * leave, and leave it in place (with a log line) on a NACK — the
+     * two outcomes are otherwise indistinguishable to the user.
      */
     suspend fun leaveGroup(flag: String) {
         val ch = channel ?: error("not connected")
-        ch.poke(
+        val id = ch.poke(
             app = "groups",
             mark = "group-leave",
             payload = JsonPrimitive(flag),
         )
+        pendingGroupLeaves[id] = flag
     }
 
     /**
@@ -1876,6 +1885,15 @@ class TlonChatRepo(
      * delivery signal beyond our own ship's ack anyway).
      */
     private val pendingChannelPokes = ConcurrentMap<Long, Pair<String, String>>()
+
+    /**
+     * In-flight `group-leave` poke ids → the group flag being left.
+     * The leaver gets no delete fact from %groups, so on the poke ACK
+     * we remove the group + its channels locally (matching tlon-apps'
+     * optimistic leave); on a NACK we keep it and log — the leave
+     * didn't take, so the group is genuinely still ours.
+     */
+    private val pendingGroupLeaves = ConcurrentMap<Long, String>()
 
     /**
      * Upload an image. Tries memex first (Tlon-hosted ships with %genuine
@@ -2607,12 +2625,27 @@ class TlonChatRepo(
                             }.onFailure { Log.w(TAG, "setStatus(failed) failed", it) }
                         }
                     }
+                    // Leave rejected — keep the group; it's still ours.
+                    pendingGroupLeaves.remove(pokeIdLong)?.let { flag ->
+                        Log.w(TAG, "group-leave NACK flag=$flag err=$err — still a member")
+                    }
                 }
             } else if (response == "poke" && pokeIdLong != null) {
                 // Successful poke — drop the tracking entry. Status is
                 // implicitly cleared when the server-id echo arrives
                 // and reapLocalTwin removes the pending row.
                 pendingChannelPokes.remove(pokeIdLong)
+                // Leave confirmed by the ship — the leaver gets no delete
+                // fact, so remove the group + channels locally now, or it
+                // lingers in the home list until the next full reconcile.
+                pendingGroupLeaves.remove(pokeIdLong)?.let { flag ->
+                    scope.launch {
+                        runCatching {
+                            db.groups().deleteChannelsForGroup(flag)
+                            db.groups().deleteGroup(flag)
+                        }.onFailure { Log.w(TAG, "local cleanup after leave failed", it) }
+                    }
+                }
             }
             return
         }
