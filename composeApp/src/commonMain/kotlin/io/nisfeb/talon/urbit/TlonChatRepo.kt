@@ -1807,6 +1807,15 @@ class TlonChatRepo(
         posts.forEach { (_, post) -> ingestPost(whom, post, messages, reactions) }
         if (messages.isNotEmpty()) db.messages().upsertAllWithMedia(db.messageMedia(), messages)
         if (reactions.isNotEmpty()) db.reactions().upsertAll(reactions)
+        // Same grey-twin reap as the init-posts bootstrap: this refresh
+        // re-adds our own posts under their real id, so clear any stranded
+        // optimistic twin (exact whom/author/sentMs) it would otherwise
+        // duplicate.
+        messages.filter { it.author == ourPatp && it.parentId == null && !it.id.startsWith("local_") }
+            .forEach {
+                db.messages().reapLocalTwin(it.whom, ourPatp, it.sentMs)
+                db.messageMedia().reapLocalTwinMedia(it.whom, ourPatp, it.sentMs)
+            }
         // Clean up stale optimistic-insert rows for channels whose id
         // format we'd gotten wrong in earlier builds. One-shot; no-op
         // once all such ghosts are gone.
