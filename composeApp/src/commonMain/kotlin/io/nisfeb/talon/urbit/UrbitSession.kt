@@ -3,7 +3,6 @@ import kotlin.concurrent.Volatile
 
 import io.ktor.client.HttpClient
 import io.ktor.client.plugins.cookies.HttpCookies
-import io.ktor.client.plugins.sse.SSE
 import io.ktor.client.request.forms.submitForm
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.Cookie
@@ -56,7 +55,6 @@ class UrbitSession(
      */
     val http: HttpClient = parentClient.config {
         install(HttpCookies) { storage = cookieStorage }
-        install(SSE)
     }
 
     @Volatile var baseUrl: String? = null

@@ -1,13 +1,15 @@
 package io.nisfeb.talon.urbit
 
 import io.ktor.client.HttpClient
-import io.ktor.client.plugins.sse.sse
 import io.ktor.client.plugins.timeout
 import io.ktor.client.request.get
 import io.ktor.client.request.header
+import io.ktor.client.request.prepareGet
 import io.ktor.client.request.put
 import io.ktor.client.request.setBody
+import io.ktor.client.statement.bodyAsChannel
 import io.ktor.client.statement.bodyAsText
+import io.ktor.utils.io.readUTF8Line
 import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
 import io.ktor.http.contentType
@@ -69,17 +71,47 @@ class UrbitChannel internal constructor(
         // job is cancelled (awaitClose below) the session closes.
         val reader = launch {
             try {
-                http.sse(
-                    urlString = channelUrl,
-                    request = { header(HttpHeaders.Accept, "text/event-stream") },
-                ) {
-                    incoming.collect { ev ->
-                        val data = ev.data ?: return@collect
-                        val element = runCatching { json.parseToJsonElement(data) }.getOrNull()
-                            ?: return@collect
-                        // inbox is UNLIMITED so trySend only fails after close,
-                        // at which point the whole flow is shutting down anyway.
-                        inbox.trySend(UrbitEvent(ev.id?.toLongOrNull(), element))
+                // Read the event-stream by hand instead of via Ktor's SSE
+                // plugin. The plugin left eyre holding the channel GET open
+                // but never flushing facts — the field symptom was the 90s
+                // watchdog force-reconnecting forever with zero events,
+                // which stranded every optimistic grey post (its echo never
+                // arrived to reap it) and let the reconnect re-scry re-add
+                // the same post as a second row: the duplicate-message bug.
+                // A plain streaming GET with `Accept-Encoding: identity`
+                // makes eyre emit each frame uncompressed the instant it's
+                // ready; parsing frames ourselves keeps this in commonMain
+                // for every platform.
+                http.prepareGet(channelUrl) {
+                    header(HttpHeaders.Accept, "text/event-stream")
+                    header(HttpHeaders.CacheControl, "no-cache")
+                    header(HttpHeaders.AcceptEncoding, "identity")
+                }.execute { resp ->
+                    if (!resp.status.isSuccess()) error("channel SSE: HTTP ${resp.status.value}")
+                    val body = resp.bodyAsChannel()
+                    var id: Long? = null
+                    val data = StringBuilder()
+                    while (true) {
+                        val line = body.readUTF8Line() ?: break
+                        when {
+                            // Blank line terminates a frame — dispatch it.
+                            line.isEmpty() -> {
+                                if (data.isNotEmpty()) {
+                                    val element = runCatching { json.parseToJsonElement(data.toString()) }.getOrNull()
+                                    // inbox is UNLIMITED so trySend only fails
+                                    // after close, when the flow is shutting down.
+                                    if (element != null) inbox.trySend(UrbitEvent(id, element))
+                                }
+                                id = null
+                                data.setLength(0)
+                            }
+                            line.startsWith(":") -> {} // heartbeat / comment
+                            line.startsWith("id:") -> id = line.removePrefix("id:").trim().toLongOrNull()
+                            line.startsWith("data:") -> {
+                                if (data.isNotEmpty()) data.append('\n')
+                                data.append(line.removePrefix("data:").removePrefix(" "))
+                            }
+                        }
                     }
                 }
                 inbox.close()
