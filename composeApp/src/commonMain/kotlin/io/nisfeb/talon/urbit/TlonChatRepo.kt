@@ -2600,6 +2600,22 @@ class TlonChatRepo(
 
         if (messages.isNotEmpty()) db.messages().upsertAllWithMedia(db.messageMedia(), messages)
         if (reactions.isNotEmpty()) db.reactions().upsertAll(reactions)
+
+        // Reap our own optimistic grey twins against this scry, not just
+        // against live SSE deltas. If the SSE echo for a just-sent post
+        // was missed (stream dropped between poke and echo), the grey
+        // `local_*` row would otherwise linger while this re-scry re-adds
+        // the same post under its real id — the two-rows duplicate. The
+        // real row carries the same (whom, author, sentMs), so an exact
+        // reap clears the twin on the next reconnect regardless of SSE
+        // health. Exact-match only (not reapOwnEchoTwin) so the FIFO
+        // fallback can't clobber a *different* still-pending post's twin
+        // when this snapshot lands mid-flight. Idempotent once gone.
+        messages.filter { it.author == ourPatp && it.parentId == null && !it.id.startsWith("local_") }
+            .forEach {
+                db.messages().reapLocalTwin(it.whom, ourPatp, it.sentMs)
+                db.messageMedia().reapLocalTwinMedia(it.whom, ourPatp, it.sentMs)
+            }
     }
 
     private suspend fun applyEvent(event: JsonElement) {
