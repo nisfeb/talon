@@ -64,6 +64,18 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
+      # core-ktx 1.19.0 / lifecycle 2.11.0 need compileSdk 37, which the
+      # runner image may not preinstall. Try the plain id first, fall back
+      # to the minor-versioned id (Android's newer platforms;android-37.x
+      # scheme) so this works whichever the runner's sdkmanager expects.
+      - name: Install Android SDK 37
+        if: steps.chk.outputs.have_keystore == 'true'
+        run: |
+          SDKMGR="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          yes | "$SDKMGR" --licenses >/dev/null 2>&1 || true
+          "$SDKMGR" "platforms;android-37" 2>/dev/null \
+            || "$SDKMGR" "platforms;android-37.0"
+
       - name: Decode keystore
         if: steps.chk.outputs.have_keystore == 'true'
         env:

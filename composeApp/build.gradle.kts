@@ -281,7 +281,11 @@ val generateTalonBuild = tasks.register("generateTalonBuild") {
 
 android {
     namespace = "io.nisfeb.talon"
-    compileSdk = 36
+    // core-ktx 1.19.0 + lifecycle 2.11.0 require compiling against API 37.
+    // targetSdk stays a notch back so we don't opt into Android 17 runtime
+    // behavior changes in the same bump. checkReleaseAarMetadata enforces
+    // this floor — it only runs in the assemble path, not compileDebug.
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "io.nisfeb.talon"
