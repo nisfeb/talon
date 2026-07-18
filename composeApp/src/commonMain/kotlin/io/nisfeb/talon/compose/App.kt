@@ -7,6 +7,7 @@ import io.nisfeb.talon.util.nowMs
 
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Surface
@@ -230,6 +231,13 @@ fun App(
     }
     var openThreadParent by remember { mutableStateOf<String?>(null) }
     var openThreadReplyAnchor by remember { mutableStateOf<String?>(null) }
+    // Chat scroll position + first-anchor flag, owned here so they survive
+    // DmChatScreen unmounting when a thread opens on compact (the thread is
+    // its own full-screen when-branch). Keyed on openChat: preserved across
+    // the thread round-trip, reset on an actual chat switch so a freshly
+    // opened conversation still snaps to the newest message.
+    val chatScrollState = remember(openChat) { LazyListState() }
+    val chatScrollAnchored = remember(openChat) { mutableStateOf(false) }
     var groupInfoOpenFor by remember { mutableStateOf<String?>(null) }
     var groupInfoDrilldown by remember { mutableStateOf<MediaCategory?>(null) }
     // Right-pane state mutators — delegate to RightPaneStateReducer
@@ -1543,6 +1551,8 @@ fun App(
                                         openChat?.let { openGroupInfoAction(it) }
                                     },
                                     searchEmbedder = searchEmbedderClient,
+                                    scrollState = chatScrollState,
+                                    scrollAnchored = chatScrollAnchored,
                                 )
                             })
                             else -> null

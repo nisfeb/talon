@@ -50,6 +50,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -92,6 +93,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -217,6 +219,17 @@ fun DmChatScreen(
      *  empty state surfaces live indexer progress instead of the
      *  generic "check back" placeholder. */
     searchEmbedder: io.nisfeb.talon.ai.SearchEmbedderClient? = null,
+    /** Scroll position + first-anchor flag, optionally hoisted by the
+     *  caller so they survive this screen being unmounted. On compact,
+     *  opening a thread swaps DmChatScreen out for a full-screen
+     *  ThreadScreen; a locally-owned LazyListState would reset and the
+     *  anchor effect would snap back to the bottom on return, stranding
+     *  the user below any unreads. The caller keys these on the chat so
+     *  they persist across the thread round-trip but reset on a real
+     *  chat switch. Null → owned locally (tests, previews, wide where the
+     *  screen never unmounts). */
+    scrollState: LazyListState? = null,
+    scrollAnchored: MutableState<Boolean>? = null,
     modifier: Modifier = Modifier,
 ) {
     val aiConfigured by aiSettings.state.collectAsState()
@@ -334,7 +347,11 @@ fun DmChatScreen(
         excludedWhoms.any { it.whom == whom }
     }
 
-    val listState = rememberLazyListState()
+    // Fall back to locally-owned state when the caller doesn't hoist it.
+    // Both are always created (no conditional composable calls) so the
+    // fallback stays valid across recompositions.
+    val fallbackScrollState = rememberLazyListState()
+    val listState = scrollState ?: fallbackScrollState
 
     val isPinnedToBottom by remember {
         derivedStateOf {
@@ -344,7 +361,8 @@ fun DmChatScreen(
     }
     @Suppress("UNUSED_EXPRESSION") isPinnedToBottom
 
-    var hasAnchored by remember(whom) { mutableStateOf(false) }
+    val fallbackAnchored = remember(whom) { mutableStateOf(false) }
+    var hasAnchored by (scrollAnchored ?: fallbackAnchored)
     var flashMessageId by remember(whom) { mutableStateOf<String?>(null) }
     // Tracks which anchor (if any) we've already scrolled to, so a fresh
     // initialScrollMessageId fires even when the user clicks a bookmark

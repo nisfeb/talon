@@ -1,6 +1,7 @@
 package io.nisfeb.talon.ui
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Scaffold
@@ -180,6 +181,13 @@ fun TalonApp(
      *  reply id rather than the newest one. Consumed-once after the
      *  thread screen reads it. */
     var pendingThreadAnchor by remember { mutableStateOf<String?>(initialThreadAnchor) }
+    // Chat scroll position + first-anchor flag, owned here so they survive
+    // DmChatScreen unmounting when a thread opens (on phones the thread is
+    // its own full-screen when-branch). Keyed on openWhom: preserved across
+    // the thread round-trip, reset on an actual chat switch so a freshly
+    // opened conversation still snaps to the newest message.
+    val chatScrollState = remember(openWhom) { LazyListState() }
+    val chatScrollAnchored = remember(openWhom) { mutableStateOf(false) }
     var searchOpen by remember { mutableStateOf(false) }
     var revealGroupRequest by remember { mutableStateOf<String?>(null) }
     var newDmOpen by remember { mutableStateOf(false) }
@@ -1415,6 +1423,8 @@ fun TalonApp(
                     onOpenImage = { viewerImageUrl = it },
                     onOpenSelfProfile = { editingProfile = true },
                     searchEmbedder = app.searchEmbedderClient,
+                    scrollState = chatScrollState,
+                    scrollAnchored = chatScrollAnchored,
                     // Android-only platform widgets — desktop hosts pass null
                     // and the screen degrades gracefully. Wired via
                     // composable slots so commonMain has no Android deps.
