@@ -78,6 +78,7 @@ class NotesRepo(
                     flag = s.flag.flagString,
                     notebookId = s.notebook.id,
                     title = s.notebook.title,
+                    rootFolderId = s.notebook.rootFolderId,
                     visibility = if (s.visibility == NotesVisibility.Public) "public" else "private",
                     createdBy = s.notebook.createdBy,
                     createdAtMs = s.notebook.createdAtMs,
@@ -90,6 +91,23 @@ class NotesRepo(
             ensureSubscribed(s.flag)
             refreshNotebook(s.flag)
         }
+    }
+
+    /**
+     * Join [flag] unless we already have it. %notes only serves notebooks
+     * in our own `books` map — a group channel someone else created isn't
+     * there until we join, and scrying one we haven't joined doesn't
+     * return empty, it fails the scry outright. So opening a notes
+     * channel from a group has to join first; that's what tapping the
+     * channel means, and it's idempotent once joined.
+     */
+    suspend fun ensureJoined(flag: NotesFlag) {
+        if (db.notes().notebook(flag.flagString) != null) {
+            ensureSubscribed(flag)
+            return
+        }
+        Log.i(TAG, "joining notes channel ${flag.flagString}")
+        joinNotebook(flag)
     }
 
     /** Re-read one notebook's folder tree + notes and swap it in. */

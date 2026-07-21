@@ -197,6 +197,81 @@ class NotesWireTest {
         assertEquals("/v0/notes/~ricsul-bilwyt/handbook/stream", NotesPaths.stream(flag))
     }
 
+    // ---- live-ship fixtures --------------------------------------------
+    // Captured verbatim from ~ricsul-bilwyt (Tlon v12.0.0) scrying the
+    // %notes channel notes/~minder-folden/codex-7. These are the real
+    // payloads, so they pin field names and the seconds-vs-millis
+    // question that the hand-written cases above only assumed.
+
+    @Test
+    fun `parses the live notebook summary payload`() {
+        val s = NotesParser.notebookSummaries(
+            arr(
+                """
+                [{"flagName":"codex-7","host":"~minder-folden","notebook":{"title":"Codex",
+                  "id":7,"rootFolderId":8,"createdBy":"~minder-folden","createdAt":1784592399,
+                  "updatedAt":1784592399,"updatedBy":"~minder-folden"},"visibility":"private"}]
+                """.trimIndent(),
+            ),
+        )
+        assertEquals(1, s.size)
+        assertEquals(NotesFlag("~minder-folden", "codex-7"), s[0].flag)
+        assertEquals("Codex", s[0].notebook.title)
+        assertEquals(NotesVisibility.Private, s[0].visibility)
+        // Host hands us the root folder directly.
+        assertEquals(8L, s[0].notebook.rootFolderId)
+        // 1784592399s = 2026-07-21. As millis it would be Jan 1970, which
+        // is exactly the bug this conversion exists to avoid.
+        assertEquals(1_784_592_399_000L, s[0].notebook.createdAtMs)
+    }
+
+    @Test
+    fun `parses the live root folder and note payloads`() {
+        val f = NotesParser.folders(
+            arr(
+                """
+                [{"name":"/","notebookId":7,"id":8,"createdBy":"~minder-folden",
+                  "createdAt":1784592399,"parentFolderId":null,"updatedAt":1784592399,
+                  "updatedBy":"~minder-folden"}]
+                """.trimIndent(),
+            ),
+        )
+        assertEquals(1, f.size)
+        assertEquals(8L, f[0].id)
+        assertEquals("/", f[0].name)
+        assertNull(f[0].parentFolderId, "root folder must parse a null parent")
+
+        val n = NotesParser.notes(
+            arr(
+                """
+                [{"folderId":8,"notebookId":7,"title":"🏆 FIRST","revision":3,"id":9,
+                  "createdBy":"~minder-folden","createdAt":1784592455,
+                  "bodyMd":"I'm excited to see how this new channel type (that's **markdown friendly**) will find its legs.",
+                  "updatedAt":1784592505,"updatedBy":"~minder-folden","slug":null}]
+                """.trimIndent(),
+            ),
+        )
+        assertEquals(1, n.size)
+        assertEquals(9L, n[0].id)
+        assertEquals(8L, n[0].folderId)
+        assertEquals(3L, n[0].revision)
+        assertNull(n[0].slug)
+        assertTrue(n[0].title.contains("FIRST"))
+        assertTrue(n[0].bodyMd.contains("**markdown friendly**"))
+        assertEquals(1_784_592_505_000L, n[0].updatedAtMs)
+    }
+
+    @Test
+    fun `parses the live members payload`() {
+        val m = NotesParser.members(
+            arr("""[{"role":"owner","ship":"~minder-folden"},{"role":"editor","ship":"~ricsul-bilwyt"}]"""),
+        )
+        assertEquals(2, m.size)
+        assertEquals(NotesRole.Owner, m[0].role)
+        assertEquals("~minder-folden", m[0].ship)
+        assertEquals(NotesRole.Editor, m[1].role)
+    }
+
     @Test
     fun `channel type maps notes nest to Notebook and diary to Bulletin`() {
         assertEquals(ChannelType.Notebook, ChannelType.fromWhom("notes/~z/handbook"))

@@ -24,6 +24,8 @@ data class NotesNotebookEntity(
     val flag: String,
     val notebookId: Long,
     val title: String,
+    /** Root folder of the tree; host-authoritative, see NotesNotebook. */
+    val rootFolderId: Long?,
     val visibility: String,
     val createdBy: String,
     val createdAtMs: Long,

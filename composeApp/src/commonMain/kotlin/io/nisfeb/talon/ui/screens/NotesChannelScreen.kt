@@ -26,6 +26,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -79,7 +80,10 @@ fun NotesChannelScreen(
 
     // Folder navigation stack; empty = notebook root.
     var stack by remember(flag) { mutableStateOf<List<NotesFolderEntity>>(emptyList()) }
-    val rootFolderId = remember(folders) { folders.firstOrNull { it.parentFolderId == null }?.folderId }
+    // Host tells us the root directly; the null-parent scan is only a
+    // fallback for a row cached before rootFolderId was stored.
+    val rootFolderId = notebook?.rootFolderId
+        ?: remember(folders) { folders.firstOrNull { it.parentFolderId == null }?.folderId }
     val currentFolderId = stack.lastOrNull()?.folderId ?: rootFolderId
 
     val childFolders = remember(folders, currentFolderId) {
@@ -88,6 +92,11 @@ fun NotesChannelScreen(
     val folderNotes = remember(notes, currentFolderId) {
         notes.filter { it.folderId == currentFolderId }.sortedBy { it.title.lowercase() }
     }
+
+    // A notes channel listed in a group isn't readable until we join it
+    // on %notes (the host only serves notebooks in our own books map).
+    // Joining is idempotent, so this is safe on every open.
+    LaunchedEffect(flag) { repo.notes.ensureJoined(flag) }
 
     var newFolderOpen by remember { mutableStateOf(false) }
     var newNoteOpen by remember { mutableStateOf(false) }

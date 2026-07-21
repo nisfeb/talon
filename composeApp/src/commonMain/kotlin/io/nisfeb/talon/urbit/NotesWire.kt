@@ -74,6 +74,13 @@ enum class NotesRole { Owner, Editor, Viewer }
 data class NotesNotebook(
     val id: Long,
     val title: String,
+    /**
+     * Id of the notebook's root folder. Authoritative and present before
+     * the folder list loads, so prefer it over hunting for the folder
+     * with a null parent. (The host mints it as notebook id + 1, but
+     * that's an implementation detail — read the field.)
+     */
+    val rootFolderId: Long?,
     val createdBy: String,
     val createdAtMs: Long,
     val updatedBy: String,
@@ -144,6 +151,7 @@ object NotesParser {
         return NotesNotebook(
             id = id,
             title = o["title"].asStr() ?: "",
+            rootFolderId = o["rootFolderId"]?.takeIf { it !is JsonNull }.asLong(),
             createdBy = o["createdBy"].asStr() ?: "",
             createdAtMs = o["createdAt"].asEpochMs(),
             updatedBy = o["updatedBy"].asStr() ?: "",
