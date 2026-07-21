@@ -178,9 +178,23 @@ class NotesWireTest {
         assertEquals("folder", folder["type"]!!.jsonPrimitive.content)
         val inner = folder["action"] as JsonObject
         assertEquals("move", inner["type"]!!.jsonPrimitive.content)
-        // hoon reads 'new-parent', not 'newParent'.
-        assertTrue(inner.containsKey("new-parent"))
-        assertEquals(9L, inner["new-parent"]!!.jsonPrimitive.content.toLong())
+        // dejs reads 'newParent'. This test previously asserted
+        // 'new-parent' — the hoon type's field name — and so locked in a
+        // payload the host rejects.
+        assertTrue(inner.containsKey("newParent"))
+        assertEquals(9L, inner["newParent"]!!.jsonPrimitive.content.toLong())
+    }
+
+    @Test
+    fun `folder delete carries the recursive flag`() {
+        val a = NotesActions.deleteFolder(NotesFlag("~z", "n"), folderId = 5, recursive = true)
+        val folder = a["action"] as JsonObject
+        assertEquals("folder", folder["type"]!!.jsonPrimitive.content)
+        assertEquals(5L, folder["id"]!!.jsonPrimitive.content.toLong())
+        val inner = folder["action"] as JsonObject
+        assertEquals("delete", inner["type"]!!.jsonPrimitive.content)
+        // `recursive` is required, not optional — a bare delete won't parse.
+        assertEquals("true", inner["recursive"]!!.jsonPrimitive.content)
     }
 
     // ---- paths ---------------------------------------------------------

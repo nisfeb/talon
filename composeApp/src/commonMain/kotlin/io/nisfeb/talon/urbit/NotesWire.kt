@@ -381,7 +381,19 @@ object NotesActions {
     fun moveFolder(flag: NotesFlag, folderId: Long, newParentId: Long): JsonObject =
         scoped(flag, folderScoped(folderId, buildJsonObject {
             put("type", "move")
-            put("new-parent", newParentId)
+            // dejs reads 'newParent'. The hoon *type* field is
+            // new-parent, which is what led this astray originally.
+            put("newParent", newParentId)
+        }))
+
+    /**
+     * Delete a folder. [recursive] must be true to remove one that still
+     * has folders or notes inside it.
+     */
+    fun deleteFolder(flag: NotesFlag, folderId: Long, recursive: Boolean): JsonObject =
+        scoped(flag, folderScoped(folderId, buildJsonObject {
+            put("type", "delete")
+            put("recursive", recursive)
         }))
 
     fun createNote(flag: NotesFlag, folderId: Long, title: String, body: String): JsonObject =

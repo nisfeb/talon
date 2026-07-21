@@ -17,6 +17,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -100,6 +101,8 @@ fun NotesChannelScreen(
     LaunchedEffect(flag) { repo.notes.ensureJoined(flag) }
 
     var addMenuOpen by remember { mutableStateOf(false) }
+    var renameFolder by remember { mutableStateOf<NotesFolderEntity?>(null) }
+    var deleteFolder by remember { mutableStateOf<NotesFolderEntity?>(null) }
     var newFolderOpen by remember { mutableStateOf(false) }
     var newNoteOpen by remember { mutableStateOf(false) }
 
@@ -174,7 +177,12 @@ fun NotesChannelScreen(
         } else {
             LazyColumn(Modifier.fillMaxSize()) {
                 items(childFolders, key = { "f${it.folderId}" }) { f ->
-                    FolderRow(f) { stack = stack + f }
+                    FolderRow(
+                        folder = f,
+                        onClick = { stack = stack + f },
+                        onRename = { renameFolder = f },
+                        onDelete = { deleteFolder = f },
+                    )
                 }
                 items(folderNotes, key = { "n${it.noteId}" }) { n ->
                     NoteRow(n) { onOpenNote(n.noteId) }
@@ -195,6 +203,55 @@ fun NotesChannelScreen(
             },
         )
     }
+    renameFolder?.let { target ->
+        NameDialog(
+            title = "Rename folder",
+            label = "Folder name",
+            initial = target.name,
+            confirmLabel = "Rename",
+            onDismiss = { renameFolder = null },
+            onConfirm = { name ->
+                renameFolder = null
+                scope.launch { repo.notes.renameFolder(flag, target.folderId, name) }
+            },
+        )
+    }
+
+    deleteFolder?.let { target ->
+        // Count what goes with it. The host needs `recursive` to remove a
+        // non-empty folder, so say plainly what's about to disappear
+        // rather than failing or quietly deleting someone's notes.
+        val childCount = remember(folders, notes, target.folderId) {
+            folders.count { it.parentFolderId == target.folderId } +
+                notes.count { it.folderId == target.folderId }
+        }
+        AlertDialog(
+            onDismissRequest = { deleteFolder = null },
+            title = { Text("Delete \"${target.name}\"?") },
+            text = {
+                Text(
+                    if (childCount == 0) {
+                        "This folder is empty."
+                    } else {
+                        "This also deletes $childCount item" +
+                            (if (childCount == 1) "" else "s") +
+                            " inside it, for everyone in the notebook."
+                    },
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    val id = target.folderId
+                    deleteFolder = null
+                    scope.launch { repo.notes.deleteFolder(flag, id, recursive = true) }
+                }) { Text("Delete") }
+            },
+            dismissButton = {
+                TextButton(onClick = { deleteFolder = null }) { Text("Cancel") }
+            },
+        )
+    }
+
     if (newNoteOpen) {
         NameDialog(
             title = "New note",
@@ -210,14 +267,35 @@ fun NotesChannelScreen(
 }
 
 @Composable
-private fun FolderRow(folder: NotesFolderEntity, onClick: () -> Unit) {
+private fun FolderRow(
+    folder: NotesFolderEntity,
+    onClick: () -> Unit,
+    onRename: () -> Unit,
+    onDelete: () -> Unit,
+) {
+    var menuOpen by remember { mutableStateOf(false) }
     Row(
-        Modifier.fillMaxWidth().clickable(onClick = onClick).padding(16.dp),
+        Modifier.fillMaxWidth().clickable(onClick = onClick).padding(start = 16.dp, top = 16.dp, bottom = 16.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text("📁", style = MaterialTheme.typography.titleMedium)
         Spacer(Modifier.width(12.dp))
-        Text(folder.name, style = MaterialTheme.typography.bodyLarge)
+        Text(folder.name, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
+        Box {
+            IconButton(onClick = { menuOpen = true }) {
+                Icon(Icons.Filled.MoreVert, contentDescription = "Folder actions")
+            }
+            DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                DropdownMenuItem(
+                    text = { Text("Rename") },
+                    onClick = { menuOpen = false; onRename() },
+                )
+                DropdownMenuItem(
+                    text = { Text("Delete") },
+                    onClick = { menuOpen = false; onDelete() },
+                )
+            }
+        }
     }
 }
 
@@ -262,8 +340,10 @@ private fun NameDialog(
     label: String,
     onDismiss: () -> Unit,
     onConfirm: (String) -> Unit,
+    initial: String = "",
+    confirmLabel: String = "Create",
 ) {
-    var text by remember { mutableStateOf("") }
+    var text by remember { mutableStateOf(initial) }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(title) },
@@ -279,7 +359,7 @@ private fun NameDialog(
             TextButton(
                 onClick = { if (text.isNotBlank()) onConfirm(text.trim()) },
                 enabled = text.isNotBlank(),
-            ) { Text("Create") }
+            ) { Text(confirmLabel) }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )

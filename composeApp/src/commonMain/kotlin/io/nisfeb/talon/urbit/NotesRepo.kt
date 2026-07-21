@@ -298,6 +298,24 @@ class NotesRepo(
     suspend fun moveFolder(flag: NotesFlag, folderId: Long, newParentId: Long): Boolean =
         poke(NotesActions.moveFolder(flag, folderId, newParentId))
 
+    /**
+     * Delete a folder. [recursive] is required by the host to remove one
+     * that still has anything in it.
+     */
+    suspend fun deleteFolder(
+        flag: NotesFlag,
+        folderId: Long,
+        recursive: Boolean = true,
+    ): Boolean {
+        val ok = poke(NotesActions.deleteFolder(flag, folderId, recursive))
+        if (ok) {
+            // Drop it locally now; the stream echo re-syncs regardless.
+            db.notes().deleteFolder(flag.flagString, folderId)
+            refreshNotebook(flag)
+        }
+        return ok
+    }
+
     suspend fun createNotebook(title: String): Boolean =
         poke(NotesActions.createNotebook(title))
 
