@@ -173,7 +173,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "cd \"$SRCROOT/..\"\n./gradlew :composeApp:embedAndSignAppleFrameworkForXcode\n";
+			shellScript = "cd \"$SRCROOT/..\"\nexport GRADLE_USER_HOME=\"$PWD/.gradle-ios-heap\"\nmkdir -p \"$GRADLE_USER_HOME\"\nprintf 'org.gradle.jvmargs=-Xmx6g -Dfile.encoding=UTF-8\\nkotlin.daemon.jvmargs=-Xmx6g\\nkotlin.native.jvmArgs=-Xmx6g\\n' > \"$GRADLE_USER_HOME/gradle.properties\"\n./gradlew :composeApp:embedAndSignAppleFrameworkForXcode\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 
