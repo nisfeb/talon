@@ -11,12 +11,14 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
@@ -79,6 +81,17 @@ fun NoteScreen(
     var confirmDelete by remember(noteId) { mutableStateOf(false) }
     /** False only while we're still waiting for the row to show up. */
     var settled by remember(noteId) { mutableStateOf(false) }
+    var published by remember(noteId) { mutableStateOf(false) }
+    var confirmPublish by remember(noteId) { mutableStateOf(false) }
+    var publicPath by remember(noteId) { mutableStateOf<String?>(null) }
+
+    // Ask the host what's published rather than tracking it locally —
+    // someone else with edit rights may have published or pulled this.
+    LaunchedEffect(noteId, flag) {
+        val key = "${'$'}{flag.flagString}#${'$'}noteId"
+        published = repo.notes.publishedKeys().contains(key)
+        if (published) publicPath = io.nisfeb.talon.urbit.NotesPaths.publicPath(flag, noteId)
+    }
 
     LaunchedEffect(noteId, note) {
         if (note != null) {
@@ -143,8 +156,53 @@ fun NoteScreen(
                 IconButton(onClick = { editing = true }) {
                     Icon(Icons.Filled.Edit, contentDescription = "Edit")
                 }
+                IconButton(onClick = {
+                    if (published) {
+                        scope.launch {
+                            if (repo.notes.unpublishNote(flag, noteId)) {
+                                published = false
+                                publicPath = null
+                            }
+                        }
+                    } else {
+                        confirmPublish = true
+                    }
+                }) {
+                    Icon(
+                        Icons.Filled.Public,
+                        contentDescription = if (published) "Unpublish" else "Publish to web",
+                        tint = if (published) {
+                            MaterialTheme.colorScheme.primary
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                    )
+                }
                 IconButton(onClick = { confirmDelete = true }) {
                     Icon(Icons.Filled.Delete, contentDescription = "Delete")
+                }
+            }
+        }
+
+        publicPath?.let { path ->
+            // Show the whole link, not a path — the point of publishing
+            // is handing someone a URL.
+            val full = (repo.shipBaseUrl?.trimEnd('/') ?: "") + path
+            Column(
+                Modifier.fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 4.dp),
+            ) {
+                Text(
+                    "Published — anyone with this link can read it",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+                SelectionContainer {
+                    Text(
+                        full,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
             }
         }
@@ -203,6 +261,33 @@ fun NoteScreen(
                 )
             },
             confirmButton = { TextButton(onClick = { conflict = false }) { Text("OK") } },
+        )
+    }
+
+    if (confirmPublish) {
+        AlertDialog(
+            onDismissRequest = { confirmPublish = false },
+            title = { Text("Publish to the web?") },
+            text = {
+                Text(
+                    "This puts a copy of the note on the public internet, " +
+                        "served from your ship. Anyone with the link can read " +
+                        "it — no Urbit account needed, and search engines may " +
+                        "index it. You can unpublish at any time.",
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmPublish = false
+                    scope.launch {
+                        publicPath = repo.notes.publishNote(flag, noteId)
+                        published = publicPath != null
+                    }
+                }) { Text("Publish") }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmPublish = false }) { Text("Cancel") }
+            },
         )
     }
 

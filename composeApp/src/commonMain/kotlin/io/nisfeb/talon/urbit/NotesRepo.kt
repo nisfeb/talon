@@ -286,6 +286,29 @@ class NotesRepo(
         return ok
     }
 
+    /**
+     * Publish [noteId] to the clear web, rendering its Markdown to HTML
+     * here because the host stores whatever we send and serves it
+     * unauthenticated. Returns the public path on success.
+     */
+    suspend fun publishNote(flag: NotesFlag, noteId: Long): String? {
+        val row = db.notes().note(flag.flagString, noteId) ?: return null
+        val html = MarkdownHtml.render(row.bodyMd)
+        if (!poke(NotesActions.publishNote(flag, noteId, html))) return null
+        return NotesPaths.publicPath(flag, noteId)
+    }
+
+    suspend fun unpublishNote(flag: NotesFlag, noteId: Long): Boolean =
+        poke(NotesActions.unpublishNote(flag, noteId))
+
+    /** Note ids currently published, as `<flag>#<id>` keys. */
+    suspend fun publishedKeys(): Set<String> {
+        val ch = channel ?: return emptySet()
+        val body = runCatching { ch.scry(NotesPaths.APP, NotesPaths.PUBLISHED) }
+            .getOrElse { return emptySet() }
+        return NotesParser.publishedKeys(body)
+    }
+
     suspend fun restoreNote(flag: NotesFlag, noteId: Long, rev: Long): Boolean =
         poke(NotesActions.restoreNote(flag, noteId, rev))
 

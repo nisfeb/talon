@@ -269,6 +269,20 @@ object NotesParser {
         return notebookSummary(body["notebook"])
     }
 
+    /**
+     * `/v0/published` returns `[{host, flagName, noteId}]`. Flattened to
+     * `<host>/<name>#<id>` keys so a screen can ask "is this published?"
+     * without rebuilding the list.
+     */
+    fun publishedKeys(el: JsonElement?): Set<String> =
+        ((el as? JsonArray) ?: emptyList()).mapNotNull { e ->
+            val o = e as? JsonObject ?: return@mapNotNull null
+            val host = o["host"].asStr() ?: return@mapNotNull null
+            val name = o["flagName"].asStr() ?: return@mapNotNull null
+            val id = o["noteId"].asLong() ?: return@mapNotNull null
+            "$host/$name#$id"
+        }.toSet()
+
     /** Error tag from a failed v1 write, when the host supplies one. */
     fun writeErrorType(el: JsonElement?): String? {
         val body = (el as? JsonObject)?.get("body") as? JsonObject ?: return null
@@ -435,6 +449,20 @@ object NotesActions {
     fun deleteNote(flag: NotesFlag, noteId: Long): JsonObject =
         scoped(flag, noteScoped(noteId, buildJsonObject { put("type", "delete") }))
 
+    /**
+     * Publish a note to the clear web. The host stores the HTML we send
+     * verbatim and serves it unauthenticated, so callers must render it
+     * through [MarkdownHtml] rather than assembling markup by hand.
+     */
+    fun publishNote(flag: NotesFlag, noteId: Long, html: String): JsonObject =
+        scoped(flag, noteScoped(noteId, buildJsonObject {
+            put("type", "publish")
+            put("html", html)
+        }))
+
+    fun unpublishNote(flag: NotesFlag, noteId: Long): JsonObject =
+        scoped(flag, noteScoped(noteId, buildJsonObject { put("type", "unpublish") }))
+
     fun restoreNote(flag: NotesFlag, noteId: Long, rev: Long): JsonObject =
         scoped(flag, noteScoped(noteId, buildJsonObject {
             put("type", "restore")
@@ -485,4 +513,12 @@ object NotesPaths {
     const val V1_NOTEBOOKS = "/notes/~/v1/notebooks"
     fun v1Notebook(flag: NotesFlag) = "$V1_NOTEBOOKS/${flag.pathSegment}"
     fun v1Note(flag: NotesFlag, id: Long) = "${v1Notebook(flag)}/notes/$id"
+
+    /**
+     * Public, unauthenticated page for a published note. %notes binds
+     * /notes in eyre and serves the stored HTML here; anyone with the
+     * link can read it without a ship.
+     */
+    fun publicPath(flag: NotesFlag, noteId: Long) =
+        "/notes/pub/${flag.host}/${flag.name}/$noteId"
 }
