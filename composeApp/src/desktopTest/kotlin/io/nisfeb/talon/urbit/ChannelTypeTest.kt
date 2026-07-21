@@ -16,7 +16,7 @@ class ChannelTypeTest {
     @Test
     fun `diary nest resolves to Notebook`() {
         assertEquals(
-            ChannelType.Notebook,
+            ChannelType.Bulletin,
             ChannelType.fromWhom("diary/~sampel-palnet/journal"),
         )
     }
@@ -50,7 +50,7 @@ class ChannelTypeTest {
     @Test
     fun `agentKind maps each type to its wire string`() {
         assertEquals("/chat", ChannelType.agentKind(ChannelType.Chat))
-        assertEquals("/diary", ChannelType.agentKind(ChannelType.Notebook))
+        assertEquals("/diary", ChannelType.agentKind(ChannelType.Bulletin))
         assertEquals("/heap", ChannelType.agentKind(ChannelType.Gallery))
     }
 }

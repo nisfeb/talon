@@ -324,7 +324,7 @@ private fun ChannelRow(
 ) {
     val (typeLabel, typeColor) = when {
         ch.nest.startsWith("diary/") ->
-            "Notebook" to MaterialTheme.colorScheme.tertiaryContainer
+            "Bulletin" to MaterialTheme.colorScheme.tertiaryContainer
         ch.nest.startsWith("heap/") ->
             "Gallery" to MaterialTheme.colorScheme.secondaryContainer
         else -> null to MaterialTheme.colorScheme.primaryContainer

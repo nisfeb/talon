@@ -2470,7 +2470,7 @@ private object HomeListSnapshot {
 @Composable
 private fun ChannelTypeBadge(whom: String) {
     val (label, bg) = when {
-        whom.startsWith("diary/") -> "Notebook" to MaterialTheme.colorScheme.tertiaryContainer
+        whom.startsWith("diary/") -> "Bulletin" to MaterialTheme.colorScheme.tertiaryContainer
         whom.startsWith("heap/") -> "Gallery" to MaterialTheme.colorScheme.secondaryContainer
         else -> return
     }

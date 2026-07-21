@@ -370,9 +370,12 @@ private fun NewChannelDialog(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    // No "diary"/Bulletin here: Tlon deprecated the type in
+                    // webapp v12 (it was the old "Notebook"). Existing
+                    // bulletins still render and stay readable/writable —
+                    // we just don't mint new ones.
                     listOf(
                         "chat" to "Chat",
-                        "diary" to "Notebook",
                         "heap" to "Gallery",
                     ).forEach { (k, label) ->
                         val selected = k == kind
