@@ -305,6 +305,37 @@ class NotesWireTest {
     }
 
     @Test
+    fun `create returns the notebook tag, not ok, and still counts as success`() {
+        // response-body has several success arms. A create answers
+        // %notebook with the new summary — reading only %ok would report
+        // a notebook that was actually created as a failure.
+        val created = obj(
+            """
+            {"body":{"type":"notebook","notebook":{"flagName":"wire-probe-5",
+              "host":"~ricsul-bilwyt","visibility":"private","notebook":{"title":"Wire probe",
+              "id":5,"rootFolderId":6,"createdBy":"~ricsul-bilwyt","createdAt":1784600147,
+              "updatedAt":1784600147,"updatedBy":"~ricsul-bilwyt"}}},"requestId":"0vn5"}
+            """.trimIndent(),
+        )
+        assertTrue(NotesParser.isWriteOk(created))
+        val summary = NotesParser.createdNotebook(created)!!
+        // The host slugifies the title, so this is the only way to learn
+        // the flag of what we just made.
+        assertEquals(NotesFlag("~ricsul-bilwyt", "wire-probe-5"), summary.flag)
+        assertEquals("notes/~ricsul-bilwyt/wire-probe-5", summary.flag.nest)
+        assertEquals(6L, summary.notebook.rootFolderId)
+        // A plain %ok mutation carries no notebook to unwrap.
+        assertNull(NotesParser.createdNotebook(obj("""{"body":{"type":"ok"}}""")))
+    }
+
+    @Test
+    fun `pending is not treated as a completed write`() {
+        // %pending means a cross-ship request is still in flight; calling
+        // that "saved" would be the same class of bug as the poke 204.
+        assertFalse(NotesParser.isWriteOk(obj("""{"body":{"type":"pending","status":"sending"}}""")))
+    }
+
+    @Test
     fun `unreadable write response counts as failure not success`() {
         // Defaulting to "saved" on a reply we can't parse would drop the
         // user's edit exactly like the original bug did.

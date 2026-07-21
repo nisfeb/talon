@@ -1192,7 +1192,16 @@ class TlonChatRepo(
         title: String,
         description: String = "",
     ): String {
-        require(kind in setOf("chat", "diary", "heap")) { "unknown channel kind: $kind" }
+        require(kind in setOf("chat", "heap", "notes")) { "unknown channel kind: $kind" }
+        // Notebooks live on %notes, which registers the channel with
+        // %groups itself — there's no %channels create to send, and the
+        // host derives the slug from the title rather than taking ours.
+        // ("diary"/Bulletin is deliberately absent: deprecated upstream,
+        // so we no longer mint new ones.)
+        if (kind == "notes") {
+            return notes.createGroupNotebook(groupFlag, title)
+                ?: error("couldn't create notebook")
+        }
         val ch = channel ?: error("not connected")
         val slug = "v" + randomBase32(7)
         val nest = "$kind/$ourPatp/$slug"

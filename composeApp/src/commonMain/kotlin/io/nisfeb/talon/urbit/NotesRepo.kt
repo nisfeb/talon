@@ -11,6 +11,8 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.buildJsonArray
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 
@@ -291,6 +293,54 @@ class NotesRepo(
 
     suspend fun createNotebook(title: String): Boolean =
         poke(NotesActions.createNotebook(title))
+
+    /**
+     * Create a notebook as a channel of [groupFlag], returning its nest.
+     *
+     * Goes over v1 rather than poking: the host slugifies the title into
+     * the flag (a "Team notes" becomes `team-notes-3`), so a
+     * fire-and-forget poke would leave us unable to name what we just
+     * made. The response carries the full summary.
+     *
+     * %notes registers the channel with %groups itself, so unlike the
+     * other channel kinds there's no separate %channels create to do.
+     */
+    suspend fun createGroupNotebook(
+        groupFlag: String,
+        title: String,
+        readers: Set<String> = emptySet(),
+    ): String? {
+        val ch = channel ?: return null
+        val group = NotesFlag.parse(groupFlag) ?: run {
+            Log.w(TAG, "createGroupNotebook: bad group flag $groupFlag")
+            return null
+        }
+        val resp = runCatching {
+            ch.apiJson(
+                method = "POST",
+                path = NotesPaths.V1_NOTEBOOKS,
+                body = buildJsonObject {
+                    put("title", title)
+                    put("group", buildJsonObject {
+                        put("host", group.host)
+                        put("flagName", group.name)
+                    })
+                    put("readers", buildJsonArray { readers.forEach { add(JsonPrimitive(it)) } })
+                },
+            )
+        }.getOrElse {
+            Log.w(TAG, "create notebook failed in $groupFlag", it)
+            return null
+        }
+        val created = NotesParser.createdNotebook(resp) ?: run {
+            Log.w(TAG, "create notebook rejected: ${NotesParser.writeErrorType(resp)}")
+            return null
+        }
+        // Pull it into the cache + subscribe so the new channel opens
+        // populated instead of empty.
+        bootstrap()
+        return created.flag.nest
+    }
 
     suspend fun renameNotebook(flag: NotesFlag, title: String): Boolean =
         poke(NotesActions.renameNotebook(flag, title))

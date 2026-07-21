@@ -250,7 +250,23 @@ object NotesParser {
      */
     fun isWriteOk(el: JsonElement?): Boolean {
         val body = (el as? JsonObject)?.get("body") as? JsonObject ?: return false
-        return body["type"].asStr() == "ok"
+        // response-body's success arms: %ok for a plain mutation,
+        // %notebook when a create returns the new summary, %no-change
+        // when the write was a no-op. %error is failure and %pending
+        // means a cross-ship request is still in flight — neither is a
+        // result we can report as saved.
+        return body["type"].asStr() in setOf("ok", "notebook", "no-change")
+    }
+
+    /**
+     * Summary of a notebook a create just returned. The host derives the
+     * flag by slugifying the title, so this is the only way to learn the
+     * new notebook's name without re-listing.
+     */
+    fun createdNotebook(el: JsonElement?): NotesNotebookSummary? {
+        val body = (el as? JsonObject)?.get("body") as? JsonObject ?: return null
+        if (body["type"].asStr() != "notebook") return null
+        return notebookSummary(body["notebook"])
     }
 
     /** Error tag from a failed v1 write, when the host supplies one. */
@@ -454,6 +470,7 @@ object NotesPaths {
      * caller must know: unlike a channel poke, these answer synchronously
      * with {"body":{"type":"ok"|"error"}}.
      */
-    fun v1Notebook(flag: NotesFlag) = "/notes/~/v1/notebooks/${flag.pathSegment}"
+    const val V1_NOTEBOOKS = "/notes/~/v1/notebooks"
+    fun v1Notebook(flag: NotesFlag) = "$V1_NOTEBOOKS/${flag.pathSegment}"
     fun v1Note(flag: NotesFlag, id: Long) = "${v1Notebook(flag)}/notes/$id"
 }

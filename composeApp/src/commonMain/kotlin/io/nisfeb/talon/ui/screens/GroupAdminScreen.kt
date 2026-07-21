@@ -373,10 +373,12 @@ private fun NewChannelDialog(
                     // No "diary"/Bulletin here: Tlon deprecated the type in
                     // webapp v12 (it was the old "Notebook"). Existing
                     // bulletins still render and stay readable/writable —
-                    // we just don't mint new ones.
+                    // we just don't mint new ones. "notes" is its
+                    // replacement, served by the %notes agent.
                     listOf(
                         "chat" to "Chat",
                         "heap" to "Gallery",
+                        "notes" to "Notebook",
                     ).forEach { (k, label) ->
                         val selected = k == kind
                         OutlinedButton(
