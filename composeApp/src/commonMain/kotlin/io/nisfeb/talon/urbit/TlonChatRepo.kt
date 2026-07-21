@@ -258,6 +258,16 @@ class TlonChatRepo(
     // callers only ever invoke this repo's own methods, which null-guard.
 
     /**
+     * Client for the %notes agent (Tlon v12 Markdown notebooks). Owned
+     * here rather than injected because it needs nothing this repo
+     * doesn't already have, and it rides the same channel: the session
+     * loop attaches it on connect and routes its facts in applyEvent.
+     * Ships older than webapp v12 have no %notes agent, in which case
+     * its bootstrap no-ops and the notes tables stay empty.
+     */
+    val notes: NotesRepo = NotesRepo(db, scope)
+
+    /**
      * Called once per incoming message delta from another author, after
      * the row has been written to Room. UI layers wire this to their
      * notification / in-app banner logic. `replyToUs` is true when the
@@ -562,6 +572,14 @@ class TlonChatRepo(
             runCatching { settingsSync.bootstrap() }
                 .onFailure { Log.e(TAG, "settings bootstrap failed", it) }
         }
+
+        // %notes (v12 Markdown notebooks). Scries the notebook list and
+        // subscribes to each notebook's stream. A pre-v12 ship has no
+        // such agent — bootstrap logs and returns, leaving the tables
+        // empty, so this is safe to run unconditionally.
+        notes.attach(ch)
+        runCatching { notes.bootstrap() }
+            .onFailure { Log.w(TAG, "notes bootstrap failed", it) }
 
         // Watchdog: if we don't see an event for 90s, the SSE is likely
         // a zombie (doze-frozen or server-side dropped). Cancel the
@@ -2753,6 +2771,14 @@ class TlonChatRepo(
             payload.containsKey("del-bucket")
         ) {
             settingsSync?.applySettingsEvent(payload)
+            return
+        }
+
+        // %notes /v0/notes/<host>/<name>/stream — notebook, folder, note
+        // and membership deltas. Facts don't name their agent, so this
+        // matches on the shape only %notes emits (type + host + flagName).
+        if (NotesRepo.isNotesEvent(payload)) {
+            notes.applyNotesEvent(payload)
             return
         }
 
