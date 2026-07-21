@@ -42,6 +42,7 @@ import androidx.compose.ui.unit.dp
 import io.nisfeb.talon.data.NotesFolderEntity
 import io.nisfeb.talon.data.NotesNoteEntity
 import io.nisfeb.talon.urbit.NotesFlag
+import io.nisfeb.talon.urbit.NotesTree
 import io.nisfeb.talon.urbit.TlonChatRepo
 import io.nisfeb.talon.util.formatMonthDayYear
 import kotlinx.coroutines.launch
@@ -103,6 +104,7 @@ fun NotesChannelScreen(
     var addMenuOpen by remember { mutableStateOf(false) }
     var renameFolder by remember { mutableStateOf<NotesFolderEntity?>(null) }
     var deleteFolder by remember { mutableStateOf<NotesFolderEntity?>(null) }
+    var moveFolder by remember { mutableStateOf<NotesFolderEntity?>(null) }
     var newFolderOpen by remember { mutableStateOf(false) }
     var newNoteOpen by remember { mutableStateOf(false) }
 
@@ -181,6 +183,7 @@ fun NotesChannelScreen(
                         folder = f,
                         onClick = { stack = stack + f },
                         onRename = { renameFolder = f },
+                        onMove = { moveFolder = f },
                         onDelete = { deleteFolder = f },
                     )
                 }
@@ -213,6 +216,46 @@ fun NotesChannelScreen(
             onConfirm = { name ->
                 renameFolder = null
                 scope.launch { repo.notes.renameFolder(flag, target.folderId, name) }
+            },
+        )
+    }
+
+    moveFolder?.let { target ->
+        // Only destinations that keep the tree intact: never itself, its
+        // own subtree (which would strand that branch), or the parent it
+        // already has. See NotesTree.
+        val destinations = remember(folders, target.folderId) {
+            NotesTree.moveDestinations(folders, target.folderId)
+        }
+        AlertDialog(
+            onDismissRequest = { moveFolder = null },
+            title = { Text("Move \"${target.name}\" to…") },
+            text = {
+                if (destinations.isEmpty()) {
+                    Text("There's nowhere else to put this folder.")
+                } else {
+                    LazyColumn {
+                        items(destinations, key = { it.folderId }) { dest ->
+                            Text(
+                                NotesTree.path(folders, dest.folderId),
+                                style = MaterialTheme.typography.bodyLarge,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        val id = target.folderId
+                                        val to = dest.folderId
+                                        moveFolder = null
+                                        scope.launch { repo.notes.moveFolder(flag, id, to) }
+                                    }
+                                    .padding(vertical = 12.dp),
+                            )
+                        }
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = {
+                TextButton(onClick = { moveFolder = null }) { Text("Cancel") }
             },
         )
     }
@@ -271,6 +314,7 @@ private fun FolderRow(
     folder: NotesFolderEntity,
     onClick: () -> Unit,
     onRename: () -> Unit,
+    onMove: () -> Unit,
     onDelete: () -> Unit,
 ) {
     var menuOpen by remember { mutableStateOf(false) }
@@ -289,6 +333,10 @@ private fun FolderRow(
                 DropdownMenuItem(
                     text = { Text("Rename") },
                     onClick = { menuOpen = false; onRename() },
+                )
+                DropdownMenuItem(
+                    text = { Text("Move…") },
+                    onClick = { menuOpen = false; onMove() },
                 )
                 DropdownMenuItem(
                     text = { Text("Delete") },
