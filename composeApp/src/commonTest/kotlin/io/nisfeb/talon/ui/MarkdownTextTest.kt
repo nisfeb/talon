@@ -100,4 +100,44 @@ class MarkdownTextTest {
         assertEquals("compute 2 * 3 * 4", inlineAnnotated("compute 2 * 3 * 4", Color.Unspecified).text)
         assertEquals("a b c", inlineAnnotated("a *b* c", Color.Unspecified).text)
     }
+
+    @Test
+    fun `a numbered list after a bulleted one stays a list`() {
+        // Reported from the app: bullets followed by a numbered list
+        // rendered the numbers as one run-on line. There was no ordered
+        // case at all, so those lines hit the paragraph branch, which
+        // joins consecutive lines with spaces.
+        val blocks = parseMarkdownBlocks("- one\n- two\n\n1. first\n2. second")
+        val bullets = blocks.filterIsInstance<MdBlock.Bullet>().map { it.text }
+        val ordered = blocks.filterIsInstance<MdBlock.Ordered>()
+        assertEquals(listOf("one", "two"), bullets)
+        assertEquals(listOf("first", "second"), ordered.map { it.text })
+        assertEquals(listOf(1, 2), ordered.map { it.number })
+        // The give-away symptom: nothing may survive as a merged paragraph.
+        assertEquals(
+            emptyList(),
+            blocks.filterIsInstance<MdBlock.Paragraph>().map { it.text },
+        )
+    }
+
+    @Test
+    fun `ordered items keep the author's numbers`() {
+        val blocks = parseMarkdownBlocks("3. three\n4. four")
+        assertEquals(listOf(3, 4), blocks.filterIsInstance<MdBlock.Ordered>().map { it.number })
+    }
+
+    @Test
+    fun `paren style numbering works too`() {
+        val blocks = parseMarkdownBlocks("1) alpha\n2) beta")
+        assertEquals(listOf("alpha", "beta"), blocks.filterIsInstance<MdBlock.Ordered>().map { it.text })
+    }
+
+    @Test
+    fun `a decimal in prose is not a list`() {
+        // "3.14 is pi" must stay a paragraph — the pattern needs
+        // whitespace after the separator.
+        val blocks = parseMarkdownBlocks("3.14 is pi")
+        assertEquals(emptyList(), blocks.filterIsInstance<MdBlock.Ordered>())
+        assertEquals(listOf("3.14 is pi"), blocks.filterIsInstance<MdBlock.Paragraph>().map { it.text })
+    }
 }

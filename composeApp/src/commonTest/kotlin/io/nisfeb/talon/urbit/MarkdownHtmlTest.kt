@@ -146,4 +146,16 @@ class MarkdownHtmlTest {
         val html = MarkdownHtml.render("| a | b |\n| - | - |")
         assertTrue(html.contains("a") && html.contains("b"), "content must never be dropped")
     }
+
+    @Test
+    fun `published lists match what the app displays`() {
+        // The in-app parser accepts `1)` as well as `1.`; if this one
+        // didn't, a list would render on screen and flatten on the web.
+        val dot = MarkdownHtml.render("1. first\n2. second")
+        assertTrue(dot.contains("<ol>") && dot.contains("<li>first</li>"))
+        val paren = MarkdownHtml.render("1) alpha\n2) beta")
+        assertTrue(paren.contains("<ol>") && paren.contains("<li>alpha</li>"), "paren numbering must list too")
+        // And a decimal in prose is still prose.
+        assertFalse(MarkdownHtml.render("3.14 is pi").contains("<ol>"))
+    }
 }

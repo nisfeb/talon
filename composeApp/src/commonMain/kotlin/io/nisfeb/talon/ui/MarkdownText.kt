@@ -37,10 +37,14 @@ internal sealed interface MdBlock {
     data class Code(val text: String) : MdBlock
     data class Heading(val level: Int, val text: String) : MdBlock
     data class Bullet(val text: String) : MdBlock
+    data class Ordered(val number: Int, val text: String) : MdBlock
     data class Paragraph(val text: String) : MdBlock
 }
 
 /** Split Markdown source into block-level elements. Pure. */
+/** `1. item` / `12) item` — the number is kept, not renumbered. */
+private val ORDERED_ITEM = Regex("""^(\d{1,9})[.)]\s+(.*)$""")
+
 internal fun parseMarkdownBlocks(src: String): List<MdBlock> {
     val out = ArrayList<MdBlock>()
     val lines = src.replace("\r\n", "\n").split("\n")
@@ -75,6 +79,19 @@ internal fun parseMarkdownBlocks(src: String): List<MdBlock> {
             trimmed.startsWith("- ") || trimmed.startsWith("* ") -> {
                 flushPara()
                 out.add(MdBlock.Bullet(trimmed.drop(2).trim()))
+            }
+            // Ordered items. Without this they fell through to the
+            // paragraph branch, which joins consecutive lines with
+            // spaces — a numbered list collapsed into one run-on line.
+            ORDERED_ITEM.matchEntire(trimmed) != null -> {
+                flushPara()
+                val m = ORDERED_ITEM.matchEntire(trimmed)!!
+                out.add(
+                    MdBlock.Ordered(
+                        number = m.groupValues[1].toIntOrNull() ?: 1,
+                        text = m.groupValues[2].trim(),
+                    ),
+                )
             }
             trimmed.isBlank() -> flushPara()
             else -> {
@@ -192,6 +209,12 @@ fun MarkdownText(text: String, modifier: Modifier = Modifier) {
                 )
                 is MdBlock.Bullet -> Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text("•", style = MaterialTheme.typography.bodyLarge)
+                    Text(inlineAnnotated(block.text, codeBg), style = MaterialTheme.typography.bodyLarge)
+                }
+                is MdBlock.Ordered -> Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    // Author's own number, so "3." after a break still
+                    // reads as 3 rather than being renumbered.
+                    Text("${block.number}.", style = MaterialTheme.typography.bodyLarge)
                     Text(inlineAnnotated(block.text, codeBg), style = MaterialTheme.typography.bodyLarge)
                 }
                 is MdBlock.Paragraph -> Text(

@@ -97,7 +97,7 @@ object MarkdownHtml {
                         val l = lines[i].trimStart()
                         if (!ORDERED.matches(l)) break
                         out.append("<li>")
-                            .append(inline(l.substringAfter('.').trim()))
+                            .append(inline(l.dropWhile { it.isDigit() }.drop(1).trim()))
                             .append("</li>\n")
                         i++
                     }
@@ -119,7 +119,9 @@ object MarkdownHtml {
         return out.toString().trimEnd()
     }
 
-    private val ORDERED = Regex("^\\d+\\. .*")
+    // Matches MarkdownText's parser, including `1)` — otherwise a list
+    // renders in the app but flattens to a paragraph once published.
+    private val ORDERED = Regex("""^\d{1,9}[.)]\s+.*""")
 
     /** HTML-escape. Applied to every piece of user text without exception. */
     fun escape(s: String): String = buildString(s.length) {
