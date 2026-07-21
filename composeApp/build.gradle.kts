@@ -568,6 +568,7 @@ val iconsExtendedKeep = setOf(
     "androidx/compose/material/icons/filled/NotificationsOffKt.class",
     "androidx/compose/material/icons/filled/PauseKt.class",
     "androidx/compose/material/icons/filled/PeopleKt.class",
+    "androidx/compose/material/icons/filled/PublicKt.class",
     "androidx/compose/material/icons/filled/PushPinKt.class",
     "androidx/compose/material/icons/filled/QrCodeScannerKt.class",
     "androidx/compose/material/icons/filled/ScheduleKt.class",
