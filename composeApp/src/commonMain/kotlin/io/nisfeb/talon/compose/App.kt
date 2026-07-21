@@ -76,7 +76,9 @@ import io.nisfeb.talon.ui.screens.LoginScreen
 import io.nisfeb.talon.ui.screens.MediaListScreen
 import io.nisfeb.talon.ui.screens.NewDmScreen
 import io.nisfeb.talon.ui.screens.NotebookComposeScreen
+import io.nisfeb.talon.ui.screens.NoteScreen
 import io.nisfeb.talon.ui.screens.NotebookListScreen
+import io.nisfeb.talon.ui.screens.NotesChannelScreen
 import io.nisfeb.talon.ui.screens.NotebookPostScreen
 import io.nisfeb.talon.ui.screens.ProfileEditScreen
 import io.nisfeb.talon.ui.screens.SearchScreen
@@ -316,6 +318,9 @@ fun App(
     // Gallery: simpler — no in-place edit on desktop yet.
     var galleryComposeOpen by remember { mutableStateOf(false) }
     var openGalleryPostId by remember { mutableStateOf<String?>(null) }
+    // %notes (v12 Markdown notebooks): which note is open inside a
+    // notes/ channel. Null = showing the notebook's folder tree.
+    var openNoteId by remember { mutableStateOf<Long?>(null) }
     var profileSheetShip by remember { mutableStateOf<String?>(null) }
     // Watchwords-sync flag. Backed by [watchwordsSync] (caller-supplied)
     // so desktop's JSON-file impl can persist across restarts and
@@ -381,6 +386,12 @@ fun App(
     PlatformBackHandler(enabled = openThreadParent != null) {
         openThreadParent = null
         openThreadReplyAnchor = null
+    }
+    // After the chat handler (LIFO): an open note sits inside a notes/
+    // channel, so both predicates hold and this must win or back would
+    // close the whole notebook instead of the note.
+    PlatformBackHandler(enabled = openNoteId != null) {
+        openNoteId = null
     }
     // Group info / media drilldown back stack (mobile / compact only —
     // wide windows render these in the right pane and dismiss via the
@@ -1516,6 +1527,26 @@ fun App(
                                     onBack = { openChat = null },
                                     onOpenPost = { id -> openGalleryPostId = id },
                                     onCompose = { galleryComposeOpen = true },
+                                )
+                            })
+                            // %notes channels (whom prefix "notes/"). Served
+                            // by the %notes agent, not %channels, so they
+                            // route to their own screens rather than any of
+                            // the chat/bulletin/gallery plumbing.
+                            openChat?.startsWith("notes/") == true && openNoteId != null -> ({
+                                NoteScreen(
+                                    repo = repo,
+                                    whom = openChat!!,
+                                    noteId = openNoteId!!,
+                                    onBack = { openNoteId = null },
+                                )
+                            })
+                            openChat?.startsWith("notes/") == true -> ({
+                                NotesChannelScreen(
+                                    repo = repo,
+                                    whom = openChat!!,
+                                    onBack = { openChat = null },
+                                    onOpenNote = { id -> openNoteId = id },
                                 )
                             })
                             // Thread no longer lives in detailSlot — it

@@ -2471,6 +2471,7 @@ private object HomeListSnapshot {
 private fun ChannelTypeBadge(whom: String) {
     val (label, bg) = when {
         whom.startsWith("diary/") -> "Bulletin" to MaterialTheme.colorScheme.tertiaryContainer
+        whom.startsWith("notes/") -> "Notebook" to MaterialTheme.colorScheme.tertiaryContainer
         whom.startsWith("heap/") -> "Gallery" to MaterialTheme.colorScheme.secondaryContainer
         else -> return
     }

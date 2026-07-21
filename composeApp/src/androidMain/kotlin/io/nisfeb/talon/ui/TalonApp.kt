@@ -60,6 +60,8 @@ import io.nisfeb.talon.ui.screens.GalleryComposeScreen
 import io.nisfeb.talon.ui.screens.GalleryGridScreen
 import io.nisfeb.talon.ui.screens.GalleryPostScreen
 import io.nisfeb.talon.ui.screens.NotebookComposeScreen
+import io.nisfeb.talon.ui.screens.NoteScreen
+import io.nisfeb.talon.ui.screens.NotesChannelScreen
 import io.nisfeb.talon.ui.screens.NotebookListScreen
 import io.nisfeb.talon.ui.screens.NotebookPostScreen
 import io.nisfeb.talon.ui.screens.BookmarksScreen
@@ -356,6 +358,9 @@ fun TalonApp(
     var notebookEditSentMs by remember { mutableStateOf(0L) }
     var openGalleryPostId by remember { mutableStateOf<String?>(null) }
     var galleryComposeOpen by remember { mutableStateOf(false) }
+    // %notes (v12 Markdown notebooks): which note is open inside a
+    // notes/ channel. Null = showing the notebook's folder tree.
+    var openNoteId by remember { mutableStateOf<Long?>(null) }
 
     // Per-ship persistent store for the last-open conversation.
     // `remember(app)` keeps the same SharedPreferences-backed instance
@@ -830,6 +835,10 @@ fun TalonApp(
             closeRightPaneAction()
         }
         BackHandler(enabled = openThread == null && openWhom != null) { openWhom = null }
+        // After the chat handler: an open note is *inside* a notes/
+        // channel, so both are enabled and the later registration has to
+        // be this one or back would close the whole notebook.
+        BackHandler(enabled = openNoteId != null) { openNoteId = null }
         // Registered last so it wins over the chat handler when an
         // image is opened from inside a chat.
         BackHandler(enabled = viewerImageList != null) { viewerImageList = null }
@@ -1357,6 +1366,26 @@ fun TalonApp(
                     onBack = { openWhom = null },
                     onOpenPost = { openNotebookPostId = it },
                     onCompose = { notebookComposeOpen = true },
+                    modifier = mod,
+                )
+            }
+
+            // %notes channels. Served by the %notes agent rather than
+            // %channels, so they get their own screens instead of any of
+            // the chat/bulletin/gallery plumbing.
+            openWhom != null && openWhom!!.startsWith("notes/") -> when {
+                openNoteId != null -> NoteScreen(
+                    repo = app.repo,
+                    whom = openWhom!!,
+                    noteId = openNoteId!!,
+                    onBack = { openNoteId = null },
+                    modifier = mod,
+                )
+                else -> NotesChannelScreen(
+                    repo = app.repo,
+                    whom = openWhom!!,
+                    onBack = { openWhom = null },
+                    onOpenNote = { id -> openNoteId = id },
                     modifier = mod,
                 )
             }
