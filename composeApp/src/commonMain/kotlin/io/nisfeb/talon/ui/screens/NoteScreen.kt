@@ -77,6 +77,19 @@ fun NoteScreen(
     var baseRevision by remember(noteId) { mutableStateOf(0L) }
     var conflict by remember(noteId) { mutableStateOf(false) }
     var confirmDelete by remember(noteId) { mutableStateOf(false) }
+    /** False only while we're still waiting for the row to show up. */
+    var settled by remember(noteId) { mutableStateOf(false) }
+
+    LaunchedEffect(noteId, note) {
+        if (note != null) {
+            settled = true
+        } else {
+            // Long enough to cover a join + scry on a slow ship, short
+            // enough that a missing note doesn't read as a hang.
+            kotlinx.coroutines.delay(6_000)
+            settled = true
+        }
+    }
 
     // Seed the draft when entering edit mode, not on every emission —
     // a stream update mid-edit must not wipe what's being typed.
@@ -137,8 +150,22 @@ fun NoteScreen(
         }
 
         when {
-            note == null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator()
+            // A null row means "not synced yet" at first and "no such
+            // note" forever after, and spinning on the second case leaves
+            // the user stuck. Give the sync a bounded window, then say so.
+            note == null && !settled -> Box(
+                Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center,
+            ) { CircularProgressIndicator() }
+            note == null -> Box(
+                Modifier.fillMaxSize().padding(24.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    "This note isn't here — it may have been deleted, or it " +
+                        "belongs to a different notebook.",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
             editing -> OutlinedTextField(
                 value = draft,

@@ -17,8 +17,9 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Create
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -98,6 +99,7 @@ fun NotesChannelScreen(
     // Joining is idempotent, so this is safe on every open.
     LaunchedEffect(flag) { repo.notes.ensureJoined(flag) }
 
+    var addMenuOpen by remember { mutableStateOf(false) }
     var newFolderOpen by remember { mutableStateOf(false) }
     var newNoteOpen by remember { mutableStateOf(false) }
 
@@ -129,11 +131,32 @@ fun NotesChannelScreen(
                     )
                 }
             }
-            IconButton(onClick = { newFolderOpen = true }) {
-                Icon(Icons.Filled.Add, contentDescription = "New folder")
-            }
-            IconButton(onClick = { newNoteOpen = true }) {
-                Icon(Icons.Filled.Create, contentDescription = "New note")
+            // One "+" that asks what to add. Two bare icon buttons here
+            // (plus = folder, pencil = note) read as "add" and "edit", so
+            // reaching for the obvious one created a folder every time.
+            Box {
+                IconButton(onClick = { addMenuOpen = true }) {
+                    Icon(Icons.Filled.Add, contentDescription = "Add")
+                }
+                DropdownMenu(
+                    expanded = addMenuOpen,
+                    onDismissRequest = { addMenuOpen = false },
+                ) {
+                    DropdownMenuItem(
+                        text = { Text("New note") },
+                        onClick = {
+                            addMenuOpen = false
+                            newNoteOpen = true
+                        },
+                    )
+                    DropdownMenuItem(
+                        text = { Text("New folder") },
+                        onClick = {
+                            addMenuOpen = false
+                            newFolderOpen = true
+                        },
+                    )
+                }
             }
         }
 

@@ -320,7 +320,10 @@ fun App(
     var openGalleryPostId by remember { mutableStateOf<String?>(null) }
     // %notes (v12 Markdown notebooks): which note is open inside a
     // notes/ channel. Null = showing the notebook's folder tree.
-    var openNoteId by remember { mutableStateOf<Long?>(null) }
+    // Keyed on openChat: note ids are only unique within a notebook, so
+    // an id left over from the last one would render a note that doesn't
+    // exist here — an endless spinner on a freshly opened notebook.
+    var openNoteId by remember(openChat) { mutableStateOf<Long?>(null) }
     var profileSheetShip by remember { mutableStateOf<String?>(null) }
     // Watchwords-sync flag. Backed by [watchwordsSync] (caller-supplied)
     // so desktop's JSON-file impl can persist across restarts and

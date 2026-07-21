@@ -360,7 +360,10 @@ fun TalonApp(
     var galleryComposeOpen by remember { mutableStateOf(false) }
     // %notes (v12 Markdown notebooks): which note is open inside a
     // notes/ channel. Null = showing the notebook's folder tree.
-    var openNoteId by remember { mutableStateOf<Long?>(null) }
+    // Keyed on openWhom: note ids are only unique within a notebook, so
+    // an id left over from the last one would render a note that doesn't
+    // exist here — an endless spinner on a freshly opened notebook.
+    var openNoteId by remember(openWhom) { mutableStateOf<Long?>(null) }
 
     // Per-ship persistent store for the last-open conversation.
     // `remember(app)` keeps the same SharedPreferences-backed instance
