@@ -257,12 +257,19 @@ class NotesRepo(
             Log.w(TAG, "note update failed for $key/$noteId", it)
             false
         }
-        if (!ok) {
-            // Drop the optimistic body so the UI shows the host's version
-            // again rather than a local edit that never landed.
-            db.notes().setPending(key, noteId, false)
-            refreshNotebook(flag)
-        }
+        // Clear the in-flight mark either way — the write is settled, and
+        // only an unsettled row should read as "saving…". This has to
+        // happen before the refresh: replaceTree deliberately re-applies
+        // pending to rows still in flight, so leaving it set here would
+        // make every later scry restore it and pin the note as saving
+        // forever.
+        db.notes().setPending(key, noteId, false)
+        // Re-read either way. On success it picks up the host's new
+        // revision, which the next edit must send back as
+        // expectedRevision; on failure it replaces the optimistic body
+        // with the host's version rather than leaving an edit on screen
+        // that never landed.
+        refreshNotebook(flag)
         return ok
     }
 

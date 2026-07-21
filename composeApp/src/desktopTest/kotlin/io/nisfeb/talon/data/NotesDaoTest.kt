@@ -99,6 +99,30 @@ class NotesDaoTest {
     }
 
     @Test
+    fun `a settled save stops reading as saving`() = runBlocking {
+        // The bug: pending was set when a save started and only cleared
+        // on failure, while replaceTree re-applies it to in-flight rows.
+        // So one successful save pinned the note as "saving…" forever,
+        // and every later refresh restored the mark.
+        val dao = db.notes()
+        dao.upsertNotes(listOf(note(1, "original")))
+        dao.applyLocalEdit(flag, 1, "edited", 2_000L)
+        assertTrue(dao.note(flag, 1)!!.pending)
+
+        // Save settles: clear the mark, then take the host's snapshot.
+        dao.setPending(flag, 1, false)
+        dao.replaceTree(flag, emptyList(), listOf(note(1, "edited").copy(revision = 2)))
+
+        val row = dao.note(flag, 1)!!
+        assertFalse(row.pending, "a settled save must not keep reading as saving")
+        assertEquals(2L, row.revision, "the host's new revision must land for the next edit")
+
+        // And it stays cleared across further refreshes.
+        dao.replaceTree(flag, emptyList(), listOf(note(1, "edited").copy(revision = 2)))
+        assertFalse(dao.note(flag, 1)!!.pending)
+    }
+
+    @Test
     fun `clearing pending lets the next snapshot win`() = runBlocking {
         val dao = db.notes()
         dao.upsertNotes(listOf(note(1, "original")))
