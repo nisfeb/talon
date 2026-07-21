@@ -247,7 +247,10 @@ class NotesRepo(
                     put("expectedRevision", expectedRevision)
                 },
             )
-            ((resp as? JsonObject)?.get("body") as? JsonObject)?.get("type").asStr() == "ok"
+            if (!NotesParser.isWriteOk(resp)) {
+                Log.w(TAG, "note update rejected for $key/$noteId: ${NotesParser.writeErrorType(resp)}")
+            }
+            NotesParser.isWriteOk(resp)
         }.getOrElse {
             Log.w(TAG, "note update failed for $key/$noteId", it)
             false

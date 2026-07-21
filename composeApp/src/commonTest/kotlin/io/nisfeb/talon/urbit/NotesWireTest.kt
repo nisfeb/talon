@@ -5,6 +5,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -270,6 +271,82 @@ class NotesWireTest {
         assertEquals(NotesRole.Owner, m[0].role)
         assertEquals("~minder-folden", m[0].ship)
         assertEquals(NotesRole.Editor, m[1].role)
+    }
+
+    // ---- write verdicts -------------------------------------------------
+    // The bug these exist for: a channel poke 204s whether the host
+    // applied the write or rejected it, so a stale edit looked saved and
+    // the editor threw the user's text away. Saves go over v1 now, which
+    // answers 200 either way with the verdict in body.type — so reading
+    // that correctly is the thing that must not regress. Both payloads
+    // below are verbatim from the live ship.
+
+    @Test
+    fun `rejected write is not read as success`() {
+        val rejected = obj(
+            """{"body":{"errorType":"unknown","message":[],"type":"error"},"requestId":"0vuc.k6rtf"}""",
+        )
+        assertFalse(NotesParser.isWriteOk(rejected), "a stale-revision rejection must not read as ok")
+        assertEquals("unknown", NotesParser.writeErrorType(rejected))
+    }
+
+    @Test
+    fun `accepted write is read as success`() {
+        val accepted = obj(
+            """
+            {"body":{"type":"ok","response":{"update":{"noteUpdate":{"note":{"folderId":2,
+              "notebookId":1,"title":"Wire test","revision":2,"id":4,"bodyMd":"# Hello",
+              "slug":null},"id":4,"type":"note-updated"},"flagName":"scratch",
+              "host":"~ricsul-bilwyt","type":"note-updated"}}},"requestId":"0v1"}
+            """.trimIndent(),
+        )
+        assertTrue(NotesParser.isWriteOk(accepted))
+        assertNull(NotesParser.writeErrorType(accepted), "a success has no error tag")
+    }
+
+    @Test
+    fun `unreadable write response counts as failure not success`() {
+        // Defaulting to "saved" on a reply we can't parse would drop the
+        // user's edit exactly like the original bug did.
+        assertFalse(NotesParser.isWriteOk(null))
+        assertFalse(NotesParser.isWriteOk(obj("""{}""")))
+        assertFalse(NotesParser.isWriteOk(obj("""{"body":"nonsense"}""")))
+        assertFalse(NotesParser.isWriteOk(obj("""{"body":{"type":"pending"}}""")))
+        assertFalse(NotesParser.isWriteOk(arr("""[]""")))
+    }
+
+    // ---- event routing ---------------------------------------------------
+    // isNotesEvent matches on payload shape because SSE facts don't name
+    // their agent. A false positive would swallow another agent's event
+    // entirely, so the negative cases matter more than the positive one.
+
+    @Test
+    fun `isNotesEvent matches notes facts`() {
+        assertTrue(
+            NotesRepo.isNotesEvent(
+                obj("""{"type":"note-updated","host":"~minder-folden","flagName":"codex-7","id":9}"""),
+            ),
+        )
+        assertTrue(
+            NotesRepo.isNotesEvent(
+                obj("""{"type":"notebook-deleted","host":"~ricsul-bilwyt","flagName":"scratch"}"""),
+            ),
+        )
+    }
+
+    @Test
+    fun `isNotesEvent ignores other agents' facts`() {
+        // %settings
+        assertFalse(NotesRepo.isNotesEvent(obj("""{"put-entry":{"bucket-key":"ui","entry-key":"x"}}""")))
+        // %groups /v1/groups
+        assertFalse(NotesRepo.isNotesEvent(obj("""{"flag":"~ship/group","r-group":{"channel":{}}}""")))
+        // %presence
+        assertFalse(NotesRepo.isNotesEvent(obj("""{"here":{"path":"/chat/x"}}""")))
+        // a channels delta that happens to carry a `type`
+        assertFalse(NotesRepo.isNotesEvent(obj("""{"type":"post","nest":"chat/~ship/general"}""")))
+        // host without flagName, and vice versa
+        assertFalse(NotesRepo.isNotesEvent(obj("""{"type":"x","host":"~ship"}""")))
+        assertFalse(NotesRepo.isNotesEvent(obj("""{"type":"x","flagName":"n"}""")))
     }
 
     @Test

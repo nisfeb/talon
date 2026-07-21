@@ -239,6 +239,27 @@ object NotesParser {
     fun members(el: JsonElement?): List<NotesMember> =
         (el as? JsonArray).orEmptyList().mapNotNull { member(it) }
 
+    /**
+     * Did a v1 write succeed?
+     *
+     * The endpoint answers 200 either way and puts the verdict in
+     * `body.type` — `"ok"` or `"error"`. Anything we can't read as an
+     * explicit success counts as failure: treating an unparseable reply
+     * as "saved" is how an edit gets silently dropped, which is the one
+     * outcome this whole path exists to avoid.
+     */
+    fun isWriteOk(el: JsonElement?): Boolean {
+        val body = (el as? JsonObject)?.get("body") as? JsonObject ?: return false
+        return body["type"].asStr() == "ok"
+    }
+
+    /** Error tag from a failed v1 write, when the host supplies one. */
+    fun writeErrorType(el: JsonElement?): String? {
+        val body = (el as? JsonObject)?.get("body") as? JsonObject ?: return null
+        if (body["type"].asStr() != "error") return null
+        return body["errorType"].asStr()
+    }
+
     private fun JsonArray?.orEmptyList(): List<JsonElement> = this ?: emptyList()
 }
 
