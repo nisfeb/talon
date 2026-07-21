@@ -427,4 +427,12 @@ object NotesPaths {
 
     /** Live update stream for one notebook (host or subscriber side). */
     fun stream(flag: NotesFlag) = "/v0/notes/${flag.pathSegment}/stream"
+
+    /**
+     * %notes' eyre-bound REST surface. Used for writes whose outcome the
+     * caller must know: unlike a channel poke, these answer synchronously
+     * with {"body":{"type":"ok"|"error"}}.
+     */
+    fun v1Notebook(flag: NotesFlag) = "/notes/~/v1/notebooks/${flag.pathSegment}"
+    fun v1Note(flag: NotesFlag, id: Long) = "${v1Notebook(flag)}/notes/$id"
 }

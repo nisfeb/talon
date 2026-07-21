@@ -6,11 +6,13 @@ import io.ktor.client.request.get
 import io.ktor.client.request.header
 import io.ktor.client.request.prepareGet
 import io.ktor.client.request.put
+import io.ktor.client.request.request
 import io.ktor.client.request.setBody
 import io.ktor.client.statement.bodyAsChannel
 import io.ktor.client.statement.bodyAsText
 import io.ktor.utils.io.readUTF8Line
 import io.ktor.http.ContentType
+import io.ktor.http.HttpMethod
 import io.ktor.http.HttpHeaders
 import io.ktor.http.contentType
 import io.ktor.http.isSuccess
@@ -231,6 +233,37 @@ class UrbitChannel internal constructor(
         val body = resp.bodyAsText()
         if (body.isEmpty()) error("empty scry body")
         json.parseToJsonElement(body)
+    }
+
+    /**
+     * Authenticated JSON request against an agent's own eyre-bound HTTP
+     * API (e.g. %notes' `/notes/~/v1/...`).
+     *
+     * Channel pokes are fire-and-forget: the PUT returns as soon as eyre
+     * accepts it, and a nack only shows up later as an SSE poke-ack. That
+     * makes them unusable when the caller needs the outcome — an edit
+     * rejected for being stale looks identical to one that landed. These
+     * REST endpoints answer synchronously with a typed body instead.
+     *
+     * Returns the parsed response, or throws on a transport/HTTP failure.
+     */
+    suspend fun apiJson(
+        method: String,
+        path: String,
+        body: JsonElement? = null,
+    ): JsonElement = withContext(ioDispatcher) {
+        val url = "${baseUrl.trimEnd('/')}$path"
+        val resp = http.request(url) {
+            this.method = HttpMethod.parse(method)
+            if (body != null) {
+                contentType(ContentType.Application.Json)
+                setBody(body.toString())
+            }
+            timeout { requestTimeoutMillis = RPC_TIMEOUT_SECS * 1000 }
+        }
+        if (!resp.status.isSuccess()) error("$method $path: HTTP ${resp.status.value}")
+        val text = resp.bodyAsText()
+        if (text.isBlank()) JsonNull else json.parseToJsonElement(text)
     }
 
     /** PUT a batch of channel actions. Runs on the IO dispatcher. */

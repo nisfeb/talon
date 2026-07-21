@@ -11,6 +11,8 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 
 /**
  * Client for the %notes agent — Tlon v12's Markdown "Notebook" channels.
@@ -227,9 +229,35 @@ class NotesRepo(
         body: String,
         expectedRevision: Long,
     ): Boolean {
-        db.notes().applyLocalEdit(flag.flagString, noteId, body, nowMs())
-        val ok = poke(NotesActions.updateNote(flag, noteId, body, expectedRevision))
-        if (!ok) db.notes().setPending(flag.flagString, noteId, false)
+        val ch = channel ?: return false
+        val key = flag.flagString
+        db.notes().applyLocalEdit(key, noteId, body, nowMs())
+        // Deliberately NOT a poke. A channel poke returns the moment eyre
+        // accepts it, so a stale-revision rejection is indistinguishable
+        // from a successful write and the user's edit would vanish
+        // silently. The v1 endpoint answers synchronously with
+        // {"body":{"type":"ok"|"error"}}, which is the whole point of
+        // threading expectedRevision through in the first place.
+        val ok = runCatching {
+            val resp = ch.apiJson(
+                method = "PUT",
+                path = NotesPaths.v1Note(flag, noteId),
+                body = buildJsonObject {
+                    put("body", body)
+                    put("expectedRevision", expectedRevision)
+                },
+            )
+            ((resp as? JsonObject)?.get("body") as? JsonObject)?.get("type").asStr() == "ok"
+        }.getOrElse {
+            Log.w(TAG, "note update failed for $key/$noteId", it)
+            false
+        }
+        if (!ok) {
+            // Drop the optimistic body so the UI shows the host's version
+            // again rather than a local edit that never landed.
+            db.notes().setPending(key, noteId, false)
+            refreshNotebook(flag)
+        }
         return ok
     }
 
