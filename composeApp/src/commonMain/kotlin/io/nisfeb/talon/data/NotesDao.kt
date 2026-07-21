@@ -108,6 +108,15 @@ interface NotesDao {
         if (merged.isNotEmpty()) upsertNotes(merged)
     }
 
+    /**
+     * Clear every in-flight mark. A save lives in one HTTP request, so
+     * nothing can still be in flight across a process restart — anything
+     * left set is a leftover from a save that never got to settle, and
+     * replaceTree would otherwise keep restoring it forever.
+     */
+    @Query("UPDATE notes_notes SET pending = 0 WHERE pending = 1")
+    suspend fun clearAllPending(): Int
+
     @Query("SELECT noteId FROM notes_notes WHERE flag = :flag AND pending = 1")
     suspend fun streamPendingIds(flag: String): List<Long>
 

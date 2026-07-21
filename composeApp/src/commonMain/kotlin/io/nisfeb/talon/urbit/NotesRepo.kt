@@ -37,6 +37,9 @@ class NotesRepo(
 
     /** Notebooks we've opened a /stream subscription for this session. */
     private val subscribed = mutableSetOf<String>()
+
+    /** Stale in-flight marks are swept once per process; see bootstrap. */
+    private var clearedStalePending = false
     private val subLock = Mutex()
 
     fun attach(ch: UrbitChannel) {
@@ -65,6 +68,16 @@ class NotesRepo(
      */
     suspend fun bootstrap() {
         val ch = channel ?: return
+        // Once per process: a save is a single HTTP request, so nothing
+        // survives a restart still in flight. Any mark left over is from
+        // a save that died before it settled, and replaceTree preserves
+        // pending rows — so without this the note reads "saving…" forever
+        // and no refresh can talk it out of that.
+        if (!clearedStalePending) {
+            clearedStalePending = true
+            val cleared = db.notes().clearAllPending()
+            if (cleared > 0) Log.i(TAG, "cleared $cleared stale in-flight note mark(s)")
+        }
         val body = runCatching { ch.scry(NotesPaths.APP, NotesPaths.NOTEBOOKS) }
             .onFailure {
                 // A ship on webapp <v12 has no %notes agent at all. That's

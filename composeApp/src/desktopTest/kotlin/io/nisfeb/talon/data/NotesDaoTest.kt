@@ -136,4 +136,25 @@ class NotesDaoTest {
         assertFalse(row.pending)
         assertEquals("host version", row.bodyMd, "host must win once the edit is abandoned")
     }
+
+    @Test
+    fun `a mark left over from a dead save can be swept`() = runBlocking {
+        // The stuck case seen in the app: a save under an older build set
+        // pending and never cleared it. Nothing else clears the mark, and
+        // replaceTree restores it on every refresh, so the note read
+        // "saving..." forever with no way out short of editing it again.
+        // A save is one HTTP request, so anything still marked at startup
+        // is by definition dead.
+        val dao = db.notes()
+        dao.upsertNotes(listOf(note(1, "body", pending = true)))
+        dao.replaceTree(flag, emptyList(), listOf(note(1, "body")))
+        assertTrue(dao.note(flag, 1)!!.pending, "replaceTree preserves it — that's the trap")
+
+        assertEquals(1, dao.clearAllPending())
+        assertFalse(dao.note(flag, 1)!!.pending)
+
+        // And it stays clear through later refreshes.
+        dao.replaceTree(flag, emptyList(), listOf(note(1, "body")))
+        assertFalse(dao.note(flag, 1)!!.pending)
+    }
 }
