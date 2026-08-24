@@ -49,7 +49,14 @@ private fun documentsDir(): String =
 
 fun createAppDatabase(shipKey: String): AppDatabase {
     val path = "${documentsDir()}/talon-${sanitizeShipKey(shipKey)}.db"
-    return Room.databaseBuilder<AppDatabase>(name = path)
+    // Explicit factory: the default path resolves @ConstructedBy via
+    // K/N findAssociatedObject, which returns null in optimized Release
+    // binaries — "Cannot find the associated RoomDatabaseConstructor"
+    // at first DB open (caught by the CI simulator launch test).
+    return Room.databaseBuilder<AppDatabase>(
+        name = path,
+        factory = { AppDatabaseConstructor.initialize() },
+    )
         .setDriver(BundledSQLiteDriver())
         .fallbackToDestructiveMigration(dropAllTables = true)
         .build()
