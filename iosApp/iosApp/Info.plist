@@ -55,5 +55,11 @@
 		<key>NSAllowsArbitraryLoads</key>
 		<true/>
 	</dict>
+	<!-- Expose Documents in the Files app so last-crash.txt (written by
+	     the unhandled-exception hook) is retrievable without a Mac. -->
+	<key>UIFileSharingEnabled</key>
+	<true/>
+	<key>LSSupportsOpeningDocumentsInPlace</key>
+	<true/>
 </dict>
 </plist>

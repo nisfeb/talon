@@ -28,6 +28,7 @@ import com.ionspin.kotlin.bignum.integer.BigInteger
 import io.nisfeb.talon.util.ConcurrentMap
 import io.nisfeb.talon.util.ConcurrentSet
 import io.nisfeb.talon.util.isTransientNetworkError
+import io.nisfeb.talon.util.backgroundExceptionHandler
 import io.nisfeb.talon.util.ioDispatcher
 import io.nisfeb.talon.util.nowMs
 
@@ -130,7 +131,7 @@ class TlonChatRepo(
         io.nisfeb.talon.notify.NotificationHealth(),
 ) {
 
-    private val scope = CoroutineScope(SupervisorJob() + ioDispatcher)
+    private val scope = CoroutineScope(SupervisorJob() + ioDispatcher + backgroundExceptionHandler)
     /**
      * Scope for fire-and-forget ship pokes (folder reorder,
      * watchword exclude, etc.) that should complete even if the
@@ -148,7 +149,7 @@ class TlonChatRepo(
      * correct: the previous ship's cookie is gone, those pushes
      * would 401).
      */
-    val pushScope = CoroutineScope(SupervisorJob() + ioDispatcher)
+    val pushScope = CoroutineScope(SupervisorJob() + ioDispatcher + backgroundExceptionHandler)
     @Volatile private var started = false
     @Volatile private var channel: UrbitChannel? = null
     @Volatile private var http: HttpClient? = null

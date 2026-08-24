@@ -1,6 +1,7 @@
 package io.nisfeb.talon.util
 
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlin.time.Clock
 
 /**
@@ -21,6 +22,18 @@ fun nowMs(): Long = Clock.System.now().toEpochMilliseconds()
  * parallelism-limited Default (see the iosMain actual).
  */
 expect val ioDispatcher: CoroutineDispatcher
+
+/**
+ * Exception handler for the app's long-lived background scopes
+ * (repo session loop, push relay, iOS root scope). On JVM an uncaught
+ * coroutine exception logs and the app lives; on Kotlin/Native the
+ * default handler calls terminate — Apple review hit exactly that as
+ * an instant SIGABRT crash-loop. SupervisorJob scopes already treat
+ * failures as per-job, so logging is the intended behaviour everywhere.
+ */
+val backgroundExceptionHandler = CoroutineExceptionHandler { _, t ->
+    Log.e("BackgroundScope", "uncaught coroutine exception", t)
+}
 
 /**
  * Cryptographically-secure random bytes. Backs security-sensitive

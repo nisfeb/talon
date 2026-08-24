@@ -11,6 +11,8 @@ import io.nisfeb.talon.update.UpdateManifest
 import io.nisfeb.talon.update.UpdateRuntime
 import io.nisfeb.talon.update.UpdateState
 import io.nisfeb.talon.urbit.createSessionStore
+import io.nisfeb.talon.util.IosFiles
+import io.nisfeb.talon.util.backgroundExceptionHandler
 import io.nisfeb.talon.util.createAppHttpClient
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -30,11 +32,22 @@ import platform.UIKit.UIViewController
  * On-device AI / digest / loops are gated off in Capabilities.ios.kt.
  */
 fun MainViewController(): UIViewController {
+    // Kotlin/Native terminates on any exception that escapes to a foreign
+    // (GCD) frame — Apple review hit that as an undiagnosable SIGABRT
+    // crash-loop, and the .ips logs carry no Kotlin frames. Write the
+    // real stack to Documents/last-crash.txt (retrievable via the Files
+    // app; UIFileSharingEnabled) before the runtime aborts.
+    @OptIn(kotlin.experimental.ExperimentalNativeApi::class)
+    setUnhandledExceptionHook { t ->
+        val report = "Talon ${TalonBuild.versionName} uncaught: $t\n${t.stackTraceToString()}"
+        println(report)
+        IosFiles.write("last-crash.txt", report)
+    }
     val http = createAppHttpClient()
     val sessionStore = createSessionStore()
     val aiSettings = createAiSettings()
     val themePreference = IosThemePreference()
-    val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default + backgroundExceptionHandler)
 
     val updateState = UpdateState(
         scope = scope,
