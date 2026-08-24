@@ -46,6 +46,11 @@
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
+	<!-- Required by Compose Multiplatform: its startup PlistSanityCheck
+	     throws (= instant crash) on high-refresh-rate iPhones when this
+	     is absent. This was the App Review rejection crash. -->
+	<key>CADisableMinimumFrameDurationOnPhone</key>
+	<true/>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
 	<key>NSPhotoLibraryUsageDescription</key>
