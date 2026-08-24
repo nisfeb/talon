@@ -49,6 +49,12 @@ jobs:
           # installed runtime doesn't support.
           UDID=$(xcrun simctl list devices available | grep 'iPhone' | head -1 | grep -oE '[0-9A-F-]{36}')
           test -n "$UDID"
+          # Icon diagnostics: the home-screen icon needs CFBundleIconName in
+          # the BUILT plist (actool injects it) and Assets.car in the bundle.
+          echo "--- built bundle contents ---" | tee icon-report.txt
+          ls -la "$APP" | tee -a icon-report.txt
+          echo "--- icon keys in built Info.plist ---" | tee -a icon-report.txt
+          plutil -p "$APP/Info.plist" | grep -i icon | tee -a icon-report.txt || echo "NO ICON KEYS IN BUILT PLIST" | tee -a icon-report.txt
           xcrun simctl boot "$UDID"
           xcrun simctl bootstatus "$UDID" -b
           xcrun simctl install "$UDID" "$APP"
@@ -56,6 +62,14 @@ jobs:
           xcrun simctl launch --console-pty "$UDID" io.nisfeb.talon > console.log 2>&1 &
           sleep 45
           xcrun simctl io "$UDID" screenshot screenshot.png
+          # Home-screen screenshot: kill the app so SpringBoard shows,
+          # then capture — the app icon (or its absence) is visible there.
+          xcrun simctl terminate "$UDID" io.nisfeb.talon || true
+          sleep 5
+          xcrun simctl io "$UDID" screenshot homescreen.png
+          # Relaunch so the aliveness check below still passes.
+          xcrun simctl launch "$UDID" io.nisfeb.talon
+          sleep 10
           # Grab any crash reports the launch produced.
           mkdir -p crashes
           cp -r ~/Library/Logs/DiagnosticReports/* crashes/ 2>/dev/null || true
@@ -75,6 +89,8 @@ jobs:
           name: ios-sim-run
           path: |
             screenshot.png
+            homescreen.png
+            icon-report.txt
             console.log
             result.txt
             crashes/
