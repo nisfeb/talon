@@ -44,9 +44,11 @@ jobs:
           set -x
           APP=$(find "$RUNNER_TEMP/dd/Build/Products" -maxdepth 2 -name '*.app' | head -1)
           test -n "$APP"
-          # Newest iPhone device type this Xcode knows about.
-          DEVTYPE=$(xcrun simctl list devicetypes | grep -oE 'com.apple.CoreSimulator.SimDeviceType.iPhone-[0-9A-Za-z-]+' | tail -1)
-          UDID=$(xcrun simctl create talon-test "$DEVTYPE")
+          # Use one of the iPhones Xcode pre-creates for its default
+          # runtime — creating by device type risks picking one the
+          # installed runtime doesn't support.
+          UDID=$(xcrun simctl list devices available | grep 'iPhone' | head -1 | grep -oE '[0-9A-F-]{36}')
+          test -n "$UDID"
           xcrun simctl boot "$UDID"
           xcrun simctl bootstatus "$UDID" -b
           xcrun simctl install "$UDID" "$APP"
