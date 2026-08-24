@@ -1,0 +1,79 @@
+# Launch-test Talon on a virtualized iPhone (iOS Simulator) — the only
+# Mac-free way to watch the app boot: the runner is the Mac. Builds the
+# simulator slice, boots the newest iPhone the runner's Xcode ships,
+# launches the app, and uploads a screenshot + the app's console output
+# (where Kotlin/Native prints "Uncaught Kotlin exception" with the full
+# stack — the detail Apple's .ips crash logs can't give us).
+#
+# Manual trigger only: macos runners bill 10x, and this is a diagnostic,
+# not a per-PR gate.
+name: ios-sim
+
+on:
+  workflow_dispatch:
+
+jobs:
+  sim-launch:
+    runs-on: macos-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Build for simulator (Release, unsigned)
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project iosApp/iosApp.xcodeproj \
+            -scheme iosApp \
+            -configuration Release \
+            -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath "$RUNNER_TEMP/dd" \
+            build \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            | tail -200
+
+      - name: Boot simulator, launch app, capture
+        run: |
+          set -x
+          APP=$(find "$RUNNER_TEMP/dd/Build/Products" -maxdepth 2 -name '*.app' | head -1)
+          test -n "$APP"
+          # Newest iPhone device type this Xcode knows about.
+          DEVTYPE=$(xcrun simctl list devicetypes | grep -oE 'com.apple.CoreSimulator.SimDeviceType.iPhone-[0-9A-Za-z-]+' | tail -1)
+          UDID=$(xcrun simctl create talon-test "$DEVTYPE")
+          xcrun simctl boot "$UDID"
+          xcrun simctl bootstatus "$UDID" -b
+          xcrun simctl install "$UDID" "$APP"
+          # --console-pty streams the app's stdout (println / K-N crash dumps).
+          xcrun simctl launch --console-pty "$UDID" io.nisfeb.talon > console.log 2>&1 &
+          sleep 45
+          xcrun simctl io "$UDID" screenshot screenshot.png
+          # Grab any crash reports the launch produced.
+          mkdir -p crashes
+          cp -r ~/Library/Logs/DiagnosticReports/* crashes/ 2>/dev/null || true
+          # Alive check: the app's process should still be running.
+          if xcrun simctl spawn "$UDID" launchctl list | grep -qi talon; then
+            echo "RESULT: app is alive after 45s" | tee result.txt
+          else
+            echo "RESULT: app is NOT running — it crashed or exited" | tee result.txt
+            tail -100 console.log || true
+            exit 1
+          fi
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-sim-run
+          path: |
+            screenshot.png
+            console.log
+            result.txt
+            crashes/
+          if-no-files-found: warn
