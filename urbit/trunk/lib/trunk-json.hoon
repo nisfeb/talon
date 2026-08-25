@@ -18,12 +18,19 @@
       [%hangup (ot ~[id+so])]
   ==
 ::
+++  ice-from-json
+  =,  dejs:format
+  ^-  $-(json ice-server:trunk)
+  (ot ~[url+so user+so cred+so])
+::
 ++  action-from-json
   =,  dejs:format
   ^-  $-(json action:trunk)
   %-  of
   :~  :-  %send
       (ot ~[ship+(su ;~(pfix sig fed:ag)) sig+sig-from-json])
+      :-  %set-ice
+      (ot ~[servers+(ar ice-from-json)])
   ==
 ::
 ++  sig-to-json
@@ -37,6 +44,15 @@
     %reject  (frond %reject (pairs ~[id+s+id.s reason+s+reason.s]))
     %hangup  (frond %hangup (pairs ~[id+s+id.s]))
   ==
+::
+++  ice-to-json
+  |=  servers=(list ice-server:trunk)
+  ^-  json
+  =,  enjs:format
+  :-  %a
+  %+  turn  servers
+  |=  s=ice-server:trunk
+  (pairs ~[url+s+url.s user+s+user.s cred+s+cred.s])
 ::
 ++  update-to-json
   |=  u=update:trunk

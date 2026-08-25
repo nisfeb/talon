@@ -52,9 +52,26 @@ fixed on the way: enjs `+ship` drops the leading `~` (agent now emits
 `(scot %p)`), and eyre poke nacks are async + easy to silently drop
 (controller now logs channel errors).
 
-## Next (per design roadmap)
+## v1 (2026-08-25, this branch)
 
-v1: Galène sidecar (STUN echo + TURN + auth tokens), tiers wired into
-the engine's RTCConfiguration, Android engine, real call UI. At v1 the
-desk + sidecar split into their own repo (`trunkline`) so other Urbit
-clients can adopt the protocol.
+- **ICE distribution**: `%trunk` stores an advertised server list
+  (`[%set-ice …]` poke, `/x/ice` scry). Clients fetch it at startup
+  and hand it to the engine — no app configuration.
+- **Sidecar**: `sidecar/docker-compose.yml` — coturn for STUN (Tier 1)
+  + TURN relay (Tier 2). Galène joins at v2 for party-line SFU rooms.
+- **Android engine**: libwebrtc (getstream build), mic-permission
+  gate, MODE_IN_COMMUNICATION routing. `isCallsSupported` now true on
+  Android + desktop.
+- **Real call UI**: full-screen ring (answer/decline), in-call top
+  banner with mute + duration, call button in the DM header, `/call`.
+- **Resilience, E2E-proven**: a dead STUN server degrades (8s gather
+  cap, partial candidates) instead of breaking; answering before the
+  offer lands now waits for it instead of no-oping. The E2E runs the
+  dead-STUN chaos path: ~nec advertises `stun:localhost:3478` with
+  nothing listening — leave it that way, it's a regression test.
+
+## Next
+
+v2: party lines — Galène SFU rooms at the group host's sidecar, join
+tokens minted by %trunk, roster presence. Split desk + sidecar into
+the `trunkline` repo. WAN metrics run against real ships.

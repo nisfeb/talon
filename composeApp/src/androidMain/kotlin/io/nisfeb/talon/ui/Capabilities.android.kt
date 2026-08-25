@@ -16,5 +16,5 @@ actual fun isOnDeviceAiFeatureSupported(
     feature: io.nisfeb.talon.ai.AiSettings.Feature,
 ): Boolean = true
 
-// Trunkline calls: libwebrtc engine pending (design roadmap v1).
-actual val isCallsSupported: Boolean = false
+// Trunkline calls: libwebrtc via getstream build (AndroidCallEngine).
+actual val isCallsSupported: Boolean = true

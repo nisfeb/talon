@@ -115,6 +115,9 @@ kotlin {
             implementation(libs.reorderable)
         }
         androidMain.dependencies {
+            // Trunkline call engine: google libwebrtc via getstream's
+            // maintained build.
+            implementation(libs.webrtc.android)
             // Ktor OkHttp engine — backs the shared HttpClient on Android.
             implementation(libs.ktor.client.okhttp)
             // Coil network fetcher (JVM/Android only).

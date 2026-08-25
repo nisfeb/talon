@@ -6,6 +6,8 @@ import io.nisfeb.talon.util.Log
 import io.nisfeb.talon.util.backgroundExceptionHandler
 import io.nisfeb.talon.util.ioDispatcher
 import io.nisfeb.talon.util.nowMs
+import kotlin.concurrent.Volatile
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
@@ -53,10 +55,15 @@ class CallController(
 
     // Per-call context. Guarded by single-threaded discipline: every
     // mutation happens inside `scope` (a single logical actor for v0).
+    @Volatile private var iceServers: List<IceServer> = emptyList()
     private var callId: String? = null
     private var peer: String? = null
     private var engine: CallEngine? = null
-    private var pendingOffer: SessionDesc? = null
+    // Completed when the peer's offer lands. A user can answer while
+    // the ring is still going and the offer still in flight (slow
+    // gather on the caller's side) — accept() awaits this instead of
+    // racing it.
+    private var pendingOffer = CompletableDeferred<SessionDesc>()
     private var mediaWatch: Job? = null
     private var tPlaced = 0L
     private var tOfferSent = 0L
@@ -78,6 +85,11 @@ class CallController(
             runCatching {
                 val ch = session.openChannel()
                 channel = ch
+                // The ship's advertised ICE servers (its sidecar / its
+                // sponsor's). Best-effort: no config means Tier 0 only.
+                runCatching { iceServers = TrunkWire.parseIce(ch.scry(TrunkWire.AGENT, "/ice")) }
+                    .onSuccess { Log.i(TAG, "ice config: ${iceServers.size} servers") }
+                    .onFailure { Log.w(TAG, "ice scry failed (Tier 0 only)", it) }
                 ch.events().let { events ->
                     ch.subscribe(TrunkWire.AGENT, TrunkWire.CALLS_PATH)
                     backoff = 2_000L
@@ -110,7 +122,7 @@ class CallController(
             _state.value = CallUiState.Outgoing(target)
             poke(target, TrunkSig.Ring(id))
             // Gather while the far end rings (design D3: the slow parts overlap).
-            val eng = engineProvider.create()
+            val eng = engineProvider.create(iceServers)
             engine = eng
             watchMedia(eng, target)
             runCatching { eng.createOffer() }
@@ -131,11 +143,18 @@ class CallController(
         scope.launch {
             val id = callId ?: return@launch
             val from = peer ?: return@launch
-            val offer = pendingOffer ?: return@launch
-            val eng = engineProvider.create()
+            _state.value = CallUiState.Active(from, MediaState.Connecting, muted = false)
+            val offer = runCatching {
+                kotlinx.coroutines.withTimeout(20_000) { pendingOffer.await() }
+            }.getOrElse {
+                Log.e(TAG, "no offer within 20s of answering")
+                poke(from, TrunkSig.Hangup(id))
+                endLocal("no offer arrived")
+                return@launch
+            }
+            val eng = engineProvider.create(iceServers)
             engine = eng
             watchMedia(eng, from)
-            _state.value = CallUiState.Active(from, MediaState.Connecting, muted = false)
             runCatching { eng.acceptOffer(offer) }
                 .onSuccess { answer ->
                     poke(from, TrunkSig.Accept(id, answer.sdp, answer.fingerprint))
@@ -187,6 +206,7 @@ class CallController(
                 }
                 callId = sig.id
                 peer = recv.from
+                pendingOffer = CompletableDeferred()
                 _state.value = CallUiState.Incoming(recv.from)
             }
             is TrunkSig.Offer -> {
@@ -201,7 +221,7 @@ class CallController(
                     endLocal("security error")
                     return
                 }
-                pendingOffer = SessionDesc(sig.sdp, sig.fpr)
+                pendingOffer.complete(SessionDesc(sig.sdp, sig.fpr))
             }
             is TrunkSig.Accept -> {
                 if (sig.id != callId) return
@@ -264,7 +284,7 @@ class CallController(
         mediaWatch = null
         engine?.close()
         engine = null
-        pendingOffer = null
+        pendingOffer = CompletableDeferred()
         val p = peer
         callId = null
         peer = null

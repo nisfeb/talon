@@ -11,6 +11,10 @@ import kotlinx.coroutines.flow.StateFlow
  */
 data class SessionDesc(val sdp: String, val fingerprint: String)
 
+/** One STUN/TURN endpoint the ship advertises (scry /x/ice). Empty
+ *  user/cred for STUN. */
+data class IceServer(val url: String, val user: String, val cred: String)
+
 enum class MediaState { Idle, Gathering, Connecting, Live, Failed, Closed }
 
 /**
@@ -40,8 +44,9 @@ interface CallEngine {
 
 /** Per-call engine factory the platform entry point injects into App. */
 fun interface CallEngineProvider {
-    /** A fresh engine for one call. */
-    fun create(): CallEngine
+    /** A fresh engine for one call, configured with the ship's
+     *  advertised ICE servers (empty = Tier 0, host candidates only). */
+    fun create(iceServers: List<IceServer>): CallEngine
 }
 
 /** Fallback for platforms without a media stack — the UI is gated by

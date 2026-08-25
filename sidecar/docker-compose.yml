@@ -1,0 +1,35 @@
+# Trunkline sidecar — runs next to your ship (vere) on its host.
+# v1: coturn provides the STUN echo (Tier 1) and the TURN relay of
+# last resort (Tier 2) for 1:1 calls. v2 adds Galène for party-line
+# SFU rooms (uncomment below).
+#
+# Usage:
+#   TURN_USER=talon TURN_PASS=$(openssl rand -hex 16) docker compose up -d
+# then advertise it from your ship's dojo (see README).
+services:
+  coturn:
+    image: coturn/coturn:4.6
+    restart: unless-stopped
+    network_mode: host
+    command:
+      - --listening-port=3478
+      - --fingerprint
+      - --lt-cred-mech
+      - --user=${TURN_USER:-talon}:${TURN_PASS:?set TURN_PASS}
+      - --realm=trunkline
+      - --no-cli
+      - --no-tls
+      - --no-dtls
+      # Relay only what a call needs; keep the port range tight so
+      # host firewalls can open it explicitly.
+      - --min-port=49160
+      - --max-port=49200
+
+  # v2 — party-line SFU at the group host's ship (design D5):
+  # galene:
+  #   image: galene/galene:latest
+  #   restart: unless-stopped
+  #   network_mode: host
+  #   volumes:
+  #     - ./galene/groups:/data/groups
+  #     - ./galene/data:/data

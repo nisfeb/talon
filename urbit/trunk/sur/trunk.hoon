@@ -12,8 +12,16 @@
       [%reject id=@t reason=@t]
       [%hangup id=@t]
   ==
-::  local client -> own agent: send a signal to a peer
-+$  action  [%send =ship =sig]
+::  one ICE server this ship advertises to its clients (the icepond
+::  role): a STUN or TURN url plus static credentials (empty for STUN).
+::  v1 is static creds; HMAC time-limited creds arrive with the
+::  sponsor cascade.
++$  ice-server  [url=@t user=@t cred=@t]
+::  local client -> own agent
++$  action
+  $%  [%send =ship =sig]
+      [%set-ice servers=(list ice-server)]
+  ==
 ::  agent -> local client subscription fact
 +$  update  [%recv from=ship =sig]
 --

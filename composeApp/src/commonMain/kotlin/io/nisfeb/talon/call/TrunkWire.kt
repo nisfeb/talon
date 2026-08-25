@@ -95,5 +95,16 @@ object TrunkWire {
         return null
     }
 
+    /** Parse the /x/ice scry body: [{"url":u,"user":s,"cred":c}, …]. */
+    fun parseIce(body: JsonElement): List<IceServer> =
+        (body as? kotlinx.serialization.json.JsonArray)?.mapNotNull { el ->
+            val o = el as? JsonObject ?: return@mapNotNull null
+            IceServer(
+                url = o["url"]?.jsonPrimitive?.content ?: return@mapNotNull null,
+                user = o["user"]?.jsonPrimitive?.content ?: "",
+                cred = o["cred"]?.jsonPrimitive?.content ?: "",
+            )
+        } ?: emptyList()
+
     val json = Json { ignoreUnknownKeys = true }
 }

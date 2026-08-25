@@ -63,8 +63,10 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.PushPin
+import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.NotificationsOff
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Search
@@ -662,6 +664,14 @@ fun DmChatScreen(
             // no-ops for them. DMs (`~ship`) likewise have no
             // group-info concept in v1 (architecture is chat-shape-
             // aware so club + DM support is additive later).
+            // Trunkline: voice-call the DM peer. onStartCall arrives
+            // non-null only for 1:1 DMs on platforms with a call
+            // engine (isCallsSupported gates the wiring upstream).
+            if (onStartCall != null) {
+                IconButton(onClick = onStartCall) {
+                    Icon(Icons.Filled.Call, contentDescription = "Voice call")
+                }
+            }
             val hasInfoPane = onOpenGroupInfo != null && whom.startsWith("chat/")
             if (hasInfoPane) {
                 IconButton(onClick = onOpenGroupInfo) {

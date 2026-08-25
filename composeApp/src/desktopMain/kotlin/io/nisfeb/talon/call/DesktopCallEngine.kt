@@ -27,7 +27,7 @@ import kotlinx.coroutines.withTimeout
  * Remote audio renders automatically through the default device via
  * libwebrtc's audio device module; mic capture likewise.
  */
-class DesktopCallEngine : CallEngine {
+class DesktopCallEngine(configuredIce: List<IceServer> = emptyList()) : CallEngine {
 
     private val _state = MutableStateFlow(MediaState.Idle)
     override val state: StateFlow<MediaState> = _state
@@ -36,8 +36,20 @@ class DesktopCallEngine : CallEngine {
     private val gathered = CompletableDeferred<Unit>()
     private var micTrack: AudioTrack? = null
 
+    private val rtcConfig = RTCConfiguration().apply {
+        for (s in configuredIce) {
+            val server = dev.onvoid.webrtc.RTCIceServer()
+            server.urls.add(s.url)
+            if (s.user.isNotEmpty()) {
+                server.username = s.user
+                server.password = s.cred
+            }
+            iceServers.add(server)
+        }
+    }
+
     private val pc: RTCPeerConnection = factory.createPeerConnection(
-        RTCConfiguration(), // no ICE servers: Tier 0 only for the spike
+        rtcConfig,
         object : PeerConnectionObserver {
             override fun onIceCandidate(candidate: RTCIceCandidate?) {
                 // Non-trickle: candidates accumulate into the local SDP.
@@ -112,9 +124,13 @@ class DesktopCallEngine : CallEngine {
         _state.value = MediaState.Closed
     }
 
-    /** LAN gathering completes in well under a second; the timeout only
-     *  guards against an ADM/network stack wedge. */
-    private suspend fun awaitGathering() = withTimeout(10_000) { gathered.await() }
+    /** A dead STUN/TURN server must degrade, not break: when gathering
+     *  stalls (unreachable server keeps ICE in %gathering), proceed
+     *  with whatever candidates we have — Tier 0 still works. */
+    private suspend fun awaitGathering() {
+        runCatching { withTimeout(8_000) { gathered.await() } }
+            .onFailure { Log.w("Trunk", "gathering incomplete after 8s — proceeding with partial candidates") }
+    }
 
     private suspend fun suspendSdp(
         call: (CreateSessionDescriptionObserver) -> Unit,
@@ -141,4 +157,5 @@ class DesktopCallEngine : CallEngine {
     }
 }
 
-val DesktopCallEngineProvider: CallEngineProvider = CallEngineProvider { DesktopCallEngine() }
+val DesktopCallEngineProvider: CallEngineProvider =
+    CallEngineProvider { ice -> DesktopCallEngine(ice) }

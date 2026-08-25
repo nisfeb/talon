@@ -45,6 +45,19 @@ class TrunkWireTest {
     }
 
     @Test
+    fun iceParsing() {
+        val ice = TrunkWire.parseIce(
+            Json.parseToJsonElement(
+                """[{"url":"stun:h:3478","user":"","cred":""},{"url":"turn:h:3478","user":"u","cred":"p"}]""",
+            ),
+        )
+        assertEquals(2, ice.size)
+        assertEquals(IceServer("stun:h:3478", "", ""), ice[0])
+        assertEquals(IceServer("turn:h:3478", "u", "p"), ice[1])
+        assertEquals(emptyList(), TrunkWire.parseIce(Json.parseToJsonElement("{}")))
+    }
+
+    @Test
     fun fingerprintExtraction() {
         val sdp = "v=0\r\no=- 1 1 IN IP4 0.0.0.0\r\na=fingerprint:sha-256 AA:BB:CC\r\na=setup:actpass\r\n"
         assertEquals("sha-256 AA:BB:CC", sdpFingerprint(sdp))

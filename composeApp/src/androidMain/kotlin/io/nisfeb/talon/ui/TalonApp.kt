@@ -159,6 +159,21 @@ fun TalonApp(
     val activeShip by app.activeShipFlow.collectAsState()
     val allShips by app.allShipsFlow.collectAsState()
     val loggedInShip = activeShip
+    // Trunkline signaling — one controller per logged-in ship. The
+    // overlay is a Popup, so incoming calls surface over any screen.
+    val callEngineProvider = rememberCallEngineProvider()
+    val callController = remember(loggedInShip) {
+        if (loggedInShip != null) {
+            io.nisfeb.talon.call.CallController(app.session, callEngineProvider)
+                .also { it.start() }
+        } else {
+            null
+        }
+    }
+    androidx.compose.runtime.DisposableEffect(callController) {
+        onDispose { callController?.stop() }
+    }
+    callController?.let { io.nisfeb.talon.ui.CallOverlay(it) }
     var addingAnotherShip by remember { mutableStateOf(false) }
     // Locally-owned navigation state. Initial values from the
     // notification-tap intent (or null on a normal cold launch). The
@@ -1454,6 +1469,12 @@ fun TalonApp(
                     },
                     onOpenImage = { viewerImageUrl = it },
                     onOpenSelfProfile = { editingProfile = true },
+                    onStartCall =
+                        if (callController != null && openWhom!!.startsWith("~")) {
+                            { callController.placeCall(openWhom!!) }
+                        } else {
+                            null
+                        },
                     searchEmbedder = app.searchEmbedderClient,
                     scrollState = chatScrollState,
                     scrollAnchored = chatScrollAnchored,
@@ -1644,4 +1665,31 @@ fun TalonApp(
         } // key(loggedInShip)
     }
     } // CompositionLocalProvider(LocalInlineMediaPlayer)
+}
+
+/**
+ * Trunkline engine factory with the mic-permission gate. If
+ * RECORD_AUDIO isn't granted yet, launch the system prompt and hand
+ * back an engine that fails fast — the user grants and retries the
+ * call. Mirrors the voice-record button's permission pattern.
+ */
+@Composable
+private fun rememberCallEngineProvider(): io.nisfeb.talon.call.CallEngineProvider {
+    val context = LocalContext.current
+    val launcher = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.RequestPermission(),
+    ) { }
+    return androidx.compose.runtime.remember {
+        io.nisfeb.talon.call.CallEngineProvider { ice ->
+            val granted = androidx.core.content.ContextCompat.checkSelfPermission(
+                context, android.Manifest.permission.RECORD_AUDIO,
+            ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+            if (granted) {
+                io.nisfeb.talon.call.AndroidCallEngine(context.applicationContext, ice)
+            } else {
+                launcher.launch(android.Manifest.permission.RECORD_AUDIO)
+                io.nisfeb.talon.call.NoopCallEngine
+            }
+        }
+    }
 }
