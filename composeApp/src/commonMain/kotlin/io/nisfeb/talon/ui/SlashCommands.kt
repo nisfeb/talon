@@ -34,6 +34,11 @@ data class SlashCommandSpec(
 
 val SLASH_COMMANDS: List<SlashCommandSpec> = listOf(
     SlashCommandSpec(
+        name = "call",
+        synopsis = "/call",
+        description = "Start a voice call with this chat's peer (desktop, 1:1)",
+    ),
+    SlashCommandSpec(
         name = "cal",
         synopsis = "/cal <when> [title]",
         description = "Attach a calendar event, e.g. \"/cal thurs 2-3p Meet John\"",
@@ -160,7 +165,7 @@ suspend fun runCommand(
         // UI-dispatched commands — DmChatScreen intercepts before this
         // function runs. Recognize them here so unknown-command errors
         // don't fire if someone routes a stale invocation through.
-        "img", "file", "mic" -> CommandResult.Handled
+        "img", "file", "mic", "call" -> CommandResult.Handled
         // Unrecognized slash commands pass through as a normal message
         // (verbatim — original casing/spacing preserved) so server-side
         // bots like hermes can receive their own `/command` syntax. A

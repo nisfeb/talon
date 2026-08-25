@@ -138,6 +138,9 @@ fun App(
      *  default; desktop passes a JSON-backed impl so the choice
      *  survives restart. */
     themePreference: ThemePreference = InMemoryThemePreference(),
+    /** Trunkline call engine — platform entry points pass a real
+     *  provider where isCallsSupported; null keeps calls dark. */
+    callEngineProvider: io.nisfeb.talon.call.CallEngineProvider? = null,
     /** OS-level notifier. Desktop wires a tray-balloon impl; other
      *  platforms (Android composeApp) get the no-op default until
      *  their notification stories port. */
@@ -508,6 +511,26 @@ fun App(
                 notificationHealth = notificationHealth,
             )
         }
+        // Trunkline signaling — one controller per logged-in ship
+        // composition; the key() re-key tears it down on ship switch.
+        // Gated on a live session so the login screen doesn't spin a
+        // doomed channel loop.
+        val callController =
+            if (io.nisfeb.talon.ui.isCallsSupported &&
+                callEngineProvider != null &&
+                session.shipName != null
+            ) {
+                remember {
+                    io.nisfeb.talon.call.CallController(session, callEngineProvider)
+                        .also { it.start() }
+                }
+            } else {
+                null
+            }
+        DisposableEffect(callController) {
+            onDispose { callController?.stop() }
+        }
+        callController?.let { io.nisfeb.talon.ui.CallOverlay(it) }
         // Curated contact book (from %contacts /v1/book) — gates the
         // "Add to contacts" affordances and backs the Contacts screen.
         val bookContacts by repo.bookContacts.collectAsState()
@@ -1581,6 +1604,12 @@ fun App(
                                     },
                                     onOpenImage = { url -> viewerImageUrl = url },
                                     onOpenSelfProfile = { showSelfProfile = true },
+                                    onStartCall =
+                                        if (callController != null && openChat!!.startsWith("~")) {
+                                            { callController.placeCall(openChat!!) }
+                                        } else {
+                                            null
+                                        },
                                     onOpenGroupInfo = {
                                         openChat?.let { openGroupInfoAction(it) }
                                     },

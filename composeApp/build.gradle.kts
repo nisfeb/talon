@@ -169,6 +169,22 @@ kotlin {
         val desktopMain by getting
         desktopMain.dependencies {
             implementation(compose.desktop.currentOs)
+            // Trunkline call engine: libwebrtc via JNI. The base jar is
+            // pure API; the natives ship per-platform. Bundle only the
+            // host's natives (matches the slimReleaseDistributable
+            // philosophy — each platform build carries its own).
+            implementation(libs.webrtc.java)
+            val webrtcNatives = run {
+                val os = System.getProperty("os.name").lowercase()
+                val arch = System.getProperty("os.arch").lowercase()
+                when {
+                    os.contains("linux") -> "linux-x86_64"
+                    os.contains("mac") && arch == "aarch64" -> "macos-aarch64"
+                    os.contains("mac") -> "macos-x86_64"
+                    else -> "windows-x86_64"
+                }
+            }
+            runtimeOnly("dev.onvoid.webrtc:webrtc-java:" + libs.versions.webrtcJava.get() + ":" + webrtcNatives)
             implementation(libs.kotlinx.coroutines.swing)
             // Ktor OkHttp engine — backs the shared HttpClient on desktop.
             implementation(libs.ktor.client.okhttp)

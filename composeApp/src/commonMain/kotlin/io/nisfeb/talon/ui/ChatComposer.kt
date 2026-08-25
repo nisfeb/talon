@@ -187,6 +187,9 @@ fun ChatComposer(
      *  desktop has no recorder and the composer surfaces a
      *  user-facing "tap the mic button" error. */
     onSlashMic: (() -> Unit)? = null,
+    /** Triggered when `/call` is sent. Null where calls are
+     *  unsupported (isCallsSupported gates the wiring upstream). */
+    onSlashCall: (() -> Unit)? = null,
     /** Per-device opt-in for the `/poke` advanced surface. Defaults
      *  off; off → /poke returns "enable in Settings" instead of
      *  poking. Caller threads `uiSettings.powerFeaturesEnabled`
@@ -500,6 +503,14 @@ fun ChatComposer(
                 }
                 firstWord == "/file" -> {
                     onPickFile(); true
+                }
+                firstWord == "/call" -> {
+                    if (onSlashCall != null) {
+                        onSlashCall()
+                    } else {
+                        state.sendError = "/call isn't available on this platform yet"
+                    }
+                    true
                 }
                 firstWord == "/mic" -> {
                     if (onSlashMic != null) {

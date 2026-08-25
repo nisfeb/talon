@@ -430,6 +430,7 @@ fun main() {
                     dailyDigestSettings = graph.dailyDigestSettings,
                     watchwordsSync = graph.watchwordsSync,
                     themePreference = graph.themePreference,
+                    callEngineProvider = io.nisfeb.talon.call.DesktopCallEngineProvider,
                     notifier = notifier,
                     createUiSettings = graph.createUiSettings,
                     relaySettings = graph.relaySettings,

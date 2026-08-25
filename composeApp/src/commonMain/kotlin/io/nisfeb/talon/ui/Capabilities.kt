@@ -110,3 +110,11 @@ expect val platformLabel: String
 expect fun isOnDeviceAiFeatureSupported(
     feature: io.nisfeb.talon.ai.AiSettings.Feature,
 ): Boolean
+
+/**
+ * Trunkline 1:1 calls (design doc: Trunkline §07). True where a
+ * libwebrtc-backed CallEngine actual exists. Desktop first (webrtc-java);
+ * Android lands v1 (libwebrtc), iOS v2 (WebRTC.xcframework +
+ * foreground-only until APNs VoIP).
+ */
+expect val isCallsSupported: Boolean

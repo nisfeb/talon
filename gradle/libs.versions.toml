@@ -25,6 +25,7 @@ mediapipeTasksText = "0.10.35"
 composeMultiplatform = "1.11.1"
 junit = "4.13.2"
 djl = "0.36.0"
+webrtcJava = "0.14.0"  # 0.15.0 lacks linux natives on maven central
 androidxWork = "2.11.2"
 unifiedpush = "3.3.3"
 
@@ -71,6 +72,7 @@ kotlinx-coroutines-swing = { group = "org.jetbrains.kotlinx", name = "kotlinx-co
 coil-compose = { group = "io.coil-kt.coil3", name = "coil-compose", version.ref = "coil" }
 coil-network-okhttp = { group = "io.coil-kt.coil3", name = "coil-network-okhttp", version.ref = "coil" }
 coil-network-ktor = { group = "io.coil-kt.coil3", name = "coil-network-ktor3", version.ref = "coil" }
+webrtc-java = { group = "dev.onvoid.webrtc", name = "webrtc-java", version.ref = "webrtcJava" }
 
 media3-exoplayer = { group = "androidx.media3", name = "media3-exoplayer", version.ref = "media3" }
 media3-ui = { group = "androidx.media3", name = "media3-ui", version.ref = "media3" }

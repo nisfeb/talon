@@ -15,3 +15,6 @@ actual val platformLabel: String = "Android ${android.os.Build.VERSION.RELEASE}"
 actual fun isOnDeviceAiFeatureSupported(
     feature: io.nisfeb.talon.ai.AiSettings.Feature,
 ): Boolean = true
+
+// Trunkline calls: libwebrtc engine pending (design roadmap v1).
+actual val isCallsSupported: Boolean = false

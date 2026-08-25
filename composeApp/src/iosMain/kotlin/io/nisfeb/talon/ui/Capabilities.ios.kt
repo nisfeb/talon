@@ -23,3 +23,6 @@ actual val platformLabel: String = "iOS ${UIDevice.currentDevice.systemVersion}"
 actual fun isOnDeviceAiFeatureSupported(
     @Suppress("UNUSED_PARAMETER") feature: io.nisfeb.talon.ai.AiSettings.Feature,
 ): Boolean = false
+
+// Trunkline calls: WebRTC.xcframework engine pending (design roadmap v2).
+actual val isCallsSupported: Boolean = false

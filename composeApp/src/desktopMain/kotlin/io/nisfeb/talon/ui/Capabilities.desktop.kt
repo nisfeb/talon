@@ -52,3 +52,6 @@ actual val isAssistantSupported: Boolean = true
 actual fun isOnDeviceAiFeatureSupported(
     @Suppress("UNUSED_PARAMETER") feature: io.nisfeb.talon.ai.AiSettings.Feature,
 ): Boolean = isOnDeviceAiSupported
+
+// Trunkline calls: webrtc-java engine (v0 spike surface).
+actual val isCallsSupported: Boolean = true

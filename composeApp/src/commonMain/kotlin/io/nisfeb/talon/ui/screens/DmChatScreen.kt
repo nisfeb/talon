@@ -207,6 +207,9 @@ fun DmChatScreen(
      *  voiceComposer mic button uses). When null the slash command
      *  surfaces a user-facing "tap the mic button" error. */
     onSlashMic: (() -> Unit)? = null,
+    /** Place a Trunkline call to this conversation's peer. Null hides
+     *  the affordance (platform unsupported or group chat). */
+    onStartCall: (() -> Unit)? = null,
     /**
      * Tap handler for the new info icon in the chat header. v1 routes
      * this to the right pane on wide and to a full-screen
@@ -948,6 +951,7 @@ fun DmChatScreen(
             voiceComposer = voiceComposer,
             voicePlayer = voicePlayer,
             onSlashMic = onSlashMic,
+            onSlashCall = onStartCall,
             powerFeaturesEnabled = powerFeaturesEnabled,
             // Up-arrow-on-empty-composer edits your most recent
             // message. Same predicate as the Edit menu action

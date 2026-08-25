@@ -1,0 +1,281 @@
+package io.nisfeb.talon.call
+
+import io.nisfeb.talon.urbit.UrbitChannel
+import io.nisfeb.talon.urbit.UrbitSession
+import io.nisfeb.talon.util.Log
+import io.nisfeb.talon.util.backgroundExceptionHandler
+import io.nisfeb.talon.util.ioDispatcher
+import io.nisfeb.talon.util.nowMs
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
+import kotlin.uuid.ExperimentalUuidApi
+import kotlin.uuid.Uuid
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.jsonObject
+
+/** What the call UI renders. One active call at a time (v0). */
+sealed interface CallUiState {
+    data object None : CallUiState
+    data class Outgoing(val peer: String) : CallUiState
+    data class Incoming(val peer: String) : CallUiState
+    data class Active(val peer: String, val media: MediaState, val muted: Boolean) : CallUiState
+    data class Ended(val peer: String, val reason: String) : CallUiState
+}
+
+/**
+ * The signaling half of a 1:1 call — design §04's state machine.
+ * Owns its own eyre channel (subscription to %trunk /calls) and one
+ * [CallEngine] per call. All WebRTC knowledge stays in the engine;
+ * all %trunk knowledge stays here.
+ *
+ * v0 spike: instruments the two numbers the design says to measure
+ * first — signaling RTT (offer→answer) and time-to-live-media. Grep
+ * logs for "Trunk metric".
+ */
+@OptIn(ExperimentalUuidApi::class)
+class CallController(
+    private val session: UrbitSession,
+    private val engineProvider: CallEngineProvider,
+) {
+    private val scope = CoroutineScope(SupervisorJob() + ioDispatcher + backgroundExceptionHandler)
+    private val _state = MutableStateFlow<CallUiState>(CallUiState.None)
+    val state: StateFlow<CallUiState> = _state.asStateFlow()
+
+    private var channel: UrbitChannel? = null
+    private var loop: Job? = null
+
+    // Per-call context. Guarded by single-threaded discipline: every
+    // mutation happens inside `scope` (a single logical actor for v0).
+    private var callId: String? = null
+    private var peer: String? = null
+    private var engine: CallEngine? = null
+    private var pendingOffer: SessionDesc? = null
+    private var mediaWatch: Job? = null
+    private var tPlaced = 0L
+    private var tOfferSent = 0L
+
+    fun start() {
+        if (loop != null) return
+        loop = scope.launch { runLoop() }
+    }
+
+    fun stop() {
+        loop?.cancel()
+        loop = null
+        endLocal("stopped")
+    }
+
+    private suspend fun runLoop() {
+        var backoff = 2_000L
+        while (scope.isActive) {
+            runCatching {
+                val ch = session.openChannel()
+                channel = ch
+                ch.events().let { events ->
+                    ch.subscribe(TrunkWire.AGENT, TrunkWire.CALLS_PATH)
+                    backoff = 2_000L
+                    events.collect { ev ->
+                        ev.id?.let { runCatching { ch.ack(it) } }
+                        val fact = (ev.body as? JsonObject)?.get("json") ?: return@collect
+                        TrunkWire.parseUpdate(fact)?.let { onSignal(it) }
+                    }
+                }
+            }.onFailure { Log.w(TAG, "signal loop ended", it) }
+            if (!scope.isActive) break
+            delay(backoff)
+            backoff = (backoff * 2).coerceAtMost(60_000L)
+        }
+    }
+
+    // ── outbound actions ──────────────────────────────────────────
+
+    fun placeCall(target: String) {
+        scope.launch {
+            if (_state.value !is CallUiState.None) return@launch
+            val id = Uuid.random().toString()
+            callId = id
+            peer = target
+            tPlaced = nowMs()
+            _state.value = CallUiState.Outgoing(target)
+            poke(target, TrunkSig.Ring(id))
+            // Gather while the far end rings (design D3: the slow parts overlap).
+            val eng = engineProvider.create()
+            engine = eng
+            watchMedia(eng, target)
+            runCatching { eng.createOffer() }
+                .onSuccess { offer ->
+                    tOfferSent = nowMs()
+                    Log.i(TAG, "Trunk metric: gather took ${tOfferSent - tPlaced}ms")
+                    poke(target, TrunkSig.Offer(id, offer.sdp, offer.fingerprint))
+                }
+                .onFailure {
+                    Log.e(TAG, "offer failed", it)
+                    poke(target, TrunkSig.Hangup(id))
+                    endLocal("media error")
+                }
+        }
+    }
+
+    fun accept() {
+        scope.launch {
+            val id = callId ?: return@launch
+            val from = peer ?: return@launch
+            val offer = pendingOffer ?: return@launch
+            val eng = engineProvider.create()
+            engine = eng
+            watchMedia(eng, from)
+            _state.value = CallUiState.Active(from, MediaState.Connecting, muted = false)
+            runCatching { eng.acceptOffer(offer) }
+                .onSuccess { answer ->
+                    poke(from, TrunkSig.Accept(id, answer.sdp, answer.fingerprint))
+                }
+                .onFailure {
+                    Log.e(TAG, "answer failed", it)
+                    poke(from, TrunkSig.Hangup(id))
+                    endLocal("media error")
+                }
+        }
+    }
+
+    fun reject() {
+        scope.launch {
+            val id = callId ?: return@launch
+            peer?.let { poke(it, TrunkSig.Reject(id, "declined")) }
+            endLocal("declined")
+        }
+    }
+
+    fun hangup() {
+        scope.launch {
+            val id = callId ?: return@launch
+            peer?.let { poke(it, TrunkSig.Hangup(id)) }
+            endLocal("hung up")
+        }
+    }
+
+    fun setMuted(muted: Boolean) {
+        engine?.setMuted(muted)
+        val cur = _state.value
+        if (cur is CallUiState.Active) _state.value = cur.copy(muted = muted)
+    }
+
+    /** Clear a transient Ended banner. */
+    fun dismissEnded() {
+        if (_state.value is CallUiState.Ended) _state.value = CallUiState.None
+    }
+
+    // ── inbound signals ───────────────────────────────────────────
+
+    private suspend fun onSignal(recv: TrunkRecv) {
+        val sig = recv.sig
+        when (sig) {
+            is TrunkSig.Ring -> {
+                if (_state.value !is CallUiState.None) {
+                    poke(recv.from, TrunkSig.Reject(sig.id, "busy"))
+                    return
+                }
+                callId = sig.id
+                peer = recv.from
+                _state.value = CallUiState.Incoming(recv.from)
+            }
+            is TrunkSig.Offer -> {
+                if (sig.id != callId) return
+                // Cross-check the signaled fingerprint against the SDP's own
+                // a=fingerprint line — catches a tampered relay.
+                // ponytail: v0 verifies signaling consistency; pinning the
+                // live DTLS handshake to fpr lands with the engine work.
+                if (sdpFingerprint(sig.sdp) != sig.fpr) {
+                    Log.e(TAG, "fingerprint mismatch from ${recv.from} — dropping call")
+                    poke(recv.from, TrunkSig.Reject(sig.id, "fingerprint mismatch"))
+                    endLocal("security error")
+                    return
+                }
+                pendingOffer = SessionDesc(sig.sdp, sig.fpr)
+            }
+            is TrunkSig.Accept -> {
+                if (sig.id != callId) return
+                if (sdpFingerprint(sig.sdp) != sig.fpr) {
+                    Log.e(TAG, "fingerprint mismatch from ${recv.from} — dropping call")
+                    endCall("security error")
+                    return
+                }
+                Log.i(TAG, "Trunk metric: offer→answer RTT ${nowMs() - tOfferSent}ms")
+                val eng = engine ?: return
+                _state.value = CallUiState.Active(recv.from, MediaState.Connecting, muted = false)
+                runCatching { eng.setAnswer(SessionDesc(sig.sdp, sig.fpr)) }
+                    .onFailure {
+                        Log.e(TAG, "setAnswer failed", it)
+                        endCall("media error")
+                    }
+            }
+            is TrunkSig.Reject -> {
+                if (sig.id != callId) return
+                endLocal(if (sig.reason == "busy") "busy" else "declined")
+            }
+            is TrunkSig.Hangup -> {
+                if (sig.id != callId) return
+                endLocal("ended")
+            }
+        }
+    }
+
+    private fun watchMedia(eng: CallEngine, withPeer: String) {
+        mediaWatch?.cancel()
+        mediaWatch = scope.launch {
+            eng.state.collect { media ->
+                when (media) {
+                    MediaState.Live -> {
+                        if (tPlaced != 0L) {
+                            Log.i(TAG, "Trunk metric: place→live ${nowMs() - tPlaced}ms")
+                        }
+                        val cur = _state.value
+                        if (cur is CallUiState.Active) _state.value = cur.copy(media = media)
+                    }
+                    MediaState.Failed -> endCall("connection failed")
+                    else -> {
+                        val cur = _state.value
+                        if (cur is CallUiState.Active) _state.value = cur.copy(media = media)
+                    }
+                }
+            }
+        }
+    }
+
+    private fun endCall(reason: String) {
+        val id = callId
+        val p = peer
+        if (id != null && p != null) scope.launch { poke(p, TrunkSig.Hangup(id)) }
+        endLocal(reason)
+    }
+
+    private fun endLocal(reason: String) {
+        mediaWatch?.cancel()
+        mediaWatch = null
+        engine?.close()
+        engine = null
+        pendingOffer = null
+        val p = peer
+        callId = null
+        peer = null
+        tPlaced = 0L
+        _state.value = if (p != null) CallUiState.Ended(p, reason) else CallUiState.None
+    }
+
+    private suspend fun poke(target: String, sig: TrunkSig) {
+        val ch = channel ?: return
+        runCatching {
+            ch.poke(TrunkWire.AGENT, TrunkWire.ACTION_MARK, TrunkWire.sendAction(target, sig))
+        }.onFailure { Log.e(TAG, "poke ${sig::class.simpleName} failed", it) }
+    }
+
+    companion object {
+        private const val TAG = "Trunk"
+    }
+}
