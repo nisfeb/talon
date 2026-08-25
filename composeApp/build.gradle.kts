@@ -584,6 +584,9 @@ val iconsExtendedKeep = setOf(
     "androidx/compose/material/icons/filled/ExpandMoreKt.class",
     "androidx/compose/material/icons/filled/ImageKt.class",
     "androidx/compose/material/icons/filled/MicKt.class",
+    // Trunkline call UI
+    "androidx/compose/material/icons/filled/CallEndKt.class",
+    "androidx/compose/material/icons/filled/MicOffKt.class",
     "androidx/compose/material/icons/filled/NotificationsOffKt.class",
     "androidx/compose/material/icons/filled/PauseKt.class",
     "androidx/compose/material/icons/filled/PeopleKt.class",
