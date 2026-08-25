@@ -44,7 +44,10 @@
   =,  enjs:format
   %+  frond  %recv
   %-  pairs
-  :~  [%from (ship from.u)]
+  ::  (scot %p) keeps the leading sig; enjs's +ship drops it, which
+  ::  broke the client's reply path (it poked back a sig-less ship
+  ::  that the action mark's dejs refused).
+  :~  [%from s+(scot %p from.u)]
       [%sig (sig-to-json sig.u)]
   ==
 --

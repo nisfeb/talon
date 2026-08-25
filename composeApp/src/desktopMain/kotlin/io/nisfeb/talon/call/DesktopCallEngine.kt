@@ -40,12 +40,16 @@ class DesktopCallEngine : CallEngine {
         RTCConfiguration(), // no ICE servers: Tier 0 only for the spike
         object : PeerConnectionObserver {
             override fun onIceCandidate(candidate: RTCIceCandidate?) {
-                // Non-trickle: candidates accumulate into the local SDP;
-                // we only care about gathering completion.
+                // Non-trickle: candidates accumulate into the local SDP.
+                Log.i("Trunk", "ice candidate: ${candidate?.sdp}")
             }
 
             override fun onIceGatheringChange(gatherState: RTCIceGatheringState?) {
                 if (gatherState == RTCIceGatheringState.COMPLETE) gathered.complete(Unit)
+            }
+
+            override fun onIceConnectionChange(iceState: dev.onvoid.webrtc.RTCIceConnectionState?) {
+                Log.i("Trunk", "ice state: $iceState")
             }
 
             override fun onConnectionChange(pcState: RTCPeerConnectionState?) {
@@ -74,6 +78,7 @@ class DesktopCallEngine : CallEngine {
         suspendSet { pc.setLocalDescription(offer, it) }
         awaitGathering()
         val sdp = pc.localDescription?.sdp ?: error("no local description")
+        Log.i("Trunk", "offer sdp: " + sdp.lines().count { it.startsWith("a=candidate") } + " candidates")
         return SessionDesc(sdp, sdpFingerprint(sdp))
     }
 
@@ -85,14 +90,16 @@ class DesktopCallEngine : CallEngine {
         suspendSet { pc.setLocalDescription(answer, it) }
         awaitGathering()
         val sdp = pc.localDescription?.sdp ?: error("no local description")
-        _state.value = MediaState.Connecting
+        Log.i("Trunk", "answer sdp: " + sdp.lines().count { it.startsWith("a=candidate") } + " candidates")
+        // No manual state write: the pc observer owns transitions. A
+        // fast connect can land CONNECTED before this returns, and a
+        // blind Connecting here would stomp Live (loopback bisect bug).
         return SessionDesc(sdp, sdpFingerprint(sdp))
     }
 
     override suspend fun setAnswer(remote: SessionDesc) {
         val desc = RTCSessionDescription(RTCSdpType.ANSWER, remote.sdp)
         suspendSet { pc.setRemoteDescription(desc, it) }
-        _state.value = MediaState.Connecting
     }
 
     override fun setMuted(muted: Boolean) {

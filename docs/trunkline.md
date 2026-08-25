@@ -42,6 +42,16 @@ STUN/TURN), and exists to measure two numbers on real ships:
   that's a *finding*, not a bug — note the NAT shapes involved.
 - `unknown/unreachable` reject → peer has no %trunk running.
 
+## v0 results (2026-08-25, ~nec + ~feb on localhost)
+
+The E2E harness (`TrunkCallE2ETest`, opt-in via `TRUNK_E2E=1`) passed:
+ring→incoming **110ms**, gather **286ms**, media live ~**300ms** after
+accept, hangup propagated. Warm-ames localhost numbers — the WAN rerun
+against real ships is the next measurement. Two wire bugs found and
+fixed on the way: enjs `+ship` drops the leading `~` (agent now emits
+`(scot %p)`), and eyre poke nacks are async + easy to silently drop
+(controller now logs channel errors).
+
 ## Next (per design roadmap)
 
 v1: Galène sidecar (STUN echo + TURN + auth tokens), tiers wired into

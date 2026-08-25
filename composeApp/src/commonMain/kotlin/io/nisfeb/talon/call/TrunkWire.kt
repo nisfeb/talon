@@ -63,7 +63,10 @@ object TrunkWire {
     /** Parse a /calls fact. Null for anything that isn't a trunk update. */
     fun parseUpdate(body: JsonElement): TrunkRecv? {
         val recv = (body as? JsonObject)?.get("recv") as? JsonObject ?: return null
-        val from = recv["from"]?.jsonPrimitive?.content ?: return null
+        val fromRaw = recv["from"]?.jsonPrimitive?.content ?: return null
+        // Belt + suspenders: the agent now sends "~feb", but normalize
+        // anyway so a stale desk can't silently break the reply path.
+        val from = if (fromRaw.startsWith("~")) fromRaw else "~$fromRaw"
         val sig = parseSig(recv["sig"] as? JsonObject ?: return null) ?: return null
         return TrunkRecv(from, sig)
     }

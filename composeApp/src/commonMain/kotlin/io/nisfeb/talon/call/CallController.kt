@@ -83,7 +83,11 @@ class CallController(
                     backoff = 2_000L
                     events.collect { ev ->
                         ev.id?.let { runCatching { ch.ack(it) } }
-                        val fact = (ev.body as? JsonObject)?.get("json") ?: return@collect
+                        val body = ev.body as? JsonObject ?: return@collect
+                        // Surface poke nacks — a silently-refused poke cost
+                        // us a day of "the accept never arrives" debugging.
+                        body["err"]?.let { Log.e(TAG, "channel error: $it") }
+                        val fact = body["json"] ?: return@collect
                         TrunkWire.parseUpdate(fact)?.let { onSignal(it) }
                     }
                 }
