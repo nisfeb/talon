@@ -93,6 +93,8 @@ kotlin {
             // Each leaf target binds the engine (OkHttp on JVM, Darwin on
             // iOS) via the httpEngineFactory expect/actual.
             implementation(libs.ktor.client.core)
+            // Galène's SFU protocol is a WebSocket JSON stream (party lines).
+            implementation(libs.ktor.client.websockets)
             // Room 2.7 ships KMP-aware artifacts so the entities,
             // DAOs, and the @Database-annotated expect class can all
             // live in commonMain. Each leaf target (androidMain /

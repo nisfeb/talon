@@ -141,6 +141,9 @@ fun App(
     /** Trunkline call engine — platform entry points pass a real
      *  provider where isCallsSupported; null keeps calls dark. */
     callEngineProvider: io.nisfeb.talon.call.CallEngineProvider? = null,
+    /** Party-line media factory (one link per SFU stream). Null keeps
+     *  party lines dark even where 1:1 calls work. */
+    peerLinkFactory: io.nisfeb.talon.call.PeerLinkFactory? = null,
     /** OS-level notifier. Desktop wires a tray-balloon impl; other
      *  platforms (Android composeApp) get the no-op default until
      *  their notification stories port. */
@@ -527,8 +530,19 @@ fun App(
             } else {
                 null
             }
+        val partyLine = remember(callController, peerLinkFactory) {
+            if (callController != null && peerLinkFactory != null) {
+                io.nisfeb.talon.call.PartyLine(http, peerLinkFactory)
+                    .also { line -> callController.onTicket = { line.join(it, shipKey) } }
+            } else {
+                null
+            }
+        }
         DisposableEffect(callController) {
-            onDispose { callController?.stop() }
+            onDispose {
+                partyLine?.leave()
+                callController?.stop()
+            }
         }
         callController?.let { io.nisfeb.talon.ui.CallOverlay(it) }
         // Curated contact book (from %contacts /v1/book) — gates the
@@ -1610,6 +1624,32 @@ fun App(
                                         } else {
                                             null
                                         },
+                                    onPartyLine =
+                                        if (callController != null && partyLine != null &&
+                                            io.nisfeb.talon.call.PartyLineHost
+                                                .roomFor(openChat!!) != null
+                                        ) {
+                                            {
+                                                val whom = openChat!!
+                                                val host = io.nisfeb.talon.call.PartyLineHost
+                                                    .roomFor(whom)!!.first
+                                                if (host == ship) {
+                                                    loopScope.launch {
+                                                        io.nisfeb.talon.call.PartyLineHost.startLine(
+                                                            callController, repo, db, whom, whom,
+                                                        )
+                                                    }
+                                                } else {
+                                                    io.nisfeb.talon.call.PartyLineHost
+                                                        .joinLine(callController, whom)
+                                                }
+                                            }
+                                        } else {
+                                            null
+                                        },
+                                    partyLineBar = partyLine?.let { line ->
+                                        { io.nisfeb.talon.ui.PartyLineBar(line) }
+                                    },
                                     onOpenGroupInfo = {
                                         openChat?.let { openGroupInfoAction(it) }
                                     },

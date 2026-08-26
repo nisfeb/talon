@@ -31,9 +31,9 @@ class TrunkWireTest {
             """{"recv":{"from":"~zod","sig":{"hangup":{"id":"a"}}}}""" to TrunkSig.Hangup("a"),
         )
         for ((raw, expected) in cases) {
-            val recv = TrunkWire.parseUpdate(Json.parseToJsonElement(raw))
-            assertEquals("~zod", recv?.from)
-            assertEquals(expected, recv?.sig)
+            val recv = TrunkWire.parseUpdate(Json.parseToJsonElement(raw)) as TrunkUpdate.Recv
+            assertEquals("~zod", recv.from)
+            assertEquals(expected, recv.sig)
         }
     }
 
@@ -42,6 +42,24 @@ class TrunkWireTest {
         assertNull(TrunkWire.parseUpdate(Json.parseToJsonElement("""{"other":1}""")))
         assertNull(TrunkWire.parseUpdate(Json.parseToJsonElement("""{"recv":{"from":"~zod","sig":{"nope":{}}}}""")))
         assertNull(TrunkWire.parseUpdate(Json.parseToJsonElement("""[1,2]""")))
+    }
+
+    @Test
+    fun ticketAndDeniedParse() {
+        val t = TrunkWire.parseUpdate(
+            Json.parseToJsonElement(
+                """{"ticket":{"from":"~nec","name":"lounge","location":"http://h/group/talon/nec-lounge/","token":"abc"}}""",
+            ),
+        ) as TrunkUpdate.Ticket
+        assertEquals("~nec", t.from)
+        assertEquals(TrunkTicket("lounge", "http://h/group/talon/nec-lounge/", "abc"), t.ticket)
+
+        val d = TrunkWire.parseUpdate(
+            Json.parseToJsonElement(
+                """{"denied":{"from":"~nec","name":"lounge","why":"not a member"}}""",
+            ),
+        ) as TrunkUpdate.Denied
+        assertEquals("not a member", d.why)
     }
 
     @Test

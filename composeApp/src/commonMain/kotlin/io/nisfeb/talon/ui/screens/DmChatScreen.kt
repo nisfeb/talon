@@ -64,9 +64,11 @@ import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Call
+import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Call
+import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.NotificationsOff
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Search
@@ -212,6 +214,11 @@ fun DmChatScreen(
     /** Place a Trunkline call to this conversation's peer. Null hides
      *  the affordance (platform unsupported or group chat). */
     onStartCall: (() -> Unit)? = null,
+    /** Join (or open) this channel's party line. Null for DMs and on
+     *  platforms without a call engine. */
+    onPartyLine: (() -> Unit)? = null,
+    /** Slot for the live party-line strip, rendered under the header. */
+    partyLineBar: (@Composable () -> Unit)? = null,
     /**
      * Tap handler for the new info icon in the chat header. v1 routes
      * this to the right pane on wide and to a full-screen
@@ -672,6 +679,11 @@ fun DmChatScreen(
                     Icon(Icons.Filled.Call, contentDescription = "Voice call")
                 }
             }
+            if (onPartyLine != null) {
+                IconButton(onClick = onPartyLine) {
+                    Icon(Icons.Filled.Groups, contentDescription = "Party line")
+                }
+            }
             val hasInfoPane = onOpenGroupInfo != null && whom.startsWith("chat/")
             if (hasInfoPane) {
                 IconButton(onClick = onOpenGroupInfo) {
@@ -721,6 +733,7 @@ fun DmChatScreen(
             }
         }
         HorizontalDivider()
+        partyLineBar?.invoke()
         if (refreshing && rows.isEmpty()) {
             androidx.compose.material3.LinearProgressIndicator(
                 modifier = Modifier

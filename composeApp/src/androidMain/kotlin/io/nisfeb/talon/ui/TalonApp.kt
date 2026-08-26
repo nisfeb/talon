@@ -170,8 +170,25 @@ fun TalonApp(
             null
         }
     }
+    val partyLine = remember(callController) {
+        if (callController != null) {
+            io.nisfeb.talon.call.PartyLine(
+                app.ktorHttp,
+                io.nisfeb.talon.call.PeerLinkFactory { ice, send ->
+                    io.nisfeb.talon.call.AndroidPeerLink(app, ice, send)
+                },
+            ).also { line ->
+                callController.onTicket = { line.join(it, loggedInShip ?: "") }
+            }
+        } else {
+            null
+        }
+    }
     androidx.compose.runtime.DisposableEffect(callController) {
-        onDispose { callController?.stop() }
+        onDispose {
+            partyLine?.leave()
+            callController?.stop()
+        }
     }
     callController?.let { io.nisfeb.talon.ui.CallOverlay(it) }
     var addingAnotherShip by remember { mutableStateOf(false) }
@@ -1475,6 +1492,31 @@ fun TalonApp(
                         } else {
                             null
                         },
+                    onPartyLine =
+                        if (callController != null && partyLine != null &&
+                            io.nisfeb.talon.call.PartyLineHost.roomFor(openWhom!!) != null
+                        ) {
+                            {
+                                val whom = openWhom!!
+                                val host =
+                                    io.nisfeb.talon.call.PartyLineHost.roomFor(whom)!!.first
+                                if (host == loggedInShip) {
+                                    appScope.launch {
+                                        io.nisfeb.talon.call.PartyLineHost.startLine(
+                                            callController, app.repo, app.db, whom, whom,
+                                        )
+                                    }
+                                } else {
+                                    io.nisfeb.talon.call.PartyLineHost
+                                        .joinLine(callController, whom)
+                                }
+                            }
+                        } else {
+                            null
+                        },
+                    partyLineBar = partyLine?.let { line ->
+                        { io.nisfeb.talon.ui.PartyLineBar(line) }
+                    },
                     searchEmbedder = app.searchEmbedderClient,
                     scrollState = chatScrollState,
                     scrollAnchored = chatScrollAnchored,

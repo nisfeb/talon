@@ -1,0 +1,292 @@
+package io.nisfeb.talon.call
+
+import io.ktor.client.HttpClient
+import io.ktor.client.plugins.websocket.webSocketSession
+import io.ktor.client.request.get
+import io.ktor.client.statement.bodyAsText
+import io.ktor.websocket.Frame
+import io.ktor.websocket.close
+import io.ktor.websocket.readText
+import io.nisfeb.talon.util.Log
+import io.nisfeb.talon.util.backgroundExceptionHandler
+import io.nisfeb.talon.util.ioDispatcher
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.int
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
+import kotlinx.serialization.json.putJsonArray
+import kotlinx.serialization.json.putJsonObject
+
+/** Who is on the line right now, as the SFU reports it. */
+data class PartyMember(val id: String, val ship: String)
+
+sealed interface PartyState {
+    data object Idle : PartyState
+    data class Connecting(val room: String) : PartyState
+    data class Live(
+        val room: String,
+        val members: List<PartyMember>,
+        val muted: Boolean,
+        /** Our own upstream audio: Live once the SFU has our mic. */
+        val media: MediaState,
+    ) : PartyState
+    data class Failed(val room: String, val why: String) : PartyState
+}
+
+/**
+ * A party line: the client half of Galène's SFU protocol.
+ *
+ * The ticket comes from the host ship's %trunk (see the trunkline
+ * design, D5) — this class never sees a password or a shared secret,
+ * only a short-lived token scoped to one room.
+ *
+ * Protocol shape (galene-protocol.md):
+ *   -> handshake            <- handshake
+ *   -> join {token}         <- joined {rtcConfiguration}
+ *   -> request {'': audio}  <- offer (one per remote stream)
+ *   -> offer (our mic)      <- answer
+ *   <-> ice (trickled, per stream id)
+ *   <- user add/delete      (the roster)
+ */
+class PartyLine(
+    private val http: HttpClient,
+    private val links: PeerLinkFactory,
+) {
+    private val scope =
+        CoroutineScope(SupervisorJob() + ioDispatcher + backgroundExceptionHandler)
+    private val _state = MutableStateFlow<PartyState>(PartyState.Idle)
+    val state: StateFlow<PartyState> = _state.asStateFlow()
+
+    private val json = Json { ignoreUnknownKeys = true }
+    private var session: io.ktor.websocket.WebSocketSession? = null
+    private var pump: Job? = null
+    private val sendLock = Mutex()
+
+    // Stream id -> link. "up" is our mic; the rest are the server's.
+    private val downLinks = mutableMapOf<String, PeerLink>()
+    private var upLink: PeerLink? = null
+    private var upId: String = ""
+    private val roster = mutableMapOf<String, PartyMember>()
+    private var muted = false
+    private var upState: MediaState = MediaState.Idle
+    private var room = ""
+    private var ourId = ""
+
+    /** Join the room named by [ticket]. Idempotent while connected. */
+    fun join(ticket: TrunkTicket, ourShip: String) {
+        if (_state.value !is PartyState.Idle) return
+        room = ticket.name
+        ourId = ourShip
+        upId = "up-$ourShip-${ticket.name}"
+        _state.value = PartyState.Connecting(ticket.name)
+        pump = scope.launch { run(ticket, ourShip) }
+    }
+
+    fun leave() {
+        scope.launch {
+            runCatching { send(buildJsonObject { put("type", "join"); put("kind", "leave"); put("group", galeneGroup) }) }
+            teardown()
+        }
+    }
+
+    fun setMuted(value: Boolean) {
+        muted = value
+        upLink?.setMuted(value)
+        val cur = _state.value
+        if (cur is PartyState.Live) _state.value = cur.copy(muted = value)
+    }
+
+    private var galeneGroup = ""
+
+    private suspend fun run(ticket: TrunkTicket, ourShip: String) {
+        try {
+            // .status carries the group's canonical name + ws endpoint,
+            // so the ship only has to hand us the location URL.
+            val status = json.parseToJsonElement(
+                http.get(ticket.location.trimEnd('/') + "/.status").bodyAsText(),
+            ).jsonObject
+            galeneGroup = status["name"]?.jsonPrimitive?.content ?: error("no group name")
+            val endpoint = status["endpoint"]?.jsonPrimitive?.content ?: error("no ws endpoint")
+
+            val ws = http.webSocketSession(endpoint)
+            session = ws
+            send(buildJsonObject {
+                put("type", "handshake"); put("id", ourShip)
+                putJsonArray("version") { add(kotlinx.serialization.json.JsonPrimitive("2")) }
+            })
+            send(buildJsonObject {
+                put("type", "join"); put("kind", "join")
+                put("group", galeneGroup); put("token", ticket.token)
+            })
+
+            for (frame in ws.incoming) {
+                val text = (frame as? Frame.Text)?.readText() ?: continue
+                val msg = runCatching { json.parseToJsonElement(text).jsonObject }.getOrNull()
+                    ?: continue
+                handle(msg)
+            }
+            Log.i(TAG, "party line stream ended")
+        } catch (t: Throwable) {
+            Log.e(TAG, "party line failed", t)
+            _state.value = PartyState.Failed(room, t.message ?: "connection failed")
+        } finally {
+            teardown()
+        }
+    }
+
+    private suspend fun handle(msg: JsonObject) {
+        when (msg["type"]?.jsonPrimitive?.content) {
+            "ping" -> send(buildJsonObject { put("type", "pong") })
+
+            "joined" -> when (msg["kind"]?.jsonPrimitive?.content) {
+                "join" -> onJoined(msg)
+                "fail" -> _state.value = PartyState.Failed(
+                    room,
+                    msg["value"]?.jsonPrimitive?.content ?: "join refused",
+                )
+                else -> {}
+            }
+
+            // The server offers us one stream per remote speaker.
+            "offer" -> onRemoteOffer(msg)
+
+            "answer" -> {
+                val id = msg["id"]?.jsonPrimitive?.content ?: return
+                val sdp = msg["sdp"]?.jsonPrimitive?.content ?: return
+                if (id == upId) upLink?.applyAnswer(sdp)
+            }
+
+            "ice" -> {
+                val id = msg["id"]?.jsonPrimitive?.content ?: return
+                val c = msg["candidate"]?.jsonObject ?: return
+                val cand = IceCandidate(
+                    candidate = c["candidate"]?.jsonPrimitive?.content ?: return,
+                    sdpMid = c["sdpMid"]?.jsonPrimitive?.content,
+                    sdpMLineIndex = c["sdpMLineIndex"]?.jsonPrimitive?.int ?: 0,
+                )
+                (if (id == upId) upLink else downLinks[id])?.addRemoteCandidate(cand)
+            }
+
+            "close" -> {
+                val id = msg["id"]?.jsonPrimitive?.content ?: return
+                downLinks.remove(id)?.close()
+            }
+
+            "user" -> {
+                val id = msg["id"]?.jsonPrimitive?.content ?: return
+                val name = msg["username"]?.jsonPrimitive?.content ?: id
+                when (msg["kind"]?.jsonPrimitive?.content) {
+                    "add" -> roster[id] = PartyMember(id, name)
+                    "delete" -> roster.remove(id)
+                    else -> {}
+                }
+                publishRoster()
+            }
+
+            "usermessage" -> Log.w(TAG, "sfu: ${msg["value"]?.jsonPrimitive?.content}")
+        }
+    }
+
+    private suspend fun onJoined(msg: JsonObject) {
+        // Galène hands out its own TURN credentials on join, so party
+        // lines need no ICE config from the ship at all.
+        val ice = msg["rtcConfiguration"]?.jsonObject
+            ?.get("iceServers")?.jsonArray.orEmpty()
+            .mapNotNull { el ->
+                val o = el.jsonObject
+                val url = o["urls"]?.jsonArray?.firstOrNull()?.jsonPrimitive?.content
+                    ?: o["urls"]?.jsonPrimitive?.content ?: return@mapNotNull null
+                IceServer(
+                    url = url,
+                    user = o["username"]?.jsonPrimitive?.content ?: "",
+                    cred = o["credential"]?.jsonPrimitive?.content ?: "",
+                )
+            }
+
+        // Ask for everyone's audio.
+        send(buildJsonObject {
+            put("type", "request")
+            putJsonObject("request") { putJsonArray("") { add(kotlinx.serialization.json.JsonPrimitive("audio")) } }
+        })
+
+        // Publish our mic as one up stream.
+        val up = links.create(ice, sendAudio = true)
+        upLink = up
+        up.setMuted(muted)
+        scope.launch { up.state.collect { upState = it; publishRoster() } }
+        up.onLocalCandidate { c -> scope.launch { sendIce(upId, c) } }
+        val sdp = up.offer()
+        send(buildJsonObject {
+            put("type", "offer"); put("id", upId); put("label", "")
+            put("username", ourId); put("sdp", sdp)
+        })
+        publishRoster()
+    }
+
+    private suspend fun onRemoteOffer(msg: JsonObject) {
+        val id = msg["id"]?.jsonPrimitive?.content ?: return
+        val sdp = msg["sdp"]?.jsonPrimitive?.content ?: return
+        val ice = emptyList<IceServer>() // down links reuse the same relay policy
+        val link = downLinks.getOrPut(id) {
+            links.create(ice, sendAudio = false).also { l ->
+                l.onLocalCandidate { c -> scope.launch { sendIce(id, c) } }
+            }
+        }
+        val answer = link.answerTo(sdp)
+        send(buildJsonObject { put("type", "answer"); put("id", id); put("sdp", answer) })
+    }
+
+    private suspend fun sendIce(id: String, c: IceCandidate) {
+        send(buildJsonObject {
+            put("type", "ice"); put("id", id)
+            putJsonObject("candidate") {
+                put("candidate", c.candidate)
+                c.sdpMid?.let { put("sdpMid", it) }
+                put("sdpMLineIndex", c.sdpMLineIndex)
+            }
+        })
+    }
+
+    private fun publishRoster() {
+        if (_state.value is PartyState.Failed) return
+        _state.value =
+            PartyState.Live(room, roster.values.sortedBy { it.ship }, muted, upState)
+    }
+
+    private suspend fun send(obj: JsonObject) {
+        val ws = session ?: return
+        sendLock.withLock {
+            runCatching { ws.send(Frame.Text(obj.toString())) }
+                .onFailure { Log.w(TAG, "sfu send failed", it) }
+        }
+    }
+
+    private suspend fun teardown() {
+        upLink?.close()
+        upLink = null
+        downLinks.values.forEach { it.close() }
+        downLinks.clear()
+        roster.clear()
+        upState = MediaState.Idle
+        runCatching { session?.close() }
+        session = null
+        if (_state.value !is PartyState.Failed) _state.value = PartyState.Idle
+    }
+
+    companion object {
+        private const val TAG = "PartyLine"
+    }
+}

@@ -431,6 +431,7 @@ fun main() {
                     watchwordsSync = graph.watchwordsSync,
                     themePreference = graph.themePreference,
                     callEngineProvider = io.nisfeb.talon.call.DesktopCallEngineProvider,
+                    peerLinkFactory = io.nisfeb.talon.call.DesktopPeerLinkFactory,
                     notifier = notifier,
                     createUiSettings = graph.createUiSettings,
                     relaySettings = graph.relaySettings,

@@ -70,8 +70,50 @@ fixed on the way: enjs `+ship` drops the leading `~` (agent now emits
   dead-STUN chaos path: ~nec advertises `stun:localhost:3478` with
   nothing listening — leave it that way, it's a regression test.
 
+## v2 — party lines (2026-08-26, this branch)
+
+Multi-party audio, host-centered per design D5. Validated end to end
+against two fake ships plus a real Galène: `PartyLineE2ETest` has both
+ships publishing to the SFU ~250ms after the host opens the line, with
+a correct roster on both sides and clean leave propagation.
+
+- **Tickets minted in Hoon.** `lib/trunk-jwt.hoon` signs Galène's
+  HS256 JWTs on-ship, so the host authorizes members without any
+  server round trip. The two byte-order conventions bite here and are
+  documented in that file: `base64:mimes:html` reads octs LSB-first,
+  `hmac-sha256l:hmac:crypto` reads them MSB-first and returns a
+  big-endian atom. Get it backwards and you get a perfect-looking
+  token that fails every signature check.
+- **One Galène group, rooms as subgroups.** The sidecar configures a
+  single `talon` group with `auto-subgroups`; each room is
+  `talon/<host>-<room>`, created on first join. Opening a party line
+  needs no server-side change, and each ticket's `aud` scopes it to
+  exactly one room.
+- **Membership is the whole check.** `[%ask]` from a non-member or for
+  an unknown room is denied by the host's agent, never by the SFU.
+- **Discovery.** Opening a room announces it to every member, so
+  joining is an invitation rather than a guess (`/x/lines`).
+- **Client.** `PartyLine.kt` speaks Galène's WebSocket protocol over
+  the shared Ktor client; `PeerLink` is the trickling, one-directional
+  per-stream media primitive (desktop + Android impls).
+
+Galène hands every client its own TURN credentials on join, so party
+lines need no ICE config from the ship at all — coturn stays for 1:1.
+
+## Known gaps
+
+- `CallEngine` (1:1) and `PeerLink` (SFU) overlap ~60% per platform.
+  Folding the former onto the latter is the obvious cleanup, deferred
+  deliberately while the 1:1 path is in an RC under test; its E2E is
+  the regression net for that refactor.
+- No party-line UI on iOS (`isCallsSupported` is false there).
+- The SFU sees plaintext audio, exactly as the host's ship already
+  sees the group's messages. Host-blind party lines would need
+  insertable-streams E2EE — a v3+ concern with real key-rotation
+  complexity on member leave.
+
 ## Next
 
-v2: party lines — Galène SFU rooms at the group host's sidecar, join
-tokens minted by %trunk, roster presence. Split desk + sidecar into
-the `trunkline` repo. WAN metrics run against real ships.
+Split desk + sidecar into the `trunkline` repo. WAN metrics against
+real ships. Then v3 telephony polish: CallKit / ConnectionService,
+APNs VoIP via user relays, ICE restart on network change.

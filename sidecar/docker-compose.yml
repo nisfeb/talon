@@ -1,11 +1,17 @@
 # Trunkline sidecar — runs next to your ship (vere) on its host.
-# v1: coturn provides the STUN echo (Tier 1) and the TURN relay of
-# last resort (Tier 2) for 1:1 calls. v2 adds Galène for party-line
-# SFU rooms (uncomment below).
 #
-# Usage:
-#   TURN_USER=talon TURN_PASS=$(openssl rand -hex 16) docker compose up -d
-# then advertise it from your ship's dojo (see README).
+#   coturn  Tier 1 (STUN echo) + Tier 2 (TURN relay) for 1:1 calls
+#   galene  the SFU that party lines run on
+#
+# Both are optional: without them Talon still makes Tier 0 calls (same
+# LAN, public IPv6) — you just lose the hostile-NAT fallback and the
+# ability to *host* a party line. One sidecar anywhere between two
+# callers covers that call, so running one upgrades every call made
+# to you.
+#
+# Bring up:
+#   TURN_PASS=$(openssl rand -hex 16) docker compose up -d
+# then advertise both from your ship (see README.md).
 services:
   coturn:
     image: coturn/coturn:4.6
@@ -25,11 +31,26 @@ services:
       - --min-port=49160
       - --max-port=49200
 
-  # v2 — party-line SFU at the group host's ship (design D5):
-  # galene:
-  #   image: galene/galene:latest
-  #   restart: unless-stopped
-  #   network_mode: host
-  #   volumes:
-  #     - ./galene/groups:/data/groups
-  #     - ./galene/data:/data
+  # Party lines. ONE Galène group ("talon") is configured, with
+  # auto-subgroups on: every room is a subgroup created on first join,
+  # so opening a new party line needs no server-side change. %trunk
+  # mints a per-room JWT signed with the group's authKeys secret.
+  galene:
+    image: galene:local
+    build:
+      context: https://github.com/jech/galene.git
+      dockerfile_inline: |
+        FROM golang:1.24-alpine AS build
+        WORKDIR /src
+        COPY . .
+        RUN go build -o /galene
+        FROM alpine:3
+        COPY --from=build /galene /galene
+        COPY --from=build /src/static /static
+        ENTRYPOINT ["/galene", "-static", "/static"]
+    restart: unless-stopped
+    network_mode: host
+    command: ["-insecure", "-http", ":8444", "-data", "/data", "-groups", "/groups"]
+    volumes:
+      - ./galene/data:/data
+      - ./galene/groups:/groups

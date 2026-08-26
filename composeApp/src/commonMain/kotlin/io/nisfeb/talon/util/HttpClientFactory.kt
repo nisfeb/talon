@@ -3,6 +3,7 @@ package io.nisfeb.talon.util
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.HttpClientEngineFactory
 import io.ktor.client.plugins.HttpTimeout
+import io.ktor.client.plugins.websocket.WebSockets
 
 /** Platform HTTP engine: OkHttp on JVM (Android + desktop), Darwin on iOS. */
 expect fun httpEngineFactory(): HttpClientEngineFactory<*>
@@ -19,6 +20,8 @@ expect fun httpEngineFactory(): HttpClientEngineFactory<*>
 fun createAppHttpClient(): HttpClient = HttpClient(httpEngineFactory()) {
     expectSuccess = false
     followRedirects = true
+    // Party lines speak Galène's WebSocket protocol over this client.
+    install(WebSockets)
     install(HttpTimeout) {
         // No socket (read) timeout here: the platform engine is configured
         // with an infinite read timeout (see httpEngineFactory) so the SSE
