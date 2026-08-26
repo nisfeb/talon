@@ -104,18 +104,29 @@ class PartyLineE2ETest {
             }
             println("metric both-publishing: ${System.currentTimeMillis() - t0}ms")
 
-            // ...and each sees the other on the line.
+            // ...and each sees the other on the line. Assert membership
+            // rather than an exact count: the SFU can still be holding a
+            // dead socket from an earlier run, and a ghost row says
+            // nothing about whether these two can hear each other.
+            val both = listOf(shipA, shipB)
             withTimeout(30_000) {
-                partyA.state.first { it is PartyState.Live && it.members.size == 2 }
+                partyA.state.first {
+                    it is PartyState.Live && it.members.map { m -> m.ship }.containsAll(both)
+                }
             }
             val seen = (partyA.state.value as PartyState.Live).members.map { it.ship }.sorted()
-            assertEquals(listOf(shipB, shipA).sorted(), seen)
-            assertTrue((partyB.state.value as PartyState.Live).members.size == 2)
+            assertTrue(seen.containsAll(both.sorted()), "host roster missing someone: $seen")
+            assertTrue(
+                (partyB.state.value as PartyState.Live).members
+                    .map { it.ship }.containsAll(both),
+            )
             println("roster: $seen")
 
             partyB.leave()
             withTimeout(20_000) {
-                partyA.state.first { it is PartyState.Live && it.members.size == 1 }
+                partyA.state.first {
+                    it is PartyState.Live && it.members.none { m -> m.ship == shipB }
+                }
             }
             println("roster after leave: ok")
 

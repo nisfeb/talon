@@ -118,3 +118,16 @@ expect fun isOnDeviceAiFeatureSupported(
  * foreground-only until APNs VoIP).
  */
 expect val isCallsSupported: Boolean
+
+/**
+ * A swipe in from the left edge navigates *back* rather than opening
+ * the ship switcher.
+ *
+ * True on iOS: a Compose view controller gets none of UIKit's
+ * navigation gesture, so the app supplies it — and going back is far
+ * more frequent than switching ships, which keeps its tap affordance
+ * on the Talon logo. False on Android, where the system back gesture
+ * already owns the edge and the drawer can have the in-app swipe;
+ * false on desktop, which has no touch edge at all.
+ */
+expect val isEdgeSwipeBackSupported: Boolean

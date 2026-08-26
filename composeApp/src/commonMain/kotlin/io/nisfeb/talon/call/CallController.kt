@@ -65,6 +65,15 @@ class CallController(
     // racing it.
     private var pendingOffer = CompletableDeferred<SessionDesc>()
     private var mediaWatch: Job? = null
+    // Ended is a notice, not a call: it must never make us look busy.
+    // It used to, and because it was only cleared by the overlay's
+    // timer, a device whose UI wasn't composed (backgrounded phone,
+    // failed first attempt) answered "busy" to every ring afterwards.
+    private val isFree: Boolean
+        get() = _state.value.let { it is CallUiState.None || it is CallUiState.Ended }
+
+    // Bumped per call so a stale auto-clear can't wipe a newer one.
+    private var endedToken = 0
     private var tPlaced = 0L
     private var tOfferSent = 0L
 
@@ -122,7 +131,7 @@ class CallController(
 
     fun placeCall(target: String) {
         scope.launch {
-            if (_state.value !is CallUiState.None) return@launch
+            if (!isFree) return@launch
             val id = Uuid.random().toString()
             callId = id
             peer = target
@@ -238,7 +247,7 @@ class CallController(
         val sig = recv.sig
         when (sig) {
             is TrunkSig.Ring -> {
-                if (_state.value !is CallUiState.None) {
+                if (!isFree) {
                     poke(recv.from, TrunkSig.Reject(sig.id, "busy"))
                     return
                 }
@@ -327,7 +336,18 @@ class CallController(
         callId = null
         peer = null
         tPlaced = 0L
-        _state.value = if (p != null) CallUiState.Ended(p, reason) else CallUiState.None
+        if (p == null) {
+            _state.value = CallUiState.None
+            return
+        }
+        _state.value = CallUiState.Ended(p, reason)
+        val token = ++endedToken
+        scope.launch {
+            delay(ENDED_NOTICE_MS)
+            if (endedToken == token && _state.value is CallUiState.Ended) {
+                _state.value = CallUiState.None
+            }
+        }
     }
 
     private suspend fun poke(target: String, sig: TrunkSig) {
@@ -339,5 +359,10 @@ class CallController(
 
     companion object {
         private const val TAG = "Trunk"
+
+        /** How long the "call ended" notice lingers before the surface
+         *  goes quiet. Cleared here, not in the UI, so a backgrounded
+         *  app still frees itself to take the next call. */
+        private const val ENDED_NOTICE_MS = 5_000L
     }
 }

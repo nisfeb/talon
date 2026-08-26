@@ -1,6 +1,16 @@
 package io.nisfeb.talon
 
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.width
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.ComposeUIViewController
+import io.nisfeb.talon.ui.IosBackDispatcher
 import io.nisfeb.talon.ai.createAiSettings
 import io.nisfeb.talon.compose.App
 import io.nisfeb.talon.data.createAppDatabase
@@ -78,6 +88,7 @@ fun MainViewController(): UIViewController {
     )
 
     return ComposeUIViewController {
+        Box(Modifier.fillMaxSize()) {
         App(
             http = http,
             sessionStore = sessionStore,
@@ -100,5 +111,42 @@ fun MainViewController(): UIViewController {
             createUiSettings = { db -> createUiSettings(db, scope) },
             dailyDigestSettings = dailyDigestSettings,
         )
+        // Back gesture. A Compose view controller gets none of UIKit's
+        // navigation edge-swipe, so we draw our own: a narrow strip on
+        // the left edge that pops whatever screen registered a
+        // PlatformBackHandler. Deliberately takes the edge from the
+        // ship-switcher drawer — going back is the far more frequent
+        // move, and the switcher still opens from the Talon logo.
+        // Only present when something has registered a back handler, so
+        // at the top of the stack the strip isn't sitting over the
+        // conversation rows' avatars waiting to eat a tap.
+        if (IosBackDispatcher.hasHandler) {
+        Box(
+            Modifier
+                .align(Alignment.CenterStart)
+                .fillMaxHeight()
+                .width(EDGE_SWIPE_WIDTH)
+                .pointerInput(Unit) {
+                    var dragged = 0f
+                    detectHorizontalDragGestures(
+                        onDragStart = { dragged = 0f },
+                        onDragEnd = {
+                            if (dragged > EDGE_SWIPE_THRESHOLD_PX) IosBackDispatcher.back()
+                            dragged = 0f
+                        },
+                        onDragCancel = { dragged = 0f },
+                        onHorizontalDrag = { _, dx -> dragged += dx },
+                    )
+                },
+        )
+        }
+        }
     }
 }
+
+/** How wide the left-edge back strip is. Narrow enough that it doesn't
+ *  steal horizontal drags from message rows (swipe-to-thread). */
+private val EDGE_SWIPE_WIDTH = 20.dp
+
+/** How far right the finger must travel before it counts as a back. */
+private const val EDGE_SWIPE_THRESHOLD_PX = 40f

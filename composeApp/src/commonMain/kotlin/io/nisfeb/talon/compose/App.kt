@@ -1131,7 +1131,11 @@ fun App(
                     // Desktop opens the ship switcher only via the Talon
                     // logo click — the edge-swipe is a touch gesture that
                     // a mouse triggers ambiguously, so it's off there.
-                    gesturesEnabled = io.nisfeb.talon.ui.isTouchSwipeNavSupported,
+                    // On iOS the same edge belongs to the back gesture,
+                    // which users reach for far more often; the switcher
+                    // keeps its logo tap.
+                    gesturesEnabled = io.nisfeb.talon.ui.isTouchSwipeNavSupported &&
+                        !io.nisfeb.talon.ui.isEdgeSwipeBackSupported,
                     drawerContent = {
                         // Empty drawer content when no ships are logged in
                         // (LoginScreen path). The drawer trigger isn't

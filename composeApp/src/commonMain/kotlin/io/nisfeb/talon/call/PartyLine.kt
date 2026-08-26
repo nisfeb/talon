@@ -19,6 +19,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlin.uuid.ExperimentalUuidApi
+import kotlin.uuid.Uuid
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
@@ -61,6 +63,7 @@ sealed interface PartyState {
  *   <-> ice (trickled, per stream id)
  *   <- user add/delete      (the roster)
  */
+@OptIn(ExperimentalUuidApi::class)
 class PartyLine(
     private val http: HttpClient,
     private val links: PeerLinkFactory,
@@ -84,6 +87,12 @@ class PartyLine(
     private var upState: MediaState = MediaState.Idle
     private var room = ""
     private var ourId = ""
+    // Galène's client id must be unique per *connection*, not per
+    // user: reusing the @p means a rejoin (or a stale socket the
+    // server hasn't reaped) is refused with "duplicate client id".
+    // The name shown to others comes from the token's subject, so this
+    // being opaque costs nothing.
+    private var connectionId = ""
 
     /** Join the room named by [ticket]. Idempotent while connected. */
     fun join(ticket: TrunkTicket, ourShip: String) {
@@ -91,7 +100,8 @@ class PartyLine(
         if (_state.value !is PartyState.Idle) return
         room = ticket.name
         ourId = ourShip
-        upId = "up-$ourShip-${ticket.name}"
+        connectionId = "$ourShip-${Uuid.random()}"
+        upId = "up-$connectionId"
         _state.value = PartyState.Connecting(ticket.name)
         pump = scope.launch { run(ticket, ourShip) }
     }
@@ -131,7 +141,7 @@ class PartyLine(
             val ws = http.webSocketSession(endpoint)
             session = ws
             send(buildJsonObject {
-                put("type", "handshake"); put("id", ourShip)
+                put("type", "handshake"); put("id", connectionId)
                 putJsonArray("version") { add(kotlinx.serialization.json.JsonPrimitive("2")) }
             })
             send(buildJsonObject {
@@ -269,8 +279,15 @@ class PartyLine(
 
     private fun publishRoster() {
         if (_state.value is PartyState.Failed) return
-        _state.value =
-            PartyState.Live(room, roster.values.sortedBy { it.ship }, muted, upState)
+        // One row per ship, not per connection: the SFU can still be
+        // holding a dead socket from a dropped join, and "~zod, ~zod"
+        // helps nobody.
+        _state.value = PartyState.Live(
+            room,
+            roster.values.distinctBy { it.ship }.sortedBy { it.ship },
+            muted,
+            upState,
+        )
     }
 
     private suspend fun send(obj: JsonObject) {

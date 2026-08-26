@@ -26,3 +26,6 @@ actual fun isOnDeviceAiFeatureSupported(
 
 // Trunkline calls: WebRTC.xcframework engine pending (design roadmap v2).
 actual val isCallsSupported: Boolean = false
+
+// Supplied by MainViewController's edge strip -> IosBackDispatcher.
+actual val isEdgeSwipeBackSupported: Boolean = true

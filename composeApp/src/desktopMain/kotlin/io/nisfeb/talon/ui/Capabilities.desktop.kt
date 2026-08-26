@@ -55,3 +55,6 @@ actual fun isOnDeviceAiFeatureSupported(
 
 // Trunkline calls: webrtc-java engine (v0 spike surface).
 actual val isCallsSupported: Boolean = true
+
+// No touch edge on desktop; the logo click opens the switcher.
+actual val isEdgeSwipeBackSupported: Boolean = false

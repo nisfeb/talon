@@ -18,3 +18,6 @@ actual fun isOnDeviceAiFeatureSupported(
 
 // Trunkline calls: libwebrtc via getstream build (AndroidCallEngine).
 actual val isCallsSupported: Boolean = true
+
+// The system back gesture already owns the left edge here.
+actual val isEdgeSwipeBackSupported: Boolean = false
