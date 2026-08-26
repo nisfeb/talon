@@ -434,6 +434,20 @@ compose.desktop {
             }
             windows {
                 iconFile.set(project.file("src/desktopMain/resources/icon.ico"))
+                // Without these jpackage installs the app but leaves no
+                // way to launch it: no Start Menu entry, no desktop
+                // shortcut, just Talon.exe sitting in Program Files.
+                menu = true
+                menuGroup = "Talon"
+                shortcut = true
+                // Stable identity across versions. MSI uses it to
+                // recognise an existing install and upgrade in place;
+                // without it every release is a separate product and
+                // they stack up in Add/Remove Programs.
+                upgradeUuid = "caa028d1-1682-453f-a017-30b7dd8e8419"
+                // Let the user install without admin rights if they
+                // want; the default per-machine install needs elevation.
+                dirChooser = true
             }
             macOS {
                 // .icns is generated on the macOS CI runner from icon.png
