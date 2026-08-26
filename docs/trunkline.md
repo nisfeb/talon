@@ -132,6 +132,36 @@ fixed in the same pass:
   insertable-streams E2EE — a v3+ concern with real key-rotation
   complexity on member leave.
 
+## Testing on real hardware
+
+The fake ships already have `%trunk`, so a phone + desktop session
+needs no ship work. Ports are on the LAN, so use the machine's LAN
+address (not localhost) from the phone.
+
+**1:1 calls (no sidecar needed).**
+
+1. Desktop Talon: log into `~feb` at `http://<lan-ip>:8082`.
+2. Phone (rc2 APK): log into `~nec` at `http://<lan-ip>:8081`.
+3. Open the DM between them, tap the call icon in the header.
+4. Expect Tier 0 (host candidates) on the same LAN. Grep the desktop
+   log (`~/.config/talon/log/talon.log`) and Android logcat for
+   `Trunk metric` — those are the first real cross-device numbers.
+5. Then put the phone on cellular and repeat. That is the first
+   genuine Tier 2 test, and it needs the sidecar's TURN
+   (`sidecar/README.md`) plus a `%set-ice` poke pointing at a
+   publicly-reachable address.
+
+**Party lines (needs a Galène).** Bring one up per `sidecar/README.md`,
+then from each ship's dojo point it at the SFU with `%set-sfu`. Open a
+group channel on a group `~nec` hosts and tap the party-line icon:
+the host opens the line, everyone else joins it. The strip under the
+channel header shows who is on.
+
+Both flows are already covered headlessly by `TrunkCallE2ETest` and
+`PartyLineE2ETest`, so a failure on device is a platform/network
+finding rather than a protocol one — worth capturing the log either
+way.
+
 ## Next
 
 Split desk + sidecar into the `trunkline` repo. WAN metrics against
