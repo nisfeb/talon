@@ -3,6 +3,7 @@ package io.nisfeb.talon.ui
 import com.ionspin.kotlin.bignum.integer.BigInteger
 import kotlinx.atomicfu.locks.SynchronizedObject
 import kotlinx.atomicfu.locks.synchronized
+import kotlin.concurrent.Volatile
 import kotlinx.coroutines.flow.MutableStateFlow
 import okio.ByteString.Companion.toByteString
 
@@ -116,5 +117,55 @@ object MnemonymNames {
         // A failed disk write must not take down the caller — set() runs
         // on the %settings apply path too. The value still applied live.
         runCatching { persist(value) }
+    }
+}
+
+/**
+ * Reader-side naming policy, in one place.
+ *
+ * Every surface that shows a ship — a row title, a mention inside a
+ * message, a quoted post's author — asks this what the *reader* wants
+ * to see, so one person's nickname for someone never leaks into
+ * another person's view. Precedence:
+ *
+ *   1. [alwaysPatp] on  -> the raw @p, always
+ *   2. a nickname the reader has for that ship
+ *   3. the mnemonym, when [MnemonymNames] is on
+ *   4. the raw @p
+ */
+object ShipNames {
+    /** Ignore nicknames and mnemonyms entirely; show @p everywhere. */
+    val alwaysPatp = MutableStateFlow(false)
+
+    /** Wired by the platform UiSettings at startup, like
+     *  [MnemonymNames.persist]. */
+    var persist: (Boolean) -> Unit = {}
+
+    fun setAlwaysPatp(value: Boolean) {
+        alwaysPatp.value = value
+        runCatching { persist(value) }
+    }
+
+    /**
+     * Resolve a ship to the reader's preferred name. Set from the live
+     * ContactMap, so it sees nicknames; defaults to the @p for code
+     * that runs before any contact data exists.
+     */
+    @Volatile
+    var resolve: (String) -> String = { it }
+        private set
+
+    /**
+     * Bumped whenever [resolve] would start giving different answers.
+     * Caches that store *rendered* output (StoryCache) key on this, so
+     * a nickname edit or a settings flip re-renders instead of serving
+     * a stale name.
+     */
+    val generation = MutableStateFlow(0)
+
+    fun setResolver(version: Int, resolver: (String) -> String) {
+        if (generation.value == version) return
+        resolve = resolver
+        generation.value = version
     }
 }

@@ -1,6 +1,7 @@
 package io.nisfeb.talon.ui
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -9,14 +10,18 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 
@@ -29,19 +34,34 @@ fun MentionPicker(
     suggestions: List<Suggestion>,
     onPick: (ship: String) -> Unit,
     modifier: Modifier = Modifier,
+    /** Row the keyboard has highlighted; Tab completes this one.
+     *  Coerced into range so a shrinking list can't point past the end.
+     *  Mirrors [EmojiPickerDropdown]. */
+    selectedIndex: Int = 0,
 ) {
     if (suggestions.isEmpty()) return
+    val sel = selectedIndex.coerceIn(0, suggestions.lastIndex)
+    val listState = rememberLazyListState()
+    // Keep the highlighted row visible as the user arrows past the fold.
+    LaunchedEffect(sel) { listState.animateScrollToItem(sel) }
     Surface(
         modifier = modifier.fillMaxWidth(),
         color = MaterialTheme.colorScheme.surface,
         shape = RoundedCornerShape(8.dp),
         shadowElevation = 4.dp,
     ) {
-        LazyColumn(modifier = Modifier.heightIn(max = 240.dp)) {
-            items(items = suggestions, key = { it.ship }) { s ->
+        LazyColumn(state = listState, modifier = Modifier.heightIn(max = 240.dp)) {
+            itemsIndexed(items = suggestions, key = { _, s -> s.ship }) { idx, s ->
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
+                        .background(
+                            if (idx == sel) {
+                                MaterialTheme.colorScheme.secondaryContainer
+                            } else {
+                                Color.Transparent
+                            },
+                        )
                         .clickable { onPick(s.ship) }
                         .padding(horizontal = 14.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically,

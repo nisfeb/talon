@@ -54,6 +54,15 @@ object StoryCache {
         fun remove(key: String) { map.remove(key) }
     }
 
+    /**
+     * Rendered parts embed the reader's chosen names for any mentions,
+     * so the key has to move when those names would change — otherwise
+     * a nickname edit (or flipping the naming setting) keeps serving
+     * text rendered under the old policy.
+     */
+    private fun cacheKey(contentJson: String): Int =
+        contentJson.hashCode() * 31 + io.nisfeb.talon.ui.ShipNames.generation.value
+
     private val parts = Lru<Pair<Int, List<StoryPart>>>(MAX_ENTRIES)
     private val previews = Lru<Pair<Int, String>>(MAX_ENTRIES)
     private val lock = SynchronizedObject()
@@ -65,7 +74,7 @@ object StoryCache {
      * No-op when the cache already holds a current entry for [id].
      */
     fun warm(id: String, contentJson: String, tree: JsonElement) {
-        val hash = contentJson.hashCode()
+        val hash = cacheKey(contentJson)
         synchronized(lock) {
             val existing = parts[id]
             if (existing != null && existing.first == hash) return
@@ -76,7 +85,7 @@ object StoryCache {
     }
 
     fun partsFor(id: String, contentJson: String): List<StoryPart> {
-        val hash = contentJson.hashCode()
+        val hash = cacheKey(contentJson)
         synchronized(lock) {
             val cached = parts[id]
             if (cached != null && cached.first == hash) return cached.second
@@ -92,7 +101,7 @@ object StoryCache {
     }
 
     fun textFor(id: String, contentJson: String): String {
-        val hash = contentJson.hashCode()
+        val hash = cacheKey(contentJson)
         synchronized(lock) {
             val cached = previews[id]
             if (cached != null && cached.first == hash) return cached.second

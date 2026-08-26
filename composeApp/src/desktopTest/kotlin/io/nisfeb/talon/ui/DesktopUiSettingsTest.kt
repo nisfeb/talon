@@ -40,7 +40,7 @@ class DesktopUiSettingsTest {
         tmpDir.deleteRecursively()
     }
 
-    private fun newStore(targetFile: File = file): DesktopUiSettings =
+    private fun newStore(targetFile: File = file): UiSettings =
         DesktopUiSettings(file = targetFile, db = db, scope = scope)
 
     @Test

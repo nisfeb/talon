@@ -1,5 +1,6 @@
 package io.nisfeb.talon.ai
 
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 
 /**
@@ -45,4 +46,27 @@ interface DailyDigestSettings {
     fun applyRemote(enabled: Boolean, hourOfDay: Int, minuteOfDay: Int)
 
     fun emitSyncToggledOff()
+}
+
+/**
+ * Digest-less stand-in for platforms that have no scheduler to fire a
+ * brief (iOS, and desktop's tests). Holds the default state, accepts
+ * writes, and tells nobody — the feature is gated off by
+ * [io.nisfeb.talon.ui.isDailyDigestSupported] on those platforms, so
+ * this only exists to keep %settings wiring total.
+ */
+class NoopDailyDigestSettings : DailyDigestSettings {
+    private val _state = MutableStateFlow(DailyDigestSettings.State())
+    override val state: StateFlow<DailyDigestSettings.State> = _state
+    override var onChange: ((DailyDigestSettings.Change, Boolean) -> Unit)? = null
+    override fun setEnabled(enabled: Boolean) {
+        _state.value = _state.value.copy(enabled = enabled)
+    }
+    override fun setTime(hourOfDay: Int, minuteOfDay: Int) {
+        _state.value = _state.value.copy(hourOfDay = hourOfDay, minuteOfDay = minuteOfDay)
+    }
+    override fun applyRemote(enabled: Boolean, hourOfDay: Int, minuteOfDay: Int) {
+        _state.value = DailyDigestSettings.State(enabled, hourOfDay, minuteOfDay)
+    }
+    override fun emitSyncToggledOff() {}
 }

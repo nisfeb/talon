@@ -376,9 +376,14 @@ object Story {
         obj["break"]?.let { out.append('\n'); return }
         (obj["ship"] as? JsonPrimitive)?.let { prim ->
             val patp = if (prim.isString) prim.content else prim.content
+            // The wire carries the @p; what the reader *sees* is their
+            // own naming preference (nickname / mnemonym / @p), so one
+            // person's nickname for someone never leaks into another
+            // person's view. The annotation stays the @p so taps still
+            // resolve the right ship.
             out.pushStringAnnotation(MENTION_TAG, patp)
             out.withSpan(SpanStyle(color = MENTION_COLOR, fontWeight = FontWeight.Medium)) {
-                append(patp)
+                append(io.nisfeb.talon.ui.ShipNames.resolve(patp))
             }
             out.pop()
             return

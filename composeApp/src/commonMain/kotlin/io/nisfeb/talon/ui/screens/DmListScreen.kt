@@ -554,6 +554,15 @@ fun DmListScreen(
     var pendingPushFolderId by remember { mutableStateOf<Long?>(null) }
     var pendingPushGroupOrders by remember { mutableStateOf(false) }
 
+    // Reordering is only real when the list is in manual order and
+    // there's a settings sink to persist it. Under "Most recent" the
+    // list re-sorts the instant you let go, and with no sink the write
+    // is dropped — either way the grip promises something that can't
+    // happen, so it isn't shown (bug: drag handles on the All list).
+    val canReorder =
+        repo.settingsSync != null &&
+            folderItemOrder == io.nisfeb.talon.ui.FolderItemOrder.Manual
+
     val reorderState = rememberReorderableLazyListState(listState) { from, to ->
         val fromKey = from.key as? String ?: return@rememberReorderableLazyListState
         val toKey = to.key as? String ?: return@rememberReorderableLazyListState
@@ -1126,7 +1135,7 @@ fun DmListScreen(
                                 // (esp. "Most recent" group ordering) fought the
                                 // expand/collapse AnimatedVisibility height
                                 // change and rendered groups overlapped/compacted.
-                                ReorderableItem(reorderState, key = row.key, enabled = editMode) { _ ->
+                                ReorderableItem(reorderState, key = row.key, enabled = editMode && canReorder) { _ ->
                                     Column {
                                         val lastActive by remember(row.flag) {
                                             repo.groupLastActive(row.flag)
@@ -1142,7 +1151,7 @@ fun DmListScreen(
                                             onToggle = onGroupHeadToggle,
                                             onLongClick = if (editMode) null else onGroupHeadLongPress,
                                             editMode = editMode,
-                                            dragHandleModifier = Modifier.longPressDraggableHandle(
+                                            dragHandleModifier = if (!canReorder) null else Modifier.longPressDraggableHandle(
                                                 onDragStarted = {
                                                     hapticRoot.performHapticFeedback(HapticFeedbackType.LongPress)
                                                     expandedGroups = expandedGroups - row.flag
@@ -1189,7 +1198,7 @@ fun DmListScreen(
                                 // (esp. "Most recent" group ordering) fought the
                                 // expand/collapse AnimatedVisibility height
                                 // change and rendered groups overlapped/compacted.
-                                ReorderableItem(reorderState, key = row.key, enabled = editMode) { _ ->
+                                ReorderableItem(reorderState, key = row.key, enabled = editMode && canReorder) { _ ->
                                     ConversationRow(
                                         m = row.m,
                                         unread = row.unread,
@@ -1198,7 +1207,7 @@ fun DmListScreen(
                                         onClick = onRowOpen,
                                         onLongClick = onRowLongPress,
                                         editMode = editMode,
-                                        dragHandleModifier = Modifier.longPressDraggableHandle(
+                                        dragHandleModifier = if (!canReorder) null else Modifier.longPressDraggableHandle(
                                             onDragStarted = {
                                                 hapticRoot.performHapticFeedback(HapticFeedbackType.LongPress)
                                             },
@@ -1255,7 +1264,7 @@ fun DmListScreen(
                                 // (esp. "Most recent" group ordering) fought the
                                 // expand/collapse AnimatedVisibility height
                                 // change and rendered groups overlapped/compacted.
-                                ReorderableItem(reorderState, key = row.key, enabled = editMode) { _ ->
+                                ReorderableItem(reorderState, key = row.key, enabled = editMode && canReorder) { _ ->
                                     Column {
                                         val lastActive by remember(row.flag) {
                                             repo.groupLastActive(row.flag)
@@ -1271,7 +1280,7 @@ fun DmListScreen(
                                             onToggle = onGroupHeadToggle,
                                             onLongClick = if (editMode) null else onGroupHeadLongPress,
                                             editMode = editMode,
-                                            dragHandleModifier = Modifier.longPressDraggableHandle(
+                                            dragHandleModifier = if (!canReorder) null else Modifier.longPressDraggableHandle(
                                                 onDragStarted = {
                                                     hapticRoot.performHapticFeedback(
                                                         HapticFeedbackType.LongPress,
@@ -1956,7 +1965,7 @@ private fun ConversationRow(
                     .padding(horizontal = 10.dp, vertical = 4.dp),
             )
         }
-        if (editMode) {
+        if (editMode && dragHandleModifier != null) {
             Icon(
                 imageVector = Icons.Filled.DragHandle,
                 contentDescription = "Drag to reorder",
@@ -2137,7 +2146,9 @@ private fun GroupHeaderRow(
     lastActiveMs: Long?,
     onToggle: (String) -> Unit,
     editMode: Boolean = false,
-    dragHandleModifier: Modifier = Modifier,
+    /** Null when this list can't be reordered — see `canReorder` in
+     *  DmListScreen. A grip the user can't drag is a lie. */
+    dragHandleModifier: Modifier? = null,
     onLongClick: ((String) -> Unit)? = null,
 ) {
     val rotation by animateFloatAsState(
@@ -2145,7 +2156,7 @@ private fun GroupHeaderRow(
         animationSpec = tween(durationMillis = 160),
         label = "groupChevronRotation",
     )
-    val rowClickModifier = if (editMode) {
+    val rowClickModifier = if (editMode && dragHandleModifier != null) {
         Modifier.clickable { onToggle(flag) }.then(dragHandleModifier)
     } else {
         Modifier.combinedClickableWithSecondary(
@@ -2212,7 +2223,7 @@ private fun GroupHeaderRow(
                 .size(24.dp)
                 .graphicsLayer { rotationZ = rotation },
         )
-        if (editMode) {
+        if (editMode && dragHandleModifier != null) {
             Icon(
                 imageVector = Icons.Filled.DragHandle,
                 contentDescription = "Drag to reorder",

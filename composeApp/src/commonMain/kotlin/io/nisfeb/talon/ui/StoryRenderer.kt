@@ -82,7 +82,7 @@ val LocalCitationOpen = compositionLocalOf<(StoryPart.Citation) -> Unit> { {} }
  * `ContactMap.displayName`, which prefers a nickname the viewer set.
  */
 val LocalDisplayName = compositionLocalOf<(String) -> String> {
-    { ship -> if (MnemonymNames.enabled.value) Mnemonym.display(ship) ?: ship else ship }
+    { ship -> ShipNames.resolve(ship) }
 }
 
 /**

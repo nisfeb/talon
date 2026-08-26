@@ -216,14 +216,27 @@ fun SettingsScreen(
             Spacer(Modifier.height(8.dp))
 
             // ── Ship naming ─────────────────────────────────────────
+            val alwaysPatp by io.nisfeb.talon.ui.ShipNames.alwaysPatp.collectAsState()
+            FeatureToggleRow(
+                label = "Always show ~ship names",
+                description = "Ignore nicknames and word-based names " +
+                    "everywhere — rows, mentions and quoted posts all " +
+                    "show the raw Urbit name.",
+                enabled = alwaysPatp,
+                onChange = { on -> io.nisfeb.talon.ui.ShipNames.setAlwaysPatp(on) },
+            )
             val mnemonymNames by io.nisfeb.talon.ui.MnemonymNames.enabled.collectAsState()
             FeatureToggleRow(
                 label = "Word-based ship names",
-                description = "Ships without a nickname show as readable " +
-                    "words (~sampel-palnet → .accept.engulf.relents) " +
-                    "instead of the raw Urbit name. Synced across your " +
-                    "devices; off restores classic ~ship naming.",
-                enabled = mnemonymNames,
+                description = if (alwaysPatp) {
+                    "Turned off while \"Always show ~ship names\" is on."
+                } else {
+                    "Ships without a nickname show as readable words " +
+                        "(~sampel-palnet → .accept.engulf.relents) instead " +
+                        "of the raw Urbit name. Synced across your devices; " +
+                        "off restores classic ~ship naming."
+                },
+                enabled = mnemonymNames && !alwaysPatp,
                 onChange = { on ->
                     io.nisfeb.talon.ui.MnemonymNames.set(on)
                     onMnemonymNamesChanged(on)

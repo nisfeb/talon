@@ -980,6 +980,14 @@ fun App(
           val citeDisplayName: (String) -> String = remember(citeContacts) {
               { ship -> citeContacts.displayName(ship) }
           }
+          // Story parsing runs outside composition (StoryCache, ingest),
+          // so the naming policy is published to it here rather than
+          // threaded through every call site.
+          LaunchedEffect(citeContacts) {
+              io.nisfeb.talon.ui.ShipNames.setResolver(citeContacts.namesVersion) { ship ->
+                  citeContacts.displayName(ship)
+              }
+          }
           androidx.compose.runtime.CompositionLocalProvider(
               io.nisfeb.talon.ui.LocalImageDownloader provides imageDownloader,
               io.nisfeb.talon.ui.LocalChatDensity provides chatDensity,

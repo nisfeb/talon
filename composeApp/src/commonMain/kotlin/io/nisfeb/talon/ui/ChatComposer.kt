@@ -403,6 +403,9 @@ fun ChatComposer(
     // time the query changes (new suggestion list); Tab/Enter completes
     // whichever row this points at.
     var emojiSel by remember(emojiQuery?.first) { mutableStateOf(0) }
+    // Same arrow-key cursor for the mention dropdown; resets whenever
+    // the typed query changes so it always starts at the best match.
+    var mentionSel by remember(mention?.first) { mutableStateOf(0) }
     val slashTrigger = detectSlashTrigger(state.draft.text, state.draft.selection.start)
     val slashSuggestions = remember(slashTrigger) {
         slashTrigger?.let { filterSlashCommands(it.query) } ?: emptyList()
@@ -478,6 +481,7 @@ fun ChatComposer(
             MentionPicker(
                 suggestions = suggestions,
                 onPick = applyMentionPick,
+                selectedIndex = mentionSel,
                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
             )
         }
@@ -706,6 +710,18 @@ fun ChatComposer(
                             }
                             return@onPreviewKeyEvent true
                         }
+                        // Same for the mention dropdown.
+                        if (mention != null && suggestions.isNotEmpty() &&
+                            (e.key == Key.DirectionDown || e.key == Key.DirectionUp)
+                        ) {
+                            val last = suggestions.lastIndex
+                            mentionSel = if (e.key == Key.DirectionDown) {
+                                (mentionSel + 1).coerceAtMost(last)
+                            } else {
+                                (mentionSel - 1).coerceAtLeast(0)
+                            }
+                            return@onPreviewKeyEvent true
+                        }
                         // Up arrow on an empty composer jumps straight into
                         // editing your most recently sent message (matches
                         // Slack/Discord). Gated on an empty draft so Up
@@ -726,7 +742,11 @@ fun ChatComposer(
                                 emojiQuery != null && emojiSuggestions.isNotEmpty() ->
                                     applyEmojiPick(emojiSuggestions[emojiSel.coerceIn(0, emojiSuggestions.lastIndex)])
                                 mention != null && suggestions.isNotEmpty() ->
-                                    applyMentionPick(suggestions.first().ship)
+                                    applyMentionPick(
+                                        suggestions[
+                                            mentionSel.coerceIn(0, suggestions.lastIndex),
+                                        ].ship,
+                                    )
                                 slashTrigger != null && slashSuggestions.isNotEmpty() ->
                                     applySlashPick(slashSuggestions.first())
                                 else -> return@onPreviewKeyEvent false

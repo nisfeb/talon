@@ -4,12 +4,15 @@ import androidx.compose.ui.window.ComposeUIViewController
 import io.nisfeb.talon.ai.createAiSettings
 import io.nisfeb.talon.compose.App
 import io.nisfeb.talon.data.createAppDatabase
+import io.nisfeb.talon.ai.NoopDailyDigestSettings
 import io.nisfeb.talon.ui.InMemoryDraftStore
+import io.nisfeb.talon.ui.createUiSettings
 import io.nisfeb.talon.ui.theme.IosThemePreference
 import io.nisfeb.talon.update.UpdateInstallerHook
 import io.nisfeb.talon.update.UpdateManifest
 import io.nisfeb.talon.update.UpdateRuntime
 import io.nisfeb.talon.update.UpdateState
+import io.nisfeb.talon.urbit.SettingsSyncImpl
 import io.nisfeb.talon.urbit.createSessionStore
 import io.nisfeb.talon.util.IosFiles
 import io.nisfeb.talon.util.backgroundExceptionHandler
@@ -48,6 +51,9 @@ fun MainViewController(): UIViewController {
     val aiSettings = createAiSettings()
     val themePreference = IosThemePreference()
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default + backgroundExceptionHandler)
+    // Digest has no scheduler on iOS (gated off in Capabilities), but
+    // %settings sync still needs a sink for the bucket.
+    val dailyDigestSettings = NoopDailyDigestSettings()
 
     val updateState = UpdateState(
         scope = scope,
@@ -80,6 +86,19 @@ fun MainViewController(): UIViewController {
             drafts = InMemoryDraftStore(),
             updateState = updateState,
             themePreference = themePreference,
+            // Without these two iOS fell back to in-memory defaults:
+            // folders were created into a null sink and never appeared,
+            // and every per-device preference reset on relaunch.
+            createSettingsSync = { db ->
+                SettingsSyncImpl(
+                    db = db,
+                    aiSettings = aiSettings,
+                    dailyDigestSettings = dailyDigestSettings,
+                    rearmDailyDigest = {},
+                )
+            },
+            createUiSettings = { db -> createUiSettings(db, scope) },
+            dailyDigestSettings = dailyDigestSettings,
         )
     }
 }

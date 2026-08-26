@@ -28,6 +28,8 @@ data class ContactMap(
      *  [Mnemonym]) instead of the raw @p. Synced via %settings
      *  (ui-prefs bucket); flip off in Settings for classic naming. */
     val mnemonymNames: Boolean = true,
+    /** Ignore nicknames and mnemonyms; show the raw @p everywhere. */
+    val alwaysPatp: Boolean = false,
 ) {
     private val byShip: Map<String, ContactEntity> =
         contacts.associateBy(ContactEntity::ship)
@@ -43,12 +45,33 @@ data class ContactMap(
             ch.title?.takeIf { it.isNotBlank() }?.let { ch.nest to it }
         }.toMap()
 
+    /**
+     * Changes exactly when [displayName] would start giving different
+     * answers, so caches that store rendered names can key on it. Only
+     * nicknames and the two naming flags matter — an avatar or colour
+     * change rebuilds the ContactMap but must not invalidate rendered
+     * message text.
+     */
+    val namesVersion: Int by lazy {
+        var h = if (mnemonymNames) 1 else 0
+        h = h * 31 + if (alwaysPatp) 1 else 0
+        for (c in contacts) {
+            h = h * 31 + c.ship.hashCode()
+            h = h * 31 + (c.nickname?.hashCode() ?: 0)
+        }
+        h
+    }
+
     fun nickname(ship: String): String? = byShip[ship]?.nickname
     fun avatar(ship: String): String? = byShip[ship]?.avatarUrl
     fun displayName(ship: String): String =
-        nickname(ship)
-            ?: (if (mnemonymNames) Mnemonym.display(ship) else null)
-            ?: ship
+        if (alwaysPatp) {
+            ship
+        } else {
+            nickname(ship)
+                ?: (if (mnemonymNames) Mnemonym.display(ship) else null)
+                ?: ship
+        }
     fun contact(ship: String): ContactEntity? = byShip[ship]
     fun shipColor(ship: String): String? = byShip[ship]?.color
 
@@ -126,13 +149,18 @@ fun contactMapFlow(
     // each have to thread a UiSettings reference through; flipping
     // the setting re-emits every ContactMap and re-renders names.
     mnemonymNamesFlow: Flow<Boolean> = MnemonymNames.enabled,
+    alwaysPatpFlow: Flow<Boolean> = ShipNames.alwaysPatp,
 ): Flow<ContactMap> = combine(
     contactsFlow.distinctUntilChanged(::sameContactDisplay),
     clubsFlow.distinctUntilChanged(),
     groupsFlow.distinctUntilChanged(),
     channelGroupsFlow.distinctUntilChanged(),
-    mnemonymNamesFlow.distinctUntilChanged(),
-) { c, cl, g, cg, mn -> ContactMap(c, cl, g, cg, mn) }
+    // Both naming switches ride one slot: `combine` only types five.
+    combine(
+        mnemonymNamesFlow.distinctUntilChanged(),
+        alwaysPatpFlow.distinctUntilChanged(),
+    ) { mn, patp -> mn to patp },
+) { c, cl, g, cg, naming -> ContactMap(c, cl, g, cg, naming.first, naming.second) }
     .flowOn(Dispatchers.Default)
     // Conflate so cascading bootstrap emissions (e.g. all four DAOs
     // streaming initial values within a frame of each other) collapse
