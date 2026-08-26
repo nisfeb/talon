@@ -104,7 +104,7 @@ class CallController(
                             is TrunkUpdate.Recv -> onSignal(up)
                             is TrunkUpdate.Ticket -> onTicket?.invoke(up.ticket)
                             is TrunkUpdate.Denied ->
-                                Log.w(TAG, "room ${'$'}{up.name} denied: ${'$'}{up.why}")
+                                Log.w(TAG, "room " + up.name + " denied: " + up.why)
                             null -> {}
                         }
                     }
@@ -207,29 +207,25 @@ class CallController(
 
     /** Host a party line: [members] are the ships allowed to join.
      *  The agent announces it to each of them. */
-    fun openRoom(name: String, title: String, members: List<String>) {
-        scope.launch {
-            val ch = channel ?: return@launch
-            runCatching {
-                ch.poke(
-                    TrunkWire.AGENT, TrunkWire.ACTION_MARK,
-                    TrunkWire.openRoomAction(name, title, members),
-                )
-            }.onFailure { Log.e(TAG, "open-room poke failed", it) }
-        }
+    suspend fun openRoom(name: String, title: String, members: List<String>) {
+        val ch = channel ?: return
+        runCatching {
+            ch.poke(
+                TrunkWire.AGENT, TrunkWire.ACTION_MARK,
+                TrunkWire.openRoomAction(name, title, members),
+            )
+        }.onFailure { Log.e(TAG, "open-room poke failed", it) }
     }
 
     /** Ask [host] to let us onto its party line. */
-    fun joinRoom(host: String, name: String) {
-        scope.launch {
-            val ch = channel ?: return@launch
-            runCatching {
-                ch.poke(
-                    TrunkWire.AGENT, TrunkWire.ACTION_MARK,
-                    TrunkWire.joinRoomAction(host, name),
-                )
-            }.onFailure { Log.e(TAG, "join-room poke failed", it) }
-        }
+    suspend fun joinRoom(host: String, name: String) {
+        val ch = channel ?: return
+        runCatching {
+            ch.poke(
+                TrunkWire.AGENT, TrunkWire.ACTION_MARK,
+                TrunkWire.joinRoomAction(host, name),
+            )
+        }.onFailure { Log.e(TAG, "join-room poke failed", it) }
     }
 
     private suspend fun onSignal(recv: TrunkUpdate.Recv) {

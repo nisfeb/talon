@@ -1507,8 +1507,10 @@ fun TalonApp(
                                         )
                                     }
                                 } else {
-                                    io.nisfeb.talon.call.PartyLineHost
-                                        .joinLine(callController, whom)
+                                    appScope.launch {
+                                        io.nisfeb.talon.call.PartyLineHost
+                                            .joinLine(callController, whom)
+                                    }
                                 }
                             }
                         } else {

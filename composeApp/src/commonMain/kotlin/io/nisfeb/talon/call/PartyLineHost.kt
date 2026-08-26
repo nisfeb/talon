@@ -49,13 +49,15 @@ object PartyLineHost {
         if (members.isEmpty()) {
             Log.w(TAG, "no group roster for $whom — opening a host-only line")
         }
+        // Ordered deliberately: the join must not reach the ship
+        // before the room it names exists.
         controller.openRoom(room, title, members)
         controller.joinRoom(host, room)
         return true
     }
 
     /** Step onto a line someone else is hosting. */
-    fun joinLine(controller: CallController, whom: String): Boolean {
+    suspend fun joinLine(controller: CallController, whom: String): Boolean {
         val (host, room) = roomFor(whom) ?: return false
         controller.joinRoom(host, room)
         return true
