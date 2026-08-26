@@ -21,6 +21,7 @@
       state-1
       state-2
       state-3
+      state-4
   ==
 +$  state-0  [%0 ~]
 +$  state-1  [%1 ice=(list ice-server:trunk)]
@@ -31,22 +32,36 @@
       sfu=sfu-config:trunk
       hosted=(map @t room:trunk)
   ==
+::  %3 accepted a %grant from any ship — see +on-poke
 +$  state-3
   $:  %3
       ice=(list ice-server:trunk)
       sfu=sfu-config:trunk
       hosted=(map @t room:trunk)
+      known=lines:trunk
+  ==
++$  state-4
+  $:  %4
+      ice=(list ice-server:trunk)
+      sfu=sfu-config:trunk
+      hosted=(map @t room:trunk)
       ::  lines other ships have invited us to
       known=lines:trunk
+      ::  rooms we have an outstanding %ask for. A ticket names an SFU
+      ::  our client will publish its microphone to, so we only accept
+      ::  one that answers a request we actually made.
+      asked=(set [=ship name=@t])
   ==
 +$  card  card:agent:gall
 ::  how long a minted ticket stays valid. Long enough for a call that
 ::  outlasts a conversation, short enough that a removed member loses
 ::  access without a key rotation.
 ++  ticket-ttl  ^~((div ~h6 ~s1))
+::  how many party-line invitations we will remember from the network.
+++  invite-cap  256
 --
 %-  agent:dbug
-=|  state-3
+=|  state-4
 =*  state  -
 ^-  agent:gall
 =<
@@ -62,10 +77,11 @@
   ^-  (quip card _this)
   =/  old  !<(versioned-state old-vase)
   ?-  -.old
-    %0  `this(state [%3 ~ ['' '' ''] ~ ~])
-    %1  `this(state [%3 ice.old ['' '' ''] ~ ~])
-    %2  `this(state [%3 ice.old sfu.old hosted.old ~])
-    %3  `this(state old)
+    %0  `this(state [%4 ~ ['' '' ''] ~ ~ ~])
+    %1  `this(state [%4 ice.old ['' '' ''] ~ ~ ~])
+    %2  `this(state [%4 ice.old sfu.old hosted.old ~ ~])
+    %3  `this(state [%4 ice.old sfu.old hosted.old known.old ~])
+    %4  `this(state old)
   ==
 ::
 ++  on-poke
@@ -101,11 +117,11 @@
       ::  hosting it ourselves? mint straight away, no round trip.
       ?:  =(host.act our.bowl)
         :_  this  (grant-cards:hc our.bowl name.act)
-      :_  this
-      :~  :*  %pass  /room/(scot %p host.act)
-              %agent  [host.act %trunk]
-              %poke  %trunk-room  !>(`room-sig:trunk`[%ask name.act])
-      ==  ==
+      :-  :~  :*  %pass  /room/(scot %p host.act)
+                  %agent  [host.act %trunk]
+                  %poke  %trunk-room  !>(`room-sig:trunk`[%ask name.act])
+          ==  ==
+      this(asked.state (~(put in asked.state) [host.act name.act]))
     ==
   ::
   ::  1:1 signal from a peer ship
@@ -122,14 +138,30 @@
         %ask    :_(this (grant-cards:hc src.bowl name.msg))
     ::
         %announce
+      ::  an invitation from anyone is fine (it is just a name), but
+      ::  the list is remote-controlled, so it does not grow forever.
+      ?:  (gth ~(wyt by known.state) invite-cap)  `this
       :-  ~[(fact:hc [%open src.bowl name.msg title.msg])]
       this(known.state (~(put by known.state) [src.bowl name.msg] title.msg))
     ::
         %shut
       :-  ~[(fact:hc [%shut src.bowl name.msg])]
       this(known.state (~(del by known.state) [src.bowl name.msg]))
-        %grant  :_(this ~[(fact:hc [%ticket src.bowl ticket.msg])])
-        %deny   :_(this ~[(fact:hc [%denied src.bowl name.msg why.msg])])
+    ::
+    ::  A ticket names an SFU our client will publish its microphone
+    ::  to, so an unsolicited one is a microphone-hijack attempt: only
+    ::  accept an answer to a request we actually made.
+        %grant
+      ?.  (~(has in asked.state) [src.bowl name.ticket.msg])
+        %-  (slog leaf+"trunk: unsolicited grant from {<src.bowl>}" ~)
+        `this
+      :-  ~[(fact:hc [%ticket src.bowl ticket.msg])]
+      this(asked.state (~(del in asked.state) [src.bowl name.ticket.msg]))
+    ::
+        %deny
+      ?.  (~(has in asked.state) [src.bowl name.msg])  `this
+      :-  ~[(fact:hc [%denied src.bowl name.msg why.msg])]
+      this(asked.state (~(del in asked.state) [src.bowl name.msg]))
     ==
   ==
 ::

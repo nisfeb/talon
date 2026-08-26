@@ -100,6 +100,26 @@ a correct roster on both sides and clean leave propagation.
 Galène hands every client its own TURN credentials on join, so party
 lines need no ICE config from the ship at all — coturn stays for 1:1.
 
+## Security review of the room path (2026-08-26)
+
+Auditing the new trust boundaries turned up one real vulnerability,
+fixed in the same pass:
+
+- **Unsolicited `%grant` = microphone hijack.** The agent accepted a
+  ticket from *any* ship, and the client auto-joins on ticket — so a
+  hostile ship could push a grant naming its own SFU and the victim
+  would publish its microphone there. The agent now records outstanding
+  `%ask`s and accepts a `%grant`/`%deny` only as the answer to one.
+  Verified: after a completed join `+dbug %state` shows `asked={}`,
+  so any later grant fails the check.
+- **Invitation list is remote-controlled**, so `%announce` is capped
+  (`invite-cap`) rather than growing without bound.
+- Membership is checked host-side at mint time, and `sub` is always the
+  *asking* ship — a member cannot mint a ticket for anyone else.
+- Ticket TTL is 6h with no revocation: a member removed from a group
+  keeps access until expiry. Rotating the SFU key is the only immediate
+  revocation. Documented ceiling, not a v2 fix.
+
 ## Known gaps
 
 - `CallEngine` (1:1) and `PeerLink` (SFU) overlap ~60% per platform.
