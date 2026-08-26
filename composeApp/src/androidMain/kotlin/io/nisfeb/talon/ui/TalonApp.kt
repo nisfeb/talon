@@ -1261,6 +1261,11 @@ fun TalonApp(
                             runCatching { app.repo.settingsSync?.pushMnemonymNames(on) }
                         }
                     },
+                    onAlwaysPatpChanged = { on ->
+                        appScope.launch {
+                            runCatching { app.repo.settingsSync?.pushAlwaysPatp(on) }
+                        }
+                    },
                     modifier = mod,
                 )
             }

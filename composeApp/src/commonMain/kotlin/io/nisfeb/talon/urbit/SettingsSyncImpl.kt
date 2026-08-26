@@ -17,7 +17,11 @@ import io.nisfeb.talon.data.NotifyPreferenceEntity
 import io.nisfeb.talon.data.RailItemPrefEntity
 import io.nisfeb.talon.ui.RailItem
 import io.nisfeb.talon.ui.railItemOrNull
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
@@ -26,6 +30,7 @@ import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
@@ -99,6 +104,17 @@ class SettingsSyncImpl(
         // One entry per pref; today just the mnemonym-naming toggle.
         const val BUCKET_UI_PREFS = "ui-prefs"
         const val ENTRY_MNEMONYM_NAMES = "mnemonym-names"
+        const val ENTRY_ALWAYS_PATP = "always-patp"
+        // User-shaped UI preferences. Screen-shaped ones (density,
+        // fontScale, chatPaneListFraction, activeRailTab) are absent on
+        // purpose — see SettingsSync.attachUiSettings.
+        const val ENTRY_GROUP_CHANNEL_ORDER = "group-channel-order"
+        const val ENTRY_FOLDER_ITEM_ORDER = "folder-item-order"
+        const val ENTRY_RAIL_ITEM_ORDER = "rail-item-order"
+        const val ENTRY_SMART_SEARCH = "smart-search-preferred"
+        const val ENTRY_POWER_FEATURES = "power-features"
+        const val ENTRY_HIDE_COMPOSER_BUTTONS = "hide-composer-buttons"
+        const val ENTRY_ACCENT = "accent"
         // Assistant history (Stage 2). Conversation metadata + append-only
         // turns, keyed by global id; embeddings stay device-local.
         const val BUCKET_ASSISTANT_CONVERSATIONS = "assistant-conversations"
@@ -133,6 +149,14 @@ class SettingsSyncImpl(
     }
 
     @Volatile private var channel: UrbitChannel? = null
+    @Volatile private var ui: io.nisfeb.talon.ui.UiSettings? = null
+    // Bootstrap can beat the host's attachUiSettings call. Hold what
+    // the ship said until there's somewhere to put it.
+    @Volatile private var pendingUiPrefs: JsonObject? = null
+    // Set while a remote value is being written into the local store,
+    // so the resulting flow emission doesn't bounce straight back to
+    // the ship as a fresh push.
+    @Volatile private var applyingRemote = false
 
     private val _statusesSeenMs = MutableStateFlow(0L)
     override val statusesSeenMs: StateFlow<Long> = _statusesSeenMs.asStateFlow()
@@ -161,8 +185,119 @@ class SettingsSyncImpl(
         )
     }
 
+    override suspend fun pushAlwaysPatp(enabled: Boolean) {
+        pokePutEntry(
+            BUCKET_UI_PREFS,
+            ENTRY_ALWAYS_PATP,
+            buildJsonObject { put("enabled", enabled) },
+        )
+    }
+
     override fun attach(channel: UrbitChannel) {
         this.channel = channel
+    }
+
+    override fun attachUiSettings(
+        settings: io.nisfeb.talon.ui.UiSettings,
+        scope: kotlinx.coroutines.CoroutineScope,
+    ) {
+        if (ui != null) return
+        ui = settings
+        // Drain anything bootstrap parked before we had a store.
+        pendingUiPrefs?.let { parked ->
+            pendingUiPrefs = null
+            parked.forEach { (key, v) ->
+                if (key != ENTRY_MNEMONYM_NAMES && key != ENTRY_ALWAYS_PATP) {
+                    applyUiPref(key, unwrap(v))
+                }
+            }
+        }
+        // Watch each synced preference and push changes the user makes
+        // here. drop(1) skips the current value — attaching is not an
+        // edit — and `applyingRemote` keeps an incoming change from
+        // echoing back out.
+        fun <T> watch(flow: Flow<T>, entry: String, encode: (T) -> JsonElement) {
+            scope.launch {
+                flow.drop(1).collect { v ->
+                    if (applyingRemote) return@collect
+                    runCatching { pokePutEntry(BUCKET_UI_PREFS, entry, encode(v)) }
+                }
+            }
+        }
+        watch(settings.groupChannelOrder, ENTRY_GROUP_CHANNEL_ORDER) { str(it.name) }
+        watch(settings.folderItemOrder, ENTRY_FOLDER_ITEM_ORDER) { str(it.name) }
+        watch(settings.smartSearchPreferred, ENTRY_SMART_SEARCH) { bool(it) }
+        watch(settings.powerFeaturesEnabled, ENTRY_POWER_FEATURES) { bool(it) }
+        watch(settings.hideComposerButtons, ENTRY_HIDE_COMPOSER_BUTTONS) { bool(it) }
+        watch(settings.railItemOrder, ENTRY_RAIL_ITEM_ORDER) { order ->
+            buildJsonObject {
+                put("order", JsonArray(order.map { JsonPrimitive(it.name) }))
+            }
+        }
+        watch(settings.accentSettings, ENTRY_ACCENT) { a ->
+            buildJsonObject {
+                a.enabled?.let { put("enabled", it) }
+                put("mode", a.mode.name)
+                a.customHex?.let { put("customHex", it) }
+            }
+        }
+    }
+
+    private fun bool(v: Boolean): JsonElement = buildJsonObject { put("enabled", v) }
+    private fun str(v: String): JsonElement = buildJsonObject { put("value", v) }
+
+    /** Write a remote ui-prefs entry into the local store without
+     *  bouncing it back out as a push. */
+    private inline fun applyLocal(block: () -> Unit) {
+        applyingRemote = true
+        try {
+            block()
+        } finally {
+            applyingRemote = false
+        }
+    }
+
+    /** Apply one ui-prefs entry that lives in [io.nisfeb.talon.ui.UiSettings]. */
+    private fun applyUiPref(entry: String, value: JsonElement?) {
+        val settings = ui ?: return
+        val obj = value as? JsonObject ?: return
+        applyLocal {
+            when (entry) {
+                ENTRY_GROUP_CHANNEL_ORDER -> obj["value"].asStr()?.let { name ->
+                    runCatching { io.nisfeb.talon.ui.GroupChannelOrder.valueOf(name) }
+                        .onSuccess { settings.setGroupChannelOrder(it) }
+                }
+                ENTRY_FOLDER_ITEM_ORDER -> obj["value"].asStr()?.let { name ->
+                    runCatching { io.nisfeb.talon.ui.FolderItemOrder.valueOf(name) }
+                        .onSuccess { settings.setFolderItemOrder(it) }
+                }
+                ENTRY_SMART_SEARCH ->
+                    obj["enabled"].asBool()?.let { settings.setSmartSearchPreferred(it) }
+                ENTRY_POWER_FEATURES ->
+                    obj["enabled"].asBool()?.let { settings.setPowerFeaturesEnabled(it) }
+                ENTRY_HIDE_COMPOSER_BUTTONS ->
+                    obj["enabled"].asBool()?.let { settings.setHideComposerButtons(it) }
+                ENTRY_RAIL_ITEM_ORDER -> {
+                    val names = (obj["order"] as? JsonArray)?.mapNotNull { it.asStr() }
+                        ?: return@applyLocal
+                    val items = names.mapNotNull { n ->
+                        runCatching { io.nisfeb.talon.ui.RailItem.valueOf(n) }.getOrNull()
+                    }
+                    if (items.isNotEmpty()) settings.setRailItemOrder(items)
+                }
+                ENTRY_ACCENT -> settings.setAccentSettings(
+                    io.nisfeb.talon.ui.AccentSettings(
+                        enabled = obj["enabled"].asBool(),
+                        mode = obj["mode"].asStr()
+                            ?.let { m ->
+                                runCatching { io.nisfeb.talon.ui.AccentMode.valueOf(m) }.getOrNull()
+                            }
+                            ?: io.nisfeb.talon.ui.AccentMode.Profile,
+                        customHex = obj["customHex"].asStr(),
+                    ),
+                )
+            }
+        }
     }
 
     /**
@@ -217,6 +352,11 @@ class SettingsSyncImpl(
             // gates the cloud-key fields on local syncEnabled so the
             // API key only travels with explicit consent.
             applyBucket(BUCKET_AI_SETTINGS, deskMap[BUCKET_AI_SETTINGS] as? JsonObject)
+            // UI preferences that follow the user. Bootstrap skipped this
+            // bucket entirely before, so a preference only ever reached a
+            // device that happened to be connected when it changed — a
+            // fresh login silently kept its local defaults.
+            applyBucket(BUCKET_UI_PREFS, deskMap[BUCKET_UI_PREFS] as? JsonObject)
             // Watchwords are unconditionally applied (mirrors live
             // subscribe semantics) so a fresh login hydrates the
             // ship's existing terms — without this, push works but
@@ -375,7 +515,9 @@ class SettingsSyncImpl(
     }
 
     /** Apply a %settings SSE fact to the right bucket. */
-    override suspend fun applySettingsEvent(payload: JsonObject) {
+    override suspend fun applySettingsEvent(wrapper: JsonObject) {
+        // %settings wraps the action; tolerate both shapes.
+        val payload = (wrapper["settings-event"] as? JsonObject) ?: wrapper
         // Expected shapes (defensively handled):
         //   {put-entry: {desk, bucket-key, entry-key, value}}
         //   {del-entry: {desk, bucket-key, entry-key}}
@@ -1216,9 +1358,24 @@ class SettingsSyncImpl(
                 bumpStatusesSeen(ms)
             }
             BUCKET_UI_PREFS -> {
-                val v = entries?.get(ENTRY_MNEMONYM_NAMES) ?: return
-                (unwrap(v) as? JsonObject)?.get("enabled").asBool()?.let {
-                    io.nisfeb.talon.ui.MnemonymNames.set(it)
+                entries?.get(ENTRY_MNEMONYM_NAMES)?.let { v ->
+                    (unwrap(v) as? JsonObject)?.get("enabled").asBool()?.let {
+                        io.nisfeb.talon.ui.MnemonymNames.set(it)
+                    }
+                }
+                entries?.get(ENTRY_ALWAYS_PATP)?.let { v ->
+                    (unwrap(v) as? JsonObject)?.get("enabled").asBool()?.let {
+                        io.nisfeb.talon.ui.ShipNames.setAlwaysPatp(it)
+                    }
+                }
+                if (ui == null) {
+                    pendingUiPrefs = entries
+                } else {
+                    entries?.forEach { (key, v) ->
+                        if (key != ENTRY_MNEMONYM_NAMES && key != ENTRY_ALWAYS_PATP) {
+                            applyUiPref(key, unwrap(v))
+                        }
+                    }
                 }
             }
             BUCKET_ASSISTANT_CONVERSATIONS -> {
@@ -1395,9 +1552,14 @@ class SettingsSyncImpl(
                 bumpStatusesSeen(ms)
             }
             BUCKET_UI_PREFS -> {
-                if (entry != ENTRY_MNEMONYM_NAMES) return
-                (unwrapped as? JsonObject)?.get("enabled").asBool()?.let {
-                    io.nisfeb.talon.ui.MnemonymNames.set(it)
+                when (entry) {
+                    ENTRY_MNEMONYM_NAMES ->
+                        (unwrapped as? JsonObject)?.get("enabled").asBool()
+                            ?.let { io.nisfeb.talon.ui.MnemonymNames.set(it) }
+                    ENTRY_ALWAYS_PATP ->
+                        (unwrapped as? JsonObject)?.get("enabled").asBool()
+                            ?.let { io.nisfeb.talon.ui.ShipNames.setAlwaysPatp(it) }
+                    else -> applyUiPref(entry, unwrapped)
                 }
             }
             // Live put-entry facts must enforce the same caps applyBucket
@@ -1421,8 +1583,11 @@ class SettingsSyncImpl(
     internal suspend fun removeEntry(bucket: String, entry: String) {
         when (bucket) {
             BUCKET_UI_PREFS -> {
-                // Entry deleted on the ship → back to the default (on).
-                if (entry == ENTRY_MNEMONYM_NAMES) io.nisfeb.talon.ui.MnemonymNames.set(true)
+                // Entry deleted on the ship → back to that entry's default.
+                when (entry) {
+                    ENTRY_MNEMONYM_NAMES -> io.nisfeb.talon.ui.MnemonymNames.set(true)
+                    ENTRY_ALWAYS_PATP -> io.nisfeb.talon.ui.ShipNames.setAlwaysPatp(false)
+                }
             }
             BUCKET_GROUP_ORDERS -> db.groupOrders().remove(entry)
             BUCKET_FOLDERS -> {
@@ -1618,7 +1783,10 @@ class SettingsSyncImpl(
 
     internal suspend fun clearBucketLocally(bucket: String) {
         when (bucket) {
-            BUCKET_UI_PREFS -> io.nisfeb.talon.ui.MnemonymNames.set(true)
+            BUCKET_UI_PREFS -> {
+                io.nisfeb.talon.ui.MnemonymNames.set(true)
+                io.nisfeb.talon.ui.ShipNames.setAlwaysPatp(false)
+            }
             BUCKET_GROUP_ORDERS -> db.groupOrders().replaceAll(emptyList())
             BUCKET_FOLDERS -> db.folders().replaceAll(emptyList())
             BUCKET_FOLDER_MEMBERS -> db.folders().replaceAllMembers(emptyList())

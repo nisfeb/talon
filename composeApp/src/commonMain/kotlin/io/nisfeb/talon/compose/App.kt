@@ -488,6 +488,7 @@ fun App(
         // JSON file / SharedPreferences regardless of which db is
         // passed; the impls just don't read those fields from db.
         val uiSettings = remember { createUiSettings(db) }
+
         // tryRestore() pulls the saved ship's cookie + baseUrl into
         // this fresh UrbitSession on first composition. After login,
         // sessionStore has the new entry; the next re-key picks it up.
@@ -514,6 +515,13 @@ fun App(
                 notificationHealth = notificationHealth,
             )
         }
+        // Let user-shaped preferences ride %settings to this user's
+        // other devices. Screen-shaped ones stay local by design.
+        DisposableEffect(settingsSync, uiSettings) {
+            settingsSync?.attachUiSettings(uiSettings, repo.pushScope)
+            onDispose { }
+        }
+
         // Trunkline signaling — one controller per logged-in ship
         // composition; the key() re-key tears it down on ship switch.
         // Gated on a live session so the login screen doesn't spin a
@@ -1274,6 +1282,11 @@ fun App(
                             onMnemonymNamesChanged = { on ->
                                 repo.pushScope.launch {
                                     runCatching { settingsSync?.pushMnemonymNames(on) }
+                                }
+                            },
+                            onAlwaysPatpChanged = { on ->
+                                repo.pushScope.launch {
+                                    runCatching { settingsSync?.pushAlwaysPatp(on) }
                                 }
                             },
                         )

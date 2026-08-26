@@ -2773,14 +2773,20 @@ class TlonChatRepo(
             return
         }
 
-        // %settings events — wrapped as {put-entry|del-entry|put-bucket|…}.
+        // %settings events. The agent emits them wrapped —
+        // {"settings-event": {"put-entry": …}} — but older builds sent
+        // the action bare, so accept both. Matching only the bare shape
+        // is why live settings changes never reached a second device:
+        // the fact arrived and fell through to the "unknown" branch.
+        val settingsAction =
+            (payload["settings-event"] as? JsonObject) ?: payload
         if (
-            payload.containsKey("put-entry") ||
-            payload.containsKey("del-entry") ||
-            payload.containsKey("put-bucket") ||
-            payload.containsKey("del-bucket")
+            settingsAction.containsKey("put-entry") ||
+            settingsAction.containsKey("del-entry") ||
+            settingsAction.containsKey("put-bucket") ||
+            settingsAction.containsKey("del-bucket")
         ) {
-            settingsSync?.applySettingsEvent(payload)
+            settingsSync?.applySettingsEvent(settingsAction)
             return
         }
 

@@ -235,6 +235,9 @@ class TalonApplication : Application() {
             initialDb = db,
             scope = appScope,
         )
+        // Let user-shaped preferences ride %settings to this user's
+        // other devices; screen-shaped ones stay local by design.
+        runCatching { settingsSync.attachUiSettings(uiSettings, appScope) }
         _activeShip.value = initialShip
 
         // Phase-2 backstop: WorkManager fires `catchUp` every ~15

@@ -127,6 +127,7 @@ fun SettingsScreen(
      *  follows the user across devices. Local apply + persist happen
      *  regardless via [io.nisfeb.talon.ui.MnemonymNames.set]. */
     onMnemonymNamesChanged: (Boolean) -> Unit = {},
+    onAlwaysPatpChanged: (Boolean) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val aiState by aiSettings.state.collectAsState()
@@ -223,7 +224,10 @@ fun SettingsScreen(
                     "everywhere — rows, mentions and quoted posts all " +
                     "show the raw Urbit name.",
                 enabled = alwaysPatp,
-                onChange = { on -> io.nisfeb.talon.ui.ShipNames.setAlwaysPatp(on) },
+                onChange = { on ->
+                    io.nisfeb.talon.ui.ShipNames.setAlwaysPatp(on)
+                    onAlwaysPatpChanged(on)
+                },
             )
             val mnemonymNames by io.nisfeb.talon.ui.MnemonymNames.enabled.collectAsState()
             FeatureToggleRow(

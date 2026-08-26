@@ -21,6 +21,17 @@ private val ZERO_STATUSES_SEEN: StateFlow<Long> = MutableStateFlow(0L).asStateFl
  */
 interface SettingsSync : io.nisfeb.talon.ai.LoopWriteCoordinator {
     fun attach(channel: UrbitChannel)
+
+    /**
+     * Hand over the device's UI settings store so preferences that
+     * belong to the *user* (naming, ordering, accent) can ride
+     * %settings to their other devices. Screen-shaped settings — font
+     * scale, density, pane split, active tab — deliberately stay local:
+     * a phone's text size has no business resizing a desktop.
+     *
+     * Optional: hosts that don't call it simply don't sync those.
+     */
+    fun attachUiSettings(settings: io.nisfeb.talon.ui.UiSettings, scope: kotlinx.coroutines.CoroutineScope) {}
     suspend fun bootstrap()
     suspend fun applySettingsEvent(payload: JsonObject)
 
@@ -46,6 +57,10 @@ interface SettingsSync : io.nisfeb.talon.ai.LoopWriteCoordinator {
     /** Push the mnemonym-naming preference (ui-prefs bucket) so every
      *  device shows the same fallback ship names. Default no-op. */
     suspend fun pushMnemonymNames(enabled: Boolean) {}
+
+    /** Push the always-show-@p preference (ui-prefs bucket). Naming is
+     *  one decision to the user, so both halves travel together. */
+    suspend fun pushAlwaysPatp(enabled: Boolean) {}
 
     // ───────── assistant history sync ─────────
     /**
