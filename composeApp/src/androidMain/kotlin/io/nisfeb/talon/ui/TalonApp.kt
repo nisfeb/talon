@@ -179,6 +179,7 @@ fun TalonApp(
                 },
             ).also { line ->
                 callController.onTicket = { line.join(it, loggedInShip ?: "") }
+                callController.onDenied = { name, why -> line.showRefused(name, why) }
             }
         } else {
             null
@@ -1732,7 +1733,9 @@ private fun rememberCallEngineProvider(): io.nisfeb.talon.call.CallEngineProvide
                 io.nisfeb.talon.call.AndroidCallEngine(context.applicationContext, ice)
             } else {
                 launcher.launch(android.Manifest.permission.RECORD_AUDIO)
-                io.nisfeb.talon.call.NoopCallEngine
+                io.nisfeb.talon.call.UnavailableCallEngine(
+                    "Microphone access needed — grant it, then call again",
+                )
             }
         }
     }

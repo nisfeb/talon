@@ -103,8 +103,10 @@ class CallController(
                         when (val up = TrunkWire.parseUpdate(fact)) {
                             is TrunkUpdate.Recv -> onSignal(up)
                             is TrunkUpdate.Ticket -> onTicket?.invoke(up.ticket)
-                            is TrunkUpdate.Denied ->
+                            is TrunkUpdate.Denied -> {
                                 Log.w(TAG, "room " + up.name + " denied: " + up.why)
+                                onDenied?.invoke(up.name, up.why)
+                            }
                             null -> {}
                         }
                     }
@@ -140,7 +142,7 @@ class CallController(
                 .onFailure {
                     Log.e(TAG, "offer failed", it)
                     poke(target, TrunkSig.Hangup(id))
-                    endLocal("media error")
+                    endLocal(it.message ?: "media error")
                 }
         }
     }
@@ -168,7 +170,7 @@ class CallController(
                 .onFailure {
                     Log.e(TAG, "answer failed", it)
                     poke(from, TrunkSig.Hangup(id))
-                    endLocal("media error")
+                    endLocal(it.message ?: "media error")
                 }
         }
     }
@@ -204,6 +206,10 @@ class CallController(
 
     /** Set by the party-line surface: a host granted us a room ticket. */
     var onTicket: ((TrunkTicket) -> Unit)? = null
+
+    /** A host refused us a line. Surfaced so tapping the button always
+     *  says something — silence reads as a broken button. */
+    var onDenied: ((name: String, why: String) -> Unit)? = null
 
     /** Host a party line: [members] are the ships allowed to join.
      *  The agent announces it to each of them. */

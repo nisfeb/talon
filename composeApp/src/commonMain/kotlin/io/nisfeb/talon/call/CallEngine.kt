@@ -49,18 +49,24 @@ fun interface CallEngineProvider {
     fun create(iceServers: List<IceServer>): CallEngine
 }
 
-/** Fallback for platforms without a media stack — the UI is gated by
- *  [io.nisfeb.talon.ui.isCallsSupported], so this only exists to keep
- *  wiring total. */
-object NoopCallEngine : CallEngine {
+/**
+ * Fallback for platforms without a media stack — the UI is gated by
+ * [io.nisfeb.talon.ui.isCallsSupported], so this mostly exists to keep
+ * wiring total. [why] surfaces to the user as the reason the call
+ * ended, so a platform that stands one up in place of a real engine
+ * (Android, while the mic permission is still unanswered) should say
+ * something the user can act on.
+ */
+class UnavailableCallEngine(private val why: String) : CallEngine {
     override val state: StateFlow<MediaState> = MutableStateFlow(MediaState.Failed)
-    override suspend fun createOffer(): SessionDesc = error("calls unsupported")
-    override suspend fun acceptOffer(remote: SessionDesc): SessionDesc =
-        error("calls unsupported")
-    override suspend fun setAnswer(remote: SessionDesc) = error("calls unsupported")
+    override suspend fun createOffer(): SessionDesc = error(why)
+    override suspend fun acceptOffer(remote: SessionDesc): SessionDesc = error(why)
+    override suspend fun setAnswer(remote: SessionDesc) = error(why)
     override fun setMuted(muted: Boolean) {}
     override fun close() {}
 }
+
+val NoopCallEngine: CallEngine = UnavailableCallEngine("calls aren't available here")
 
 /** Extract the DTLS fingerprint from an SDP blob (`a=fingerprint:` line).
  *  Kept here — pure string work — so every platform pins identically. */

@@ -87,12 +87,19 @@ class PartyLine(
 
     /** Join the room named by [ticket]. Idempotent while connected. */
     fun join(ticket: TrunkTicket, ourShip: String) {
+        if (_state.value is PartyState.Failed) _state.value = PartyState.Idle
         if (_state.value !is PartyState.Idle) return
         room = ticket.name
         ourId = ourShip
         upId = "up-$ourShip-${ticket.name}"
         _state.value = PartyState.Connecting(ticket.name)
         pump = scope.launch { run(ticket, ourShip) }
+    }
+
+    /** Show why a host refused us, so the strip explains itself. */
+    fun showRefused(room: String, why: String) {
+        if (_state.value is PartyState.Live) return
+        _state.value = PartyState.Failed(room, why)
     }
 
     fun leave() {

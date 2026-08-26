@@ -533,7 +533,10 @@ fun App(
         val partyLine = remember(callController, peerLinkFactory) {
             if (callController != null && peerLinkFactory != null) {
                 io.nisfeb.talon.call.PartyLine(http, peerLinkFactory)
-                    .also { line -> callController.onTicket = { line.join(it, shipKey) } }
+                    .also { line ->
+                        callController.onTicket = { line.join(it, shipKey) }
+                        callController.onDenied = { name, why -> line.showRefused(name, why) }
+                    }
             } else {
                 null
             }
