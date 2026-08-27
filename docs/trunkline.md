@@ -230,7 +230,12 @@ TRUNK_E2E=1 TRUNK_SFU_KEY=<key> TRUNK_SFU=http://<lan-ip>:8444 \
 - Offer arrives, never live → Tier 0 insufficiency on this network;
   that's a *finding*, not a bug — note the NAT shapes involved.
 - `unknown`/`unreachable` reject → the peer has no `%trunk` running.
-- **"busy" on every call** → the far device is stuck in a ringing or
+- **"busy" on every call** → first: is another client logged into the
+  same ship? A ship is one identity across many devices and they all
+  receive the ring. A busy device used to reply "busy" for the whole
+  ship, cancelling a call another device was ringing for — a test
+  harness left connected did exactly this for a day. Busy devices now
+  stay silent. Then: the far device is stuck in a ringing or
   active state. It used to stick forever; a ring now expires after 45s.
   The state is in memory, so a device wedged by an older build stays
   wedged until the process restarts.

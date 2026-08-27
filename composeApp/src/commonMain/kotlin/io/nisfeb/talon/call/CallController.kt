@@ -262,11 +262,17 @@ class CallController(
         when (sig) {
             is TrunkSig.Ring -> {
                 if (!isFree) {
-                    // Name the state: every "it just says busy" report
-                    // so far has been a different stuck state, and the
-                    // reason is invisible from the caller's side.
-                    Log.w(TAG, "refusing ring from ${'$'}{recv.from} as busy: ${'$'}{_state.value}")
-                    poke(recv.from, TrunkSig.Reject(sig.id, "busy"))
+                    // Stay silent rather than replying busy.
+                    //
+                    // A ship is one identity across many devices, and
+                    // every one of them gets this ring — that is the
+                    // point. Rejecting would speak for all of them: a
+                    // phone mid-call would cancel a ring the desktop
+                    // was about to answer, which is how "it just says
+                    // busy" happened even when a device was visibly
+                    // ringing. Whoever is free answers; if nobody does,
+                    // the caller's own ring watchdog ends it.
+                    Log.i(TAG, "ignoring ring from " + recv.from + "; this device is " + _state.value)
                     return
                 }
                 callId = sig.id
