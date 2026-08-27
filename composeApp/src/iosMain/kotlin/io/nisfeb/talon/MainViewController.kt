@@ -12,6 +12,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.ComposeUIViewController
 import io.nisfeb.talon.ui.IosBackDispatcher
 import io.nisfeb.talon.ai.createAiSettings
+import io.nisfeb.talon.call.IosCallEngineProvider
+import io.nisfeb.talon.call.IosPeerLinkFactory
+import io.nisfeb.talon.call.NativeRtcFactory
 import io.nisfeb.talon.compose.App
 import io.nisfeb.talon.data.createAppDatabase
 import io.nisfeb.talon.ai.NoopDailyDigestSettings
@@ -34,8 +37,8 @@ import platform.UIKit.UIViewController
 
 /**
  * iOS entry point. The Xcode host (iosApp) calls
- * `MainViewControllerKt.MainViewController()` and embeds the returned
- * controller. Wires the six required App() dependencies with iOS-backed
+ * `MainViewControllerKt.MainViewController(rtc:)` and embeds the
+ * returned controller. Wires the six required App() dependencies with iOS-backed
  * impls; the rest take their commonMain defaults.
  *
  * Persistence today: session, assistant settings, and theme survive
@@ -44,7 +47,7 @@ import platform.UIKit.UIViewController
  * projection). Update install is a no-op — App Store owns updates.
  * On-device AI / digest / loops are gated off in Capabilities.ios.kt.
  */
-fun MainViewController(): UIViewController {
+fun MainViewController(rtc: NativeRtcFactory?): UIViewController {
     // Kotlin/Native terminates on any exception that escapes to a foreign
     // (GCD) frame — Apple review hit that as an undiagnosable SIGABRT
     // crash-loop, and the .ips logs carry no Kotlin frames. Write the
@@ -109,6 +112,12 @@ fun MainViewController(): UIViewController {
                 )
             },
             createUiSettings = { db -> createUiSettings(db, scope) },
+            // Media comes from the Xcode target, where WebRTC lives as
+            // a Swift Package. Null keeps calls dark — App() gates the
+            // controller on it, so a host that hasn't wired the engine
+            // shows no call button rather than a broken one.
+            callEngineProvider = rtc?.let { IosCallEngineProvider(it) },
+            peerLinkFactory = rtc?.let { IosPeerLinkFactory(it) },
             dailyDigestSettings = dailyDigestSettings,
         )
         // Back gesture. A Compose view controller gets none of UIKit's

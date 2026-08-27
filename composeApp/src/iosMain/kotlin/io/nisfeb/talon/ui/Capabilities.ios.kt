@@ -24,8 +24,11 @@ actual fun isOnDeviceAiFeatureSupported(
     @Suppress("UNUSED_PARAMETER") feature: io.nisfeb.talon.ai.AiSettings.Feature,
 ): Boolean = false
 
-// Trunkline calls: WebRTC.xcframework engine pending (design roadmap v2).
-actual val isCallsSupported: Boolean = false
+// Trunkline calls: WebRTC lives in the Xcode target as a Swift Package,
+// bridged through NativeRtcFactory. The flag says the platform is
+// capable; App() still gates the controller on the host actually
+// passing a factory, so a build without it shows no call UI.
+actual val isCallsSupported: Boolean = true
 
 // Supplied by MainViewController's edge strip -> IosBackDispatcher.
 actual val isEdgeSwipeBackSupported: Boolean = true
