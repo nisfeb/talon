@@ -45,6 +45,11 @@ sealed interface CallUiState {
 class CallController(
     private val session: UrbitSession,
     private val engineProvider: CallEngineProvider,
+    /** How long a phone rings before giving up. Without this a caller
+     *  that vanishes mid-ring (app killed, crash, network drop) leaves
+     *  the callee ringing internally forever — and a device that thinks
+     *  it is ringing answers "busy" to every call after it. */
+    private val ringTimeoutMs: Long = 45_000L,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + ioDispatcher + backgroundExceptionHandler)
     private val _state = MutableStateFlow<CallUiState>(CallUiState.None)
@@ -74,6 +79,9 @@ class CallController(
 
     // Bumped per call so a stale auto-clear can't wipe a newer one.
     private var endedToken = 0
+    // Same idea for the ring watchdog: answering, ending, or starting
+    // another call must disarm the one already in flight.
+    private var ringToken = 0
     private var tPlaced = 0L
     private var tOfferSent = 0L
 
@@ -137,6 +145,7 @@ class CallController(
             peer = target
             tPlaced = nowMs()
             _state.value = CallUiState.Outgoing(target)
+            armRingWatchdog()
             poke(target, TrunkSig.Ring(id))
             // Gather while the far end rings (design D3: the slow parts overlap).
             val eng = engineProvider.create(iceServers)
@@ -158,6 +167,7 @@ class CallController(
 
     fun accept() {
         scope.launch {
+            ringToken++ // answered: stop the give-up timer
             val id = callId ?: return@launch
             val from = peer ?: return@launch
             _state.value = CallUiState.Active(from, MediaState.Connecting, muted = false)
@@ -255,6 +265,7 @@ class CallController(
                 peer = recv.from
                 pendingOffer = CompletableDeferred()
                 _state.value = CallUiState.Incoming(recv.from)
+                armRingWatchdog()
             }
             is TrunkSig.Offer -> {
                 if (sig.id != callId) return
@@ -327,6 +338,7 @@ class CallController(
     }
 
     private fun endLocal(reason: String) {
+        ringToken++
         mediaWatch?.cancel()
         mediaWatch = null
         engine?.close()
@@ -346,6 +358,31 @@ class CallController(
             delay(ENDED_NOTICE_MS)
             if (endedToken == token && _state.value is CallUiState.Ended) {
                 _state.value = CallUiState.None
+            }
+        }
+    }
+
+    /** Give up on a ring nobody answered, on either side. */
+    private fun armRingWatchdog() {
+        val token = ++ringToken
+        val id = callId
+        val target = peer
+        scope.launch {
+            delay(ringTimeoutMs)
+            if (ringToken != token) return@launch
+            when (_state.value) {
+                is CallUiState.Outgoing -> {
+                    // Tell the far end to stop ringing before we forget
+                    // the call id.
+                    if (id != null && target != null) poke(target, TrunkSig.Hangup(id))
+                    Log.i(TAG, "no answer after ${ringTimeoutMs}ms")
+                    endLocal("no answer")
+                }
+                is CallUiState.Incoming -> {
+                    Log.i(TAG, "missed call from ${'$'}target")
+                    endLocal("missed")
+                }
+                else -> {}
             }
         }
     }
