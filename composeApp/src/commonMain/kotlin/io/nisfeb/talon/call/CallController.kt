@@ -22,6 +22,20 @@ import kotlin.uuid.Uuid
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonObject
 
+/**
+ * Whether to offer installing %trunk, and how that is going.
+ *
+ * Calls need the desk on both ships and it isn't part of %base, so a
+ * user who has never installed it would otherwise tap the call button
+ * and get nothing at all.
+ */
+sealed interface TrunkInstall {
+    data object Hidden : TrunkInstall
+    data object Offered : TrunkInstall
+    data object Installing : TrunkInstall
+    data class Failed(val why: String) : TrunkInstall
+}
+
 /** What the call UI renders. One active call at a time (v0). */
 sealed interface CallUiState {
     data object None : CallUiState
@@ -69,6 +83,12 @@ class CallController(
     private val _policy = MutableStateFlow<CallPolicy?>(null)
     val state: StateFlow<CallUiState> = _state.asStateFlow()
     val policy: StateFlow<CallPolicy?> = _policy.asStateFlow()
+
+    private val _install = MutableStateFlow<TrunkInstall>(TrunkInstall.Hidden)
+    val install: StateFlow<TrunkInstall> = _install.asStateFlow()
+
+    /** No %trunk (or one too old to answer /x/policy) — see [_policy]. */
+    private val trunkMissing: Boolean get() = _policy.value == null
 
     private var channel: UrbitChannel? = null
     private var loop: Job? = null
@@ -160,6 +180,7 @@ class CallController(
 
     fun placeCall(target: String) {
         scope.launch {
+            if (offerInstallIfMissing()) return@launch
             if (!isFree) return@launch
             val id = Uuid.random().toString()
             callId = id
@@ -265,6 +286,74 @@ class CallController(
     }
 
     /**
+     * True when we asked the user to install %trunk instead of doing
+     * what they wanted. Checked before placing a call or joining a
+     * line — the two things that need the desk.
+     */
+    private fun offerInstallIfMissing(): Boolean {
+        if (!trunkMissing) return false
+        if (_install.value == TrunkInstall.Hidden) _install.value = TrunkInstall.Offered
+        return true
+    }
+
+    fun dismissInstall() { _install.value = TrunkInstall.Hidden }
+
+    /**
+     * Install %trunk from the publisher. The poke returns as soon as
+     * %kiln accepts it, but the desk arrives over ames afterwards, so
+     * success means "the agent answers a scry", not "the poke acked".
+     */
+    fun installTrunk(publisher: String = TrunkWire.PUBLISHER) {
+        if (_install.value == TrunkInstall.Installing) return
+        _install.value = TrunkInstall.Installing
+        scope.launch {
+            val ch = channel
+            if (ch == null) {
+                _install.value = TrunkInstall.Failed("not connected to your ship")
+                return@launch
+            }
+            val (app, mark, body) = TrunkWire.installTrunkPoke(publisher)
+            val poked = runCatching { ch.poke(app, mark, body) }
+                .onFailure { Log.e(TAG, "kiln-install poke failed", it) }
+                .isSuccess
+            if (!poked) {
+                _install.value = TrunkInstall.Failed("your ship refused the install")
+                return@launch
+            }
+            // Poll rather than guess a duration: a desk can take a
+            // while to come over ames, and there is no fact to await.
+            val started = nowMs()
+            val deadline = started + INSTALL_TIMEOUT_MS
+            var revived = false
+            while (nowMs() < deadline) {
+                delay(3_000)
+                // A ship that previously removed %trunk keeps the desk
+                // suspended, and installing re-syncs it without
+                // starting it. Nudge it once, halfway in, rather than
+                // waiting out the whole timeout for nothing.
+                if (!revived && nowMs() - started > INSTALL_TIMEOUT_MS / 2) {
+                    revived = true
+                    val (rApp, rMark, rBody) = TrunkWire.reviveTrunkPoke()
+                    runCatching { ch.poke(rApp, rMark, rBody) }
+                        .onFailure { Log.i(TAG, "revive poke declined (usually fine): " + it.message) }
+                }
+                val got = runCatching {
+                    TrunkWire.parsePolicy(ch.scry(TrunkWire.AGENT, "/policy"))
+                }.getOrNull()
+                if (got != null) {
+                    _policy.value = got
+                    _install.value = TrunkInstall.Hidden
+                    Log.i(TAG, "%trunk installed from " + publisher)
+                    return@launch
+                }
+            }
+            _install.value = TrunkInstall.Failed(
+                "the desk did not arrive; check your ship can reach " + publisher,
+            )
+        }
+    }
+
+    /**
      * Change who may ring us. Each edit is a poke; the agent echoes the
      * whole policy back on /calls, so [policy] updates from the fact
      * rather than optimistically here — that keeps every device on the
@@ -287,6 +376,7 @@ class CallController(
 
     /** Ask [host] to let us onto its party line. */
     suspend fun joinRoom(host: String, name: String) {
+        if (offerInstallIfMissing()) return
         val ch = channel ?: return
         runCatching {
             ch.poke(
@@ -469,6 +559,9 @@ class CallController(
 
     companion object {
         private const val TAG = "Trunk"
+
+        /** How long to wait for an installed desk to start answering. */
+        private const val INSTALL_TIMEOUT_MS = 120_000L
 
         /** How long a caller rings before giving up. Public because
          *  Android's ring notification has to expire no later than

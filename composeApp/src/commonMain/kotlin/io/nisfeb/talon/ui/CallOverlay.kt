@@ -15,6 +15,7 @@ import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.CallEnd
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -37,6 +38,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Popup
 import io.nisfeb.talon.call.CallController
 import io.nisfeb.talon.call.CallUiState
+import io.nisfeb.talon.call.TrunkInstall
+import io.nisfeb.talon.call.TrunkWire
 import io.nisfeb.talon.call.MediaState
 import io.nisfeb.talon.util.nowMs
 import kotlinx.coroutines.delay
@@ -49,6 +52,8 @@ import kotlinx.coroutines.delay
  */
 @Composable
 fun CallOverlay(controller: CallController, modifier: Modifier = Modifier) {
+    TrunkInstallPrompt(controller)
+
     val state by controller.state.collectAsState()
     if (state is CallUiState.None) return
 
@@ -155,6 +160,65 @@ fun CallOverlay(controller: CallController, modifier: Modifier = Modifier) {
 
         CallUiState.None -> {}
     }
+}
+
+/**
+ * Offer to fetch %trunk when the ship hasn't got it.
+ *
+ * Says who the desk comes from, because accepting means the ship
+ * installs and then keeps auto-updating software published by another
+ * ship. That is the ordinary Urbit distribution model, but it is the
+ * user's call to make knowingly rather than a silent side effect of
+ * tapping a phone icon.
+ */
+@Composable
+private fun TrunkInstallPrompt(controller: CallController) {
+    val install by controller.install.collectAsState()
+    if (install is TrunkInstall.Hidden) return
+
+    val installing = install is TrunkInstall.Installing
+    AlertDialog(
+        onDismissRequest = { if (!installing) controller.dismissInstall() },
+        title = { Text("Calling needs one more app") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    "Calls run through %trunk, a small app on your ship. " +
+                        "It isn't installed yet.",
+                )
+                Text(
+                    "Installing it fetches %trunk from ${TrunkWire.PUBLISHER}, " +
+                        "which will also supply its updates.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                when (val s = install) {
+                    is TrunkInstall.Installing -> Text(
+                        "Installing… this can take a minute.",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    is TrunkInstall.Failed -> Text(
+                        s.why,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                    else -> {}
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { controller.installTrunk() },
+                enabled = !installing,
+            ) { Text(if (install is TrunkInstall.Failed) "Try again" else "Install") }
+        },
+        dismissButton = {
+            TextButton(
+                onClick = { controller.dismissInstall() },
+                enabled = !installing,
+            ) { Text("Not now") }
+        },
+    )
 }
 
 @Composable

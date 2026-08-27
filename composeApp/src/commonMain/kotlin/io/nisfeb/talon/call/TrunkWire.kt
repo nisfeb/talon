@@ -83,6 +83,34 @@ object TrunkWire {
     const val ACTION_MARK = "trunk-action"
     const val CALLS_PATH = "/calls"
 
+    /**
+     * Where %trunk comes from when a ship doesn't have it. Calls need
+     * the desk on BOTH ships, and it isn't part of %base, so the app
+     * offers to fetch it rather than leaving the call button dead.
+     */
+    const val PUBLISHER = "~ricsul-bilwyt"
+    const val DESK = "trunk"
+    private const val KILN_AGENT = "hood"
+    private const val KILN_INSTALL_MARK = "kiln-install"
+    private const val KILN_REVIVE_MARK = "kiln-revive"
+
+    /**
+     * Ask our own %hood to install [DESK] from [PUBLISHER]. %kiln's
+     * install mark takes json, so this needs no dojo — it is the same
+     * action as `|install ~ricsul-bilwyt %trunk`.
+     */
+    fun installTrunkPoke(
+        publisher: String = PUBLISHER,
+    ): Triple<String, String, JsonElement> = Triple(
+        KILN_AGENT,
+        KILN_INSTALL_MARK,
+        buildJsonObject {
+            put("local", DESK)
+            put("ship", publisher)
+            put("desk", DESK)
+        },
+    )
+
     /** [%send ship sig] poke payload for our own %trunk. */
     fun sendAction(peer: String, sig: TrunkSig): JsonElement = buildJsonObject {
         putJsonObject("send") {
@@ -140,6 +168,15 @@ object TrunkWire {
     fun setSfuAction(base: String, group: String, key: String): JsonElement = buildJsonObject {
         putJsonObject("set-sfu") { put("base", base); put("group", group); put("key", key) }
     }
+
+    /**
+     * Resume a suspended desk — `|revive %trunk`. A ship that once had
+     * %trunk and removed it keeps the desk suspended, and a fresh
+     * install re-syncs it without starting it, so the agent never
+     * answers. Harmless on a desk that isn't suspended.
+     */
+    fun reviveTrunkPoke(): Triple<String, String, JsonElement> =
+        Triple(KILN_AGENT, KILN_REVIVE_MARK, JsonPrimitive(DESK))
 
     /** Parse a /calls fact. Null for anything that isn't a trunk update. */
     fun parseUpdate(body: JsonElement): TrunkUpdate? {

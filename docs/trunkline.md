@@ -264,6 +264,44 @@ The notification is cancelled as soon as the controller leaves
   device depends on which UnifiedPush distributor the user runs and
   can only be measured on a real handset.
 
+## Offering the desk from the app
+
+`%trunk` isn't in `%base`, and calls need it on *both* ships, so a user
+who has never installed it would tap the call button and get nothing.
+Instead the app offers to fetch it.
+
+`%kiln`'s install mark takes json, so this needs no dojo — the client
+pokes its own `%hood`:
+
+```
+mark  kiln-install
+json  {"local":"trunk","ship":"~ricsul-bilwyt","desk":"trunk"}
+```
+
+which is exactly `|install ~ricsul-bilwyt %trunk`. `placeCall` and
+`joinRoom` check first: no readable policy means no usable desk, so
+they raise the offer instead of doing the thing.
+
+Two details that are not obvious:
+
+- **Success is a scry, not an ack.** The poke returns as soon as kiln
+  accepts it; the desk arrives over ames afterwards. The controller
+  polls `/x/policy` until the agent answers, up to two minutes.
+- **A ship that once removed `%trunk` keeps the desk suspended**, and
+  installing re-syncs it *without starting it* — the agent never
+  answers and the install looks like it silently failed. Halfway
+  through the wait the controller sends one `kiln-revive` (`|revive
+  %trunk`), which is harmless on a desk that isn't suspended.
+
+The dialog names the publisher, because accepting means the ship
+installs and then keeps auto-updating software published by another
+ship. That is the ordinary Urbit distribution model, but it should be
+a knowing choice rather than a side effect of tapping a phone icon.
+
+`TrunkInstallE2ETest` drives the whole path against real ships. It is
+destructive — it uninstalls the desk — so it needs `TRUNK_INSTALL=1`
+on top of `TRUNK_E2E=1`.
+
 ## Installing the desk
 
 Validated on two fake ships. `|rein` alone is not enough — gall reports
