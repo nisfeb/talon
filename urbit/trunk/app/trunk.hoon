@@ -74,7 +74,9 @@
 ++  ticket-ttl  ^~((div ~h6 ~s1))
 ::  how many party-line invitations we will remember from the network.
 ++  invite-cap  256
-::  the policy a ship starts with: ring for anyone, block nobody.
+::  The policy a ship starts with: ring for anyone, block nobody.
+::  Always assign this explicitly — never lean on the bunt of
+::  +$ policy, which forks to %allow and locks the ship down.
 ++  open-policy  `policy:trunk`[%open ~ ~]
 --
 %-  agent:dbug
@@ -87,7 +89,14 @@
     def   ~(. (default-agent this %.n) bowl)
     hc    ~(. +> bowl)
 ::
-++  on-init  `this
+::  A fresh install must start OPEN. Not decorative: `on-init` used to
+::  be a bare ``this`, which leaves the bunt of the state — and the
+::  bunt of ?(%open %allow) is %allow, the last case, not the first.
+::  Every newly installed ship therefore came up in allow-mode with an
+::  empty allow set and silently refused every caller, while the
+::  migration paths below set the policy explicitly and looked fine.
+::  Nothing caught it because every test ship was an upgrade.
+++  on-init  `this(pol.state open-policy)
 ++  on-save  !>(state)
 ++  on-load
   |=  old-vase=vase

@@ -186,8 +186,15 @@ confirm to a stranger that the ship is live and filtering, and would
 tell a blocked caller they were blocked; instead their ring watchdog
 times out, which is what an offline ship looks like.
 
-Upgrading never changes behaviour: an existing ship migrates to
-`%open` with empty lists, exactly how it behaved before.
+Both a fresh install and an upgrade start `%open` with empty lists, so
+neither installing nor upgrading ever silently starts refusing calls.
+
+Assign `open-policy` explicitly in `on-init` — never lean on the bunt
+of `+$ policy`. `?(%open %allow)` bunts to `%allow`, the *last* case,
+so a bare `` `this `` in `on-init` brought every newly installed ship
+up in allow-mode with an empty allow set: it refused every caller, and
+refusal is silent, so neither side saw an error. Every test ship was
+an upgrade, so nothing caught it until a real install did.
 
 Deliberately, the agent knows nothing about `%contacts`. Making
 "contacts only" work by scrying Tlon's agent would make shared
