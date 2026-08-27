@@ -32,6 +32,12 @@ jobs:
       - name: Run unit tests
         run: ./gradlew :composeApp:desktopTest --stacktrace
 
+      # The relay is on the call path now — a ring only wakes a sleeping
+      # device if this module works. Its suite had never run in CI, and
+      # a JDK-17 pin nobody had locally meant it never ran anywhere.
+      - name: Relay tests
+        run: ./gradlew :relay:test --stacktrace
+
       # Hook test runs the bash test harness that stages synthetic
       # content into throwaway git repos and asserts the pre-commit
       # rules (block / allow) match expectations. Catches both rule

@@ -5,8 +5,11 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.media.AudioAttributes
+import android.media.RingtoneManager
 import android.os.Build
 import androidx.core.app.NotificationCompat
+import androidx.core.app.Person
 import androidx.core.content.ContextCompat
 
 /**
@@ -24,6 +27,13 @@ object Notifications {
     const val CHANNEL_WATCHWORDS = "watchwords"
     const val CHANNEL_DAILY_DIGEST = "daily-digest"
     const val CHANNEL_LOOPS = "loops"
+    const val CHANNEL_CALLS = "calls"
+
+    const val EXTRA_ANSWER_FROM = "answer_from"
+    const val EXTRA_ANSWER_CALL_ID = "answer_call_id"
+
+    /** One notification id for calls: only one can ring at a time. */
+    private const val CALL_NOTIFICATION_ID = 0x0CA11
     const val EXTRA_OPEN_WHOM = "open_whom"
     const val EXTRA_SCROLL_TO_MESSAGE = "scroll_to_message"
     /** When the notification is for a reply, the parent post id —
@@ -49,6 +59,30 @@ object Notifications {
                     description = "New chat and channel messages"
                     enableLights(true)
                     enableVibration(true)
+                }
+            )
+        }
+        if (mgr.getNotificationChannel(CHANNEL_CALLS) == null) {
+            mgr.createNotificationChannel(
+                NotificationChannel(
+                    CHANNEL_CALLS,
+                    "Calls",
+                    NotificationManager.IMPORTANCE_HIGH,
+                ).apply {
+                    description = "Incoming calls"
+                    // The ringtone stream, not the notification one —
+                    // a call should sound like a call, and should keep
+                    // ringing rather than blip once.
+                    setSound(
+                        RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE),
+                        AudioAttributes.Builder()
+                            .setUsage(AudioAttributes.USAGE_NOTIFICATION_RINGTONE)
+                            .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                            .build(),
+                    )
+                    enableLights(true)
+                    enableVibration(true)
+                    vibrationPattern = longArrayOf(0, 800, 800, 800, 800)
                 }
             )
         }
@@ -101,6 +135,76 @@ object Notifications {
                 }
             )
         }
+    }
+
+    /**
+     * Someone is ringing this ship.
+     *
+     * A full-screen intent so it takes over a locked screen the way a
+     * phone call does, and CallStyle where the platform has it (31+)
+     * so it renders as a call rather than a chat notification.
+     *
+     * Answering only *opens* the app: the media negotiation lives in
+     * CallController, which needs the app running and its channel up
+     * before it can answer anything. The in-app ring surface is where
+     * the call is actually accepted. Declining works from here alone,
+     * because a decline is one poke and needs no media.
+     */
+    fun showIncomingCall(context: Context, from: String, callId: String) {
+        ensureChannel(context)
+        val mgr = ContextCompat.getSystemService(context, NotificationManager::class.java)
+            ?: return
+
+        val answerIntent = Intent(context, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            putExtra(EXTRA_ANSWER_FROM, from)
+            putExtra(EXTRA_ANSWER_CALL_ID, callId)
+        }
+        val answer = PendingIntent.getActivity(
+            context, callId.hashCode(), answerIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+        val decline = PendingIntent.getBroadcast(
+            context, callId.hashCode() + 1,
+            Intent(context, CallActionReceiver::class.java).apply {
+                action = CallActionReceiver.ACTION_DECLINE
+                putExtra(EXTRA_ANSWER_FROM, from)
+                putExtra(EXTRA_ANSWER_CALL_ID, callId)
+            },
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+
+        val builder = NotificationCompat.Builder(context, CHANNEL_CALLS)
+            .setSmallIcon(android.R.drawable.sym_call_incoming)
+            .setContentTitle(from)
+            .setContentText("Incoming call")
+            .setCategory(NotificationCompat.CATEGORY_CALL)
+            .setPriority(NotificationCompat.PRIORITY_MAX)
+            .setOngoing(true)
+            .setAutoCancel(false)
+            .setContentIntent(answer)
+            .setFullScreenIntent(answer, true)
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            builder.setStyle(
+                NotificationCompat.CallStyle.forIncomingCall(
+                    Person.Builder().setName(from).setImportant(true).build(),
+                    decline,
+                    answer,
+                ),
+            )
+        } else {
+            builder
+                .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Decline", decline)
+                .addAction(android.R.drawable.sym_action_call, "Answer", answer)
+        }
+        mgr.notify(CALL_NOTIFICATION_ID, builder.build())
+    }
+
+    /** Stop ringing — answered, declined, or the caller gave up. */
+    fun cancelIncomingCall(context: Context) {
+        ContextCompat.getSystemService(context, NotificationManager::class.java)
+            ?.cancel(CALL_NOTIFICATION_ID)
     }
 
     fun showMessage(

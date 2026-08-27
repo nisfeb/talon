@@ -76,7 +76,17 @@ class TalonMessagingReceiver : MessagingReceiver() {
         val whom = parsed?.get("whom")?.jsonPrimitive?.content
         val patp = parsed?.get("patp")?.jsonPrimitive?.content
         val eventId = parsed?.get("id")?.jsonPrimitive?.content
-        Log.i(TAG, "push received patp=$patp whom=$whom id=$eventId")
+        val event = parsed?.get("event")?.jsonPrimitive?.content
+        Log.i(TAG, "push received event=$event patp=$patp whom=$whom id=$eventId")
+
+        // A ring is the one push that isn't a message: it rings rather
+        // than pings, and it carries the caller instead of a whom.
+        if (event == "ring") {
+            val from = parsed?.get("from")?.jsonPrimitive?.content
+            if (from.isNullOrBlank() || eventId.isNullOrBlank()) return
+            io.nisfeb.talon.Notifications.showIncomingCall(context, from, eventId)
+            return
+        }
 
         if (whom.isNullOrBlank()) return
         val title = patp ?: "Talon"

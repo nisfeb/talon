@@ -3,6 +3,7 @@ package io.nisfeb.talon.relay
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
+import kotlin.test.assertTrue
 import kotlin.test.assertNull
 
 class UrbitTimeTest {
@@ -32,13 +33,20 @@ class UrbitTimeTest {
 
     @Test
     fun `postIdToMs handles dotted-decimal da`() {
-        // Same value as above but with the dotted form Tlon actually
-        // wires up. Dots get stripped before BigInteger parsing.
-        val postId = "~zod/170.141.184.504.852.106.413.367.296.000.000"
-        val ms = UrbitTime.postIdToMs(postId)
-        // Just verifying the parser doesn't choke on dots — the
-        // specific ms value isn't load-bearing here.
-        assertNotNull(ms)
+        // Derived rather than hand-written: the literal that used to
+        // sit here was six digits short of a real @da, so it landed
+        // before the unix epoch and the parser rightly returned null.
+        // A wrong fixture in a suite nobody ran read as a real bug.
+        val expected = 1_704_067_200_000L  // 2024-01-01T00:00:00Z
+        val da = java.math.BigInteger("170141184475152167957503069145530368000") +
+            (java.math.BigInteger.valueOf(expected) *
+                java.math.BigInteger.ONE.shiftLeft(64)) /
+            java.math.BigInteger.valueOf(1000)
+        // Dot it the way Tlon wires it: groups of three from the right.
+        val dotted = da.toString().reversed().chunked(3).joinToString(".").reversed()
+        assertTrue('.' in dotted, "fixture should exercise dot-stripping")
+        val ms = assertNotNull(UrbitTime.postIdToMs("~zod/$dotted"))
+        assertTrue(kotlin.math.abs(ms - expected) <= 1L, "expected ~$expected, got $ms")
     }
 
     @Test

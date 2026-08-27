@@ -210,6 +210,45 @@ Over HTTP the scry is `/~/scry/trunk/policy.json` (eyre supplies the
 Every edit echoes the whole policy back on `/calls` as a `%policy`
 fact, so a ship's other devices converge without re-scrying.
 
+## Making the phone actually ring
+
+A ring only reaches a sleeping device if three things line up.
+
+1. **`%trunk` emits it.** A `%recv` fact with a `%ring` sig on `/calls`.
+   Policy is enforced before this point, so a blocked or unlisted
+   caller never produces a fact and never wakes anyone.
+2. **The relay pushes a hint.** It subscribes to `%trunk /calls`
+   alongside `%activity /v4` on one channel, and POSTs
+   `{"event":"ring","patp","from","id"}` to the device's UnifiedPush
+   endpoint. Hint-only, like messages: no SDP or fingerprint leaves
+   the ship. Measured 64–136ms from ring to push against live ships.
+3. **Android rings.** `TalonMessagingReceiver` routes `event == "ring"`
+   to a `CATEGORY_CALL` notification on its own channel — the system
+   ringtone stream, not the notification blip — with a full-screen
+   intent so it takes over a locked screen, and `CallStyle` on API 31+.
+
+Answering opens the app rather than answering in place: the media
+negotiation lives in `CallController`, which needs the app running and
+its channel up. Declining works from the notification alone, because a
+decline is one poke and needs no media (`CallActionReceiver`).
+
+The notification is cancelled as soon as the controller leaves
+`Incoming` — answered, declined, or the caller gave up.
+
+### What this does not cover yet
+
+- **Process death.** The push wakes the receiver and rings, but
+  `CallController` is still created inside the Compose tree, so a cold
+  app has no signaling channel until the user opens it. Answering
+  therefore costs a launch. Moving the controller into
+  `TalonSyncService` is the fix.
+- **iOS.** `isCallsSupported` is false there; real ringing needs
+  CallKit plus PushKit, where Apple requires the app to report the
+  call to CallKit immediately on receiving the push.
+- **The distributor leg.** ship→relay is measured; relay→distributor→
+  device depends on which UnifiedPush distributor the user runs and
+  can only be measured on a real handset.
+
 ## Installing the desk
 
 Validated on two fake ships. `|rein` alone is not enough — gall reports

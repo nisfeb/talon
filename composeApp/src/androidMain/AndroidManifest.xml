@@ -28,6 +28,10 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.VIBRATE" />
+    <!-- Incoming calls take over a locked screen. Auto-granted for
+         apps that post CATEGORY_CALL notifications; without it the
+         ring degrades to a heads-up banner. -->
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
@@ -107,6 +111,10 @@
 
         <receiver
             android:name="io.nisfeb.talon.LoopAlarmReceiver"
+            android:exported="false" />
+
+        <receiver
+            android:name="io.nisfeb.talon.CallActionReceiver"
             android:exported="false" />
 
         <receiver

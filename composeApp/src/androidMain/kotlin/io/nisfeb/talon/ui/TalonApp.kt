@@ -191,6 +191,18 @@ fun TalonApp(
             callController?.stop()
         }
     }
+    // The push notification rings; the app decides when to stop. Once
+    // the controller is showing anything other than an incoming call —
+    // answered, declined, or the caller gave up — the notification has
+    // nothing left to say.
+    if (callController != null) {
+        val callState by callController.state.collectAsState()
+        androidx.compose.runtime.LaunchedEffect(callState) {
+            if (callState !is io.nisfeb.talon.call.CallUiState.Incoming) {
+                io.nisfeb.talon.Notifications.cancelIncomingCall(app)
+            }
+        }
+    }
     callController?.let { io.nisfeb.talon.ui.CallOverlay(it) }
     var addingAnotherShip by remember { mutableStateOf(false) }
     // Locally-owned navigation state. Initial values from the
