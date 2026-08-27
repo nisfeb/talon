@@ -33,7 +33,8 @@ import java.util.concurrent.TimeUnit
  * Per-ship SSE consumer. The relay opens one of these for every
  * unique (shipUrl, cookie) pair on startup and dispatches FCM
  * pushes for every `%activity` event that lands on a non-muted
- * whom we haven't already notified the device about.
+ * whom we haven't already notified the device about, and for every
+ * incoming %trunk ring.
  *
  * Reconnect strategy: if the SSE event source closes for any
  * reason, we wait with exponential backoff (capped at 60s) and
@@ -90,7 +91,7 @@ class ShipConnection(
      *  false on any other failure path so the caller backs off. */
     private suspend fun runConnection(): Boolean {
         val channelId = openChannel() ?: return false
-        val subscribed = subscribeActivity(channelId)
+        val subscribed = subscribe(channelId)
         if (!subscribed) return false
         // Per-connection state for the suppression decision (see
         // [decideSuppress]). Captured into the handler closure so
@@ -122,9 +123,16 @@ class ShipConnection(
         }.getOrNull()
     }
 
-    private fun subscribeActivity(channelId: String): Boolean {
-        // %activity /v4 — same subscribe path Talon-the-app uses.
-        val payload = """[{"id":1,"action":"subscribe","ship":"${patp.removePrefix("~")}","app":"activity","path":"/v4"}]"""
+    private fun subscribe(channelId: String): Boolean {
+        // %activity /v4 — same subscribe path Talon-the-app uses — plus
+        // %trunk /calls for rings. Most ships have no %trunk installed;
+        // eyre nacks that one subscription individually and the channel
+        // (and %activity with it) carries on, so a missing desk costs
+        // nothing but a logged warning.
+        val ship = patp.removePrefix("~")
+        val payload =
+            """[{"id":$SUB_ACTIVITY,"action":"subscribe","ship":"$ship","app":"activity","path":"/v4"},""" +
+                """{"id":$SUB_CALLS,"action":"subscribe","ship":"$ship","app":"trunk","path":"/calls"}]"""
         val req = Request.Builder()
             .url("$shipUrl/~/channel/$channelId")
             .put(payload.toRequestBody(JSON_MEDIA))
@@ -210,7 +218,21 @@ class ShipConnection(
         // muted-thread updates) — silent early-return is intentional.
         val response = body["response"]?.jsonPrimitive?.contentOrNull
         if (response != "diff" && response != "subscribe") return
+
+        // A nacked subscribe carries `err` and no `json`. The %trunk one
+        // nacks on any ship without the desk, which is the common case.
+        body["err"]?.jsonPrimitive?.contentOrNull?.let { err ->
+            log.warn("subscription ${body["id"]?.jsonPrimitive?.contentOrNull} refused: $err")
+            return
+        }
         val json = body["json"]?.jsonObject ?: return
+
+        // Route by subscription id — the two streams have nothing in
+        // common beyond the channel they share.
+        if (body["id"]?.jsonPrimitive?.contentOrNull == SUB_CALLS.toString()) {
+            handleRing(json)
+            return
+        }
 
         // %activity /v4 envelope shape:
         //   { add: { source: { dm | club | channel: {...} },
@@ -266,6 +288,37 @@ class ShipConnection(
         db.setLastEventId(shipRowId, deviceId, postId)
     }
 
+    /**
+     * An incoming 1:1 signal. Only a ring wakes the device: the rest of
+     * the exchange (offer / accept / hangup) is for a client that is
+     * already awake and subscribed.
+     *
+     * Deliberately outside the suppression layer. Warmup exists to
+     * swallow %activity's subscribe-time backlog, and a ring has no
+     * equivalent — %trunk sends nothing on subscribe, and every relay
+     * connection opens a brand-new channel, so there is no replay to
+     * damp. A ring reaching us is always live, and suppressing it for
+     * 30s after a reconnect would simply mean a missed call.
+     *
+     * It also stays off the %activity cursor: that cursor resumes the
+     * message stream after a crash, and a call is not a message.
+     */
+    private fun handleRing(json: JsonObject) {
+        val recv = json["recv"]?.jsonObject ?: return
+        val from = recv["from"]?.jsonPrimitive?.contentOrNull ?: return
+        val callId = recv["sig"]?.jsonObject
+            ?.get("ring")?.jsonObject
+            ?.get("id")?.jsonPrimitive?.contentOrNull
+            ?: return
+
+        val pushEndpoint = db.pushEndpointFor(deviceId) ?: run {
+            log.warn("device $deviceId has no push endpoint; dropping ring")
+            return
+        }
+        log.info("push ring from=$from call=$callId")
+        push.sendRing(endpoint = pushEndpoint, patp = patp, from = from, callId = callId)
+    }
+
     /** Pull the globally-unique post id out of an %activity event.
      *  The Tlon agent wraps it in dm-post / chan-post / club-post
      *  depending on the source kind; all three share `.key.id`. */
@@ -309,6 +362,10 @@ class ShipConnection(
         get() = runCatching { boolean }.getOrNull()
 
     private companion object {
+        /** Subscription ids on the shared eyre channel. */
+        const val SUB_ACTIVITY = 1
+        const val SUB_CALLS = 2
+
         private val JSON_MEDIA = "application/json".toMediaType()
     }
 }

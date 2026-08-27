@@ -12,6 +12,14 @@ pluginManagement {
     }
 }
 
+// Lets Gradle fetch a toolchain it can't find locally. The relay
+// pins jvmToolchain(17) to match CI and its Dockerfile; a dev box
+// with only a newer JDK would otherwise be unable to build or test
+// it at all.
+plugins {
+    id("org.gradle.toolchains.foojay-resolver-convention") version "1.0.0"
+}
+
 dependencyResolutionManagement {
     repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
     repositories {

@@ -25,9 +25,16 @@ import java.util.concurrent.TimeUnit
  *     "whom":  "<conversation>",
  *     "id":    "<event-id>"
  *   }
+ *   {
+ *     "event": "ring",
+ *     "patp":  "<ship>",
+ *     "from":  "<caller>",
+ *     "id":    "<call-id>"
+ *   }
  * The client wakes, posts the local notification, and pulls the
- * actual message body via SSE — message text never transits the
- * relay or the distributor.
+ * actual message body — or the call's SDP — via SSE. Neither message
+ * text nor any part of the media negotiation transits the relay or
+ * the distributor.
  */
 class Push {
 
@@ -37,6 +44,22 @@ class Push {
         .readTimeout(15, TimeUnit.SECONDS)
         .writeTimeout(10, TimeUnit.SECONDS)
         .build()
+
+    /** Wake the device for an incoming call. Same hint-only contract:
+     *  the caller's @p and the call id are all that travel — the SDP
+     *  and fingerprint stay on the ship's own channel. */
+    fun sendRing(endpoint: String, patp: String, from: String, callId: String) {
+        val body = buildString {
+            append("""{"event":"ring","patp":"""")
+            append(escape(patp))
+            append("""","from":"""")
+            append(escape(from))
+            append("""","id":"""")
+            append(escape(callId))
+            append("\"}")
+        }
+        post(endpoint, body)
+    }
 
     fun send(endpoint: String, patp: String, whom: String, postId: String) {
         // Hand-rolled JSON to avoid pulling kotlinx-serialization
@@ -57,6 +80,10 @@ class Push {
             append(escape(postId))
             append("\"}")
         }
+        post(endpoint, body)
+    }
+
+    private fun post(endpoint: String, body: String) {
         val req = Request.Builder()
             .url(endpoint)
             .post(body.toRequestBody(JSON_MEDIA))
