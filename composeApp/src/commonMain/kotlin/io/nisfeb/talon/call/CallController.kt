@@ -49,7 +49,7 @@ class CallController(
      *  that vanishes mid-ring (app killed, crash, network drop) leaves
      *  the callee ringing internally forever — and a device that thinks
      *  it is ringing answers "busy" to every call after it. */
-    private val ringTimeoutMs: Long = 45_000L,
+    private val ringTimeoutMs: Long = DEFAULT_RING_TIMEOUT_MS,
     /** How long a call may sit "connecting" before we give up on it. */
     private val connectTimeoutMs: Long = 60_000L,
 ) {
@@ -57,14 +57,18 @@ class CallController(
     private val _state = MutableStateFlow<CallUiState>(CallUiState.None)
 
     /**
-     * Who may ring this ship. The agent enforces it; this is a read
-     * model for the settings screen, refreshed from /x/policy on
-     * connect and from %policy facts after every edit (including
-     * edits made on the ship's other devices).
+     * Who may ring this ship, or null if we don't know yet.
+     *
+     * Null is load-bearing: %trunk is a desk the user installs by
+     * hand, so a ship without it answers the scry with an error. That
+     * has to stay distinguishable from "installed, and set to open" —
+     * otherwise the settings screen shows an editor whose every poke
+     * is nacked, which reads as a broken toggle rather than a missing
+     * desk. The agent enforces the policy; this is only a read model.
      */
-    private val _policy = MutableStateFlow(CallPolicy())
+    private val _policy = MutableStateFlow<CallPolicy?>(null)
     val state: StateFlow<CallUiState> = _state.asStateFlow()
-    val policy: StateFlow<CallPolicy> = _policy.asStateFlow()
+    val policy: StateFlow<CallPolicy?> = _policy.asStateFlow()
 
     private var channel: UrbitChannel? = null
     private var loop: Job? = null
@@ -119,10 +123,10 @@ class CallController(
                 runCatching { iceServers = TrunkWire.parseIce(ch.scry(TrunkWire.AGENT, "/ice")) }
                     .onSuccess { Log.i(TAG, "ice config: ${iceServers.size} servers") }
                     .onFailure { Log.w(TAG, "ice scry failed (Tier 0 only)", it) }
-                // An old desk has no /x/policy; leaving the default
-                // (open) matches how that desk actually behaves.
+                // No %trunk (or a desk predating policy) leaves this
+                // null, and the settings editor stays hidden.
                 runCatching { _policy.value = TrunkWire.parsePolicy(ch.scry(TrunkWire.AGENT, "/policy")) }
-                    .onFailure { Log.w(TAG, "policy scry failed; assuming open", it) }
+                    .onFailure { Log.w(TAG, "policy scry failed; hiding the editor", it) }
                 ch.events().let { events ->
                     ch.subscribe(TrunkWire.AGENT, TrunkWire.CALLS_PATH)
                     backoff = 2_000L
@@ -465,6 +469,11 @@ class CallController(
 
     companion object {
         private const val TAG = "Trunk"
+
+        /** How long a caller rings before giving up. Public because
+         *  Android's ring notification has to expire no later than
+         *  this — see Notifications.showIncomingCall. */
+        const val DEFAULT_RING_TIMEOUT_MS = 45_000L
 
         /** How long the "call ended" notice lingers before the surface
          *  goes quiet. Cleared here, not in the UI, so a backgrounded

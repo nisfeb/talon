@@ -208,7 +208,7 @@ object TrunkWire {
         val o = body as? JsonObject ?: return CallPolicy()
         fun ships(k: String): Set<String> =
             (o[k] as? kotlinx.serialization.json.JsonArray)
-                ?.mapNotNull { it.jsonPrimitive.content.takeIf(String::isNotBlank) }
+                ?.mapNotNull { (it as? JsonPrimitive)?.content?.takeIf(String::isNotBlank) }
                 ?.toSet()
                 ?: emptySet()
         return CallPolicy(

@@ -182,6 +182,12 @@ object Notifications {
             .setPriority(NotificationCompat.PRIORITY_MAX)
             .setOngoing(true)
             .setAutoCancel(false)
+            // Without this a missed call is permanent: the notification
+            // is ongoing (so it can't be swiped away) and the only
+            // things that cancel it are the Decline action and a
+            // running app. A caller who gives up while the phone sleeps
+            // would leave "Incoming call" on screen forever.
+            .setTimeoutAfter(io.nisfeb.talon.call.CallController.DEFAULT_RING_TIMEOUT_MS)
             .setContentIntent(answer)
             .setFullScreenIntent(answer, true)
 

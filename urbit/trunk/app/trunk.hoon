@@ -175,11 +175,25 @@
   ::  1:1 signal from a peer ship
       %trunk-signal
     =/  =sig:trunk  !<(sig:trunk vase)
+    ::  A block is total: nothing from that ship reaches our clients.
+    ?:  (~(has in block.pol.state) src.bowl)
+      %-  (slog leaf+"trunk: dropped {<-.sig>} from blocked {<src.bowl>}" ~)
+      `this
+    ::  The mode gates rings only. The rest of an exchange — offer,
+    ::  accept, hangup — has to pass even from a ship the mode would
+    ::  refuse, because WE may have called THEM: gating those on the
+    ::  allow list would break every outgoing call to someone not
+    ::  already on it, by dropping our own callee's answer. Safe
+    ::  because a client ignores any signal whose call id it does not
+    ::  recognise, so a stranger's stray offer goes nowhere.
+    ::
     ::  A refused caller is answered with silence, not a rejection: a
     ::  rejection confirms the ship is live and filtering, and tells a
     ::  blocked caller they were blocked. Their ring watchdog gives up
     ::  on its own, which looks the same as an offline ship.
-    ?.  (may-ring:hc src.bowl)
+    ?:  ?&  ?=(%ring -.sig)
+            !(may-ring:hc src.bowl)
+        ==
       %-  (slog leaf+"trunk: refused ring from {<src.bowl>}" ~)
       `this
     :_  this

@@ -173,6 +173,14 @@ clients, and does nothing at all for a second app sharing the agent.
 - A block also refuses party-line tickets and drops room announcements
   from that ship.
 
+The mode gates **rings only**. Offer, accept and hangup pass even from
+a ship the mode would refuse, because you may have called *them* —
+gating every inbound signal on the allow list would drop your own
+callee's answer and break every outgoing call to someone not already
+on your list. That is safe because a client ignores any signal whose
+call id it doesn't recognise. A **block** is total: nothing from that
+ship reaches your clients at all.
+
 A refused caller gets **silence**, not a rejection. A rejection would
 confirm to a stranger that the ship is live and filtering, and would
 tell a blocked caller they were blocked; instead their ring watchdog

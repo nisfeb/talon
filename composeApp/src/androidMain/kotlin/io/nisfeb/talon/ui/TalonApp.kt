@@ -1242,6 +1242,7 @@ fun TalonApp(
                     aiSettings = app.aiSettings,
                     themePreference = app.themePreference,
                     uiSettings = app.uiSettings,
+                    callController = callController,
                     multiShip = multiShip,
                     profileAccentPreview = profileAccentPreview,
                     notificationHealth = app.notificationHealth,

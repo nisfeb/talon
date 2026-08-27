@@ -67,8 +67,12 @@ class CallPolicyE2ETest {
             val shipA = calleeSession.login(aUrl, aCode).getOrThrow()
             val shipB = callerSession.login(bUrl, bCode).getOrThrow()
 
-            val caller = CallController(callerSession, DesktopCallEngineProvider, ringTimeoutMs = 6_000L)
-            val callee = CallController(calleeSession, DesktopCallEngineProvider, ringTimeoutMs = 6_000L)
+            // Long enough for a real negotiation: the last case places
+            // an actual call and waits for media, and a short ring
+            // timeout would end it before the answer got back.
+            val ring = 25_000L
+            val caller = CallController(callerSession, DesktopCallEngineProvider, ringTimeoutMs = ring)
+            val callee = CallController(calleeSession, DesktopCallEngineProvider, ringTimeoutMs = ring)
             caller.start(); callee.start()
             delay(4_000)
 
@@ -76,7 +80,7 @@ class CallPolicyE2ETest {
             try {
                 // Baseline: open policy rings.
                 callee.setCallMode(CallPolicy.Mode.Open)
-                withTimeout(15_000) { callee.policy.first { it.mode == CallPolicy.Mode.Open } }
+                withTimeout(15_000) { callee.policy.first { it?.mode == CallPolicy.Mode.Open } }
                 caller.placeCall(shipA)
                 withTimeout(20_000) { callee.state.first { it is CallUiState.Incoming } }
                 callee.reject()
@@ -86,18 +90,18 @@ class CallPolicyE2ETest {
                 // Blocked, still in open mode: no ring.
                 callee.setCallMode(CallPolicy.Mode.Open)
                 callee.setBlocked(shipB, true)
-                withTimeout(15_000) { callee.policy.first { shipB in it.block } }
+                withTimeout(15_000) { callee.policy.first { shipB in (it?.block ?: emptySet()) } }
                 caller.placeCall(shipA)
                 assertNoRing(callee, 8_000, "a blocked ship must not ring us")
                 caller.hangup()
                 println("blocked: silent")
 
                 callee.setBlocked(shipB, false)
-                withTimeout(15_000) { callee.policy.first { shipB !in it.block } }
+                withTimeout(15_000) { callee.policy.first { it != null && shipB !in it.block } }
 
                 // Allow-list mode, caller not on it: no ring.
                 callee.setCallMode(CallPolicy.Mode.Allow)
-                withTimeout(15_000) { callee.policy.first { it.mode == CallPolicy.Mode.Allow } }
+                withTimeout(15_000) { callee.policy.first { it?.mode == CallPolicy.Mode.Allow } }
                 caller.placeCall(shipA)
                 assertNoRing(callee, 8_000, "allow mode must refuse a ship not on the list")
                 caller.hangup()
@@ -105,7 +109,7 @@ class CallPolicyE2ETest {
 
                 // Same mode, now on the list: rings.
                 callee.setAllowed(shipB, true)
-                withTimeout(15_000) { callee.policy.first { shipB in it.allow } }
+                withTimeout(15_000) { callee.policy.first { shipB in (it?.allow ?: emptySet()) } }
                 caller.placeCall(shipA)
                 withTimeout(20_000) { callee.state.first { it is CallUiState.Incoming } }
                 println("allow mode, listed: rings")
@@ -113,15 +117,46 @@ class CallPolicyE2ETest {
 
                 // Blocking must outrank an explicit allow entry.
                 callee.setBlocked(shipB, true)
-                val pol = withTimeout(15_000) { callee.policy.first { shipB in it.block } }
+                val pol = withTimeout(15_000) { callee.policy.first { shipB in (it?.block ?: emptySet()) } }
                 assertEquals(
-                    emptySet(), pol.allow intersect setOf(shipB),
+                    emptySet(), pol!!.allow intersect setOf(shipB),
                     "blocking a ship must drop it from the allow list",
                 )
                 caller.placeCall(shipA)
                 assertNoRing(callee, 8_000, "a block must outrank an allow entry")
                 caller.hangup()
                 println("blocked while allowed: silent")
+
+                // Restrictive mode must not break calls WE place. The
+                // policy gates rings; if it gated every inbound signal
+                // it would also drop our own callee's answer, so an
+                // allow-list user could never call anyone not already
+                // on their list.
+                callee.setBlocked(shipB, false)
+                callee.setAllowed(shipB, false)
+                callee.setCallMode(CallPolicy.Mode.Allow)
+                withTimeout(15_000) {
+                    callee.policy.first {
+                        it?.mode == CallPolicy.Mode.Allow &&
+                            shipB !in it.allow && shipB !in it.block
+                    }
+                }
+                // `callee` is the restricted ship; here it is the one
+                // placing the call, to a ship it has not allowed.
+                callee.placeCall(shipB)
+                withTimeout(20_000) { caller.state.first { it is CallUiState.Incoming } }
+                caller.accept()
+                val outbound = withTimeout(25_000) {
+                    callee.state.first { it is CallUiState.Active || it is CallUiState.Ended }
+                }
+                assertTrue(
+                    outbound is CallUiState.Active,
+                    "allow mode broke an outgoing call: $outbound",
+                )
+                println("allow mode, outgoing to an unlisted ship: connects")
+                callee.hangup()
+                caller.hangup()
+                delay(1_000)
             } finally {
                 callee.setBlocked(shipB, false)
                 callee.setAllowed(shipB, false)

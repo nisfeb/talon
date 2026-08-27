@@ -766,9 +766,6 @@ fun SettingsScreen(
             // here — this is only its editor, and any other app on the
             // ship sees the same lists.
             if (isCallsSupported && callController != null) {
-                Spacer(Modifier.height(16.dp))
-                HorizontalDivider()
-                Spacer(Modifier.height(8.dp))
                 CallPolicySection(callController)
             }
 
@@ -993,10 +990,17 @@ internal fun aiFeatureEnabled(state: AiSettings.Config, feature: AiSettings.Feat
 
 @Composable
 private fun CallPolicySection(controller: io.nisfeb.talon.call.CallController) {
+    // Null means we couldn't read the policy — no %trunk installed, or
+    // a desk that predates it. Render nothing rather than an editor
+    // whose every poke would be nacked.
     val policy by controller.policy.collectAsState()
+    val current = policy ?: return
     val scope = rememberCoroutineScope()
-    val allowOnly = policy.mode == io.nisfeb.talon.call.CallPolicy.Mode.Allow
+    val allowOnly = current.mode == io.nisfeb.talon.call.CallPolicy.Mode.Allow
 
+    Spacer(Modifier.height(16.dp))
+    HorizontalDivider()
+    Spacer(Modifier.height(8.dp))
     Column {
         Text("Who can call you", style = MaterialTheme.typography.titleMedium)
         Spacer(Modifier.height(4.dp))
@@ -1031,7 +1035,7 @@ private fun CallPolicySection(controller: io.nisfeb.talon.call.CallController) {
             ShipListEditor(
                 title = "Allowed",
                 empty = "Nobody yet — with this on, no one can reach you.",
-                ships = policy.allow,
+                ships = current.allow,
                 onAdd = { scope.launch { controller.setAllowed(it, true) } },
                 onRemove = { scope.launch { controller.setAllowed(it, false) } },
             )
@@ -1039,7 +1043,7 @@ private fun CallPolicySection(controller: io.nisfeb.talon.call.CallController) {
         ShipListEditor(
             title = "Blocked",
             empty = "Nobody blocked.",
-            ships = policy.block,
+            ships = current.block,
             onAdd = { scope.launch { controller.setBlocked(it, true) } },
             onRemove = { scope.launch { controller.setBlocked(it, false) } },
         )
