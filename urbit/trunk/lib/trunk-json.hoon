@@ -8,7 +8,7 @@
 ::            {"open-room":{"name":n,"title":t,"members":["~zod"],
 ::                           "admins":["~zod"]}}
 ::            {"set-room-listen":{"name":n,"listen":true}}
-::            {"share-room":{"name":n,"ttl":600}}
+::            {"share-room":{"host":"~zod","name":n,"ttl":600}}
 ::            {"configure-room":{"host":"~zod","name":n,"open":true,
 ::                               "listen":false,
 ::                               "sfu":null|{"base":b,"group":g,"key":k}}}
@@ -59,7 +59,7 @@
       :-  %open-room
       (ot ~[name+so title+so members+(as ship-from-json) admins+(as ship-from-json)])
       [%set-room-listen (ot ~[name+so listen+bo])]
-      [%share-room (ot ~[name+so ttl+ni])]
+      [%share-room (ot ~[host+ship-from-json name+so ttl+ni])]
       :-  %configure-room
       %-  ot
       :~  host+ship-from-json  name+so  open+bo  listen+bo

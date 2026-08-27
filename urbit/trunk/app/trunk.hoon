@@ -284,6 +284,16 @@
     ::  the ttl is the whole security model — and it only exists at all
     ::  when the room's admins have asked for it.
         %share-room
+      ::  Only the host holds the signing key, so a line hosted
+      ::  elsewhere has to be asked. Without this an admin of someone
+      ::  else's group clicked the button and nothing happened at all.
+      ?.  =(host.act our.bowl)
+        :_  this
+        :~  :*  %pass  /room/(scot %p host.act)
+                %agent  [host.act %trunk]
+                %poke  %trunk-room
+                !>(`room-sig:trunk`[%share name.act ttl.act])
+        ==  ==
       =/  got  (~(get by hosted.state) name.act)
       ?~  got  `this
       ?.  listen.u.got  `this
@@ -390,6 +400,32 @@
     ::  A room admin, over ames, turning the line on or off. %trunk
     ::  does not know what a Tlon group is — admins are simply the
     ::  ships the host listed when it opened the room.
+    ::  An admin asking us to mint a listen link for a line we host.
+        %share
+      =/  got  (~(get by hosted.state) name.msg)
+      ?~  got  `this
+      ?.  (~(has in admins.u.got) src.bowl)  `this
+      ?.  listen.u.got  `this
+      ::  :hc, not bare. The agent core sits =< over the helper core,
+      ::  so these arms resolve without it — but against the helper's
+      ::  BUNTED bowl, where our.bowl is ~zod. Every link minted here
+      ::  pointed at ~zod's subgroup, which no member is ever in, and
+      ::  nothing errored.
+      ?:  =('' key:(room-sfu:hc name.msg))  `this
+      =/  now-secs  (unix-secs:trunk-jwt now.bowl)
+      =/  ttl  (min ttl.msg listen-ttl-cap)
+      =/  exp  (add now-secs ttl)
+      =/  loc=@t  (room-location:hc name.msg)
+      =/  tok=@t
+        (mint-listen:trunk-jwt key:(room-sfu:hc name.msg) 'listener' loc now-secs exp)
+      :_  this
+      (reply:hc src.bowl [%link [name.msg (rap 3 ~[loc '?token=' tok]) exp]])
+    ::
+    ::  the host answering our %share.
+        %link
+      :_  this
+      ~[(fact:hc [%listen-link listen-link.msg])]
+    ::
         %configure
       =/  got  (~(get by hosted.state) name.msg)
       ::  Creating a line the host has never hosted — a group admin
@@ -620,8 +656,10 @@
       %shut      ~[(fact [%shut our.bowl name.msg])]
       ::  neither is ever addressed to ourselves; the ?- must still
       ::  be total.
-      %ask       ~
+      %ask        ~
       %configure  ~
+      %share      ~
+      %link       ~[(fact [%listen-link listen-link.msg])]
     ==
   :~  :*  %pass  /room/(scot %p who)
           %agent  [who %trunk]

@@ -807,8 +807,13 @@ private fun PartyLineSection(
             scope.launch {
                 // title/roster only matter when creating: the host may
                 // never have hosted this line before.
+                // Give the line a server when creating. The host may
+                // be a ship that never runs Talon and so has no
+                // sidecar of its own — without this its tickets fail
+                // with "no sfu configured" and the line is unusable.
                 controller.configureRoom(
                     host, roomName, open = on, listen = false,
+                    sfu = if (on) io.nisfeb.talon.call.TrunkWire.defaultSfu() else null,
                     title = group.title.orEmpty().ifEmpty { roomName },
                     members = group.members.map { it.ship },
                     admins = group.members.filter { it.isAdmin }.map { it.ship },
@@ -840,7 +845,7 @@ private fun PartyLineSection(
         ) {
             val clipboard = LocalClipboardManager.current
             if (link == null) {
-                OutlinedButton(onClick = { scope.launch { controller.shareRoom(roomName) } }) {
+                OutlinedButton(onClick = { scope.launch { controller.shareRoom(host, roomName) } }) {
                     Text("Create listen link")
                 }
             } else {

@@ -246,9 +246,22 @@ object TrunkWire {
      * link is a bearer token and Galène cannot revoke one, so the ship
      * caps it regardless of what we ask for.
      */
-    fun shareRoomAction(name: String, ttlSecs: Int): JsonElement = buildJsonObject {
-        putJsonObject("share-room") { put("name", name); put("ttl", ttlSecs) }
-    }
+    fun shareRoomAction(host: String, name: String, ttlSecs: Int): JsonElement =
+        buildJsonObject {
+            putJsonObject("share-room") {
+                put("host", host); put("name", name); put("ttl", ttlSecs)
+            }
+        }
+
+    /** The sidecar this build ships with, or null if it has none. */
+    fun defaultSfu(): SfuConfig? =
+        io.nisfeb.talon.TalonBuild.defaultSfuBase.takeIf { it.isNotEmpty() }?.let {
+            SfuConfig(
+                it,
+                io.nisfeb.talon.TalonBuild.defaultSfuGroup,
+                io.nisfeb.talon.TalonBuild.defaultSfuKey,
+            )
+        }
 
     fun closeRoomAction(name: String): JsonElement = buildJsonObject {
         putJsonObject("close-room") { put("name", name) }

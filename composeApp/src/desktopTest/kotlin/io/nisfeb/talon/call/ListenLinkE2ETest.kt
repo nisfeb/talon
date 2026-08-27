@@ -62,7 +62,7 @@ class ListenLinkE2ETest {
 
             // A new room must not hand out links, however nicely asked.
             ctl.clearListenLink()
-            ctl.shareRoom(room)
+            ctl.shareRoom(ship, room)
             delay(8_000)
             assertEquals(
                 null, ctl.listenLink.value,
@@ -73,7 +73,7 @@ class ListenLinkE2ETest {
             // Turned on, the link appears and points at this room.
             ctl.setRoomListen(room, true)
             delay(3_000)
-            ctl.shareRoom(room)
+            ctl.shareRoom(ship, room)
             val link = withTimeout(20_000) { ctl.listenLink.first { it != null } }!!
             assertEquals(room, link.room)
             assertTrue("token=" in link.url, "link carries no token: ${link.url}")
@@ -88,7 +88,7 @@ class ListenLinkE2ETest {
             ctl.setRoomListen(room, false)
             delay(3_000)
             ctl.clearListenLink()
-            ctl.shareRoom(room)
+            ctl.shareRoom(ship, room)
             delay(8_000)
             assertEquals(
                 null, ctl.listenLink.value,
@@ -97,6 +97,63 @@ class ListenLinkE2ETest {
             println("listening off again: no link")
 
             ctl.stop()
+        }
+    }
+
+    /**
+     * An admin of a line hosted by *another* ship must be able to mint
+     * a link. Only the host holds the signing key, so the request has
+     * to travel — %share-room used to look only at our own rooms and
+     * silently do nothing, which is what "create listen link does
+     * nothing" turned out to be.
+     */
+    @Test
+    fun anAdminCanShareALineHostedElsewhere() {
+        if (System.getenv("TRUNK_E2E") == null) {
+            println("TRUNK_E2E not set — skipping remote share test")
+            return
+        }
+        val aUrl = System.getenv("TRUNK_A_URL") ?: "http://localhost:8081"
+        val aCode = System.getenv("TRUNK_A_CODE") ?: "ropnys-batwyd-nossyt-mapwet"
+        val bUrl = System.getenv("TRUNK_B_URL") ?: "http://localhost:8082"
+        val bCode = System.getenv("TRUNK_B_CODE") ?: "navper-fopmul-figlur-darryd"
+
+        runBlocking {
+            val hostSession = UrbitSession(createAppHttpClient(), MemStore())
+            val adminSession = UrbitSession(createAppHttpClient(), MemStore())
+            val hostShip = hostSession.login(aUrl, aCode).getOrThrow()
+            val adminShip = adminSession.login(bUrl, bCode).getOrThrow()
+
+            val hostCtl = CallController(hostSession, DesktopCallEngineProvider)
+            val adminCtl = CallController(adminSession, DesktopCallEngineProvider)
+            hostCtl.start(); adminCtl.start()
+            delay(4_000)
+
+            val room = "remote-share-${System.currentTimeMillis()}"
+            // The host opens it and names the other ship an admin.
+            hostCtl.openRoom(room, "Remote Share", listOf(adminShip), admins = listOf(adminShip))
+            delay(3_000)
+            hostCtl.setRoomListen(room, true)
+            delay(3_000)
+
+            // The admin — who holds no key — asks the host for a link.
+            adminCtl.clearListenLink()
+            adminCtl.shareRoom(hostShip, room)
+            val link = withTimeout(30_000) { adminCtl.listenLink.first { it != null } }!!
+            assertTrue("token=" in link.url, "no token in ${link.url}")
+            assertEquals(room, link.room)
+            // The subgroup must be the HOST's — a listener has to land
+            // in the same Galène room the members are in, and the
+            // subgroup is host-qualified. Get this wrong and the link
+            // opens an empty room with no error anywhere.
+            assertTrue(
+                "/${hostShip.removePrefix("~")}-$room/" in link.url,
+                "link points at the wrong host's subgroup: ${link.url.substringBefore("?token=")}",
+            )
+            println("remote admin got a link: ${link.url.substringBefore("?token=")}")
+
+            hostCtl.configureRoom(hostShip, room, open = false, listen = false)
+            hostCtl.stop(); adminCtl.stop()
         }
     }
 }

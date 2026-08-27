@@ -96,7 +96,7 @@ class RoomToggleE2ETest {
             // actually hit was clicking "create listen link" while the
             // ship still had listening off.
             ctl.clearListenLink()
-            ctl.shareRoom(room)
+            ctl.shareRoom(ship, room)
             val link = withTimeout(20_000) { ctl.listenLink.first { it != null } }!!
             assertTrue("token=" in link.url, "no token in ${link.url}")
             println("link minted right after enabling")

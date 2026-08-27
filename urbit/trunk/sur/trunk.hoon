@@ -78,7 +78,7 @@
       ::  mint a listen link for a room we host. ttl is in seconds:
       ::  the link is a bearer token and Galene cannot revoke one, so
       ::  the lifetime is the whole security model.
-      [%share-room name=@t ttl=@ud]
+      [%share-room host=ship name=@t ttl=@ud]
       ::  ask a REMOTE host to reconfigure a line we are an admin of.
       ::  The host checks that we are actually on its admin list.
       $:  %configure-room
@@ -108,6 +108,11 @@
       ::  is an invitation rather than a guess
       [%announce name=@t title=@t listen=? sfu-base=@t]
       [%shut name=@t]
+      ::  an admin asking the host to mint a listen link, and the
+      ::  host answering. Only the host has the key, so an admin of a
+      ::  line hosted elsewhere has to ask.
+      [%share name=@t ttl=@ud]
+      [%link =listen-link]
       ::  a room admin, over ames, changing what the host hosts
       ::  title/members/admins are only used when the room does not
       ::  exist yet — a group admin turning the line on for the first

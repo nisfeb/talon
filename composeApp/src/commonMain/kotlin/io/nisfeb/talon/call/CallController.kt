@@ -451,12 +451,16 @@ class CallController(
      * all if the room's admins haven't enabled listening, which is the
      * refusal, not an error.
      */
-    suspend fun shareRoom(name: String, ttlSecs: Int = DEFAULT_LISTEN_TTL_SECS) {
+    suspend fun shareRoom(
+        host: String,
+        name: String,
+        ttlSecs: Int = DEFAULT_LISTEN_TTL_SECS,
+    ) {
         val ch = channel ?: return
         runCatching {
             ch.poke(
                 TrunkWire.AGENT, TrunkWire.ACTION_MARK,
-                TrunkWire.shareRoomAction(name, ttlSecs),
+                TrunkWire.shareRoomAction(host, name, ttlSecs),
             )
         }.onFailure { Log.e(TAG, "share-room poke failed", it) }
     }
