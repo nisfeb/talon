@@ -51,7 +51,10 @@ class PartyLineE2ETest {
         val bCode = System.getenv("TRUNK_B_CODE") ?: "navper-fopmul-figlur-darryd"
         val sfuBase = System.getenv("TRUNK_SFU") ?: "http://localhost:8444"
         val sfuKey = System.getenv("TRUNK_SFU_KEY") ?: error("set TRUNK_SFU_KEY")
-        val roomName = "e2e-line"
+        // Unique per run: Galène keeps a subgroup's roster alive after
+        // the last client drops, so a fixed name means one run sees the
+        // previous run's members and the leave assertion never settles.
+        val roomName = "e2e-line-${System.currentTimeMillis()}"
 
         runBlocking {
             val httpA = createAppHttpClient()

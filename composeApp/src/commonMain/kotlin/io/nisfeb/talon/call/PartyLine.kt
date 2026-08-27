@@ -4,6 +4,7 @@ import io.ktor.client.HttpClient
 import io.ktor.client.plugins.websocket.webSocketSession
 import io.ktor.client.request.get
 import io.ktor.client.statement.bodyAsText
+import io.ktor.websocket.CloseReason
 import io.ktor.websocket.Frame
 import io.ktor.websocket.close
 import io.ktor.websocket.readText
@@ -299,14 +300,23 @@ class PartyLine(
     }
 
     private suspend fun teardown() {
+        // Close the socket first, and cleanly. Tearing down the native
+        // peer connections takes long enough that Galène saw the gap
+        // and then an abrupt EOF rather than a close handshake, and it
+        // keeps a client it never saw leave — so everyone else went on
+        // showing the person who just left.
+        runCatching {
+            session?.close(
+                CloseReason(CloseReason.Codes.NORMAL, "left"),
+            )
+        }
+        session = null
         upLink?.close()
         upLink = null
         downLinks.values.forEach { it.close() }
         downLinks.clear()
         roster.clear()
         upState = MediaState.Idle
-        runCatching { session?.close() }
-        session = null
         if (_state.value !is PartyState.Failed) _state.value = PartyState.Idle
     }
 

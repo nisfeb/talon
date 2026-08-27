@@ -394,6 +394,12 @@ fixed in the same pass:
   Folding the former onto the latter is the obvious cleanup, deferred
   deliberately while the 1:1 path is in an RC under test; its E2E is
   the regression net for that refactor.
+- Galène keeps a subgroup's roster after the last client drops, so a
+  member who left can linger in everyone's list for a while. Talon now
+  closes the socket cleanly (and before the slow native media
+  teardown, which used to leave Galène with an abrupt EOF), but the
+  reaping delay is the server's. `PartyLineE2ETest` sidesteps it by
+  using a fresh room name per run.
 - No party-line UI on iOS (`isCallsSupported` is false there), which
   also means no call-policy editor there — an iOS-only user has to set
   it from another device or the dojo.
