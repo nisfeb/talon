@@ -38,11 +38,18 @@ services:
   galene:
     image: galene:local
     build:
-      context: https://github.com/jech/galene.git
+      # Pinned: building from a floating master means an SFU restart can
+      # pick up whatever upstream landed that morning.
+      context: https://github.com/jech/galene.git#galene-1.1
       dockerfile_inline: |
         FROM golang:1.24-alpine AS build
         WORKDIR /src
         COPY . .
+        # handleAction dereferences c.group without a nil check, so a
+        # member leaving a party line while a peer joins segfaults the
+        # whole server — every room, not just theirs. Present in 1.1 and
+        # master alike; drop this line once upstream guards it.
+        RUN sed -i 's/if a\.group != c\.group\.Name() {/if c.group == nil || a.group != c.group.Name() {/' rtpconn/webclient.go
         RUN go build -o /galene
         FROM alpine:3
         COPY --from=build /galene /galene

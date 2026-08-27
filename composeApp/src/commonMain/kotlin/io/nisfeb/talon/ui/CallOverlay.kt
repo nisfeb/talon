@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.CallEnd
@@ -31,6 +32,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Popup
 import io.nisfeb.talon.call.CallController
@@ -41,9 +43,9 @@ import kotlinx.coroutines.delay
 
 /**
  * Trunkline call surface, floated via Popup so it renders over any
- * screen. Ringing states (incoming/outgoing) take the full screen —
- * a phone call is a modal event; a live call collapses to a top
- * banner so the user can keep using the app while talking.
+ * screen. A ringing call dims the app behind a card — modal, but
+ * still recognisably your app underneath; a live call collapses to a
+ * top banner so you can keep reading while you talk.
  */
 @Composable
 fun CallOverlay(controller: CallController, modifier: Modifier = Modifier) {
@@ -161,20 +163,38 @@ private fun FullScreenRing(
     subtitle: String,
     actions: @Composable () -> Unit,
 ) {
+    // A scrim over the app, not an opaque repaint of it. Filling the
+    // window with `surface` meant a ringing device looked like a blank
+    // white app — and since every device on a ship receives every ring,
+    // that is a thing people see without having placed a call.
     Popup(alignment = Alignment.Center) {
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(MaterialTheme.colorScheme.surface),
+                .background(Color.Black.copy(alpha = 0.55f)),
             contentAlignment = Alignment.Center,
         ) {
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(12.dp),
+            Surface(
+                shape = RoundedCornerShape(20.dp),
+                color = MaterialTheme.colorScheme.surface,
+                tonalElevation = 6.dp,
+                shadowElevation = 12.dp,
             ) {
-                Text(subtitle, style = MaterialTheme.typography.titleMedium)
-                Text(title, style = MaterialTheme.typography.headlineMedium)
-                Box(Modifier.padding(top = 36.dp)) { actions() }
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                    modifier = Modifier.padding(horizontal = 40.dp, vertical = 32.dp),
+                ) {
+                    Icon(
+                        Icons.Filled.Call,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(36.dp),
+                    )
+                    Text(subtitle, style = MaterialTheme.typography.titleMedium)
+                    Text(title, style = MaterialTheme.typography.headlineSmall)
+                    Box(Modifier.padding(top = 28.dp)) { actions() }
+                }
             }
         }
     }
