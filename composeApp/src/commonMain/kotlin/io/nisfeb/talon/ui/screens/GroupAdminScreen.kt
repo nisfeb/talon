@@ -682,16 +682,43 @@ private fun AdminBody(
         }
 
         // ───────── Members ─────────
+        //
+        // Paged rather than lazy: this whole screen is one
+        // verticalScroll Column, and a LazyColumn nested in that has
+        // no bounded height to work with. A `for` over every member
+        // composed the entire roster up front, which is what made big
+        // groups crawl.
         SectionHeader("Members · ${group.members.size}")
-        for (m in group.members) {
+        var shownMembers by remember(group.flag) { mutableStateOf(MEMBER_PAGE) }
+        val visible = group.members.take(shownMembers)
+        for (m in visible) {
             MemberRow(
                 member = m,
                 contactMap = contactMap,
                 onLongPress = { onMemberLongPress(m) },
             )
         }
+        val remaining = group.members.size - visible.size
+        if (remaining > 0) {
+            TextButton(
+                onClick = { shownMembers += MEMBER_PAGE },
+                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+            ) {
+                Text(
+                    if (remaining > MEMBER_PAGE) {
+                        "Show $MEMBER_PAGE more · $remaining remaining"
+                    } else {
+                        "Show $remaining more"
+                    },
+                )
+            }
+        }
     }
 }
+
+/** How many members to add per page. Big enough that small groups
+ *  never see the button, small enough that one page is cheap. */
+private const val MEMBER_PAGE = 50
 
 @Composable
 private fun ShipRow(

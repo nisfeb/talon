@@ -45,6 +45,16 @@ sealed interface PartyState {
         val muted: Boolean,
         /** Our own upstream audio: Live once the SFU has our mic. */
         val media: MediaState,
+        /**
+         * Anonymous listeners, counted by connection.
+         *
+         * They cannot be folded into [members]: every listen token
+         * authenticates as the same subject, so deduplicating by name
+         * would report twelve of them as one. Counting connections is
+         * the only honest number, and the whole point of showing it is
+         * that nobody should be able to forget the line is open.
+         */
+        val listeners: Int = 0,
     ) : PartyState
     data class Failed(val room: String, val why: String) : PartyState
 }
@@ -280,14 +290,18 @@ class PartyLine(
 
     private fun publishRoster() {
         if (_state.value is PartyState.Failed) return
-        // One row per ship, not per connection: the SFU can still be
+        // Members are ships and dedupe by ship: the SFU can still be
         // holding a dead socket from a dropped join, and "~zod, ~zod"
-        // helps nobody.
+        // helps nobody. Anonymous listeners are not ships — they all
+        // authenticate as the same subject — so they are counted by
+        // connection instead, or they would collapse into one row.
+        val (ships, anon) = roster.values.partition { it.ship.startsWith("~") }
         _state.value = PartyState.Live(
             room,
-            roster.values.distinctBy { it.ship }.sortedBy { it.ship },
+            ships.distinctBy { it.ship }.sortedBy { it.ship },
             muted,
             upState,
+            listeners = anon.size,
         )
     }
 

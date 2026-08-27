@@ -24,6 +24,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.platform.LocalClipboardManager
 import io.nisfeb.talon.call.MediaState
@@ -71,13 +72,36 @@ fun PartyLineBar(
                     )
 
                 is PartyState.Live -> {
+                    // Count people, then name them: in a busy line the
+                    // number is what you want at a glance, and the
+                    // names overflow anyway.
+                    val n = s.members.size
                     val who = s.members.joinToString(", ") { it.ship }
                     val label = when {
                         s.media != MediaState.Live -> "Connecting audio…"
-                        s.members.isEmpty() -> "On the line — waiting for others"
-                        else -> "On the line: $who"
+                        n == 0 -> "On the line — waiting for others"
+                        else -> "$n on the line: $who"
                     }
-                    Text(label, style = MaterialTheme.typography.bodyMedium)
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            label,
+                            style = MaterialTheme.typography.bodyMedium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        // Never silently: an open line should say so.
+                        if (s.listeners > 0) {
+                            Text(
+                                if (s.listeners == 1) {
+                                    "1 person listening by link"
+                                } else {
+                                    "${s.listeners} people listening by link"
+                                },
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         IconButton(onClick = { party.setMuted(!s.muted) }) {
                             Icon(
