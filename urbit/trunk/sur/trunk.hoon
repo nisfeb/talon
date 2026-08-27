@@ -50,11 +50,17 @@
 ::             Off by default: a party line is gated by the host's
 ::             membership list, and a public link deliberately punches
 ::             through that, so it must be asked for.
+::    sfu      which sidecar this room runs on. ~ means "the ship's
+::             own", which is the common case. A group that would
+::             rather not route its audio through the host's sidecar
+::             sets its own here — the host still mints the tickets,
+::             but against the group's chosen server.
 +$  room
   $:  title=@t
       members=(set ship)
       admins=(set ship)
       listen=?
+      sfu=(unit sfu-config)
   ==
 ::  a listen-only link: where to point a browser, and until when.
 +$  listen-link  [name=@t url=@t expires=@ud]
@@ -75,7 +81,7 @@
       [%share-room name=@t ttl=@ud]
       ::  ask a REMOTE host to reconfigure a line we are an admin of.
       ::  The host checks that we are actually on its admin list.
-      [%configure-room host=ship name=@t open=? listen=?]
+      [%configure-room host=ship name=@t open=? listen=? sfu=(unit sfu-config)]
       [%close-room name=@t]
       [%join-room host=ship name=@t]
       [%set-call-mode mode=call-mode]
@@ -91,19 +97,22 @@
       [%deny name=@t why=@t]
       ::  the host telling a member a line is open / gone, so joining
       ::  is an invitation rather than a guess
-      [%announce name=@t title=@t]
+      [%announce name=@t title=@t listen=? sfu-base=@t]
       [%shut name=@t]
       ::  a room admin, over ames, changing what the host hosts
-      [%configure name=@t open=? listen=?]
+      [%configure name=@t open=? listen=? sfu=(unit sfu-config)]
   ==
-::  party lines other ships have invited us to: [host name] -> title
-+$  lines  (map [=ship name=@t] @t)
+::  a line another ship has invited us to. Carries enough for an admin
+::  to see the current settings without owning the host ship; never the
+::  SFU secret, only the base URL members will connect to anyway.
++$  line  [title=@t listen=? sfu-base=@t]
++$  lines  (map [=ship name=@t] line)
 ::  agent -> local client, on /calls
 +$  update
   $%  [%recv from=ship =sig]
       [%ticket from=ship =ticket]
       [%denied from=ship name=@t why=@t]
-      [%open from=ship name=@t title=@t]
+      [%open from=ship name=@t =line]
       [%shut from=ship name=@t]
       ::  echoed after every policy change so a ship's other devices
       ::  converge without re-scrying

@@ -21,6 +21,11 @@
 ::  +$ room:trunk alias silently rewrites history, and every migration
 ::  then reads the new shape out of an old noun.
 +$  old-room  [title=@t members=(set ship)]
+::  Lines before %7 were just [host name] -> title.
++$  old-lines  (map [=ship name=@t] @t)
+::  ...and as they were in %6, before the per-room SFU.
++$  old-room-6
+  [title=@t members=(set ship) admins=(set ship) listen=?]
 +$  versioned-state
   $%  state-0
       state-1
@@ -29,6 +34,7 @@
       state-4
       state-5
       state-6
+      state-7
   ==
 +$  state-0  [%0 ~]
 +$  state-1  [%1 ice=(list ice-server:trunk)]
@@ -45,7 +51,7 @@
       ice=(list ice-server:trunk)
       sfu=sfu-config:trunk
       hosted=(map @t old-room)
-      known=lines:trunk
+      known=old-lines
   ==
 +$  state-4
   $:  %4
@@ -53,7 +59,7 @@
       sfu=sfu-config:trunk
       hosted=(map @t old-room)
       ::  lines other ships have invited us to
-      known=lines:trunk
+      known=old-lines
       ::  rooms we have an outstanding %ask for. A ticket names an SFU
       ::  our client will publish its microphone to, so we only accept
       ::  one that answers a request we actually made.
@@ -65,7 +71,7 @@
       ice=(list ice-server:trunk)
       sfu=sfu-config:trunk
       hosted=(map @t old-room)
-      known=lines:trunk
+      known=old-lines
       asked=(set [=ship name=@t])
       ::  who may ring us. Enforced here rather than in the client:
       ::  a client-side filter still lets the poke land, still rings
@@ -76,6 +82,16 @@
 ::  %5 rooms had no admins and no listen flag
 +$  state-6
   $:  %6
+      ice=(list ice-server:trunk)
+      sfu=sfu-config:trunk
+      hosted=(map @t old-room-6)
+      known=old-lines
+      asked=(set [=ship name=@t])
+      pol=policy:trunk
+  ==
+::  %6 rooms had no per-room SFU; lines carried only a title
++$  state-7
+  $:  %7
       ice=(list ice-server:trunk)
       sfu=sfu-config:trunk
       hosted=(map @t room:trunk)
@@ -102,7 +118,28 @@
   %-  ~(run by old)
   |=  r=old-room
   ^-  room:trunk
-  [title.r members.r ~ %.n]
+  [title.r members.r ~ %.n ~]
+::
+::  +upgrade-rooms-6: %6 rooms gain the per-room SFU, unset — every
+::  existing room keeps running on its host ship's own sidecar.
+++  upgrade-rooms-6
+  |=  old=(map @t old-room-6)
+  ^-  (map @t room:trunk)
+  %-  ~(run by old)
+  |=  r=old-room-6
+  ^-  room:trunk
+  [title.r members.r admins.r listen.r ~]
+::
+::  +upgrade-lines: a remembered invitation used to be just a title.
+::  Nothing is known about its settings until the host announces
+::  again, so assume the conservative values.
+++  upgrade-lines
+  |=  old=old-lines
+  ^-  lines:trunk
+  %-  ~(run by old)
+  |=  t=@t
+  ^-  line:trunk
+  [t %.n '']
 ::
 ::  The policy a ship starts with: ring for anyone, block nobody.
 ::  Always assign this explicitly — never lean on the bunt of
@@ -110,7 +147,7 @@
 ++  open-policy  `policy:trunk`[%open ~ ~]
 --
 %-  agent:dbug
-=|  state-6
+=|  state-7
 =*  state  -
 ^-  agent:gall
 =<
@@ -133,22 +170,44 @@
   ^-  (quip card _this)
   =/  old  !<(versioned-state old-vase)
   ?-  -.old
-    %0  `this(state [%6 ~ ['' '' ''] ~ ~ ~ open-policy])
-    %1  `this(state [%6 ice.old ['' '' ''] ~ ~ ~ open-policy])
-    %2  `this(state [%6 ice.old sfu.old (upgrade-rooms hosted.old) ~ ~ open-policy])
-    %3  `this(state [%6 ice.old sfu.old (upgrade-rooms hosted.old) known.old ~ open-policy])
+    %0  `this(state [%7 ~ ['' '' ''] ~ ~ ~ open-policy])
+    %1  `this(state [%7 ice.old ['' '' ''] ~ ~ ~ open-policy])
+    %2  `this(state [%7 ice.old sfu.old (upgrade-rooms hosted.old) ~ ~ open-policy])
+    %3
+  :-  ~
+  %=  this
+    state
+  :*  %7  ice.old  sfu.old  (upgrade-rooms hosted.old)
+      (upgrade-lines known.old)  ~  open-policy
+  ==  ==
   ::  upgrading must not silently start refusing calls, so an existing
   ::  ship keeps ringing for anyone until its owner says otherwise.
     %4
-  `this(state [%6 ice.old sfu.old (upgrade-rooms hosted.old) known.old asked.old open-policy])
+  :-  ~
+  %=  this
+    state
+  :*  %7  ice.old  sfu.old  (upgrade-rooms hosted.old)
+      (upgrade-lines known.old)  asked.old  open-policy
+  ==  ==
   ::  existing rooms gain no admins and no anonymous listening: both
   ::  are things you opt into, never things an upgrade turns on.
     %5
   :-  ~
   %=  this
-    state  [%6 ice.old sfu.old (upgrade-rooms hosted.old) known.old asked.old pol.old]
-  ==
-    %6  `this(state old)
+    state
+  :*  %7  ice.old  sfu.old  (upgrade-rooms hosted.old)
+      (upgrade-lines known.old)  asked.old  pol.old
+  ==  ==
+  ::  %6 already had admins and the listen flag; it gains only the
+  ::  per-room SFU, unset.
+    %6
+  :-  ~
+  %=  this
+    state
+  :*  %7  ice.old  sfu.old  (upgrade-rooms-6 hosted.old)
+      (upgrade-lines known.old)  asked.old  pol.old
+  ==  ==
+    %7  `this(state old)
   ==
 
 ::
@@ -199,11 +258,12 @@
       ::  host's client re-announcing the line.
       =/  had  (~(get by hosted.state) name.act)
       =/  listen  ?~(had %.n listen.u.had)
-      :-  (announce:hc name.act title.act members.act %.y)
-      %=  this
-        hosted.state
-      (~(put by hosted.state) name.act [title.act members.act admins.act listen])
-      ==
+      =/  room-sfu  ?~(had ~ sfu.u.had)
+      =.  hosted.state
+        %+  ~(put by hosted.state)  name.act
+        [title.act members.act admins.act listen room-sfu]
+      :_  this
+      (announce:hc name.act title.act members.act %.y)
     ::
         %set-room-listen
       =/  got  (~(get by hosted.state) name.act)
@@ -217,14 +277,14 @@
       =/  got  (~(get by hosted.state) name.act)
       ?~  got  `this
       ?.  listen.u.got  `this
-      ?:  =('' key.sfu.state)  `this
+      ?:  =('' key:(room-sfu:hc name.act))  `this
       =/  now-secs  (unix-secs:trunk-jwt now.bowl)
       =/  ttl  (min ttl.act listen-ttl-cap)
       =/  exp  (add now-secs ttl)
       =/  loc=@t  (room-location:hc name.act)
       =/  tok=@t
         %:  mint-listen:trunk-jwt
-          key.sfu.state
+          key:(room-sfu:hc name.act)
           'listener'
           loc
           now-secs
@@ -253,12 +313,15 @@
         ?.  open.act
           :-  (announce:hc name.act title.u.got members.u.got %.n)
           this(hosted.state (~(del by hosted.state) name.act))
-        `this(hosted.state (~(put by hosted.state) name.act u.got(listen listen.act)))
+        =.  hosted.state
+          (~(put by hosted.state) name.act u.got(listen listen.act, sfu sfu.act))
+        :_  this
+        (announce:hc name.act title.u.got members.u.got %.y)
       :_  this
       :~  :*  %pass  /room/(scot %p host.act)
               %agent  [host.act %trunk]
               %poke  %trunk-room
-              !>(`room-sig:trunk`[%configure name.act open.act listen.act])
+              !>(`room-sig:trunk`[%configure name.act open.act listen.act sfu.act])
       ==  ==
     ::
         %join-room
@@ -318,15 +381,20 @@
       ?.  open.msg
         :-  (announce:hc name.msg title.u.got members.u.got %.n)
         this(hosted.state (~(del by hosted.state) name.msg))
-      `this(hosted.state (~(put by hosted.state) name.msg u.got(listen listen.msg)))
+      :-  (announce:hc name.msg title.u.got members.u.got %.y)
+      %=  this
+        hosted.state
+      (~(put by hosted.state) name.msg u.got(listen listen.msg, sfu sfu.msg))
+      ==
     ::
         %announce
       ::  an invitation from anyone is fine (it is just a name), but
       ::  the list is remote-controlled, so it does not grow forever.
       ?:  (~(has in block.pol.state) src.bowl)  `this
       ?:  (gth ~(wyt by known.state) invite-cap)  `this
-      :-  ~[(fact:hc [%open src.bowl name.msg title.msg])]
-      this(known.state (~(put by known.state) [src.bowl name.msg] title.msg))
+      =/  =line:trunk  [title.msg listen.msg sfu-base.msg]
+      :-  ~[(fact:hc [%open src.bowl name.msg line])]
+      this(known.state (~(put by known.state) [src.bowl name.msg] line))
     ::
         %shut
       :-  ~[(fact:hc [%shut src.bowl name.msg])]
@@ -362,7 +430,7 @@
   ^-  (unit (unit cage))
   ?+  path  (on-peek:def path)
     [%x %ice ~]    ``trunk-ice+!>(ice.state)
-    [%x %rooms ~]  ``noun+!>(hosted.state)
+    [%x %rooms ~]   ``trunk-rooms+!>(hosted.state)
     [%x %lines ~]   ``trunk-lines+!>(known.state)
     [%x %policy ~]  ``trunk-policy+!>(pol.state)
   ==
@@ -435,13 +503,13 @@
           (~(has in members.u.got) who)
       ==
     (reply who [%deny name 'not a member'])
-  ?:  =('' key.sfu.state)
+  ?:  =('' key:(room-sfu name))
     (reply who [%deny name 'no sfu configured'])
   =/  loc=@t  (room-location name)
   =/  now-secs  (unix-secs:trunk-jwt now.bowl)
   =/  tok=@t
     %:  mint:trunk-jwt
-      key.sfu.state
+      key:(room-sfu name)
       (scot %p who)
       loc
       now-secs
@@ -457,12 +525,20 @@
 ::  Shared by the member ticket and the anonymous listen link, so the
 ::  two can never disagree about which room they point at.
 ::
+++  room-sfu
+  |=  name=@t
+  ^-  sfu-config:trunk
+  =/  got  (~(get by hosted.state) name)
+  ?~  got  sfu.state
+  ?~(sfu.u.got sfu.state u.sfu.u.got)
+::
 ++  room-location
   |=  name=@t
   ^-  @t
+  =/  cfg  (room-sfu name)
   =/  sub=@t
     (rap 3 ~[(rsh [3 1] (scot %p our.bowl)) '-' name])
-  (rap 3 ~[base.sfu.state '/group/' group.sfu.state '/' sub '/'])
+  (rap 3 ~[base.cfg '/group/' group.cfg '/' sub '/'])
 ::
 ::  +announce: tell every member a line opened (or closed). The host
 ::  is always a member of its own line for this purpose; we skip
@@ -470,6 +546,9 @@
 ::
 ++  announce
   |=  [name=@t title=@t members=(set ship) open=?]
+  =/  got  (~(get by hosted.state) name)
+  =/  listen  ?~(got %.n listen.u.got)
+  =/  base  base:(room-sfu name)
   ^-  (list card)
   %+  turn  ~(tap in (~(del in members) our.bowl))
   |=  who=ship
@@ -477,7 +556,7 @@
   :*  %pass  /room/(scot %p who)
       %agent  [who %trunk]
       %poke  %trunk-room
-      !>(`room-sig:trunk`?:(open [%announce name title] [%shut name]))
+      !>(`room-sig:trunk`?:(open [%announce name title listen base] [%shut name]))
   ==
 ::
 ::  +reply: deliver a room-sig to `who` — as a local fact when that's
@@ -490,7 +569,8 @@
     ?-  -.msg
       %grant     ~[(fact [%ticket our.bowl ticket.msg])]
       %deny      ~[(fact [%denied our.bowl name.msg why.msg])]
-      %announce  ~[(fact [%open our.bowl name.msg title.msg])]
+      %announce
+    ~[(fact [%open our.bowl name.msg [title.msg listen.msg sfu-base.msg]])]
       %shut      ~[(fact [%shut our.bowl name.msg])]
       ::  neither is ever addressed to ourselves; the ?- must still
       ::  be total.

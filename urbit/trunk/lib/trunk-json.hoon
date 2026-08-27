@@ -9,8 +9,9 @@
 ::                           "admins":["~zod"]}}
 ::            {"set-room-listen":{"name":n,"listen":true}}
 ::            {"share-room":{"name":n,"ttl":600}}
-::            {"configure-room":{"host":"~zod","name":n,
-::                               "open":true,"listen":false}}
+::            {"configure-room":{"host":"~zod","name":n,"open":true,
+::                               "listen":false,
+::                               "sfu":null|{"base":b,"group":g,"key":k}}}
 ::            {"close-room":{"name":n}}
 ::            {"join-room":{"host":"~zod","name":n}}
 ::            {"set-call-mode":"open"} | {"allow":"~zod"}
@@ -38,6 +39,11 @@
       [%hangup (ot ~[id+so])]
   ==
 ::
+++  sfu-from-json
+  =,  dejs:format
+  ^-  $-(json sfu-config:trunk)
+  (ot ~[base+so group+so key+so])
+::
 ++  ice-from-json
   =,  dejs:format
   ^-  $-(json ice-server:trunk)
@@ -55,7 +61,11 @@
       [%set-room-listen (ot ~[name+so listen+bo])]
       [%share-room (ot ~[name+so ttl+ni])]
       :-  %configure-room
-      (ot ~[host+ship-from-json name+so open+bo listen+bo])
+      %-  ot
+      :~  host+ship-from-json  name+so  open+bo  listen+bo
+          ::  ~ means "use the host ship's own sidecar"
+          sfu+(mu sfu-from-json)
+      ==
       [%close-room (ot ~[name+so])]
       [%join-room (ot ~[host+ship-from-json name+so])]
       [%set-call-mode (su (perk %open %allow ~))]
@@ -139,7 +149,9 @@
     %-  pairs
     :~  [%from s+(scot %p from.u)]
         [%name s+name.u]
-        [%title s+title.u]
+        [%title s+title.line.u]
+        [%listen b+listen.line.u]
+        [%sfu-base s+sfu-base.line.u]
     ==
   ::
       %shut
@@ -160,6 +172,28 @@
     ==
   ==
 ::
+++  rooms-to-json
+  ::  The SFU secret never leaves the ship: an admin sets it, and can
+  ::  see WHICH sidecar is in use, but reading it back is not part of
+  ::  the deal.
+  |=  rooms=(map @t room:trunk)
+  ^-  json
+  :-  %a
+  %+  turn  ~(tap by rooms)
+  |=  [nom=@t =room:trunk]
+  ^-  json
+  %-  pairs:enjs:format
+  :~  [%name s+nom]
+      [%title s+title.room]
+      [%listen b+listen.room]
+      [%sfu-base s+?~(sfu.room '' base.u.sfu.room)]
+      [%custom-sfu b+?=(^ sfu.room)]
+      :-  %members
+      [%a (turn ~(tap in members.room) |=(w=@p `json`s+(scot %p w)))]
+      :-  %admins
+      [%a (turn ~(tap in admins.room) |=(w=@p `json`s+(scot %p w)))]
+  ==
+::
 ++  lines-to-json
   ::  no `=, enjs:format` here: it shadows `ship` with the json encoder
   ::  of that name, so a `who=ship` binding silently becomes a gate.
@@ -167,11 +201,13 @@
   ^-  json
   :-  %a
   %+  turn  ~(tap by known)
-  |=  [[who=@p nom=@t] title=@t]
+  |=  [[who=@p nom=@t] =line:trunk]
   ^-  json
   %-  pairs:enjs:format
   :~  [%host s+(scot %p who)]
       [%name s+nom]
-      [%title s+title]
+      [%title s+title.line]
+      [%listen b+listen.line]
+      [%sfu-base s+sfu-base.line]
   ==
 --

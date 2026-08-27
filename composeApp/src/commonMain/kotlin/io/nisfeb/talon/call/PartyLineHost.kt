@@ -5,24 +5,35 @@ import io.nisfeb.talon.urbit.TlonChatRepo
 import io.nisfeb.talon.util.Log
 
 /**
- * Glue between a group channel and its party line.
+ * Glue between a group and its party line.
  *
- * A channel's whom is `chat/~host/slug`; the line it maps to is the
- * room `slug` hosted by `~host` — so every member derives the same
- * room without any extra state, and the host ship is the one that
- * owns the SFU (design D5).
+ * One line per *group*, not per channel: a group's voice room is a
+ * property of the group, so every channel in it joins the same line
+ * and a group's admins turn it on once. The room is derived from the
+ * group flag `~host/slug`, so every member computes the same name
+ * without extra state, and the host ship is the one that owns the SFU
+ * (design D5).
  */
 object PartyLineHost {
 
-    /** (host, room) for a group channel, or null for DMs and clubs. */
-    fun roomFor(whom: String): Pair<String, String>? {
-        val parts = whom.split("/")
-        if (parts.size < 3) return null
-        if (parts[0] != "chat") return null
-        val host = parts[1]
+    /** (host, room) for a group flag `~host/slug`. */
+    fun roomForGroup(flag: String): Pair<String, String>? {
+        val parts = flag.split("/")
+        if (parts.size < 2) return null
+        val host = parts[0]
         if (!host.startsWith("~")) return null
-        return host to parts.drop(2).joinToString("-")
+        val slug = parts.drop(1).joinToString("-")
+        if (slug.isEmpty()) return null
+        return host to slug
     }
+
+    /** The group flag behind a channel whom, via the local db. */
+    suspend fun groupFlagFor(db: AppDatabase, whom: String): String? =
+        runCatching { db.groups().channelGroupFor(whom)?.groupFlag }.getOrNull()
+
+    /** (host, room) for the group a channel belongs to. */
+    suspend fun roomFor(db: AppDatabase, whom: String): Pair<String, String>? =
+        groupFlagFor(db, whom)?.let { roomForGroup(it) }
 
     /**
      * Open the line for [whom] and step onto it. Only the channel's
@@ -37,18 +48,13 @@ object PartyLineHost {
         whom: String,
         title: String,
     ): Boolean {
-        val (host, room) = roomFor(whom) ?: return false
-        val flag = runCatching { db.groups().channelGroupFor(whom)?.groupFlag }
-            .getOrNull()
+        val flag = groupFlagFor(db, whom) ?: return false
+        val (host, room) = roomForGroup(flag) ?: return false
         // One fetch gives both lists: the group's roster is the line's
         // guest list, and the group's admins are the ships allowed to
         // reconfigure the line afterwards. %trunk never learns what a
         // group is — it just gets the two sets of ships.
-        val roster = if (flag != null) {
-            runCatching { repo.fetchGroupAdmin(flag)?.members }.getOrNull()
-        } else {
-            null
-        }
+        val roster = runCatching { repo.fetchGroupAdmin(flag)?.members }.getOrNull()
         val members = roster?.map { it.ship }.orEmpty()
         val admins = roster?.filter { it.isAdmin }?.map { it.ship }.orEmpty()
         if (members.isEmpty()) {
@@ -62,8 +68,12 @@ object PartyLineHost {
     }
 
     /** Step onto a line someone else is hosting. */
-    suspend fun joinLine(controller: CallController, whom: String): Boolean {
-        val (host, room) = roomFor(whom) ?: return false
+    suspend fun joinLine(
+        controller: CallController,
+        db: AppDatabase,
+        whom: String,
+    ): Boolean {
+        val (host, room) = roomFor(db, whom) ?: return false
         controller.joinRoom(host, room)
         return true
     }

@@ -13,6 +13,15 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
+import io.nisfeb.talon.ui.isCallsSupported
+import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material3.Switch
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -62,6 +71,11 @@ fun GroupAdminScreen(
     flag: String,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
+    /** Drives the party-line switches. Null hides that section — a
+     *  platform without calls has nothing to configure. */
+    callController: io.nisfeb.talon.call.CallController? = null,
+    /** Our own @p, to decide whether we may change the line. */
+    me: String = "",
 ) {
     val scope = rememberCoroutineScope()
 
@@ -136,6 +150,8 @@ fun GroupAdminScreen(
 
             group != null -> AdminBody(
                 repo = repo,
+                    callController = callController,
+                    me = me,
                 flag = flag,
                 group = group!!,
                 contactMap = contactMap,
@@ -443,6 +459,8 @@ private fun AdminBody(
     repo: TlonChatRepo,
     flag: String,
     group: AdminGroup,
+    callController: io.nisfeb.talon.call.CallController?,
+    me: String,
     contactMap: ContactMap,
     onSaveMeta: (title: String, description: String, image: String, cover: String) -> Unit,
     onInvite: (ship: String) -> Unit,
@@ -681,6 +699,12 @@ private fun AdminBody(
             HorizontalDivider()
         }
 
+        // ───────── Party line ─────────
+        if (callController != null && isCallsSupported) {
+            PartyLineSection(callController, flag, group, me)
+            HorizontalDivider()
+        }
+
         // ───────── Members ─────────
         //
         // Paged rather than lazy: this whole screen is one
@@ -719,6 +743,213 @@ private fun AdminBody(
 /** How many members to add per page. Big enough that small groups
  *  never see the button, small enough that one page is cheap. */
 private const val MEMBER_PAGE = 50
+
+/**
+ * Whether this group has a voice room, and on whose terms.
+ *
+ * One line per group, so this is the group's switch rather than a
+ * per-channel one, and the call button in every channel follows it.
+ * Only the host ship and the group's admins may change it — %trunk
+ * enforces that on its own, but showing switches that would be
+ * refused is worse than showing none.
+ */
+@Composable
+private fun PartyLineSection(
+    controller: io.nisfeb.talon.call.CallController,
+    flag: String,
+    group: AdminGroup,
+    me: String,
+) {
+    val target = io.nisfeb.talon.call.PartyLineHost.roomForGroup(flag) ?: return
+    val (host, roomName) = target
+    val key = "$host/$roomName"
+
+    val hosted by controller.rooms.collectAsState()
+    val invited by controller.invites.collectAsState()
+    val link by controller.listenLink.collectAsState()
+    val scope = rememberCoroutineScope()
+
+    val room = hosted[key]
+    val invite = invited[key]
+    val enabled = room != null || invite != null
+    val listening = room?.listen ?: invite?.listen ?: false
+    val sfuBase = room?.sfuBase?.takeIf { it.isNotEmpty() }
+        ?: invite?.sfuBase?.takeIf { it.isNotEmpty() }
+
+    val mayEdit = me.isNotEmpty() &&
+        (me == host || group.members.any { it.ship == me && it.isAdmin })
+
+    var sfuOpen by remember(flag) { mutableStateOf(false) }
+    var sfuBaseField by remember(flag) { mutableStateOf("") }
+    var sfuGroupField by remember(flag) { mutableStateOf("talon") }
+    var sfuKeyField by remember(flag) { mutableStateOf("") }
+
+    SectionHeader("Party line")
+    if (!mayEdit) {
+        Text(
+            if (enabled) "This group has a party line." else "This group has no party line.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        return
+    }
+
+    FeatureRow(
+        label = "Party line",
+        description = "A voice room for the whole group. Every channel joins the same one.",
+        checked = enabled,
+        onChange = { on ->
+            scope.launch {
+                controller.configureRoom(host, roomName, open = on, listen = false)
+            }
+        },
+    )
+
+    if (!enabled) return
+
+    FeatureRow(
+        label = "Anyone with a link can listen",
+        description = if (listening) {
+            "People outside the group can listen with a link."
+        } else {
+            "Only group members can join."
+        },
+        checked = listening,
+        onChange = { on ->
+            scope.launch { controller.configureRoom(host, roomName, open = true, listen = on) }
+        },
+    )
+
+    if (listening) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            val clipboard = LocalClipboardManager.current
+            if (link == null) {
+                OutlinedButton(onClick = { scope.launch { controller.shareRoom(roomName) } }) {
+                    Text("Create listen link")
+                }
+            } else {
+                Text(
+                    // The token is the credential; don't put it on screen.
+                    link!!.url.substringBefore("?token="),
+                    style = MaterialTheme.typography.bodySmall,
+                    maxLines = 1,
+                    modifier = Modifier.weight(1f),
+                )
+                TextButton(onClick = { clipboard.setText(AnnotatedString(link!!.url)) }) {
+                    Text("Copy")
+                }
+            }
+        }
+        Text(
+            "A link expires on its own and can't be revoked early.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+
+    // Whose sidecar the audio runs through. Groups that would rather
+    // not route through the host ship's server can point at their own.
+    Spacer(Modifier.height(8.dp))
+    Row(
+        modifier = Modifier.fillMaxWidth().clickable { sfuOpen = !sfuOpen },
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text("Server", style = MaterialTheme.typography.bodyMedium)
+            Text(
+                sfuBase ?: "The host ship's own",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+            )
+        }
+        Icon(
+            if (sfuOpen) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
+            contentDescription = if (sfuOpen) "Hide server settings" else "Server settings",
+        )
+    }
+    if (sfuOpen) {
+        OutlinedTextField(
+            value = sfuBaseField,
+            onValueChange = { sfuBaseField = it },
+            label = { Text("https://your-sidecar") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        OutlinedTextField(
+            value = sfuGroupField,
+            onValueChange = { sfuGroupField = it },
+            label = { Text("Galène group") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        OutlinedTextField(
+            value = sfuKeyField,
+            onValueChange = { sfuKeyField = it },
+            label = { Text("Shared secret") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(
+                enabled = sfuBaseField.isNotBlank() && sfuKeyField.isNotBlank(),
+                onClick = {
+                    scope.launch {
+                        controller.configureRoom(
+                            host, roomName, open = true, listen = listening,
+                            sfu = io.nisfeb.talon.call.SfuConfig(
+                                sfuBaseField.trim().trimEnd('/'),
+                                sfuGroupField.trim(),
+                                sfuKeyField.trim(),
+                            ),
+                        )
+                        sfuKeyField = ""
+                        sfuOpen = false
+                    }
+                },
+            ) { Text("Use this server") }
+            if (sfuBase != null) {
+                OutlinedButton(onClick = {
+                    scope.launch {
+                        controller.configureRoom(
+                            host, roomName, open = true, listen = listening, sfu = null,
+                        )
+                        sfuOpen = false
+                    }
+                }) { Text("Use the host's") }
+            }
+        }
+    }
+}
+
+@Composable
+private fun FeatureRow(
+    label: String,
+    description: String,
+    checked: Boolean,
+    onChange: (Boolean) -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(label, style = MaterialTheme.typography.bodyMedium)
+            Text(
+                description,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Switch(checked = checked, onCheckedChange = onChange)
+    }
+}
 
 @Composable
 private fun ShipRow(

@@ -32,6 +32,34 @@ sealed interface TrunkSig {
     data class Hangup(override val id: String) : TrunkSig
 }
 
+/**
+ * A party line as its host describes it. [customSfu] says the room
+ * runs on a sidecar the group chose rather than the host ship's own;
+ * the secret behind it never leaves the ship, so only [sfuBase] is
+ * visible here.
+ */
+data class PartyRoom(
+    val name: String,
+    val title: String,
+    val listen: Boolean,
+    val sfuBase: String,
+    val customSfu: Boolean,
+    val members: Set<String> = emptySet(),
+    val admins: Set<String> = emptySet(),
+)
+
+/** A line another ship has invited us onto. */
+data class PartyInvite(
+    val host: String,
+    val name: String,
+    val title: String,
+    val listen: Boolean,
+    val sfuBase: String,
+)
+
+/** Where a room's audio runs. Null means the host ship's own sidecar. */
+data class SfuConfig(val base: String, val group: String, val key: String)
+
 /** Authorization to join one party line, minted by the host's ship. */
 data class TrunkTicket(val name: String, val location: String, val token: String)
 
@@ -78,6 +106,12 @@ sealed interface TrunkUpdate {
     data class Policy(override val from: String, val policy: CallPolicy) : TrunkUpdate
 
     /** A freshly minted anonymous listen link, for the user to share. */
+    /** The host opened (or reconfigured) a line we're a member of. */
+    data class Open(override val from: String, val invite: PartyInvite) : TrunkUpdate
+
+    /** The host closed a line. */
+    data class Shut(override val from: String, val name: String) : TrunkUpdate
+
     data class ListenLink(
         override val from: String,
         val room: String,
@@ -178,10 +212,19 @@ object TrunkWire {
         name: String,
         open: Boolean,
         listen: Boolean,
+        /** Null leaves the room on the host ship's own sidecar. */
+        sfu: SfuConfig? = null,
     ): JsonElement = buildJsonObject {
         putJsonObject("configure-room") {
             put("host", host); put("name", name)
             put("open", open); put("listen", listen)
+            if (sfu == null) {
+                put("sfu", kotlinx.serialization.json.JsonNull)
+            } else {
+                putJsonObject("sfu") {
+                    put("base", sfu.base); put("group", sfu.group); put("key", sfu.key)
+                }
+            }
         }
     }
 
@@ -252,6 +295,25 @@ object TrunkWire {
                 ),
             )
         }
+        (obj["open"] as? JsonObject)?.let { o ->
+            val host = who(o) ?: return null
+            return TrunkUpdate.Open(
+                host,
+                PartyInvite(
+                    host = host,
+                    name = o["name"]?.jsonPrimitive?.content ?: return null,
+                    title = o["title"]?.jsonPrimitive?.content.orEmpty(),
+                    listen = o["listen"]?.jsonPrimitive?.content == "true",
+                    sfuBase = o["sfu-base"]?.jsonPrimitive?.content.orEmpty(),
+                ),
+            )
+        }
+        (obj["shut"] as? JsonObject)?.let { o ->
+            return TrunkUpdate.Shut(
+                who(o) ?: return null,
+                o["name"]?.jsonPrimitive?.content ?: return null,
+            )
+        }
         (obj["listen-link"] as? JsonObject)?.let { l ->
             return TrunkUpdate.ListenLink(
                 from = "",
@@ -296,6 +358,37 @@ object TrunkWire {
         sig["hangup"]?.jsonObject?.let { return TrunkSig.Hangup(it.str("id") ?: return null) }
         return null
     }
+
+    /** Parse the /x/rooms scry body: the lines this ship hosts. */
+    fun parseRooms(body: JsonElement): List<PartyRoom> =
+        (body as? kotlinx.serialization.json.JsonArray)?.mapNotNull { el ->
+            val o = el as? JsonObject ?: return@mapNotNull null
+            fun ships(k: String) =
+                (o[k] as? kotlinx.serialization.json.JsonArray)
+                    ?.mapNotNull { (it as? JsonPrimitive)?.content }?.toSet().orEmpty()
+            PartyRoom(
+                name = o["name"]?.jsonPrimitive?.content ?: return@mapNotNull null,
+                title = o["title"]?.jsonPrimitive?.content.orEmpty(),
+                listen = o["listen"]?.jsonPrimitive?.content == "true",
+                sfuBase = o["sfu-base"]?.jsonPrimitive?.content.orEmpty(),
+                customSfu = o["custom-sfu"]?.jsonPrimitive?.content == "true",
+                members = ships("members"),
+                admins = ships("admins"),
+            )
+        } ?: emptyList()
+
+    /** Parse the /x/lines scry body: lines we've been invited onto. */
+    fun parseLines(body: JsonElement): List<PartyInvite> =
+        (body as? kotlinx.serialization.json.JsonArray)?.mapNotNull { el ->
+            val o = el as? JsonObject ?: return@mapNotNull null
+            PartyInvite(
+                host = o["host"]?.jsonPrimitive?.content ?: return@mapNotNull null,
+                name = o["name"]?.jsonPrimitive?.content ?: return@mapNotNull null,
+                title = o["title"]?.jsonPrimitive?.content.orEmpty(),
+                listen = o["listen"]?.jsonPrimitive?.content == "true",
+                sfuBase = o["sfu-base"]?.jsonPrimitive?.content.orEmpty(),
+            )
+        } ?: emptyList()
 
     /** Parse the /x/policy scry body, or a %policy fact's payload. */
     fun parsePolicy(body: JsonElement): CallPolicy {

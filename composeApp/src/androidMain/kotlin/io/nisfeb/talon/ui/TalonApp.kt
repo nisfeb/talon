@@ -1141,6 +1141,8 @@ fun TalonApp(
                 flag = adminGroupFlag!!,
                 onBack = { adminGroupFlag = null },
                 modifier = mod,
+                callController = callController,
+                me = loggedInShip.orEmpty(),
             )
 
             adminListOpen -> GroupAdminListScreen(
@@ -1485,6 +1487,27 @@ fun TalonApp(
                         extraBufferCapacity = 1,
                     )
                 }
+                // The group line this chat belongs to, and only if it
+                // exists: one line per group, gated on the group's
+                // admins having enabled it. Same gate as App.kt.
+                val hostedRooms by (
+                    callController?.rooms
+                        ?: kotlinx.coroutines.flow.MutableStateFlow(emptyMap())
+                    ).collectAsState()
+                val knownInvites by (
+                    callController?.invites
+                        ?: kotlinx.coroutines.flow.MutableStateFlow(emptyMap())
+                    ).collectAsState()
+                val groupRoom by androidx.compose.runtime.produceState<
+                    Pair<String, String>?
+                    >(null, openWhom) {
+                    value = openWhom?.let {
+                        io.nisfeb.talon.call.PartyLineHost.roomFor(app.db, it)
+                    }
+                }
+                val partyRoomHere = groupRoom?.takeIf { (h, n) ->
+                    hostedRooms.containsKey("$h/$n") || knownInvites.containsKey("$h/$n")
+                }
                 DmChatScreen(
                     db = app.db,
                     repo = app.repo,
@@ -1511,14 +1534,14 @@ fun TalonApp(
                         } else {
                             null
                         },
+                    // No line, no button — see the same gate in App.kt.
                     onPartyLine =
                         if (callController != null && partyLine != null &&
-                            io.nisfeb.talon.call.PartyLineHost.roomFor(openWhom!!) != null
+                            partyRoomHere != null
                         ) {
                             {
                                 val whom = openWhom!!
-                                val host =
-                                    io.nisfeb.talon.call.PartyLineHost.roomFor(whom)!!.first
+                                val host = partyRoomHere!!.first
                                 if (host == loggedInShip) {
                                     appScope.launch {
                                         io.nisfeb.talon.call.PartyLineHost.startLine(
@@ -1528,7 +1551,7 @@ fun TalonApp(
                                 } else {
                                     appScope.launch {
                                         io.nisfeb.talon.call.PartyLineHost
-                                            .joinLine(callController, whom)
+                                            .joinLine(callController, app.db, whom)
                                     }
                                 }
                             }

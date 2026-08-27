@@ -92,6 +92,29 @@ class CallController(
      * rather than fired-and-forgotten so the UI can show it until the
      * user has actually copied it somewhere.
      */
+    /**
+     * Every party line this ship can see: the ones it hosts, and the
+     * ones it has been invited onto, keyed "~host/name".
+     *
+     * This is what decides whether a group shows a call button at all
+     * — no line, no button — and what the admin switches read their
+     * current state from.
+     */
+    private val _rooms = MutableStateFlow<Map<String, PartyRoom>>(emptyMap())
+    val rooms: StateFlow<Map<String, PartyRoom>> = _rooms.asStateFlow()
+
+    private val _invites = MutableStateFlow<Map<String, PartyInvite>>(emptyMap())
+    val invites: StateFlow<Map<String, PartyInvite>> = _invites.asStateFlow()
+
+    /** The line for [host]/[name], from whichever side we know it. */
+    fun lineFor(host: String, name: String): PartyRoom? {
+        val key = "$host/$name"
+        _rooms.value[key]?.let { return it }
+        return _invites.value[key]?.let {
+            PartyRoom(it.name, it.title, it.listen, it.sfuBase, it.sfuBase.isNotEmpty())
+        }
+    }
+
     private val _listenLink = MutableStateFlow<ListenLink?>(null)
     val listenLink: StateFlow<ListenLink?> = _listenLink.asStateFlow()
 
@@ -160,6 +183,15 @@ class CallController(
                 // null, and the settings editor stays hidden.
                 runCatching { _policy.value = TrunkWire.parsePolicy(ch.scry(TrunkWire.AGENT, "/policy")) }
                     .onFailure { Log.w(TAG, "policy scry failed; hiding the editor", it) }
+                runCatching {
+                    val ours = session.shipName.orEmpty()
+                    _rooms.value = TrunkWire.parseRooms(ch.scry(TrunkWire.AGENT, "/rooms"))
+                        .associateBy { "$ours/${it.name}" }
+                }.onFailure { Log.w(TAG, "rooms scry failed", it) }
+                runCatching {
+                    _invites.value = TrunkWire.parseLines(ch.scry(TrunkWire.AGENT, "/lines"))
+                        .associateBy { "${it.host}/${it.name}" }
+                }.onFailure { Log.w(TAG, "lines scry failed", it) }
                 ch.events().let { events ->
                     ch.subscribe(TrunkWire.AGENT, TrunkWire.CALLS_PATH)
                     backoff = 2_000L
@@ -174,6 +206,11 @@ class CallController(
                             is TrunkUpdate.Recv -> onSignal(up)
                             is TrunkUpdate.Ticket -> onTicket?.invoke(up.ticket)
                             is TrunkUpdate.Policy -> _policy.value = up.policy
+                            is TrunkUpdate.Open ->
+                                _invites.value = _invites.value +
+                                    ("${up.invite.host}/${up.invite.name}" to up.invite)
+                            is TrunkUpdate.Shut ->
+                                _invites.value = _invites.value - "${up.from}/${up.name}"
                             is TrunkUpdate.ListenLink ->
                                 _listenLink.value = ListenLink(up.room, up.url, up.expiresSecs)
                             is TrunkUpdate.Denied -> {
@@ -311,14 +348,33 @@ class CallController(
      * the host: our ship relays it, and the host enforces membership
      * of its admin list. Setting [open] false closes the line.
      */
-    suspend fun configureRoom(host: String, name: String, open: Boolean, listen: Boolean) {
+    suspend fun configureRoom(
+        host: String,
+        name: String,
+        open: Boolean,
+        listen: Boolean,
+        sfu: SfuConfig? = null,
+    ) {
         val ch = channel ?: return
         runCatching {
             ch.poke(
                 TrunkWire.AGENT, TrunkWire.ACTION_MARK,
-                TrunkWire.configureRoomAction(host, name, open, listen),
+                TrunkWire.configureRoomAction(host, name, open, listen, sfu),
             )
         }.onFailure { Log.e(TAG, "configure-room poke failed", it) }
+        // The host answers with an announcement; refresh our own view
+        // too, for the case where the host is us.
+        refreshRooms()
+    }
+
+    /** Re-read the lines this ship hosts. */
+    suspend fun refreshRooms() {
+        val ch = channel ?: return
+        val ours = session.shipName.orEmpty()
+        runCatching {
+            _rooms.value = TrunkWire.parseRooms(ch.scry(TrunkWire.AGENT, "/rooms"))
+                .associateBy { "$ours/${it.name}" }
+        }.onFailure { Log.w(TAG, "rooms refresh failed", it) }
     }
 
     /** Turn anonymous listening on or off for a room we host. */

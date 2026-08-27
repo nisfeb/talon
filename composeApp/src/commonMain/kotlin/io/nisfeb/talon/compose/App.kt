@@ -1421,6 +1421,8 @@ fun App(
                         repo = repo,
                         flag = openGroupAdminFlag!!,
                         onBack = { openGroupAdminFlag = null },
+                        callController = callController,
+                        me = ship.orEmpty(),
                     )
                     showGroupAdminList -> GroupAdminListScreen(
                         repo = repo,
@@ -1625,6 +1627,30 @@ fun App(
                             // so the chat list doesn't unmount when the
                             // user opens a thread.
                             openChat != null -> ({
+                                // The group line this chat belongs to,
+                                // and only if it actually exists — the
+                                // party icon is gated on it below. One
+                                // line per group, so every channel in a
+                                // group resolves to the same room.
+                                val hostedRooms by (
+                                    callController?.rooms
+                                        ?: kotlinx.coroutines.flow.MutableStateFlow(emptyMap())
+                                    ).collectAsState()
+                                val knownInvites by (
+                                    callController?.invites
+                                        ?: kotlinx.coroutines.flow.MutableStateFlow(emptyMap())
+                                    ).collectAsState()
+                                val groupRoom by androidx.compose.runtime.produceState<
+                                    Pair<String, String>?
+                                    >(null, openChat) {
+                                    value = openChat?.let {
+                                        io.nisfeb.talon.call.PartyLineHost.roomFor(db, it)
+                                    }
+                                }
+                                val partyRoomHere = groupRoom?.takeIf { (h, n) ->
+                                    hostedRooms.containsKey("$h/$n") ||
+                                        knownInvites.containsKey("$h/$n")
+                                }
                                 DmChatScreen(
                                     db = db,
                                     repo = repo,
@@ -1653,15 +1679,18 @@ fun App(
                                         } else {
                                             null
                                         },
+                                    // No line, no button. A group's party
+                                    // line exists only once its admins
+                                    // turn it on, and the call icon
+                                    // follows that rather than offering
+                                    // something the ship would refuse.
                                     onPartyLine =
                                         if (callController != null && partyLine != null &&
-                                            io.nisfeb.talon.call.PartyLineHost
-                                                .roomFor(openChat!!) != null
+                                            partyRoomHere != null
                                         ) {
                                             {
                                                 val whom = openChat!!
-                                                val host = io.nisfeb.talon.call.PartyLineHost
-                                                    .roomFor(whom)!!.first
+                                                val host = partyRoomHere!!.first
                                                 if (host == ship) {
                                                     loopScope.launch {
                                                         io.nisfeb.talon.call.PartyLineHost.startLine(
@@ -1671,7 +1700,7 @@ fun App(
                                                 } else {
                                                     loopScope.launch {
                                                         io.nisfeb.talon.call.PartyLineHost
-                                                            .joinLine(callController, whom)
+                                                            .joinLine(callController, db, whom)
                                                     }
                                                 }
                                             }

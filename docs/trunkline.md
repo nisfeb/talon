@@ -264,6 +264,40 @@ The notification is cancelled as soon as the controller leaves
   device depends on which UnifiedPush distributor the user runs and
   can only be measured on a real handset.
 
+## One line per group, and the group's admins own it
+
+A party line belongs to a **group**, not a channel. The room is derived
+from the group flag `~host/slug`, so every channel in the group joins
+the same line and admins enable it once. `PartyLineHost.roomForGroup`
+is that mapping, and it is load-bearing for authorization, not just
+naming — the host it names is the ship that mints the tickets.
+
+**No line, no button.** The call icon in a channel is gated on a line
+actually existing for its group: the client checks `/x/rooms` (lines we
+host) and `/x/lines` (lines we've been invited onto), kept live by
+`%open` / `%shut` facts. A group whose admins haven't turned it on
+shows no party icon at all, rather than one the ship would refuse.
+
+The switches live in group admin, above the member list. Only the host
+and the group's admins see them; `%trunk` enforces that itself, but
+showing switches that would be refused is worse than showing none.
+
+### Whose server
+
+`%set-sfu` is ship-level and stays the fallback, but a room can name
+its own:
+
+```
++$ room  [... listen=? sfu=(unit sfu-config)]
+```
+
+`~` means "the host ship's own sidecar", which is the common case. A
+group that would rather not route its audio through the host's server
+sets its own — the host still mints the tickets, but against the
+group's chosen SFU. The secret never leaves the ship: `/x/rooms`
+reports `sfu-base` and `custom-sfu` so an admin can see *which* server
+is in use, but reading the key back is not part of the deal.
+
 ## Party lines are opt-in, and so is anonymous listening
 
 Two switches per room, both off unless someone asks for them.

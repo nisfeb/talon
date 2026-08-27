@@ -105,7 +105,7 @@ class PartyLineUiPathTest {
             println("host is on the line")
 
             // Member taps the icon.
-            assertTrue(PartyLineHost.joinLine(ctlB, whom))
+            assertTrue(PartyLineHost.joinLine(ctlB, dbB, whom))
             withTimeout(30_000) {
                 partyB.state.first { it is PartyState.Live && it.media == MediaState.Live }
             }
