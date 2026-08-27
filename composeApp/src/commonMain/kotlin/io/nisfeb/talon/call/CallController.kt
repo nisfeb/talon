@@ -116,6 +116,14 @@ class CallController(
         }
     }
 
+    /**
+     * The sidecar this ship uses when a room doesn't name its own.
+     * Surfaced so the admin screen can show which server a group is
+     * actually on, rather than "the host's" with no way to see it.
+     */
+    private val _shipSfuBase = MutableStateFlow("")
+    val shipSfuBase: StateFlow<String> = _shipSfuBase.asStateFlow()
+
     private val _listenLink = MutableStateFlow<ListenLink?>(null)
     val listenLink: StateFlow<ListenLink?> = _listenLink.asStateFlow()
 
@@ -191,6 +199,10 @@ class CallController(
                 runCatching { adoptDefaultSfu(ch) }
                     .onFailure { Log.w(TAG, "default sfu check failed", it) }
                 runCatching {
+                    _shipSfuBase.value = (ch.scry(TrunkWire.AGENT, "/sfu") as? JsonObject)
+                        ?.get("base")?.jsonPrimitive?.content.orEmpty()
+                }.onFailure { Log.w(TAG, "sfu scry failed", it) }
+                runCatching {
                     val ours = session.shipName.orEmpty()
                     _rooms.value = TrunkWire.parseRooms(ch.scry(TrunkWire.AGENT, "/rooms"))
                         .associateBy { "$ours/${it.name}" }
@@ -213,11 +225,18 @@ class CallController(
                             is TrunkUpdate.Recv -> onSignal(up)
                             is TrunkUpdate.Ticket -> onTicket?.invoke(up.ticket)
                             is TrunkUpdate.Policy -> _policy.value = up.policy
-                            is TrunkUpdate.Open ->
+                            // A room of our own changing announces to
+                            // us as well, so the switch reflects the
+                            // ship rather than a re-scry that races it.
+                            is TrunkUpdate.Open -> {
                                 _invites.value = _invites.value +
                                     ("${up.invite.host}/${up.invite.name}" to up.invite)
-                            is TrunkUpdate.Shut ->
+                                if (up.invite.host == session.shipName) refreshRooms()
+                            }
+                            is TrunkUpdate.Shut -> {
                                 _invites.value = _invites.value - "${up.from}/${up.name}"
+                                if (up.from == session.shipName) refreshRooms()
+                            }
                             is TrunkUpdate.ListenLink ->
                                 _listenLink.value = ListenLink(up.room, up.url, up.expiresSecs)
                             is TrunkUpdate.Denied -> {
@@ -392,6 +411,7 @@ class CallController(
         }.getOrElse { return }
         if (configured) return
         Log.i(TAG, "no sidecar on this ship; adopting the built-in default")
+        _shipSfuBase.value = io.nisfeb.talon.TalonBuild.defaultSfuBase
         runCatching {
             ch.poke(
                 TrunkWire.AGENT, TrunkWire.ACTION_MARK,

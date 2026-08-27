@@ -84,9 +84,39 @@ class RoomToggleE2ETest {
             withTimeout(20_000) { ctl.rooms.first { key in it } }
             println("on again: line exists")
 
+            // Each switch must take on ONE call. The host used to be
+            // excluded from its own announcements, so the only path to
+            // the UI was a re-scry racing the poke and an admin's first
+            // click looked like nothing.
+            ctl.setRoomListen(room, true)
+            withTimeout(20_000) { ctl.rooms.first { it[key]?.listen == true } }
+            println("listen on after one call")
+
+            // And sharing works immediately after — the failure people
+            // actually hit was clicking "create listen link" while the
+            // ship still had listening off.
+            ctl.clearListenLink()
+            ctl.shareRoom(room)
+            val link = withTimeout(20_000) { ctl.listenLink.first { it != null } }!!
+            assertTrue("token=" in link.url, "no token in ${link.url}")
+            println("link minted right after enabling")
+
+            ctl.setRoomListen(room, false)
+            withTimeout(20_000) { ctl.rooms.first { it[key]?.listen == false } }
+            println("listen off after one call")
+
             ctl.configureRoom(ship, room, open = false, listen = false)
             withTimeout(20_000) { ctl.rooms.first { key !in it } }
             assertTrue(key !in ctl.rooms.value, "line survived being turned off")
+
+            // The admin screen shows which server a group is on; with
+            // no room override that is the ship's own, and it must be
+            // readable rather than a placeholder.
+            assertTrue(
+                ctl.shipSfuBase.value.isNotEmpty(),
+                "ship sidecar base is unknown, so the UI can only say 'the host's'",
+            )
+            println("ship sidecar: ${ctl.shipSfuBase.value}")
 
             ctl.stop()
         }

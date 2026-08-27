@@ -773,8 +773,13 @@ private fun PartyLineSection(
     val invite = invited[key]
     val enabled = room != null || invite != null
     val listening = room?.listen ?: invite?.listen ?: false
-    val sfuBase = room?.sfuBase?.takeIf { it.isNotEmpty() }
+    // The room's own server if it has one, otherwise the host ship's.
+    // Showing "the host's" without saying *which* is useless — the
+    // whole point of the setting is knowing where the audio goes.
+    val shipSfu by controller.shipSfuBase.collectAsState()
+    val customSfu = room?.sfuBase?.takeIf { it.isNotEmpty() }
         ?: invite?.sfuBase?.takeIf { it.isNotEmpty() }
+    val sfuBase = customSfu ?: shipSfu.takeIf { it.isNotEmpty() }
 
     val mayEdit = me.isNotEmpty() &&
         (me == host || group.members.any { it.ship == me && it.isAdmin })
@@ -869,7 +874,11 @@ private fun PartyLineSection(
         Column(Modifier.weight(1f)) {
             Text("Server", style = MaterialTheme.typography.bodyMedium)
             Text(
-                sfuBase ?: "The host ship's own",
+                when {
+                    sfuBase == null -> "None configured — party lines won't connect"
+                    customSfu != null -> "$sfuBase · chosen by this group"
+                    else -> "$sfuBase · the host ship's"
+                },
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
@@ -920,7 +929,7 @@ private fun PartyLineSection(
                     }
                 },
             ) { Text("Use this server") }
-            if (sfuBase != null) {
+            if (customSfu != null) {
                 OutlinedButton(onClick = {
                     scope.launch {
                         controller.configureRoom(

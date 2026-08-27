@@ -271,7 +271,14 @@
         %set-room-listen
       =/  got  (~(get by hosted.state) name.act)
       ?~  got  `this
-      `this(hosted.state (~(put by hosted.state) name.act u.got(listen listen.act)))
+      ::  Announce, like every other room change. Without this the
+      ::  flag moved on the ship and nothing was told about it —
+      ::  members kept showing the old state, and our own client only
+      ::  noticed if some other call happened to re-scry.
+      =.  hosted.state
+        (~(put by hosted.state) name.act u.got(listen listen.act))
+      :_  this
+      (announce:hc name.act title.u.got members.u.got %.y)
     ::
     ::  A listen link is a bearer token that Galène cannot revoke, so
     ::  the ttl is the whole security model — and it only exists at all
@@ -581,6 +588,14 @@
   =/  listen  ?~(got %.n listen.u.got)
   =/  base  base:(room-sfu name)
   ^-  (list card)
+  ::  The host tells itself too. It is excluded from the ames pokes
+  ::  below — it is not a peer of its own room — but its client still
+  ::  has to see the change, and it has no other way to: without this
+  ::  the only path was a re-scry racing the poke, so an admin's first
+  ::  click on a switch appeared to do nothing.
+  :-  ?:  open
+        (fact [%open our.bowl name [title listen base]])
+      (fact [%shut our.bowl name])
   %+  turn  ~(tap in (~(del in members) our.bowl))
   |=  who=ship
   ^-  card
