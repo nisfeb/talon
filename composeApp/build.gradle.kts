@@ -597,6 +597,7 @@ val iconsExtendedKeep = setOf(
     "androidx/compose/material/icons/filled/DownloadKt.class",
     "androidx/compose/material/icons/filled/DragHandleKt.class",
     "androidx/compose/material/icons/filled/ErrorOutlineKt.class",
+    "androidx/compose/material/icons/filled/ExpandLessKt.class",
     "androidx/compose/material/icons/filled/ExpandMoreKt.class",
     "androidx/compose/material/icons/filled/ImageKt.class",
     "androidx/compose/material/icons/filled/MicKt.class",
