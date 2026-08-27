@@ -11,7 +11,10 @@ fallback and let you *host* party lines.
 | galene | the SFU party lines run on | hosting a party line |
 
 One sidecar anywhere between two callers covers that call, so running
-one upgrades every call made *to* you.
+one upgrades every call made *to* you. For why coturn exists at all
+when Galène already ships a TURN server — and what each service is
+actually on the critical path for — see "What the sidecar is actually
+for" in `docs/trunkline.md`.
 
 ## 1. Generate the party-line signing key
 

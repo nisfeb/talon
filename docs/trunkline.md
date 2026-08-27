@@ -1,46 +1,247 @@
-# Trunkline v0 spike — runbook
+# Trunkline — calls and party lines over Urbit
 
-Design: see the Trunkline design doc (calls + party lines over Urbit).
-This spike is 1:1 desktop↔desktop, Tier 0 (host candidates only, no
-STUN/TURN), and exists to measure two numbers on real ships:
+1:1 voice calls and multi-party "party lines" between ships. WebRTC
+carries the audio; ames carries the signaling, so a call is addressed
+to a `@p` and authenticated by the network rather than by a phone
+number or an account. Design rationale lives in the Trunkline design
+doc; this file is how it actually fits together and how to run it.
 
-- signaling RTT (offer→answer) — grep logs for `Trunk metric`
-- time to live media (place→live)
+## Architecture
+
+```
+===============================================================
+ 1:1 CALL          signaling rides ames; media never does
+===============================================================
+
+  CALLER DEVICE                              CALLEE DEVICE
+  +----------------------+           +----------------------+
+  | Talon                |           | Talon                |
+  |  CallController      |           |  CallController      |
+  |  CallEngine(libwebrtc)           |  CallEngine          |
+  +----------+-----------+           +-----------+----------+
+             |                                   ^
+   (0) scry /x/ice                        (3) eyre SSE fact
+       -> STUN/TURN this ship                  on /calls
+          advertises                        [%recv ~zod sig]
+             |                                   |
+   (1) eyre poke                                 |
+       %trunk-action                             |
+       [%send ~nec sig]                          |
+             v                                   |
+  +----------------------+           +-----------+----------+
+  | ~zod   DESK: %trunk  |    (2)    | ~nec   DESK: %trunk  |
+  |   app/trunk.hoon     |   ames    |   app/trunk.hoon     |
+  |   sur/ lib/ mar/     +---------->+                      |
+  +----------------------+  mark:    +----------------------+
+                          %trunk-signal
+                    [%ring][%offer sdp fpr]
+                    [%accept][%reject][%hangup]
+
+  MEDIA - direct, the agent never sees it
+     caller <====== DTLS-SRTP (ICE) ======> callee
+       Tier 0  host candidates (same LAN, public IPv6)
+       Tier 1  reflexive addr via sidecar STUN
+       Tier 2  relayed by coturn  <- the relay sees ciphertext
+                                     only, so the call stays
+                                     end-to-end encrypted
+```
+
+```
+===============================================================
+ PARTY LINE        host's ship authorizes; host's SFU mixes
+===============================================================
+
+  HOST DEVICE                                MEMBER DEVICE
+  +----------------------+           +----------------------+
+  | Talon                |           | Talon                |
+  |  PartyLineHost       |           |  PartyLine           |
+  +----------+-----------+           +-----------+----------+
+        |    |                                   ^
+   (1) scry %groups  DESK: groups                 |
+       /v2/groups/<flag>                          |
+       -> roster = who may join                   |
+        |                                         |
+   (2) eyre poke %trunk-action            (6) eyre SSE fact
+       [%open-room name title members]           /calls
+        v                                   [%ticket loc tok]
+  +----------------------+           +-----------+----------+
+  | ~zod   DESK: %trunk  |    (3)    | ~nec   DESK: %trunk  |
+  |  app/trunk.hoon      |   ames    |  app/trunk.hoon      |
+  |  lib/trunk-jwt.hoon  +---------->+                      |
+  |                      | %trunk-room                      |
+  |                      | [%announce name title]           |
+  |                      |           |                      |
+  |                      +<----------+ (4) [%ask name]      |
+  |  checks membership   |           |                      |
+  |  mints HS256 JWT     +---------->+ (5) [%grant ticket]  |
+  +----------------------+           +----------------------+
+     (host joining its own room skips 3-5 entirely)
+
+  MEDIA - a star, not a mesh
+     host   --- GET <loc>/.status, then wss ---> +-----------+
+     member --- GET <loc>/.status, then wss ---> |  Galene   |
+                one outbound conn each,          |  SFU      |
+                so NAT never enters              | (sidecar) |
+                                                 +-----------+
+     ticket = JWT scoped to  talon/<host>-<room>, 6h expiry
+     Galene issues its own TURN creds on join -> no ICE config
+     SFU terminates DTLS -> host's machine hears plaintext,
+     the same trust boundary as it already storing the posts
+```
+
+**Desks.** `%trunk` is the desk this project adds — agent, types, marks,
+and the JWT lib — and it must be installed on **both** ships; a peer
+without it nacks the relay and the caller sees "unreachable". `groups`
+is Tlon's existing desk, read-only here and only on the host side, to
+answer "who is allowed on this line".
+
+**Transports.** Device to its own ship is always eyre: pokes up, SSE
+facts down. Ship to ship is always ames, so `src` is cryptographically
+the sending ship and a signal cannot lie about who it is from. Galène
+and coturn are plain Unix daemons on the ship's host machine — not
+desks, not part of Urbit.
+
+**The asymmetry worth remembering.** In 1:1 the agent is a dumb relay
+and the two devices negotiate directly, so nothing in the middle can
+hear the call. In a party line the host's ship is a real authority: it
+decides membership and signs the tickets, and its SFU necessarily hears
+the audio in order to mix it.
+
+## What the sidecar is actually for
+
+Two services, needed at different times, both optional:
+
+- **Galène (SFU)** — required to *host* a party line. There is no
+  peer-to-peer fallback for group audio; without it, party lines do not
+  exist. Joining someone else's line needs nothing locally.
+- **coturn (STUN/TURN)** — only for 1:1 calls with no direct path.
+  Same-LAN calls never touch it (Tier 0 finds a route). Phone-on-cellular
+  to desktop-at-home usually does need it: carrier-grade NAT on one side,
+  a home router on the other. Expect roughly 10-20% of real-world pairs,
+  disproportionately mobile.
+
+Galène ships its own TURN server and hands credentials to every joining
+client, which is why party lines need no ICE configuration at all. That
+raises the obvious question of why coturn exists rather than relaying
+1:1 calls through Galène too — the answer is that an SFU terminates
+DTLS and re-encrypts per listener, so it would hear the call. A TURN
+relay only forwards packets it cannot read. Keeping coturn is what lets
+1:1 calls stay end-to-end while party lines are honest about the host
+hearing them.
+
+One sidecar anywhere between two callers covers that call, so running
+one upgrades every call made *to* you.
 
 ## Pieces
 
-- `urbit/trunk/` — the %trunk desk: stateless signaling router.
-  Local `%trunk-action` pokes relay to the peer's %trunk as
-  `%trunk-signal`; inbound signals surface as `%trunk-update` facts
-  on `/calls`. **Not yet compiled on a ship** — written blind; expect
-  a syntax pass on first `|commit`. Check `sys.kelvin` matches your
-  ships' zuse.
-- `call/TrunkWire.kt` — JSON wire (source of truth: `lib/trunk-json.hoon`).
-- `call/CallController.kt` — signaling state machine + metrics.
-- `call/CallEngine.kt` + `call/DesktopCallEngine.kt` — media half;
-  desktop uses webrtc-java 0.14.0 (0.15.0 lacks Linux natives).
-- `/call` slash command in a DM + a top-banner call overlay.
+- `urbit/trunk/` — the `%trunk` desk. `app/trunk.hoon` routes signals
+  and mints room tickets; `lib/trunk-jwt.hoon` signs the Galène JWTs;
+  `lib/trunk-json.hoon` is the wire's source of truth; `mar/trunk/*`
+  are the eyre-facing and ship-to-ship marks. Not self-contained yet:
+  installing it needs `default-agent`, `dbug`, `skeleton` and the
+  `bill`/`mime`/`json` marks copied from `%base`.
+- `call/TrunkWire.kt` — JSON wire, mirrors `lib/trunk-json.hoon`.
+- `call/CallController.kt` — 1:1 signaling state machine + metrics.
+- `call/CallEngine.kt` + platform engines — the 1:1 media half
+  (webrtc-java on desktop, libwebrtc on Android).
+- `call/PartyLine.kt` — Galène's WebSocket protocol; `call/PeerLink.kt`
+  + platform impls are the per-stream, trickling media primitive.
+- `call/PartyLineHost.kt` — maps a channel to `(host, room)` so every
+  member derives the same line with no shared state.
+- UI: call button and `/call` in a DM, party-line button in a group
+  channel, `CallOverlay` (ring / in-call banner) and `PartyLineBar`.
+- `sidecar/` — compose file and setup for coturn + Galène.
 
-## Two-ship test
+## Installing the desk
 
-1. Boot two fake ships (e.g. ~zod and ~nec — never reuse a rebuilt
-   fake's name for cross-ship work) with distinct HTTP ports.
-2. On each: `|mount %base`, copy `urbit/trunk/*` into a new desk (or
-   overlay onto %base for the quick version), `|commit`, then
-   `|rein %trunk-desk [& %trunk]` / `|start %trunk`.
+Validated on two fake ships. `|rein` alone is not enough — gall reports
+"not running %trunk yet" until the desk has been installed once.
+
+```dojo
+|new-desk %trunk
+|mount %trunk
+|mount %base          :: to borrow the shared libs below
+```
+
+Copy `urbit/trunk/{app,sur,lib,mar,desk.bill,sys.kelvin}` into the
+mounted desk, then copy from `%base` (the desk is not self-contained):
+
+```
+lib/default-agent.hoon  lib/dbug.hoon  lib/skeleton.hoon
+mar/bill.hoon  mar/mime.hoon  mar/json.hoon
+```
+
+Check `sys.kelvin` matches the ship's zuse — a fake booted from a
+recent pill wants `[%zuse 408]`, and a mismatch fails the commit with
+no useful message. Then:
+
+```dojo
+|commit %trunk
+|install our %trunk
+```
+
+Point the ship at its sidecar once (see `sidecar/README.md` for the
+key):
+
+```dojo
+:trunk &trunk-action [%set-ice ~[['stun:host:3478' '' ''] ['turn:host:3478' 'talon' 'PASS']]]
+:trunk &trunk-action [%set-sfu ['http://host:8444' 'talon' 'KEY']]
+```
+
+Use an address the *other devices* can reach. `localhost` works from a
+desktop on the same box and fails from a phone — that mistake costs a
+testing session.
+
+## Automated checks
+
+Faster than driving the UI, and they run against real ships:
+
+```
+TRUNK_E2E=1 TRUNK_SFU_KEY=<key> TRUNK_SFU=http://<lan-ip>:8444 \
+  ./gradlew :composeApp:desktopTest --tests '*E2E*'
+```
+
+- `TrunkCallE2ETest` — a 1:1 call end to end, with metrics.
+- `PartyLineE2ETest` — two ships on one line via a real Galène.
+- `PartyLineUiPathTest` — the path the UI takes (needs `TRUNK_CHANNEL`).
+- `StuckRingE2ETest` — a caller that vanishes mid-ring must not leave
+  the callee wedged.
+- `UiPrefSyncE2ETest` — a preference set on one device reaches another.
+- `TrunkFixtureTest` (`TRUNK_FIXTURE=1`) — one-shot: creates a group
+  with a chat channel, invites the second ship, and points the host at
+  its SFU. Prints the channel to open in the app.
+
+## Two-ship test by hand
+
+1. Boot two fake ships (never reuse a rebuilt fake's name for
+   cross-ship work) with distinct HTTP ports.
+2. Install the desk on **both** — a peer without it nacks the relay.
 3. Run two Talon desktops with separate config dirs:
    `XDG_CONFIG_HOME=/tmp/talon-a ./gradlew :composeApp:run` (and -b).
-4. Log each into its ship, open a DM between them, type `/call`.
+4. Log each into its ship, open a DM between them, tap the call icon
+   (or type `/call`).
 5. Answer on the other side; both machines on the same LAN should go
    live over host candidates. Grep both logs for `Trunk metric`.
 
 ## What failure teaches
 
-- Ring arrives but no offer → check eyre poke of `%trunk-action`
+- Ring arrives but no offer → check the eyre poke of `%trunk-action`
   (mark file json grab) on the caller's ship.
 - Offer arrives, never live → Tier 0 insufficiency on this network;
   that's a *finding*, not a bug — note the NAT shapes involved.
-- `unknown/unreachable` reject → peer has no %trunk running.
+- `unknown`/`unreachable` reject → the peer has no `%trunk` running.
+- **"busy" on every call** → the far device is stuck in a ringing or
+  active state. It used to stick forever; a ring now expires after 45s.
+  The state is in memory, so a device wedged by an older build stays
+  wedged until the process restarts.
+- **Party line fails to connect** → almost always the SFU address:
+  check what `location` a ticket carries (`join-room` and read the
+  fact) rather than what you think you configured.
+- **"duplicate client id"** in Galène's log → a client reused its id
+  across connections; each connection needs a fresh one.
+- Denials are deliberate and specific: `no such room` (host never
+  opened it), `not a member` (not on the group roster), `no sfu
+  configured` (host never ran `%set-sfu`).
 
 ## v0 results (2026-08-25, ~nec + ~feb on localhost)
 
