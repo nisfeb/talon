@@ -34,7 +34,7 @@ class DesktopPeerLink(
     private val _state = MutableStateFlow(MediaState.Idle)
     override val state: StateFlow<MediaState> = _state
 
-    private val factory = PeerConnectionFactory()
+    private val factory = DesktopWebRtcFactory.get()
     private var micTrack: AudioTrack? = null
     private var onCandidate: ((IceCandidate) -> Unit)? = null
 
@@ -122,9 +122,15 @@ class DesktopPeerLink(
         micTrack?.isEnabled = !muted
     }
 
+    private val closed = kotlinx.atomicfu.atomic(false)
+
     override fun close() {
+        // Idempotent, and never disposes the factory: it is
+        // process-wide, and tearing it down while ICE gathering is
+        // still running on a native thread is a use-after-free.
+        if (!closed.compareAndSet(false, true)) return
+        runCatching { micTrack?.isEnabled = false }
         runCatching { pc.close() }
-        runCatching { factory.dispose() }
         _state.value = MediaState.Closed
     }
 

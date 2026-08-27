@@ -50,6 +50,8 @@ class CallController(
      *  the callee ringing internally forever — and a device that thinks
      *  it is ringing answers "busy" to every call after it. */
     private val ringTimeoutMs: Long = 45_000L,
+    /** How long a call may sit "connecting" before we give up on it. */
+    private val connectTimeoutMs: Long = 60_000L,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + ioDispatcher + backgroundExceptionHandler)
     private val _state = MutableStateFlow<CallUiState>(CallUiState.None)
@@ -82,6 +84,7 @@ class CallController(
     // Same idea for the ring watchdog: answering, ending, or starting
     // another call must disarm the one already in flight.
     private var ringToken = 0
+    private var connectToken = 0
     private var tPlaced = 0L
     private var tOfferSent = 0L
 
@@ -171,6 +174,7 @@ class CallController(
             val id = callId ?: return@launch
             val from = peer ?: return@launch
             _state.value = CallUiState.Active(from, MediaState.Connecting, muted = false)
+            armConnectWatchdog()
             val offer = runCatching {
                 kotlinx.coroutines.withTimeout(20_000) { pendingOffer.await() }
             }.getOrElse {
@@ -258,6 +262,10 @@ class CallController(
         when (sig) {
             is TrunkSig.Ring -> {
                 if (!isFree) {
+                    // Name the state: every "it just says busy" report
+                    // so far has been a different stuck state, and the
+                    // reason is invisible from the caller's side.
+                    Log.w(TAG, "refusing ring from ${'$'}{recv.from} as busy: ${'$'}{_state.value}")
                     poke(recv.from, TrunkSig.Reject(sig.id, "busy"))
                     return
                 }
@@ -291,6 +299,7 @@ class CallController(
                 Log.i(TAG, "Trunk metric: offer→answer RTT ${nowMs() - tOfferSent}ms")
                 val eng = engine ?: return
                 _state.value = CallUiState.Active(recv.from, MediaState.Connecting, muted = false)
+                armConnectWatchdog()
                 runCatching { eng.setAnswer(SessionDesc(sig.sdp, sig.fpr)) }
                     .onFailure {
                         Log.e(TAG, "setAnswer failed", it)
@@ -308,12 +317,30 @@ class CallController(
         }
     }
 
+    /** Give up on a call that never finishes connecting. Only a call
+     *  with live media is allowed to hold the device indefinitely —
+     *  anything else eventually frees it, so no sequence of failures
+     *  can leave a device permanently "busy". */
+    private fun armConnectWatchdog() {
+        val token = ++connectToken
+        scope.launch {
+            delay(connectTimeoutMs)
+            if (connectToken != token) return@launch
+            val cur = _state.value
+            if (cur is CallUiState.Active && cur.media != MediaState.Live) {
+                Log.w(TAG, "media never connected after ${'$'}{connectTimeoutMs}ms")
+                endCall("couldn't connect")
+            }
+        }
+    }
+
     private fun watchMedia(eng: CallEngine, withPeer: String) {
         mediaWatch?.cancel()
         mediaWatch = scope.launch {
             eng.state.collect { media ->
                 when (media) {
                     MediaState.Live -> {
+                        connectToken++ // connected: stop the give-up timer
                         if (tPlaced != 0L) {
                             Log.i(TAG, "Trunk metric: place→live ${nowMs() - tPlaced}ms")
                         }
@@ -339,6 +366,7 @@ class CallController(
 
     private fun endLocal(reason: String) {
         ringToken++
+        connectToken++
         mediaWatch?.cancel()
         mediaWatch = null
         engine?.close()

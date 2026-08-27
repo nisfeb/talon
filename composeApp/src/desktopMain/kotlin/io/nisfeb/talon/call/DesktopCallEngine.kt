@@ -32,7 +32,7 @@ class DesktopCallEngine(configuredIce: List<IceServer> = emptyList()) : CallEngi
     private val _state = MutableStateFlow(MediaState.Idle)
     override val state: StateFlow<MediaState> = _state
 
-    private val factory = PeerConnectionFactory()
+    private val factory = DesktopWebRtcFactory.get()
     private val gathered = CompletableDeferred<Unit>()
     private var micTrack: AudioTrack? = null
 
@@ -118,9 +118,15 @@ class DesktopCallEngine(configuredIce: List<IceServer> = emptyList()) : CallEngi
         micTrack?.isEnabled = !muted
     }
 
+    private val closed = kotlinx.atomicfu.atomic(false)
+
     override fun close() {
+        // Idempotent, and never disposes the factory: it is
+        // process-wide, and tearing it down while ICE gathering is
+        // still running on a native thread is a use-after-free.
+        if (!closed.compareAndSet(false, true)) return
+        runCatching { micTrack?.isEnabled = false }
         runCatching { pc.close() }
-        runCatching { factory.dispose() }
         _state.value = MediaState.Closed
     }
 
@@ -159,3 +165,21 @@ class DesktopCallEngine(configuredIce: List<IceServer> = emptyList()) : CallEngi
 
 val DesktopCallEngineProvider: CallEngineProvider =
     CallEngineProvider { ice -> DesktopCallEngine(ice) }
+
+/**
+ * One [PeerConnectionFactory] for the process.
+ *
+ * The factory owns libwebrtc's native threads and audio device; it is
+ * meant to be shared. One per call — disposed on hang-up — could race
+ * the ICE gathering of the call that was ending, which crashed the app
+ * seconds after a rejected call. PeerConnections are still closed per
+ * call; the factory outlives them.
+ */
+internal object DesktopWebRtcFactory {
+    private val lock = Any()
+    private var factory: PeerConnectionFactory? = null
+
+    fun get(): PeerConnectionFactory = synchronized(lock) {
+        factory ?: PeerConnectionFactory().also { factory = it }
+    }
+}

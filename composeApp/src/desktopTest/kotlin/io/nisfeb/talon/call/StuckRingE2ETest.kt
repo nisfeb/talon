@@ -104,6 +104,24 @@ class StuckRingE2ETest {
 
             second.hangup()
             second.stop()
+
+            // A call answered but never connected must also free the
+            // device: only live media may hold it indefinitely.
+            val stalling = CallController(
+                sessionA, DesktopCallEngineProvider,
+                ringTimeoutMs = ring, connectTimeoutMs = ring,
+            )
+            stalling.start()
+            delay(3_000)
+            stalling.placeCall(shipB)
+            withTimeout(20_000) { callee.state.first { it is CallUiState.Incoming } }
+            callee.accept()
+            withTimeout(20_000) { callee.state.first { it is CallUiState.Active } }
+            // Drop the caller mid-negotiation so media can never come up.
+            stalling.stop()
+            withTimeout(ring + 30_000) { callee.state.first { it is CallUiState.None } }
+            println("callee freed itself after a call that never connected")
+
             callee.stop()
         }
     }

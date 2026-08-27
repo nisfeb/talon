@@ -16,7 +16,6 @@ import org.webrtc.PeerConnectionFactory
 import org.webrtc.RtpTransceiver
 import org.webrtc.SdpObserver
 import org.webrtc.SessionDescription
-import org.webrtc.audio.JavaAudioDeviceModule
 
 /**
  * Android [PeerLink] over libwebrtc: one SFU stream, trickling ICE.
@@ -64,14 +63,7 @@ class AndroidPeerLink(
         override fun onRenegotiationNeeded() {}
     }
 
-    private val factory: PeerConnectionFactory = run {
-        ensureInitialized(appContext)
-        PeerConnectionFactory.builder()
-            .setAudioDeviceModule(
-                JavaAudioDeviceModule.builder(appContext).createAudioDeviceModule(),
-            )
-            .createPeerConnectionFactory()
-    }
+    private val factory: PeerConnectionFactory = WebRtcFactory.get(appContext)
 
     private val pc: PeerConnection = run {
         val servers = iceServers.map { s ->
@@ -150,9 +142,13 @@ class AndroidPeerLink(
         micTrack?.setEnabled(!muted)
     }
 
+    private val closed = kotlinx.atomicfu.atomic(false)
+
     override fun close() {
+        if (!closed.compareAndSet(false, true)) return
+        runCatching { micTrack?.setEnabled(false) }
+        // The factory is process-wide; see WebRtcFactory.
         runCatching { pc.close() }
-        runCatching { factory.dispose() }
         if (micTrack != null) audioManager.mode = priorAudioMode
         _state.value = MediaState.Closed
     }
@@ -183,17 +179,4 @@ class AndroidPeerLink(
         d.await()
     }
 
-    companion object {
-        private var initialized = false
-
-        @Synchronized
-        private fun ensureInitialized(context: Context) {
-            if (initialized) return
-            PeerConnectionFactory.initialize(
-                PeerConnectionFactory.InitializationOptions.builder(context.applicationContext)
-                    .createInitializationOptions(),
-            )
-            initialized = true
-        }
-    }
 }

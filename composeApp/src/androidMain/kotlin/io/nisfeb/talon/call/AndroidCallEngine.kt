@@ -70,14 +70,7 @@ class AndroidCallEngine(
         override fun onRenegotiationNeeded() {}
     }
 
-    private val factory: PeerConnectionFactory = run {
-        ensureInitialized(appContext)
-        PeerConnectionFactory.builder()
-            .setAudioDeviceModule(
-                JavaAudioDeviceModule.builder(appContext).createAudioDeviceModule(),
-            )
-            .createPeerConnectionFactory()
-    }
+    private val factory: PeerConnectionFactory = WebRtcFactory.get(appContext)
 
     private val pc: PeerConnection = run {
         val servers = configuredIce.map { s ->
@@ -134,11 +127,21 @@ class AndroidCallEngine(
     }
 
     override fun close() {
+        // Idempotent: a call can end down several paths at once (remote
+        // hangup racing a local failure) and closing twice used to mean
+        // a double native teardown.
+        if (!closed.compareAndSet(false, true)) return
+        runCatching { micTrack?.setEnabled(false) }
+        // Close, don't dispose the factory: it is process-wide, and
+        // tearing it down while ICE gathering is still running on a
+        // native thread crashes the app seconds later, once a callback
+        // fires into freed memory.
         runCatching { pc.close() }
-        runCatching { factory.dispose() }
         audioManager.mode = priorAudioMode
         _state.value = MediaState.Closed
     }
+
+    private val closed = kotlinx.atomicfu.atomic(false)
 
     /** A dead STUN/TURN server must degrade, not break: when gathering
      *  stalls (unreachable server keeps ICE in %gathering), proceed
@@ -174,17 +177,34 @@ class AndroidCallEngine(
         d.await()
     }
 
-    companion object {
-        private var initialized = false
+}
 
-        @Synchronized
-        private fun ensureInitialized(context: Context) {
-            if (initialized) return
-            PeerConnectionFactory.initialize(
-                PeerConnectionFactory.InitializationOptions.builder(context.applicationContext)
-                    .createInitializationOptions(),
+/**
+ * One [PeerConnectionFactory] for the process.
+ *
+ * libwebrtc's factory is expensive and designed to be shared; it also
+ * owns the audio device module and native threads. Creating one per
+ * call and disposing it on hang-up meant a teardown could race the ICE
+ * gathering of the call that was ending — a use-after-free that
+ * surfaced as a crash a few seconds after "busy". Individual
+ * PeerConnections are still closed per call; the factory outlives them.
+ */
+internal object WebRtcFactory {
+    private var factory: PeerConnectionFactory? = null
+
+    @Synchronized
+    fun get(context: Context): PeerConnectionFactory {
+        factory?.let { return it }
+        val app = context.applicationContext
+        PeerConnectionFactory.initialize(
+            PeerConnectionFactory.InitializationOptions.builder(app)
+                .createInitializationOptions(),
+        )
+        return PeerConnectionFactory.builder()
+            .setAudioDeviceModule(
+                JavaAudioDeviceModule.builder(app).createAudioDeviceModule(),
             )
-            initialized = true
-        }
+            .createPeerConnectionFactory()
+            .also { factory = it }
     }
 }
