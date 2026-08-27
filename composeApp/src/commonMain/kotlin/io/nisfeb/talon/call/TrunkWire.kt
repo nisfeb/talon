@@ -20,6 +20,7 @@ import kotlinx.serialization.json.putJsonObject
  *           {"accept":{...}}  | {"reject":{"id":i,"reason":r}}
  *           {"hangup":{"id":i}}
  *   update  {"recv":{"from":"~zod","sig":{...}}}
+ *   policy  {"mode":"open","allow":["~zod"],"block":["~bus"]}
  */
 sealed interface TrunkSig {
     val id: String
@@ -34,6 +35,30 @@ sealed interface TrunkSig {
 /** Authorization to join one party line, minted by the host's ship. */
 data class TrunkTicket(val name: String, val location: String, val token: String)
 
+/**
+ * Who may ring this ship. Enforced by the agent, not here — the client
+ * only reads and edits it. [block] always applies; [mode] decides what
+ * happens to everyone who isn't blocked.
+ */
+data class CallPolicy(
+    val mode: Mode = Mode.Open,
+    val allow: Set<String> = emptySet(),
+    val block: Set<String> = emptySet(),
+) {
+    enum class Mode(val wire: String) {
+        /** Anyone may ring, except blocked ships. */
+        Open("open"),
+
+        /** Only ships in [allow] may ring. */
+        Allow("allow"),
+        ;
+
+        companion object {
+            fun from(wire: String): Mode = entries.firstOrNull { it.wire == wire } ?: Open
+        }
+    }
+}
+
 /** Anything the agent surfaces on /calls. */
 sealed interface TrunkUpdate {
     val from: String
@@ -45,6 +70,12 @@ sealed interface TrunkUpdate {
         val name: String,
         val why: String,
     ) : TrunkUpdate
+
+    /**
+     * Echoed after every policy edit so a ship's other devices
+     * converge without re-scrying. [from] is always our own ship.
+     */
+    data class Policy(override val from: String, val policy: CallPolicy) : TrunkUpdate
 }
 
 object TrunkWire {
@@ -95,6 +126,16 @@ object TrunkWire {
         putJsonObject("close-room") { put("name", name) }
     }
 
+    fun setCallModeAction(mode: CallPolicy.Mode): JsonElement =
+        buildJsonObject { put("set-call-mode", mode.wire) }
+
+    /** Add or drop one ship from the allow or block list. */
+    fun allowAction(peer: String, allowed: Boolean): JsonElement =
+        buildJsonObject { put(if (allowed) "allow" else "unallow", peer) }
+
+    fun blockAction(peer: String, blocked: Boolean): JsonElement =
+        buildJsonObject { put(if (blocked) "block" else "unblock", peer) }
+
     /** Point this ship at its sidecar's SFU. */
     fun setSfuAction(base: String, group: String, key: String): JsonElement = buildJsonObject {
         putJsonObject("set-sfu") { put("base", base); put("group", group); put("key", key) }
@@ -124,6 +165,9 @@ object TrunkWire {
                     token = t["token"]?.jsonPrimitive?.content ?: return null,
                 ),
             )
+        }
+        (obj["policy"] as? JsonObject)?.let { p ->
+            return TrunkUpdate.Policy("", parsePolicy(p))
         }
         (obj["denied"] as? JsonObject)?.let { d ->
             return TrunkUpdate.Denied(
@@ -157,6 +201,21 @@ object TrunkWire {
         }
         sig["hangup"]?.jsonObject?.let { return TrunkSig.Hangup(it.str("id") ?: return null) }
         return null
+    }
+
+    /** Parse the /x/policy scry body, or a %policy fact's payload. */
+    fun parsePolicy(body: JsonElement): CallPolicy {
+        val o = body as? JsonObject ?: return CallPolicy()
+        fun ships(k: String): Set<String> =
+            (o[k] as? kotlinx.serialization.json.JsonArray)
+                ?.mapNotNull { it.jsonPrimitive.content.takeIf(String::isNotBlank) }
+                ?.toSet()
+                ?: emptySet()
+        return CallPolicy(
+            mode = CallPolicy.Mode.from(o["mode"]?.jsonPrimitive?.content ?: "open"),
+            allow = ships("allow"),
+            block = ships("block"),
+        )
     }
 
     /** Parse the /x/ice scry body: [{"url":u,"user":s,"cred":c}, …]. */

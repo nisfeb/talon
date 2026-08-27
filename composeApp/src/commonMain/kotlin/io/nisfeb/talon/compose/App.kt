@@ -1264,6 +1264,7 @@ fun App(
                             aiSettings = aiSettings,
                             themePreference = themePreference,
                             uiSettings = uiSettings,
+                            callController = callController,
                             multiShip = multiShip,
                             profileAccentPreview = profileAccent,
                             notificationHealth = notificationHealth,

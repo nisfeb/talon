@@ -28,6 +28,18 @@
 ::    key:    the group's HS256 secret, base64url — the same string as
 ::            the "k" field of Galène's authKeys entry.
 +$  sfu-config  [base=@t group=@t key=@t]
+::  who may ring us 1:1. The block set always applies; the mode only
+::  decides what happens to everyone who isn't blocked.
+::    %open   anyone may ring
+::    %allow  only ships in the allow set may ring
+::
+::  This is ship-level on purpose: %trunk is the chokepoint every
+::  client shares, so the policy holds for every device and for apps
+::  other than the one that set it. It deliberately knows nothing
+::  about %contacts — a client that wants "contacts only" keeps the
+::  allow set in sync itself.
++$  call-mode  ?(%open %allow)
++$  policy  [mode=call-mode allow=(set ship) block=(set ship)]
 ::  a party line we host. members may join; anyone else is denied.
 +$  room  [title=@t members=(set ship)]
 ::  authorization to join one room: where it is, and a short-lived
@@ -41,6 +53,11 @@
       [%open-room name=@t title=@t members=(set ship)]
       [%close-room name=@t]
       [%join-room host=ship name=@t]
+      [%set-call-mode mode=call-mode]
+      [%allow =ship]
+      [%unallow =ship]
+      [%block =ship]
+      [%unblock =ship]
   ==
 ::  ship-to-ship room negotiation
 +$  room-sig
@@ -61,5 +78,8 @@
       [%denied from=ship name=@t why=@t]
       [%open from=ship name=@t title=@t]
       [%shut from=ship name=@t]
+      ::  echoed after every policy change so a ship's other devices
+      ::  converge without re-scrying
+      [%policy =policy]
   ==
 --

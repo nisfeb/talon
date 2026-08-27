@@ -8,12 +8,15 @@
 ::            {"open-room":{"name":n,"title":t,"members":["~zod"]}}
 ::            {"close-room":{"name":n}}
 ::            {"join-room":{"host":"~zod","name":n}}
+::            {"set-call-mode":"open"} | {"allow":"~zod"}
+::            {"unallow":"~zod"} | {"block":"~zod"} | {"unblock":"~zod"}
 ::    sig     {"ring":{"id":i}} | {"offer":{"id":i,"sdp":s,"fpr":f}}
 ::            {"accept":{...}}  | {"reject":{"id":i,"reason":r}}
 ::            {"hangup":{"id":i}}
 ::    update  {"recv":{"from":"~zod","sig":{...}}}
 ::            {"ticket":{"from":"~zod","name":n,"location":l,"token":t}}
 ::            {"denied":{"from":"~zod","name":n,"why":w}}
+::    policy  {"mode":"open","allow":["~zod"],"block":["~bus"]}
 /-  trunk
 |%
 ++  ship-from-json  (su:dejs:format ;~(pfix sig fed:ag))
@@ -44,6 +47,27 @@
       [%open-room (ot ~[name+so title+so members+(as ship-from-json)])]
       [%close-room (ot ~[name+so])]
       [%join-room (ot ~[host+ship-from-json name+so])]
+      [%set-call-mode (su (perk %open %allow ~))]
+      [%allow ship-from-json]
+      [%unallow ship-from-json]
+      [%block ship-from-json]
+      [%unblock ship-from-json]
+  ==
+::
+++  policy-to-json
+  ::  no `=, enjs:format` here either; see +lines-to-json.
+  |=  pol=policy:trunk
+  ^-  json
+  =/  ships
+    |=  who=(set @p)
+    ^-  json
+    :-  %a
+    %+  turn  ~(tap in who)
+    |=(w=@p `json`s+(scot %p w))
+  %-  pairs:enjs:format
+  :~  [%mode s+`@t`mode.pol]
+      [%allow (ships allow.pol)]
+      [%block (ships block.pol)]
   ==
 ::
 ++  ice-to-json
@@ -113,6 +137,8 @@
     :~  [%from s+(scot %p from.u)]
         [%name s+name.u]
     ==
+  ::
+      %policy  (frond %policy (policy-to-json policy.u))
   ==
 ::
 ++  lines-to-json

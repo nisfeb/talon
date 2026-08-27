@@ -67,6 +67,7 @@ import io.nisfeb.talon.ai.LoopPrompt
 import io.nisfeb.talon.ui.UiSettings
 import io.nisfeb.talon.ui.isOnDeviceAiFeatureSupported
 import io.nisfeb.talon.ui.isAssistantSupported
+import io.nisfeb.talon.ui.isCallsSupported
 import io.nisfeb.talon.ui.isLoopsSupported
 import io.nisfeb.talon.ui.isOnDeviceAiSupported
 import io.nisfeb.talon.ui.theme.ThemePreference
@@ -103,6 +104,11 @@ fun SettingsScreen(
      *  + PushTokenProvider. */
     relayConfig: RelayPanelConfig? = null,
     onBack: () -> Unit,
+    /** Optional call controller. When non-null (and the platform does
+     *  calls at all) Settings grows a "Who can call you" section that
+     *  edits the ship-level policy %trunk enforces. null hides it —
+     *  tests and hosts that haven't wired calls. */
+    callController: io.nisfeb.talon.call.CallController? = null,
     /** Optional daily-digest config + alarm controls. Android wires
      *  the JSON-prefs-backed impl that drives AlarmManager; desktop
      *  passes null until a desktop scheduler lands and the section
@@ -756,6 +762,16 @@ fun SettingsScreen(
                 )
             }
 
+            // Who may ring this ship. The policy lives in %trunk, not
+            // here — this is only its editor, and any other app on the
+            // ship sees the same lists.
+            if (isCallsSupported && callController != null) {
+                Spacer(Modifier.height(16.dp))
+                HorizontalDivider()
+                Spacer(Modifier.height(8.dp))
+                CallPolicySection(callController)
+            }
+
             // Loops — scheduled agent prompts. Needs a cloud key (it runs
             // the agent) and a platform that can fire it, so it's gated on
             // isLoopsSupported (Android via AlarmManager; desktop via the
@@ -974,6 +990,117 @@ internal fun aiFeatureEnabled(state: AiSettings.Config, feature: AiSettings.Feat
         // Unified assistant: either legacy flag counts as enabled.
         AiSettings.Feature.Agent -> state.assistantOn()
     }
+
+@Composable
+private fun CallPolicySection(controller: io.nisfeb.talon.call.CallController) {
+    val policy by controller.policy.collectAsState()
+    val scope = rememberCoroutineScope()
+    val allowOnly = policy.mode == io.nisfeb.talon.call.CallPolicy.Mode.Allow
+
+    Column {
+        Text("Who can call you", style = MaterialTheme.typography.titleMedium)
+        Spacer(Modifier.height(4.dp))
+        Text(
+            "Your ship decides this, so it applies to every device you're " +
+                "signed in on — and to any other app sharing your call setup.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.height(8.dp))
+        FeatureToggleRow(
+            label = "Only people on my list",
+            description = if (allowOnly) {
+                "Everyone else's calls are ignored."
+            } else {
+                "Anyone can ring you, except people you've blocked."
+            },
+            enabled = allowOnly,
+            onChange = { on ->
+                scope.launch {
+                    controller.setCallMode(
+                        if (on) {
+                            io.nisfeb.talon.call.CallPolicy.Mode.Allow
+                        } else {
+                            io.nisfeb.talon.call.CallPolicy.Mode.Open
+                        },
+                    )
+                }
+            },
+        )
+        if (allowOnly) {
+            ShipListEditor(
+                title = "Allowed",
+                empty = "Nobody yet — with this on, no one can reach you.",
+                ships = policy.allow,
+                onAdd = { scope.launch { controller.setAllowed(it, true) } },
+                onRemove = { scope.launch { controller.setAllowed(it, false) } },
+            )
+        }
+        ShipListEditor(
+            title = "Blocked",
+            empty = "Nobody blocked.",
+            ships = policy.block,
+            onAdd = { scope.launch { controller.setBlocked(it, true) } },
+            onRemove = { scope.launch { controller.setBlocked(it, false) } },
+        )
+    }
+}
+
+/**
+ * One editable set of ships. Validation is deliberately loose — the
+ * agent's own parser is the real gate, and it rejects a malformed @p
+ * long before it reaches the policy.
+ */
+@Composable
+private fun ShipListEditor(
+    title: String,
+    empty: String,
+    ships: Set<String>,
+    onAdd: (String) -> Unit,
+    onRemove: (String) -> Unit,
+) {
+    var draft by remember { mutableStateOf("") }
+    val candidate = draft.trim().let { if (it.startsWith("~")) it else "~$it" }
+    val valid = candidate.length > 3 && candidate.drop(1).all { it.isLetter() || it == '-' }
+
+    Spacer(Modifier.height(12.dp))
+    Text(title, style = MaterialTheme.typography.labelLarge)
+    Spacer(Modifier.height(4.dp))
+    if (ships.isEmpty()) {
+        Text(
+            empty,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    } else {
+        ships.sorted().forEach { who ->
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(who, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+                TextButton(onClick = { onRemove(who) }) { Text("Remove") }
+            }
+        }
+    }
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        OutlinedTextField(
+            value = draft,
+            onValueChange = { draft = it },
+            singleLine = true,
+            label = { Text("~sampel-palnet") },
+            modifier = Modifier.weight(1f),
+        )
+        Button(
+            enabled = valid && candidate !in ships,
+            onClick = { onAdd(candidate); draft = "" },
+        ) { Text("Add") }
+    }
+}
 
 @Composable
 private fun FeatureToggleRow(

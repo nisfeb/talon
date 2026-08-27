@@ -55,7 +55,16 @@ class CallController(
 ) {
     private val scope = CoroutineScope(SupervisorJob() + ioDispatcher + backgroundExceptionHandler)
     private val _state = MutableStateFlow<CallUiState>(CallUiState.None)
+
+    /**
+     * Who may ring this ship. The agent enforces it; this is a read
+     * model for the settings screen, refreshed from /x/policy on
+     * connect and from %policy facts after every edit (including
+     * edits made on the ship's other devices).
+     */
+    private val _policy = MutableStateFlow(CallPolicy())
     val state: StateFlow<CallUiState> = _state.asStateFlow()
+    val policy: StateFlow<CallPolicy> = _policy.asStateFlow()
 
     private var channel: UrbitChannel? = null
     private var loop: Job? = null
@@ -110,6 +119,10 @@ class CallController(
                 runCatching { iceServers = TrunkWire.parseIce(ch.scry(TrunkWire.AGENT, "/ice")) }
                     .onSuccess { Log.i(TAG, "ice config: ${iceServers.size} servers") }
                     .onFailure { Log.w(TAG, "ice scry failed (Tier 0 only)", it) }
+                // An old desk has no /x/policy; leaving the default
+                // (open) matches how that desk actually behaves.
+                runCatching { _policy.value = TrunkWire.parsePolicy(ch.scry(TrunkWire.AGENT, "/policy")) }
+                    .onFailure { Log.w(TAG, "policy scry failed; assuming open", it) }
                 ch.events().let { events ->
                     ch.subscribe(TrunkWire.AGENT, TrunkWire.CALLS_PATH)
                     backoff = 2_000L
@@ -123,6 +136,7 @@ class CallController(
                         when (val up = TrunkWire.parseUpdate(fact)) {
                             is TrunkUpdate.Recv -> onSignal(up)
                             is TrunkUpdate.Ticket -> onTicket?.invoke(up.ticket)
+                            is TrunkUpdate.Policy -> _policy.value = up.policy
                             is TrunkUpdate.Denied -> {
                                 Log.w(TAG, "room " + up.name + " denied: " + up.why)
                                 onDenied?.invoke(up.name, up.why)
@@ -244,6 +258,27 @@ class CallController(
                 TrunkWire.openRoomAction(name, title, members),
             )
         }.onFailure { Log.e(TAG, "open-room poke failed", it) }
+    }
+
+    /**
+     * Change who may ring us. Each edit is a poke; the agent echoes the
+     * whole policy back on /calls, so [policy] updates from the fact
+     * rather than optimistically here — that keeps every device on the
+     * ship showing the same thing.
+     */
+    suspend fun setCallMode(mode: CallPolicy.Mode) =
+        pokePolicy("set-call-mode", TrunkWire.setCallModeAction(mode))
+
+    suspend fun setAllowed(peer: String, allowed: Boolean) =
+        pokePolicy("allow", TrunkWire.allowAction(peer, allowed))
+
+    suspend fun setBlocked(peer: String, blocked: Boolean) =
+        pokePolicy("block", TrunkWire.blockAction(peer, blocked))
+
+    private suspend fun pokePolicy(what: String, action: kotlinx.serialization.json.JsonElement) {
+        val ch = channel ?: return
+        runCatching { ch.poke(TrunkWire.AGENT, TrunkWire.ACTION_MARK, action) }
+            .onFailure { Log.e(TAG, "$what poke failed", it) }
     }
 
     /** Ask [host] to let us onto its party line. */

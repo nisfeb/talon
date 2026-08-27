@@ -22,6 +22,7 @@
       state-2
       state-3
       state-4
+      state-5
   ==
 +$  state-0  [%0 ~]
 +$  state-1  [%1 ice=(list ice-server:trunk)]
@@ -52,6 +53,20 @@
       ::  one that answers a request we actually made.
       asked=(set [=ship name=@t])
   ==
+::  %4 rang for any ship that asked — see +may-ring
++$  state-5
+  $:  %5
+      ice=(list ice-server:trunk)
+      sfu=sfu-config:trunk
+      hosted=(map @t room:trunk)
+      known=lines:trunk
+      asked=(set [=ship name=@t])
+      ::  who may ring us. Enforced here rather than in the client:
+      ::  a client-side filter still lets the poke land, still rings
+      ::  a ship's other clients, and stops nothing for an app that
+      ::  shares this agent.
+      pol=policy:trunk
+  ==
 +$  card  card:agent:gall
 ::  how long a minted ticket stays valid. Long enough for a call that
 ::  outlasts a conversation, short enough that a removed member loses
@@ -59,9 +74,11 @@
 ++  ticket-ttl  ^~((div ~h6 ~s1))
 ::  how many party-line invitations we will remember from the network.
 ++  invite-cap  256
+::  the policy a ship starts with: ring for anyone, block nobody.
+++  open-policy  `policy:trunk`[%open ~ ~]
 --
 %-  agent:dbug
-=|  state-4
+=|  state-5
 =*  state  -
 ^-  agent:gall
 =<
@@ -77,11 +94,14 @@
   ^-  (quip card _this)
   =/  old  !<(versioned-state old-vase)
   ?-  -.old
-    %0  `this(state [%4 ~ ['' '' ''] ~ ~ ~])
-    %1  `this(state [%4 ice.old ['' '' ''] ~ ~ ~])
-    %2  `this(state [%4 ice.old sfu.old hosted.old ~ ~])
-    %3  `this(state [%4 ice.old sfu.old hosted.old known.old ~])
-    %4  `this(state old)
+    %0  `this(state [%5 ~ ['' '' ''] ~ ~ ~ open-policy])
+    %1  `this(state [%5 ice.old ['' '' ''] ~ ~ ~ open-policy])
+    %2  `this(state [%5 ice.old sfu.old hosted.old ~ ~ open-policy])
+    %3  `this(state [%5 ice.old sfu.old hosted.old known.old ~ open-policy])
+  ::  upgrading must not silently start refusing calls, so an existing
+  ::  ship keeps ringing for anyone until its owner says otherwise.
+    %4  `this(state [%5 ice.old sfu.old hosted.old known.old asked.old open-policy])
+    %5  `this(state old)
   ==
 ::
 ++  on-poke
@@ -96,6 +116,34 @@
     ?-    -.act
         %set-ice  `this(ice.state servers.act)
         %set-sfu  `this(sfu.state sfu-config.act)
+    ::
+    ::  policy edits. Each echoes the whole policy back on /calls so a
+    ::  ship's other devices converge without re-scrying.
+        %set-call-mode
+      =/  new  pol.state(mode mode.act)
+      :-  ~[(fact:hc [%policy new])]  this(pol.state new)
+    ::
+        %allow
+      =/  new  pol.state(allow (~(put in allow.pol.state) ship.act))
+      :-  ~[(fact:hc [%policy new])]  this(pol.state new)
+    ::
+        %unallow
+      =/  new  pol.state(allow (~(del in allow.pol.state) ship.act))
+      :-  ~[(fact:hc [%policy new])]  this(pol.state new)
+    ::
+    ::  blocking also drops any allow entry, so the two lists can never
+    ::  disagree about one ship.
+        %block
+      =/  new
+        %=  pol.state
+          block  (~(put in block.pol.state) ship.act)
+          allow  (~(del in allow.pol.state) ship.act)
+        ==
+      :-  ~[(fact:hc [%policy new])]  this(pol.state new)
+    ::
+        %unblock
+      =/  new  pol.state(block (~(del in block.pol.state) ship.act))
+      :-  ~[(fact:hc [%policy new])]  this(pol.state new)
     ::
         %open-room
       :-  (announce:hc name.act title.act members.act %.y)
@@ -127,6 +175,13 @@
   ::  1:1 signal from a peer ship
       %trunk-signal
     =/  =sig:trunk  !<(sig:trunk vase)
+    ::  A refused caller is answered with silence, not a rejection: a
+    ::  rejection confirms the ship is live and filtering, and tells a
+    ::  blocked caller they were blocked. Their ring watchdog gives up
+    ::  on its own, which looks the same as an offline ship.
+    ?.  (may-ring:hc src.bowl)
+      %-  (slog leaf+"trunk: refused ring from {<src.bowl>}" ~)
+      `this
     :_  this
     :~  [%give %fact ~[/calls] %trunk-update !>(`update:trunk`[%recv src.bowl sig])]
     ==
@@ -140,6 +195,7 @@
         %announce
       ::  an invitation from anyone is fine (it is just a name), but
       ::  the list is remote-controlled, so it does not grow forever.
+      ?:  (~(has in block.pol.state) src.bowl)  `this
       ?:  (gth ~(wyt by known.state) invite-cap)  `this
       :-  ~[(fact:hc [%open src.bowl name.msg title.msg])]
       this(known.state (~(put by known.state) [src.bowl name.msg] title.msg))
@@ -179,7 +235,8 @@
   ?+  path  (on-peek:def path)
     [%x %ice ~]    ``trunk-ice+!>(ice.state)
     [%x %rooms ~]  ``noun+!>(hosted.state)
-    [%x %lines ~]  ``trunk-lines+!>(known.state)
+    [%x %lines ~]   ``trunk-lines+!>(known.state)
+    [%x %policy ~]  ``trunk-policy+!>(pol.state)
   ==
 ::
 ++  on-agent
@@ -219,6 +276,19 @@
   ^-  card
   [%give %fact ~[/calls] %trunk-update !>(update)]
 ::
+::  +may-ring: may `who` ring us 1:1? Our own ship always may — that
+::  is our other devices, not a stranger.
+::
+++  may-ring
+  |=  who=ship
+  ^-  ?
+  ?:  =(who our.bowl)  %.y
+  ?:  (~(has in block.pol.state) who)  %.n
+  ?-  mode.pol.state
+    %open   %.y
+    %allow  (~(has in allow.pol.state) who)
+  ==
+::
 ::  +grant-cards: authorize (or refuse) `who` for the room `name` we
 ::  host. Membership is the whole check — a ticket is only ever minted
 ::  for a ship the host explicitly listed.
@@ -226,6 +296,10 @@
 ++  grant-cards
   |=  [who=ship name=@t]
   ^-  (list card)
+  ::  a block outranks membership: being on the list is not a way
+  ::  around having been blocked.
+  ?:  (~(has in block.pol.state) who)
+    (reply who [%deny name 'not a member'])
   =/  got  (~(get by hosted.state) name)
   ?~  got
     (reply who [%deny name 'no such room'])

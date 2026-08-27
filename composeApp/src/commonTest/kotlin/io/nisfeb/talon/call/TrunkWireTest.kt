@@ -81,4 +81,46 @@ class TrunkWireTest {
         assertEquals("sha-256 AA:BB:CC", sdpFingerprint(sdp))
         assertEquals("", sdpFingerprint("v=0\r\n"))
     }
+
+    @Test
+    fun policyParsing() {
+        val pol = TrunkWire.parsePolicy(
+            Json.parseToJsonElement(
+                """{"mode":"allow","allow":["~zod","~nec"],"block":["~bus"]}""",
+            ),
+        )
+        assertEquals(CallPolicy.Mode.Allow, pol.mode)
+        assertEquals(setOf("~zod", "~nec"), pol.allow)
+        assertEquals(setOf("~bus"), pol.block)
+
+        // An unknown or missing mode must fail open rather than
+        // silently locking the user out of their own calls.
+        assertEquals(
+            CallPolicy.Mode.Open,
+            TrunkWire.parsePolicy(Json.parseToJsonElement("""{"mode":"weird"}""")).mode,
+        )
+        assertEquals(CallPolicy(), TrunkWire.parsePolicy(Json.parseToJsonElement("{}")))
+    }
+
+    @Test
+    fun policyActionShapes() {
+        assertEquals(
+            """{"set-call-mode":"allow"}""",
+            TrunkWire.setCallModeAction(CallPolicy.Mode.Allow).toString(),
+        )
+        assertEquals("""{"allow":"~zod"}""", TrunkWire.allowAction("~zod", true).toString())
+        assertEquals("""{"unallow":"~zod"}""", TrunkWire.allowAction("~zod", false).toString())
+        assertEquals("""{"block":"~bus"}""", TrunkWire.blockAction("~bus", true).toString())
+        assertEquals("""{"unblock":"~bus"}""", TrunkWire.blockAction("~bus", false).toString())
+    }
+
+    @Test
+    fun policyFactParsing() {
+        val up = TrunkWire.parseUpdate(
+            Json.parseToJsonElement(
+                """{"policy":{"mode":"open","allow":[],"block":["~bus"]}}""",
+            ),
+        )
+        assertEquals(CallPolicy(block = setOf("~bus")), (up as TrunkUpdate.Policy).policy)
+    }
 }

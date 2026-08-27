@@ -151,6 +151,64 @@ one upgrades every call made *to* you.
 - UI: call button and `/call` in a DM, party-line button in a group
   channel, `CallOverlay` (ring / in-call banner) and `PartyLineBar`.
 - `sidecar/` — compose file and setup for coturn + Galène.
+- `gen/trunk/policy.hoon` — dojo read-out of the call policy, since
+  `%trunk` has no UI of its own.
+
+## Who may ring you
+
+`%trunk` carries a ship-level call policy. It is enforced in the agent,
+not in Talon, and that placement is the whole point: a client-side
+filter still lets the poke land, still rings the ship's *other*
+clients, and does nothing at all for a second app sharing the agent.
+
+```
++$  call-mode  ?(%open %allow)
++$  policy  [mode=call-mode allow=(set ship) block=(set ship)]
+```
+
+- `%open` — anyone may ring, except ships in `block`.
+- `%allow` — only ships in `allow` may ring.
+- `block` always applies, and outranks `allow`: blocking a ship also
+  drops it from the allow list, so the two can never disagree.
+- A block also refuses party-line tickets and drops room announcements
+  from that ship.
+
+A refused caller gets **silence**, not a rejection. A rejection would
+confirm to a stranger that the ship is live and filtering, and would
+tell a blocked caller they were blocked; instead their ring watchdog
+times out, which is what an offline ship looks like.
+
+Upgrading never changes behaviour: an existing ship migrates to
+`%open` with empty lists, exactly how it behaved before.
+
+Deliberately, the agent knows nothing about `%contacts`. Making
+"contacts only" work by scrying Tlon's agent would make shared
+infrastructure depend on the Tlon suite; a client that wants that
+behaviour keeps the allow set in sync itself.
+
+### Reading and editing it
+
+The policy has no UI in `%trunk` — the desk stays headless so it can be
+shared. Talon renders it under Settings → "Who can call you". Outside
+Talon:
+
+```dojo
+::  read
+=dir /=trunk=
++trunk/policy
+
+::  write
+:trunk &trunk-action [%set-call-mode %allow]
+:trunk &trunk-action [%allow ~zod]
+:trunk &trunk-action [%block ~bus]
+:trunk &trunk-action [%unblock ~bus]
+```
+
+Over HTTP the scry is `/~/scry/trunk/policy.json` (eyre supplies the
+`%x` care itself — do not put it in the path).
+
+Every edit echoes the whole policy back on `/calls` as a `%policy`
+fact, so a ship's other devices converge without re-scrying.
 
 ## Installing the desk
 
@@ -206,6 +264,10 @@ TRUNK_E2E=1 TRUNK_SFU_KEY=<key> TRUNK_SFU=http://<lan-ip>:8444 \
 - `PartyLineUiPathTest` — the path the UI takes (needs `TRUNK_CHANNEL`).
 - `StuckRingE2ETest` — a caller that vanishes mid-ring must not leave
   the callee wedged.
+- `CallPolicyE2ETest` — open rings, blocked is silent, allow-mode
+  refuses a ship not on the list and rings one that is, and a block
+  outranks an allow entry. Rings land on ship A only, so pointing A at
+  an unused ship keeps the noise off a real device.
 - `UiPrefSyncE2ETest` — a preference set on one device reaches another.
 - `TrunkFixtureTest` (`TRUNK_FIXTURE=1`) — one-shot: creates a group
   with a chat channel, invites the second ship, and points the host at
@@ -332,7 +394,9 @@ fixed in the same pass:
   Folding the former onto the latter is the obvious cleanup, deferred
   deliberately while the 1:1 path is in an RC under test; its E2E is
   the regression net for that refactor.
-- No party-line UI on iOS (`isCallsSupported` is false there).
+- No party-line UI on iOS (`isCallsSupported` is false there), which
+  also means no call-policy editor there — an iOS-only user has to set
+  it from another device or the dojo.
 - The SFU sees plaintext audio, exactly as the host's ship already
   sees the group's messages. Host-blind party lines would need
   insertable-streams E2EE — a v3+ concern with real key-rotation
