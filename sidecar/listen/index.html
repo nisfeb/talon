@@ -1,0 +1,252 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Listen · Trunk</title>
+<!--
+  A listen-only page for Trunkline party lines.
+
+  Galène's own client is a video-conferencing UI: it hides audio-only
+  publishers behind a "display all" setting, and a tab that has never
+  been clicked can't autoplay audio. Getting sound out of it took a
+  settings panel and a play button — hopeless for someone handed a
+  link.
+
+  So this page does one thing. The button is the user gesture that
+  unlocks autoplay AND the thing that connects, so there is no way to
+  end up connected but silent. Everything Galène offers that a
+  listener can't use — publishing, chat, hand-raising, file transfer,
+  device pickers — simply isn't here.
+
+  protocol.js is Galène's own client library, served by the same
+  server, so the wire protocol can never drift from it.
+-->
+<style>
+  :root {
+    --bg: #f7f6f3;
+    --fg: #1a1a17;
+    --muted: #6b6a63;
+    --line: #e0ded7;
+    --accent: #1f6f4a;
+    --accent-fg: #ffffff;
+    --bad: #8a2f2f;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #14140f;
+      --fg: #ece9e1;
+      --muted: #9a978c;
+      --line: #2c2b25;
+      --accent: #4bbd85;
+      --accent-fg: #0d1a13;
+      --bad: #e08585;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    background: var(--bg);
+    color: var(--fg);
+    font: 16px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  main { width: 100%; max-width: 26rem; text-align: center; }
+  h1 {
+    margin: 0 0 .25rem;
+    font-size: 1.05rem;
+    font-weight: 600;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  .room {
+    margin: 0 0 2rem;
+    font-size: 1.5rem;
+    font-weight: 600;
+    overflow-wrap: anywhere;
+  }
+  button {
+    width: 100%;
+    padding: 1.15rem 1rem;
+    border: 0;
+    border-radius: 999px;
+    background: var(--accent);
+    color: var(--accent-fg);
+    font: inherit;
+    font-size: 1.15rem;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  button:disabled { opacity: .55; cursor: default; }
+  button.leave { background: transparent; color: var(--muted); border: 1px solid var(--line); }
+  .status { margin-top: 1.25rem; color: var(--muted); min-height: 1.5rem; }
+  .status.bad { color: var(--bad); }
+  .who {
+    margin-top: 1.5rem; padding-top: 1rem;
+    border-top: 1px solid var(--line);
+    color: var(--muted); font-size: .9rem;
+    text-align: left;
+  }
+  .who ul { margin: .5rem 0 0; padding-left: 1.1rem; }
+  .live { display: inline-block; width: .55rem; height: .55rem; border-radius: 50%;
+          background: var(--accent); margin-right: .45rem; vertical-align: baseline; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Trunk</h1>
+  <p class="room" id="room">Party line</p>
+
+  <button id="go">Listen</button>
+  <p class="status" id="status">Audio starts when you press Listen.</p>
+
+  <div class="who" id="who" hidden>
+    <strong>On the line</strong>
+    <ul id="whoList"></ul>
+  </div>
+
+  <!-- Hidden, but present from the start: it is attached to a real
+       track later, and it must be the element the click gesture
+       unlocked. -->
+  <audio id="audio" autoplay playsinline></audio>
+</main>
+
+<script src="/protocol.js"></script>
+<script>
+(function () {
+  var params = new URLSearchParams(location.search);
+  var group = params.get('group');
+  var token = params.get('token');
+
+  var goBtn = document.getElementById('go');
+  var statusEl = document.getElementById('status');
+  var roomEl = document.getElementById('room');
+  var whoEl = document.getElementById('who');
+  var whoList = document.getElementById('whoList');
+  var audio = document.getElementById('audio');
+
+  var conn = null;
+  var users = {};
+
+  function say(text, bad) {
+    statusEl.textContent = text;
+    statusEl.className = bad ? 'status bad' : 'status';
+  }
+
+  if (!group || !token) {
+    roomEl.textContent = 'Bad link';
+    goBtn.disabled = true;
+    say('This link is missing its room or its token.', true);
+    return;
+  }
+  roomEl.textContent = group.split('/').pop().replace(/-/g, ' ');
+
+  function renderWho() {
+    var names = Object.keys(users).map(function (k) { return users[k]; });
+    names = names.filter(function (n) { return n && n !== 'listener'; });
+    whoEl.hidden = names.length === 0;
+    whoList.innerHTML = '';
+    names.sort().forEach(function (n) {
+      var li = document.createElement('li');
+      li.textContent = n;
+      whoList.appendChild(li);
+    });
+  }
+
+  function stop() {
+    if (conn) { try { conn.close(); } catch (e) {} conn = null; }
+    audio.srcObject = null;
+    users = {};
+    renderWho();
+    goBtn.textContent = 'Listen';
+    goBtn.className = '';
+    goBtn.disabled = false;
+    goBtn.onclick = start;
+  }
+
+  function start() {
+    goBtn.disabled = true;
+    say('Connecting…');
+
+    // The click is the autoplay gesture. Attach a live MediaStream to
+    // the element now and play it, so the element is already unlocked
+    // by the time a track arrives.
+    var stream = new MediaStream();
+    audio.srcObject = stream;
+    var unlocked = audio.play();
+    if (unlocked && unlocked.catch) unlocked.catch(function () { /* retried on track */ });
+
+    conn = new ServerConnection();
+
+    conn.onconnected = function () {
+      this.join(group, 'listener', { type: 'token', token: token });
+    };
+
+    conn.onjoined = function (kind, g, perms, status, data, error, message) {
+      if (kind === 'fail' || kind === 'redirect') {
+        say(message || error || 'The host refused this link.', true);
+        stop();
+        return;
+      }
+      if (kind !== 'join') return;
+      // Ask for every audio stream on the line.
+      this.request({ '': ['audio'] });
+      say('Listening. Nothing to hear yet.');
+      goBtn.textContent = 'Stop listening';
+      goBtn.className = 'leave';
+      goBtn.disabled = false;
+      goBtn.onclick = function () { stop(); say('Stopped.'); };
+    };
+
+    conn.onuser = function (id, kind, username) {
+      if (kind === 'add') users[id] = username;
+      else if (kind === 'delete') delete users[id];
+      renderWho();
+    };
+
+    conn.ondownstream = function (s) {
+      s.onstatus = function (st) {
+        if (st === 'connected') say('Listening');
+      };
+      s.ondowntrack = function (track, transceiver, stream_) {
+        // Add the track to the element we already unlocked, rather
+        // than swapping srcObject — swapping loses the gesture.
+        stream.addTrack(track);
+        audio.play().catch(function () {
+          say('Your browser blocked playback. Press Listen again.', true);
+        });
+        say('Listening');
+      };
+      s.onclose = function () { say('Listening. Nothing to hear yet.'); };
+    };
+
+    conn.onclose = function () {
+      say('The line ended.');
+      stop();
+    };
+
+    conn.onerror = function (e) {
+      say((e && e.message) || 'Connection failed.', true);
+      stop();
+    };
+
+    // Galène tells us its websocket endpoint in the group's status.
+    fetch('/group/' + group + '/.status')
+      .then(function (r) { return r.json(); })
+      .then(function (st) { conn.connect(st.endpoint); })
+      .catch(function () {
+        say('Could not reach the server.', true);
+        stop();
+      });
+  }
+
+  goBtn.onclick = start;
+})();
+</script>
+</body>
+</html>

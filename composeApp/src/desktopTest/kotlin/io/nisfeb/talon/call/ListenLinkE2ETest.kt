@@ -78,11 +78,16 @@ class ListenLinkE2ETest {
             assertEquals(room, link.room)
             assertTrue("token=" in link.url, "link carries no token: ${link.url}")
             assertTrue(room in link.url, "link points at the wrong room: ${link.url}")
+            // The link must open Trunk's own one-button page, not
+            // Galène's conference UI — that UI hides audio-only
+            // publishers and can't autoplay, so a plain group URL is
+            // unusable to whoever you send it to.
+            assertTrue("/listen/?group=" in link.url, "not a listen page: ${link.url}")
             assertTrue(
                 link.expiresSecs > 0,
                 "link has no expiry — the ttl is the only thing that can revoke it",
             )
-            println("listening on: ${link.url.substringBefore("?token=")} (exp ${link.expiresSecs})")
+            println("listening on: ${link.url.substringBefore("&token=")} (exp ${link.expiresSecs})")
 
             // And turning it back off must stop new links immediately.
             ctl.setRoomListen(room, false)
@@ -147,10 +152,11 @@ class ListenLinkE2ETest {
             // subgroup is host-qualified. Get this wrong and the link
             // opens an empty room with no error anywhere.
             assertTrue(
-                "/${hostShip.removePrefix("~")}-$room/" in link.url,
-                "link points at the wrong host's subgroup: ${link.url.substringBefore("?token=")}",
+                "${hostShip.removePrefix("~")}-$room" in link.url,
+                "link points at the wrong host's subgroup: ${link.url.substringBefore("&token=")}",
             )
-            println("remote admin got a link: ${link.url.substringBefore("?token=")}")
+            assertTrue("/listen/?group=" in link.url, "not a listen page: ${link.url}")
+            println("remote admin got a link: ${link.url.substringBefore("&token=")}")
 
             hostCtl.configureRoom(hostShip, room, open = false, listen = false)
             hostCtl.stop(); adminCtl.stop()

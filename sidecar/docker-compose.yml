@@ -1,5 +1,11 @@
 # Trunkline sidecar — runs next to your ship (vere) on its host.
 #
+# NOTE: listeners do NOT use Galène's own web client. It hides
+# audio-only publishers behind a "display all" setting and cannot
+# autoplay in a tab nobody has clicked, so a plain group link is
+# unusable to whoever you send it to. Serve sidecar/listen/index.html
+# at /listen/ (see README) and %trunk mints links pointing there.
+#
 #   coturn  Tier 1 (STUN echo) + Tier 2 (TURN relay) for 1:1 calls
 #   galene  the SFU that party lines run on
 #

@@ -311,7 +311,7 @@
           exp
         ==
       :_  this
-      ~[(fact:hc [%listen-link [name.act (rap 3 ~[loc '?token=' tok]) exp]])]
+      ~[(fact:hc [%listen-link [name.act (listen-url:hc name.act tok) exp]])]
     ::
         %close-room
       =/  got  (~(get by hosted.state) name.act)
@@ -419,7 +419,7 @@
       =/  tok=@t
         (mint-listen:trunk-jwt key:(room-sfu:hc name.msg) 'listener' loc now-secs exp)
       :_  this
-      (reply:hc src.bowl [%link [name.msg (rap 3 ~[loc '?token=' tok]) exp]])
+      (reply:hc src.bowl [%link [name.msg (listen-url:hc name.msg tok) exp]])
     ::
     ::  the host answering our %share.
         %link
@@ -605,6 +605,26 @@
   =/  got  (~(get by hosted.state) name)
   ?~  got  sfu.state
   ?~(sfu.u.got sfu.state u.sfu.u.got)
+::
+::  +room-subgroup: the Galène group name for a room we host.
+++  room-subgroup
+  |=  name=@t
+  ^-  @t
+  =/  cfg  (room-sfu name)
+  (rap 3 ~[group.cfg '/' (rsh [3 1] (scot %p our.bowl)) '-' name])
+::
+::  +listen-url: where a listener points a browser. Not the Galène
+::  conference UI — that hides audio-only publishers behind a setting
+::  and cannot autoplay in a tab nobody clicked, which made a link
+::  useless to anyone who hadn't been told the trick. Trunk serves its
+::  own one-button page at /listen.
+++  listen-url
+  |=  [name=@t tok=@t]
+  ^-  @t
+  =/  cfg  (room-sfu name)
+  %+  rap  3
+  :~  base.cfg  '/listen/?group='  (room-subgroup name)  '&token='  tok
+  ==
 ::
 ++  room-location
   |=  name=@t

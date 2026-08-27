@@ -351,9 +351,24 @@ minted. A client that ignores the switches still can't get a ticket.
 
 Galène's permissions are `op` / `present` / `message` / `caption` /
 `token`. A token *without* `present` is a listener: it receives streams
-and cannot publish one. `mint-listen:trunk-jwt` grants exactly that,
-and Galène's own web client reads `?token=` from the query string
-(`galene.js`), so the link needs no Talon web client at all.
+and cannot publish one. `mint-listen:trunk-jwt` grants exactly that.
+
+**Links point at Trunk's own page, not Galène's client.** Galène's UI
+is built for video conferencing: `showHideMedia` only displays a remote
+stream if one of its tracks is `kind === 'video'`, and `.peer-hidden`
+is `display: none` — so an audio-only party line renders *no tile at
+all*. Combined with browser autoplay policy on a tab nobody clicked,
+getting sound out of it took opening settings, enabling "display
+audio-only", and pressing play on a panel. Hopeless for someone handed
+a link.
+
+`sidecar/listen/index.html` is a one-button page instead: the click is
+both the autoplay gesture and the connect, so there is no way to end up
+connected but silent. It reuses Galène's own `protocol.js` (served by
+the same server, so the wire protocol can't drift) and offers nothing a
+listener can't use — no publishing, chat, hand-raising, file transfer
+or device pickers. Serve it at `/listen/`; `+listen-url` mints
+`<base>/listen/?group=<group>/<host>-<room>&token=<jwt>`.
 
 ```
 https://<your-sidecar-host>/group/talon/<host>-<room>/?token=<jwt>
