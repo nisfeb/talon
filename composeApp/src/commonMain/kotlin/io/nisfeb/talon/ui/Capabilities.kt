@@ -131,3 +131,26 @@ expect val isCallsSupported: Boolean
  * false on desktop, which has no touch edge at all.
  */
 expect val isEdgeSwipeBackSupported: Boolean
+
+/**
+ * Whether emoji need an explicit font span to render in colour.
+ *
+ * True only on desktop, where [EmojiFontFamily] resolves to a bundled
+ * system emoji family; Android and iOS already draw colour emoji in
+ * the default family, so the span changes nothing there. It is not
+ * free, though: a VisualTransformation on a text field has a long
+ * history of breaking iOS's native text-actions menu (paste), so the
+ * composer only pays for it where it buys something.
+ */
+expect val needsEmojiFontSpans: Boolean
+
+/**
+ * Whether the composer must offer its own "paste image" action.
+ *
+ * Android receives pasted images through the text field's content
+ * receiver and desktop through its Ctrl+V intercept, so on those the
+ * system paste gesture is enough. iOS has neither hook — the system
+ * Paste item on a plain text field yields text only — so image paste
+ * needs a button of its own, or it silently does nothing.
+ */
+expect val needsManualImagePaste: Boolean

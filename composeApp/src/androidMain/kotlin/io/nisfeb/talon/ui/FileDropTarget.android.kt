@@ -65,3 +65,8 @@ actual fun Modifier.imagePasteTarget(
     }
     return this.contentReceiver(listener)
 }
+
+// Images arrive through the field itself here (content receiver
+// on Android, the Ctrl+V intercept on desktop), so the composer
+// never needs to offer a manual paste action.
+actual fun clipboardHasImage(): Boolean = false

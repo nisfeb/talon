@@ -123,9 +123,16 @@ fun AnnotatedString.applyEmojiSpans(): AnnotatedString {
  * stays plain text; only the display layer changes. OffsetMapping is
  * identity since we add styling, not characters.
  */
-val EmojiVisualTransformation: VisualTransformation = VisualTransformation { source ->
-    TransformedText(
-        text = source.text.applyEmojiSpans(),
-        offsetMapping = OffsetMapping.Identity,
-    )
-}
+val EmojiVisualTransformation: VisualTransformation
+    get() = if (!needsEmojiFontSpans) {
+        // Nothing to restyle — and an identity transformation is not
+        // free on iOS, where it can cost the field its paste menu.
+        VisualTransformation.None
+    } else {
+        VisualTransformation { source ->
+            TransformedText(
+                text = source.text.applyEmojiSpans(),
+                offsetMapping = OffsetMapping.Identity,
+            )
+        }
+    }

@@ -58,3 +58,9 @@ actual val isCallsSupported: Boolean = true
 
 // No touch edge on desktop; the logo click opens the switcher.
 actual val isEdgeSwipeBackSupported: Boolean = false
+
+// Desktop resolves a bundled emoji family; the span does the work.
+actual val needsEmojiFontSpans: Boolean = true
+
+// Handled by the composer's Ctrl+V intercept.
+actual val needsManualImagePaste: Boolean = false

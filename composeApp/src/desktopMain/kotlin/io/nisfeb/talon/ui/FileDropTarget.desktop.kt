@@ -128,3 +128,8 @@ actual fun Modifier.imagePasteTarget(
     enabled: Boolean,
     onImage: (DroppedFile) -> Unit,
 ): Modifier = this
+
+// Images arrive through the field itself here (content receiver
+// on Android, the Ctrl+V intercept on desktop), so the composer
+// never needs to offer a manual paste action.
+actual fun clipboardHasImage(): Boolean = false

@@ -21,3 +21,9 @@ actual val isCallsSupported: Boolean = true
 
 // The system back gesture already owns the left edge here.
 actual val isEdgeSwipeBackSupported: Boolean = false
+
+// Android draws colour emoji in the default family already.
+actual val needsEmojiFontSpans: Boolean = false
+
+// Handled by the field's content receiver.
+actual val needsManualImagePaste: Boolean = false

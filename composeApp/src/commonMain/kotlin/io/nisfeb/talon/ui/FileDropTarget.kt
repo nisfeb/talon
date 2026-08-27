@@ -67,6 +67,17 @@ data class DroppedFile(
 expect fun readClipboardImageOrNull(): DroppedFile?
 
 /**
+ * True when the OS clipboard holds an image, checked cheaply enough to
+ * call during composition — and, on iOS, without tripping the system's
+ * "pasted from" notification, which a real read does.
+ *
+ * Only meaningful where [needsManualImagePaste] is true; elsewhere the
+ * platform delivers pasted images through the field itself and this
+ * returns false.
+ */
+expect fun clipboardHasImage(): Boolean
+
+/**
  * Accept a pasted (or keyboard-inserted) image into the composer's
  * text field and hand it to [onImage] for the same upload+send path
  * drag-drop and the picker use.

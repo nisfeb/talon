@@ -29,3 +29,10 @@ actual val isCallsSupported: Boolean = false
 
 // Supplied by MainViewController's edge strip -> IosBackDispatcher.
 actual val isEdgeSwipeBackSupported: Boolean = true
+
+// Apple Color Emoji is the system default; the span was a no-op
+// that cost the text field its paste menu.
+actual val needsEmojiFontSpans: Boolean = false
+
+// No rich-content hook on iOS; the composer shows a paste button.
+actual val needsManualImagePaste: Boolean = true
