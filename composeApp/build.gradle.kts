@@ -279,8 +279,25 @@ val generateTalonBuild = tasks.register("generateTalonBuild") {
     val outputDir = layout.buildDirectory.dir("generated/talon-build/commonMain/kotlin")
     val capturedVersionName = talonVersionName
     val capturedVersionCode = talonVersionCode
+    // Default party-line sidecar, injected at build time — never
+    // committed. A ship with no SFU of its own is pointed here on
+    // first connect so party lines work out of the box; group admins
+    // can point their group somewhere else.
+    //
+    // The key is a shared secret: anyone who extracts it from a build
+    // can mint a Galène token for any room on that server. It buys
+    // "works immediately" at the cost of the host-gated membership
+    // model on THAT server only — a group that sets its own sidecar
+    // is unaffected. Replace with per-ship provisioning before this
+    // is load-bearing.
+    val sfuBase = System.getenv("TALON_DEFAULT_SFU_BASE").orEmpty()
+    val sfuGroup = System.getenv("TALON_DEFAULT_SFU_GROUP") ?: "talon"
+    val sfuKey = System.getenv("TALON_DEFAULT_SFU_KEY").orEmpty()
     inputs.property("versionName", capturedVersionName)
     inputs.property("versionCode", capturedVersionCode)
+    inputs.property("sfuBase", sfuBase)
+    inputs.property("sfuGroup", sfuGroup)
+    inputs.property("sfuKey", sfuKey)
     outputs.dir(outputDir)
     doLast {
         val pkgDir = outputDir.get().asFile.resolve("io/nisfeb/talon")
@@ -293,6 +310,11 @@ val generateTalonBuild = tasks.register("generateTalonBuild") {
             object TalonBuild {
                 const val versionName: String = "$capturedVersionName"
                 const val versionCode: Int = $capturedVersionCode
+
+                /** Fallback party-line sidecar; empty base = none. */
+                const val defaultSfuBase: String = "$sfuBase"
+                const val defaultSfuGroup: String = "$sfuGroup"
+                const val defaultSfuKey: String = "$sfuKey"
             }
 
             """.trimIndent(),

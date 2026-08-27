@@ -278,9 +278,37 @@ host) and `/x/lines` (lines we've been invited onto), kept live by
 `%open` / `%shut` facts. A group whose admins haven't turned it on
 shows no party icon at all, rather than one the ship would refuse.
 
+Turning a line on for a group hosted by *another* ship creates the
+room there. There is no admin list to check yet at that point, so
+creation reuses the dial that already decides who may make your ship
+do work: whoever may ring you (`+may-ring`), capped by `room-cap`. Lock
+your ship down and only those ships can open a line on it.
+
 The switches live in group admin, above the member list. Only the host
 and the group's admins see them; `%trunk` enforces that itself, but
 showing switches that would be refused is worse than showing none.
+
+### The default server
+
+A build can carry a fallback sidecar, injected at build time and never
+committed:
+
+```
+TALON_DEFAULT_SFU_BASE=https://your-sidecar \
+TALON_DEFAULT_SFU_GROUP=talon \
+TALON_DEFAULT_SFU_KEY=<secret> ./gradlew ...
+```
+
+A ship with no SFU of its own adopts it on first connect, so party
+lines work with no setup. A ship that already has one is left alone.
+
+**The key is a shared secret.** Anyone who extracts it from a build can
+mint a Galène token for any room on that server, so on *that* server
+the host's membership list stops being the gate. It buys "works out of
+the box"; the operator's kill switch is rotating the group key, which
+locks out every build carrying the old one. Groups that set their own
+sidecar are unaffected either way. Per-ship provisioning is the real
+fix and is not built.
 
 ### Whose server
 

@@ -81,7 +81,16 @@
       [%share-room name=@t ttl=@ud]
       ::  ask a REMOTE host to reconfigure a line we are an admin of.
       ::  The host checks that we are actually on its admin list.
-      [%configure-room host=ship name=@t open=? listen=? sfu=(unit sfu-config)]
+      $:  %configure-room
+          host=ship
+          name=@t
+          open=?
+          listen=?
+          sfu=(unit sfu-config)
+          title=@t
+          members=(set ship)
+          admins=(set ship)
+      ==
       [%close-room name=@t]
       [%join-room host=ship name=@t]
       [%set-call-mode mode=call-mode]
@@ -100,7 +109,18 @@
       [%announce name=@t title=@t listen=? sfu-base=@t]
       [%shut name=@t]
       ::  a room admin, over ames, changing what the host hosts
-      [%configure name=@t open=? listen=? sfu=(unit sfu-config)]
+      ::  title/members/admins are only used when the room does not
+      ::  exist yet — a group admin turning the line on for the first
+      ::  time, on a host ship that has never hosted it.
+      $:  %configure
+          name=@t
+          open=?
+          listen=?
+          sfu=(unit sfu-config)
+          title=@t
+          members=(set ship)
+          admins=(set ship)
+      ==
   ==
 ::  a line another ship has invited us to. Carries enough for an admin
 ::  to see the current settings without owning the host ship; never the

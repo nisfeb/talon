@@ -65,6 +65,8 @@
       :~  host+ship-from-json  name+so  open+bo  listen+bo
           ::  ~ means "use the host ship's own sidecar"
           sfu+(mu sfu-from-json)
+          ::  only used when the room does not exist yet
+          title+so  members+(as ship-from-json)  admins+(as ship-from-json)
       ==
       [%close-room (ot ~[name+so])]
       [%join-room (ot ~[host+ship-from-json name+so])]
@@ -170,6 +172,17 @@
         [%url s+url.listen-link.u]
         [%expires (numb expires.listen-link.u)]
     ==
+  ==
+::
+++  sfu-to-json
+  ::  Never the key: a client may see WHICH sidecar its ship uses and
+  ::  whether one is set, never the secret that signs its tickets.
+  |=  cfg=sfu-config:trunk
+  ^-  json
+  %-  pairs:enjs:format
+  :~  [%base s+base.cfg]
+      [%group s+group.cfg]
+      [%configured b+!=('' key.cfg)]
   ==
 ::
 ++  rooms-to-json

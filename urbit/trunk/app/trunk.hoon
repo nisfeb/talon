@@ -14,7 +14,7 @@
 ::  the trust boundary: local-only actions, and a signal's `from` is
 ::  the cryptographic ames src, never a claim in the payload.
 /-  trunk
-/+  default-agent, dbug, trunk-jwt
+/+  default-agent, dbug, trunk-jwt, trunk-json
 |%
 ::  Rooms as they were before state-6. Old state versions must pin the
 ::  shape they were actually saved with — referencing the evolving
@@ -106,6 +106,9 @@
 ++  ticket-ttl  ^~((div ~h6 ~s1))
 ::  how many party-line invitations we will remember from the network.
 ++  invite-cap  256
+::  how many lines one ship will host. A remote admin can open one, so
+::  this is the brake on that.
+++  room-cap  64
 ::  the longest a listen link may live. Galène's tokens are stateless,
 ::  so nothing can revoke one early — a short cap is the only brake.
 ++  listen-ttl-cap  ^~((div ~h1 ~s1))
@@ -306,22 +309,30 @@
       ==  ==
     ::
         %configure-room
-      ::  hosting it ourselves? apply directly, same checks.
+      ::  Hosting it ourselves? Apply directly. Creating is allowed
+      ::  here without further checks — this action is local-only, so
+      ::  it is already our own ship's owner asking.
       ?:  =(host.act our.bowl)
         =/  got  (~(get by hosted.state) name.act)
-        ?~  got  `this
         ?.  open.act
+          ?~  got  `this
           :-  (announce:hc name.act title.u.got members.u.got %.n)
           this(hosted.state (~(del by hosted.state) name.act))
-        =.  hosted.state
-          (~(put by hosted.state) name.act u.got(listen listen.act, sfu sfu.act))
+        =/  new=room:trunk
+          ?~  got
+            [title.act members.act admins.act listen.act sfu.act]
+          u.got(listen listen.act, sfu sfu.act, members members.act, admins admins.act)
+        =.  hosted.state  (~(put by hosted.state) name.act new)
         :_  this
-        (announce:hc name.act title.u.got members.u.got %.y)
+        (announce:hc name.act title.new members.new %.y)
       :_  this
       :~  :*  %pass  /room/(scot %p host.act)
               %agent  [host.act %trunk]
               %poke  %trunk-room
-              !>(`room-sig:trunk`[%configure name.act open.act listen.act sfu.act])
+              !>  ^-  room-sig:trunk
+              :*  %configure  name.act  open.act  listen.act  sfu.act
+                  title.act  members.act  admins.act
+              ==
       ==  ==
     ::
         %join-room
@@ -374,7 +385,25 @@
     ::  ships the host listed when it opened the room.
         %configure
       =/  got  (~(get by hosted.state) name.msg)
-      ?~  got  `this
+      ::  Creating a line the host has never hosted — a group admin
+      ::  turning it on for the first time. There is no admin list to
+      ::  check yet, so this reuses the dial that already decides who
+      ::  may make this ship do work for them: whoever may ring us.
+      ::  Lock your ship down and only those ships can open a line on
+      ::  it; leave it open and it is the same exposure as a call.
+      ?~  got
+        ?.  open.msg  `this
+        ?.  (may-ring:hc src.bowl)
+          %-  (slog leaf+"trunk: {<src.bowl>} may not open a line here" ~)
+          `this
+        ?:  (gth ~(wyt by hosted.state) room-cap)
+          %-  (slog leaf+"trunk: too many rooms; refusing {<name.msg>}" ~)
+          `this
+        =/  new=room:trunk
+          [title.msg members.msg admins.msg listen.msg sfu.msg]
+        =.  hosted.state  (~(put by hosted.state) name.msg new)
+        :_  this
+        (announce:hc name.msg title.msg members.msg %.y)
       ?.  (~(has in admins.u.got) src.bowl)
         %-  (slog leaf+"trunk: {<src.bowl>} is not an admin of {<name.msg>}" ~)
         `this
@@ -433,6 +462,8 @@
     [%x %rooms ~]   ``trunk-rooms+!>(hosted.state)
     [%x %lines ~]   ``trunk-lines+!>(known.state)
     [%x %policy ~]  ``trunk-policy+!>(pol.state)
+    ::  base + group only. The key is write-only by design.
+    [%x %sfu ~]     ``json+!>((sfu-to-json:trunk-json sfu.state))
   ==
 ::
 ++  on-agent

@@ -800,7 +800,14 @@ private fun PartyLineSection(
         checked = enabled,
         onChange = { on ->
             scope.launch {
-                controller.configureRoom(host, roomName, open = on, listen = false)
+                // title/roster only matter when creating: the host may
+                // never have hosted this line before.
+                controller.configureRoom(
+                    host, roomName, open = on, listen = false,
+                    title = group.title.orEmpty().ifEmpty { roomName },
+                    members = group.members.map { it.ship },
+                    admins = group.members.filter { it.isAdmin }.map { it.ship },
+                )
             }
         },
     )

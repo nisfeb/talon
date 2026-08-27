@@ -214,10 +214,18 @@ object TrunkWire {
         listen: Boolean,
         /** Null leaves the room on the host ship's own sidecar. */
         sfu: SfuConfig? = null,
+        /** Only used when the room doesn't exist yet — an admin
+         *  turning the line on for the first time. */
+        title: String = "",
+        members: List<String> = emptyList(),
+        admins: List<String> = emptyList(),
     ): JsonElement = buildJsonObject {
         putJsonObject("configure-room") {
             put("host", host); put("name", name)
             put("open", open); put("listen", listen)
+            put("title", title)
+            putJsonArray("members") { members.forEach { add(JsonPrimitive(it)) } }
+            putJsonArray("admins") { admins.forEach { add(JsonPrimitive(it)) } }
             if (sfu == null) {
                 put("sfu", kotlinx.serialization.json.JsonNull)
             } else {

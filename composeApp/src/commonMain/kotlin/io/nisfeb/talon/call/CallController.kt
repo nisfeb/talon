@@ -21,6 +21,7 @@ import kotlin.uuid.ExperimentalUuidApi
 import kotlin.uuid.Uuid
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 
 /**
  * Whether to offer installing %trunk, and how that is going.
@@ -183,6 +184,12 @@ class CallController(
                 // null, and the settings editor stays hidden.
                 runCatching { _policy.value = TrunkWire.parsePolicy(ch.scry(TrunkWire.AGENT, "/policy")) }
                     .onFailure { Log.w(TAG, "policy scry failed; hiding the editor", it) }
+                // A ship with no sidecar of its own gets the one this
+                // build ships with, so party lines work without any
+                // setup. Group admins can point their group elsewhere;
+                // a ship that already has an SFU is left alone.
+                runCatching { adoptDefaultSfu(ch) }
+                    .onFailure { Log.w(TAG, "default sfu check failed", it) }
                 runCatching {
                     val ours = session.shipName.orEmpty()
                     _rooms.value = TrunkWire.parseRooms(ch.scry(TrunkWire.AGENT, "/rooms"))
@@ -354,17 +361,47 @@ class CallController(
         open: Boolean,
         listen: Boolean,
         sfu: SfuConfig? = null,
+        title: String = "",
+        members: List<String> = emptyList(),
+        admins: List<String> = emptyList(),
     ) {
         val ch = channel ?: return
         runCatching {
             ch.poke(
                 TrunkWire.AGENT, TrunkWire.ACTION_MARK,
-                TrunkWire.configureRoomAction(host, name, open, listen, sfu),
+                TrunkWire.configureRoomAction(
+                    host, name, open, listen, sfu, title, members, admins,
+                ),
             )
         }.onFailure { Log.e(TAG, "configure-room poke failed", it) }
         // The host answers with an announcement; refresh our own view
         // too, for the case where the host is us.
         refreshRooms()
+    }
+
+    /**
+     * Point this ship at the build's default sidecar, but only if it
+     * has none. Never overwrites a ship that has been configured — a
+     * user who set their own server keeps it.
+     */
+    private suspend fun adoptDefaultSfu(ch: UrbitChannel) {
+        if (io.nisfeb.talon.TalonBuild.defaultSfuBase.isEmpty()) return
+        val configured = runCatching {
+            (ch.scry(TrunkWire.AGENT, "/sfu") as? JsonObject)
+                ?.get("configured")?.jsonPrimitive?.content == "true"
+        }.getOrElse { return }
+        if (configured) return
+        Log.i(TAG, "no sidecar on this ship; adopting the built-in default")
+        runCatching {
+            ch.poke(
+                TrunkWire.AGENT, TrunkWire.ACTION_MARK,
+                TrunkWire.setSfuAction(
+                    io.nisfeb.talon.TalonBuild.defaultSfuBase,
+                    io.nisfeb.talon.TalonBuild.defaultSfuGroup,
+                    io.nisfeb.talon.TalonBuild.defaultSfuKey,
+                ),
+            )
+        }.onFailure { Log.w(TAG, "set-sfu poke failed", it) }
     }
 
     /** Re-read the lines this ship hosts. */
