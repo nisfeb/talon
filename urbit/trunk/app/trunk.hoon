@@ -16,6 +16,11 @@
 /-  trunk
 /+  default-agent, dbug, trunk-jwt
 |%
+::  Rooms as they were before state-6. Old state versions must pin the
+::  shape they were actually saved with — referencing the evolving
+::  +$ room:trunk alias silently rewrites history, and every migration
+::  then reads the new shape out of an old noun.
++$  old-room  [title=@t members=(set ship)]
 +$  versioned-state
   $%  state-0
       state-1
@@ -23,6 +28,7 @@
       state-3
       state-4
       state-5
+      state-6
   ==
 +$  state-0  [%0 ~]
 +$  state-1  [%1 ice=(list ice-server:trunk)]
@@ -31,21 +37,21 @@
   $:  %2
       ice=(list ice-server:trunk)
       sfu=sfu-config:trunk
-      hosted=(map @t room:trunk)
+      hosted=(map @t old-room)
   ==
 ::  %3 accepted a %grant from any ship — see +on-poke
 +$  state-3
   $:  %3
       ice=(list ice-server:trunk)
       sfu=sfu-config:trunk
-      hosted=(map @t room:trunk)
+      hosted=(map @t old-room)
       known=lines:trunk
   ==
 +$  state-4
   $:  %4
       ice=(list ice-server:trunk)
       sfu=sfu-config:trunk
-      hosted=(map @t room:trunk)
+      hosted=(map @t old-room)
       ::  lines other ships have invited us to
       known=lines:trunk
       ::  rooms we have an outstanding %ask for. A ticket names an SFU
@@ -58,13 +64,23 @@
   $:  %5
       ice=(list ice-server:trunk)
       sfu=sfu-config:trunk
-      hosted=(map @t room:trunk)
+      hosted=(map @t old-room)
       known=lines:trunk
       asked=(set [=ship name=@t])
       ::  who may ring us. Enforced here rather than in the client:
       ::  a client-side filter still lets the poke land, still rings
       ::  a ship's other clients, and stops nothing for an app that
       ::  shares this agent.
+      pol=policy:trunk
+  ==
+::  %5 rooms had no admins and no listen flag
++$  state-6
+  $:  %6
+      ice=(list ice-server:trunk)
+      sfu=sfu-config:trunk
+      hosted=(map @t room:trunk)
+      known=lines:trunk
+      asked=(set [=ship name=@t])
       pol=policy:trunk
   ==
 +$  card  card:agent:gall
@@ -74,13 +90,27 @@
 ++  ticket-ttl  ^~((div ~h6 ~s1))
 ::  how many party-line invitations we will remember from the network.
 ++  invite-cap  256
+::  the longest a listen link may live. Galène's tokens are stateless,
+::  so nothing can revoke one early — a short cap is the only brake.
+++  listen-ttl-cap  ^~((div ~h1 ~s1))
+::  +upgrade-rooms: rooms before state-6 had only [title members].
+::  Pure, so it lives out here rather than in the agent core — that
+::  core admits exactly its ten arms.
+++  upgrade-rooms
+  |=  old=(map @t old-room)
+  ^-  (map @t room:trunk)
+  %-  ~(run by old)
+  |=  r=old-room
+  ^-  room:trunk
+  [title.r members.r ~ %.n]
+::
 ::  The policy a ship starts with: ring for anyone, block nobody.
 ::  Always assign this explicitly — never lean on the bunt of
 ::  +$ policy, which forks to %allow and locks the ship down.
 ++  open-policy  `policy:trunk`[%open ~ ~]
 --
 %-  agent:dbug
-=|  state-5
+=|  state-6
 =*  state  -
 ^-  agent:gall
 =<
@@ -103,15 +133,24 @@
   ^-  (quip card _this)
   =/  old  !<(versioned-state old-vase)
   ?-  -.old
-    %0  `this(state [%5 ~ ['' '' ''] ~ ~ ~ open-policy])
-    %1  `this(state [%5 ice.old ['' '' ''] ~ ~ ~ open-policy])
-    %2  `this(state [%5 ice.old sfu.old hosted.old ~ ~ open-policy])
-    %3  `this(state [%5 ice.old sfu.old hosted.old known.old ~ open-policy])
+    %0  `this(state [%6 ~ ['' '' ''] ~ ~ ~ open-policy])
+    %1  `this(state [%6 ice.old ['' '' ''] ~ ~ ~ open-policy])
+    %2  `this(state [%6 ice.old sfu.old (upgrade-rooms hosted.old) ~ ~ open-policy])
+    %3  `this(state [%6 ice.old sfu.old (upgrade-rooms hosted.old) known.old ~ open-policy])
   ::  upgrading must not silently start refusing calls, so an existing
   ::  ship keeps ringing for anyone until its owner says otherwise.
-    %4  `this(state [%5 ice.old sfu.old hosted.old known.old asked.old open-policy])
-    %5  `this(state old)
+    %4
+  `this(state [%6 ice.old sfu.old (upgrade-rooms hosted.old) known.old asked.old open-policy])
+  ::  existing rooms gain no admins and no anonymous listening: both
+  ::  are things you opt into, never things an upgrade turns on.
+    %5
+  :-  ~
+  %=  this
+    state  [%6 ice.old sfu.old (upgrade-rooms hosted.old) known.old asked.old pol.old]
   ==
+    %6  `this(state old)
+  ==
+
 ::
 ++  on-poke
   |=  [=mark =vase]
@@ -155,8 +194,44 @@
       :-  ~[(fact:hc [%policy new])]  this(pol.state new)
     ::
         %open-room
+      ::  Reopening keeps the room's existing listen setting: an admin
+      ::  turning anonymous listening on shouldn't be undone by the
+      ::  host's client re-announcing the line.
+      =/  had  (~(get by hosted.state) name.act)
+      =/  listen  ?~(had %.n listen.u.had)
       :-  (announce:hc name.act title.act members.act %.y)
-      this(hosted.state (~(put by hosted.state) name.act [title.act members.act]))
+      %=  this
+        hosted.state
+      (~(put by hosted.state) name.act [title.act members.act admins.act listen])
+      ==
+    ::
+        %set-room-listen
+      =/  got  (~(get by hosted.state) name.act)
+      ?~  got  `this
+      `this(hosted.state (~(put by hosted.state) name.act u.got(listen listen.act)))
+    ::
+    ::  A listen link is a bearer token that Galène cannot revoke, so
+    ::  the ttl is the whole security model — and it only exists at all
+    ::  when the room's admins have asked for it.
+        %share-room
+      =/  got  (~(get by hosted.state) name.act)
+      ?~  got  `this
+      ?.  listen.u.got  `this
+      ?:  =('' key.sfu.state)  `this
+      =/  now-secs  (unix-secs:trunk-jwt now.bowl)
+      =/  ttl  (min ttl.act listen-ttl-cap)
+      =/  exp  (add now-secs ttl)
+      =/  loc=@t  (room-location:hc name.act)
+      =/  tok=@t
+        %:  mint-listen:trunk-jwt
+          key.sfu.state
+          'listener'
+          loc
+          now-secs
+          exp
+        ==
+      :_  this
+      ~[(fact:hc [%listen-link [name.act (rap 3 ~[loc '?token=' tok]) exp]])]
     ::
         %close-room
       =/  got  (~(get by hosted.state) name.act)
@@ -168,6 +243,22 @@
       :~  :*  %pass  /relay/(scot %p ship.act)
               %agent  [ship.act %trunk]
               %poke  %trunk-signal  !>(sig.act)
+      ==  ==
+    ::
+        %configure-room
+      ::  hosting it ourselves? apply directly, same checks.
+      ?:  =(host.act our.bowl)
+        =/  got  (~(get by hosted.state) name.act)
+        ?~  got  `this
+        ?.  open.act
+          :-  (announce:hc name.act title.u.got members.u.got %.n)
+          this(hosted.state (~(del by hosted.state) name.act))
+        `this(hosted.state (~(put by hosted.state) name.act u.got(listen listen.act)))
+      :_  this
+      :~  :*  %pass  /room/(scot %p host.act)
+              %agent  [host.act %trunk]
+              %poke  %trunk-room
+              !>(`room-sig:trunk`[%configure name.act open.act listen.act])
       ==  ==
     ::
         %join-room
@@ -214,6 +305,20 @@
     =/  msg  !<(room-sig:trunk vase)
     ?-    -.msg
         %ask    :_(this (grant-cards:hc src.bowl name.msg))
+    ::
+    ::  A room admin, over ames, turning the line on or off. %trunk
+    ::  does not know what a Tlon group is — admins are simply the
+    ::  ships the host listed when it opened the room.
+        %configure
+      =/  got  (~(get by hosted.state) name.msg)
+      ?~  got  `this
+      ?.  (~(has in admins.u.got) src.bowl)
+        %-  (slog leaf+"trunk: {<src.bowl>} is not an admin of {<name.msg>}" ~)
+        `this
+      ?.  open.msg
+        :-  (announce:hc name.msg title.u.got members.u.got %.n)
+        this(hosted.state (~(del by hosted.state) name.msg))
+      `this(hosted.state (~(put by hosted.state) name.msg u.got(listen listen.msg)))
     ::
         %announce
       ::  an invitation from anyone is fine (it is just a name), but
@@ -332,13 +437,7 @@
     (reply who [%deny name 'not a member'])
   ?:  =('' key.sfu.state)
     (reply who [%deny name 'no sfu configured'])
-  ::  every room is a subgroup of the one configured Galène group, so
-  ::  opening a room needs no server-side config. The subgroup name is
-  ::  host-qualified to keep two ships' rooms distinct on a shared SFU.
-  =/  sub=@t
-    (rap 3 ~[(rsh [3 1] (scot %p our.bowl)) '-' name])
-  =/  loc=@t
-    (rap 3 ~[base.sfu.state '/group/' group.sfu.state '/' sub '/'])
+  =/  loc=@t  (room-location name)
   =/  now-secs  (unix-secs:trunk-jwt now.bowl)
   =/  tok=@t
     %:  mint:trunk-jwt
@@ -349,6 +448,21 @@
       (add now-secs ticket-ttl)
     ==
   (reply who [%grant name loc tok])
+::
+::  +room-location: the Galène URL for a room we host.
+::
+::  Every room is a subgroup of the one configured group, so opening a
+::  room needs no server-side config. The subgroup name is
+::  host-qualified to keep two ships' rooms distinct on a shared SFU.
+::  Shared by the member ticket and the anonymous listen link, so the
+::  two can never disagree about which room they point at.
+::
+++  room-location
+  |=  name=@t
+  ^-  @t
+  =/  sub=@t
+    (rap 3 ~[(rsh [3 1] (scot %p our.bowl)) '-' name])
+  (rap 3 ~[base.sfu.state '/group/' group.sfu.state '/' sub '/'])
 ::
 ::  +announce: tell every member a line opened (or closed). The host
 ::  is always a member of its own line for this purpose; we skip
@@ -378,7 +492,10 @@
       %deny      ~[(fact [%denied our.bowl name.msg why.msg])]
       %announce  ~[(fact [%open our.bowl name.msg title.msg])]
       %shut      ~[(fact [%shut our.bowl name.msg])]
+      ::  neither is ever addressed to ourselves; the ?- must still
+      ::  be total.
       %ask       ~
+      %configure  ~
     ==
   :~  :*  %pass  /room/(scot %p who)
           %agent  [who %trunk]

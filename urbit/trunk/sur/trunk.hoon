@@ -41,7 +41,23 @@
 +$  call-mode  ?(%open %allow)
 +$  policy  [mode=call-mode allow=(set ship) block=(set ship)]
 ::  a party line we host. members may join; anyone else is denied.
-+$  room  [title=@t members=(set ship)]
+::
+::    admins   ships that may reconfigure this room remotely. %trunk
+::             has no idea what a Tlon group is — this is just a list
+::             the host seeds, so a group's admins can turn the line
+::             on or off without owning the host ship.
+::    listen   may anonymous listen links be minted for this room?
+::             Off by default: a party line is gated by the host's
+::             membership list, and a public link deliberately punches
+::             through that, so it must be asked for.
++$  room
+  $:  title=@t
+      members=(set ship)
+      admins=(set ship)
+      listen=?
+  ==
+::  a listen-only link: where to point a browser, and until when.
++$  listen-link  [name=@t url=@t expires=@ud]
 ::  authorization to join one room: where it is, and a short-lived
 ::  token scoped to exactly that room.
 +$  ticket  [name=@t location=@t token=@t]
@@ -50,7 +66,16 @@
   $%  [%send =ship =sig]
       [%set-ice servers=(list ice-server)]
       [%set-sfu =sfu-config]
-      [%open-room name=@t title=@t members=(set ship)]
+      [%open-room name=@t title=@t members=(set ship) admins=(set ship)]
+      ::  turn anonymous listening on or off for a room we host
+      [%set-room-listen name=@t listen=?]
+      ::  mint a listen link for a room we host. ttl is in seconds:
+      ::  the link is a bearer token and Galene cannot revoke one, so
+      ::  the lifetime is the whole security model.
+      [%share-room name=@t ttl=@ud]
+      ::  ask a REMOTE host to reconfigure a line we are an admin of.
+      ::  The host checks that we are actually on its admin list.
+      [%configure-room host=ship name=@t open=? listen=?]
       [%close-room name=@t]
       [%join-room host=ship name=@t]
       [%set-call-mode mode=call-mode]
@@ -68,6 +93,8 @@
       ::  is an invitation rather than a guess
       [%announce name=@t title=@t]
       [%shut name=@t]
+      ::  a room admin, over ames, changing what the host hosts
+      [%configure name=@t open=? listen=?]
   ==
 ::  party lines other ships have invited us to: [host name] -> title
 +$  lines  (map [=ship name=@t] @t)
@@ -81,5 +108,7 @@
       ::  echoed after every policy change so a ship's other devices
       ::  converge without re-scrying
       [%policy =policy]
+      ::  a freshly minted listen link, for the client to share
+      [%listen-link =listen-link]
   ==
 --

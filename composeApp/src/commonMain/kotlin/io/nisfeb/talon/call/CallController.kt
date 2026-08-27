@@ -36,6 +36,9 @@ sealed interface TrunkInstall {
     data class Failed(val why: String) : TrunkInstall
 }
 
+/** An anonymous listen link, and when it stops working. */
+data class ListenLink(val room: String, val url: String, val expiresSecs: Long)
+
 /** What the call UI renders. One active call at a time (v0). */
 sealed interface CallUiState {
     data object None : CallUiState
@@ -83,6 +86,16 @@ class CallController(
     private val _policy = MutableStateFlow<CallPolicy?>(null)
     val state: StateFlow<CallUiState> = _state.asStateFlow()
     val policy: StateFlow<CallPolicy?> = _policy.asStateFlow()
+
+    /**
+     * The most recently minted anonymous listen link, or null. Held
+     * rather than fired-and-forgotten so the UI can show it until the
+     * user has actually copied it somewhere.
+     */
+    private val _listenLink = MutableStateFlow<ListenLink?>(null)
+    val listenLink: StateFlow<ListenLink?> = _listenLink.asStateFlow()
+
+    fun clearListenLink() { _listenLink.value = null }
 
     private val _install = MutableStateFlow<TrunkInstall>(TrunkInstall.Hidden)
     val install: StateFlow<TrunkInstall> = _install.asStateFlow()
@@ -161,6 +174,8 @@ class CallController(
                             is TrunkUpdate.Recv -> onSignal(up)
                             is TrunkUpdate.Ticket -> onTicket?.invoke(up.ticket)
                             is TrunkUpdate.Policy -> _policy.value = up.policy
+                            is TrunkUpdate.ListenLink ->
+                                _listenLink.value = ListenLink(up.room, up.url, up.expiresSecs)
                             is TrunkUpdate.Denied -> {
                                 Log.w(TAG, "room " + up.name + " denied: " + up.why)
                                 onDenied?.invoke(up.name, up.why)
@@ -273,16 +288,64 @@ class CallController(
      *  says something — silence reads as a broken button. */
     var onDenied: ((name: String, why: String) -> Unit)? = null
 
-    /** Host a party line: [members] are the ships allowed to join.
-     *  The agent announces it to each of them. */
-    suspend fun openRoom(name: String, title: String, members: List<String>) {
+    /** Host a party line: [members] are the ships allowed to join and
+     *  [admins] those allowed to reconfigure it. The agent announces
+     *  it to each member. */
+    suspend fun openRoom(
+        name: String,
+        title: String,
+        members: List<String>,
+        admins: List<String> = emptyList(),
+    ) {
         val ch = channel ?: return
         runCatching {
             ch.poke(
                 TrunkWire.AGENT, TrunkWire.ACTION_MARK,
-                TrunkWire.openRoomAction(name, title, members),
+                TrunkWire.openRoomAction(name, title, members, admins),
             )
         }.onFailure { Log.e(TAG, "open-room poke failed", it) }
+    }
+
+    /**
+     * Reconfigure a line hosted by [host]. Works whether or not we are
+     * the host: our ship relays it, and the host enforces membership
+     * of its admin list. Setting [open] false closes the line.
+     */
+    suspend fun configureRoom(host: String, name: String, open: Boolean, listen: Boolean) {
+        val ch = channel ?: return
+        runCatching {
+            ch.poke(
+                TrunkWire.AGENT, TrunkWire.ACTION_MARK,
+                TrunkWire.configureRoomAction(host, name, open, listen),
+            )
+        }.onFailure { Log.e(TAG, "configure-room poke failed", it) }
+    }
+
+    /** Turn anonymous listening on or off for a room we host. */
+    suspend fun setRoomListen(name: String, listen: Boolean) {
+        val ch = channel ?: return
+        runCatching {
+            ch.poke(
+                TrunkWire.AGENT, TrunkWire.ACTION_MARK,
+                TrunkWire.setRoomListenAction(name, listen),
+            )
+        }.onFailure { Log.e(TAG, "set-room-listen poke failed", it) }
+    }
+
+    /**
+     * Ask for an anonymous listen link. The ship answers with a
+     * %listen-link fact on [listenLink] — and answers with nothing at
+     * all if the room's admins haven't enabled listening, which is the
+     * refusal, not an error.
+     */
+    suspend fun shareRoom(name: String, ttlSecs: Int = DEFAULT_LISTEN_TTL_SECS) {
+        val ch = channel ?: return
+        runCatching {
+            ch.poke(
+                TrunkWire.AGENT, TrunkWire.ACTION_MARK,
+                TrunkWire.shareRoomAction(name, ttlSecs),
+            )
+        }.onFailure { Log.e(TAG, "share-room poke failed", it) }
     }
 
     /**
@@ -559,6 +622,11 @@ class CallController(
 
     companion object {
         private const val TAG = "Trunk"
+
+        /** Default life of a listen link. Short on purpose: the link
+         *  is a bearer token nothing can revoke, so its lifetime is
+         *  the only brake. The ship caps it regardless. */
+        const val DEFAULT_LISTEN_TTL_SECS = 900
 
         /** How long to wait for an installed desk to start answering. */
         private const val INSTALL_TIMEOUT_MS = 120_000L

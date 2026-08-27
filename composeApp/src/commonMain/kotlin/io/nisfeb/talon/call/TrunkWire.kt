@@ -76,6 +76,14 @@ sealed interface TrunkUpdate {
      * converge without re-scrying. [from] is always our own ship.
      */
     data class Policy(override val from: String, val policy: CallPolicy) : TrunkUpdate
+
+    /** A freshly minted anonymous listen link, for the user to share. */
+    data class ListenLink(
+        override val from: String,
+        val room: String,
+        val url: String,
+        val expiresSecs: Long,
+    ) : TrunkUpdate
 }
 
 object TrunkWire {
@@ -140,15 +148,56 @@ object TrunkWire {
         putJsonObject("join-room") { put("host", host); put("name", name) }
     }
 
-    /** Host a party line: [members] are the ships allowed to join. */
-    fun openRoomAction(name: String, title: String, members: List<String>): JsonElement =
+    /**
+     * Host a party line: [members] are the ships allowed to join, and
+     * [admins] the ships allowed to reconfigure it afterwards without
+     * owning the host ship. %trunk has no idea what a Tlon group is —
+     * the host seeds this list from the group's own roster.
+     */
+    fun openRoomAction(
+        name: String,
+        title: String,
+        members: List<String>,
+        admins: List<String> = emptyList(),
+    ): JsonElement =
         buildJsonObject {
             putJsonObject("open-room") {
                 put("name", name)
                 put("title", title)
                 putJsonArray("members") { members.forEach { add(JsonPrimitive(it)) } }
+                putJsonArray("admins") { admins.forEach { add(JsonPrimitive(it)) } }
             }
         }
+
+    /**
+     * Ask a remote host to reconfigure a line we administer. The host
+     * checks we are on its admin list; a non-admin is ignored.
+     */
+    fun configureRoomAction(
+        host: String,
+        name: String,
+        open: Boolean,
+        listen: Boolean,
+    ): JsonElement = buildJsonObject {
+        putJsonObject("configure-room") {
+            put("host", host); put("name", name)
+            put("open", open); put("listen", listen)
+        }
+    }
+
+    /** Allow (or stop allowing) anonymous listen links for a room. */
+    fun setRoomListenAction(name: String, listen: Boolean): JsonElement = buildJsonObject {
+        putJsonObject("set-room-listen") { put("name", name); put("listen", listen) }
+    }
+
+    /**
+     * Mint a listen link. [ttlSecs] is the whole security model: the
+     * link is a bearer token and Galène cannot revoke one, so the ship
+     * caps it regardless of what we ask for.
+     */
+    fun shareRoomAction(name: String, ttlSecs: Int): JsonElement = buildJsonObject {
+        putJsonObject("share-room") { put("name", name); put("ttl", ttlSecs) }
+    }
 
     fun closeRoomAction(name: String): JsonElement = buildJsonObject {
         putJsonObject("close-room") { put("name", name) }
@@ -201,6 +250,14 @@ object TrunkWire {
                     location = t["location"]?.jsonPrimitive?.content ?: return null,
                     token = t["token"]?.jsonPrimitive?.content ?: return null,
                 ),
+            )
+        }
+        (obj["listen-link"] as? JsonObject)?.let { l ->
+            return TrunkUpdate.ListenLink(
+                from = "",
+                room = l["name"]?.jsonPrimitive?.content ?: return null,
+                url = l["url"]?.jsonPrimitive?.content ?: return null,
+                expiresSecs = l["expires"]?.jsonPrimitive?.content?.toLongOrNull() ?: 0L,
             )
         }
         (obj["policy"] as? JsonObject)?.let { p ->

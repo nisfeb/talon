@@ -22,8 +22,24 @@
 ::    now  current time in unix seconds
 ::    exp  expiry in unix seconds (Galène requires the claim)
 ::
+::  +mint grants %present — the holder may publish audio. +mint-listen
+::  grants nothing, which is Galène's listener: it receives streams and
+::  cannot send one. The permission names are Galène's own (op, present,
+::  message, caption, token); an empty list is a valid claim, not a
+::  missing one.
+::
 ++  mint
   |=  [key=@t sub=@t aud=@t now=@ud exp=@ud]
+  ^-  @t
+  (mint-with key sub aud now exp ~[s+'present'])
+::
+++  mint-listen
+  |=  [key=@t sub=@t aud=@t now=@ud exp=@ud]
+  ^-  @t
+  (mint-with key sub aud now exp ~)
+::
+++  mint-with
+  |=  [key=@t sub=@t aud=@t now=@ud exp=@ud perms=(list json)]
   ^-  @t
   =/  sec=octs  (fall (de-b64 key) [0 0])
   =/  hed=@t  '{"alg":"HS256","typ":"JWT"}'
@@ -32,7 +48,7 @@
     %-  pairs:enjs:format
     :~  ['sub' s+sub]
         ['aud' a+~[s+aud]]
-        ['permissions' a+~[s+'present']]
+        ['permissions' a+perms]
         ['iat' (numb:enjs:format now)]
         ['exp' (numb:enjs:format exp)]
     ==

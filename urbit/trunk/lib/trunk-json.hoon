@@ -5,7 +5,12 @@
 ::    action  {"send":{"ship":"~zod","sig":{...}}}
 ::            {"set-ice":{"servers":[{"url":u,"user":s,"cred":c}]}}
 ::            {"set-sfu":{"base":b,"group":g,"key":k}}
-::            {"open-room":{"name":n,"title":t,"members":["~zod"]}}
+::            {"open-room":{"name":n,"title":t,"members":["~zod"],
+::                           "admins":["~zod"]}}
+::            {"set-room-listen":{"name":n,"listen":true}}
+::            {"share-room":{"name":n,"ttl":600}}
+::            {"configure-room":{"host":"~zod","name":n,
+::                               "open":true,"listen":false}}
 ::            {"close-room":{"name":n}}
 ::            {"join-room":{"host":"~zod","name":n}}
 ::            {"set-call-mode":"open"} | {"allow":"~zod"}
@@ -17,6 +22,7 @@
 ::            {"ticket":{"from":"~zod","name":n,"location":l,"token":t}}
 ::            {"denied":{"from":"~zod","name":n,"why":w}}
 ::    policy  {"mode":"open","allow":["~zod"],"block":["~bus"]}
+::    link    {"listen-link":{"name":n,"url":u,"expires":1787000000}}
 /-  trunk
 |%
 ++  ship-from-json  (su:dejs:format ;~(pfix sig fed:ag))
@@ -44,7 +50,12 @@
   :~  [%send (ot ~[ship+ship-from-json sig+sig-from-json])]
       [%set-ice (ot ~[servers+(ar ice-from-json)])]
       [%set-sfu (ot ~[base+so group+so key+so])]
-      [%open-room (ot ~[name+so title+so members+(as ship-from-json)])]
+      :-  %open-room
+      (ot ~[name+so title+so members+(as ship-from-json) admins+(as ship-from-json)])
+      [%set-room-listen (ot ~[name+so listen+bo])]
+      [%share-room (ot ~[name+so ttl+ni])]
+      :-  %configure-room
+      (ot ~[host+ship-from-json name+so open+bo listen+bo])
       [%close-room (ot ~[name+so])]
       [%join-room (ot ~[host+ship-from-json name+so])]
       [%set-call-mode (su (perk %open %allow ~))]
@@ -139,6 +150,14 @@
     ==
   ::
       %policy  (frond %policy (policy-to-json policy.u))
+  ::
+      %listen-link
+    %+  frond  %listen-link
+    %-  pairs
+    :~  [%name s+name.listen-link.u]
+        [%url s+url.listen-link.u]
+        [%expires (numb expires.listen-link.u)]
+    ==
   ==
 ::
 ++  lines-to-json

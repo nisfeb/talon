@@ -40,18 +40,23 @@ object PartyLineHost {
         val (host, room) = roomFor(whom) ?: return false
         val flag = runCatching { db.groups().channelGroupFor(whom)?.groupFlag }
             .getOrNull()
-        val members = if (flag != null) {
-            runCatching { repo.fetchGroupAdmin(flag)?.members?.map { it.ship } }
-                .getOrNull().orEmpty()
+        // One fetch gives both lists: the group's roster is the line's
+        // guest list, and the group's admins are the ships allowed to
+        // reconfigure the line afterwards. %trunk never learns what a
+        // group is — it just gets the two sets of ships.
+        val roster = if (flag != null) {
+            runCatching { repo.fetchGroupAdmin(flag)?.members }.getOrNull()
         } else {
-            emptyList()
+            null
         }
+        val members = roster?.map { it.ship }.orEmpty()
+        val admins = roster?.filter { it.isAdmin }?.map { it.ship }.orEmpty()
         if (members.isEmpty()) {
             Log.w(TAG, "no group roster for $whom — opening a host-only line")
         }
         // Ordered deliberately: the join must not reach the ship
         // before the room it names exists.
-        controller.openRoom(room, title, members)
+        controller.openRoom(room, title, members, admins)
         controller.joinRoom(host, room)
         return true
     }

@@ -264,6 +264,60 @@ The notification is cancelled as soon as the controller leaves
   device depends on which UnifiedPush distributor the user runs and
   can only be measured on a real handset.
 
+## Party lines are opt-in, and so is anonymous listening
+
+Two switches per room, both off unless someone asks for them.
+
+```
++$ room  [title=@t members=(set ship) admins=(set ship) listen=?]
+```
+
+`admins` is just "ships that may reconfigure this room". `%trunk` never
+learns what a Tlon group is — the host seeds the list from the group's
+own roster when it opens the line (`PartyLineHost.startLine` gets
+members and admins from one `fetchGroupAdmin` call). A group admin who
+doesn't own the host ship sends `%configure-room`, which relays to the
+host as a `%configure` room-sig; the host checks its own `admins` set.
+So the authority model is the group's, and the enforcement is the
+host's.
+
+Enforcement stays where it already was: no open room means
+`grant-cards` denies, and `listen=%.n` means no listener token is ever
+minted. A client that ignores the switches still can't get a ticket.
+
+### Anonymous listening
+
+Galène's permissions are `op` / `present` / `message` / `caption` /
+`token`. A token *without* `present` is a listener: it receives streams
+and cannot publish one. `mint-listen:trunk-jwt` grants exactly that,
+and Galène's own web client reads `?token=` from the query string
+(`galene.js`), so the link needs no Talon web client at all.
+
+```
+https://<your-sidecar-host>/group/talon/<host>-<room>/?token=<jwt>
+```
+
+Three things this design deliberately accepts:
+
+- **The link is a bearer token and cannot be revoked.** Galène's JWTs
+  are stateless; nothing checks a revocation list. The only early kill
+  switch is rotating the group secret, which breaks every room for
+  everyone. So the TTL *is* the security model — `listen-ttl-cap` caps
+  it at an hour regardless of what the client asks for, and the client
+  asks for 15 minutes.
+- **It punches through the group's boundary on purpose.** A party line
+  is otherwise gated by the host's membership list, which is the trust
+  boundary the whole design leans on. Turning listening on is therefore
+  an explicit act by an admin, never a default, and never something an
+  upgrade switches on: rooms migrating to state-6 get `listen=%.n`.
+- **TLS is required, not advisory.** The token travels in a URL. The
+  sidecar should run behind nginx on your own hostname with Galène's
+  `proxyURL` set so `.status` advertises `wss://`; port 8444 is closed
+  to the outside.
+
+`ListenLinkE2ETest` covers the shape that matters: off by default,
+minted when enabled, and refused again the moment it's switched off.
+
 ## Offering the desk from the app
 
 `%trunk` isn't in `%base`, and calls need it on *both* ships, so a user
