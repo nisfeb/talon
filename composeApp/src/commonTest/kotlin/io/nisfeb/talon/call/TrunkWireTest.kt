@@ -183,4 +183,32 @@ class TrunkWireTest {
             .jsonObject["set-ice"]!!.jsonObject["servers"]!!
         assertEquals(servers, TrunkWire.parseIce(wire))
     }
+
+    @Test
+    fun iceSpecParsing() {
+        // The exact shape TALON_DEFAULT_ICE ships in. The STUN entry's
+        // trailing "||" is the case worth pinning: no user, no cred.
+        val spec =
+            "stun:sfu.example:3479||;turn:sfu.example:3479|talon|s3cret"
+        assertEquals(
+            listOf(
+                IceServer("stun:sfu.example:3479", "", ""),
+                IceServer("turn:sfu.example:3479", "talon", "s3cret"),
+            ),
+            TrunkWire.parseIceSpec(spec),
+        )
+    }
+
+    @Test
+    fun iceSpecToleratesJunk() {
+        // A build with no default, and a spec with a stray separator,
+        // must both come back empty or short rather than throwing —
+        // this runs on every app start.
+        assertEquals(emptyList(), TrunkWire.parseIceSpec(""))
+        assertEquals(emptyList(), TrunkWire.parseIceSpec(";;"))
+        assertEquals(
+            listOf(IceServer("stun:a:1", "", "")),
+            TrunkWire.parseIceSpec(";stun:a:1;"),
+        )
+    }
 }

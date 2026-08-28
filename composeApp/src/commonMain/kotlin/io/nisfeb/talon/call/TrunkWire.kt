@@ -287,9 +287,12 @@ object TrunkWire {
      * call. A url is the only required field — STUN takes no
      * credentials.
      */
-    fun defaultIce(): List<IceServer> =
-        io.nisfeb.talon.TalonBuild.defaultIce
-            .split(';')
+    fun defaultIce(): List<IceServer> = parseIceSpec(io.nisfeb.talon.TalonBuild.defaultIce)
+
+    /** Split out from [defaultIce] so it can be tested without a build
+     *  configured to carry one. */
+    internal fun parseIceSpec(spec: String): List<IceServer> =
+        spec.split(';')
             .mapNotNull { entry ->
                 val parts = entry.split('|')
                 val url = parts.getOrNull(0)?.trim().orEmpty()
