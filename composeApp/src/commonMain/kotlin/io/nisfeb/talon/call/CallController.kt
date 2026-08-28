@@ -124,6 +124,9 @@ class CallController(
     private val _shipSfuBase = MutableStateFlow("")
     val shipSfuBase: StateFlow<String> = _shipSfuBase.asStateFlow()
 
+    /** "host/room" this device asked to join, or null. */
+    private var pendingJoin: String? = null
+
     private val _listenLink = MutableStateFlow<ListenLink?>(null)
     val listenLink: StateFlow<ListenLink?> = _listenLink.asStateFlow()
 
@@ -223,7 +226,23 @@ class CallController(
                         val fact = body["json"] ?: return@collect
                         when (val up = TrunkWire.parseUpdate(fact)) {
                             is TrunkUpdate.Recv -> onSignal(up)
-                            is TrunkUpdate.Ticket -> onTicket?.invoke(up.from, up.ticket)
+                            is TrunkUpdate.Ticket -> {
+                                // Only the device that asked. A ship is
+                                // one identity across many devices and
+                                // they all see this fact, so without
+                                // this a desktop joining dragged the
+                                // phone onto the line too — two
+                                // entries for one person, and two
+                                // streams the listener has to pick
+                                // between.
+                                val key = "${up.from}/${up.ticket.name}"
+                                if (pendingJoin == key) {
+                                    pendingJoin = null
+                                    onTicket?.invoke(up.from, up.ticket)
+                                } else {
+                                    Log.i(TAG, "ignoring ticket for $key; this device didn't ask")
+                                }
+                            }
                             is TrunkUpdate.Policy -> _policy.value = up.policy
                             // A room of our own changing announces to
                             // us as well, so the switch reflects the
@@ -561,6 +580,9 @@ class CallController(
     suspend fun joinRoom(host: String, name: String) {
         if (offerInstallIfMissing()) return
         val ch = channel ?: return
+        // Claim the answer before asking: the grant comes back as a
+        // fact every device of this ship can see.
+        pendingJoin = "$host/$name"
         runCatching {
             ch.poke(
                 TrunkWire.AGENT, TrunkWire.ACTION_MARK,

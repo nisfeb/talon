@@ -116,10 +116,11 @@
     <ul id="whoList"></ul>
   </div>
 
-  <!-- Hidden, but present from the start: it is attached to a real
-       track later, and it must be the element the click gesture
-       unlocked. -->
-  <audio id="audio" autoplay playsinline></audio>
+  <!-- One element per incoming stream, created here after the click.
+       A single element cannot carry several speakers: an <audio> with
+       a multi-track MediaStream plays only the first track in Chrome,
+       so a second publisher could silently take over the output. -->
+  <div id="sinks" hidden></div>
 </main>
 
 <script src="/protocol.js"></script>
@@ -134,12 +135,44 @@
   var roomEl = document.getElementById('room');
   var whoEl = document.getElementById('who');
   var whoList = document.getElementById('whoList');
-  var audio = document.getElementById('audio');
+  var sinks = document.getElementById('sinks');
 
   var conn = null;
   var speaking = {};
   var receivers = {};
+  var elements = {};
   var speakTimer = null;
+
+  /** Satisfy autoplay with a silent element inside the click. */
+  function unlock() {
+    var a = document.createElement('audio');
+    a.autoplay = true;
+    a.playsInline = true;
+    a.srcObject = new MediaStream();
+    sinks.appendChild(a);
+    var p = a.play();
+    if (p && p.catch) p.catch(function () { /* the real ones report */ });
+  }
+
+  /** One element per stream, so several speakers are all audible. */
+  function play(id, track) {
+    var a = elements[id];
+    if (!a) {
+      a = document.createElement('audio');
+      a.autoplay = true;
+      a.playsInline = true;
+      a.srcObject = new MediaStream();
+      sinks.appendChild(a);
+      elements[id] = a;
+    }
+    a.srcObject.addTrack(track);
+    var p = a.play();
+    if (p && p.catch) {
+      p.catch(function () {
+        say('Your browser blocked playback. Press Listen again.', true);
+      });
+    }
+  }
 
   function say(text, bad) {
     statusEl.textContent = text;
@@ -172,8 +205,14 @@
     Object.keys(us).forEach(function (id) {
       var u = us[id] || {};
       var perms = u.permissions || [];
-      if (perms.indexOf('present') >= 0) names.push(u.username || id);
-      else others++;
+      if (perms.indexOf('present') >= 0) {
+        // One row per person, not per connection. Someone signed in
+        // on two devices is still one person on the line.
+        var n = u.username || id;
+        if (names.indexOf(n) < 0) names.push(n);
+      } else {
+        others++;
+      }
     });
     whoEl.hidden = names.length === 0 && others === 0;
     whoList.innerHTML = '';
@@ -222,7 +261,8 @@
   function stop() {
     if (conn) { try { conn.close(); } catch (e) {} conn = null; }
     if (speakTimer) { clearInterval(speakTimer); speakTimer = null; }
-    audio.srcObject = null;
+    sinks.innerHTML = '';
+    elements = {};
     speaking = {};
     receivers = {};
     renderWho();
@@ -236,13 +276,10 @@
     goBtn.disabled = true;
     say('Connecting…');
 
-    // The click is the autoplay gesture. Attach a live MediaStream to
-    // the element now and play it, so the element is already unlocked
-    // by the time a track arrives.
-    var stream = new MediaStream();
-    audio.srcObject = stream;
-    var unlocked = audio.play();
-    if (unlocked && unlocked.catch) unlocked.catch(function () { /* retried on track */ });
+    // The click is the autoplay gesture: play one silent element now
+    // so the page is unlocked, and every element made afterwards can
+    // start on its own.
+    unlock();
 
     conn = new ServerConnection();
 
@@ -279,12 +316,7 @@
         var who = s.username || 'someone';
         (receivers[who] = receivers[who] || []).push(transceiver.receiver);
         startSpeakingPoll();
-        // Add the track to the element we already unlocked, rather
-        // than swapping srcObject — swapping loses the gesture.
-        stream.addTrack(track);
-        audio.play().catch(function () {
-          say('Your browser blocked playback. Press Listen again.', true);
-        });
+        play(s.id, track);
         say('Listening');
       };
       s.onclose = function () { say('Listening. Nothing to hear yet.'); };

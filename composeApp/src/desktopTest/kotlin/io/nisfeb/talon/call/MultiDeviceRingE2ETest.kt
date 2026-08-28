@@ -96,4 +96,51 @@ class MultiDeviceRingE2ETest {
             caller.stop(); phone.stop(); desktop.stop()
         }
     }
+
+    /**
+     * A party-line ticket is a fact on /calls, which every device of a
+     * ship sees. Only the device that asked may act on it — otherwise
+     * joining on a desktop drags the phone onto the line as well: one
+     * person appears twice in the roster, and a listener is offered
+     * two streams from them, one of which is nobody talking.
+     */
+    @Test
+    fun onlyTheDeviceThatAskedJoinsTheLine() {
+        if (System.getenv("TRUNK_E2E") == null) {
+            println("TRUNK_E2E not set — skipping multi-device join test")
+            return
+        }
+        val aUrl = System.getenv("TRUNK_A_URL") ?: "http://localhost:8081"
+        val aCode = System.getenv("TRUNK_A_CODE") ?: "ropnys-batwyd-nossyt-mapwet"
+
+        runBlocking {
+            // Two clients of the SAME ship, as a phone and a desktop.
+            val (deskSession, ship) = device(aUrl, aCode)
+            val (phoneSession, _) = device(aUrl, aCode)
+            val desk = CallController(deskSession, DesktopCallEngineProvider)
+            val phone = CallController(phoneSession, DesktopCallEngineProvider)
+
+            var deskJoined = 0
+            var phoneJoined = 0
+            desk.onTicket = { _, _ -> deskJoined++ }
+            phone.onTicket = { _, _ -> phoneJoined++ }
+            desk.start(); phone.start()
+            delay(4_000)
+
+            val room = "one-device-${System.currentTimeMillis()}"
+            desk.openRoom(room, "One Device", listOf(ship), admins = listOf(ship))
+            delay(3_000)
+
+            // The desktop asks. The phone must stay put.
+            desk.joinRoom(ship, room)
+            delay(10_000)
+
+            assertTrue(deskJoined == 1, "the asking device didn't join: $deskJoined")
+            assertTrue(phoneJoined == 0, "the other device joined too: $phoneJoined")
+            println("desk joined ($deskJoined), phone did not ($phoneJoined)")
+
+            desk.configureRoom(ship, room, open = false, listen = false)
+            desk.stop(); phone.stop()
+        }
+    }
 }
