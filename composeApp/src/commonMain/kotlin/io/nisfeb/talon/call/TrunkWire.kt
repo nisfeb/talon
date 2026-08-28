@@ -137,7 +137,7 @@ object TrunkWire {
      * lib/trunk-json.hoon by hand, so bump both together — a drift is
      * otherwise a silent no-op rather than an error.
      */
-    const val WIRE_VERSION = 1
+    const val WIRE_VERSION = 2
 
     const val PUBLISHER = "~ricsul-bilwyt"
     const val DESK = "trunk"
@@ -318,6 +318,19 @@ object TrunkWire {
                 }
             }
         }
+    }
+
+    /**
+     * Ask [host] whether a line called [name] exists, without joining.
+     *
+     * The only way for a member to find out. A host announces a line
+     * once, over ames; a ship with no %trunk desk at that moment never
+     * receives it and has no other route to the answer, because scries
+     * are local and it cannot read the host's rooms. Answered with the
+     * same announce a member would have got, or a denial.
+     */
+    fun peekRoomAction(host: String, name: String): JsonElement = buildJsonObject {
+        putJsonObject("peek-room") { put("host", host); put("name", name) }
     }
 
     fun closeRoomAction(name: String): JsonElement = buildJsonObject {

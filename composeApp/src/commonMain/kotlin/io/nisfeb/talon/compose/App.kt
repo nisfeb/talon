@@ -1689,6 +1689,19 @@ fun App(
                                 }.collectAsState(
                                     initial = io.nisfeb.talon.ui.ContactMap.EMPTY,
                                 )
+                                // Ask the host once per group whether a
+                                // line exists, when we hold no invite.
+                                // A member whose ship had no %trunk when
+                                // the host announced never heard about
+                                // it, and before this the only cure was
+                                // an admin toggling the line off and on.
+                                LaunchedEffect(groupRoom, knownInvites.keys, hostedRooms.keys) {
+                                    val (h, n) = groupRoom ?: return@LaunchedEffect
+                                    val key = "$h/$n"
+                                    if (hostedRooms.containsKey(key)) return@LaunchedEffect
+                                    if (knownInvites.containsKey(key)) return@LaunchedEffect
+                                    callController?.peekRoom(h, n)
+                                }
                                 val partyRoomHere = groupRoom?.takeIf { (h, n) ->
                                     hostedRooms.containsKey("$h/$n") ||
                                         knownInvites.containsKey("$h/$n")

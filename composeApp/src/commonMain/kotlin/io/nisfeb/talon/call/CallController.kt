@@ -666,6 +666,21 @@ class CallController(
             .onFailure { Log.e(TAG, "$what poke failed", it) }
     }
 
+    /**
+     * Ask [host] whether it hosts a line called [name].
+     *
+     * Cheap and idempotent: the host answers with the announcement a
+     * member would have received, which lands in [invites] exactly as
+     * a pushed one does, or with a denial that costs nothing. Safe to
+     * fire on opening a group — it mints no token and joins nothing.
+     */
+    suspend fun peekRoom(host: String, name: String) {
+        val ch = channel ?: return
+        runCatching {
+            ch.poke(TrunkWire.AGENT, TrunkWire.ACTION_MARK, TrunkWire.peekRoomAction(host, name))
+        }.onFailure { Log.i(TAG, "peek $host/$name declined: " + it.message) }
+    }
+
     /** Ask [host] to let us onto its party line. */
     suspend fun joinRoom(host: String, name: String) {
         if (offerInstallIfMissing()) return

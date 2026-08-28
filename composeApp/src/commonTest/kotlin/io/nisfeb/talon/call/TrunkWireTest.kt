@@ -211,4 +211,24 @@ class TrunkWireTest {
             TrunkWire.parseIceSpec(";stun:a:1;"),
         )
     }
+
+    @Test
+    fun peekRoomActionShape() {
+        // Mirrors lib/trunk-json.hoon's [%peek-room (ot ~[host name])].
+        // Both keys are required; a missing one is a bad-key nack, which
+        // before the channel read poke acks looked like nothing at all.
+        val json = TrunkWire.peekRoomAction("~zod", "lounge").jsonObject
+        val body = json["peek-room"]!!.jsonObject
+        assertEquals(setOf("host", "name"), body.keys)
+        assertEquals("~zod", body["host"]!!.jsonPrimitive.content)
+        assertEquals("lounge", body["name"]!!.jsonPrimitive.content)
+    }
+
+    @Test
+    fun wireVersionMatchesTheAgent() {
+        // The agent answers /x/version with ++wire-version. Bump both or
+        // neither: a client claiming a version the desk doesn't speak
+        // reports every ship as out of date.
+        assertEquals(2, TrunkWire.WIRE_VERSION)
+    }
 }
