@@ -131,6 +131,14 @@ object TrunkWire {
      * the desk on BOTH ships, and it isn't part of %base, so the app
      * offers to fetch it rather than leaving the call button dead.
      */
+    /**
+     * The wire this client speaks. Must match `++wire-version` in the
+     * agent (github.com/gwbtc/trunk). The shapes below mirror
+     * lib/trunk-json.hoon by hand, so bump both together — a drift is
+     * otherwise a silent no-op rather than an error.
+     */
+    const val WIRE_VERSION = 1
+
     const val PUBLISHER = "~ricsul-bilwyt"
     const val DESK = "trunk"
     private const val KILN_AGENT = "hood"
@@ -385,6 +393,13 @@ object TrunkWire {
         sig["hangup"]?.jsonObject?.let { return TrunkSig.Hangup(it.str("id") ?: return null) }
         return null
     }
+
+    /**
+     * The wire the ship speaks, or 0 for a desk too old to say —
+     * which is itself a mismatch worth reporting.
+     */
+    fun parseWireVersion(body: JsonElement): Int =
+        (body as? JsonObject)?.get("wire")?.jsonPrimitive?.content?.toIntOrNull() ?: 0
 
     /** Parse the /x/rooms scry body: the lines this ship hosts. */
     fun parseRooms(body: JsonElement): List<PartyRoom> =

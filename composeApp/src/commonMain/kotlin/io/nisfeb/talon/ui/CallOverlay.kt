@@ -177,17 +177,33 @@ private fun TrunkInstallPrompt(controller: CallController) {
     if (install is TrunkInstall.Hidden) return
 
     val installing = install is TrunkInstall.Installing
+    val outdated = install as? TrunkInstall.Outdated
     AlertDialog(
         onDismissRequest = { if (!installing) controller.dismissInstall() },
-        title = { Text("Calling needs one more app") },
+        title = {
+            Text(
+                if (outdated != null) "Your ship's calling app is out of date"
+                else "Calling needs one more app",
+            )
+        },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(
-                    "Calls run through %trunk, a small app on your ship. " +
-                        "It isn't installed yet.",
+                    if (outdated != null) {
+                        // Naming the mismatch matters: without it an old
+                        // desk just refuses pokes and every control
+                        // looks broken for no visible reason.
+                        "Your ship runs an older version of %trunk than this " +
+                            "app speaks, so calls and party lines won't work " +
+                            "properly until it's updated."
+                    } else {
+                        "Calls run through %trunk, a small app on your ship. " +
+                            "It isn't installed yet."
+                    },
                 )
                 Text(
-                    "Installing it fetches %trunk from ${TrunkWire.PUBLISHER}, " +
+                    (if (outdated != null) "Updating" else "Installing") +
+                        " it fetches %trunk from ${TrunkWire.PUBLISHER}, " +
                         "which will also supply its updates.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -210,7 +226,15 @@ private fun TrunkInstallPrompt(controller: CallController) {
             TextButton(
                 onClick = { controller.installTrunk() },
                 enabled = !installing,
-            ) { Text(if (install is TrunkInstall.Failed) "Try again" else "Install") }
+            ) {
+                Text(
+                    when {
+                        install is TrunkInstall.Failed -> "Try again"
+                        outdated != null -> "Update"
+                        else -> "Install"
+                    },
+                )
+            }
         },
         dismissButton = {
             TextButton(

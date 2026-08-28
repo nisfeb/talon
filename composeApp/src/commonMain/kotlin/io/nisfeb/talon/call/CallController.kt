@@ -33,6 +33,13 @@ import kotlinx.serialization.json.jsonPrimitive
 sealed interface TrunkInstall {
     data object Hidden : TrunkInstall
     data object Offered : TrunkInstall
+
+    /**
+     * The desk is installed but speaks an older wire than this client.
+     * The remedy is the same poke as installing — kiln fetches the
+     * publisher's current version — so it shares this flow.
+     */
+    data class Outdated(val shipWire: Int, val ourWire: Int) : TrunkInstall
     data object Installing : TrunkInstall
     data class Failed(val why: String) : TrunkInstall
 }
@@ -127,6 +134,10 @@ class CallController(
     /** "host/room" this device asked to join, or null. */
     private var pendingJoin: String? = null
 
+    /** The wire the ship speaks, once known. */
+    private val _wire = MutableStateFlow(0)
+    val wire: StateFlow<Int> = _wire.asStateFlow()
+
     private val _listenLink = MutableStateFlow<ListenLink?>(null)
     val listenLink: StateFlow<ListenLink?> = _listenLink.asStateFlow()
 
@@ -199,6 +210,23 @@ class CallController(
                 // build ships with, so party lines work without any
                 // setup. Group admins can point their group elsewhere;
                 // a ship that already has an SFU is left alone.
+                // A ship running an older wire than we speak is the
+                // failure that looks like nothing happening: pokes
+                // gall cannot cast, switches that do not move. Say so
+                // instead.
+                runCatching {
+                    val shipWire = TrunkWire.parseWireVersion(
+                        ch.scry(TrunkWire.AGENT, "/version"),
+                    )
+                    _wire.value = shipWire
+                    if (shipWire < TrunkWire.WIRE_VERSION &&
+                        _install.value == TrunkInstall.Hidden
+                    ) {
+                        Log.w(TAG, "ship speaks wire $shipWire; we speak ${TrunkWire.WIRE_VERSION}")
+                        _install.value =
+                            TrunkInstall.Outdated(shipWire, TrunkWire.WIRE_VERSION)
+                    }
+                }.onFailure { Log.w(TAG, "version scry failed; assuming an old desk", it) }
                 runCatching { adoptDefaultSfu(ch) }
                     .onFailure { Log.w(TAG, "default sfu check failed", it) }
                 runCatching {

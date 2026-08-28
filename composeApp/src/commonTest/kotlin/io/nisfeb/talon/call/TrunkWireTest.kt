@@ -123,4 +123,16 @@ class TrunkWireTest {
         )
         assertEquals(CallPolicy(block = setOf("~bus")), (up as TrunkUpdate.Policy).policy)
     }
+
+    @Test
+    fun wireVersionParsing() {
+        assertEquals(1, TrunkWire.parseWireVersion(Json.parseToJsonElement("""{"wire":1}""")))
+        // A desk too old to answer, or one that answers with rubbish,
+        // reads as 0 — which is a mismatch, not a silent pass.
+        assertEquals(0, TrunkWire.parseWireVersion(Json.parseToJsonElement("{}")))
+        assertEquals(
+            0,
+            TrunkWire.parseWireVersion(Json.parseToJsonElement("""{"wire":"x"}""")),
+        )
+    }
 }
