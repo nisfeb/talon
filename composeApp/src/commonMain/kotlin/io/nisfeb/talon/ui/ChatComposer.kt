@@ -644,7 +644,24 @@ fun ChatComposer(
                 // there as a dead button — and the check is the cheap,
                 // notification-free kind.
                 if (needsManualImagePaste && canSend && !state.uploading) {
-                    val hasImage = clipboardHasImage()
+                    // Polled, not read straight into composition. The
+                    // pasteboard is not snapshot state, so a plain read
+                    // is sampled once and never re-evaluated: you copy
+                    // an image in another app, come back, and the
+                    // button is still absent because nothing told
+                    // Compose to look again. Nothing else in the frame
+                    // changes when the clipboard does.
+                    //
+                    // hasImages inspects declared types only, so this
+                    // costs nothing and never trips the iOS "pasted
+                    // from" banner.
+                    var hasImage by remember { mutableStateOf(false) }
+                    LaunchedEffect(Unit) {
+                        while (true) {
+                            hasImage = clipboardHasImage()
+                            kotlinx.coroutines.delay(600)
+                        }
+                    }
                     if (hasImage) {
                         IconButton(
                             onClick = {
