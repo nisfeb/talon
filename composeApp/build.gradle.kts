@@ -505,6 +505,17 @@ compose.desktop {
                 if (icnsFile.exists()) {
                     iconFile.set(icnsFile)
                 }
+                // Without this key macOS TCC never shows the microphone
+                // prompt, so webrtc-java's CoreAudio capture silently
+                // records nothing — calls connect and playback works,
+                // but the outgoing track is silence. Dev runs never hit
+                // it because the mic permission belongs to the terminal.
+                infoPlist {
+                    extraKeysRawXml = """
+                        <key>NSMicrophoneUsageDescription</key>
+                        <string>Talon uses the microphone for voice calls.</string>
+                    """
+                }
             }
         }
     }
