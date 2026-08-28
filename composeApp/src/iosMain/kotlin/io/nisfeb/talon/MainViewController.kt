@@ -155,7 +155,10 @@ fun MainViewController(rtc: NativeRtcFactory?): UIViewController {
 
 /** How wide the left-edge back strip is. Narrow enough that it doesn't
  *  steal horizontal drags from message rows (swipe-to-thread). */
-private val EDGE_SWIPE_WIDTH = 20.dp
+// 20dp sat underneath iOS's own screen-edge gestures, which claim
+// roughly the outer 20pt — the strip was there but UIKit won the touch,
+// so back-swipe never fired. Widened to clear that band.
+private val EDGE_SWIPE_WIDTH = 32.dp
 
 /** How far right the finger must travel before it counts as a back. */
 private const val EDGE_SWIPE_THRESHOLD_PX = 40f
