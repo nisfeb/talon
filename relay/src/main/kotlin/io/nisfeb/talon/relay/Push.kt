@@ -58,7 +58,10 @@ class Push {
             append(escape(callId))
             append("\"}")
         }
-        post(endpoint, body)
+        // A ring is worthless once the caller has given up, so it is
+        // urgent and short-lived: better to drop it than deliver it
+        // into an empty room ten minutes later.
+        post(endpoint, body, urgency = "high", ttlSecs = RING_TTL_SECS)
     }
 
     fun send(endpoint: String, patp: String, whom: String, postId: String) {
@@ -83,9 +86,29 @@ class Push {
         post(endpoint, body)
     }
 
-    private fun post(endpoint: String, body: String) {
+    /**
+     * @param urgency RFC 8030 urgency. A push server may batch or defer
+     *   anything below "high" to save the device's battery, which is
+     *   right for a message and fatal for a ring: the notification
+     *   carries a 45s timeout, so a ring delivered late shows nothing
+     *   at all. Distributors backed by a real WebPush service honour
+     *   this; ntfy holds a socket open and never needed it, which is
+     *   why the gap only appears on some distributors.
+     * @param ttlSecs how long the server may hold it for a device that
+     *   is offline. RFC 8030 makes TTL mandatory, and we were sending
+     *   none — a ring worth nothing after a minute was being retained
+     *   on the server's default, which is hours.
+     */
+    private fun post(
+        endpoint: String,
+        body: String,
+        urgency: String = "normal",
+        ttlSecs: Int = 86_400,
+    ) {
         val req = Request.Builder()
             .url(endpoint)
+            .header("TTL", ttlSecs.toString())
+            .header("Urgency", urgency)
             .post(body.toRequestBody(JSON_MEDIA))
             .build()
         try {
@@ -111,5 +134,8 @@ class Push {
 
     private companion object {
         private val JSON_MEDIA = "application/json".toMediaType()
+
+        /** Slightly over the client's 45s ring timeout. */
+        private const val RING_TTL_SECS = 60
     }
 }
