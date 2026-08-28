@@ -101,6 +101,13 @@ jobs:
         if: steps.chk.outputs.have_keystore == 'true'
         env:
           RELEASE_KEYSTORE_PROPS: /home/runner/.config/talon/keystore.properties
+          # Baked into TalonBuild. Unset secrets arrive as "", which is
+          # the same as not shipping a default at all — the ship keeps
+          # whatever it was configured with.
+          TALON_DEFAULT_ICE: ${{ secrets.TALON_DEFAULT_ICE }}
+          TALON_DEFAULT_SFU_BASE: ${{ secrets.TALON_DEFAULT_SFU_BASE }}
+          TALON_DEFAULT_SFU_GROUP: ${{ secrets.TALON_DEFAULT_SFU_GROUP }}
+          TALON_DEFAULT_SFU_KEY: ${{ secrets.TALON_DEFAULT_SFU_KEY }}
         run: ./gradlew :composeApp:assembleRelease
 
       - name: Stage release artifacts
@@ -216,6 +223,11 @@ jobs:
         run: ./scripts/build-macos-icns.sh
         shell: bash
       - name: Build native package (${{ matrix.target }})
+        env:
+          TALON_DEFAULT_ICE: ${{ secrets.TALON_DEFAULT_ICE }}
+          TALON_DEFAULT_SFU_BASE: ${{ secrets.TALON_DEFAULT_SFU_BASE }}
+          TALON_DEFAULT_SFU_GROUP: ${{ secrets.TALON_DEFAULT_SFU_GROUP }}
+          TALON_DEFAULT_SFU_KEY: ${{ secrets.TALON_DEFAULT_SFU_KEY }}
         run: ./gradlew :composeApp:${{ matrix.target }}
         shell: bash
       - name: Upload installer
@@ -235,6 +247,11 @@ jobs:
       # so this runner doesn't need FUSE.
       - name: Build AppImage (Linux only)
         if: runner.os == 'Linux'
+        env:
+          TALON_DEFAULT_ICE: ${{ secrets.TALON_DEFAULT_ICE }}
+          TALON_DEFAULT_SFU_BASE: ${{ secrets.TALON_DEFAULT_SFU_BASE }}
+          TALON_DEFAULT_SFU_GROUP: ${{ secrets.TALON_DEFAULT_SFU_GROUP }}
+          TALON_DEFAULT_SFU_KEY: ${{ secrets.TALON_DEFAULT_SFU_KEY }}
         run: ./scripts/build-appimage.sh
       - name: Upload AppImage (Linux only)
         if: runner.os == 'Linux'
