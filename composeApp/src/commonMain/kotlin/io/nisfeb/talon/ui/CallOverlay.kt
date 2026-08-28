@@ -1,7 +1,6 @@
 package io.nisfeb.talon.ui
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -33,7 +32,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Popup
 import io.nisfeb.talon.call.CallController
@@ -131,31 +129,18 @@ fun CallOverlay(
             )
         }
 
-        // A pill, not a bar. This is a notice that clears itself in
-        // four seconds, and giving it the full width of the window —
-        // the same footprint as a live call's controls — made an
-        // ended call look like a thing needing attention. It wraps its
-        // text, floats clear of the edges, and takes a tap anywhere to
-        // dismiss rather than carrying a button.
+        // The same strip the call was just using, rather than a
+        // differently-shaped banner appearing where the bar was. It is
+        // the tail of one thing, not a new thing.
         is CallUiState.Ended -> Popup(alignment = Alignment.TopCenter) {
-            Surface(
-                modifier = Modifier
-                    .padding(top = 12.dp)
-                    .clickable { controller.dismissEnded() },
-                shape = RoundedCornerShape(20.dp),
-                color = MaterialTheme.colorScheme.secondaryContainer,
-                contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
-                tonalElevation = 3.dp,
-                shadowElevation = 6.dp,
-            ) {
-                Text(
-                    "${nameFor(s.peer)} — ${s.reason}",
-                    style = MaterialTheme.typography.bodyMedium,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-                )
-            }
+            PartyLineBarContent(
+                state = PartyState.Failed(s.peer, s.reason),
+                admin = null,
+                modifier = modifier,
+                nameFor = nameFor,
+                headline = "${nameFor(s.peer)} — ${s.reason}",
+                onDismiss = { controller.dismissEnded() },
+            )
             LaunchedEffect(s) {
                 delay(ENDED_NOTICE_MS)
                 controller.dismissEnded()
