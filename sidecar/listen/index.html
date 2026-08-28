@@ -98,6 +98,8 @@
          background: var(--line); flex: none; }
   .dot.on { background: var(--accent); }
   .topic { margin: -1.5rem 0 2rem; color: var(--muted); font-size: 1rem; }
+  .trace { margin-top: .75rem; font-size: .75rem; color: var(--muted);
+           opacity: .8; min-height: 1rem; }
   .live { display: inline-block; width: .55rem; height: .55rem; border-radius: 50%;
           background: var(--accent); margin-right: .45rem; vertical-align: baseline; }
 </style>
@@ -110,6 +112,8 @@
 
   <button id="go">Listen</button>
   <p class="status" id="status">Audio starts when you press Listen.</p>
+
+  <p class="trace" id="trace"></p>
 
   <div class="who" id="who" hidden>
     <strong>On the line</strong>
@@ -141,37 +145,78 @@
   var speaking = {};
   var receivers = {};
   var elements = {};
+  var ctx = null;
   var speakTimer = null;
 
-  /** Satisfy autoplay with a silent element inside the click. */
+  /**
+   * Take the gesture and hold it.
+   *
+   * An <audio> created later — when a track finally arrives, seconds
+   * after the click — does not carry the click's activation, and
+   * play() is refused with NotAllowedError. An AudioContext resumed
+   * inside the click stays resumed, and sources attached to it
+   * afterwards need no further gesture.
+   */
   function unlock() {
-    var a = document.createElement('audio');
-    a.autoplay = true;
-    a.playsInline = true;
-    a.srcObject = new MediaStream();
-    sinks.appendChild(a);
-    var p = a.play();
-    if (p && p.catch) p.catch(function () { /* the real ones report */ });
+    try {
+      var Ctx = window.AudioContext || window.webkitAudioContext;
+      if (!ctx && Ctx) ctx = new Ctx();
+      if (ctx && ctx.state === 'suspended') ctx.resume();
+    } catch (e) {
+      trace('no audio context');
+    }
   }
 
-  /** One element per stream, so several speakers are all audible. */
-  function play(id, track) {
-    var a = elements[id];
-    if (!a) {
-      a = document.createElement('audio');
-      a.autoplay = true;
-      a.playsInline = true;
-      a.srcObject = new MediaStream();
-      sinks.appendChild(a);
-      elements[id] = a;
+  /**
+   * One element per stream, so several speakers are all audible: an
+   * <audio> with a multi-track MediaStream plays only the first track
+   * in Chrome.
+   *
+   * Uses the MediaStream protocol.js received with the track, rather
+   * than a hand-built one — that is what Galene's own client attaches,
+   * and a stream assembled by hand does not reliably play.
+   */
+  function play(id, mediaStream) {
+    if (!mediaStream) { trace('track with no stream'); return; }
+    if (elements[id]) return;
+
+    // Chrome will not pump a WebRTC stream that is only wired into an
+    // AudioContext, so the stream is also parked on a MUTED element.
+    // That element is silent by design — the sound comes out of the
+    // context below, which the click already unlocked.
+    var pump = document.createElement('audio');
+    pump.muted = true;
+    pump.autoplay = true;
+    pump.playsInline = true;
+    pump.srcObject = mediaStream;
+    sinks.appendChild(pump);
+    var pp = pump.play();
+    if (pp && pp.catch) pp.catch(function () { /* muted; harmless */ });
+
+    if (!ctx) {
+      trace('no audio context');
+      say('This browser cannot play the line.', true);
+      return;
     }
-    a.srcObject.addTrack(track);
-    var p = a.play();
-    if (p && p.catch) {
-      p.catch(function () {
-        say('Your browser blocked playback. Press Listen again.', true);
-      });
+    try {
+      var src = ctx.createMediaStreamSource(mediaStream);
+      src.connect(ctx.destination);
+      elements[id] = { pump: pump, src: src };
+      if (ctx.state === 'suspended') ctx.resume();
+      trace('playing');
+    } catch (e) {
+      trace('routing failed: ' + (e && e.name));
+      say('Could not route the audio.', true);
     }
+  }
+
+  var traceEl = document.getElementById('trace');
+  var steps = [];
+  /** Say where we got to, so a silent page is still diagnosable. */
+  function trace(step) {
+    steps.push(step);
+    if (steps.length > 4) steps.shift();
+    traceEl.textContent = steps.join(' · ');
   }
 
   function say(text, bad) {
@@ -261,6 +306,9 @@
   function stop() {
     if (conn) { try { conn.close(); } catch (e) {} conn = null; }
     if (speakTimer) { clearInterval(speakTimer); speakTimer = null; }
+    Object.keys(elements).forEach(function (k) {
+      try { elements[k].src.disconnect(); } catch (e) {}
+    });
     sinks.innerHTML = '';
     elements = {};
     speaking = {};
@@ -295,7 +343,9 @@
       }
       if (kind !== 'join') return;
       // Ask for every audio stream on the line.
+      trace('joined');
       this.request({ '': ['audio'] });
+      trace('asked for audio');
       say('Listening. Nothing to hear yet.');
       goBtn.textContent = 'Stop listening';
       goBtn.className = 'leave';
@@ -307,7 +357,9 @@
     conn.onuser = function () { renderWho(); };
 
     conn.ondownstream = function (s) {
+      trace('stream offered');
       s.onstatus = function (st) {
+        trace('stream ' + st);
         if (st === 'connected') say('Listening');
       };
       s.ondowntrack = function (track, transceiver, stream_) {
@@ -316,7 +368,8 @@
         var who = s.username || 'someone';
         (receivers[who] = receivers[who] || []).push(transceiver.receiver);
         startSpeakingPoll();
-        play(s.id, track);
+        trace('track from ' + who);
+        play(s.id, s.stream || stream_);
         say('Listening');
       };
       s.onclose = function () { say('Listening. Nothing to hear yet.'); };

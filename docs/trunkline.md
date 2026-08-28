@@ -399,9 +399,13 @@ minted when enabled, and refused again the moment it's switched off.
 
 Both surfaces show the roster and who is talking.
 
-**Speaking** comes from the audio level WebRTC already carries in the
-RTP header — `getSynchronizationSources()` on the receiver, polled at
-250ms. No stats round trip, no `AudioContext` analyser on a stream we
+**Speaking** comes from the remote audio level, polled at 250ms.
+Each platform reads it differently, because the APIs differ:
+`getSynchronizationSources()` on desktop (the level RTP already
+carries in its header, so it costs nothing extra), and `inbound-rtp`
+statistics on Android and iOS, neither of which exposes a
+synchronization-source accessor. Both of those are async, so the poll
+kicks off a refresh and reads what the previous one saw. No stats round trip, no `AudioContext` analyser on a stream we
 only want to hear, and no protocol change: Galène names the publisher
 on each `offer`, which is the only place a stream is tied to a person
 (the roster is keyed by client, levels arrive per stream).

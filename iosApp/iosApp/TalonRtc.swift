@@ -32,6 +32,8 @@ final class TalonRtcPeer: NSObject, NativeRtcPeer, RTCPeerConnectionDelegate {
     /// SDP is the only chance their candidates get to reach the peer.
     private var pendingGather: ((String?, String?) -> Void)?
     private var closed = false
+    private var lastLevel: Double = -1
+    private var statsInFlight = false
 
     init(iceServers: [IceServer], sendAudio: Bool, trickle: Bool) {
         self.trickle = trickle
@@ -137,6 +139,28 @@ final class TalonRtcPeer: NSObject, NativeRtcPeer, RTCPeerConnectionDelegate {
         ) { err in
             if let err = err { NSLog("talon: addIceCandidate failed: \(err)") }
         }
+    }
+
+    /// Remote audio level, or -1 when unknown.
+    ///
+    /// libwebrtc's iOS API has no synchronization-source accessor, so
+    /// this reads inbound-rtp statistics instead. They arrive
+    /// asynchronously, so a call kicks off a refresh and returns what
+    /// the last one saw — the caller polls anyway.
+    func audioLevel() -> Double {
+        guard let pc = pc, !statsInFlight else { return lastLevel }
+        statsInFlight = true
+        pc.statistics { [weak self] report in
+            var level = -1.0
+            for (_, stat) in report.statistics where stat.type == "inbound-rtp" {
+                if let v = stat.values["audioLevel"] as? NSNumber {
+                    level = v.doubleValue
+                }
+            }
+            self?.lastLevel = level
+            self?.statsInFlight = false
+        }
+        return lastLevel
     }
 
     func setMuted(muted: Bool) {

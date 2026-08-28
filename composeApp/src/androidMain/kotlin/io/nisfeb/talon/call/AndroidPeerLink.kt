@@ -142,6 +142,34 @@ class AndroidPeerLink(
         micTrack?.setEnabled(!muted)
     }
 
+    // Android's RtpReceiver has no getSynchronizationSources, so the
+    // level comes from inbound-rtp stats instead. getStats is async,
+    // so a poll refreshes this and audioLevel() reads what it last
+    // saw — the caller polls at 250ms anyway.
+    @Volatile private var lastLevel: Float? = null
+    @Volatile private var statsInFlight = false
+
+    override fun audioLevel(): Float? {
+        if (!statsInFlight && !closed.value) {
+            statsInFlight = true
+            runCatching {
+                pc.getStats { report ->
+                    var level: Float? = null
+                    for (stat in report.statsMap.values) {
+                        if (stat.type == "inbound-rtp") {
+                            (stat.members["audioLevel"] as? Number)?.let {
+                                level = it.toFloat()
+                            }
+                        }
+                    }
+                    lastLevel = level
+                    statsInFlight = false
+                }
+            }.onFailure { statsInFlight = false }
+        }
+        return lastLevel
+    }
+
     private val closed = kotlinx.atomicfu.atomic(false)
 
     override fun close() {

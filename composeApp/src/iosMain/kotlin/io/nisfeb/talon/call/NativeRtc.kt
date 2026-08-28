@@ -46,6 +46,14 @@ interface NativeRtcPeer {
 
     fun addIceCandidate(candidate: IceCandidate)
 
+    /**
+     * Remote audio level, 0..1, or -1 when unknown. A plain Double
+     * rather than a nullable Float: primitives cross to Swift without
+     * boxing, and there is no useful distinction between "silent" and
+     * "can't tell" for a speaking dot.
+     */
+    fun audioLevel(): Double
+
     fun setMuted(muted: Boolean)
 
     /** Must be idempotent: the adapters can close more than once. */
