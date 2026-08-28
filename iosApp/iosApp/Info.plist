@@ -4,6 +4,8 @@
 <dict>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Talon uses your microphone for voice calls and party lines.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>Talon does not use the camera. The WebRTC library it uses for voice calls also contains video-calling code, which Talon never enables.</string>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleExecutable</key>
