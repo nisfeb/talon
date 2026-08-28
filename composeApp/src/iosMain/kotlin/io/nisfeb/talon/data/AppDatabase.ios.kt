@@ -58,6 +58,13 @@ fun createAppDatabase(shipKey: String): AppDatabase {
         factory = { AppDatabaseConstructor.initialize() },
     )
         .setDriver(BundledSQLiteDriver())
+        // Room on JVM/Android falls back to its own background
+        // executor; Kotlin/Native has no such default, so a suspend DAO
+        // call made from the composition scope ran on the main thread.
+        // Every write that goes through a background scope (message
+        // sync, settings) was fine, and the one path that doesn't —
+        // creating a folder from the tab strip — was not.
+        .setQueryCoroutineContext(io.nisfeb.talon.util.ioDispatcher)
         .fallbackToDestructiveMigration(dropAllTables = true)
         .build()
 }

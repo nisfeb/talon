@@ -2529,12 +2529,16 @@ private suspend fun createFolderLogged(
         )
         return
     }
+    // Off the composition scope: these callers are rememberCoroutineScope,
+    // which dispatches on main.
     runCatching {
+        kotlinx.coroutines.withContext(io.nisfeb.talon.util.ioDispatcher) {
         val id = sync.createFolder(name, sortOrder)
         io.nisfeb.talon.util.Log.i("Folders", "created \"$name\" as id=$id")
         if (addWhom != null) sync.addFolderMember(id, addWhom)
         if (addGroup != null) sync.addGroupToFolder(id, addGroup)
         id
+        }
     }.onFailure {
         io.nisfeb.talon.util.Log.e("Folders", "creating \"$name\" failed", it)
     }
