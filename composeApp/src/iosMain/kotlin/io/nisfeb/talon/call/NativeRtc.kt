@@ -52,7 +52,7 @@ interface NativeRtcPeer {
      * boxing, and there is no useful distinction between "silent" and
      * "can't tell" for a speaking dot.
      */
-    fun audioLevel(): Double
+    fun remoteAudioLevel(): Double
 
     fun setMuted(muted: Boolean)
 

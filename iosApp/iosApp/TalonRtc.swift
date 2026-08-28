@@ -81,10 +81,10 @@ final class TalonRtcPeer: NSObject, NativeRtcPeer, RTCPeerConnectionDelegate {
         session.lockForConfiguration()
         do {
             try session.setCategory(
-                AVAudioSession.Category.playAndRecord.rawValue,
+                .playAndRecord,
                 with: [.allowBluetooth, .defaultToSpeaker]
             )
-            try session.setMode(AVAudioSession.Mode.voiceChat.rawValue)
+            try session.setMode(.voiceChat)
         } catch {
             NSLog("talon: audio session config failed: \(error)")
         }
@@ -147,7 +147,7 @@ final class TalonRtcPeer: NSObject, NativeRtcPeer, RTCPeerConnectionDelegate {
     /// this reads inbound-rtp statistics instead. They arrive
     /// asynchronously, so a call kicks off a refresh and returns what
     /// the last one saw — the caller polls anyway.
-    func audioLevel() -> Double {
+    func remoteAudioLevel() -> Double {
         guard let pc = pc, !statsInFlight else { return lastLevel }
         statsInFlight = true
         pc.statistics { [weak self] report in
