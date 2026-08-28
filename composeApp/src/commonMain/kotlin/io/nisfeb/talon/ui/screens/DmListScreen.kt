@@ -1381,10 +1381,7 @@ fun DmListScreen(
                 }
             },
             onCreateNew = { name ->
-                scope.launch {
-                    val id = repo.settingsSync?.createFolder(name, folders.size)
-                    if (id != null) repo.settingsSync?.addFolderMember(id, whom)
-                }
+                scope.launch { createFolderLogged(repo, name, folders.size, whom) }
             },
             onDismiss = { folderSheetWhom = null },
         )
@@ -1412,8 +1409,7 @@ fun DmListScreen(
             },
             onCreateNew = { name ->
                 scope.launch {
-                    val id = repo.settingsSync?.createFolder(name, folders.size)
-                    if (id != null) repo.settingsSync?.addGroupToFolder(id, flag)
+                    createFolderLogged(repo, name, folders.size, addGroup = flag)
                 }
             },
             onDismiss = { folderSheetGroup = null },
@@ -1506,9 +1502,7 @@ fun DmListScreen(
     if (creatingFolder) {
         FolderCreateDialog(
             onCreate = { name ->
-                scope.launch {
-                    repo.settingsSync?.createFolder(name, folders.size)
-                }
+                scope.launch { createFolderLogged(repo, name, folders.size, null) }
                 creatingFolder = false
             },
             onDismiss = { creatingFolder = false },
@@ -2510,4 +2504,38 @@ internal class ShipSnapshot {
     @Volatile var initialTabApplied: Boolean = false
     val listState: androidx.compose.foundation.lazy.LazyListState =
         androidx.compose.foundation.lazy.LazyListState()
+}
+
+/**
+ * Create a folder and report what happened.
+ *
+ * All three call sites used a bare `scope.launch`, so a null settings
+ * sink and a throwing insert looked identical from the outside: the
+ * folder just never appeared. On iOS that cost a round trip to a user
+ * to learn which of the two it was.
+ */
+private suspend fun createFolderLogged(
+    repo: TlonChatRepo,
+    name: String,
+    sortOrder: Int,
+    addWhom: String? = null,
+    addGroup: String? = null,
+) {
+    val sync = repo.settingsSync
+    if (sync == null) {
+        io.nisfeb.talon.util.Log.e(
+            "Folders",
+            "cannot create \"$name\": this build has no settings sink",
+        )
+        return
+    }
+    runCatching {
+        val id = sync.createFolder(name, sortOrder)
+        io.nisfeb.talon.util.Log.i("Folders", "created \"$name\" as id=$id")
+        if (addWhom != null) sync.addFolderMember(id, addWhom)
+        if (addGroup != null) sync.addGroupToFolder(id, addGroup)
+        id
+    }.onFailure {
+        io.nisfeb.talon.util.Log.e("Folders", "creating \"$name\" failed", it)
+    }
 }
