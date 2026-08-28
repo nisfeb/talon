@@ -33,6 +33,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Popup
@@ -112,7 +113,13 @@ fun CallOverlay(controller: CallController, modifier: Modifier = Modifier) {
                     }
                     Text(label, style = MaterialTheme.typography.bodyLarge)
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        IconButton(onClick = { controller.setMuted(!s.muted) }) {
+                        // Same reasoning as the ring buttons: this banner
+                        // sits over whatever you are typing into, and a
+                        // stray keystroke must not mute or end the call.
+                        IconButton(
+                            onClick = { controller.setMuted(!s.muted) },
+                            modifier = Modifier.focusProperties { canFocus = false },
+                        ) {
                             Icon(
                                 if (s.muted) Icons.Filled.MicOff else Icons.Filled.Mic,
                                 contentDescription = if (s.muted) "Unmute" else "Mute",
@@ -120,6 +127,7 @@ fun CallOverlay(controller: CallController, modifier: Modifier = Modifier) {
                         }
                         FilledIconButton(
                             onClick = { controller.hangup() },
+                            modifier = Modifier.focusProperties { canFocus = false },
                             colors = IconButtonDefaults.filledIconButtonColors(
                                 containerColor = MaterialTheme.colorScheme.error,
                                 contentColor = MaterialTheme.colorScheme.onError,
@@ -299,7 +307,14 @@ private fun RoundAction(
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         FilledIconButton(
             onClick = onClick,
-            modifier = Modifier.size(72.dp),
+            // Deliberately unreachable by keyboard: a ring arrives while
+            // you are mid-sentence, and a focusable button turns the next
+            // space bar into "declined" — or worse, into "answered", with
+            // a live mic. Answering and hanging up are pointer-only until
+            // the call UI is redesigned, at which point this should come
+            // back as a deliberate key binding rather than whatever the
+            // focus order happened to be.
+            modifier = Modifier.size(72.dp).focusProperties { canFocus = false },
             colors = IconButtonDefaults.filledIconButtonColors(
                 containerColor = container,
                 contentColor = content,
