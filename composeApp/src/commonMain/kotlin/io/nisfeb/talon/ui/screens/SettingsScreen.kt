@@ -767,6 +767,7 @@ fun SettingsScreen(
             // ship sees the same lists.
             if (isCallsSupported && callController != null) {
                 CallPolicySection(callController)
+                CallServersSection(callController)
             }
 
             // Loops — scheduled agent prompts. Needs a cloud key (it runs
@@ -1055,6 +1056,125 @@ private fun CallPolicySection(controller: io.nisfeb.talon.call.CallController) {
  * agent's own parser is the real gate, and it rejects a malformed @p
  * long before it reaches the policy.
  */
+/**
+ * The STUN/TURN servers 1:1 calls use.
+ *
+ * Party lines never appear here — Galène hands out its own on join.
+ * A 1:1 has no server in the middle to ask, so this list is the only
+ * thing standing between a call and "connection failed" whenever the
+ * two people aren't on the same network.
+ */
+@Composable
+private fun CallServersSection(controller: io.nisfeb.talon.call.CallController) {
+    // Same reasoning as CallPolicySection: no readable policy means no
+    // %trunk to poke, so an editor here would only nack.
+    val policy by controller.policy.collectAsState()
+    if (policy == null) return
+    val servers by controller.ice.collectAsState()
+    val scope = rememberCoroutineScope()
+    var url by remember { mutableStateOf("") }
+    var user by remember { mutableStateOf("") }
+    var cred by remember { mutableStateOf("") }
+    val candidate = url.trim()
+    val valid = candidate.startsWith("stun:") || candidate.startsWith("turn:")
+
+    Spacer(Modifier.height(16.dp))
+    HorizontalDivider()
+    Spacer(Modifier.height(8.dp))
+    Column {
+        Text("Call servers", style = MaterialTheme.typography.titleMedium)
+        Spacer(Modifier.height(4.dp))
+        Text(
+            "How a one-to-one call finds a path between you when you're " +
+                "on different networks. Stored on your ship, so it's the " +
+                "same on every device. Party lines don't use these — they " +
+                "get their own from the group's server.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.height(8.dp))
+        if (servers.isEmpty()) {
+            // Not a cosmetic state: with no servers, every call off the
+            // local network fails, and it used to do so silently.
+            Text(
+                "None set — calls will only work with people on your own " +
+                    "network. Add a server below.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+            )
+        } else {
+            servers.forEach { s ->
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(s.url, style = MaterialTheme.typography.bodyMedium)
+                        if (s.user.isNotEmpty()) {
+                            Text(
+                                "as ${s.user}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                    TextButton(
+                        onClick = { scope.launch { controller.setIce(servers - s) } },
+                    ) { Text("Remove") }
+                }
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+        OutlinedTextField(
+            value = url,
+            onValueChange = { url = it },
+            singleLine = true,
+            label = { Text("stun:… or turn:…") },
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            OutlinedTextField(
+                value = user,
+                onValueChange = { user = it },
+                singleLine = true,
+                label = { Text("User") },
+                modifier = Modifier.weight(1f),
+            )
+            OutlinedTextField(
+                value = cred,
+                onValueChange = { cred = it },
+                singleLine = true,
+                label = { Text("Password") },
+                modifier = Modifier.weight(1f),
+            )
+            Button(
+                enabled = valid && servers.none { it.url == candidate },
+                onClick = {
+                    scope.launch {
+                        controller.setIce(
+                            servers + io.nisfeb.talon.call.IceServer(
+                                candidate, user.trim(), cred.trim(),
+                            ),
+                        )
+                    }
+                    url = ""; user = ""; cred = ""
+                },
+            ) { Text("Add") }
+        }
+        Text(
+            "A STUN server needs no user or password. Leave the list " +
+                "empty to go back to the one this build ships with.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 4.dp),
+        )
+    }
+}
+
 @Composable
 private fun ShipListEditor(
     title: String,

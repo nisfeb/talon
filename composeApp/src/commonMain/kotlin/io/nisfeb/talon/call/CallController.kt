@@ -154,7 +154,18 @@ class CallController(
 
     // Per-call context. Guarded by single-threaded discipline: every
     // mutation happens inside `scope` (a single logical actor for v0).
-    @Volatile private var iceServers: List<IceServer> = emptyList()
+    private val _ice = MutableStateFlow<List<IceServer>>(emptyList())
+
+    /**
+     * The STUN/TURN servers in play, as this ship advertises them.
+     *
+     * Exposed so the settings editor can show what a call will
+     * actually use — an empty list means every call off the local
+     * network fails, and that is worth being able to see.
+     */
+    val ice: StateFlow<List<IceServer>> = _ice.asStateFlow()
+
+    private val iceServers: List<IceServer> get() = _ice.value
     private var callId: String? = null
     private var peer: String? = null
     private var engine: CallEngine? = null
@@ -199,9 +210,10 @@ class CallController(
                 channel = ch
                 // The ship's advertised ICE servers (its sidecar / its
                 // sponsor's). Best-effort: no config means Tier 0 only.
-                runCatching { iceServers = TrunkWire.parseIce(ch.scry(TrunkWire.AGENT, "/ice")) }
+                runCatching { _ice.value = TrunkWire.parseIce(ch.scry(TrunkWire.AGENT, "/ice")) }
                     .onSuccess { Log.i(TAG, "ice config: ${iceServers.size} servers") }
                     .onFailure { Log.w(TAG, "ice scry failed (Tier 0 only)", it) }
+                adoptDefaultIce(ch)
                 // No %trunk (or a desk predating policy) leaves this
                 // null, and the settings editor stays hidden.
                 runCatching { _policy.value = TrunkWire.parsePolicy(ch.scry(TrunkWire.AGENT, "/policy")) }
@@ -472,6 +484,50 @@ class CallController(
                 ),
             )
         }.onFailure { Log.w(TAG, "set-sfu poke failed", it) }
+    }
+
+    /**
+     * Point this ship at the build's default STUN/TURN, but only if
+     * it has none. Same contract as [adoptDefaultSfu]: a ship someone
+     * configured keeps what they chose.
+     *
+     * Writing it to the ship rather than falling back locally is
+     * deliberate — `/x/ice` is then right for every device signed
+     * into this ship and for any other app sharing %trunk, and the
+     * settings editor has one place to read and write.
+     */
+    private suspend fun adoptDefaultIce(ch: UrbitChannel) {
+        if (iceServers.isNotEmpty()) return
+        val fallback = TrunkWire.defaultIce()
+        if (fallback.isEmpty()) return
+        Log.i(TAG, "no ICE on this ship; adopting ${fallback.size} built-in servers")
+        runCatching {
+            ch.poke(TrunkWire.AGENT, TrunkWire.ACTION_MARK, TrunkWire.setIceAction(fallback))
+        }.onFailure {
+            Log.w(TAG, "set-ice poke failed", it)
+            return
+        }
+        // Only trust it once the ship confirms; a nacked poke that
+        // still updated the flow would hide a broken desk behind a
+        // settings screen that looks configured.
+        runCatching { _ice.value = TrunkWire.parseIce(ch.scry(TrunkWire.AGENT, "/ice")) }
+            .onFailure { Log.w(TAG, "ice re-scry after adopt failed", it) }
+    }
+
+    /**
+     * Replace this ship's ICE servers. An empty list clears them, and
+     * the build default is adopted again on the next connect.
+     */
+    suspend fun setIce(servers: List<IceServer>) {
+        val ch = channel ?: return
+        runCatching {
+            ch.poke(TrunkWire.AGENT, TrunkWire.ACTION_MARK, TrunkWire.setIceAction(servers))
+        }.onFailure {
+            Log.e(TAG, "set-ice poke failed", it)
+            return
+        }
+        runCatching { _ice.value = TrunkWire.parseIce(ch.scry(TrunkWire.AGENT, "/ice")) }
+            .onFailure { Log.w(TAG, "ice re-scry failed", it) }
     }
 
     /** Re-read the lines this ship hosts. */

@@ -293,11 +293,27 @@ val generateTalonBuild = tasks.register("generateTalonBuild") {
     val sfuBase = System.getenv("TALON_DEFAULT_SFU_BASE").orEmpty()
     val sfuGroup = System.getenv("TALON_DEFAULT_SFU_GROUP") ?: "talon"
     val sfuKey = System.getenv("TALON_DEFAULT_SFU_KEY").orEmpty()
+    // Fallback STUN/TURN for 1:1 calls, adopted by a ship that has
+    // none. Party lines don't need this — Galène hands out its own on
+    // join — but a 1:1 has no server in the middle to ask, so an
+    // unconfigured ship gathers host candidates and every call off the
+    // local network fails with nothing to explain it.
+    //
+    // Format: url|user|cred, entries separated by ';'. Leave user and
+    // cred empty for STUN. Example:
+    //   stun:sfu.example:3478||;turn:sfu.example:3478|talon|s3cret
+    //
+    // Same trade as the SFU key above: the TURN credential ships in
+    // the binary, so anyone can relay through that server. It buys
+    // "calls work out of the box" and nothing else — TURN carries
+    // SRTP it cannot read.
+    val defaultIce = System.getenv("TALON_DEFAULT_ICE").orEmpty()
     inputs.property("versionName", capturedVersionName)
     inputs.property("versionCode", capturedVersionCode)
     inputs.property("sfuBase", sfuBase)
     inputs.property("sfuGroup", sfuGroup)
     inputs.property("sfuKey", sfuKey)
+    inputs.property("defaultIce", defaultIce)
     outputs.dir(outputDir)
     doLast {
         val pkgDir = outputDir.get().asFile.resolve("io/nisfeb/talon")
@@ -315,6 +331,10 @@ val generateTalonBuild = tasks.register("generateTalonBuild") {
                 const val defaultSfuBase: String = "$sfuBase"
                 const val defaultSfuGroup: String = "$sfuGroup"
                 const val defaultSfuKey: String = "$sfuKey"
+
+                /** Fallback ICE servers for 1:1, as url|user|cred
+                 *  entries separated by ';'. Empty = none. */
+                const val defaultIce: String = "$defaultIce"
             }
 
             """.trimIndent(),

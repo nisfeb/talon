@@ -277,6 +277,46 @@ object TrunkWire {
             )
         }
 
+    /**
+     * The ICE servers this build falls back to, parsed from
+     * [io.nisfeb.talon.TalonBuild.defaultIce] (`url|user|cred`
+     * entries separated by `;`). Empty when the build shipped none.
+     *
+     * Malformed entries are dropped rather than failing the whole
+     * list: a typo in one server should cost that server, not every
+     * call. A url is the only required field — STUN takes no
+     * credentials.
+     */
+    fun defaultIce(): List<IceServer> =
+        io.nisfeb.talon.TalonBuild.defaultIce
+            .split(';')
+            .mapNotNull { entry ->
+                val parts = entry.split('|')
+                val url = parts.getOrNull(0)?.trim().orEmpty()
+                if (url.isEmpty()) return@mapNotNull null
+                IceServer(
+                    url = url,
+                    user = parts.getOrNull(1)?.trim().orEmpty(),
+                    cred = parts.getOrNull(2)?.trim().orEmpty(),
+                )
+            }
+
+    /** Replace the ship's advertised ICE servers. An empty list
+     *  clears them, which puts the build default back in play. */
+    fun setIceAction(servers: List<IceServer>): JsonElement = buildJsonObject {
+        putJsonObject("set-ice") {
+            putJsonArray("servers") {
+                for (s in servers) {
+                    add(
+                        buildJsonObject {
+                            put("url", s.url); put("user", s.user); put("cred", s.cred)
+                        },
+                    )
+                }
+            }
+        }
+    }
+
     fun closeRoomAction(name: String): JsonElement = buildJsonObject {
         putJsonObject("close-room") { put("name", name) }
     }

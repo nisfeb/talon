@@ -2,6 +2,8 @@ package io.nisfeb.talon.call
 
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.jsonArray
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
@@ -134,5 +136,51 @@ class TrunkWireTest {
             0,
             TrunkWire.parseWireVersion(Json.parseToJsonElement("""{"wire":"x"}""")),
         )
+    }
+    // ---- set-ice ------------------------------------------------
+    // The shape lib/trunk-json.hoon dejs's: all three fields are `so`
+    // inside an `ot`, so every one must be present or gall refuses the
+    // poke with a bad-key and the settings screen looks inert.
+
+    @Test
+    fun setIceActionShape() {
+        val json = TrunkWire.setIceAction(
+            listOf(
+                IceServer("stun:sfu.example:3478", "", ""),
+                IceServer("turn:sfu.example:3478", "talon", "s3cret"),
+            ),
+        ).jsonObject
+        val servers = json["set-ice"]!!.jsonObject["servers"]!!.jsonArray
+        assertEquals(2, servers.size)
+
+        val stun = servers[0].jsonObject
+        assertEquals(setOf("url", "user", "cred"), stun.keys)
+        assertEquals("stun:sfu.example:3478", stun["url"]!!.jsonPrimitive.content)
+        assertEquals("", stun["user"]!!.jsonPrimitive.content)
+
+        val turn = servers[1].jsonObject
+        assertEquals("turn:sfu.example:3478", turn["url"]!!.jsonPrimitive.content)
+        assertEquals("talon", turn["user"]!!.jsonPrimitive.content)
+        assertEquals("s3cret", turn["cred"]!!.jsonPrimitive.content)
+    }
+
+    @Test
+    fun clearingIceSendsAnEmptyList() {
+        val json = TrunkWire.setIceAction(emptyList()).jsonObject
+        assertEquals(0, json["set-ice"]!!.jsonObject["servers"]!!.jsonArray.size)
+    }
+
+    @Test
+    fun setIceRoundTripsThroughOurOwnParser() {
+        // parseIce reads /x/ice, which the agent renders with the same
+        // field names. If these two ever drift, adopt-then-rescry
+        // silently reports the wrong server count.
+        val servers = listOf(
+            IceServer("stun:sfu.example:3478", "", ""),
+            IceServer("turn:sfu.example:3478", "talon", "s3cret"),
+        )
+        val wire = TrunkWire.setIceAction(servers)
+            .jsonObject["set-ice"]!!.jsonObject["servers"]!!
+        assertEquals(servers, TrunkWire.parseIce(wire))
     }
 }
