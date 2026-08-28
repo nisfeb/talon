@@ -149,6 +149,10 @@ fun App(
      *  routing — gate it, don't fake it. */
     audioDevices: io.nisfeb.talon.call.AudioDevices =
         io.nisfeb.talon.call.AudioDevices.Noop,
+    /** Call tones. Noop renders the app silent rather than absent, so
+     *  a platform without playback needs no gating. */
+    callSounds: io.nisfeb.talon.call.CallSoundPlayer =
+        io.nisfeb.talon.call.CallSoundPlayer.Noop,
     /** OS-level notifier. Desktop wires a tray-balloon impl; other
      *  platforms (Android composeApp) get the no-op default until
      *  their notification stories port. */
@@ -537,7 +541,7 @@ fun App(
                 session.shipName != null
             ) {
                 remember {
-                    io.nisfeb.talon.call.CallController(session, callEngineProvider)
+                    io.nisfeb.talon.call.CallController(session, callEngineProvider, sounds = callSounds)
                         .also { it.start() }
                 }
             } else {
@@ -545,7 +549,7 @@ fun App(
             }
         val partyLine = remember(callController, peerLinkFactory) {
             if (callController != null && peerLinkFactory != null) {
-                io.nisfeb.talon.call.PartyLine(http, peerLinkFactory)
+                io.nisfeb.talon.call.PartyLine(http, peerLinkFactory, callSounds)
                     .also { line ->
                         callController.onTicket = { host, ticket ->
                             // The topic lives on the host's room, not

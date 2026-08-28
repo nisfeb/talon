@@ -433,6 +433,7 @@ fun main() {
                     callEngineProvider = io.nisfeb.talon.call.DesktopCallEngineProvider,
                     peerLinkFactory = io.nisfeb.talon.call.DesktopPeerLinkFactory,
                     audioDevices = io.nisfeb.talon.call.DesktopAudioDevices(),
+                    callSounds = io.nisfeb.talon.call.DesktopCallSoundPlayer(),
                     notifier = notifier,
                     createUiSettings = graph.createUiSettings,
                     relaySettings = graph.relaySettings,

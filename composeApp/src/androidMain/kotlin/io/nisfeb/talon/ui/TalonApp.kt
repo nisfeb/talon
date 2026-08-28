@@ -162,9 +162,12 @@ fun TalonApp(
     // Trunkline signaling — one controller per logged-in ship. The
     // overlay is a Popup, so incoming calls surface over any screen.
     val callEngineProvider = rememberCallEngineProvider()
+    // One player for the process: it owns a loop thread, and two would
+    // ring over each other.
+    val callSounds = remember { io.nisfeb.talon.call.AndroidCallSoundPlayer() }
     val callController = remember(loggedInShip) {
         if (loggedInShip != null) {
-            io.nisfeb.talon.call.CallController(app.session, callEngineProvider)
+            io.nisfeb.talon.call.CallController(app.session, callEngineProvider, sounds = callSounds)
                 .also { it.start() }
         } else {
             null
@@ -177,6 +180,7 @@ fun TalonApp(
                 io.nisfeb.talon.call.PeerLinkFactory { ice, send ->
                     io.nisfeb.talon.call.AndroidPeerLink(app, ice, send)
                 },
+                callSounds,
             ).also { line ->
                 callController.onTicket = { host, ticket ->
                             // The topic lives on the host's room, not

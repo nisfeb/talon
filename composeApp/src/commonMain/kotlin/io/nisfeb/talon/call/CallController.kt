@@ -77,6 +77,9 @@ class CallController(
     private val ringTimeoutMs: Long = DEFAULT_RING_TIMEOUT_MS,
     /** How long a call may sit "connecting" before we give up on it. */
     private val connectTimeoutMs: Long = 60_000L,
+    /** Call tones. Noop where a platform has no playback path, so
+     *  nothing here has to check. */
+    private val sounds: CallSoundPlayer = CallSoundPlayer.Noop,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + ioDispatcher + backgroundExceptionHandler)
     private val _state = MutableStateFlow<CallUiState>(CallUiState.None)
@@ -93,6 +96,24 @@ class CallController(
      */
     private val _policy = MutableStateFlow<CallPolicy?>(null)
     val state: StateFlow<CallUiState> = _state.asStateFlow()
+
+    init {
+        // Tones follow the call state rather than being sprinkled
+        // through placeCall / accept / reject / hangup / the watchdogs.
+        // Every one of those already moves the state, and half of them
+        // are reached from more than one path.
+        scope.launch {
+            _state.collect { st ->
+                when (st) {
+                    is CallUiState.Outgoing ->
+                        sounds.loop(CallSounds.ringback(), RINGBACK_GAP_MS)
+                    is CallUiState.Incoming ->
+                        sounds.loop(CallSounds.incoming(), INCOMING_GAP_MS)
+                    else -> sounds.stopLoop()
+                }
+            }
+        }
+    }
     val policy: StateFlow<CallPolicy?> = _policy.asStateFlow()
 
     /**
@@ -888,6 +909,11 @@ class CallController(
          * Long is cheap now that the dialog can be closed: the poll
          * runs on the controller's scope, not the composition.
          */
+        /** Silence between ringback bursts, as a phone network does. */
+        private const val RINGBACK_GAP_MS = 3_000
+        /** Shorter for an incoming call: it is asking for attention. */
+        private const val INCOMING_GAP_MS = 1_400
+
         private const val INSTALL_TIMEOUT_MS = 600_000L
 
         /** Nudge a suspended desk early rather than at half of ten

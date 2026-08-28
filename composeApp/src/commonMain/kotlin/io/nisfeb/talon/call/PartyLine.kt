@@ -99,6 +99,7 @@ sealed interface PartyState {
 class PartyLine(
     private val http: HttpClient,
     private val links: PeerLinkFactory,
+    private val sounds: CallSoundPlayer = CallSoundPlayer.Noop,
 ) {
     private val scope =
         CoroutineScope(SupervisorJob() + ioDispatcher + backgroundExceptionHandler)
@@ -129,6 +130,10 @@ class PartyLine(
     private var speaking: Set<String> = emptySet()
     // Ships that have told us their mic is off.
     private val mutedBy = mutableSetOf<String>()
+    // False until our own join settles. Galène replays the existing
+    // roster as a run of user-add messages, and chiming once per
+    // person already on the line is not an arrival.
+    private var joined = false
     private var levelPoll: Job? = null
     private var muted = false
     private var upState: MediaState = MediaState.Idle
@@ -295,6 +300,15 @@ class PartyLine(
                 val name = msg["username"]?.jsonPrimitive?.content ?: id
                 when (msg["kind"]?.jsonPrimitive?.content) {
                     "add" -> {
+                        // Not for our own arrival, and not for anyone
+                        // already here: Galène sends the existing
+                        // roster on join, which would otherwise be a
+                        // burst of chimes for a room that was quietly
+                        // full before we walked in.
+                        val firstSeen = !roster.containsKey(id)
+                        if (firstSeen && joined && name != ourId) {
+                            sounds.play(CallSounds.joined())
+                        }
                         roster[id] = PartyMember(id, name)
                         // Someone who just arrived missed every mute
                         // broadcast so far. Say ours again rather than
@@ -303,6 +317,9 @@ class PartyLine(
                         if (id != connectionId) scope.launch { broadcastMuted() }
                     }
                     "delete" -> {
+                        if (roster[id]?.ship?.let { it != ourId } == true) {
+                            sounds.play(CallSounds.left())
+                        }
                         // A delete carries no username, so take the ship
                         // from the row we were holding — keying off the
                         // fallback id cleared nothing, and a rejoin came
@@ -351,6 +368,8 @@ class PartyLine(
                 )
             }
         sfuIce = ice
+        // Anyone reported from here on is genuinely arriving.
+        joined = true
 
         // Ask for everyone's audio.
         send(buildJsonObject {
@@ -470,6 +489,8 @@ class PartyLine(
         levelPoll = null
         streamOwner.clear()
         speaking = emptySet()
+        joined = false
+        mutedBy.clear()
         // Close the socket first, and cleanly. Tearing down the native
         // peer connections takes long enough that Galène saw the gap
         // and then an abrupt EOF rather than a close handshake, and it
