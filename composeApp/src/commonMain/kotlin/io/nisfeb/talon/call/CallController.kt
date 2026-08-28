@@ -380,6 +380,7 @@ class CallController(
         open: Boolean,
         listen: Boolean,
         sfu: SfuConfig? = null,
+        keepSfu: Boolean = true,
         title: String = "",
         members: List<String> = emptyList(),
         admins: List<String> = emptyList(),
@@ -389,7 +390,7 @@ class CallController(
             ch.poke(
                 TrunkWire.AGENT, TrunkWire.ACTION_MARK,
                 TrunkWire.configureRoomAction(
-                    host, name, open, listen, sfu, title, members, admins,
+                    host, name, open, listen, sfu, keepSfu, title, members, admins,
                 ),
             )
         }.onFailure { Log.e(TAG, "configure-room poke failed", it) }

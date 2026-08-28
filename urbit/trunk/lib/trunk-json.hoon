@@ -10,7 +10,7 @@
 ::            {"set-room-listen":{"name":n,"listen":true}}
 ::            {"share-room":{"host":"~zod","name":n,"ttl":600}}
 ::            {"configure-room":{"host":"~zod","name":n,"open":true,
-::                               "listen":false,
+::                               "listen":false,"keep-sfu":true,
 ::                               "sfu":null|{"base":b,"group":g,"key":k}}}
 ::            {"close-room":{"name":n}}
 ::            {"join-room":{"host":"~zod","name":n}}
@@ -64,7 +64,7 @@
       %-  ot
       :~  host+ship-from-json  name+so  open+bo  listen+bo
           ::  ~ means "use the host ship's own sidecar"
-          sfu+(mu sfu-from-json)
+          sfu+(mu sfu-from-json)  keep-sfu+bo
           ::  only used when the room does not exist yet
           title+so  members+(as ship-from-json)  admins+(as ship-from-json)
       ==

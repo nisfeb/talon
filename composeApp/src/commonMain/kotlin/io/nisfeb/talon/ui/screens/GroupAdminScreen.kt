@@ -814,6 +814,7 @@ private fun PartyLineSection(
                 controller.configureRoom(
                     host, roomName, open = on, listen = false,
                     sfu = if (on) io.nisfeb.talon.call.TrunkWire.defaultSfu() else null,
+                    keepSfu = false,
                     title = group.title.orEmpty().ifEmpty { roomName },
                     members = group.members.map { it.ship },
                     admins = group.members.filter { it.isAdmin }.map { it.ship },
@@ -859,6 +860,15 @@ private fun PartyLineSection(
                 TextButton(onClick = { clipboard.setText(AnnotatedString(link!!.url)) }) {
                     Text("Copy")
                 }
+                // Links expire, so there has to be a way to get
+                // another one — the button used to vanish for good
+                // after the first press.
+                TextButton(onClick = {
+                    scope.launch {
+                        controller.clearListenLink()
+                        controller.shareRoom(host, roomName)
+                    }
+                }) { Text("New") }
             }
         }
         Text(
@@ -928,6 +938,7 @@ private fun PartyLineSection(
                                 sfuGroupField.trim(),
                                 sfuKeyField.trim(),
                             ),
+                            keepSfu = false,
                         )
                         sfuKeyField = ""
                         sfuOpen = false
@@ -938,7 +949,8 @@ private fun PartyLineSection(
                 OutlinedButton(onClick = {
                     scope.launch {
                         controller.configureRoom(
-                            host, roomName, open = true, listen = listening, sfu = null,
+                            host, roomName, open = true, listen = listening,
+                            sfu = null, keepSfu = false,
                         )
                         sfuOpen = false
                     }

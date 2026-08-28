@@ -87,6 +87,7 @@
           open=?
           listen=?
           sfu=(unit sfu-config)
+          keep-sfu=?
           title=@t
           members=(set ship)
           admins=(set ship)
@@ -122,6 +123,9 @@
           open=?
           listen=?
           sfu=(unit sfu-config)
+          ::  leave the room's server alone; see the action of the
+          ::  same name.
+          keep-sfu=?
           title=@t
           members=(set ship)
           admins=(set ship)

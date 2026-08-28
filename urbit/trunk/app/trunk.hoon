@@ -262,11 +262,10 @@
       =/  had  (~(get by hosted.state) name.act)
       =/  listen  ?~(had %.n listen.u.had)
       =/  room-sfu  ?~(had ~ sfu.u.had)
-      =.  hosted.state
-        %+  ~(put by hosted.state)  name.act
-        [title.act members.act admins.act listen room-sfu]
+      =/  new=room:trunk  [title.act members.act admins.act listen room-sfu]
+      =.  hosted.state  (~(put by hosted.state) name.act new)
       :_  this
-      (announce:hc name.act title.act members.act %.y)
+      (announce:hc name.act new %.y)
     ::
         %set-room-listen
       =/  got  (~(get by hosted.state) name.act)
@@ -275,10 +274,10 @@
       ::  flag moved on the ship and nothing was told about it —
       ::  members kept showing the old state, and our own client only
       ::  noticed if some other call happened to re-scry.
-      =.  hosted.state
-        (~(put by hosted.state) name.act u.got(listen listen.act))
+      =/  new  u.got(listen listen.act)
+      =.  hosted.state  (~(put by hosted.state) name.act new)
       :_  this
-      (announce:hc name.act title.u.got members.u.got %.y)
+      (announce:hc name.act new %.y)
     ::
     ::  A listen link is a bearer token that Galène cannot revoke, so
     ::  the ttl is the whole security model — and it only exists at all
@@ -315,7 +314,7 @@
     ::
         %close-room
       =/  got  (~(get by hosted.state) name.act)
-      :-  ?~(got ~ (announce:hc name.act title.u.got members.u.got %.n))
+      :-  ?~(got ~ (announce:hc name.act u.got %.n))
       this(hosted.state (~(del by hosted.state) name.act))
     ::
         %send
@@ -333,22 +332,23 @@
         =/  got  (~(get by hosted.state) name.act)
         ?.  open.act
           ?~  got  `this
-          :-  (announce:hc name.act title.u.got members.u.got %.n)
+          :-  (announce:hc name.act u.got %.n)
           this(hosted.state (~(del by hosted.state) name.act))
         =/  new=room:trunk
           ?~  got
             [title.act members.act admins.act listen.act sfu.act]
-          u.got(listen listen.act, sfu sfu.act, members members.act, admins admins.act)
+          =/  new-sfu  ?:(keep-sfu.act sfu.u.got sfu.act)
+          u.got(listen listen.act, sfu new-sfu, members members.act, admins admins.act)
         =.  hosted.state  (~(put by hosted.state) name.act new)
         :_  this
-        (announce:hc name.act title.new members.new %.y)
+        (announce:hc name.act new %.y)
       :_  this
       :~  :*  %pass  /room/(scot %p host.act)
               %agent  [host.act %trunk]
               %poke  %trunk-room
               !>  ^-  room-sig:trunk
               :*  %configure  name.act  open.act  listen.act  sfu.act
-                  title.act  members.act  admins.act
+                  keep-sfu.act  title.act  members.act  admins.act
               ==
       ==  ==
     ::
@@ -446,18 +446,23 @@
           [title.msg members.msg admins.msg listen.msg sfu.msg]
         =.  hosted.state  (~(put by hosted.state) name.msg new)
         :_  this
-        (announce:hc name.msg title.msg members.msg %.y)
+        (announce:hc name.msg new %.y)
       ?.  (~(has in admins.u.got) src.bowl)
         %-  (slog leaf+"trunk: {<src.bowl>} is not an admin of {<name.msg>}" ~)
         `this
       ?.  open.msg
-        :-  (announce:hc name.msg title.u.got members.u.got %.n)
-        this(hosted.state (~(del by hosted.state) name.msg))
-      :-  (announce:hc name.msg title.u.got members.u.got %.y)
-      %=  this
-        hosted.state
-      (~(put by hosted.state) name.msg u.got(listen listen.msg, sfu sfu.msg))
-      ==
+        =.  hosted.state  (~(del by hosted.state) name.msg)
+        :_  this
+        (announce:hc name.msg u.got %.n)
+      ::  State FIRST, announce second. +announce reads the room back
+      ::  out of hosted.state, so announcing before the write told
+      ::  everyone the OLD flag — the host changed and no client ever
+      ::  heard about it, which is a switch that does nothing.
+      =/  new-sfu  ?:(keep-sfu.msg sfu.u.got sfu.msg)
+      =/  new  u.got(listen listen.msg, sfu new-sfu)
+      =.  hosted.state  (~(put by hosted.state) name.msg new)
+      :_  this
+      (announce:hc name.msg new %.y)
     ::
         %announce
       ::  an invitation from anyone is fine (it is just a name), but
@@ -638,11 +643,18 @@
 ::  is always a member of its own line for this purpose; we skip
 ::  ourselves since our client already knows.
 ::
+::  Takes the room BY VALUE, deliberately. `hc` is ~(. +> bowl), so
+::  the helper core closes over the state as it was when the arm was
+::  entered — reading hosted.state back in here returned the value
+::  from before the caller's own `=.`, and every change announced the
+::  flag it had just replaced. That is one bug wearing several hats:
+::  a switch that does nothing, a listen link refused after enabling.
 ++  announce
-  |=  [name=@t title=@t members=(set ship) open=?]
-  =/  got  (~(get by hosted.state) name)
-  =/  listen  ?~(got %.n listen.u.got)
-  =/  base  base:(room-sfu name)
+  |=  [name=@t =room:trunk open=?]
+  =/  title  title.room
+  =/  members  members.room
+  =/  listen  listen.room
+  =/  base  base:?~(sfu.room sfu.state u.sfu.room)
   ^-  (list card)
   ::  The host tells itself too. It is excluded from the ames pokes
   ::  below — it is not a peer of its own room — but its client still

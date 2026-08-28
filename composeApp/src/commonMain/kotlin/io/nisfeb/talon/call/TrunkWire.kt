@@ -212,8 +212,12 @@ object TrunkWire {
         name: String,
         open: Boolean,
         listen: Boolean,
-        /** Null leaves the room on the host ship's own sidecar. */
+        /** Null means the host ship's own sidecar. Ignored entirely
+         *  when [keepSfu] — which is what every call that isn't the
+         *  server picker wants, or toggling listening would silently
+         *  reset a group's chosen server. */
         sfu: SfuConfig? = null,
+        keepSfu: Boolean = true,
         /** Only used when the room doesn't exist yet — an admin
          *  turning the line on for the first time. */
         title: String = "",
@@ -223,6 +227,7 @@ object TrunkWire {
         putJsonObject("configure-room") {
             put("host", host); put("name", name)
             put("open", open); put("listen", listen)
+            put("keep-sfu", keepSfu)
             put("title", title)
             putJsonArray("members") { members.forEach { add(JsonPrimitive(it)) } }
             putJsonArray("admins") { admins.forEach { add(JsonPrimitive(it)) } }
