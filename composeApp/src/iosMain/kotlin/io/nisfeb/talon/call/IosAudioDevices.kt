@@ -2,11 +2,14 @@ package io.nisfeb.talon.call
 
 import io.nisfeb.talon.util.Log
 import platform.AVFAudio.AVAudioSession
+// availableInputs is an extension in these bindings, so it needs
+// an explicit import; setPreferredInput is a member and must not be
+// imported at all.
+import platform.AVFAudio.availableInputs
 import platform.AVFAudio.AVAudioSessionPortBuiltInMic
 import platform.AVFAudio.AVAudioSessionPortDescription
 import platform.AVFAudio.AVAudioSessionPortOverrideNone
 import platform.AVFAudio.AVAudioSessionPortOverrideSpeaker
-import platform.AVFAudio.setPreferredInput
 
 /**
  * Call routing on iOS.
@@ -26,6 +29,7 @@ import platform.AVFAudio.setPreferredInput
  * placed in the Xcode target, and it only offers *outputs*. The list
  * here is what a person actually wants to choose between.
  */
+@OptIn(kotlinx.cinterop.ExperimentalForeignApi::class)
 class IosAudioDevices : AudioDevices {
 
     override val supported: Boolean = true

@@ -17,9 +17,14 @@ import io.ktor.http.HttpHeaders
 import io.ktor.http.contentType
 import io.ktor.http.isSuccess
 import io.nisfeb.talon.util.ioDispatcher
+import io.nisfeb.talon.util.Log
 import io.nisfeb.talon.util.nowMs
 import kotlinx.atomicfu.atomic
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.channelFlow
@@ -29,6 +34,9 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
@@ -55,6 +63,26 @@ class UrbitChannel internal constructor(
 
     /** Unique message id generator. Urbit requires monotonically-increasing ids. */
     private fun nextRequestId(): Long = nextId.getAndIncrement()
+
+    // Pokes awaiting their ack, by request id. Eyre answers every poke
+    // on the SSE stream with {"id":n,"response":"poke","ok"|"err"}, so
+    // the forwarder below can settle them.
+    private val pendingPokes = mutableMapOf<Long, CompletableDeferred<String?>>()
+    private val pokeLock = Mutex()
+
+    /**
+     * Settle a poke waiting on its ack. Called for every inbound event.
+     *
+     * Failing to find an id is normal and silent: facts, subscription
+     * responses and acks for pokes we already gave up on all land here.
+     */
+    private suspend fun settlePokeAck(element: JsonElement) {
+        val obj = element as? JsonObject ?: return
+        if (obj["response"]?.jsonPrimitive?.contentOrNull != "poke") return
+        val id = obj["id"]?.jsonPrimitive?.contentOrNull?.toLongOrNull() ?: return
+        val err = obj["err"]?.jsonPrimitive?.contentOrNull
+        pokeLock.withLock { pendingPokes.remove(id) }?.complete(err)
+    }
 
     /**
      * Opens the SSE stream. Hot flow — every collector shares the same
@@ -125,7 +153,12 @@ class UrbitChannel internal constructor(
         // the collector is slow, but inbox is unlimited so the SSE reader
         // never has to block on the engine's dispatcher.
         val forwarder = launch {
-            for (event in inbox) send(event)
+            for (event in inbox) {
+                // Settle before forwarding: a collector that is slow to
+                // consume must not delay a poke waiting on its ack.
+                settlePokeAck(event.body)
+                send(event)
+            }
             close()
         }
         awaitClose {
@@ -158,6 +191,21 @@ class UrbitChannel internal constructor(
         put(buildJsonArray { add(msg) })
     }
 
+    /**
+     * Poke an agent and wait for the ship to accept it.
+     *
+     * This used to PUT and return, never reading the ack, so a nacked
+     * poke was indistinguishable from a delivered one. Every failure of
+     * that kind surfaced instead as a control that silently did nothing
+     * — a mark whose key we had spelled wrong, an agent too old to
+     * understand the action — and each one cost a debugging session.
+     *
+     * A nack now throws. A timeout does not: an ack only arrives if
+     * something is collecting [events], and callers that poke without a
+     * live stream are not wrong, merely unobserved. Losing the signal
+     * there is the old behaviour, so it stays a warning rather than
+     * failing work that probably succeeded.
+     */
     suspend fun poke(
         app: String,
         mark: String,
@@ -173,7 +221,21 @@ class UrbitChannel internal constructor(
             put("mark", mark)
             put("json", payload)
         }
-        put(buildJsonArray { add(msg) })
+        val ack = CompletableDeferred<String?>()
+        pokeLock.withLock { pendingPokes[id] = ack }
+        try {
+            put(buildJsonArray { add(msg) })
+        } catch (t: Throwable) {
+            pokeLock.withLock { pendingPokes.remove(id) }
+            throw t
+        }
+        val err = withTimeoutOrNull(POKE_ACK_TIMEOUT_MS) { ack.await() }
+        if (err == null && !ack.isCompleted) {
+            pokeLock.withLock { pendingPokes.remove(id) }
+            Log.w(TAG, "no ack for poke $id to $app/$mark within ${POKE_ACK_TIMEOUT_MS}ms")
+            return id
+        }
+        if (err != null) throw PokeNacked(app, mark, err)
         return id
     }
 
@@ -278,8 +340,31 @@ class UrbitChannel internal constructor(
 
     companion object {
         private const val RPC_TIMEOUT_SECS = 30L
+        private const val TAG = "UrbitChannel"
+
+        /**
+         * How long to wait for a poke ack.
+         *
+         * Generous: this covers a round trip to the ship, not any work
+         * the agent does afterwards. Short enough that a caller poking
+         * with no live event stream isn't held up for long.
+         */
+        private const val POKE_ACK_TIMEOUT_MS = 15_000L
     }
 }
 
 /** Raw SSE event: optional sequence id from the server, plus JSON payload. */
 data class UrbitEvent(val id: Long?, val body: JsonElement)
+
+/**
+ * The ship refused a poke.
+ *
+ * Carries what was refused as well as why: eyre's message is a crash
+ * stack, and "bad-key" on its own says nothing about which action was
+ * being attempted.
+ */
+class PokeNacked(
+    val app: String,
+    val mark: String,
+    val reason: String,
+) : RuntimeException("$app rejected a $mark poke: $reason")
