@@ -62,6 +62,50 @@ object CallSounds {
      */
     fun left(): ByteArray = reverseSamples(joined())
 
+    /**
+     * The same PCM with [gapMs] of silence after it.
+     *
+     * Lets a platform whose looping is native — iOS's AVAudioPlayer
+     * repeats a buffer with no gap at all — get the same cadence as the
+     * hand-rolled loops by baking the gap into the buffer, rather than
+     * running a thread just to wait.
+     */
+    fun withGap(pcm: ByteArray, gapMs: Int): ByteArray =
+        pcm + silence(gapMs / 1000.0)
+
+    /**
+     * Wrap PCM in a WAV container.
+     *
+     * For platforms whose simple playback API wants a file format
+     * rather than raw samples. 44 bytes of well-known header, kept here
+     * beside the synthesis so the two can never disagree about the
+     * sample rate or width.
+     */
+    fun wav(pcm: ByteArray): ByteArray {
+        val header = ByteArray(44)
+        val byteRate = SAMPLE_RATE * CHANNELS * BITS_PER_SAMPLE / 8
+        val blockAlign = CHANNELS * BITS_PER_SAMPLE / 8
+        fun ascii(at: Int, text: String) {
+            for (i in text.indices) header[at + i] = text[i].code.toByte()
+        }
+        fun le32(at: Int, v: Int) {
+            header[at] = (v and 0xFF).toByte()
+            header[at + 1] = ((v shr 8) and 0xFF).toByte()
+            header[at + 2] = ((v shr 16) and 0xFF).toByte()
+            header[at + 3] = ((v shr 24) and 0xFF).toByte()
+        }
+        fun le16(at: Int, v: Int) {
+            header[at] = (v and 0xFF).toByte()
+            header[at + 1] = ((v shr 8) and 0xFF).toByte()
+        }
+        ascii(0, "RIFF"); le32(4, 36 + pcm.size); ascii(8, "WAVE")
+        ascii(12, "fmt "); le32(16, 16); le16(20, 1)
+        le16(22, CHANNELS); le32(24, SAMPLE_RATE); le32(28, byteRate)
+        le16(32, blockAlign); le16(34, BITS_PER_SAMPLE)
+        ascii(36, "data"); le32(40, pcm.size)
+        return header + pcm
+    }
+
     // ---- synthesis -------------------------------------------------
 
     private data class Partial(val hz: Double)
