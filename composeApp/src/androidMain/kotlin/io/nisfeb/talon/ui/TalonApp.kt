@@ -210,6 +210,9 @@ fun TalonApp(
             }
         }
     }
+    val androidAudioDevices = remember {
+        io.nisfeb.talon.call.AndroidAudioDevices(app)
+    }
     val contactMap by remember {
         contactMapFlow(
             app.db.contacts().stream(),
@@ -223,6 +226,7 @@ fun TalonApp(
         io.nisfeb.talon.ui.CallOverlay(
             it,
             nameFor = { ship -> contactMap.displayName(ship) },
+            audioDevices = androidAudioDevices,
         )
     }
     var addingAnotherShip by remember { mutableStateOf(false) }
@@ -1576,6 +1580,7 @@ fun TalonApp(
                             io.nisfeb.talon.ui.PartyLineBar(
                                 line,
                                 nameFor = { contactMap.displayName(it) },
+                                audioDevices = androidAudioDevices,
                             )
                         }
                     },

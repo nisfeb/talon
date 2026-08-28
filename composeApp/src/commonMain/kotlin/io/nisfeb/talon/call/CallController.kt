@@ -617,7 +617,7 @@ class CallController(
                 // suspended, and installing re-syncs it without
                 // starting it. Nudge it once, halfway in, rather than
                 // waiting out the whole timeout for nothing.
-                if (!revived && nowMs() - started > INSTALL_TIMEOUT_MS / 2) {
+                if (!revived && nowMs() - started > INSTALL_REVIVE_AFTER_MS) {
                     revived = true
                     val (rApp, rMark, rBody) = TrunkWire.reviveTrunkPoke()
                     runCatching { ch.poke(rApp, rMark, rBody) }
@@ -633,8 +633,14 @@ class CallController(
                     return@launch
                 }
             }
+            // Deliberately not "check your ship can reach X". A poke is
+            // fire-and-forget over the channel — we never see its ack —
+            // so this branch cannot distinguish a refused install from
+            // a slow one, and it used to assert the one diagnosis we
+            // have no evidence for.
             _install.value = TrunkInstall.Failed(
-                "the desk did not arrive; check your ship can reach " + publisher,
+                "%trunk hasn't arrived from $publisher yet. It may still be " +
+                    "on its way — check with |vats %trunk in the dojo.",
             )
         }
     }
@@ -855,7 +861,23 @@ class CallController(
         const val DEFAULT_LISTEN_TTL_SECS = 900
 
         /** How long to wait for an installed desk to start answering. */
-        private const val INSTALL_TIMEOUT_MS = 120_000L
+        /**
+         * How long to watch for an installing desk.
+         *
+         * Was two minutes, which is simply less than a cold desk sync
+         * from a foreign ship takes over ames — reported as an install
+         * that "failed" twice and then worked from the dojo, because
+         * by then most of the sync our two attempts started had
+         * already happened.
+         *
+         * Long is cheap now that the dialog can be closed: the poll
+         * runs on the controller's scope, not the composition.
+         */
+        private const val INSTALL_TIMEOUT_MS = 600_000L
+
+        /** Nudge a suspended desk early rather than at half of ten
+         *  minutes, which would be far too late to help. */
+        private const val INSTALL_REVIVE_AFTER_MS = 45_000L
 
         /** How long a caller rings before giving up. Public because
          *  Android's ring notification has to expire no later than

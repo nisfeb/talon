@@ -59,7 +59,7 @@ fun AudioDeviceControls(
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {
                 Text(
-                    "Microphone and speaker",
+                    if (devices.unifiedRoute) "Audio device" else "Microphone and speaker",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -78,19 +78,35 @@ fun AudioDeviceControls(
                 var input by remember { mutableStateOf(devices.selectedInput) }
                 var output by remember { mutableStateOf(devices.selectedOutput) }
 
-                DevicePicker(
-                    title = "Microphone",
-                    devices = inputs,
-                    selected = input,
-                    onPick = { input = it; devices.selectInput(it) },
-                )
-                HorizontalDivider(Modifier.padding(vertical = 4.dp))
-                DevicePicker(
-                    title = "Speaker",
-                    devices = outputs,
-                    selected = output,
-                    onPick = { output = it; devices.selectOutput(it) },
-                )
+                if (devices.unifiedRoute) {
+                    // One choice drives both directions here, so one
+                    // list. Two would imply a freedom the phone
+                    // doesn't have.
+                    DevicePicker(
+                        title = "Route",
+                        devices = inputs,
+                        selected = input,
+                        onPick = {
+                            input = it
+                            output = it
+                            devices.selectInput(it)
+                        },
+                    )
+                } else {
+                    DevicePicker(
+                        title = "Microphone",
+                        devices = inputs,
+                        selected = input,
+                        onPick = { input = it; devices.selectInput(it) },
+                    )
+                    HorizontalDivider(Modifier.padding(vertical = 4.dp))
+                    DevicePicker(
+                        title = "Speaker",
+                        devices = outputs,
+                        selected = output,
+                        onPick = { output = it; devices.selectOutput(it) },
+                    )
+                }
             }
         }
     }

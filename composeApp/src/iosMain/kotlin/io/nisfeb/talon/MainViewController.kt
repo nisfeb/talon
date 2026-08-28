@@ -119,6 +119,7 @@ fun MainViewController(rtc: NativeRtcFactory?): UIViewController {
             callEngineProvider = rtc?.let { IosCallEngineProvider(it) },
             peerLinkFactory = rtc?.let { IosPeerLinkFactory(it) },
             dailyDigestSettings = dailyDigestSettings,
+            audioDevices = io.nisfeb.talon.call.IosAudioDevices(),
         )
         // Back gesture. A Compose view controller gets none of UIKit's
         // navigation edge-swipe, so we draw our own: a narrow strip on

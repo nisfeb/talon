@@ -26,9 +26,23 @@ data class AudioDevice(val id: String, val label: String)
  */
 interface AudioDevices {
 
-    /** False on platforms where the OS owns routing. The settings pane
-     *  is hidden entirely rather than shown empty or disabled. */
+    /** False where the platform offers no choice at all. The settings
+     *  pane is hidden entirely rather than shown empty or disabled. */
     val supported: Boolean get() = false
+
+    /**
+     * True when one choice covers both directions.
+     *
+     * Phones route a *call* to a device — earpiece, speaker, the
+     * headset — rather than picking a microphone and a speaker
+     * separately, and both Android's communication device and iOS's
+     * preferred input work that way. Desktop is the odd one out with
+     * genuinely independent capture and render devices.
+     *
+     * The UI shows one list instead of two when this is set; showing
+     * two that secretly move together would be a lie.
+     */
+    val unifiedRoute: Boolean get() = false
 
     fun inputs(): List<AudioDevice> = emptyList()
 
