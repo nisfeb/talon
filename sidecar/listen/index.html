@@ -137,7 +137,6 @@
   var audio = document.getElementById('audio');
 
   var conn = null;
-  var users = {};
   var speaking = {};
   var receivers = {};
   var speakTimer = null;
@@ -160,15 +159,25 @@
     document.getElementById('topic').hidden = false;
   }
 
-  // id -> {name, speaking}. Listeners are not shown: they are not
-  // on the line, they are looking at it.
+  // protocol.js maintains conn.users itself; onuser is only a
+  // notification and carries (id, kind) — no username. Reading a
+  // third argument that isn't there is why this list was empty.
+  //
+  // 'present' separates people on the line from other listeners:
+  // a listener holds no permissions at all.
   function renderWho() {
-    var ids = Object.keys(users).filter(function (k) {
-      return users[k] && users[k] !== 'listener';
+    var us = (conn && conn.users) || {};
+    var names = [];
+    var others = 0;
+    Object.keys(us).forEach(function (id) {
+      var u = us[id] || {};
+      var perms = u.permissions || [];
+      if (perms.indexOf('present') >= 0) names.push(u.username || id);
+      else others++;
     });
-    whoEl.hidden = ids.length === 0;
+    whoEl.hidden = names.length === 0 && others === 0;
     whoList.innerHTML = '';
-    ids.map(function (k) { return users[k]; }).sort().forEach(function (n) {
+    names.sort().forEach(function (n) {
       var li = document.createElement('li');
       var dot = document.createElement('span');
       dot.className = speaking[n] ? 'dot on' : 'dot';
@@ -176,6 +185,13 @@
       li.appendChild(document.createTextNode(n));
       whoList.appendChild(li);
     });
+    if (others > 0) {
+      var li = document.createElement('li');
+      li.style.opacity = '.7';
+      li.appendChild(document.createTextNode(
+        others === 1 ? 'and 1 listening' : 'and ' + others + ' listening'));
+      whoList.appendChild(li);
+    }
   }
 
   /**
@@ -207,7 +223,6 @@
     if (conn) { try { conn.close(); } catch (e) {} conn = null; }
     if (speakTimer) { clearInterval(speakTimer); speakTimer = null; }
     audio.srcObject = null;
-    users = {};
     speaking = {};
     receivers = {};
     renderWho();
@@ -251,11 +266,8 @@
       goBtn.onclick = function () { stop(); say('Stopped.'); };
     };
 
-    conn.onuser = function (id, kind, username) {
-      if (kind === 'add') users[id] = username;
-      else if (kind === 'delete') delete users[id];
-      renderWho();
-    };
+    // (id, kind) only — the user record lives in conn.users.
+    conn.onuser = function () { renderWho(); };
 
     conn.ondownstream = function (s) {
       s.onstatus = function (st) {
