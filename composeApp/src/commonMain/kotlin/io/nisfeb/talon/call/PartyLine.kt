@@ -182,8 +182,12 @@ class PartyLine(
     fun setMuted(value: Boolean) {
         muted = value
         upLink?.setMuted(value)
-        val cur = _state.value
-        if (cur is PartyState.Live) _state.value = cur.copy(muted = value)
+        // publishRoster, not a copy(muted = ...). The top-level flag
+        // drives the mic button; our own roster row is rebuilt from
+        // `muted` inside publishRoster, so copying only the flag left
+        // our row showing the previous state until the next user add or
+        // delete happened to republish it.
+        publishRoster()
         scope.launch { broadcastMuted() }
     }
 

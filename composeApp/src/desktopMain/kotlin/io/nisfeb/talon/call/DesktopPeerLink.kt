@@ -122,15 +122,49 @@ class DesktopPeerLink(
         micTrack?.isEnabled = !muted
     }
 
+    /**
+     * Remote audio level, or null when it can't be read.
+     *
+     * Two sources, because the cheap one is not always there.
+     * getSynchronizationSources reports the level carried in RTP's
+     * own header extension — free, but only populated when that
+     * extension was negotiated. Galène's down streams did not carry
+     * it, so desktop showed nobody speaking while Android, which
+     * reads inbound-rtp statistics instead, showed everyone.
+     *
+     * Fall back to the same statistic Android uses. It is
+     * asynchronous, so a call kicks off a refresh and returns what
+     * the last one saw; the caller polls at 4Hz anyway.
+     */
     override fun audioLevel(): Float? =
         runCatching {
-            // getSynchronizationSources carries the level RTP already
-            // sends in its header extension, so this costs nothing
-            // extra on the wire and needs no stats round trip.
             pc.receivers.firstNotNullOfOrNull { r ->
                 r.synchronizationSources?.firstOrNull()?.audioLevel?.toFloat()
             }
-        }.getOrNull()
+        }.getOrNull() ?: statsAudioLevel()
+
+    private val lastStatsLevel = kotlinx.atomicfu.atomic(-1f)
+    private val statsInFlight = kotlinx.atomicfu.atomic(false)
+
+    private fun statsAudioLevel(): Float? {
+        if (statsInFlight.compareAndSet(expect = false, update = true)) {
+            runCatching {
+                pc.getStats { report ->
+                    var level = -1f
+                    report?.stats?.values?.forEach { st ->
+                        if (st?.type == dev.onvoid.webrtc.RTCStatsType.INBOUND_RTP) {
+                            (st.attributes?.get("audioLevel") as? Number)?.let {
+                                level = it.toFloat()
+                            }
+                        }
+                    }
+                    lastStatsLevel.value = level
+                    statsInFlight.value = false
+                }
+            }.onFailure { statsInFlight.value = false }
+        }
+        return lastStatsLevel.value.takeIf { it >= 0f }
+    }
 
     private val closed = kotlinx.atomicfu.atomic(false)
 
