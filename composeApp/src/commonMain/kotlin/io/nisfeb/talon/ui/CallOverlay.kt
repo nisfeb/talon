@@ -129,35 +129,30 @@ fun CallOverlay(
             )
         }
 
+        // The same strip the call was just using, rather than a
+        // differently-shaped banner appearing where the bar was. It is
+        // the tail of one thing, not a new thing.
         is CallUiState.Ended -> Popup(alignment = Alignment.TopCenter) {
-            Surface(
-                modifier = modifier.fillMaxWidth(),
-                color = MaterialTheme.colorScheme.surfaceVariant,
-                tonalElevation = 4.dp,
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 10.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        "Call with ${nameFor(s.peer)}: ${s.reason}",
-                        style = MaterialTheme.typography.bodyLarge,
-                    )
-                    TextButton(onClick = { controller.dismissEnded() }) { Text("Dismiss") }
-                }
-                LaunchedEffect(s) {
-                    delay(4_000)
-                    controller.dismissEnded()
-                }
+            PartyLineBarContent(
+                state = PartyState.Failed(s.peer, s.reason),
+                admin = null,
+                modifier = modifier,
+                nameFor = nameFor,
+                headline = "${nameFor(s.peer)} — ${s.reason}",
+                onDismiss = { controller.dismissEnded() },
+            )
+            LaunchedEffect(s) {
+                delay(ENDED_NOTICE_MS)
+                controller.dismissEnded()
             }
         }
 
         CallUiState.None -> {}
     }
 }
+
+/** How long "call ended" lingers before clearing itself. */
+private const val ENDED_NOTICE_MS = 4_000L
 
 /**
  * Offer to fetch %trunk when the ship hasn't got it.

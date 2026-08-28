@@ -103,6 +103,15 @@ fun PartyLineBarContent(
      * sentence for a phone call, so the caller supplies its own.
      */
     headline: String? = null,
+    /**
+     * Trailing "Dismiss" for a terminal notice.
+     *
+     * Only meaningful with [PartyState.Failed], which is how a call
+     * that has ended renders: same strip as the live call it replaces,
+     * rather than a differently-shaped banner appearing where the bar
+     * just was.
+     */
+    onDismiss: (() -> Unit)? = null,
 ) {
     if (state is PartyState.Idle) return
     var expanded by remember { mutableStateOf(false) }
@@ -125,12 +134,27 @@ fun PartyLineBarContent(
                 is PartyState.Connecting ->
                     Text("Joining the line…", style = MaterialTheme.typography.bodyMedium)
 
-                is PartyState.Failed ->
+                is PartyState.Failed -> {
                     Text(
-                        "Party line: ${s.why}",
+                        headline ?: "Party line: ${s.why}",
                         style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.error,
+                        // Error red only for an actual party-line
+                        // failure. A caller supplying its own headline
+                        // is framing it itself, and a call ending
+                        // normally is not a fault worth colouring.
+                        color = if (headline != null) {
+                            MaterialTheme.colorScheme.onSecondaryContainer
+                        } else {
+                            MaterialTheme.colorScheme.error
+                        },
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
                     )
+                    if (onDismiss != null) {
+                        TextButton(onClick = onDismiss) { Text("Dismiss") }
+                    }
+                }
 
                 is PartyState.Live -> {
                     // Count people, then name them: in a busy line the
