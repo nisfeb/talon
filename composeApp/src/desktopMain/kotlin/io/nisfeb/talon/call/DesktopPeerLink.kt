@@ -139,31 +139,54 @@ class DesktopPeerLink(
     override fun audioLevel(): Float? =
         runCatching {
             pc.receivers.firstNotNullOfOrNull { r ->
+                // > 0, not just non-null. audioLevel is a primitive
+                // double, so an existing source whose header extension
+                // was never negotiated reports 0.0 — which is not null,
+                // so the fallback below never ran and desktop reported
+                // silence forever. Nobody is audible at exactly zero
+                // anyway, so losing that value costs nothing.
                 r.synchronizationSources?.firstOrNull()?.audioLevel?.toFloat()
+                    ?.takeIf { it > 0f }
             }
         }.getOrNull() ?: statsAudioLevel()
 
-    private val lastStatsLevel = kotlinx.atomicfu.atomic(-1f)
-    private val statsInFlight = kotlinx.atomicfu.atomic(false)
+    /**
+     * Our own microphone level, from the MEDIA_SOURCE statistic.
+     *
+     * Not inbound-rtp: the up link has no receivers, and outbound-rtp
+     * describes what was sent rather than what the microphone heard —
+     * which is silence-suppressed, so a quiet talker reads as nothing.
+     */
+    override fun localAudioLevel(): Float? = statsAudioLevel(local = true)
 
-    private fun statsAudioLevel(): Float? {
-        if (statsInFlight.compareAndSet(expect = false, update = true)) {
+    private val lastStatsLevel = kotlinx.atomicfu.atomic(-1f)
+    private val lastLocalLevel = kotlinx.atomicfu.atomic(-1f)
+    private val statsInFlight = kotlinx.atomicfu.atomic(false)
+    private val localInFlight = kotlinx.atomicfu.atomic(false)
+
+    private fun statsAudioLevel(local: Boolean = false): Float? {
+        val inFlight = if (local) localInFlight else statsInFlight
+        val last = if (local) lastLocalLevel else lastStatsLevel
+        val want =
+            if (local) dev.onvoid.webrtc.RTCStatsType.MEDIA_SOURCE
+            else dev.onvoid.webrtc.RTCStatsType.INBOUND_RTP
+        if (inFlight.compareAndSet(expect = false, update = true)) {
             runCatching {
                 pc.getStats { report ->
                     var level = -1f
                     report?.stats?.values?.forEach { st ->
-                        if (st?.type == dev.onvoid.webrtc.RTCStatsType.INBOUND_RTP) {
+                        if (st?.type == want) {
                             (st.attributes?.get("audioLevel") as? Number)?.let {
                                 level = it.toFloat()
                             }
                         }
                     }
-                    lastStatsLevel.value = level
-                    statsInFlight.value = false
+                    last.value = level
+                    inFlight.value = false
                 }
-            }.onFailure { statsInFlight.value = false }
+            }.onFailure { inFlight.value = false }
         }
-        return lastStatsLevel.value.takeIf { it >= 0f }
+        return last.value.takeIf { it >= 0f }
     }
 
     private val closed = kotlinx.atomicfu.atomic(false)

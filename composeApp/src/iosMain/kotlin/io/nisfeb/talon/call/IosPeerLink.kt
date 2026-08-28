@@ -60,6 +60,9 @@ class IosPeerLink(private val native: NativeRtcPeer) : PeerLink {
     override fun audioLevel(): Float? =
         native.remoteAudioLevel().takeIf { it >= 0.0 }?.toFloat()
 
+    override fun localAudioLevel(): Float? =
+        native.localAudioLevel().takeIf { it >= 0.0 }?.toFloat()
+
     private val closed = atomic(false)
 
     override fun close() {

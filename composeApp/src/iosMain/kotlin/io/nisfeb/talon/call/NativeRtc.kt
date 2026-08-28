@@ -54,6 +54,16 @@ interface NativeRtcPeer {
      */
     fun remoteAudioLevel(): Double
 
+    /**
+     * Our own microphone level, 0..1, or -1 when unknown.
+     *
+     * Named apart from [remoteAudioLevel] rather than overloaded:
+     * Kotlin/Native mangles a name it thinks collides, and `audioLevel`
+     * already came out the far side as `audioLevel_()` once, which
+     * broke conformance and the whole iOS build with it.
+     */
+    fun localAudioLevel(): Double
+
     fun setMuted(muted: Boolean)
 
     /** Must be idempotent: the adapters can close more than once. */

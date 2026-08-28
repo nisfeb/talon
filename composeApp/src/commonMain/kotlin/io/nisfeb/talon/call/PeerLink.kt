@@ -51,6 +51,18 @@ interface PeerLink {
      */
     fun audioLevel(): Float? = null
 
+    /**
+     * How loud *our own* microphone is right now, 0..1, or null where
+     * the platform can't say.
+     *
+     * Read from the outgoing side rather than the incoming one, so it
+     * works on the up link, which has no receivers at all. Worth
+     * showing: without it there is no way to tell "nobody is talking"
+     * from "my microphone is dead", and a muted mic looks identical to
+     * a working one.
+     */
+    fun localAudioLevel(): Float? = null
+
     fun close()
 }
 

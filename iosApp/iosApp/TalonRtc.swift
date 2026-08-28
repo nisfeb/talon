@@ -34,6 +34,8 @@ final class TalonRtcPeer: NSObject, NativeRtcPeer, RTCPeerConnectionDelegate {
     private var closed = false
     private var lastLevel: Double = -1
     private var statsInFlight = false
+    private var lastLocalLevel: Double = -1
+    private var localStatsInFlight = false
 
     init(iceServers: [IceServer], sendAudio: Bool, trickle: Bool) {
         self.trickle = trickle
@@ -147,6 +149,26 @@ final class TalonRtcPeer: NSObject, NativeRtcPeer, RTCPeerConnectionDelegate {
     /// this reads inbound-rtp statistics instead. They arrive
     /// asynchronously, so a call kicks off a refresh and returns what
     /// the last one saw — the caller polls anyway.
+    /// Our own microphone, from the media-source statistic.
+    ///
+    /// Not outbound-rtp: that reports what was sent, which is
+    /// silence-suppressed, so a quiet talker reads as nothing at all.
+    func localAudioLevel() -> Double {
+        guard let pc = pc, !localStatsInFlight else { return lastLocalLevel }
+        localStatsInFlight = true
+        pc.statistics { [weak self] report in
+            var level = -1.0
+            for (_, stat) in report.statistics where stat.type == "media-source" {
+                if let v = stat.values["audioLevel"] as? NSNumber {
+                    level = v.doubleValue
+                }
+            }
+            self?.lastLocalLevel = level
+            self?.localStatsInFlight = false
+        }
+        return lastLocalLevel
+    }
+
     func remoteAudioLevel() -> Double {
         guard let pc = pc, !statsInFlight else { return lastLevel }
         statsInFlight = true

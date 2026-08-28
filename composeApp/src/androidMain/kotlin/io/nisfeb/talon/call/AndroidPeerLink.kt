@@ -148,26 +148,46 @@ class AndroidPeerLink(
     // saw — the caller polls at 250ms anyway.
     @Volatile private var lastLevel: Float? = null
     @Volatile private var statsInFlight = false
+    @Volatile private var lastLocalLevel: Float? = null
+    @Volatile private var localInFlight = false
 
-    override fun audioLevel(): Float? {
-        if (!statsInFlight && !closed.value) {
-            statsInFlight = true
+    override fun audioLevel(): Float? = level("inbound-rtp")
+
+    /**
+     * Our own microphone, from media-source.
+     *
+     * Not outbound-rtp: that describes what was sent, which is
+     * silence-suppressed, so a quiet talker reads as nothing at all.
+     * media-source is what the microphone actually heard.
+     */
+    override fun localAudioLevel(): Float? = level("media-source")
+
+    private fun level(type: String): Float? {
+        val local = type == "media-source"
+        val busy = if (local) localInFlight else statsInFlight
+        if (!busy && !closed.value) {
+            if (local) localInFlight = true else statsInFlight = true
             runCatching {
                 pc.getStats { report ->
-                    var level: Float? = null
+                    var found: Float? = null
                     for (stat in report.statsMap.values) {
-                        if (stat.type == "inbound-rtp") {
+                        if (stat.type == type) {
                             (stat.members["audioLevel"] as? Number)?.let {
-                                level = it.toFloat()
+                                found = it.toFloat()
                             }
                         }
                     }
-                    lastLevel = level
-                    statsInFlight = false
+                    if (local) {
+                        lastLocalLevel = found
+                        localInFlight = false
+                    } else {
+                        lastLevel = found
+                        statsInFlight = false
+                    }
                 }
-            }.onFailure { statsInFlight = false }
+            }.onFailure { if (local) localInFlight = false else statsInFlight = false }
         }
-        return lastLevel
+        return if (local) lastLocalLevel else lastLevel
     }
 
     private val closed = kotlinx.atomicfu.atomic(false)

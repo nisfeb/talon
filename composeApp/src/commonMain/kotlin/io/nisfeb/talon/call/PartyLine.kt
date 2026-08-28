@@ -467,7 +467,19 @@ class PartyLine(
                     val ship = streamOwner[id] ?: return@mapNotNull null
                     val level = link.audioLevel() ?: return@mapNotNull null
                     ship.takeIf { level > SPEAKING_THRESHOLD }
-                }.toSet()
+                }.toMutableSet()
+                // Ourselves, from the up link's own microphone level.
+                // Without this there is no way to tell "nobody is
+                // talking" from "my microphone is dead", and a muted
+                // mic looks exactly like a working one.
+                //
+                // Skipped while muted: the level still moves — the
+                // track is disabled, not the capture — and a dot that
+                // lights up while muted says the opposite of the truth.
+                if (!muted && ourId.isNotEmpty()) {
+                    val own = upLink?.localAudioLevel()
+                    if (own != null && own > SPEAKING_THRESHOLD) loud += ourId
+                }
                 if (loud != speaking) {
                     speaking = loud
                     publishRoster()
