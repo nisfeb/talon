@@ -92,7 +92,12 @@
     color: var(--muted); font-size: .9rem;
     text-align: left;
   }
-  .who ul { margin: .5rem 0 0; padding-left: 1.1rem; }
+  .who ul { margin: .5rem 0 0; padding: 0; list-style: none; }
+  .who li { display: flex; align-items: center; gap: .5rem; padding: .15rem 0; }
+  .dot { width: .5rem; height: .5rem; border-radius: 50%;
+         background: var(--line); flex: none; }
+  .dot.on { background: var(--accent); }
+  .topic { margin: -1.5rem 0 2rem; color: var(--muted); font-size: 1rem; }
   .live { display: inline-block; width: .55rem; height: .55rem; border-radius: 50%;
           background: var(--accent); margin-right: .45rem; vertical-align: baseline; }
 </style>
@@ -101,6 +106,7 @@
 <main>
   <h1>Trunk</h1>
   <p class="room" id="room">Party line</p>
+  <p class="topic" id="topic" hidden></p>
 
   <button id="go">Listen</button>
   <p class="status" id="status">Audio starts when you press Listen.</p>
@@ -132,6 +138,9 @@
 
   var conn = null;
   var users = {};
+  var speaking = {};
+  var receivers = {};
+  var speakTimer = null;
 
   function say(text, bad) {
     statusEl.textContent = text;
@@ -145,23 +154,62 @@
     return;
   }
   roomEl.textContent = group.split('/').pop().replace(/-/g, ' ');
+  var topic = params.get('topic');
+  if (topic) {
+    document.getElementById('topic').textContent = topic;
+    document.getElementById('topic').hidden = false;
+  }
 
+  // id -> {name, speaking}. Listeners are not shown: they are not
+  // on the line, they are looking at it.
   function renderWho() {
-    var names = Object.keys(users).map(function (k) { return users[k]; });
-    names = names.filter(function (n) { return n && n !== 'listener'; });
-    whoEl.hidden = names.length === 0;
+    var ids = Object.keys(users).filter(function (k) {
+      return users[k] && users[k] !== 'listener';
+    });
+    whoEl.hidden = ids.length === 0;
     whoList.innerHTML = '';
-    names.sort().forEach(function (n) {
+    ids.map(function (k) { return users[k]; }).sort().forEach(function (n) {
       var li = document.createElement('li');
-      li.textContent = n;
+      var dot = document.createElement('span');
+      dot.className = speaking[n] ? 'dot on' : 'dot';
+      li.appendChild(dot);
+      li.appendChild(document.createTextNode(n));
       whoList.appendChild(li);
     });
   }
 
+  /**
+   * Who is talking, polled off the receivers.
+   *
+   * WebRTC already carries an audio level in the RTP header, so
+   * getSynchronizationSources costs nothing extra — no stats round
+   * trip, no AudioContext analyser on a stream we only want to hear.
+   */
+  function startSpeakingPoll() {
+    if (speakTimer) return;
+    speakTimer = setInterval(function () {
+      var changed = false;
+      Object.keys(receivers).forEach(function (name) {
+        var loud = false;
+        (receivers[name] || []).forEach(function (r) {
+          var srcs = r.getSynchronizationSources ? r.getSynchronizationSources() : [];
+          srcs.forEach(function (src) {
+            if (typeof src.audioLevel === 'number' && src.audioLevel > 0.02) loud = true;
+          });
+        });
+        if (!!speaking[name] !== loud) { speaking[name] = loud; changed = true; }
+      });
+      if (changed) renderWho();
+    }, 250);
+  }
+
   function stop() {
     if (conn) { try { conn.close(); } catch (e) {} conn = null; }
+    if (speakTimer) { clearInterval(speakTimer); speakTimer = null; }
     audio.srcObject = null;
     users = {};
+    speaking = {};
+    receivers = {};
     renderWho();
     goBtn.textContent = 'Listen';
     goBtn.className = '';
@@ -214,6 +262,11 @@
         if (st === 'connected') say('Listening');
       };
       s.ondowntrack = function (track, transceiver, stream_) {
+        // Tie this receiver to whoever is publishing, so the speaking
+        // dot lands on the right name.
+        var who = s.username || 'someone';
+        (receivers[who] = receivers[who] || []).push(transceiver.receiver);
+        startSpeakingPoll();
         // Add the track to the element we already unlocked, rather
         // than swapping srcObject — swapping loses the gesture.
         stream.addTrack(track);

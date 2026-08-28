@@ -542,7 +542,14 @@ fun App(
             if (callController != null && peerLinkFactory != null) {
                 io.nisfeb.talon.call.PartyLine(http, peerLinkFactory)
                     .also { line ->
-                        callController.onTicket = { line.join(it, shipKey) }
+                        callController.onTicket = { host, ticket ->
+                            // The topic lives on the host's room, not
+                            // in Galène — carry it across as we join.
+                            line.setTopic(
+                                callController.lineFor(host, ticket.name)?.title.orEmpty(),
+                            )
+                            line.join(ticket, shipKey)
+                        }
                         callController.onDenied = { name, why -> line.showRefused(name, why) }
                     }
             } else {
@@ -1647,6 +1654,19 @@ fun App(
                                         io.nisfeb.talon.call.PartyLineHost.roomFor(db, it)
                                     }
                                 }
+                                // Nicknames for the party-line roster:
+                                // the @p is the identity, the nickname
+                                // is what a reader actually recognises.
+                                val partyContacts by remember(db) {
+                                    io.nisfeb.talon.ui.contactMapFlow(
+                                        db.contacts().stream(),
+                                        db.clubs().stream(),
+                                        db.groups().streamGroups(),
+                                        db.groups().streamChannelGroups(),
+                                    )
+                                }.collectAsState(
+                                    initial = io.nisfeb.talon.ui.ContactMap.EMPTY,
+                                )
                                 val partyRoomHere = groupRoom?.takeIf { (h, n) ->
                                     hostedRooms.containsKey("$h/$n") ||
                                         knownInvites.containsKey("$h/$n")
@@ -1708,7 +1728,12 @@ fun App(
                                             null
                                         },
                                     partyLineBar = partyLine?.let { line ->
-                                        { io.nisfeb.talon.ui.PartyLineBar(line) }
+                                        {
+                                            io.nisfeb.talon.ui.PartyLineBar(
+                                                line,
+                                                nameFor = { partyContacts.displayName(it) },
+                                            )
+                                        }
                                     },
                                     onOpenGroupInfo = {
                                         openChat?.let { openGroupInfoAction(it) }

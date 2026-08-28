@@ -122,6 +122,16 @@ class DesktopPeerLink(
         micTrack?.isEnabled = !muted
     }
 
+    override fun audioLevel(): Float? =
+        runCatching {
+            // getSynchronizationSources carries the level RTP already
+            // sends in its header extension, so this costs nothing
+            // extra on the wire and needs no stats round trip.
+            pc.receivers.firstNotNullOfOrNull { r ->
+                r.synchronizationSources?.firstOrNull()?.audioLevel?.toFloat()
+            }
+        }.getOrNull()
+
     private val closed = kotlinx.atomicfu.atomic(false)
 
     override fun close() {

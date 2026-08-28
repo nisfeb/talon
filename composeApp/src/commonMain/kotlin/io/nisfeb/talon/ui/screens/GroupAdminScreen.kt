@@ -838,6 +838,37 @@ private fun PartyLineSection(
         },
     )
 
+    // The topic: what this line is about right now, rather than the
+    // group's name. Members see it on the bar and listeners on the
+    // listen page, so it is the one thing that tells someone what
+    // they've walked into.
+    var topicField by remember(flag, room?.title) { mutableStateOf(room?.title.orEmpty()) }
+    Spacer(Modifier.height(8.dp))
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        OutlinedTextField(
+            value = topicField,
+            onValueChange = { topicField = it },
+            label = { Text("Topic") },
+            singleLine = true,
+            modifier = Modifier.weight(1f),
+        )
+        Button(
+            enabled = topicField.isNotBlank() && topicField != room?.title,
+            onClick = {
+                scope.launch {
+                    controller.configureRoom(
+                        host, roomName, open = true, listen = listening,
+                        title = topicField.trim(),
+                    )
+                }
+            },
+        ) { Text("Set") }
+    }
+
     if (listening) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),

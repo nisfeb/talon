@@ -178,7 +178,14 @@ fun TalonApp(
                     io.nisfeb.talon.call.AndroidPeerLink(app, ice, send)
                 },
             ).also { line ->
-                callController.onTicket = { line.join(it, loggedInShip ?: "") }
+                callController.onTicket = { host, ticket ->
+                            // The topic lives on the host's room, not
+                            // in Galène — carry it across as we join.
+                            line.setTopic(
+                                callController.lineFor(host, ticket.name)?.title.orEmpty(),
+                            )
+                            line.join(ticket, loggedInShip ?: "")
+                        }
                 callController.onDenied = { name, why -> line.showRefused(name, why) }
             }
         } else {
@@ -1559,7 +1566,12 @@ fun TalonApp(
                             null
                         },
                     partyLineBar = partyLine?.let { line ->
-                        { io.nisfeb.talon.ui.PartyLineBar(line) }
+                        {
+                            io.nisfeb.talon.ui.PartyLineBar(
+                                line,
+                                nameFor = { contactMap.displayName(it) },
+                            )
+                        }
                     },
                     searchEmbedder = app.searchEmbedderClient,
                     scrollState = chatScrollState,

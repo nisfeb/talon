@@ -223,7 +223,7 @@ class CallController(
                         val fact = body["json"] ?: return@collect
                         when (val up = TrunkWire.parseUpdate(fact)) {
                             is TrunkUpdate.Recv -> onSignal(up)
-                            is TrunkUpdate.Ticket -> onTicket?.invoke(up.ticket)
+                            is TrunkUpdate.Ticket -> onTicket?.invoke(up.from, up.ticket)
                             is TrunkUpdate.Policy -> _policy.value = up.policy
                             // A room of our own changing announces to
                             // us as well, so the switch reflects the
@@ -345,7 +345,9 @@ class CallController(
     // ── inbound signals ───────────────────────────────────────────
 
     /** Set by the party-line surface: a host granted us a room ticket. */
-    var onTicket: ((TrunkTicket) -> Unit)? = null
+    /** (host, ticket): the host is needed to find the room the
+     *  ticket belongs to, which is where the topic lives. */
+    var onTicket: ((String, TrunkTicket) -> Unit)? = null
 
     /** A host refused us a line. Surfaced so tapping the button always
      *  says something — silence reads as a broken button. */

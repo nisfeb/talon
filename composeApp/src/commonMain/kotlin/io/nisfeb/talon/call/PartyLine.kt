@@ -13,6 +13,7 @@ import io.nisfeb.talon.util.backgroundExceptionHandler
 import io.nisfeb.talon.util.ioDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -33,14 +34,26 @@ import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
 import kotlinx.serialization.json.putJsonObject
 
-/** Who is on the line right now, as the SFU reports it. */
-data class PartyMember(val id: String, val ship: String)
+/**
+ * Who is on the line right now, as the SFU reports it.
+ *
+ * [speaking] is a live read of the person's audio level, so a roster
+ * can show who is actually talking rather than only who is present.
+ */
+data class PartyMember(
+    val id: String,
+    val ship: String,
+    val speaking: Boolean = false,
+)
 
 sealed interface PartyState {
     data object Idle : PartyState
     data class Connecting(val room: String) : PartyState
     data class Live(
         val room: String,
+        /** What the line is about, set by an admin. Empty until one
+         *  bothers; the UI falls back to the room's own name. */
+        val topic: String = "",
         val members: List<PartyMember>,
         val muted: Boolean,
         /** Our own upstream audio: Live once the SFU has our mic. */
@@ -94,6 +107,11 @@ class PartyLine(
     private var upLink: PeerLink? = null
     private var upId: String = ""
     private val roster = mutableMapOf<String, PartyMember>()
+    // stream id -> the ship publishing it, from the offer.
+    private val streamOwner = mutableMapOf<String, String>()
+    // ships heard from within the last poll or two.
+    private var speaking: Set<String> = emptySet()
+    private var levelPoll: Job? = null
     private var muted = false
     private var upState: MediaState = MediaState.Idle
     private var room = ""
@@ -106,11 +124,24 @@ class PartyLine(
     private var connectionId = ""
 
     /** Join the room named by [ticket]. Idempotent while connected. */
+    /** Set the line's topic for display. Comes from the host's room,
+     *  not from Galène, which knows nothing about it. */
+    fun setTopic(value: String) {
+        topic = value
+        val cur = _state.value
+        if (cur is PartyState.Live) _state.value = cur.copy(topic = value)
+    }
+
     fun join(ticket: TrunkTicket, ourShip: String) {
         if (_state.value is PartyState.Failed) _state.value = PartyState.Idle
         if (_state.value !is PartyState.Idle) return
         room = ticket.name
         ourId = ourShip
+        // Join muted. Stepping onto a line should never start
+        // broadcasting someone's room before they've decided to
+        // speak — the mic button is one tap away, an accidental hot
+        // mic is not recoverable.
+        muted = true
         connectionId = "$ourShip-${Uuid.random()}"
         upId = "up-$connectionId"
         _state.value = PartyState.Connecting(ticket.name)
@@ -138,6 +169,7 @@ class PartyLine(
     }
 
     private var galeneGroup = ""
+    private var topic = ""
 
     private suspend fun run(ticket: TrunkTicket, ourShip: String) {
         try {
@@ -211,6 +243,7 @@ class PartyLine(
             "close" -> {
                 val id = msg["id"]?.jsonPrimitive?.content ?: return
                 downLinks.remove(id)?.close()
+            streamOwner.remove(id)
             }
 
             "user" -> {
@@ -253,6 +286,7 @@ class PartyLine(
         // Publish our mic as one up stream.
         val up = links.create(ice, sendAudio = true)
         upLink = up
+        startLevelPolling()
         up.setMuted(muted)
         scope.launch { up.state.collect { upState = it; publishRoster() } }
         up.onLocalCandidate { c -> scope.launch { sendIce(upId, c) } }
@@ -267,6 +301,10 @@ class PartyLine(
     private suspend fun onRemoteOffer(msg: JsonObject) {
         val id = msg["id"]?.jsonPrimitive?.content ?: return
         val sdp = msg["sdp"]?.jsonPrimitive?.content ?: return
+        // Galène names the publisher on the offer, which is the only
+        // place a stream is tied to a person — the roster is keyed by
+        // client, and audio levels arrive per stream.
+        msg["username"]?.jsonPrimitive?.content?.let { streamOwner[id] = it }
         val ice = emptyList<IceServer>() // down links reuse the same relay policy
         val link = downLinks.getOrPut(id) {
             links.create(ice, sendAudio = false).also { l ->
@@ -297,12 +335,40 @@ class PartyLine(
         // connection instead, or they would collapse into one row.
         val (ships, anon) = roster.values.partition { it.ship.startsWith("~") }
         _state.value = PartyState.Live(
-            room,
-            ships.distinctBy { it.ship }.sortedBy { it.ship },
-            muted,
-            upState,
+            room = room,
+            topic = topic,
+            members = ships.distinctBy { it.ship }.sortedBy { it.ship }
+                .map { it.copy(speaking = it.ship in speaking) },
+            muted = muted,
+            media = upState,
             listeners = anon.size,
         )
+    }
+
+    /**
+     * Poll who is talking.
+     *
+     * WebRTC reports audio level per stream, and the offer told us
+     * which ship each stream belongs to, so this is the join of the
+     * two. Polled at a rate a person can perceive rather than per
+     * packet — a speaking dot doesn't need 50Hz.
+     */
+    private fun startLevelPolling() {
+        if (levelPoll != null) return
+        levelPoll = scope.launch {
+            while (true) {
+                delay(SPEAKING_POLL_MS)
+                val loud = downLinks.entries.mapNotNull { (id, link) ->
+                    val ship = streamOwner[id] ?: return@mapNotNull null
+                    val level = link.audioLevel() ?: return@mapNotNull null
+                    ship.takeIf { level > SPEAKING_THRESHOLD }
+                }.toSet()
+                if (loud != speaking) {
+                    speaking = loud
+                    publishRoster()
+                }
+            }
+        }
     }
 
     private suspend fun send(obj: JsonObject) {
@@ -314,6 +380,10 @@ class PartyLine(
     }
 
     private suspend fun teardown() {
+        levelPoll?.cancel()
+        levelPoll = null
+        streamOwner.clear()
+        speaking = emptySet()
         // Close the socket first, and cleanly. Tearing down the native
         // peer connections takes long enough that Galène saw the gap
         // and then an abrupt EOF rather than a close handshake, and it
@@ -335,6 +405,13 @@ class PartyLine(
     }
 
     companion object {
+        /** Fast enough to look live, slow enough to cost nothing. */
+        private const val SPEAKING_POLL_MS = 250L
+
+        /** Above this counts as talking. WebRTC's level is linear
+         *  0..1; room noise sits well below it. */
+        private const val SPEAKING_THRESHOLD = 0.02f
+
         private const val TAG = "PartyLine"
     }
 }

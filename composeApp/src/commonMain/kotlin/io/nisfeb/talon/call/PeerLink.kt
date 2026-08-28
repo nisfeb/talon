@@ -43,6 +43,14 @@ interface PeerLink {
 
     fun setMuted(muted: Boolean)
 
+    /**
+     * How loud this link's remote audio is right now, 0..1, or null
+     * where the platform can't say. Polled rather than pushed —
+     * WebRTC reports it per-packet, and the UI only needs "is this
+     * person talking", at a rate a person can perceive.
+     */
+    fun audioLevel(): Float? = null
+
     fun close()
 }
 

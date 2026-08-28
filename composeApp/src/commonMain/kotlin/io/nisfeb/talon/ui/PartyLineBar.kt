@@ -1,5 +1,11 @@
 package io.nisfeb.talon.ui
 
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
@@ -52,6 +58,8 @@ fun PartyLineBar(
      *  an admin of the group it belongs to. Null hides the listening
      *  controls entirely rather than showing a disabled switch. */
     admin: PartyLineAdmin? = null,
+    /** Resolve a @p to whatever this reader calls that person. */
+    nameFor: (String) -> String = { it },
 ) {
     val state by party.state.collectAsState()
     PartyLineBarContent(
@@ -60,6 +68,7 @@ fun PartyLineBar(
         modifier = modifier,
         onToggleMute = { party.setMuted(it) },
         onLeave = { party.leave() },
+        nameFor = nameFor,
     )
 }
 
@@ -75,8 +84,12 @@ fun PartyLineBarContent(
     modifier: Modifier = Modifier,
     onToggleMute: (Boolean) -> Unit = {},
     onLeave: () -> Unit = {},
+    /** Resolve a @p to whatever this reader calls that person.
+     *  Identity is the @p; the nickname is a courtesy. */
+    nameFor: (String) -> String = { it },
 ) {
     if (state is PartyState.Idle) return
+    var expanded by remember { mutableStateOf(false) }
 
     // One node, not two siblings: the bar and the admin strip have to
     // stack vertically, and emitting them loose leaves that to whatever
@@ -126,18 +139,41 @@ fun PartyLineBarContent(
                     // real reading space. Ordered so that truncation
                     // eats the least important part — the count and
                     // the listener warning survive; names go first.
-                    Text(
-                        label,
-                        style = MaterialTheme.typography.bodyMedium,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f),
-                    )
+                    Column(
+                        Modifier.weight(1f).clickable { expanded = !expanded },
+                    ) {
+                        Text(
+                            label,
+                            style = MaterialTheme.typography.bodyMedium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        // The topic, when an admin has set one — it is
+                        // what the line is FOR, so it outranks the
+                        // room's own name.
+                        if (s.topic.isNotBlank()) {
+                            Text(
+                                s.topic,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    }
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         IconButton(onClick = { onToggleMute(!s.muted) }) {
                             Icon(
                                 if (s.muted) Icons.Filled.MicOff else Icons.Filled.Mic,
                                 contentDescription = if (s.muted) "Unmute" else "Mute",
+                            )
+                        }
+                        IconButton(onClick = { expanded = !expanded }) {
+                            Icon(
+                                if (expanded) Icons.Filled.ExpandLess
+                                else Icons.Filled.ExpandMore,
+                                contentDescription =
+                                    if (expanded) "Hide who's on the line" else "Who's on the line",
                             )
                         }
                         FilledIconButton(
@@ -156,6 +192,7 @@ fun PartyLineBarContent(
             }
         }
     }
+    if (state is PartyState.Live && expanded) Roster(state, nameFor)
     if (state is PartyState.Live && admin != null) {
         ListenControls(admin, state.listeners)
     }
@@ -182,6 +219,57 @@ data class PartyLineAdmin(
  * public link punches through the group's own boundary — it is opt-in,
  * and the bar says plainly that the line is open while it is on.
  */
+/**
+ * Who is on the line, and who is talking.
+ *
+ * Collapsed by default: the bar sits on top of the conversation, so
+ * this only costs space when someone asks for it.
+ */
+@Composable
+private fun Roster(s: PartyState.Live, nameFor: (String) -> String) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        color = MaterialTheme.colorScheme.surfaceVariant,
+    ) {
+        Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp)) {
+            for (m in s.members) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    // A dot rather than a moving meter: the question
+                    // is "who is talking", and a meter on a strip this
+                    // small reads as noise.
+                    Box(
+                        Modifier.size(8.dp)
+                            .background(
+                                if (m.speaking) MaterialTheme.colorScheme.primary
+                                else MaterialTheme.colorScheme.outlineVariant,
+                                CircleShape,
+                            ),
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        nameFor(m.ship),
+                        style = MaterialTheme.typography.bodySmall,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+            if (s.listeners > 0) {
+                Text(
+                    if (s.listeners == 1) "1 listening by link"
+                    else "${s.listeners} listening by link",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 4.dp),
+                )
+            }
+        }
+    }
+}
+
 @Composable
 private fun ListenControls(admin: PartyLineAdmin, listeners: Int) {
     val clipboard = LocalClipboardManager.current

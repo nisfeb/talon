@@ -395,6 +395,34 @@ Three things this design deliberately accepts:
 `ListenLinkE2ETest` covers the shape that matters: off by default,
 minted when enabled, and refused again the moment it's switched off.
 
+## Who's on the line
+
+Both surfaces show the roster and who is talking.
+
+**Speaking** comes from the audio level WebRTC already carries in the
+RTP header — `getSynchronizationSources()` on the receiver, polled at
+250ms. No stats round trip, no `AudioContext` analyser on a stream we
+only want to hear, and no protocol change: Galène names the publisher
+on each `offer`, which is the only place a stream is tied to a person
+(the roster is keyed by client, levels arrive per stream).
+
+**Names** are the reader's own. Talon resolves a `@p` through its
+contact map, so you see whatever you call that person. The listen page
+shows the bare `@p`: a browser has no Urbit and no contact book, and
+imposing the *host's* nicknames on strangers would be a different and
+worse thing than showing identity plainly.
+
+**The topic** is `room.title`, editable by admins. It reaches Talon
+members live through `%announce`, and listeners through a `topic=`
+parameter on the link — a snapshot taken when the link was minted,
+because a browser can't ask the ship for a newer one. An empty title
+means "leave the topic alone", so the toggles don't wipe it; the same
+trap as `keep-sfu`, and the same fix.
+
+**Joining mutes you.** Stepping onto a line should never start
+broadcasting someone's room before they decide to speak, and an
+accidental hot mic isn't recoverable after the fact.
+
 ## Offering the desk from the app
 
 `%trunk` isn't in `%base`, and calls need it on *both* ships, so a user

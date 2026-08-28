@@ -80,8 +80,8 @@ class PartyLineE2ETest {
             val partyB = PartyLine(httpB, DesktopPeerLinkFactory)
             val ctlA = CallController(sessionA, DesktopCallEngineProvider)
             val ctlB = CallController(sessionB, DesktopCallEngineProvider)
-            ctlA.onTicket = { partyA.join(it, shipA) }
-            ctlB.onTicket = { partyB.join(it, shipB) }
+            ctlA.onTicket = { _, t -> partyA.join(t, shipA) }
+            ctlB.onTicket = { _, t -> partyB.join(t, shipB) }
             ctlA.start()
             ctlB.start()
             delay(3_000) // let both /calls subscriptions land
@@ -124,6 +124,14 @@ class PartyLineE2ETest {
                     .map { it.ship }.containsAll(both),
             )
             println("roster: $seen")
+
+            // Joining must not open the mic. A hot mic on join is not
+            // something a user can undo after the fact.
+            assertTrue(
+                (partyA.state.value as PartyState.Live).muted,
+                "joined the line with the microphone live",
+            )
+            println("joined muted")
 
             partyB.leave()
             withTimeout(20_000) {

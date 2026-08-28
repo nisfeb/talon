@@ -90,8 +90,8 @@ class PartyLineUiPathTest {
             val partyB = PartyLine(httpB, DesktopPeerLinkFactory)
             val ctlA = CallController(sessionA, DesktopCallEngineProvider)
             val ctlB = CallController(sessionB, DesktopCallEngineProvider)
-            ctlA.onTicket = { partyA.join(it, shipA) }
-            ctlB.onTicket = { partyB.join(it, shipB) }
+            ctlA.onTicket = { _, t -> partyA.join(t, shipA) }
+            ctlB.onTicket = { _, t -> partyB.join(t, shipB) }
             ctlA.start()
             ctlB.start()
             delay(3_000)

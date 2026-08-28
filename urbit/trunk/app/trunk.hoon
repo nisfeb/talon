@@ -338,7 +338,14 @@
           ?~  got
             [title.act members.act admins.act listen.act sfu.act]
           =/  new-sfu  ?:(keep-sfu.act sfu.u.got sfu.act)
-          u.got(listen listen.act, sfu new-sfu, members members.act, admins admins.act)
+          =/  new-title  ?:(=('' title.act) title.u.got title.act)
+          %=  u.got
+            listen   listen.act
+            sfu      new-sfu
+            title    new-title
+            members  ?~(members.act members.u.got members.act)
+            admins   ?~(admins.act admins.u.got admins.act)
+          ==
         =.  hosted.state  (~(put by hosted.state) name.act new)
         :_  this
         (announce:hc name.act new %.y)
@@ -459,7 +466,11 @@
       ::  everyone the OLD flag — the host changed and no client ever
       ::  heard about it, which is a switch that does nothing.
       =/  new-sfu  ?:(keep-sfu.msg sfu.u.got sfu.msg)
-      =/  new  u.got(listen listen.msg, sfu new-sfu)
+      ::  An empty title means "don't touch the topic" — every other
+      ::  change sends none, and without this each listen toggle would
+      ::  blank whatever an admin had set. Same trap as keep-sfu.
+      =/  new-title  ?:(=('' title.msg) title.u.got title.msg)
+      =/  new  u.got(listen listen.msg, sfu new-sfu, title new-title)
       =.  hosted.state  (~(put by hosted.state) name.msg new)
       :_  this
       (announce:hc name.msg new %.y)
@@ -627,8 +638,15 @@
   |=  [name=@t tok=@t]
   ^-  @t
   =/  cfg  (room-sfu name)
+  =/  got  (~(get by hosted.state) name)
+  ::  The topic travels in the link. A listener has no Urbit and no
+  ::  way to ask the ship what the line is about, so this is a
+  ::  snapshot taken when the link was minted.
+  =/  topic  ?~(got '' title.u.got)
   %+  rap  3
-  :~  base.cfg  '/listen/?group='  (room-subgroup name)  '&token='  tok
+  :~  base.cfg  '/listen/?group='  (room-subgroup name)
+      '&topic='  (crip (en-urlt:html (trip topic)))
+      '&token='  tok
   ==
 ::
 ++  room-location

@@ -126,6 +126,32 @@ class RemoteAdminE2ETest {
             )
             println("6. sharing refused once listening is off")
 
+            // 6b. A topic an admin sets must survive every other
+            //     change. Each toggle sends no title, and an empty one
+            //     used to overwrite it — the same trap as the sidecar.
+            adminCtl.configureRoom(host, room, open = true, listen = false, title = "Weekly sync")
+            withTimeout(25_000) {
+                adminCtl.invites.first { it[key]?.title == "Weekly sync" }
+            }
+            adminCtl.configureRoom(host, room, open = true, listen = true)
+            withTimeout(25_000) { adminCtl.invites.first { it[key]?.listen == true } }
+            assertTrue(
+                adminCtl.invites.value[key]?.title == "Weekly sync",
+                "toggling listening wiped the topic: ${adminCtl.invites.value[key]?.title}",
+            )
+            println("6b. topic set, and survives a listen toggle")
+
+            // 6c. And it reaches a listener, who has no other way to
+            //     know what the line is about.
+            adminCtl.clearListenLink()
+            adminCtl.shareRoom(host, room)
+            val withTopic = withTimeout(25_000) { adminCtl.listenLink.first { it != null } }!!
+            assertTrue(
+                "topic=Weekly" in withTopic.url,
+                "listen link carries no topic: ${withTopic.url.substringBefore("&token=")}",
+            )
+            println("6c. the topic travels in the listen link")
+
             // 7. Turn the line off entirely.
             adminCtl.configureRoom(host, room, open = false, listen = false)
             withTimeout(25_000) { adminCtl.invites.first { key !in it } }
