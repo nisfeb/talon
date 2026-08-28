@@ -95,6 +95,14 @@ fun PartyLineBarContent(
     nameFor: (String) -> String = { it },
     audioDevices: io.nisfeb.talon.call.AudioDevices =
         io.nisfeb.talon.call.AudioDevices.Noop,
+    /**
+     * Replaces the computed "N on the line" text.
+     *
+     * A 1:1 call renders through this same bar — one roster row, one
+     * mute button, one hang-up — but "1 on the line" is the wrong
+     * sentence for a phone call, so the caller supplies its own.
+     */
+    headline: String? = null,
 ) {
     if (state is PartyState.Idle) return
     var expanded by remember { mutableStateOf(false) }
@@ -129,7 +137,11 @@ fun PartyLineBarContent(
                     // number is what you want at a glance, and the
                     // names overflow anyway.
                     val n = s.members.size
-                    val who = s.members.joinToString(", ") { it.ship }
+                    // Through nameFor, not the raw @p: the roster below
+                    // has always shown nicknames and this line hadn't,
+                    // so the same person read two different ways in one
+                    // strip.
+                    val who = s.members.joinToString(", ") { nameFor(it.ship) }
                     // An open line must never be able to look quiet,
                     // so the listener count sits ahead of the names.
                     val listening = when (s.listeners) {
@@ -137,7 +149,7 @@ fun PartyLineBarContent(
                         1 -> " · 1 listening"
                         else -> " · ${s.listeners} listening"
                     }
-                    val label = when {
+                    val label = headline ?: when {
                         s.media != MediaState.Live -> "Connecting audio…"
                         n == 0 -> "On the line — waiting for others$listening"
                         else -> "$n on the line$listening: $who"

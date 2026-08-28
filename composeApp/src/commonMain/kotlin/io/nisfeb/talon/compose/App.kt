@@ -567,7 +567,24 @@ fun App(
                 callController?.stop()
             }
         }
-        callController?.let { io.nisfeb.talon.ui.CallOverlay(it) }
+        // Names for the call surface. A third collection of the same
+        // local-Room flows in this function — cheap, but the three
+        // (here, citeContacts, partyContacts) want hoisting into one.
+        val callContacts by remember(db) {
+            io.nisfeb.talon.ui.contactMapFlow(
+                db.contacts().stream(),
+                db.clubs().stream(),
+                db.groups().streamGroups(),
+                db.groups().streamChannelGroups(),
+            )
+        }.collectAsState(initial = io.nisfeb.talon.ui.ContactMap.EMPTY)
+        callController?.let {
+            io.nisfeb.talon.ui.CallOverlay(
+                it,
+                nameFor = { ship -> callContacts.displayName(ship) },
+                audioDevices = audioDevices,
+            )
+        }
         // Curated contact book (from %contacts /v1/book) — gates the
         // "Add to contacts" affordances and backs the Contacts screen.
         val bookContacts by repo.bookContacts.collectAsState()

@@ -13,12 +13,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.CallEnd
-import androidx.compose.material.icons.filled.Mic
-import androidx.compose.material.icons.filled.MicOff
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -42,6 +39,8 @@ import io.nisfeb.talon.call.CallUiState
 import io.nisfeb.talon.call.TrunkInstall
 import io.nisfeb.talon.call.TrunkWire
 import io.nisfeb.talon.call.MediaState
+import io.nisfeb.talon.call.PartyState
+import io.nisfeb.talon.call.PartyMember
 import io.nisfeb.talon.util.nowMs
 import kotlinx.coroutines.delay
 
@@ -52,7 +51,15 @@ import kotlinx.coroutines.delay
  * top banner so you can keep reading while you talk.
  */
 @Composable
-fun CallOverlay(controller: CallController, modifier: Modifier = Modifier) {
+fun CallOverlay(
+    controller: CallController,
+    modifier: Modifier = Modifier,
+    /** Resolve a @p to whatever this reader calls that person, so a
+     *  call names people the same way the rest of the app does. */
+    nameFor: (String) -> String = { it },
+    audioDevices: io.nisfeb.talon.call.AudioDevices =
+        io.nisfeb.talon.call.AudioDevices.Noop,
+) {
     TrunkInstallPrompt(controller)
 
     val state by controller.state.collectAsState()
@@ -60,7 +67,7 @@ fun CallOverlay(controller: CallController, modifier: Modifier = Modifier) {
 
     when (val s = state) {
         is CallUiState.Incoming -> FullScreenRing(
-            title = s.peer,
+            title = nameFor(s.peer),
             subtitle = "Incoming call",
         ) {
             Row(horizontalArrangement = Arrangement.spacedBy(48.dp)) {
@@ -82,7 +89,7 @@ fun CallOverlay(controller: CallController, modifier: Modifier = Modifier) {
         }
 
         is CallUiState.Outgoing -> FullScreenRing(
-            title = s.peer,
+            title = nameFor(s.peer),
             subtitle = "Calling…",
         ) {
             RoundAction(
@@ -94,50 +101,32 @@ fun CallOverlay(controller: CallController, modifier: Modifier = Modifier) {
             )
         }
 
+        // A live 1:1 renders through the party-line bar. It is the same
+        // situation — a call in progress you keep above the
+        // conversation — and the bar already carries the roster, the
+        // mute markers and the device pane that this banner grew none
+        // of. One surface to improve instead of two that drift.
         is CallUiState.Active -> Popup(alignment = Alignment.TopCenter) {
-            Surface(
-                modifier = modifier.fillMaxWidth(),
-                color = MaterialTheme.colorScheme.primaryContainer,
-                tonalElevation = 4.dp,
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 6.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    val label = when (s.media) {
-                        MediaState.Live -> "${s.peer} · ${liveDuration(s.media)}"
-                        else -> "Connecting to ${s.peer}…"
-                    }
-                    Text(label, style = MaterialTheme.typography.bodyLarge)
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        // Same reasoning as the ring buttons: this banner
-                        // sits over whatever you are typing into, and a
-                        // stray keystroke must not mute or end the call.
-                        IconButton(
-                            onClick = { controller.setMuted(!s.muted) },
-                            modifier = Modifier.focusProperties { canFocus = false },
-                        ) {
-                            Icon(
-                                if (s.muted) Icons.Filled.MicOff else Icons.Filled.Mic,
-                                contentDescription = if (s.muted) "Unmute" else "Mute",
-                            )
-                        }
-                        FilledIconButton(
-                            onClick = { controller.hangup() },
-                            modifier = Modifier.focusProperties { canFocus = false },
-                            colors = IconButtonDefaults.filledIconButtonColors(
-                                containerColor = MaterialTheme.colorScheme.error,
-                                contentColor = MaterialTheme.colorScheme.onError,
-                            ),
-                        ) {
-                            Icon(Icons.Filled.CallEnd, contentDescription = "Hang up")
-                        }
-                    }
-                }
-            }
+            PartyLineBarContent(
+                state = PartyState.Live(
+                    room = s.peer,
+                    members = listOf(PartyMember(id = s.peer, ship = s.peer)),
+                    muted = s.muted,
+                    media = s.media,
+                ),
+                admin = null,
+                modifier = modifier,
+                onToggleMute = { controller.setMuted(it) },
+                onLeave = { controller.hangup() },
+                nameFor = nameFor,
+                audioDevices = audioDevices,
+                // "1 on the line" is the wrong sentence for a phone
+                // call; keep what the banner said.
+                headline = when (s.media) {
+                    MediaState.Live -> "${nameFor(s.peer)} · ${liveDuration(s.media)}"
+                    else -> "Connecting to ${nameFor(s.peer)}…"
+                },
+            )
         }
 
         is CallUiState.Ended -> Popup(alignment = Alignment.TopCenter) {
@@ -154,7 +143,7 @@ fun CallOverlay(controller: CallController, modifier: Modifier = Modifier) {
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(
-                        "Call with ${s.peer}: ${s.reason}",
+                        "Call with ${nameFor(s.peer)}: ${s.reason}",
                         style = MaterialTheme.typography.bodyLarge,
                     )
                     TextButton(onClick = { controller.dismissEnded() }) { Text("Dismiss") }

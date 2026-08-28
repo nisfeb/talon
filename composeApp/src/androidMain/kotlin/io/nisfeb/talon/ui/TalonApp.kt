@@ -210,7 +210,21 @@ fun TalonApp(
             }
         }
     }
-    callController?.let { io.nisfeb.talon.ui.CallOverlay(it) }
+    val contactMap by remember {
+        contactMapFlow(
+            app.db.contacts().stream(),
+            app.db.clubs().stream(),
+            app.db.groups().streamGroups(),
+            app.db.groups().streamChannelGroups(),
+        )
+    }.let { flow -> flow.collectAsState(initial = ContactMap.EMPTY) }
+
+    callController?.let {
+        io.nisfeb.talon.ui.CallOverlay(
+            it,
+            nameFor = { ship -> contactMap.displayName(ship) },
+        )
+    }
     var addingAnotherShip by remember { mutableStateOf(false) }
     // Locally-owned navigation state. Initial values from the
     // notification-tap intent (or null on a normal cold launch). The
@@ -564,14 +578,6 @@ fun TalonApp(
 
     // Latest-value refs so the callback below doesn't close over stale state.
     val openWhomState = rememberUpdatedState(openWhom)
-    val contactMap by remember {
-        contactMapFlow(
-            app.db.contacts().stream(),
-            app.db.clubs().stream(),
-            app.db.groups().streamGroups(),
-            app.db.groups().streamChannelGroups(),
-        )
-    }.let { flow -> flow.collectAsState(initial = ContactMap.EMPTY) }
 
     // Keep the shared ship-profile cache in sync with the active
     // ship's self-contact nickname. Fires whenever %contacts pushes a
