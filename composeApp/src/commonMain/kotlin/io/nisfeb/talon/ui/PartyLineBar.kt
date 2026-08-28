@@ -254,7 +254,21 @@ private fun Roster(s: PartyState.Live, nameFor: (String) -> String) {
                         style = MaterialTheme.typography.bodySmall,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false),
                     )
+                    // Only the muted are marked. Everyone on a line is
+                    // expected to be able to talk, so a mic icon on
+                    // every row would be a column of noise; the
+                    // exception is the thing worth seeing.
+                    if (m.muted) {
+                        Spacer(Modifier.width(6.dp))
+                        Icon(
+                            Icons.Filled.MicOff,
+                            contentDescription = "Muted",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(14.dp),
+                        )
+                    }
                 }
             }
             if (s.listeners > 0) {

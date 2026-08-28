@@ -44,6 +44,14 @@ data class PartyMember(
     val id: String,
     val ship: String,
     val speaking: Boolean = false,
+    /**
+     * Whether this person has their mic off.
+     *
+     * Not something the SFU knows — muting is a local track disable, so
+     * to Galène a muted speaker is indistinguishable from a silent one.
+     * Clients tell each other over [PartyLine.MUTE_KIND] instead.
+     */
+    val muted: Boolean = false,
 )
 
 sealed interface PartyState {
@@ -119,6 +127,8 @@ class PartyLine(
     private var sfuIce: List<IceServer> = emptyList()
     // ships heard from within the last poll or two.
     private var speaking: Set<String> = emptySet()
+    // Ships that have told us their mic is off.
+    private val mutedBy = mutableSetOf<String>()
     private var levelPoll: Job? = null
     private var muted = false
     private var upState: MediaState = MediaState.Idle
@@ -174,6 +184,28 @@ class PartyLine(
         upLink?.setMuted(value)
         val cur = _state.value
         if (cur is PartyState.Live) _state.value = cur.copy(muted = value)
+        scope.launch { broadcastMuted() }
+    }
+
+    /**
+     * Tell the room whether our mic is off.
+     *
+     * Galène cannot infer this: muting disables the local track, so a
+     * muted speaker and a silent one look identical on the wire. A
+     * broadcast usermessage is the cheapest channel that reaches both
+     * Talon and the listen page, and costs nothing when nobody cares.
+     */
+    private suspend fun broadcastMuted() {
+        send(
+            buildJsonObject {
+                put("type", "usermessage")
+                put("source", connectionId)
+                put("dest", "")
+                put("username", ourId)
+                put("kind", MUTE_KIND)
+                put("value", muted)
+            },
+        )
     }
 
     private var galeneGroup = ""
@@ -215,7 +247,7 @@ class PartyLine(
         }
     }
 
-    private suspend fun handle(msg: JsonObject) {
+    internal suspend fun handle(msg: JsonObject) {
         when (msg["type"]?.jsonPrimitive?.content) {
             "ping" -> send(buildJsonObject { put("type", "pong") })
 
@@ -258,14 +290,44 @@ class PartyLine(
                 val id = msg["id"]?.jsonPrimitive?.content ?: return
                 val name = msg["username"]?.jsonPrimitive?.content ?: id
                 when (msg["kind"]?.jsonPrimitive?.content) {
-                    "add" -> roster[id] = PartyMember(id, name)
-                    "delete" -> roster.remove(id)
+                    "add" -> {
+                        roster[id] = PartyMember(id, name)
+                        // Someone who just arrived missed every mute
+                        // broadcast so far. Say ours again rather than
+                        // making them show us wrong until we next touch
+                        // the button.
+                        if (id != connectionId) scope.launch { broadcastMuted() }
+                    }
+                    "delete" -> {
+                        // A delete carries no username, so take the ship
+                        // from the row we were holding — keying off the
+                        // fallback id cleared nothing, and a rejoin came
+                        // back still marked muted.
+                        val gone = roster.remove(id)?.ship
+                        // Only forget them once their last connection is
+                        // gone; someone signed in twice is still here.
+                        if (gone != null && roster.values.none { it.ship == gone }) {
+                            mutedBy.remove(gone)
+                        }
+                    }
                     else -> {}
                 }
                 publishRoster()
             }
 
-            "usermessage" -> Log.w(TAG, "sfu: ${msg["value"]?.jsonPrimitive?.content}")
+            "usermessage" -> {
+                if (msg["kind"]?.jsonPrimitive?.content == MUTE_KIND) {
+                    val who = msg["username"]?.jsonPrimitive?.content ?: return
+                    // Keyed by ship, not connection: the roster dedupes
+                    // by ship too, so a person on two devices reads as
+                    // one row and one mute state.
+                    val off = msg["value"]?.jsonPrimitive?.content == "true"
+                    if (off) mutedBy.add(who) else mutedBy.remove(who)
+                    publishRoster()
+                    return
+                }
+                Log.w(TAG, "sfu: ${msg["value"]?.jsonPrimitive?.content}")
+            }
         }
     }
 
@@ -297,6 +359,8 @@ class PartyLine(
         upLink = up
         startLevelPolling()
         up.setMuted(muted)
+        // We join muted, so say so before anyone renders us as live.
+        broadcastMuted()
         scope.launch { up.state.collect { upState = it; publishRoster() } }
         up.onLocalCandidate { c -> scope.launch { sendIce(upId, c) } }
         val sdp = up.offer()
@@ -348,7 +412,15 @@ class PartyLine(
             room = room,
             topic = topic,
             members = ships.distinctBy { it.ship }.sortedBy { it.ship }
-                .map { it.copy(speaking = it.ship in speaking) },
+                .map {
+                    it.copy(
+                        speaking = it.ship in speaking,
+                        // Our own row reads the local flag: we never
+                        // receive our own broadcast, and the button
+                        // should agree with the dot beside our name.
+                        muted = if (it.ship == ourId) muted else it.ship in mutedBy,
+                    )
+                },
             muted = muted,
             media = upState,
             listeners = anon.size,
@@ -423,5 +495,14 @@ class PartyLine(
         private const val SPEAKING_THRESHOLD = 0.02f
 
         private const val TAG = "PartyLine"
+
+        /**
+         * Application-specific usermessage kind carrying mic state.
+         *
+         * Galène relays kinds it doesn't recognise untouched, and its
+         * own client ignores them, so this is additive: an unmodified
+         * Galène client on the same line is unaffected.
+         */
+        internal const val MUTE_KIND = "talon-mute"
     }
 }
