@@ -226,13 +226,6 @@ fun TalonApp(
         )
     }.let { flow -> flow.collectAsState(initial = ContactMap.EMPTY) }
 
-    callController?.let {
-        io.nisfeb.talon.ui.CallOverlay(
-            it,
-            nameFor = { ship -> contactMap.displayName(ship) },
-            audioDevices = androidAudioDevices,
-        )
-    }
     var addingAnotherShip by remember { mutableStateOf(false) }
     // Locally-owned navigation state. Initial values from the
     // notification-tap intent (or null on a normal cold launch). The
@@ -246,6 +239,17 @@ fun TalonApp(
     var openWhom by remember {
         mutableStateOf(initialOpenWhom?.takeUnless { it.startsWith("group:") })
     }
+    callController?.let {
+        io.nisfeb.talon.ui.CallOverlay(
+            it,
+            nameFor = { ship -> contactMap.displayName(ship) },
+            audioDevices = androidAudioDevices,
+            // Under the chat's header when there is one, rather than
+            // floating across the whole window.
+            stripShownInline = openWhom != null,
+        )
+    }
+
     var openGroupFlag by remember {
         mutableStateOf(initialOpenWhom?.takeIf { it.startsWith("group:") }?.removePrefix("group:"))
     }
@@ -1586,6 +1590,13 @@ fun TalonApp(
                                 nameFor = { contactMap.displayName(it) },
                                 audioDevices = androidAudioDevices,
                             )
+                            callController?.let { c ->
+                                io.nisfeb.talon.ui.CallStrip(
+                                    c,
+                                    nameFor = { contactMap.displayName(it) },
+                                    audioDevices = androidAudioDevices,
+                                )
+                            }
                         }
                     },
                     searchEmbedder = app.searchEmbedderClient,

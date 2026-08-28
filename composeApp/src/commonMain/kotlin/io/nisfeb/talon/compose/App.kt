@@ -587,6 +587,10 @@ fun App(
                 it,
                 nameFor = { ship -> callContacts.displayName(ship) },
                 audioDevices = audioDevices,
+                // With a chat open the strip renders under its header,
+                // beside the party-line bar. Floating it as well would
+                // put the same call in two places.
+                stripShownInline = openChat != null,
             )
         }
         // Curated contact book (from %contacts /v1/book) — gates the
@@ -1766,10 +1770,23 @@ fun App(
                                         } else {
                                             null
                                         },
-                                    partyLineBar = partyLine?.let { line ->
-                                        {
+                                    // One slot under the channel header
+                                    // for both: a 1:1 call and a party
+                                    // line are the same kind of thing
+                                    // and belong in the same place,
+                                    // bounded by the chat pane rather
+                                    // than spanning the window.
+                                    partyLineBar = {
+                                        partyLine?.let { line ->
                                             io.nisfeb.talon.ui.PartyLineBar(
                                                 line,
+                                                nameFor = { partyContacts.displayName(it) },
+                                                audioDevices = audioDevices,
+                                            )
+                                        }
+                                        callController?.let { c ->
+                                            io.nisfeb.talon.ui.CallStrip(
+                                                c,
                                                 nameFor = { partyContacts.displayName(it) },
                                                 audioDevices = audioDevices,
                                             )

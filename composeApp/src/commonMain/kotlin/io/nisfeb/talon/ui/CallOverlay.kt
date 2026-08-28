@@ -59,6 +59,16 @@ fun CallOverlay(
     nameFor: (String) -> String = { it },
     audioDevices: io.nisfeb.talon.call.AudioDevices =
         io.nisfeb.talon.call.AudioDevices.Noop,
+    /**
+     * True when [CallStrip] is already being rendered somewhere in the
+     * layout — under a chat's header, where the party-line bar lives.
+     *
+     * The strip only floats when there is nowhere to put it. A window-
+     * wide Popup spans the sidebar and everything else, which is what
+     * made an ended call read as a banner across the whole app rather
+     * than the same strip the call was using.
+     */
+    stripShownInline: Boolean = false,
 ) {
     TrunkInstallPrompt(controller)
 
@@ -101,38 +111,57 @@ fun CallOverlay(
             )
         }
 
-        // A live 1:1 renders through the party-line bar. It is the same
-        // situation — a call in progress you keep above the
-        // conversation — and the bar already carries the roster, the
-        // mute markers and the device pane that this banner grew none
-        // of. One surface to improve instead of two that drift.
-        is CallUiState.Active -> Popup(alignment = Alignment.TopCenter) {
-            PartyLineBarContent(
-                state = PartyState.Live(
-                    room = s.peer,
-                    members = listOf(PartyMember(id = s.peer, ship = s.peer)),
-                    muted = s.muted,
-                    media = s.media,
-                ),
-                admin = null,
-                modifier = modifier,
-                onToggleMute = { controller.setMuted(it) },
-                onLeave = { controller.hangup() },
-                nameFor = nameFor,
-                audioDevices = audioDevices,
-                // "1 on the line" is the wrong sentence for a phone
-                // call; keep what the banner said.
-                headline = when (s.media) {
-                    MediaState.Live -> "${nameFor(s.peer)} · ${liveDuration(s.media)}"
-                    else -> "Connecting to ${nameFor(s.peer)}…"
-                },
-            )
+        is CallUiState.Active, is CallUiState.Ended -> {
+            if (!stripShownInline) {
+                Popup(alignment = Alignment.TopCenter) {
+                    CallStrip(controller, modifier, nameFor, audioDevices)
+                }
+            }
         }
 
-        // The same strip the call was just using, rather than a
-        // differently-shaped banner appearing where the bar was. It is
-        // the tail of one thing, not a new thing.
-        is CallUiState.Ended -> Popup(alignment = Alignment.TopCenter) {
+        CallUiState.None -> {}
+    }
+}
+
+/**
+ * A call in progress, or one that just ended, as a strip.
+ *
+ * The same composable the party line uses, so a 1:1 call and a party
+ * line are one surface rather than two that drift. Renders nothing
+ * unless there is a call, so it can sit unconditionally in a layout
+ * slot beside the party-line bar.
+ */
+@Composable
+fun CallStrip(
+    controller: CallController,
+    modifier: Modifier = Modifier,
+    nameFor: (String) -> String = { it },
+    audioDevices: io.nisfeb.talon.call.AudioDevices =
+        io.nisfeb.talon.call.AudioDevices.Noop,
+) {
+    val state by controller.state.collectAsState()
+    when (val s = state) {
+        is CallUiState.Active -> PartyLineBarContent(
+            state = PartyState.Live(
+                room = s.peer,
+                members = listOf(PartyMember(id = s.peer, ship = s.peer)),
+                muted = s.muted,
+                media = s.media,
+            ),
+            admin = null,
+            modifier = modifier,
+            onToggleMute = { controller.setMuted(it) },
+            onLeave = { controller.hangup() },
+            nameFor = nameFor,
+            audioDevices = audioDevices,
+            // "1 on the line" is the wrong sentence for a phone call.
+            headline = when (s.media) {
+                MediaState.Live -> "${nameFor(s.peer)} · ${liveDuration(s.media)}"
+                else -> "Connecting to ${nameFor(s.peer)}…"
+            },
+        )
+
+        is CallUiState.Ended -> {
             PartyLineBarContent(
                 state = PartyState.Failed(s.peer, s.reason),
                 admin = null,
@@ -147,7 +176,7 @@ fun CallOverlay(
             }
         }
 
-        CallUiState.None -> {}
+        else -> Unit
     }
 }
 
