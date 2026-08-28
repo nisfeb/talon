@@ -60,6 +60,11 @@ fun PartyLineBar(
     admin: PartyLineAdmin? = null,
     /** Resolve a @p to whatever this reader calls that person. */
     nameFor: (String) -> String = { it },
+    /** Microphone and speaker selection. Defaults to the no-op, which
+     *  renders nothing — the pane is absent on platforms where the OS
+     *  owns routing rather than shown empty. */
+    audioDevices: io.nisfeb.talon.call.AudioDevices =
+        io.nisfeb.talon.call.AudioDevices.Noop,
 ) {
     val state by party.state.collectAsState()
     PartyLineBarContent(
@@ -69,6 +74,7 @@ fun PartyLineBar(
         onToggleMute = { party.setMuted(it) },
         onLeave = { party.leave() },
         nameFor = nameFor,
+        audioDevices = audioDevices,
     )
 }
 
@@ -87,6 +93,8 @@ fun PartyLineBarContent(
     /** Resolve a @p to whatever this reader calls that person.
      *  Identity is the @p; the nickname is a courtesy. */
     nameFor: (String) -> String = { it },
+    audioDevices: io.nisfeb.talon.call.AudioDevices =
+        io.nisfeb.talon.call.AudioDevices.Noop,
 ) {
     if (state is PartyState.Idle) return
     var expanded by remember { mutableStateOf(false) }
@@ -192,7 +200,13 @@ fun PartyLineBarContent(
             }
         }
     }
-    if (state is PartyState.Live && expanded) Roster(state, nameFor)
+    if (state is PartyState.Live && expanded) {
+        Roster(state, nameFor)
+        // Behind the same expander as the roster: picking a headset is
+        // a thing you do once, not something worth a permanent row over
+        // the conversation. Renders nothing where the OS owns routing.
+        AudioDeviceControls(audioDevices)
+    }
     if (state is PartyState.Live && admin != null) {
         ListenControls(admin, state.listeners)
     }

@@ -178,8 +178,30 @@ val DesktopCallEngineProvider: CallEngineProvider =
 internal object DesktopWebRtcFactory {
     private val lock = Any()
     private var factory: PeerConnectionFactory? = null
+    private var adm: dev.onvoid.webrtc.media.audio.AudioDeviceModule? = null
 
-    fun get(): PeerConnectionFactory = synchronized(lock) {
-        factory ?: PeerConnectionFactory().also { factory = it }
+    /**
+     * The module the factory captures and plays through.
+     *
+     * Held here because device selection has to go through the *same*
+     * instance the factory was built with — an ADM created later has no
+     * effect on tracks already sourced from another one. Created eagerly
+     * with the factory so the first call and a device change made before
+     * any call both land on one object.
+     */
+    fun audioDeviceModule(): dev.onvoid.webrtc.media.audio.AudioDeviceModule =
+        synchronized(lock) { ensure().second }
+
+    fun get(): PeerConnectionFactory = synchronized(lock) { ensure().first }
+
+    private fun ensure(): Pair<PeerConnectionFactory, dev.onvoid.webrtc.media.audio.AudioDeviceModule> {
+        val f = factory
+        val a = adm
+        if (f != null && a != null) return f to a
+        val module = dev.onvoid.webrtc.media.audio.AudioDeviceModule()
+        val made = PeerConnectionFactory(module)
+        factory = made
+        adm = module
+        return made to module
     }
 }

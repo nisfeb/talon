@@ -144,6 +144,11 @@ fun App(
     /** Party-line media factory (one link per SFU stream). Null keeps
      *  party lines dark even where 1:1 calls work. */
     peerLinkFactory: io.nisfeb.talon.call.PeerLinkFactory? = null,
+    /** Microphone / speaker selection. The no-op default renders no
+     *  pane at all, which is right for platforms where the OS owns
+     *  routing — gate it, don't fake it. */
+    audioDevices: io.nisfeb.talon.call.AudioDevices =
+        io.nisfeb.talon.call.AudioDevices.Noop,
     /** OS-level notifier. Desktop wires a tray-balloon impl; other
      *  platforms (Android composeApp) get the no-op default until
      *  their notification stories port. */
@@ -1732,6 +1737,7 @@ fun App(
                                             io.nisfeb.talon.ui.PartyLineBar(
                                                 line,
                                                 nameFor = { partyContacts.displayName(it) },
+                                                audioDevices = audioDevices,
                                             )
                                         }
                                     },

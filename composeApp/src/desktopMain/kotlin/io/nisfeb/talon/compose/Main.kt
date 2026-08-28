@@ -432,6 +432,7 @@ fun main() {
                     themePreference = graph.themePreference,
                     callEngineProvider = io.nisfeb.talon.call.DesktopCallEngineProvider,
                     peerLinkFactory = io.nisfeb.talon.call.DesktopPeerLinkFactory,
+                    audioDevices = io.nisfeb.talon.call.DesktopAudioDevices(),
                     notifier = notifier,
                     createUiSettings = graph.createUiSettings,
                     relaySettings = graph.relaySettings,
