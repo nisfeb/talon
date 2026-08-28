@@ -109,6 +109,14 @@ class PartyLine(
     private val roster = mutableMapOf<String, PartyMember>()
     // stream id -> the ship publishing it, from the offer.
     private val streamOwner = mutableMapOf<String, String>()
+    // Galène's own ICE servers, handed to us on join. Held as a field
+    // because the down links are built in a different callback than
+    // the one that receives them: when this was a local in onJoined,
+    // every down link was created with an empty list, gathered host
+    // candidates only, and never reached the SFU. Both sides could
+    // publish — the listen page heard everyone — and nobody in the
+    // app heard anything.
+    private var sfuIce: List<IceServer> = emptyList()
     // ships heard from within the last poll or two.
     private var speaking: Set<String> = emptySet()
     private var levelPoll: Job? = null
@@ -261,7 +269,7 @@ class PartyLine(
         }
     }
 
-    private suspend fun onJoined(msg: JsonObject) {
+    internal suspend fun onJoined(msg: JsonObject) {
         // Galène hands out its own TURN credentials on join, so party
         // lines need no ICE config from the ship at all.
         val ice = msg["rtcConfiguration"]?.jsonObject
@@ -276,6 +284,7 @@ class PartyLine(
                     cred = o["credential"]?.jsonPrimitive?.content ?: "",
                 )
             }
+        sfuIce = ice
 
         // Ask for everyone's audio.
         send(buildJsonObject {
@@ -298,16 +307,17 @@ class PartyLine(
         publishRoster()
     }
 
-    private suspend fun onRemoteOffer(msg: JsonObject) {
+    internal suspend fun onRemoteOffer(msg: JsonObject) {
         val id = msg["id"]?.jsonPrimitive?.content ?: return
         val sdp = msg["sdp"]?.jsonPrimitive?.content ?: return
         // Galène names the publisher on the offer, which is the only
         // place a stream is tied to a person — the roster is keyed by
         // client, and audio levels arrive per stream.
         msg["username"]?.jsonPrimitive?.content?.let { streamOwner[id] = it }
-        val ice = emptyList<IceServer>() // down links reuse the same relay policy
+        // The same servers the up link got. A down link needs them just
+        // as much: it is the side that has to traverse to the SFU.
         val link = downLinks.getOrPut(id) {
-            links.create(ice, sendAudio = false).also { l ->
+            links.create(sfuIce, sendAudio = false).also { l ->
                 l.onLocalCandidate { c -> scope.launch { sendIce(id, c) } }
             }
         }
