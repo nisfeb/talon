@@ -12,8 +12,9 @@ import kotlinx.serialization.json.putJsonArray
 import kotlinx.serialization.json.putJsonObject
 
 /**
- * JSON wire for the %trunk agent. Shapes mirror urbit/trunk/lib/
- * trunk-json.hoon exactly — that file is the source of truth:
+ * JSON wire for the %trunk agent. Shapes mirror lib/trunk-json.hoon
+ * in github.com/gwbtc/trunk exactly — that file is the source of
+ * truth, and it is mirrored here by hand, so the two can drift:
  *
  *   action  {"send":{"ship":"~zod","sig":{...}}}
  *   sig     {"ring":{"id":i}} | {"offer":{"id":i,"sdp":s,"fpr":f}}

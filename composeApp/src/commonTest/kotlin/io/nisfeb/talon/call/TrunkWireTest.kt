@@ -6,7 +6,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
 
-/** Wire shapes must match urbit/trunk/lib/trunk-json.hoon verbatim. */
+/** Wire shapes must match lib/trunk-json.hoon in gwbtc/trunk. */
 class TrunkWireTest {
 
     @Test
