@@ -153,7 +153,7 @@ final class TalonRtcPeer: NSObject, NativeRtcPeer, RTCPeerConnectionDelegate {
     ///
     /// Not outbound-rtp: that reports what was sent, which is
     /// silence-suppressed, so a quiet talker reads as nothing at all.
-    func localAudioLevel() -> Double {
+    func micLevel() -> Double {
         guard let pc = pc, !localStatsInFlight else { return lastLocalLevel }
         localStatsInFlight = true
         pc.statistics { [weak self] report in

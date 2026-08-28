@@ -57,12 +57,24 @@ interface NativeRtcPeer {
     /**
      * Our own microphone level, 0..1, or -1 when unknown.
      *
-     * Named apart from [remoteAudioLevel] rather than overloaded:
-     * Kotlin/Native mangles a name it thinks collides, and `audioLevel`
-     * already came out the far side as `audioLevel_()` once, which
-     * broke conformance and the whole iOS build with it.
+     * Named unlike anything on [PeerLink], and that is the whole
+     * reason for the name.
+     *
+     * Kotlin/Native maps a no-argument function to a bare Objective-C
+     * selector, so two exported declarations with the same name and
+     * *incompatible return types* collide, and one gets an underscore.
+     * PeerLink.audioLevel returns Float? — a boxed object — where this
+     * returns a primitive Double, so `audioLevel` and then
+     * `localAudioLevel` both arrived in Swift as `..._()` and the
+     * class stopped conforming.
+     *
+     * Sharing a name is not enough on its own: close, setMuted,
+     * applyAnswer and create are all shared with PeerLink and are
+     * fine, because their signatures either match exactly or differ in
+     * arity, which produces a different selector anyway. It is the
+     * same-selector, different-type case that breaks.
      */
-    fun localAudioLevel(): Double
+    fun micLevel(): Double
 
     fun setMuted(muted: Boolean)
 
