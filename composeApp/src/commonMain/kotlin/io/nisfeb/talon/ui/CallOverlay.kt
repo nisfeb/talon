@@ -187,7 +187,13 @@ private fun TrunkInstallPrompt(controller: CallController) {
     val installing = install is TrunkInstall.Installing
     val outdated = install as? TrunkInstall.Outdated
     AlertDialog(
-        onDismissRequest = { if (!installing) controller.dismissInstall() },
+        // Dismissable even mid-install. The install is a coroutine on
+        // the controller's own scope, not on this composition, so
+        // closing the dialog only stops watching it — the desk keeps
+        // arriving. Holding a modal open for the full 120s timeout
+        // with every button disabled read, correctly, as the whole app
+        // freezing for the length of the install.
+        onDismissRequest = { controller.dismissInstall() },
         title = {
             Text(
                 if (outdated != null) "Your ship's calling app is out of date"
@@ -218,7 +224,9 @@ private fun TrunkInstallPrompt(controller: CallController) {
                 )
                 when (val s = install) {
                     is TrunkInstall.Installing -> Text(
-                        "Installing… this can take a minute.",
+                        "Installing… this can take a minute. You can close " +
+                            "this and keep using Talon; it carries on in the " +
+                            "background and we'll tell you if it fails.",
                         style = MaterialTheme.typography.bodySmall,
                     )
                     is TrunkInstall.Failed -> Text(
@@ -245,10 +253,11 @@ private fun TrunkInstallPrompt(controller: CallController) {
             }
         },
         dismissButton = {
+            // Stays enabled while installing — this is the way out of a
+            // two-minute wait, so disabling it is exactly backwards.
             TextButton(
                 onClick = { controller.dismissInstall() },
-                enabled = !installing,
-            ) { Text("Not now") }
+            ) { Text(if (installing) "Close" else "Not now") }
         },
     )
 }
