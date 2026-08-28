@@ -5,8 +5,6 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
-import android.media.AudioAttributes
-import android.media.RingtoneManager
 import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.app.Person
@@ -27,7 +25,10 @@ object Notifications {
     const val CHANNEL_WATCHWORDS = "watchwords"
     const val CHANNEL_DAILY_DIGEST = "daily-digest"
     const val CHANNEL_LOOPS = "loops"
-    const val CHANNEL_CALLS = "calls"
+    // v2: the Ringer owns sound and vibration now, so the channel must
+    // do neither. A channel's alerting cannot be changed after it is
+    // created, so changing it means a new id.
+    const val CHANNEL_CALLS = "calls_v2"
 
     const val EXTRA_ANSWER_FROM = "answer_from"
     const val EXTRA_ANSWER_CALL_ID = "answer_call_id"
@@ -70,19 +71,15 @@ object Notifications {
                     NotificationManager.IMPORTANCE_HIGH,
                 ).apply {
                     description = "Incoming calls"
-                    // The ringtone stream, not the notification one —
-                    // a call should sound like a call, and should keep
-                    // ringing rather than blip once.
-                    setSound(
-                        RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE),
-                        AudioAttributes.Builder()
-                            .setUsage(AudioAttributes.USAGE_NOTIFICATION_RINGTONE)
-                            .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                            .build(),
-                    )
+                    // Silent by design. A channel plays its sound and
+                    // its vibration pattern exactly once — which is the
+                    // bug this replaces: the ringtone blipped and the
+                    // pattern buzzed twice, and there is no flag to
+                    // make either repeat. Ringer loops both for the
+                    // life of the ring and stops with the call.
+                    setSound(null, null)
                     enableLights(true)
-                    enableVibration(true)
-                    vibrationPattern = longArrayOf(0, 800, 800, 800, 800)
+                    enableVibration(false)
                 }
             )
         }
@@ -205,10 +202,17 @@ object Notifications {
                 .addAction(android.R.drawable.sym_action_call, "Answer", answer)
         }
         mgr.notify(CALL_NOTIFICATION_ID, builder.build())
+        io.nisfeb.talon.notify.Ringer.start(
+            context,
+            io.nisfeb.talon.call.CallController.DEFAULT_RING_TIMEOUT_MS,
+        )
     }
 
     /** Stop ringing — answered, declined, or the caller gave up. */
     fun cancelIncomingCall(context: Context) {
+        // Stop the noise first: the notification going away while the
+        // phone keeps buzzing is worse than either alone.
+        io.nisfeb.talon.notify.Ringer.stop()
         ContextCompat.getSystemService(context, NotificationManager::class.java)
             ?.cancel(CALL_NOTIFICATION_ID)
     }
