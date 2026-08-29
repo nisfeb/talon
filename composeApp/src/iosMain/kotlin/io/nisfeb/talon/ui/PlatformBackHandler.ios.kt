@@ -5,6 +5,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 
 /**
@@ -22,27 +23,47 @@ import androidx.compose.runtime.rememberUpdatedState
  * chat pops before the chat does.
  */
 object IosBackDispatcher {
-    private val handlers = mutableListOf<() -> Unit>()
+    /**
+     * Enabled handlers by slot, innermost last.
+     *
+     * Keyed by slot rather than ordered by registration time, because
+     * registration order stops matching nesting the moment an *outer*
+     * handler re-registers: PlatformBackHandler binds its
+     * DisposableEffect to `enabled`, and a condition like
+     * "openChat != null && openThreadParent == null" flips off and on
+     * again when a thread closes. The chat's handler then sat above
+     * the screens opened over it, and backing out of those took extra
+     * gestures while the wrong thing closed first.
+     *
+     * A slot is taken once per call site and kept for its lifetime, so
+     * it reflects declaration order — which in App.kt runs outermost
+     * to innermost.
+     */
+    private val handlers = mutableMapOf<Int, () -> Unit>()
+    private var nextSlot = 0
+
+    /** Claim a stable slot. Call once per handler, from remember. */
+    fun claimSlot(): Int = nextSlot++
 
     /** Observable so the root can drop the edge strip entirely at the
      *  top of the stack — no handler, no reason to sit over content. */
     var depth by mutableStateOf(0)
         private set
 
-    fun register(handler: () -> Unit) {
-        handlers.add(handler)
+    fun register(slot: Int, handler: () -> Unit) {
+        handlers[slot] = handler
         depth = handlers.size
     }
 
-    fun unregister(handler: () -> Unit) {
-        handlers.remove(handler)
+    fun unregister(slot: Int) {
+        handlers.remove(slot)
         depth = handlers.size
     }
 
     /** Run the innermost handler. Returns false when nothing wanted it,
      *  so the caller can leave the gesture alone (no-op at the root). */
     fun back(): Boolean {
-        val top = handlers.lastOrNull() ?: return false
+        val top = handlers.maxByOrNull { it.key }?.value ?: return false
         top()
         return true
     }
@@ -53,10 +74,12 @@ object IosBackDispatcher {
 @Composable
 actual fun PlatformBackHandler(enabled: Boolean, onBack: () -> Unit) {
     val current by rememberUpdatedState(onBack)
-    DisposableEffect(enabled) {
+    // Claimed once and kept, so enabling and disabling does not change
+    // this handler's position relative to the others.
+    val slot = remember { IosBackDispatcher.claimSlot() }
+    DisposableEffect(enabled, slot) {
         if (!enabled) return@DisposableEffect onDispose { }
-        val handler: () -> Unit = { current() }
-        IosBackDispatcher.register(handler)
-        onDispose { IosBackDispatcher.unregister(handler) }
+        IosBackDispatcher.register(slot) { current() }
+        onDispose { IosBackDispatcher.unregister(slot) }
     }
 }
