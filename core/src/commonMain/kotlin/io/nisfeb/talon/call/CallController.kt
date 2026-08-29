@@ -81,6 +81,9 @@ class CallController(
     /** Call tones. Noop where a platform has no playback path, so
      *  nothing here has to check. */
     private val sounds: CallSoundPlayer = CallSoundPlayer.Noop,
+    /** Fallback ICE and sidecar this build ships, adopted by a ship
+     *  that has none. [CallDefaults.None] adopts nothing. */
+    private val defaults: CallDefaults = CallDefaults.None,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + ioDispatcher + backgroundExceptionHandler)
     private val _state = MutableStateFlow<CallUiState>(CallUiState.None)
@@ -505,21 +508,21 @@ class CallController(
      * user who set their own server keeps it.
      */
     private suspend fun adoptDefaultSfu(ch: UrbitChannel) {
-        if (io.nisfeb.talon.TalonBuild.defaultSfuBase.isEmpty()) return
+        if (defaults.sfuBase.isEmpty()) return
         val configured = runCatching {
             (ch.scry(TrunkWire.AGENT, "/sfu") as? JsonObject)
                 ?.get("configured")?.jsonPrimitive?.content == "true"
         }.getOrElse { return }
         if (configured) return
         Log.i(TAG, "no sidecar on this ship; adopting the built-in default")
-        _shipSfuBase.value = io.nisfeb.talon.TalonBuild.defaultSfuBase
+        _shipSfuBase.value = defaults.sfuBase
         runCatching {
             ch.poke(
                 TrunkWire.AGENT, TrunkWire.ACTION_MARK,
                 TrunkWire.setSfuAction(
-                    io.nisfeb.talon.TalonBuild.defaultSfuBase,
-                    io.nisfeb.talon.TalonBuild.defaultSfuGroup,
-                    io.nisfeb.talon.TalonBuild.defaultSfuKey,
+                    defaults.sfuBase,
+                    defaults.sfuGroup,
+                    defaults.sfuKey,
                 ),
             )
         }.onFailure { Log.w(TAG, "set-sfu poke failed", it) }
@@ -537,7 +540,7 @@ class CallController(
      */
     private suspend fun adoptDefaultIce(ch: UrbitChannel) {
         if (iceServers.isNotEmpty()) return
-        val fallback = TrunkWire.defaultIce()
+        val fallback = TrunkWire.defaultIce(defaults)
         if (fallback.isEmpty()) return
         Log.i(TAG, "no ICE on this ship; adopting ${fallback.size} built-in servers")
         runCatching {

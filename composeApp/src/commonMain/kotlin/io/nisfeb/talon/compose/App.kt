@@ -545,7 +545,7 @@ fun App(
                 session.shipName != null
             ) {
                 remember {
-                    io.nisfeb.talon.call.CallController(session, callEngineProvider, sounds = callSounds)
+                    io.nisfeb.talon.call.CallController(session, callEngineProvider, sounds = callSounds, defaults = io.nisfeb.talon.call.buildCallDefaults)
                         .also { it.start() }
                 }
             } else {

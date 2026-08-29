@@ -63,6 +63,10 @@ kotlin {
             )
         }
         commonMain.dependencies {
+            // The headless half: Urbit transport and the call stack,
+            // shared with any process that needs to join a line
+            // without a UI.
+            api(project(":core"))
             implementation(compose.runtime)
             implementation(compose.foundation)
             implementation(compose.material3)

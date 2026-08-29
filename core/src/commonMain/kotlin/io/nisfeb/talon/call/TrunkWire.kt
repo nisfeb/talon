@@ -278,18 +278,14 @@ object TrunkWire {
         }
 
     /** The sidecar this build ships with, or null if it has none. */
-    fun defaultSfu(): SfuConfig? =
-        io.nisfeb.talon.TalonBuild.defaultSfuBase.takeIf { it.isNotEmpty() }?.let {
-            SfuConfig(
-                it,
-                io.nisfeb.talon.TalonBuild.defaultSfuGroup,
-                io.nisfeb.talon.TalonBuild.defaultSfuKey,
-            )
+    fun defaultSfu(d: CallDefaults): SfuConfig? =
+        d.sfuBase.takeIf { it.isNotEmpty() }?.let {
+            SfuConfig(it, d.sfuGroup, d.sfuKey)
         }
 
     /**
      * The ICE servers this build falls back to, parsed from
-     * [io.nisfeb.talon.TalonBuild.defaultIce] (`url|user|cred`
+     * [CallDefaults.iceSpec] (`url|user|cred`
      * entries separated by `;`). Empty when the build shipped none.
      *
      * Malformed entries are dropped rather than failing the whole
@@ -297,7 +293,7 @@ object TrunkWire {
      * call. A url is the only required field — STUN takes no
      * credentials.
      */
-    fun defaultIce(): List<IceServer> = parseIceSpec(io.nisfeb.talon.TalonBuild.defaultIce)
+    fun defaultIce(d: CallDefaults): List<IceServer> = parseIceSpec(d.iceSpec)
 
     /** Split out from [defaultIce] so it can be tested without a build
      *  configured to carry one. */

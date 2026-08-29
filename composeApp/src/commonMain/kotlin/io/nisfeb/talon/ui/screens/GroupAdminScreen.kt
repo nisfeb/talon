@@ -828,7 +828,7 @@ private fun PartyLineSection(
                 // with "no sfu configured" and the line is unusable.
                 controller.configureRoom(
                     host, roomName, open = on, listen = false,
-                    sfu = if (on) io.nisfeb.talon.call.TrunkWire.defaultSfu() else null,
+                    sfu = if (on) io.nisfeb.talon.call.TrunkWire.defaultSfu(io.nisfeb.talon.call.buildCallDefaults) else null,
                     keepSfu = false,
                     title = group.title.orEmpty().ifEmpty { roomName },
                     members = group.members.map { it.ship },

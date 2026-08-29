@@ -167,7 +167,7 @@ fun TalonApp(
     val callSounds = remember { io.nisfeb.talon.call.AndroidCallSoundPlayer() }
     val callController = remember(loggedInShip) {
         if (loggedInShip != null) {
-            io.nisfeb.talon.call.CallController(app.session, callEngineProvider, sounds = callSounds)
+            io.nisfeb.talon.call.CallController(app.session, callEngineProvider, sounds = callSounds, defaults = io.nisfeb.talon.call.buildCallDefaults)
                 .also { it.start() }
         } else {
             null
