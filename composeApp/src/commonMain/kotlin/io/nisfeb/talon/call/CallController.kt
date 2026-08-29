@@ -530,51 +530,25 @@ class CallController(
      * person decides, not a thing an app does on their behalf.
      */
     private suspend fun repairOutdated(ch: UrbitChannel): Boolean {
-        // Two different failures wear the same face, so try both.
-        //
-        // A stalled sync has an intact subscription that simply has
-        // not pulled; |bump fixes that and an install poke would not,
-        // because kiln no-ops when it believes the desk is current.
-        //
-        // A desk that was uninstalled and later revived has no source
-        // ship at all — the agent runs, nothing feeds it. |bump has
-        // nothing to bump and succeeds without doing anything; only an
-        // install re-establishes the subscription. Ships that were
-        // nuked land here too, with their known lines and policy gone.
-        val (bApp, bMark, bBody) = TrunkWire.bumpDesksPoke()
-        runCatching { ch.poke(bApp, bMark, bBody) }
-            .onFailure { Log.w(TAG, "kiln-bump refused: " + it.message) }
-        if (waitForWire(ch, BUMP_WAIT_MS)) return true
-
-        Log.i(TAG, "bump did not move it; re-establishing the subscription")
-        val (iApp, iMark, iBody) = TrunkWire.installTrunkPoke()
-        runCatching { ch.poke(iApp, iMark, iBody) }
+        val (app, mark, body) = TrunkWire.bumpDesksPoke()
+        runCatching { ch.poke(app, mark, body) }
             .onFailure {
-                Log.w(TAG, "kiln-install refused: " + it.message)
+                Log.w(TAG, "kiln-bump refused: " + it.message)
                 return false
             }
-        // Longer: this one may be pulling the whole desk over ames
-        // rather than checking whether it needs to.
-        if (waitForWire(ch, INSTALL_TIMEOUT_MS)) return true
-
-        Log.w(TAG, "still behind after bump and install; asking the user")
-        return false
-    }
-
-    /** Poll /x/version until it is current enough, or time runs out. */
-    private suspend fun waitForWire(ch: UrbitChannel, budgetMs: Long): Boolean {
-        val deadline = nowMs() + budgetMs
+        val deadline = nowMs() + BUMP_WAIT_MS
         while (nowMs() < deadline) {
             delay(3_000)
             val wire = runCatching {
                 TrunkWire.parseWireVersion(ch.scry(TrunkWire.AGENT, "/version"))
             }.getOrNull() ?: continue
             if (wire >= TrunkWire.WIRE_VERSION) {
-                Log.i(TAG, "desk reached wire $wire")
+                Log.i(TAG, "desk caught up to wire $wire after a bump")
                 _wire.value = wire
                 return true
             }
         }
+        Log.w(TAG, "still behind after a bump; asking the user")
         return false
     }
 
