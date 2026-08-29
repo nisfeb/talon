@@ -805,13 +805,15 @@ fun SettingsScreen(
             Spacer(Modifier.height(16.dp))
             HorizontalDivider()
             Spacer(Modifier.height(8.dp))
-            AboutSection()
+            AboutSection(callController)
         }
     }
 }
 
 @Composable
-private fun AboutSection() {
+private fun AboutSection(
+    callController: io.nisfeb.talon.call.CallController? = null,
+) {
     val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
     Text(
         "About",
@@ -837,15 +839,50 @@ private fun AboutSection() {
         label = "Source",
         value = "github.com/nisfeb/talon",
     )
+    // The desk's wire version, beside the app's own. These two have to
+    // agree for calls to work and they update by different routes —
+    // the app from a release, the desk over ames from its publisher —
+    // so "which one is behind" is a question people actually have to
+    // answer, and the alternative was a dojo scry.
+    val shipWire by (
+        callController?.wire
+            ?: kotlinx.coroutines.flow.MutableStateFlow(-1)
+        ).collectAsState()
+    if (callController != null) {
+        AboutRow(
+            label = "Calling (%trunk)",
+            value = when {
+                shipWire <= 0 -> "not installed on your ship"
+                shipWire < io.nisfeb.talon.call.TrunkWire.WIRE_VERSION ->
+                    "wire $shipWire · this app speaks " +
+                        "${io.nisfeb.talon.call.TrunkWire.WIRE_VERSION}, so your " +
+                        "ship's copy is behind"
+                shipWire > io.nisfeb.talon.call.TrunkWire.WIRE_VERSION ->
+                    "wire $shipWire · newer than this app, which speaks " +
+                        "${io.nisfeb.talon.call.TrunkWire.WIRE_VERSION}"
+                else -> "wire $shipWire"
+            },
+        )
+    }
 
     Spacer(Modifier.height(8.dp))
     OutlinedButton(
         onClick = {
             clipboard.setText(
                 androidx.compose.ui.text.AnnotatedString(
+                    // Includes the desk's wire: half the call reports
+                    // so far have come down to a ship running an older
+                    // %trunk than the app, and this is what someone
+                    // pastes into a support thread.
                     "Talon ${io.nisfeb.talon.TalonBuild.versionName} " +
                         "(build ${io.nisfeb.talon.TalonBuild.versionCode}) " +
-                        "· ${io.nisfeb.talon.ui.platformLabel}",
+                        "· ${io.nisfeb.talon.ui.platformLabel}" +
+                        if (callController != null) {
+                            " · %trunk wire $shipWire " +
+                                "(app speaks ${io.nisfeb.talon.call.TrunkWire.WIRE_VERSION})"
+                        } else {
+                            ""
+                        },
                 ),
             )
         },
