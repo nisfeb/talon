@@ -88,8 +88,8 @@ own playback straight back into the Space.
 
 On Linux, `scripts/talon-bridge-spaces` creates both devices, points
 the bridge at them, and removes them on exit. Then in your X client set
-the microphone to *Monitor of "Talon Bridge (mic for X)"* and the
-output to *"Talon Bridge (X output)"* — a browser does output per tab,
+the microphone to *Monitor of TalonBridgeMic* and the output to
+*TalonBridgeSpace* — a browser does output per tab,
 which is what you want, since the native app follows the system default
 and would route everything here.
 

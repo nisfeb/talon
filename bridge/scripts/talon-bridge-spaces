@@ -43,21 +43,25 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
+# Descriptions carry no spaces on purpose: pactl's own property
+# parser splits on them and the load fails outright, whatever the
+# shell quoting. Verified against escaped and inner-quoted forms —
+# both are rejected. So these strings are exactly what X will show.
 mic_mod=$(pactl load-module module-null-sink \
 	sink_name=TalonBridgeMic \
-	sink_properties=device.description="Talon Bridge (mic for X)" \
+	sink_properties=device.description=TalonBridgeMic \
 	rate=48000 channels=1)
 space_mod=$(pactl load-module module-null-sink \
 	sink_name=TalonBridgeSpace \
-	sink_properties=device.description="Talon Bridge (X output)" \
+	sink_properties=device.description=TalonBridgeSpace \
 	rate=48000 channels=1)
 
 cat <<'EOF'
 
 Devices are up. In your X client, set:
 
-  Microphone  ->  Monitor of "Talon Bridge (mic for X)"
-  Output      ->  "Talon Bridge (X output)"
+  Microphone  ->  Monitor of TalonBridgeMic
+  Output      ->  TalonBridgeSpace
 
 The browser sets output per tab (right-click the tab, or the OS
 volume mixer). The native app follows the system default, so use a
@@ -75,4 +79,17 @@ export PULSE_SOURCE=TalonBridgeSpace.monitor
 export TALON_BRIDGE_AUDIO_IN="${TALON_BRIDGE_AUDIO_IN:-default}"
 export TALON_BRIDGE_AUDIO_OUT="${TALON_BRIDGE_AUDIO_OUT:-default}"
 
-exec "$bridge" "$@"
+# Deliberately not exec: exec replaces this shell, so the EXIT trap
+# never runs and both null sinks outlive the bridge. Run it as a
+# child instead and let the trap tear them down.
+#
+# The signal is forwarded rather than assumed. A terminal Ctrl-C
+# reaches the whole foreground process group, so the bridge gets it
+# either way — but a supervisor signalling this script's pid alone
+# does not, and bash defers a trap until the foreground child exits.
+# Measured: without this, a lone SIGTERM leaves both the child and
+# both null sinks running forever.
+"$bridge" "$@" &
+child=$!
+trap 'kill -TERM "$child" 2>/dev/null || true' INT TERM
+wait "$child" || true
