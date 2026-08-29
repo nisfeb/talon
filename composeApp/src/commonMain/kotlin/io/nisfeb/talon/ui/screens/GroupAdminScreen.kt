@@ -506,6 +506,15 @@ private fun AdminBody(
         }
     }
 
+    // The same test the party-line section already used, hoisted: this
+    // screen is reachable from "view members", which everyone can do,
+    // so everything that changes the group has to be gated rather than
+    // relying on the ship to refuse. Editing a field that silently
+    // never persists is worse than not offering it.
+    val mayAdminister = me.isNotEmpty() &&
+        (me == flag.substringBefore('/') ||
+            group.members.any { it.ship == me && it.isAdmin })
+
     val metaDirty = title != group.title.orEmpty() ||
         description != group.description.orEmpty() ||
         image != group.image.orEmpty() ||
@@ -519,6 +528,7 @@ private fun AdminBody(
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         // ───────── Metadata ─────────
+        if (mayAdminister) {
         SectionHeader("Metadata")
         OutlinedTextField(
             value = title,
@@ -587,8 +597,10 @@ private fun AdminBody(
         ) { Text("Save metadata") }
 
         HorizontalDivider()
+        }
 
         // ───────── Invite ─────────
+        if (mayAdminister) {
         SectionHeader("Invite")
         val privacyLabel = when (group.privacy) {
             "public" -> "Public — anyone can join. Invites still speed up discovery."
@@ -626,6 +638,7 @@ private fun AdminBody(
         }
 
         HorizontalDivider()
+        }
 
         // ───────── Outstanding invites ─────────
         val allInvited = (group.invitedTokenByShip.keys + group.directInvitedShips).sorted()
@@ -719,7 +732,9 @@ private fun AdminBody(
             MemberRow(
                 member = m,
                 contactMap = contactMap,
-                onLongPress = { onMemberLongPress(m) },
+                // Kick and ban live behind this. A non-admin gets no
+                // sheet rather than one whose every action is refused.
+                onLongPress = { if (mayAdminister) onMemberLongPress(m) },
             )
         }
         val remaining = group.members.size - visible.size

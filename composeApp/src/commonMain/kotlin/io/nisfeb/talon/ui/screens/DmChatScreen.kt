@@ -837,6 +837,11 @@ fun DmChatScreen(
                         groupFlag = contactMap.groupOfChannel(whom),
                         adminGroups = adminGroups,
                     ),
+                canModerate = io.nisfeb.talon.urbit.canPinInGroup(
+                    ourPatp = ourPatp,
+                    groupFlag = contactMap.groupOfChannel(whom),
+                    adminGroups = adminGroups,
+                ),
                 canQuote = whom.startsWith("chat/") && target.parentId == null,
                 onDismiss = { actionTarget = null },
                 onPickReaction = { emoji ->
@@ -1886,6 +1891,8 @@ private fun MessageActionMenu(
     isPinned: Boolean,
     canBookmark: Boolean,
     canPin: Boolean,
+    /** Group admin here, so may act on other people's messages. */
+    canModerate: Boolean,
     onDismiss: () -> Unit,
     onPickReaction: (String) -> Unit,
     onReply: () -> Unit,
@@ -2075,11 +2082,12 @@ private fun MessageActionMenu(
                     label = if (isPinned) "Unpin" else "Pin",
                 )
             }
-            // Delete: always allowed on your own messages. On channels
-            // we also show it for others' messages — the server
-            // enforces admin-only deletion and rejects if the user
-            // isn't authorized, leaving the row in place.
-            if (isMine || isChannel) {
+            // Your own always; other people's only where you can
+            // actually moderate. Offering it to everyone and letting
+            // the ship refuse was the old behaviour: the row stayed
+            // put, nothing said why, and the app had advertised a
+            // power the reader did not have.
+            if (isMine || (isChannel && canModerate)) {
                 ActionRow(
                     onClick = onDelete,
                     label = if (isMine) "Delete" else "Delete (admin)",
