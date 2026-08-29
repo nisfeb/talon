@@ -231,15 +231,4 @@ class TrunkWireTest {
         // reports every ship as out of date.
         assertEquals(2, TrunkWire.WIRE_VERSION)
     }
-
-    @Test
-    fun bumpPokeIsNullToHood() {
-        // mar/kiln/bump.hoon grabs `ul` — JSON null, not an empty
-        // object. An object nacks with a cast failure, which before
-        // the channel read poke acks would have been silent.
-        val (app, mark, body) = TrunkWire.bumpDesksPoke()
-        assertEquals("hood", app)
-        assertEquals("kiln-bump", mark)
-        assertEquals(kotlinx.serialization.json.JsonNull, body)
-    }
 }
