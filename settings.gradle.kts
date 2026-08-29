@@ -35,3 +35,7 @@ include(":composeApp")
 // repo so the design doc, client, and server stay in lockstep.
 // Build with `./gradlew :relay:installDist` or `docker build relay/`.
 include(":relay")
+// Headless party-line participant — joins a line with its own ship
+// and moves PCM between it and a file (or, later, a stream). Reuses
+// :core verbatim. Build with `./gradlew :bridge:installDist`.
+include(":bridge")

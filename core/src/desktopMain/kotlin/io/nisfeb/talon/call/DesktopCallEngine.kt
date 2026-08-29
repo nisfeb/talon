@@ -175,10 +175,33 @@ val DesktopCallEngineProvider: CallEngineProvider =
  * seconds after a rejected call. PeerConnections are still closed per
  * call; the factory outlives them.
  */
-internal object DesktopWebRtcFactory {
+object DesktopWebRtcFactory {
     private val lock = Any()
     private var factory: PeerConnectionFactory? = null
-    private var adm: dev.onvoid.webrtc.media.audio.AudioDeviceModule? = null
+    private var adm: dev.onvoid.webrtc.media.audio.AudioDeviceModuleBase? = null
+
+    /**
+     * What to build the factory's audio device from.
+     *
+     * The app wants the real one — a sound card, with devices to
+     * enumerate and pick between. A headless process wants
+     * HeadlessAudioDeviceModule, which has no sound card at all and
+     * moves PCM through setAudioSink / setAudioSource instead. Both
+     * are AudioDeviceModuleBase, and the factory only ever needs that.
+     *
+     * Must be set before the first [get] or [audioDeviceModule]: the
+     * factory captures the module it was built with, and a later one
+     * has no effect on tracks already sourced from the first.
+     */
+    fun useAudioDeviceModule(make: () -> dev.onvoid.webrtc.media.audio.AudioDeviceModuleBase) {
+        synchronized(lock) {
+            check(factory == null) { "the WebRTC factory is already built" }
+            makeAdm = make
+        }
+    }
+
+    private var makeAdm: () -> dev.onvoid.webrtc.media.audio.AudioDeviceModuleBase =
+        { dev.onvoid.webrtc.media.audio.AudioDeviceModule() }
 
     /**
      * The module the factory captures and plays through.
@@ -189,16 +212,16 @@ internal object DesktopWebRtcFactory {
      * with the factory so the first call and a device change made before
      * any call both land on one object.
      */
-    fun audioDeviceModule(): dev.onvoid.webrtc.media.audio.AudioDeviceModule =
+    fun audioDeviceModule(): dev.onvoid.webrtc.media.audio.AudioDeviceModuleBase =
         synchronized(lock) { ensure().second }
 
     fun get(): PeerConnectionFactory = synchronized(lock) { ensure().first }
 
-    private fun ensure(): Pair<PeerConnectionFactory, dev.onvoid.webrtc.media.audio.AudioDeviceModule> {
+    private fun ensure(): Pair<PeerConnectionFactory, dev.onvoid.webrtc.media.audio.AudioDeviceModuleBase> {
         val f = factory
         val a = adm
         if (f != null && a != null) return f to a
-        val module = dev.onvoid.webrtc.media.audio.AudioDeviceModule()
+        val module = makeAdm()
         val made = PeerConnectionFactory(module)
         factory = made
         adm = module

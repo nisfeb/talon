@@ -29,6 +29,20 @@ import kotlinx.coroutines.flow.StateFlow
 class DesktopPeerLink(
     iceServers: List<IceServer>,
     private val sendAudio: Boolean,
+    /**
+     * Where the outgoing audio comes from, instead of a microphone.
+     *
+     * Null captures a sound card, which is what the app wants. A
+     * headless process passes a CustomAudioSource and pushes PCM into
+     * it on its own clock — that is the only injection point that
+     * works: an AudioDeviceModule's setAudioSink / setAudioSource
+     * stop firing once a PeerConnectionFactory owns the module, so a
+     * HeadlessAudioDeviceModule is good for *not* opening a sound
+     * card and nothing more.
+     */
+    private val micPcm: dev.onvoid.webrtc.media.audio.CustomAudioSource? = null,
+    /** Where the incoming audio goes, instead of a speaker. */
+    private val remotePcm: dev.onvoid.webrtc.media.audio.AudioTrackSink? = null,
 ) : PeerLink {
 
     private val _state = MutableStateFlow(MediaState.Idle)
@@ -60,6 +74,13 @@ class DesktopPeerLink(
                 )
             }
 
+            override fun onTrack(transceiver: dev.onvoid.webrtc.RTCRtpTransceiver?) {
+                val sink = remotePcm ?: return
+                val track = transceiver?.receiver?.track as? AudioTrack ?: return
+                runCatching { track.addSink(sink) }
+                    .onFailure { Log.w("PartyLine", "could not tap the remote track", it) }
+            }
+
             override fun onConnectionChange(pcState: RTCPeerConnectionState?) {
                 when (pcState) {
                     RTCPeerConnectionState.CONNECTED -> _state.value = MediaState.Live
@@ -74,7 +95,7 @@ class DesktopPeerLink(
 
     init {
         if (sendAudio) {
-            val source = factory.createAudioSource(AudioOptions())
+            val source = micPcm ?: factory.createAudioSource(AudioOptions())
             val track = factory.createAudioTrack("talon-mic", source)
             // Galène requires every stream to be one-directional: the
             // offerer is always the sender.
