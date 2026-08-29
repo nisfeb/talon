@@ -43,8 +43,23 @@ object Bridge {
         Log.i(TAG, "starting: $config")
 
         val audio = BridgeAudio(
-            source = config.play?.let { WavPcmSource(it, config.loop) } ?: PcmSource.Silent,
-            sink = config.record?.let(::WavPcmSink) ?: PcmSink.Discard,
+            source = when {
+                config.audioIn != null -> LineInPcmSource(config.audioIn)
+                config.play != null -> WavPcmSource(config.play, config.loop)
+                else -> PcmSource.Silent
+            },
+            // Both, when both are asked for: relaying a line somewhere
+            // and recording it are not alternatives.
+            sink = listOfNotNull(
+                config.audioOut?.let(::LineOutPcmSink),
+                config.record?.let(::WavPcmSink),
+            ).let { sinks ->
+                when (sinks.size) {
+                    0 -> PcmSink.Discard
+                    1 -> sinks.single()
+                    else -> TeePcmSink(*sinks.toTypedArray())
+                }
+            },
         )
         // Before anything else touches WebRTC: the factory captures
         // the audio device it was built with, and a later one has no

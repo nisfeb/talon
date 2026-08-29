@@ -39,12 +39,22 @@ argument):
 | `TALON_BRIDGE_SHIP_CODE` | `talon.bridge.ship.code` | That ship's `+code` |
 | `TALON_BRIDGE_HOST` | `talon.bridge.host` | Who hosts the line |
 | `TALON_BRIDGE_ROOM` | `talon.bridge.room` | The line's name |
+| `TALON_BRIDGE_AUDIO_IN` | `talon.bridge.audio.in` | Capture device spoken into the line |
+| `TALON_BRIDGE_AUDIO_OUT` | `talon.bridge.audio.out` | Playback device the line is played to |
 | `TALON_BRIDGE_PLAY` | `talon.bridge.play` | WAV to play into the line |
 | `TALON_BRIDGE_LOOP` | `talon.bridge.loop` | Repeat that file |
 | `TALON_BRIDGE_RECORD` | `talon.bridge.record` | WAV to record the line to |
 
-Set `PLAY`, `RECORD`, or both. Neither means the bridge has nothing to
-do, and it says so rather than sitting there.
+Set at least one of these four. `AUDIO_IN` wins over `PLAY` when both
+are given — a device is a live source and a file would talk over it —
+while `AUDIO_OUT` and `RECORD` compose, so a relay can record itself.
+None of them set means the bridge has nothing to do, and it says so
+rather than sitting there.
+
+Device names are matched as a case-insensitive substring, or
+`default` for the system device. On Linux `default` is what you want:
+`javax.sound` cannot see PipeWire sinks at all, so routing happens
+outside the process (see below).
 
 The `+code` is the one value worth keeping out of a shell history, so
 prefer the properties file or a systemd `EnvironmentFile=`.
@@ -53,6 +63,56 @@ Stop it with Ctrl-C or `SIGTERM`. A recording's WAV header carries its
 own length, which is only correct once the file is closed — the
 shutdown hook is what does that, so killing it with `SIGKILL` leaves a
 file most players will still play but whose length field reads zero.
+
+## Relaying something this machine can only reach through an app
+
+An X Space cannot be published into: there is no ingest API, and only
+speakers the host invited can talk. So a *person* joins the Space as a
+speaker in their own client, and the bridge becomes that client's
+microphone and speaker:
+
+```
+Talon (you) --party line--> bridge --> TalonBridgeMic  --monitor--> X mic --> Space
+Space --> X output --> TalonBridgeSpace --monitor--> bridge --party line--> Talon (you)
+```
+
+You speak and listen in Talon. X never touches your real microphone or
+your real speakers, which is what stops the two directions feeding each
+other: X does not echo your own mic back, and a WebRTC down link
+carries other participants but not your own up stream.
+
+Both ends must be *dedicated* null sinks rather than the system's
+default output and its monitor. Talon is very likely running on the
+same machine, and a whole-system capture would push the party line's
+own playback straight back into the Space.
+
+On Linux, `scripts/talon-bridge-spaces` creates both devices, points
+the bridge at them, and removes them on exit. Then in your X client set
+the microphone to *Monitor of "Talon Bridge (mic for X)"* and the
+output to *"Talon Bridge (X output)"* — a browser does output per tab,
+which is what you want, since the native app follows the system default
+and would route everything here.
+
+macOS and Windows cannot create a virtual device without installing a
+driver (BlackHole, VB-Cable). Install one, then set `AUDIO_IN` and
+`AUDIO_OUT` to it and skip the script.
+
+Because you are a *speaker*, your client is on the Space's real-time
+path rather than the 10-30s HLS listener feed, so this stays roughly
+sub-second in both directions.
+
+Two things measured rather than assumed, both on PipeWire:
+`PULSE_SINK` and `PULSE_SOURCE` do steer a Java stream through the ALSA
+default device (which matters, because `javax.sound` cannot see
+PipeWire sinks at all — only ALSA hardware); and a capture line
+delivers nothing for its first ~1.7 seconds, so early silence is the
+device waking up, not a broken route.
+
+The remaining unknown is what X's own audio processing does to a
+multi-voice mix arriving as a microphone. Echo cancellation should be a
+non-issue — it adapts against what is being played, and the party line
+is uncorrelated with the Space — but automatic gain control is worth a
+listen before trusting it live.
 
 ## Audio
 

@@ -1,0 +1,78 @@
+#!/usr/bin/env bash
+# Run the bridge as a two-way relay between a Talon party line and
+# something this machine can only reach through an app — an X Space
+# being the case it was written for.
+#
+# You join the Space in your own client as a speaker. This makes the
+# bridge that client's microphone and speaker, so the party line
+# arrives at X as mic input and the Space comes back out. You speak
+# and listen in Talon; X never touches your real mic or speakers.
+#
+# Two null sinks, because both ends must be dedicated devices. Talon
+# is very likely running on this same machine, and capturing the
+# system monitor instead would push the party line's own playback
+# straight back into the Space.
+#
+#     party line -> bridge -> TalonBridgeMic  -(monitor)-> X mic
+#     Space -> X out -> TalonBridgeSpace -(monitor)-> bridge -> party line
+#
+# Linux/PipeWire/PulseAudio only. macOS and Windows have no way to
+# create a virtual device without installing a driver (BlackHole,
+# VB-Cable); point AUDIO_IN/AUDIO_OUT at those instead and skip this.
+
+set -euo pipefail
+
+command -v pactl >/dev/null || {
+	echo "talon-bridge: pactl not found — this script is for PipeWire/PulseAudio" >&2
+	exit 1
+}
+
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+bridge="${TALON_BRIDGE_BIN:-$here/../build/install/talon-bridge/bin/talon-bridge}"
+[ -x "$bridge" ] || {
+	echo "talon-bridge: no binary at $bridge — run ./gradlew :bridge:installDist" >&2
+	exit 1
+}
+
+mic_mod=""
+space_mod=""
+cleanup() {
+	# Unload in reverse, and never fail the exit path over it.
+	[ -n "$space_mod" ] && pactl unload-module "$space_mod" 2>/dev/null || true
+	[ -n "$mic_mod" ] && pactl unload-module "$mic_mod" 2>/dev/null || true
+}
+trap cleanup EXIT INT TERM
+
+mic_mod=$(pactl load-module module-null-sink \
+	sink_name=TalonBridgeMic \
+	sink_properties=device.description="Talon Bridge (mic for X)" \
+	rate=48000 channels=1)
+space_mod=$(pactl load-module module-null-sink \
+	sink_name=TalonBridgeSpace \
+	sink_properties=device.description="Talon Bridge (X output)" \
+	rate=48000 channels=1)
+
+cat <<'EOF'
+
+Devices are up. In your X client, set:
+
+  Microphone  ->  Monitor of "Talon Bridge (mic for X)"
+  Output      ->  "Talon Bridge (X output)"
+
+The browser sets output per tab (right-click the tab, or the OS
+volume mixer). The native app follows the system default, so use a
+browser unless you want everything routed here.
+
+Then join the Space as a speaker. Ctrl-C removes both devices.
+
+EOF
+
+# PULSE_SINK steers playback, PULSE_SOURCE steers capture; both are
+# honoured for a Java stream through the ALSA default device, which
+# is the only thing javax.sound can see on Linux.
+export PULSE_SINK=TalonBridgeMic
+export PULSE_SOURCE=TalonBridgeSpace.monitor
+export TALON_BRIDGE_AUDIO_IN="${TALON_BRIDGE_AUDIO_IN:-default}"
+export TALON_BRIDGE_AUDIO_OUT="${TALON_BRIDGE_AUDIO_OUT:-default}"
+
+exec "$bridge" "$@"

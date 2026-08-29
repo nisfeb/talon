@@ -20,6 +20,16 @@ data class Config(
     val host: String,
     /** The line's name on that host. */
     val room: String,
+    /**
+     * Capture device whose audio is spoken into the line, or null.
+     *
+     * Takes precedence over [play]: a live source is what someone
+     * configured a device for, and playing a file at the same time
+     * would talk over it.
+     */
+    val audioIn: String?,
+    /** Playback device the line is played out to, or null. */
+    val audioOut: String?,
     /** WAV played into the line, or null to listen only. */
     val play: File?,
     /** Whether [play] repeats when it ends. */
@@ -32,9 +42,10 @@ data class Config(
          * Sources, in order of precedence: the environment, then
          * [file] if it exists.
          *
-         * TALON_BRIDGE_SHIP_URL, _SHIP_CODE, _HOST, _ROOM, _PLAY,
-         * _LOOP, _RECORD — or the same names lowercased with dots in
-         * a properties file (talon.bridge.ship.url, …).
+         * TALON_BRIDGE_SHIP_URL, _SHIP_CODE, _HOST, _ROOM, _AUDIO_IN,
+         * _AUDIO_OUT, _PLAY, _LOOP, _RECORD — or the same names
+         * lowercased with dots in a properties file
+         * (talon.bridge.ship.url, …).
          */
         fun load(file: File = File("bridge.properties")): Config {
             val props = Properties().apply {
@@ -54,9 +65,12 @@ data class Config(
 
             val play = get("PLAY")?.let(::File)
             val record = get("RECORD")?.let(::File)
-            require(play != null || record != null) {
-                "set TALON_BRIDGE_PLAY, TALON_BRIDGE_RECORD, or both — " +
-                    "a bridge that neither speaks nor listens has nothing to do"
+            val audioIn = get("AUDIO_IN")
+            val audioOut = get("AUDIO_OUT")
+            require(play != null || record != null || audioIn != null || audioOut != null) {
+                "set TALON_BRIDGE_AUDIO_IN / _AUDIO_OUT (to relay a device) or " +
+                    "_PLAY / _RECORD (to use files) — a bridge that neither " +
+                    "speaks nor listens has nothing to do"
             }
             require(play == null || play.isFile) { "no such file: $play" }
 
@@ -66,6 +80,8 @@ data class Config(
                 shipCode = need("SHIP_CODE"),
                 host = host,
                 room = need("ROOM"),
+                audioIn = audioIn,
+                audioOut = audioOut,
                 play = play,
                 loop = get("LOOP")?.lowercase() in setOf("1", "true", "yes"),
                 record = record,
@@ -76,5 +92,6 @@ data class Config(
     /** Safe to print: the +code is the one thing that must not leak. */
     override fun toString() =
         "Config(ship=$shipUrl, line=$host/$room, " +
-            "play=${play ?: "—"}${if (loop) " (looping)" else ""}, record=${record ?: "—"})"
+            "in=${audioIn ?: play?.toString() ?: "—"}${if (play != null && loop) " (looping)" else ""}, " +
+            "out=${listOfNotNull(audioOut, record?.toString()).joinToString(" + ").ifEmpty { "—" }})"
 }
