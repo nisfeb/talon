@@ -257,8 +257,15 @@ class CallController(
                         _install.value == TrunkInstall.Hidden
                     ) {
                         Log.w(TAG, "ship speaks wire $shipWire; we speak ${TrunkWire.WIRE_VERSION}")
-                        _install.value =
-                            TrunkInstall.Outdated(shipWire, TrunkWire.WIRE_VERSION)
+                        // Try to repair it before asking the user to.
+                        // An outdated desk is almost always a sync
+                        // that stalled rather than a decision, and the
+                        // person seeing the prompt can do nothing
+                        // about it that the ship cannot do itself.
+                        if (!repairOutdated(ch)) {
+                            _install.value =
+                                TrunkInstall.Outdated(shipWire, TrunkWire.WIRE_VERSION)
+                        }
                     }
                 }.onFailure { Log.w(TAG, "version scry failed; assuming an old desk", it) }
                 runCatching { adoptDefaultSfu(ch) }
@@ -506,6 +513,43 @@ class CallController(
                 ),
             )
         }.onFailure { Log.w(TAG, "set-sfu poke failed", it) }
+    }
+
+    /**
+     * Unstick a desk whose sync has fallen behind. True when it worked.
+     *
+     * `|bump` asks kiln to re-check its sources, which is the repair
+     * for the common case: the subscription is intact and simply has
+     * not pulled. An install poke would not do it — kiln no-ops when
+     * it believes the desk is current, which is precisely the state a
+     * stalled ship is in, and why re-installing appears to do nothing.
+     *
+     * Deliberately not uninstall-then-install, which does work and
+     * takes the desk's agent state with it: a host would silently lose
+     * its rooms, its policy and its ICE servers. That stays a thing a
+     * person decides, not a thing an app does on their behalf.
+     */
+    private suspend fun repairOutdated(ch: UrbitChannel): Boolean {
+        val (app, mark, body) = TrunkWire.bumpDesksPoke()
+        runCatching { ch.poke(app, mark, body) }
+            .onFailure {
+                Log.w(TAG, "kiln-bump refused: " + it.message)
+                return false
+            }
+        val deadline = nowMs() + BUMP_WAIT_MS
+        while (nowMs() < deadline) {
+            delay(3_000)
+            val wire = runCatching {
+                TrunkWire.parseWireVersion(ch.scry(TrunkWire.AGENT, "/version"))
+            }.getOrNull() ?: continue
+            if (wire >= TrunkWire.WIRE_VERSION) {
+                Log.i(TAG, "desk caught up to wire $wire after a bump")
+                _wire.value = wire
+                return true
+            }
+        }
+        Log.w(TAG, "still behind after a bump; asking the user")
+        return false
     }
 
     /**
@@ -941,6 +985,10 @@ class CallController(
         private const val RINGBACK_GAP_MS = 3_000
         /** Shorter for an incoming call: it is asking for attention. */
         private const val INCOMING_GAP_MS = 1_400
+
+        /** How long to watch for a bumped desk to catch up. A desk
+         *  arriving over ames takes longer than a poke. */
+        private const val BUMP_WAIT_MS = 90_000L
 
         private const val INSTALL_TIMEOUT_MS = 600_000L
 

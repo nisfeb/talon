@@ -144,6 +144,7 @@ object TrunkWire {
     private const val KILN_AGENT = "hood"
     private const val KILN_INSTALL_MARK = "kiln-install"
     private const val KILN_REVIVE_MARK = "kiln-revive"
+    private const val KILN_BUMP_MARK = "kiln-bump"
 
     /**
      * Ask our own %hood to install [DESK] from [PUBLISHER]. %kiln's
@@ -329,6 +330,23 @@ object TrunkWire {
      * are local and it cannot read the host's rooms. Answered with the
      * same announce a member would have got, or a denial.
      */
+    /**
+     * Ask %kiln to re-check its sources for updates — dojo's `|bump`.
+     *
+     * The repair for a desk whose sync has stalled. A plain install
+     * poke no-ops when kiln believes the desk is current, which is
+     * exactly the state a stalled ship is in, so re-installing looks
+     * like it does nothing. Bump is non-destructive: it checks, and
+     * pulls only if there is something to pull.
+     *
+     * Explicitly NOT uninstall-then-install. That works, but
+     * uninstalling drops the desk's agent state with it — a host would
+     * lose its rooms, its policy and its ICE config to a repair it
+     * never asked for.
+     */
+    fun bumpDesksPoke(): Triple<String, String, JsonElement> =
+        Triple(KILN_AGENT, KILN_BUMP_MARK, kotlinx.serialization.json.JsonNull)
+
     fun peekRoomAction(host: String, name: String): JsonElement = buildJsonObject {
         putJsonObject("peek-room") { put("host", host); put("name", name) }
     }
