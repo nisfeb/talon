@@ -6,6 +6,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
@@ -106,6 +107,15 @@ sealed interface TrunkUpdate {
      */
     data class Policy(override val from: String, val policy: CallPolicy) : TrunkUpdate
 
+    /**
+     * Another of this ship's devices answered, declined or hung up.
+     *
+     * Carries the call id so a device ignores one for a call it was
+     * never ringing for — a stale notice must not silence a genuine
+     * incoming call that arrived in the meantime.
+     */
+    data class Handled(override val from: String, val callId: String) : TrunkUpdate
+
     /** A freshly minted anonymous listen link, for the user to share. */
     /** The host opened (or reconfigured) a line we're a member of. */
     data class Open(override val from: String, val invite: PartyInvite) : TrunkUpdate
@@ -137,7 +147,7 @@ object TrunkWire {
      * lib/trunk-json.hoon by hand, so bump both together — a drift is
      * otherwise a silent no-op rather than an error.
      */
-    const val WIRE_VERSION = 2
+    const val WIRE_VERSION = 3
 
     const val PUBLISHER = "~ricsul-bilwyt"
     const val DESK = "trunk"
@@ -415,6 +425,9 @@ object TrunkWire {
         }
         (obj["policy"] as? JsonObject)?.let { p ->
             return TrunkUpdate.Policy("", parsePolicy(p))
+        }
+        obj["handled"]?.jsonPrimitive?.contentOrNull?.let { id ->
+            return TrunkUpdate.Handled("", id)
         }
         (obj["denied"] as? JsonObject)?.let { d ->
             return TrunkUpdate.Denied(

@@ -288,6 +288,23 @@ class CallController(
                         val fact = body["json"] ?: return@collect
                         when (val up = TrunkWire.parseUpdate(fact)) {
                             is TrunkUpdate.Recv -> onSignal(up)
+                            is TrunkUpdate.Handled -> {
+                                // Another of our devices answered or
+                                // declined. Stop ringing — but only for
+                                // the call we are actually ringing for,
+                                // or a stale notice would silence a
+                                // genuine incoming call that arrived
+                                // since.
+                                if (up.callId == callId &&
+                                    _state.value is CallUiState.Incoming
+                                ) {
+                                    Log.i(TAG, "call ${up.callId} handled on another device")
+                                    ringToken++
+                                    callId = null
+                                    peer = null
+                                    _state.value = CallUiState.None
+                                }
+                            }
                             is TrunkUpdate.Ticket -> {
                                 // Only the device that asked. A ship is
                                 // one identity across many devices and

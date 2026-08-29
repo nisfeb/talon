@@ -229,6 +229,6 @@ class TrunkWireTest {
         // The agent answers /x/version with ++wire-version. Bump both or
         // neither: a client claiming a version the desk doesn't speak
         // reports every ship as out of date.
-        assertEquals(2, TrunkWire.WIRE_VERSION)
+        assertEquals(3, TrunkWire.WIRE_VERSION)
     }
 }
