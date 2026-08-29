@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
@@ -28,6 +29,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.window.Dialog
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -134,6 +138,11 @@ fun InlineVideoPlayer(url: String, modifier: Modifier = Modifier) {
     }
     DisposableEffect(player) { onDispose { player.release() } }
 
+    // PlayerView only draws its fullscreen button when a listener is
+    // set — without one the control is simply absent, which is why a
+    // video could be played inline and never enlarged.
+    var fullscreen by remember(url) { mutableStateOf(false) }
+
     Box(
         modifier = modifier
             .fillMaxWidth()
@@ -145,12 +154,38 @@ fun InlineVideoPlayer(url: String, modifier: Modifier = Modifier) {
         AndroidView(
             factory = { ctx ->
                 PlayerView(ctx).apply {
-                    this.player = player
                     useController = true
+                    setFullscreenButtonClickListener { fullscreen = true }
                 }
             },
+            // One ExoPlayer, two views: whichever is not showing has to
+            // let go of it, or the surface stays with the hidden one
+            // and the visible view renders nothing.
+            update = { it.player = if (fullscreen) null else player },
             modifier = Modifier.fillMaxWidth().height(240.dp),
         )
+    }
+
+    if (fullscreen) {
+        Dialog(
+            onDismissRequest = { fullscreen = false },
+            properties = DialogProperties(usePlatformDefaultWidth = false),
+        ) {
+            Box(
+                modifier = Modifier.fillMaxSize().background(Color.Black),
+            ) {
+                AndroidView(
+                    factory = { ctx ->
+                        PlayerView(ctx).apply {
+                            useController = true
+                            setFullscreenButtonClickListener { fullscreen = false }
+                        }
+                    },
+                    update = { it.player = player },
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+        }
     }
 }
 
