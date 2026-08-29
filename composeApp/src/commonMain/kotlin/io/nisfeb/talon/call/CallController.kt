@@ -1,6 +1,7 @@
 package io.nisfeb.talon.call
 
 import io.nisfeb.talon.urbit.UrbitChannel
+import io.nisfeb.talon.urbit.PokeNacked
 import io.nisfeb.talon.urbit.UrbitSession
 import io.nisfeb.talon.util.Log
 import io.nisfeb.talon.util.backgroundExceptionHandler
@@ -695,11 +696,38 @@ class CallController(
      * a pushed one does, or with a denial that costs nothing. Safe to
      * fire on opening a group — it mints no token and joins nothing.
      */
+    /**
+     * Hosts we asked and could not reach, by "host/name".
+     *
+     * A peek needs wire 2 on *both* ships: ours to send it, and the
+     * host's to understand it. An older host receives a room-sig
+     * carrying a variant its type has no case for, the mark fails to
+     * cast, and the poke nacks — so the answer never comes and the
+     * line stays invisible with nothing to explain why. This is that
+     * explanation, kept so the UI can say it.
+     */
+    private val _peekFailed = MutableStateFlow<Map<String, String>>(emptyMap())
+    val peekFailed: StateFlow<Map<String, String>> = _peekFailed.asStateFlow()
+
     suspend fun peekRoom(host: String, name: String) {
         val ch = channel ?: return
+        val key = "$host/$name"
         runCatching {
             ch.poke(TrunkWire.AGENT, TrunkWire.ACTION_MARK, TrunkWire.peekRoomAction(host, name))
-        }.onFailure { Log.i(TAG, "peek $host/$name declined: " + it.message) }
+        }.onSuccess {
+            _peekFailed.value = _peekFailed.value - key
+        }.onFailure { t ->
+            // A nack here is information, not noise: our own ship
+            // refusing the action means our desk is too old, and the
+            // host refusing means theirs is.
+            val why = when {
+                t is PokeNacked && t.reason.contains("bad-key") ->
+                    "$host is running an older Trunk that can't answer this yet"
+                else -> t.message ?: "the host didn't answer"
+            }
+            Log.w(TAG, "peek $key failed: $why")
+            _peekFailed.value = _peekFailed.value + (key to why)
+        }
     }
 
     /** Ask [host] to let us onto its party line. */

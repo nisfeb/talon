@@ -111,6 +111,10 @@ import io.ktor.client.HttpClient
  *   - TlonChatRepo.stop calls scope.cancel which permanently dies;
  *     the rebuild gets a fresh scope per ship.
  */
+/** Asks per group open, 2s then 6s apart. Enough for a host that is
+ *  briefly asleep, few enough not to hammer one that is gone. */
+private const val PEEK_ATTEMPTS = 3
+
 @Composable
 fun App(
     http: HttpClient,
@@ -1706,13 +1710,39 @@ fun App(
                                 LaunchedEffect(groupRoom, knownInvites.keys, hostedRooms.keys) {
                                     val (h, n) = groupRoom ?: return@LaunchedEffect
                                     val key = "$h/$n"
-                                    if (hostedRooms.containsKey(key)) return@LaunchedEffect
-                                    if (knownInvites.containsKey(key)) return@LaunchedEffect
-                                    callController?.peekRoom(h, n)
+                                    // A few widening attempts, then
+                                    // stop. One try per group open was
+                                    // enough only when the host
+                                    // happened to be reachable at that
+                                    // instant; an ames round trip to a
+                                    // sleeping ship is not.
+                                    var wait = 2_000L
+                                    repeat(PEEK_ATTEMPTS) { attempt ->
+                                        if (hostedRooms.containsKey(key)) return@LaunchedEffect
+                                        if (knownInvites.containsKey(key)) return@LaunchedEffect
+                                        callController?.peekRoom(h, n)
+                                        if (attempt < PEEK_ATTEMPTS - 1) {
+                                            kotlinx.coroutines.delay(wait)
+                                            wait *= 3
+                                        }
+                                    }
                                 }
                                 val partyRoomHere = groupRoom?.takeIf { (h, n) ->
                                     hostedRooms.containsKey("$h/$n") ||
                                         knownInvites.containsKey("$h/$n")
+                                }
+                                // Why we couldn't find out, when we
+                                // couldn't. Silence here is what turns
+                                // "no line in this group" and "your
+                                // ship can't ask" into the same thing.
+                                val peekProblems by (
+                                    callController?.peekFailed
+                                        ?: kotlinx.coroutines.flow.MutableStateFlow(
+                                            emptyMap<String, String>(),
+                                        )
+                                    ).collectAsState()
+                                val peekProblem = groupRoom?.let { (h, n) ->
+                                    peekProblems["$h/$n"]
                                 }
                                 DmChatScreen(
                                     db = db,
@@ -1790,6 +1820,9 @@ fun App(
                                                 nameFor = { partyContacts.displayName(it) },
                                                 audioDevices = audioDevices,
                                             )
+                                        }
+                                        peekProblem?.let { why ->
+                                            io.nisfeb.talon.ui.PartyLineUnavailable(why)
                                         }
                                     },
                                     onOpenGroupInfo = {
