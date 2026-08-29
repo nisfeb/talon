@@ -72,7 +72,7 @@ class BridgeAudio(
         if (loggedRemote.compareAndSet(false, true)) {
             Log.i(TAG, "line audio: ${sampleRate}Hz×$ch, $bitsPerSample-bit, $frames frames/slab")
         }
-        if (bitsPerSample == 16) mixer.add(data, frames, PcmFormat(sampleRate, ch))
+        if (bitsPerSample == 16) mixer.add(data, frames, PcmFormat(sampleRate, ch), rate)
     }
 
     /**
@@ -137,7 +137,12 @@ class BridgeAudio(
         running.set(false)
         pump?.join(500)
         pump = null
-        runCatching { mic?.dispose() }
+        // Deliberately not disposed. A peer connection that was
+        // closed a moment ago still has native threads winding down
+        // around the track this sourced, and freeing it underneath
+        // them is a use-after-free — the same reason DesktopPeerLink
+        // never disposes the shared factory. One native object
+        // outliving the process costs nothing.
         mic = null
         runCatching { source.close() }
         runCatching { sink.close() }
@@ -156,21 +161,51 @@ class BridgeAudio(
  * interleaving them into noise. Everyone who lands in the same 10ms
  * window is mixed into that window.
  *
- * ponytail: no resampling and no per-source jitter buffer — Galène
- * hands out 48kHz and a recording tolerates ±10ms of alignment
- * slack. If a source ever arrives at another rate, put an
- * AudioResampler (webrtc-java ships one) in front of [add].
+ * Channel counts are folded; sample rates are not. A stereo speaker
+ * is averaged down, but a source at another *rate* would be summed
+ * sample-for-sample and come out at the wrong speed, so it is
+ * dropped with a warning instead — silence that says why beats a
+ * recording that plays at half speed and doesn't.
+ *
+ * ponytail: no per-source jitter buffer — Galène hands out 48kHz and
+ * a recording tolerates ±10ms of alignment slack. If rates ever do
+ * vary, put an AudioResampler (webrtc-java ships one) in front.
  */
-private class Mixer(private val frames: Int, private val channels: Int) {
+internal class Mixer(private val frames: Int, private val channels: Int) {
     private val lock = Any()
     private var acc = IntArray(frames * channels)
     private var any = false
 
-    fun add(data: ByteArray, frames: Int, format: PcmFormat) {
+    /** True once we have complained about a rate we can't take. */
+    private val warned = java.util.concurrent.atomic.AtomicBoolean(false)
+
+    fun add(data: ByteArray, frames: Int, format: PcmFormat, rate: Int) {
+        if (format.sampleRate != rate) {
+            if (warned.compareAndSet(false, true)) {
+                Log.w(
+                    "BridgeAudio",
+                    "dropping a stream at ${format.sampleRate}Hz; the mixer runs at ${rate}Hz",
+                )
+            }
+            return
+        }
         val b = ByteBuffer.wrap(data).order(ByteOrder.LITTLE_ENDIAN).asShortBuffer()
         synchronized(lock) {
-            val n = minOf(frames * format.channels, acc.size, b.remaining())
-            for (i in 0 until n) acc[i] += b.get(i).toInt()
+            val usable = minOf(frames, acc.size / channels, b.remaining() / format.channels)
+            for (f in 0 until usable) {
+                for (c in 0 until channels) {
+                    acc[f * channels + c] += if (format.channels == channels) {
+                        b.get(f * format.channels + c).toInt()
+                    } else {
+                        // Fold: average every input channel into each
+                        // of ours, which is a downmix for stereo→mono
+                        // and a duplicate for mono→stereo.
+                        var sum = 0
+                        for (sc in 0 until format.channels) sum += b.get(f * format.channels + sc)
+                        sum / format.channels
+                    }
+                }
+            }
             any = true
         }
     }

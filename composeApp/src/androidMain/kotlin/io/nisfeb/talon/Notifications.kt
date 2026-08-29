@@ -30,6 +30,15 @@ object Notifications {
     // created, so changing it means a new id.
     const val CHANNEL_CALLS = "calls_v2"
 
+    /**
+     * The "on a call" notification a live call's foreground service
+     * posts, separate from [CHANNEL_CALLS] because importance is a
+     * channel property. Incoming calls are HIGH so they take over the
+     * screen; an ongoing call must not, or connecting a call pops a
+     * heads-up banner over the call UI you are already looking at.
+     */
+    const val CHANNEL_CALL_ONGOING = "call_ongoing"
+
     const val EXTRA_ANSWER_FROM = "answer_from"
     const val EXTRA_ANSWER_CALL_ID = "answer_call_id"
 
@@ -80,6 +89,18 @@ object Notifications {
                     setSound(null, null)
                     enableLights(true)
                     enableVibration(false)
+                }
+            )
+        }
+        if (mgr.getNotificationChannel(CHANNEL_CALL_ONGOING) == null) {
+            mgr.createNotificationChannel(
+                NotificationChannel(
+                    CHANNEL_CALL_ONGOING,
+                    "Ongoing calls",
+                    NotificationManager.IMPORTANCE_LOW,
+                ).apply {
+                    description = "Shown while a call or party line is live"
+                    setShowBadge(false)
                 }
             )
         }

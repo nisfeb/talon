@@ -124,7 +124,12 @@ class WavPcmSource(file: File, private val loop: Boolean = false) : PcmSource {
                 }
                 "data" -> {
                     dataOff = off + 8
-                    dataLen = minOf(len, bytes.size - dataOff)
+                    // Clamped both ways: a truncated file declares more
+                    // than it holds, and a corrupt one declares a
+                    // negative length, which would reach ShortArray()
+                    // as a NegativeArraySizeException rather than as
+                    // the "this is not a WAV" it actually is.
+                    dataLen = minOf(len, bytes.size - dataOff).coerceAtLeast(0)
                 }
             }
             if (len < 0) break
@@ -148,8 +153,13 @@ class WavPcmSource(file: File, private val loop: Boolean = false) : PcmSource {
         if (total == 0) return 0
         val out = ByteBuffer.wrap(into).order(ByteOrder.LITTLE_ENDIAN)
         val ratio = source.sampleRate.toDouble() / format.sampleRate
+        // Never write past the buffer we were handed, whatever [frames]
+        // claims — a BufferOverflowException here would surface as a
+        // dead audio pump, three layers from the caller that got it
+        // wrong.
+        val room = minOf(frames, into.size / format.bytesPerFrame)
         var written = 0
-        while (written < frames) {
+        while (written < room) {
             val srcFrame = (pos * ratio).toInt()
             if (srcFrame >= total) {
                 if (!loop) break

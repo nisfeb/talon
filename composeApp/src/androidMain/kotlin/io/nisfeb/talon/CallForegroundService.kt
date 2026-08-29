@@ -68,9 +68,9 @@ class CallForegroundService : Service() {
             this, 0, tapIntent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
-        return NotificationCompat.Builder(this, Notifications.CHANNEL_CALLS)
+        return NotificationCompat.Builder(this, Notifications.CHANNEL_CALL_ONGOING)
             .setSmallIcon(android.R.drawable.stat_sys_speakerphone)
-            .setContentTitle(if (with.isEmpty()) "On a call" else "On a call with $with")
+            .setContentTitle(if (with.isEmpty()) "On a party line" else "On a call with $with")
             .setContentText("Tap to return to Talon")
             .setContentIntent(pending)
             .setOngoing(true)
@@ -85,7 +85,7 @@ class CallForegroundService : Service() {
         private const val EXTRA_WITH = "with"
         private const val TAG = "CallForegroundService"
 
-        /** [with] names the call in the notification — a peer or a line. */
+        /** [with] is the peer for a 1:1 call, or empty for a line. */
         fun start(context: Context, with: String) {
             val intent = Intent(context, CallForegroundService::class.java)
                 .putExtra(EXTRA_WITH, with)

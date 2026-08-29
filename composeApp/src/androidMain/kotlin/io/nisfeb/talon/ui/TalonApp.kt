@@ -227,7 +227,14 @@ fun TalonApp(
         // and missing.
         if (initialAnswerFrom != null) {
             androidx.compose.runtime.LaunchedEffect(initialAnswerFrom) {
-                val rang = kotlinx.coroutines.withTimeoutOrNull(20_000) {
+                // Matched to the ring timeout rather than picked: a
+                // cold start has to open the channel and run its
+                // scries before the ring can land, and giving up
+                // while the caller is still ringing is the bug this
+                // is here to fix.
+                val rang = kotlinx.coroutines.withTimeoutOrNull(
+                    io.nisfeb.talon.call.CallController.DEFAULT_RING_TIMEOUT_MS,
+                ) {
                     callController.state.first { s ->
                         s is io.nisfeb.talon.call.CallUiState.Incoming &&
                             s.peer == initialAnswerFrom
@@ -243,19 +250,32 @@ fun TalonApp(
         // recorder silence the moment the app stops being visible —
         // which read as "backgrounding Talon mutes you, but you can
         // still hear them".
-        val partyState by (partyLine?.state ?: remember {
-            kotlinx.coroutines.flow.MutableStateFlow(io.nisfeb.talon.call.PartyState.Idle)
-        }).collectAsState()
+        // partyLine is non-null exactly when callController is, but
+        // read through a remembered fallback rather than a `remember`
+        // inside an elvis — a remember that only runs on one side of
+        // a branch is a slot that appears and disappears.
+        val idleParty = remember {
+            kotlinx.coroutines.flow.MutableStateFlow<io.nisfeb.talon.call.PartyState>(
+                io.nisfeb.talon.call.PartyState.Idle,
+            )
+        }
+        val partyState by (partyLine?.state ?: idleParty).collectAsState()
         val onAir = callState is io.nisfeb.talon.call.CallUiState.Active ||
             callState is io.nisfeb.talon.call.CallUiState.Outgoing ||
             partyState is io.nisfeb.talon.call.PartyState.Live
+        // Naming the peer, but never an opaque room id — a party
+        // line's room is a Galène identifier, not something to put on
+        // a lock screen.
+        val onAirWith = (callState as? io.nisfeb.talon.call.CallUiState.Active)?.peer.orEmpty()
+        // Starting is keyed on the title too, so an outgoing call that
+        // connects re-posts as "On a call with ~ship" instead of
+        // keeping the placeholder for the length of the call. Stopping
+        // is keyed only on onAir, so a title change updates the
+        // notification without dropping the mic hold in between.
+        androidx.compose.runtime.LaunchedEffect(onAir, onAirWith) {
+            if (onAir) io.nisfeb.talon.CallForegroundService.start(context, onAirWith)
+        }
         androidx.compose.runtime.DisposableEffect(onAir) {
-            if (onAir) {
-                val with = (callState as? io.nisfeb.talon.call.CallUiState.Active)?.peer
-                    ?: (partyState as? io.nisfeb.talon.call.PartyState.Live)?.room
-                    ?: ""
-                io.nisfeb.talon.CallForegroundService.start(context, with)
-            }
             onDispose { if (onAir) io.nisfeb.talon.CallForegroundService.stop(context) }
         }
     }
