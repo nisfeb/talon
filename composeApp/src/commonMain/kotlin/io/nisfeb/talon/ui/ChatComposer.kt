@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Close
@@ -27,6 +28,7 @@ import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.LaunchedEffect
@@ -129,7 +131,25 @@ class ComposerState(initialDraftText: String) {
     var pendingAttachment by mutableStateOf<PendingAttachment?>(null)
     var sendError by mutableStateOf<String?>(null)
     var uploading by mutableStateOf(false)
+
+    /**
+     * The post being edited, if any.
+     *
+     * Editing happens in the composer rather than a dialog: it is the
+     * same act as writing the message was, with the same keyboard,
+     * autocomplete and formatting. A modal over the conversation hid
+     * the thing being edited and gave the text a second, lesser
+     * editor.
+     */
+    var editing by mutableStateOf<EditTarget?>(null)
 }
+
+/** A message being edited in place. */
+data class EditTarget(
+    val postId: String,
+    val originalSentMs: Long,
+    val originalContentJson: String?,
+)
 
 /**
  * Re-keys on [whom] so switching conversations starts the composer
@@ -177,6 +197,9 @@ fun ChatComposer(
     allShips: List<String>,
     canSend: Boolean,
     hideComposerButtons: Boolean,
+    /** Commit an in-place edit. Default no-op so surfaces that don't
+     *  support editing need not pass one. */
+    onSaveEdit: (EditTarget, String) -> Unit = { _, _ -> },
     placeholder: String = "Message",
     locationProvider: LocationProvider? = null,
     voiceComposer: (@Composable (
@@ -488,6 +511,18 @@ fun ChatComposer(
         }
 
         val doSend: () -> Boolean = doSend@{
+            // Editing short-circuits everything below: no commands, no
+            // quote, no attachments — an edit replaces the text of a
+            // post that already exists and nothing else.
+            val edit = state.editing
+            if (edit != null) {
+                val text = state.draft.text.trim()
+                if (text.isEmpty() || !canSend) return@doSend false
+                state.editing = null
+                state.draft = TextFieldValue("")
+                onSaveEdit(edit, text)
+                return@doSend true
+            }
             val body = state.draft.text.trim()
             val quote = state.pendingQuote
             // A bare quote (empty body) is allowed so a user can
@@ -571,6 +606,30 @@ fun ChatComposer(
                 contactMap = contactMap,
                 onDismiss = { state.pendingQuote = null },
             )
+        }
+
+        // Says what the composer is about to do, and offers the way
+        // out. Without it an edit in progress is indistinguishable
+        // from a half-typed message, and the only visible difference
+        // would be the send icon.
+        if (state.editing != null) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    "Editing message",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.weight(1f),
+                )
+                TextButton(onClick = {
+                    state.editing = null
+                    state.draft = TextFieldValue("")
+                }) { Text("Cancel") }
+            }
         }
 
         // Send-button + composer accent. App.kt drives theme primary
@@ -836,14 +895,18 @@ fun ChatComposer(
                         true
                     },
             )
+            val isEditing = state.editing != null
             IconButton(
                 onClick = { doSend() },
                 enabled = canSend && state.draft.text.isNotBlank(),
                 modifier = Modifier.size(36.dp),
             ) {
+                // A tick, not a paper plane. Editing and sending are
+                // different acts and the button is the only thing that
+                // says which one is about to happen.
                 Icon(
-                    Icons.AutoMirrored.Filled.Send,
-                    contentDescription = "Send",
+                    if (isEditing) Icons.Filled.Check else Icons.AutoMirrored.Filled.Send,
+                    contentDescription = if (isEditing) "Save edit" else "Send",
                     modifier = Modifier.size(22.dp),
                     tint = if (canSend && state.draft.text.isNotBlank()) sendAccent
                     else LocalContentColor.current,

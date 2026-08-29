@@ -554,7 +554,6 @@ fun DmChatScreen(
     var reactionDetailsTarget by remember(whom) {
         mutableStateOf<List<ReactionEntity>?>(null)
     }
-    var editing by remember { mutableStateOf<MessageEntity?>(null) }
     var confirmingDelete by remember { mutableStateOf<MessageEntity?>(null) }
 
     val canSend = remember(whom) {
@@ -889,7 +888,17 @@ fun DmChatScreen(
                 },
                 onEdit = {
                     actionTarget = null
-                    editing = target
+                    // Into the composer, not a dialog: same keyboard,
+                    // same autocomplete, and the conversation stays
+                    // visible behind what you are changing.
+                    composerState.draft = androidx.compose.ui.text.input.TextFieldValue(
+                        io.nisfeb.talon.urbit.editableText(target.contentJson),
+                    )
+                    composerState.editing = io.nisfeb.talon.ui.EditTarget(
+                        postId = target.id,
+                        originalSentMs = target.sentMs,
+                        originalContentJson = target.contentJson,
+                    )
                 },
                 onDelete = {
                     actionTarget = null
@@ -986,6 +995,22 @@ fun DmChatScreen(
             // (mine, channel chat, top-level) so it can only open
             // an edit the action menu would also allow. Null on
             // non-channel chats — %chat DMs ignore edit pokes.
+            onSaveEdit = { target, newText ->
+                scope.launch {
+                    runCatching {
+                        repo.edit(
+                            whom = whom,
+                            postId = target.postId,
+                            text = newText,
+                            originalSentMs = target.originalSentMs,
+                            originalContentJson = target.originalContentJson,
+                        )
+                    }.onFailure {
+                        composerState.sendError =
+                            "edit failed: ${it.message ?: it::class.simpleName}"
+                    }
+                }
+            },
             onEditLast = if (whom.startsWith("chat/")) {
                 {
                     rows.asSequence()
@@ -993,7 +1018,17 @@ fun DmChatScreen(
                         .map { it.row.m }
                         .filter { it.author == ourPatp && it.parentId == null }
                         .maxByOrNull { it.sentMs }
-                        ?.let { editing = it }
+                        ?.let { target ->
+                            composerState.draft =
+                                androidx.compose.ui.text.input.TextFieldValue(
+                                    io.nisfeb.talon.urbit.editableText(target.contentJson),
+                                )
+                            composerState.editing = io.nisfeb.talon.ui.EditTarget(
+                                postId = target.id,
+                                originalSentMs = target.sentMs,
+                                originalContentJson = target.contentJson,
+                            )
+                        }
                 }
             } else null,
             onBeforeLocalEcho = {
@@ -1061,29 +1096,6 @@ fun DmChatScreen(
         )
     }
 
-    editing?.let { target ->
-        EditMessageDialog(
-            // Editable text only — a quoted post's cite (and images /
-            // link previews) ride along untouched via originalContentJson.
-            initial = io.nisfeb.talon.urbit.editableText(target.contentJson),
-            onDismiss = { editing = null },
-            onSave = { newText ->
-                editing = null
-                scope.launch {
-                    runCatching {
-                        repo.edit(
-                            whom = whom,
-                            postId = target.id,
-                            text = newText,
-                            originalSentMs = target.sentMs,
-                            originalContentJson = target.contentJson,
-                        )
-                    }
-                        .onFailure { composerState.sendError = "edit failed: ${it.message ?: it::class.simpleName}" }
-                }
-            },
-        )
-    }
 
     catchUpSummary?.let { summary ->
         AlertDialog(
@@ -1813,74 +1825,7 @@ private fun NotifyLevelDropdown(
 // AlertDialog with a single OutlinedTextField bound to the message
 // body. Mirrors production exactly — there's no rich composer here
 // because messages with images/quotes/polls aren't editable.
-@Composable
-private fun EditMessageDialog(
-    initial: String,
-    onDismiss: () -> Unit,
-    onSave: (String) -> Unit,
-) {
-    // TextFieldValue (not a bare String) so Shift+Enter can splice a
-    // newline in at the caret. Caret starts at the end so the user can
-    // immediately type or hit Return to save.
-    var value by remember {
-        mutableStateOf(TextFieldValue(initial, selection = TextRange(initial.length)))
-    }
-    val focus = remember { FocusRequester() }
-    LaunchedEffect(Unit) { focus.requestFocus() }
-    val submit = { if (value.text.isNotBlank()) onSave(value.text.trim()) }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Edit message") },
-        text = {
-            OutlinedTextField(
-                value = value,
-                onValueChange = { value = it },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .focusRequester(focus)
-                    .onPreviewKeyEvent { e ->
-                        // Return sends the edit; Shift+Return inserts a
-                        // newline (CMP Desktop won't on a hardware Return,
-                        // so splice it in ourselves). Mirrors the composer.
-                        if (e.type != KeyEventType.KeyDown || e.key != Key.Enter) {
-                            return@onPreviewKeyEvent false
-                        }
-                        if (e.isShiftPressed) {
-                            val sel = value.selection
-                            val newText = value.text.substring(0, sel.start) +
-                                "\n" + value.text.substring(sel.end)
-                            value = value.copy(
-                                text = newText,
-                                selection = TextRange(sel.start + 1),
-                            )
-                        } else {
-                            submit()
-                        }
-                        true
-                    },
-            )
-        },
-        confirmButton = {
-            TextButton(onClick = submit, enabled = value.text.isNotBlank()) {
-                Text("Save")
-            }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
-    )
-}
 
-/**
- * Per-message action menu rendered as the body of a [DropdownMenu]
- * anchored to the message row, opened by a single tap on the row (or
- * right-click on desktop). Previously a [ModalBottomSheet] at screen
- * level — the bottom-sheet pattern wasted vertical room and obscured
- * the message the user was acting on. Now it floats next to the
- * source row.
- *
- * Self-dismissing actions invoke [onDismiss] before firing so the menu
- * closes immediately on selection.
- */
-@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 private fun MessageActionMenu(
     db: AppDatabase,
