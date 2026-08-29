@@ -75,3 +75,110 @@ internal fun storageS3Ready(creds: StorageCreds, config: StorageConfig): Boolean
         creds.accessKeyId.isNotBlank() &&
         creds.secretAccessKey.isNotBlank() &&
         config.bucket.isNotBlank()
+
+/**
+ * The longest object name any backend here will accept.
+ *
+ * ENAMETOOLONG (os error 36) is a *filesystem* limit on one path
+ * component — 255 bytes on ext4 and most others — and both upload
+ * backends land the object on a filesystem eventually. It bit a real
+ * user as an HTTP 500 from S3 with `Filename too long`, after memex
+ * had already 500'd on the same name, so neither path can be treated
+ * as the safe one.
+ *
+ * 255 is the ceiling, not the budget. The S3 key prepends
+ * `talon/<@da>-`, and a @da is a ~39-digit decimal, so roughly 40 of
+ * those bytes are gone before the name starts; memex builds a key of
+ * its own that we cannot see at all. Hence generous headroom rather
+ * than shaving to the theoretical maximum — a name this long is
+ * already unreadable, and the bytes buy nothing. StorageUploadTest
+ * pins the real key against the 255-byte limit so this stays true.
+ */
+internal const val MAX_UPLOAD_NAME_BYTES = 160
+
+/** Longest extension worth preserving; beyond this it isn't one. */
+private const val MAX_EXT_BYTES = 16
+
+/**
+ * Trim [fileName] to [maxBytes] of UTF-8, keeping its extension.
+ *
+ * Bytes rather than characters, because the limit being enforced
+ * downstream is a byte count: a name of 200 CJK characters is 600
+ * bytes and would fail a check that only counted 200.
+ *
+ * The extension is what survives truncation, since that is what tells
+ * a viewer (and a content sniffer) what the file is. No hash is mixed
+ * in to keep truncated names distinct: the S3 key already carries a
+ * timestamp, and memex mints its own key, so two long names cannot
+ * collide by being shortened here.
+ */
+internal fun truncateUploadName(
+    fileName: String,
+    maxBytes: Int = MAX_UPLOAD_NAME_BYTES,
+): String {
+    // Any directory part is not ours to send — and a stray separator
+    // would turn one over-long component into two path segments.
+    val name = fileName.substringAfterLast('/').substringAfterLast('\\')
+    if (name.isEmpty()) return "file"
+    if (name.utf8Size() <= maxBytes) return name
+
+    val dot = name.lastIndexOf('.')
+    val ext = if (dot > 0 && name.length - dot - 1 > 0 &&
+        name.substring(dot).utf8Size() <= MAX_EXT_BYTES
+    ) {
+        name.substring(dot)
+    } else {
+        ""
+    }
+    val stem = if (ext.isEmpty()) name else name.substring(0, dot)
+    val kept = stem.takeUtf8Bytes(maxBytes - ext.utf8Size())
+    // A name that is nothing but an over-long extension still has to
+    // go somewhere; give it a stem rather than returning a bare dot.
+    return if (kept.isEmpty()) "file".plus(ext) else kept + ext
+}
+
+/** UTF-8 length without allocating the encoded array. */
+private fun String.utf8Size(): Int {
+    var n = 0
+    var i = 0
+    while (i < length) {
+        val c = this[i]
+        if (c.isHighSurrogate() && i + 1 < length && this[i + 1].isLowSurrogate()) {
+            n += 4
+            i += 2
+        } else {
+            n += when {
+                c.code < 0x80 -> 1
+                c.code < 0x800 -> 2
+                else -> 3
+            }
+            i++
+        }
+    }
+    return n
+}
+
+/**
+ * The longest prefix of this string that fits [max] UTF-8 bytes,
+ * never splitting a character or a surrogate pair — a half-written
+ * code point is how truncation turns a name into replacement glyphs.
+ */
+private fun String.takeUtf8Bytes(max: Int): String {
+    if (max <= 0) return ""
+    var used = 0
+    var i = 0
+    while (i < length) {
+        val c = this[i]
+        val pair = c.isHighSurrogate() && i + 1 < length && this[i + 1].isLowSurrogate()
+        val size = when {
+            pair -> 4
+            c.code < 0x80 -> 1
+            c.code < 0x800 -> 2
+            else -> 3
+        }
+        if (used + size > max) break
+        used += size
+        i += if (pair) 2 else 1
+    }
+    return substring(0, i)
+}

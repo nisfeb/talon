@@ -1970,12 +1970,18 @@ class TlonChatRepo(
         val ch = channel ?: error("not connected")
         val client = http ?: error("not connected")
 
+        // Shortened here rather than in either backend, because both
+        // fail on an over-long name and neither is the safe fallback:
+        // the report that prompted this had memex 500 and then S3 500
+        // with `Filename too long (os error 36)` on the same upload.
+        val safeLengthName = truncateUploadName(fileName)
+
         val memexErr = runCatching {
-            uploadViaMemex(ch, client, bytes, contentType, fileName)
+            uploadViaMemex(ch, client, bytes, contentType, safeLengthName)
         }.onSuccess { return@withContext it }.exceptionOrNull()
 
         val storageErr = runCatching {
-            uploadViaStorage(ch, client, bytes, contentType, fileName)
+            uploadViaStorage(ch, client, bytes, contentType, safeLengthName)
         }.onSuccess { return@withContext it }.exceptionOrNull()
 
         error(
