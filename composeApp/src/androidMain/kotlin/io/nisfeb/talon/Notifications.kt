@@ -141,11 +141,13 @@ object Notifications {
      * phone call does, and CallStyle where the platform has it (31+)
      * so it renders as a call rather than a chat notification.
      *
-     * Answering only *opens* the app: the media negotiation lives in
-     * CallController, which needs the app running and its channel up
-     * before it can answer anything. The in-app ring surface is where
-     * the call is actually accepted. Declining works from here alone,
-     * because a decline is one poke and needs no media.
+     * Answering opens the app carrying EXTRA_ANSWER_FROM, and TalonApp
+     * accepts as soon as the controller is up and ringing for that
+     * peer — the media negotiation lives in CallController and needs a
+     * running app and a live channel, so it can't happen here. It has
+     * to be handled on arrival, though: without that the action just
+     * showed the in-app ring and the user had to press Answer twice.
+     * Declining works from here alone, being one poke and no media.
      */
     fun showIncomingCall(context: Context, from: String, callId: String) {
         ensureChannel(context)

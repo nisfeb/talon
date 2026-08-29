@@ -37,6 +37,10 @@ class MainActivity : ComponentActivity() {
      *  stashed for completeness even though the screen reads the
      *  active ship's digest itself. */
     private val deepLinkOpenDigest = mutableStateOf<String?>(null)
+    /** Set when the user hit Answer on the incoming-call notification.
+     *  The action can only open the activity — accepting needs the
+     *  running CallController — so TalonApp does the accept. */
+    private val pendingAnswerFrom = mutableStateOf<String?>(null)
     private val pendingShare = mutableStateOf<ShareIntent?>(null)
     /** When the system share sheet routes through a published Sharing
      *  Shortcut (one of the per-channel shortcuts ShortcutsPublisher
@@ -78,6 +82,7 @@ class MainActivity : ComponentActivity() {
             val openDigest by deepLinkOpenDigest
             val share by pendingShare
             val shareTarget by pendingShareTarget
+            val answerFrom by pendingAnswerFrom
             val themeMode by app.themePreference.mode.collectAsState()
             val systemDark = isSystemInDarkTheme()
             val darkTheme = when (themeMode) {
@@ -157,6 +162,8 @@ class MainActivity : ComponentActivity() {
                             deepLinkThreadAnchor.value = null
                             deepLinkOpenDigest.value = null
                         },
+                        initialAnswerFrom = answerFrom,
+                        onAnswerConsumed = { pendingAnswerFrom.value = null },
                     )
                 }
             }
@@ -190,6 +197,14 @@ class MainActivity : ComponentActivity() {
         }
         intent.getStringExtra(Notifications.EXTRA_OPEN_DIGEST)?.let {
             deepLinkOpenDigest.value = it
+            consumedDeepLink = true
+        }
+        intent.getStringExtra(Notifications.EXTRA_ANSWER_FROM)?.let {
+            pendingAnswerFrom.value = it
+            // Cleared here as well as in the block below: a retained
+            // answer extra would re-accept on the next cold launch.
+            intent.removeExtra(Notifications.EXTRA_ANSWER_FROM)
+            intent.removeExtra(Notifications.EXTRA_ANSWER_CALL_ID)
             consumedDeepLink = true
         }
         // Strip the deep-link extras now that we've read them, then write

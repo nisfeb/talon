@@ -419,16 +419,25 @@ class CallController(
     fun reject() {
         scope.launch {
             val id = callId ?: return@launch
-            peer?.let { poke(it, TrunkSig.Reject(id, "declined")) }
+            val p = peer
             endLocal("declined")
+            p?.let { poke(it, TrunkSig.Reject(id, "declined")) }
         }
     }
 
     fun hangup() {
         scope.launch {
             val id = callId ?: return@launch
-            peer?.let { poke(it, TrunkSig.Hangup(id)) }
+            val p = peer
+            // End locally FIRST, then tell the far end. A poke now
+            // waits for its ack (up to POKE_ACK_TIMEOUT_MS), so doing
+            // this the other way round left the call on screen — and
+            // the red button looking dead — for as long as the peer's
+            // ship took to answer, or the full timeout if it never
+            // did. Hanging up is a local decision; it doesn't need
+            // anyone's permission.
             endLocal("hung up")
+            p?.let { poke(it, TrunkSig.Hangup(id)) }
         }
     }
 

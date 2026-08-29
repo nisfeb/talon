@@ -16,6 +16,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import kotlinx.coroutines.flow.first
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.ProcessLifecycleOwner
@@ -140,6 +141,9 @@ fun TalonApp(
      *  without it the param value never changes on the second tap
      *  and the LaunchedEffect below doesn't re-fire. */
     onDeepLinkConsumed: () -> Unit = {},
+    /** The @p whose call the user answered from the notification. */
+    initialAnswerFrom: String? = null,
+    onAnswerConsumed: () -> Unit = {},
 ) {
     val app = LocalContext.current.applicationContext as TalonApplication
     val context = LocalContext.current
@@ -212,6 +216,47 @@ fun TalonApp(
             if (callState !is io.nisfeb.talon.call.CallUiState.Incoming) {
                 io.nisfeb.talon.Notifications.cancelIncomingCall(app)
             }
+        }
+
+        // Answering from the notification. The platform action only
+        // opens the activity — the media negotiation needs the
+        // controller and a live channel — so the accept has to happen
+        // here, or the user lands on the in-app ring and has to press
+        // Answer a second time. On a cold start the ring hasn't
+        // arrived over SSE yet, so wait for it rather than firing once
+        // and missing.
+        if (initialAnswerFrom != null) {
+            androidx.compose.runtime.LaunchedEffect(initialAnswerFrom) {
+                val rang = kotlinx.coroutines.withTimeoutOrNull(20_000) {
+                    callController.state.first { s ->
+                        s is io.nisfeb.talon.call.CallUiState.Incoming &&
+                            s.peer == initialAnswerFrom
+                    }
+                }
+                if (rang != null) callController.accept()
+                onAnswerConsumed()
+            }
+        }
+
+        // Hold the microphone while there is live audio. Without a
+        // microphone-typed foreground service, Android 14+ hands the
+        // recorder silence the moment the app stops being visible —
+        // which read as "backgrounding Talon mutes you, but you can
+        // still hear them".
+        val partyState by (partyLine?.state ?: remember {
+            kotlinx.coroutines.flow.MutableStateFlow(io.nisfeb.talon.call.PartyState.Idle)
+        }).collectAsState()
+        val onAir = callState is io.nisfeb.talon.call.CallUiState.Active ||
+            callState is io.nisfeb.talon.call.CallUiState.Outgoing ||
+            partyState is io.nisfeb.talon.call.PartyState.Live
+        androidx.compose.runtime.DisposableEffect(onAir) {
+            if (onAir) {
+                val with = (callState as? io.nisfeb.talon.call.CallUiState.Active)?.peer
+                    ?: (partyState as? io.nisfeb.talon.call.PartyState.Live)?.room
+                    ?: ""
+                io.nisfeb.talon.CallForegroundService.start(context, with)
+            }
+            onDispose { if (onAir) io.nisfeb.talon.CallForegroundService.stop(context) }
         }
     }
     val androidAudioDevices = remember {

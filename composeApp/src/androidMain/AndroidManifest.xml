@@ -35,6 +35,9 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <!-- Android 14+ feeds silence to the mic once the app is not
+         visible unless a microphone-typed FGS is running. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
@@ -104,6 +107,11 @@
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="Maintains a persistent SSE channel to the user's self-hosted Urbit ship so chat and DM events arrive in real time. Urbit ships do not push to FCM or any other cloud relay, so a long-lived foreground connection is the only delivery mechanism. dataSync's 6-hour daily cap (Android 15+) terminates the sync mid-day for active users." />
         </service>
+
+        <service
+            android:name="io.nisfeb.talon.CallForegroundService"
+            android:exported="false"
+            android:foregroundServiceType="microphone" />
 
         <receiver
             android:name="io.nisfeb.talon.DigestAlarmReceiver"
