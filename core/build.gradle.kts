@@ -11,14 +11,21 @@
 // needs editing: only the module boundary moved.
 plugins {
     alias(libs.plugins.kotlin.multiplatform)
-    alias(libs.plugins.android.library)
+    // The KMP-native Android plugin, not `com.android.library`.
+    // Pairing com.android.library with androidTarget() is deprecated and
+    // the compatibility shim is removed in AGP 10 (H2 2026). Here the
+    // Android target is declared inside kotlin { androidLibrary { } }
+    // and there is no top-level android { } block at all.
+    alias(libs.plugins.android.kmp.library)
     alias(libs.plugins.kotlin.serialization)
 }
 
 kotlin {
     compilerOptions { optIn.add("kotlin.time.ExperimentalTime") }
-    androidTarget {
-        compilerOptions { jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17) }
+    androidLibrary {
+        namespace = "io.nisfeb.talon.core"
+        compileSdk = 37
+        minSdk = 26
     }
     jvm("desktop") {
         compilerOptions { jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17) }
@@ -68,15 +75,5 @@ kotlin {
         iosMain.dependencies {
             implementation(libs.ktor.client.darwin)
         }
-    }
-}
-
-android {
-    namespace = "io.nisfeb.talon.core"
-    compileSdk = 37
-    defaultConfig { minSdk = 26 }
-    compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_17
-        targetCompatibility = JavaVersion.VERSION_17
     }
 }
