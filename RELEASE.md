@@ -6,6 +6,11 @@
   Each tagged push runs the CI matrix in `.github/workflows/release.yml`
   and publishes Android `.apk`, Linux `.deb` + `.AppImage`, macOS
   `.dmg`, and Windows `.msi` artifacts.
+- iOS ships to TestFlight through nomac, on its own cadence — note that
+  `release.yml` is ubuntu-only and never builds the iOS app, so a green
+  release run says nothing about it. Submitting to the App Store proper
+  is a separate, not-yet-done step with outstanding blockers tracked in
+  [docs/app-store-release.md](docs/app-store-release.md).
 
 ## CI publishes the release. Do not upload artifacts manually.
 
