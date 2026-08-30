@@ -39,6 +39,20 @@ kotlin {
         iosTarget.binaries.framework {
             baseName = "ComposeApp"
             isStatic = true
+            // Without this the Swift app cannot see anything that lives
+            // in :core — TalonRtc.swift failed with "cannot find
+            // 'IceCandidate' in scope" the moment the call package moved
+            // there. `api(project(":core"))` makes the types visible to
+            // Kotlin consumers; only `export` puts them in the framework's
+            // generated Objective-C header, which is what Swift reads.
+            // The dependency must be `api` (it is, in commonMain) or this
+            // fails at configuration time.
+            //
+            // Nothing on a Linux dev box catches this: the iOS compile and
+            // link tasks report success here while producing no framework
+            // at all. The ios-compile job in test.yml, which runs a real
+            // Xcode archive on macOS, is the only thing that does.
+            export(project(":core"))
             // Kotlin/Native can't infer a bundle id from our package layout
             // (it warns and falls back to the framework name). Set it
             // explicitly so the release archive step doesn't print the warning.
