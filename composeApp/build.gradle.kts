@@ -299,6 +299,24 @@ tasks.withType<Test>().configureEach {
 // filenames because nobody updated both literals.
 // Declared in gradle.properties so :androidApp and CI read the same
 // value. The names are unchanged, so every use below still works.
+// Build-time config: the env var CI sets, falling back to a Gradle
+// property of the same shape.
+//
+// The env form is what release.yml uses, injecting from GitHub
+// secrets. It cannot reach every builder, though: nomac builds iOS on
+// a remote Mac from a snapshot of the working tree, with no
+// environment of ours and — by design — without anything .gitignore
+// excludes. Without a second channel, every iOS build ships with no
+// TURN server and no sidecar, which is why calls off the local
+// network have never worked there.
+//
+// So a property is read too. Put it in a file Gradle loads but git
+// does not track, and never in gradle.properties, which is committed.
+fun buildConfig(env: String, prop: String, fallback: String = ""): String =
+    System.getenv(env)?.takeIf { it.isNotBlank() }
+        ?: (project.findProperty(prop) as String?)?.takeIf { it.isNotBlank() }
+        ?: fallback
+
 val talonVersionCode = (property("talon.versionCode") as String).trim().toInt()
 val talonVersionName = (property("talon.versionName") as String).trim()
 
@@ -322,9 +340,9 @@ val generateTalonBuild = tasks.register("generateTalonBuild") {
     // model on THAT server only — a group that sets its own sidecar
     // is unaffected. Replace with per-ship provisioning before this
     // is load-bearing.
-    val sfuBase = System.getenv("TALON_DEFAULT_SFU_BASE").orEmpty()
-    val sfuGroup = System.getenv("TALON_DEFAULT_SFU_GROUP") ?: "talon"
-    val sfuKey = System.getenv("TALON_DEFAULT_SFU_KEY").orEmpty()
+    val sfuBase = buildConfig("TALON_DEFAULT_SFU_BASE", "talon.default.sfu.base")
+    val sfuGroup = buildConfig("TALON_DEFAULT_SFU_GROUP", "talon.default.sfu.group", "talon")
+    val sfuKey = buildConfig("TALON_DEFAULT_SFU_KEY", "talon.default.sfu.key")
     // Fallback STUN/TURN for 1:1 calls, adopted by a ship that has
     // none. Party lines don't need this — Galène hands out its own on
     // join — but a 1:1 has no server in the middle to ask, so an
@@ -339,7 +357,7 @@ val generateTalonBuild = tasks.register("generateTalonBuild") {
     // the binary, so anyone can relay through that server. It buys
     // "calls work out of the box" and nothing else — TURN carries
     // SRTP it cannot read.
-    val defaultIce = System.getenv("TALON_DEFAULT_ICE").orEmpty()
+    val defaultIce = buildConfig("TALON_DEFAULT_ICE", "talon.default.ice")
     inputs.property("versionName", capturedVersionName)
     inputs.property("versionCode", capturedVersionCode)
     inputs.property("sfuBase", sfuBase)
