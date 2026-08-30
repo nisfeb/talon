@@ -10,7 +10,7 @@ import org.jetbrains.compose.desktop.application.dsl.TargetFormat
 
 plugins {
     alias(libs.plugins.kotlin.multiplatform)
-    alias(libs.plugins.android.application)
+    alias(libs.plugins.android.kmp.library)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.compose.multiplatform)
     alias(libs.plugins.kotlin.serialization)
@@ -22,8 +22,20 @@ kotlin {
     // @ExperimentalTime in Kotlin 2.2.20. Opt in once for all targets
     // rather than annotating every date/time call site.
     compilerOptions { optIn.add("kotlin.time.ExperimentalTime") }
-    androidTarget {
-        compilerOptions { jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17) }
+    androidLibrary {
+        // Was `androidTarget` + a top-level android { } block. The
+        // application half of that block — applicationId, signing, ABI
+        // splits, R8 — moved to :androidApp, which is the only thing
+        // that could not live beside the Kotlin Multiplatform plugin.
+        namespace = "io.nisfeb.talon"
+        compileSdk = 37
+        minSdk = 26
+        // Off by default under this plugin, unlike com.android.library.
+        // Without it no R class is generated and the launcher icon,
+        // theme and shortcut resources stop resolving.
+        androidResources {
+            enable = true
+        }
     }
     jvm("desktop") {
         compilerOptions { jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17) }
@@ -285,8 +297,10 @@ tasks.withType<Test>().configureEach {
 // version inside derivePackageVersion and silently drifted — every
 // release between 0.7.14 and 0.7.23 shipped with stale .dmg/.msi/.deb
 // filenames because nobody updated both literals.
-val talonVersionCode = 223
-val talonVersionName = "0.16.0-rc25"
+// Declared in gradle.properties so :androidApp and CI read the same
+// value. The names are unchanged, so every use below still works.
+val talonVersionCode = (property("talon.versionCode") as String).trim().toInt()
+val talonVersionName = (property("talon.versionName") as String).trim()
 
 // Surface the gradle-side version constants to commonMain code via a
 // generated Kotlin source file. Without this, the About section in
@@ -360,98 +374,6 @@ val generateTalonBuild = tasks.register("generateTalonBuild") {
     }
 }
 
-android {
-    namespace = "io.nisfeb.talon"
-    // core-ktx 1.19.0 + lifecycle 2.11.0 require compiling against API 37.
-    // targetSdk stays a notch back so we don't opt into Android 17 runtime
-    // behavior changes in the same bump. checkReleaseAarMetadata enforces
-    // this floor — it only runs in the assemble path, not compileDebug.
-    compileSdk = 37
-
-    defaultConfig {
-        applicationId = "io.nisfeb.talon"
-        minSdk = 26
-        // Play Store requires new apps to target "latest API - 1". 35
-        // matches what RELEASE.md already documents and opts us into
-        // Android 15 behavior changes (16 KB page sizes, edge-to-edge).
-        targetSdk = 36
-        versionCode = talonVersionCode
-        versionName = talonVersionName
-    }
-
-    signingConfigs {
-        create("release") {
-            // Keystore lives outside the repo. Path comes from the
-            // RELEASE_KEYSTORE_PROPS env var (file containing
-            // storeFile / storePassword / keyAlias / keyPassword).
-            // Falls back to debug signing when the env var is unset
-            // so unsigned local debug builds still work.
-            val propsPath = System.getenv("RELEASE_KEYSTORE_PROPS")
-            if (propsPath != null) {
-                val props = Properties().apply {
-                    FileInputStream(propsPath).use { load(it) }
-                }
-                storeFile = file(props.getProperty("storeFile"))
-                storePassword = props.getProperty("storePassword")
-                keyAlias = props.getProperty("keyAlias")
-                keyPassword = props.getProperty("keyPassword")
-            }
-        }
-    }
-
-    // Per-ABI APK splits. The 4 native libs (sqlite-bundled,
-    // mediapipe text, onnxruntime, image-codecs from coil/skia) total
-    // ~41 MB across all architectures. Each user only needs one
-    // architecture. The universal APK stays enabled so the existing
-    // GitHub Releases sideload flow keeps working unchanged; per-arch
-    // APKs are produced alongside as smaller alternatives.
-    splits {
-        abi {
-            isEnable = true
-            reset()
-            include("arm64-v8a", "armeabi-v7a", "x86_64")
-            isUniversalApk = true
-        }
-    }
-
-    buildTypes {
-        release {
-            val hasReleaseKeys = System.getenv("RELEASE_KEYSTORE_PROPS") != null
-            signingConfig = signingConfigs.getByName(
-                if (hasReleaseKeys) "release" else "debug"
-            )
-            isMinifyEnabled = true
-            isShrinkResources = true
-            proguardFiles(
-                getDefaultProguardFile("proguard-android-optimize.txt"),
-                "proguard-rules.pro"
-            )
-        }
-    }
-
-    compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_17
-        targetCompatibility = JavaVersion.VERSION_17
-    }
-
-    packaging {
-        // Match app/'s exclude — Kotlin stdlib, OkHttp, and a few
-        // others bundle these license files; without the exclude,
-        // resource merging emits a duplicate-file error once the
-        // dep tree fully lands in B2.
-        resources {
-            excludes += "/META-INF/{AL2.0,LGPL2.1}"
-        }
-    }
-
-    lint {
-        // Lint's NonNullableMutableLiveDataDetector crashes on this
-        // Kotlin/compose combo — skip lint on release builds; we're not
-        // shipping to Play Store yet.
-        checkReleaseBuilds = false
-        abortOnError = false
-    }
-}
 
 compose.desktop {
     application {

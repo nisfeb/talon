@@ -99,7 +99,9 @@ that's the gap to be aware of when shipping Android-specific changes.
 
 ## Build artifacts
 
-- Android release APKs: `composeApp/build/outputs/apk/release/`
+- Android release APKs: `androidApp/build/outputs/apk/release/`
+  (the Android application is its own module; `:composeApp` is a
+  KMP library holding the shared code, desktop app and iOS framework)
   (per-ABI splits + universal — see ABI splits in build.gradle.kts)
 - Desktop AppImage: `dist/Talon-x86_64.AppImage` via
   `scripts/build-appimage.sh` (depends on `slimReleaseDistributable`

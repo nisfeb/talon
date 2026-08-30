@@ -93,7 +93,7 @@ Keep a second copy in cold storage (printed QR of the keystore +
 password, or a hardware token). Losing it means you can never update
 this app on Play again.
 
-Wire it into `composeApp/build.gradle.kts`:
+Wire it into `androidApp/build.gradle.kts` (signing is application-level):
 
 ```kotlin
 signingConfigs {
@@ -118,11 +118,13 @@ already in `.gitignore`.
 
 ## Version bumping
 
-In `composeApp/build.gradle.kts`:
+In `gradle.properties` — one place, because `:composeApp` (TalonBuild,
+desktop package), `:androidApp` (versionCode/versionName) and
+`release.yml` all read it:
 
-```kotlin
-versionCode = 23      // monotonic, +1 per published build (Play requires)
-versionName = "0.6.2" // user-visible
+```properties
+talon.versionCode=223       # monotonic, +1 per published build
+talon.versionName=0.16.0    # user-visible; the tag must match exactly
 ```
 
 `derivePackageVersion()` in the same file rewrites `0.M.P → 1.M.P`
@@ -244,13 +246,13 @@ them to verify a tagged build will produce installable output before
 pushing the tag. Don't upload them anywhere — see "CI publishes the
 release" above.
 
-- [ ] `./gradlew :composeApp:assembleRelease` produces APKs under
-  `composeApp/build/outputs/apk/release/`. With ABI splits enabled,
+- [ ] `./gradlew :androidApp:assembleRelease` produces APKs under
+  `androidApp/build/outputs/apk/release/`. With ABI splits enabled,
   you get four artifacts:
   `composeApp-arm64-v8a-release.apk` (~25 MB),
   `composeApp-armeabi-v7a-release.apk` (~20 MB),
   `composeApp-x86_64-release.apk` (~18 MB), and
-  `composeApp-universal-release.apk` (~54 MB fallback).
+  `androidApp-universal-release.apk` (~54 MB fallback).
 - [ ] `./gradlew :composeApp:bundleRelease` produces an AAB (Play).
 - [ ] Install the **arm64-v8a** APK fresh on a phone that never had
   the app → login → open chat → send a message. Most modern Android
