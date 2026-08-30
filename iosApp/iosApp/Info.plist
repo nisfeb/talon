@@ -4,6 +4,19 @@
 <dict>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Talon uses your microphone for voice calls and party lines.</string>
+	<!-- Without this, iOS suspends the app the moment it is backgrounded
+	     and the audio session goes with it — the call dies outright,
+	     not just the microphone. The .playAndRecord category TalonRtc
+	     sets (see TalonRtc.configureAudioSession) governs routing and
+	     echo cancellation; it grants no background execution on its
+	     own. This is the iOS half of the Android microphone foreground
+	     service: same user-visible bug, entirely different mechanism.
+	     `audio` rather than `voip` deliberately — voip is for CallKit
+	     apps waking on a push, which Talon is not. -->
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>audio</string>
+	</array>
 	<key>NSCameraUsageDescription</key>
 	<string>Talon does not use the camera. The WebRTC library it uses for voice calls also contains video-calling code, which Talon never enables.</string>
 	<key>CFBundleDevelopmentRegion</key>
