@@ -167,23 +167,50 @@ object CallSounds {
 }
 
 /**
+ * Which volume a tone belongs to.
+ *
+ * The distinction is not cosmetic: on Android the silent switch mutes
+ * some streams and not others, so putting a tone on the wrong one
+ * makes it vanish for anyone who keeps their ringer off.
+ */
+enum class ToneStream {
+    /**
+     * Part of a live call — ringback, join, leave.
+     *
+     * Belongs with the call audio and stays audible with the ringer
+     * off, exactly as a phone's earpiece does: someone who silenced
+     * their ringer did not ask to be unable to hear a call they
+     * placed themselves.
+     */
+    Call,
+
+    /**
+     * Someone is ringing us.
+     *
+     * The one tone that must respect the ringer switch, because it is
+     * the one the user was silencing.
+     */
+    Ringer,
+}
+
+/**
  * Plays [CallSounds]. One impl per platform; [Noop] where there is no
  * playback path yet, so callers never have to check.
  */
 interface CallSoundPlayer {
 
     /** Play once, over anything already playing of the same kind. */
-    fun play(pcm: ByteArray)
+    fun play(pcm: ByteArray, stream: ToneStream = ToneStream.Call)
 
     /** Loop [pcm], separated by [gapMs] of silence, until [stopLoop]. */
-    fun loop(pcm: ByteArray, gapMs: Int)
+    fun loop(pcm: ByteArray, gapMs: Int, stream: ToneStream = ToneStream.Call)
 
     fun stopLoop()
 
     companion object {
         val Noop: CallSoundPlayer = object : CallSoundPlayer {
-            override fun play(pcm: ByteArray) = Unit
-            override fun loop(pcm: ByteArray, gapMs: Int) = Unit
+            override fun play(pcm: ByteArray, stream: ToneStream) = Unit
+            override fun loop(pcm: ByteArray, gapMs: Int, stream: ToneStream) = Unit
             override fun stopLoop() = Unit
         }
     }

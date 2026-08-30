@@ -112,7 +112,11 @@ class CallController(
                     is CallUiState.Outgoing ->
                         sounds.loop(CallSounds.ringback(), RINGBACK_GAP_MS)
                     is CallUiState.Incoming ->
-                        sounds.loop(CallSounds.incoming(), INCOMING_GAP_MS)
+                        // The only tone that honours the silent
+                        // switch: it is the one the user silenced.
+                        sounds.loop(
+                            CallSounds.incoming(), INCOMING_GAP_MS, ToneStream.Ringer,
+                        )
                     else -> sounds.stopLoop()
                 }
             }

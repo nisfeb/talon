@@ -9,10 +9,19 @@ import kotlin.concurrent.thread
 /**
  * Call tones on Android, through AudioTrack.
  *
- * USAGE_VOICE_COMMUNICATION_SIGNALLING is the attribute for exactly
- * this — the beeps a call makes about itself. It follows the call
- * routing, so the ringback comes out of whatever the call is using
- * rather than fighting it, and it ducks properly against media.
+ * The usage is chosen per [ToneStream], and getting it wrong makes a
+ * tone silently inaudible. USAGE_VOICE_COMMUNICATION_SIGNALLING reads
+ * like the obvious choice — it is literally "the beeps a call makes
+ * about itself" — but it maps to the legacy STREAM_DTMF, which the
+ * silent switch mutes. So a user with the ringer off and media volume
+ * up heard nothing at all when placing a call, which is what this
+ * replaces.
+ *
+ * Now: a tone that is part of a call rides USAGE_VOICE_COMMUNICATION
+ * (STREAM_VOICE_CALL), audible with the ringer off exactly as a
+ * phone's earpiece is; only an incoming ring rides
+ * USAGE_NOTIFICATION_RINGTONE, where the silent switch is supposed to
+ * reach it.
  *
  * Not the same thing as [io.nisfeb.talon.notify.Ringer], which handles
  * an *incoming* call while the app is backgrounded and belongs to the
@@ -23,16 +32,16 @@ class AndroidCallSoundPlayer : CallSoundPlayer {
     @Volatile private var looping = false
     @Volatile private var loopThread: Thread? = null
 
-    override fun play(pcm: ByteArray) {
-        thread(isDaemon = true, name = "talon-tone") { writeOnce(pcm) { true } }
+    override fun play(pcm: ByteArray, stream: ToneStream) {
+        thread(isDaemon = true, name = "talon-tone") { writeOnce(pcm, stream) { true } }
     }
 
-    override fun loop(pcm: ByteArray, gapMs: Int) {
+    override fun loop(pcm: ByteArray, gapMs: Int, stream: ToneStream) {
         stopLoop()
         looping = true
         loopThread = thread(isDaemon = true, name = "talon-ring") {
             while (looping) {
-                writeOnce(pcm) { looping }
+                writeOnce(pcm, stream) { looping }
                 var slept = 0
                 while (looping && slept < gapMs) {
                     Thread.sleep(50)
@@ -48,7 +57,11 @@ class AndroidCallSoundPlayer : CallSoundPlayer {
         loopThread = null
     }
 
-    private fun writeOnce(pcm: ByteArray, keepGoing: () -> Boolean) {
+    private fun writeOnce(
+        pcm: ByteArray,
+        stream: ToneStream,
+        keepGoing: () -> Boolean,
+    ) {
         var track: AudioTrack? = null
         runCatching {
             val min = AudioTrack.getMinBufferSize(
@@ -59,7 +72,19 @@ class AndroidCallSoundPlayer : CallSoundPlayer {
             track = AudioTrack.Builder()
                 .setAudioAttributes(
                     AudioAttributes.Builder()
-                        .setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION_SIGNALLING)
+                        .setUsage(
+                            when (stream) {
+                                // STREAM_VOICE_CALL: follows the call's
+                                // own routing and volume, and the silent
+                                // switch does not reach it.
+                                ToneStream.Call ->
+                                    AudioAttributes.USAGE_VOICE_COMMUNICATION
+                                // STREAM_RING: silenced along with every
+                                // other ringtone, which is the point.
+                                ToneStream.Ringer ->
+                                    AudioAttributes.USAGE_NOTIFICATION_RINGTONE
+                            },
+                        )
                         .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
                         .build(),
                 )

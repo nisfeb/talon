@@ -34,8 +34,12 @@ class PartyLineTonesTest {
      *  so identity is by content. */
     private class Recorder : CallSoundPlayer {
         val played = mutableListOf<ByteArray>()
-        override fun play(pcm: ByteArray) { played += pcm }
-        override fun loop(pcm: ByteArray, gapMs: Int) = Unit
+        val streams = mutableListOf<ToneStream>()
+        override fun play(pcm: ByteArray, stream: ToneStream) {
+            played += pcm
+            streams += stream
+        }
+        override fun loop(pcm: ByteArray, gapMs: Int, stream: ToneStream) = Unit
         override fun stopLoop() = Unit
         val joins get() = played.count { it.contentEquals(CallSounds.joined()) }
         val leaves get() = played.count { it.contentEquals(CallSounds.left()) }
@@ -87,6 +91,23 @@ class PartyLineTonesTest {
         assertTrue(
             !CallSounds.joined().contentEquals(CallSounds.left()),
             "the two tones must be distinguishable",
+        )
+    }
+
+    @Test
+    fun `join and leave chimes ride the call stream, not the ringer`() = runTest {
+        // On Android the silent switch mutes the ringer stream. A
+        // party-line chime belongs to a call the user is already in,
+        // so silencing the ringer must not silence it.
+        val rec = Recorder()
+        val l = line(rec)
+        l.onJoined(joined())
+        l.handle(add("b", "~hapnyl-fotlyx"))
+        l.handle(del("b"))
+        assertEquals(2, rec.streams.size, "expected an arrival and a departure")
+        assertTrue(
+            rec.streams.all { it == ToneStream.Call },
+            "a chime went to ${rec.streams.distinct()} instead of the call stream",
         )
     }
 }

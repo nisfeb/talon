@@ -17,6 +17,11 @@ import platform.AVFAudio.AVAudioPlayer
  * repeats with no gap between passes, so the gap is baked into the
  * buffer instead — same cadence, less machinery.
  *
+ * [ToneStream] is ignored for now: the session TalonRtc configures
+ * is playAndRecord, which already ignores the ring/silent switch, and
+ * changing that per tone would mean reconfiguring the session under a
+ * live call — the exact thing the note below warns against.
+ *
  * The audio session is left alone deliberately. TalonRtc configures it
  * for voice chat when a call starts, and a tone reconfiguring it
  * underneath a live call is a good way to drop the call's audio.
@@ -27,14 +32,14 @@ class IosCallSoundPlayer : CallSoundPlayer {
     private var oneShot: AVAudioPlayer? = null
     private var looper: AVAudioPlayer? = null
 
-    override fun play(pcm: ByteArray) {
+    override fun play(pcm: ByteArray, stream: ToneStream) {
         runCatching {
             oneShot?.stop()
             oneShot = make(pcm, loops = 0)?.also { it.play() }
         }.onFailure { Log.i(TAG, "could not play a tone: ${it.message}") }
     }
 
-    override fun loop(pcm: ByteArray, gapMs: Int) {
+    override fun loop(pcm: ByteArray, gapMs: Int, stream: ToneStream) {
         runCatching {
             stopLoop()
             // The gap rides in the buffer: AVAudioPlayer repeats

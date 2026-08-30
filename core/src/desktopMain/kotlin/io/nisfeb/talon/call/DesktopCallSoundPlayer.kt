@@ -13,6 +13,9 @@ import kotlin.concurrent.thread
  * reopened to replay, and the looping ring needs to stop the instant a
  * call is answered rather than at the end of the current pass.
  *
+ * [ToneStream] is ignored: desktop has no silent switch and no
+ * per-usage volumes, so every tone goes to the default output.
+ *
  * Deliberately separate from the WebRTC audio device — these are UI
  * sounds and belong on the system's default output, not on whatever
  * headset the call is routed to. Hearing the ring in one ear and the
@@ -31,11 +34,11 @@ class DesktopCallSoundPlayer : CallSoundPlayer {
     @Volatile private var looping = false
     @Volatile private var loopThread: Thread? = null
 
-    override fun play(pcm: ByteArray) {
+    override fun play(pcm: ByteArray, stream: ToneStream) {
         thread(isDaemon = true, name = "talon-tone") { writeOnce(pcm) }
     }
 
-    override fun loop(pcm: ByteArray, gapMs: Int) {
+    override fun loop(pcm: ByteArray, gapMs: Int, stream: ToneStream) {
         stopLoop()
         looping = true
         loopThread = thread(isDaemon = true, name = "talon-ring") {
