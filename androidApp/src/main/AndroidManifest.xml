@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Deliberately near-empty. Every component, permission and resource
+  reference lives in :composeApp's library manifest and merges in from
+  there, so the app module carries only what is genuinely
+  application-level: the id, the signing, the ABI splits and R8.
+
+  Splitting this way keeps all 400-odd source files where they were.
+  The move is forced by AGP: com.android.application cannot be applied
+  alongside the Kotlin Multiplatform plugin once the compatibility
+  shim is removed in AGP 10, and Gradle's own guidance is to move the
+  application into a subproject of its own.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" />

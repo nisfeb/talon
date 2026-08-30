@@ -31,6 +31,10 @@ dependencyResolutionManagement {
 rootProject.name = "talon"
 include(":core")
 include(":composeApp")
+// The Android application shell. Separate from :composeApp because
+// com.android.application cannot coexist with the Kotlin
+// Multiplatform plugin once AGP 10 drops the shim.
+include(":androidApp")
 // Notification push relay — JVM-only Ktor server. Lives in the
 // repo so the design doc, client, and server stay in lockstep.
 // Build with `./gradlew :relay:installDist` or `docker build relay/`.

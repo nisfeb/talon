@@ -19,15 +19,17 @@ jobs:
       - id: parse
         run: |
           TAG="${GITHUB_REF#refs/tags/v}"
-          # Match the val declarations (`talonVersionCode`,
-          # `talonVersionName`) rather than the `defaultConfig`
-          # assignments — the latter use the val identifiers and
-          # have no literal to extract. This regex bug masqueraded
-          # as a tag mismatch on v0.7.24's release run.
-          VERSION_CODE=$(grep 'talonVersionCode = ' composeApp/build.gradle.kts | head -1 | grep -oE '[0-9]+')
-          VERSION_NAME=$(grep 'talonVersionName = ' composeApp/build.gradle.kts | head -1 | grep -oE '"[^"]+"' | tr -d '"')
+          # The version lives in gradle.properties now, because two
+          # modules and this workflow all need it: :composeApp bakes it
+          # into TalonBuild and the desktop package, :androidApp uses it
+          # for versionCode/versionName. That also retires the old regex
+          # over build.gradle.kts, which had to skip the defaultConfig
+          # assignments (they reference the vals and hold no literal) —
+          # a bug that once masqueraded as a tag mismatch on v0.7.24.
+          VERSION_CODE=$(grep -E '^talon\.versionCode=' gradle.properties | head -1 | cut -d= -f2 | tr -d ' ')
+          VERSION_NAME=$(grep -E '^talon\.versionName=' gradle.properties | head -1 | cut -d= -f2 | tr -d ' ')
           if [ "$TAG" != "$VERSION_NAME" ]; then
-            echo "::error::Tag (v$TAG) does not match versionName ($VERSION_NAME) in build.gradle.kts"
+            echo "::error::Tag (v$TAG) does not match talon.versionName ($VERSION_NAME) in gradle.properties"
             exit 1
           fi
           echo "version_code=$VERSION_CODE" >> $GITHUB_OUTPUT
@@ -108,7 +110,7 @@ jobs:
           TALON_DEFAULT_SFU_BASE: ${{ secrets.TALON_DEFAULT_SFU_BASE }}
           TALON_DEFAULT_SFU_GROUP: ${{ secrets.TALON_DEFAULT_SFU_GROUP }}
           TALON_DEFAULT_SFU_KEY: ${{ secrets.TALON_DEFAULT_SFU_KEY }}
-        run: ./gradlew :composeApp:assembleRelease
+        run: ./gradlew :androidApp:assembleRelease
 
       - name: Stage release artifacts
         if: steps.chk.outputs.have_keystore == 'true'
@@ -125,8 +127,11 @@ jobs:
           # the manifest template hardcodes). The per-arch splits
           # ride along under suffixed names for users who want a
           # smaller manual download.
-          APK_DIR=composeApp/build/outputs/apk/release
-          UNIVERSAL="$APK_DIR/composeApp-universal-release.apk"
+          # :androidApp, not :composeApp — the Android application
+          # moved to its own module so :composeApp could become a
+          # KMP library (AGP 10 drops the old pairing).
+          APK_DIR=androidApp/build/outputs/apk/release
+          UNIVERSAL="$APK_DIR/androidApp-universal-release.apk"
           if [ ! -f "$UNIVERSAL" ]; then
             echo "::error::universal APK not found at $UNIVERSAL"
             ls -la "$APK_DIR"
@@ -136,7 +141,7 @@ jobs:
           cp "$UNIVERSAL" "$OUT_APK"
           STAGED=("$OUT_APK")
           for abi in arm64-v8a armeabi-v7a x86_64; do
-            SRC="$APK_DIR/composeApp-$abi-release.apk"
+            SRC="$APK_DIR/androidApp-$abi-release.apk"
             if [ -f "$SRC" ]; then
               DEST="talon-$VERSION_NAME-$abi.apk"
               cp "$SRC" "$DEST"

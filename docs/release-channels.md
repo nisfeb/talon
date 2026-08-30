@@ -41,11 +41,11 @@ You ship both from the same `master`. Tagging a release builds both APKs. Each g
 
 | Concern | Shape A (sideload only) | Shape B (Play only) | Shape C (both) |
 |---|---|---|---|
-| `composeApp/build.gradle.kts` flavors | none | none | `productFlavors { create("direct"); create("play") }` |
+| `androidApp/build.gradle.kts` flavors | none | none | `productFlavors { create("direct"); create("play") }` |
 | `update/` package | included | **deleted** | `direct` source set only |
 | `REQUEST_INSTALL_PACKAGES` | declared | **removed** | `src/direct/AndroidManifest.xml` only |
 | FileProvider for APKs | declared | **removed** | `src/direct/AndroidManifest.xml` only |
-| `release.yml` build target | `:composeApp:assembleRelease` | `:composeApp:bundlePlayRelease` (AAB) | both: `:composeApp:assembleDirectRelease` + `:composeApp:bundlePlayRelease` |
+| `release.yml` build target | `:androidApp:assembleRelease` | `:androidApp:bundlePlayRelease` (AAB) | both: `:androidApp:assembleDirectRelease` + `:androidApp:bundlePlayRelease` |
 | GitHub Release artifacts | APK + `latest.json` | none (or unsigned mapping for crash-symbolication) | `talon-direct-X.Y.Z.apk` + `latest.json` only — Play AAB stays out of public releases |
 | Manifest discovery in-app | HTTP fetch + Urbit push (Stage C) | Play In-App Updates API (or nothing) | flavor-conditional |
 | Pre-release ceremony | tag, push | tag, push, wait for Play review, fill out console forms | tag, push, ALSO Play review for the `play` artifact |
@@ -58,10 +58,10 @@ You ship both from the same `master`. Tagging a release builds both APKs. Each g
 
 ```bash
 # 1. Bump version
-$EDITOR composeApp/build.gradle.kts   # versionCode + versionName
+$EDITOR gradle.properties            # talon.versionCode + talon.versionName
 
 # 2. Commit + tag
-git add composeApp/build.gradle.kts
+git add gradle.properties
 git commit -m "release: 0.5.0"
 git tag v0.5.0
 git push origin master
