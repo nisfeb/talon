@@ -130,6 +130,16 @@ expect val isCallsSupported: Boolean
  * already owns the edge and the drawer can have the in-app swipe;
  * false on desktop, which has no touch edge at all.
  */
+/**
+ * Camera on a 1:1 call.
+ *
+ * True wherever a CallEngine can capture and render video, which is
+ * currently all three platforms — Android and iOS through libwebrtc's
+ * own renderer, desktop through a hand-written I420 converter. Party
+ * lines stay audio-only regardless: this gates the 1:1 surface only.
+ */
+expect val isVideoCallsSupported: Boolean
+
 expect val isEdgeSwipeBackSupported: Boolean
 
 /**

@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -41,6 +42,8 @@ import io.nisfeb.talon.call.TrunkWire
 import io.nisfeb.talon.call.MediaState
 import io.nisfeb.talon.call.PartyState
 import io.nisfeb.talon.call.PartyMember
+import io.nisfeb.talon.call.VideoState
+import kotlinx.coroutines.flow.MutableStateFlow
 import io.nisfeb.talon.util.nowMs
 import kotlinx.coroutines.delay
 
@@ -140,8 +143,18 @@ fun CallStrip(
         io.nisfeb.talon.call.AudioDevices.Noop,
 ) {
     val state by controller.state.collectAsState()
+    val engine = controller.mediaEngine
+    val video by (engine?.video ?: remember { MutableStateFlow(VideoState()) })
+        .collectAsState()
+    val camera = rememberCameraPermission()
     when (val s = state) {
-        is CallUiState.Active -> PartyLineBarContent(
+        is CallUiState.Active -> Column(modifier) {
+            // Pictures above the strip, so the controls stay in the
+            // same place whether or not anyone has a camera on.
+            if (isVideoCallsSupported && engine != null && video.anyOn) {
+                CallVideoPane(engine, video, Modifier.fillMaxWidth())
+            }
+            PartyLineBarContent(
             state = PartyState.Live(
                 room = s.peer,
                 members = listOf(PartyMember(id = s.peer, ship = s.peer)),
@@ -149,7 +162,6 @@ fun CallStrip(
                 media = s.media,
             ),
             admin = null,
-            modifier = modifier,
             onToggleMute = { controller.setMuted(it) },
             onLeave = { controller.hangup() },
             nameFor = nameFor,
@@ -159,7 +171,18 @@ fun CallStrip(
                 MediaState.Live -> "${nameFor(s.peer)} · ${liveDuration(s.media)}"
                 else -> "Connecting to ${nameFor(s.peer)}…"
             },
+            cameraOn = video.localOn,
+            onToggleCamera = if (isVideoCallsSupported && engine != null) {
+                {
+                    // Ask the first time; the tap that grants is not
+                    // the tap that turns the camera on, which is how
+                    // every permission-gated control behaves.
+                    if (!camera.granted) camera.request()
+                    else controller.setCamera(!video.localOn)
+                }
+            } else null,
         )
+        }
 
         is CallUiState.Ended -> {
             PartyLineBarContent(
@@ -365,4 +388,52 @@ private fun liveDuration(media: MediaState): String {
     val mm = (secs / 60).toString().padStart(2, '0')
     val ss = (secs % 60).toString().padStart(2, '0')
     return "$mm:$ss"
+}
+
+/**
+ * The two pictures on a 1:1 call: them large, us inset.
+ *
+ * A fixed height rather than a fraction of the window — the strip
+ * this sits above can be rendered inside a chat pane or floated over
+ * the whole app, and a pane that resized depending on which would
+ * look like a bug. 16:9-ish at the width a chat column tends to be.
+ */
+@Composable
+private fun CallVideoPane(
+    engine: io.nisfeb.talon.call.CallEngine,
+    video: VideoState,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        modifier = modifier.height(220.dp),
+        color = Color.Black,
+        shape = RoundedCornerShape(12.dp),
+    ) {
+        Box(Modifier.fillMaxSize()) {
+            if (video.remoteOn) {
+                VideoSurface(engine, local = false, modifier = Modifier.fillMaxSize())
+            } else {
+                // Our own camera on, theirs off: say so rather than
+                // showing a black rectangle that reads as broken.
+                Text(
+                    "Camera off",
+                    modifier = Modifier.align(Alignment.Center),
+                    color = Color.White,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+            if (video.localOn) {
+                Surface(
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(8.dp)
+                        .size(width = 84.dp, height = 112.dp),
+                    color = Color.DarkGray,
+                    shape = RoundedCornerShape(8.dp),
+                ) {
+                    VideoSurface(engine, local = true, modifier = Modifier.fillMaxSize())
+                }
+            }
+        }
+    }
 }

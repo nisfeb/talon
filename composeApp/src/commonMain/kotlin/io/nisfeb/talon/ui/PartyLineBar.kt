@@ -15,6 +15,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CallEnd
 import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.Videocam
+import androidx.compose.material.icons.filled.VideocamOff
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.MicOff
@@ -112,6 +114,15 @@ fun PartyLineBarContent(
      * just was.
      */
     onDismiss: (() -> Unit)? = null,
+    /**
+     * Camera toggle, shown only when non-null.
+     *
+     * Null for party lines, which are audio-only — so the button
+     * exists exactly where video does, rather than being greyed out
+     * somewhere it can never work (CLAUDE.md #3).
+     */
+    onToggleCamera: (() -> Unit)? = null,
+    cameraOn: Boolean = false,
 ) {
     if (state is PartyState.Idle) return
     var expanded by remember { mutableStateOf(false) }
@@ -211,6 +222,17 @@ fun PartyLineBarContent(
                                 if (s.muted) Icons.Filled.MicOff else Icons.Filled.Mic,
                                 contentDescription = if (s.muted) "Unmute" else "Mute",
                             )
+                        }
+                        if (onToggleCamera != null) {
+                            IconButton(onClick = onToggleCamera) {
+                                Icon(
+                                    if (cameraOn) Icons.Filled.Videocam
+                                    else Icons.Filled.VideocamOff,
+                                    contentDescription =
+                                        if (cameraOn) "Turn the camera off"
+                                        else "Turn the camera on",
+                                )
+                            }
                         }
                         IconButton(onClick = { expanded = !expanded }) {
                             Icon(

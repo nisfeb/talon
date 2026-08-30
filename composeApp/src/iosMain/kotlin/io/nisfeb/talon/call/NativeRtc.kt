@@ -78,6 +78,43 @@ interface NativeRtcPeer {
 
     fun setMuted(muted: Boolean)
 
+    /**
+     * Open or close the camera. [done] gets null on success, or a
+     * short reason it failed — no device, permission refused, already
+     * in use — which the UI shows rather than leaving a dead button.
+     * A `String?` for the same reason applyAnswer uses one: it avoids
+     * the boxing that a `(Boolean) -> Unit` would incur.
+     *
+     * Two arguments, which is not an accident: a no-argument export
+     * whose selector matched something on [CallEngine] with a
+     * different return type is what silently renamed `audioLevel` and
+     * broke conformance twice. Every name added here is unique to this
+     * interface for the same reason.
+     */
+    fun setCameraEnabled(enabled: Boolean, done: (String?) -> Unit)
+
+    /**
+     * Who is showing a camera, whenever that changes.
+     *
+     * Passes [VideoState] rather than two Booleans: Kotlin/Native
+     * boxes primitives in lambda parameter position, so `(Boolean,
+     * Boolean) -> Unit` reaches Swift as `(KotlinBoolean,
+     * KotlinBoolean) -> Void`. A data class crosses unboxed and reads
+     * better on both sides.
+     */
+    fun onVideoChange(listener: (VideoState) -> Unit)
+
+    /**
+     * The `RTCMTLVideoView` showing our camera, or theirs, or null
+     * before there is one.
+     *
+     * Typed `Any?` because the Kotlin side has no UIKit types in
+     * scope here and does not need them: it hands the value straight
+     * to Compose's UIKitView, which wants a UIView anyway.
+     */
+    fun localVideoView(): Any?
+    fun remoteVideoView(): Any?
+
     /** Must be idempotent: the adapters can close more than once. */
     fun close()
 }

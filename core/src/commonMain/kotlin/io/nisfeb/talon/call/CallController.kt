@@ -441,6 +441,31 @@ class CallController(
         }
     }
 
+    /**
+     * The live call's engine, or null between calls.
+     *
+     * Exposed only so the video surface can reach the platform's own
+     * track — it is the one thing that cannot cross into commonMain.
+     * Everything else about a call still goes through this controller.
+     */
+    val mediaEngine: CallEngine? get() = engine
+
+    /**
+     * Turn our camera on or off for the live call.
+     *
+     * No signalling: the video transceiver was negotiated in the first
+     * offer, so this is a local track swap (see
+     * [CallEngine.setCameraEnabled]). Silent when there is no call.
+     */
+    fun setCamera(on: Boolean) {
+        val eng = engine ?: return
+        scope.launch {
+            if (!eng.setCameraEnabled(on) && on) {
+                Log.w(TAG, "the camera would not start")
+            }
+        }
+    }
+
     fun setMuted(muted: Boolean) {
         engine?.setMuted(muted)
         val cur = _state.value

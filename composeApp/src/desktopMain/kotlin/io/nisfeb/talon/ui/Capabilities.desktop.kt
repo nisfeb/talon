@@ -57,6 +57,8 @@ actual fun isOnDeviceAiFeatureSupported(
 actual val isCallsSupported: Boolean = true
 
 // No touch edge on desktop; the logo click opens the switcher.
+actual val isVideoCallsSupported: Boolean = true
+
 actual val isEdgeSwipeBackSupported: Boolean = false
 
 // Desktop resolves a bundled emoji family; the span does the work.

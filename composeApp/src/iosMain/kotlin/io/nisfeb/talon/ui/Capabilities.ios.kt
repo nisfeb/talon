@@ -31,6 +31,8 @@ actual fun isOnDeviceAiFeatureSupported(
 actual val isCallsSupported: Boolean = true
 
 // Supplied by MainViewController's edge strip -> IosBackDispatcher.
+actual val isVideoCallsSupported: Boolean = true
+
 actual val isEdgeSwipeBackSupported: Boolean = true
 
 // Apple Color Emoji is the system default; the span was a no-op

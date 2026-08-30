@@ -18,7 +18,7 @@
 		<string>audio</string>
 	</array>
 	<key>NSCameraUsageDescription</key>
-	<string>Talon does not use the camera. The WebRTC library it uses for voice calls also contains video-calling code, which Talon never enables.</string>
+	<string>Talon uses your camera for video calls, and only while a call is on screen and you have turned your camera on.</string>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleExecutable</key>

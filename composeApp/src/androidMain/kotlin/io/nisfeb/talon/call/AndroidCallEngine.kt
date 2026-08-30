@@ -16,6 +16,18 @@ import org.webrtc.PeerConnection
 import org.webrtc.PeerConnectionFactory
 import org.webrtc.SdpObserver
 import org.webrtc.SessionDescription
+import org.webrtc.Camera2Enumerator
+import org.webrtc.CameraVideoCapturer
+import org.webrtc.DefaultVideoDecoderFactory
+import org.webrtc.DefaultVideoEncoderFactory
+import org.webrtc.EglBase
+import org.webrtc.MediaStreamTrack
+import org.webrtc.RtpReceiver
+import org.webrtc.RtpSender
+import org.webrtc.RtpTransceiver
+import org.webrtc.SurfaceTextureHelper
+import org.webrtc.VideoSource
+import org.webrtc.VideoTrack
 import org.webrtc.audio.JavaAudioDeviceModule
 
 /**
@@ -28,7 +40,9 @@ import org.webrtc.audio.JavaAudioDeviceModule
  * only; add an audio-route control when real-device testing demands it.
  */
 class AndroidCallEngine(
-    appContext: Context,
+    // A `val` because the camera is opened long after construction:
+    // Camera2Enumerator and capturer.initialize both need a Context.
+    private val appContext: Context,
     configuredIce: List<IceServer>,
 ) : CallEngine {
 
@@ -37,10 +51,37 @@ class AndroidCallEngine(
 
     private val gathered = CompletableDeferred<Unit>()
     private var micTrack: AudioTrack? = null
+
+    // ── video ────────────────────────────────────────────────────
+    private val _video = MutableStateFlow(VideoState())
+    override val video: StateFlow<VideoState> = _video
+
+    /** The sendrecv video sender, created up-front with no track. */
+    private var videoSender: RtpSender? = null
+    private var capturer: CameraVideoCapturer? = null
+    private var videoSource: VideoSource? = null
+    private var surfaceHelper: SurfaceTextureHelper? = null
+    private var localVideo: VideoTrack? = null
+
+    /** Local and remote camera tracks, for [VideoSurface] to render.
+     *  Android-only members: the renderer needs libwebrtc's own track
+     *  object, which cannot cross into commonMain. */
+    val localVideoTrack: VideoTrack? get() = localVideo
+    @Volatile var remoteVideoTrack: VideoTrack? = null
+        private set
     private val audioManager = appContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager
     private val priorAudioMode = audioManager.mode
 
     private val observer = object : PeerConnection.Observer {
+        override fun onTrack(transceiver: RtpTransceiver?) {
+            // The far end turned a camera on (or had one from the
+            // start). Unified Plan fires this once per transceiver.
+            val track = transceiver?.receiver?.track() as? VideoTrack ?: return
+            remoteVideoTrack = track
+            _video.value = _video.value.copy(remoteOn = true)
+            Log.i(TAG, "remote video track ${track.id()}")
+        }
+
         override fun onIceCandidate(candidate: IceCandidate?) {}
         override fun onIceCandidatesRemoved(candidates: Array<out IceCandidate>?) {}
         override fun onIceGatheringChange(gatherState: PeerConnection.IceGatheringState?) {
@@ -94,6 +135,20 @@ class AndroidCallEngine(
         val track = factory.createAudioTrack("talon-mic", source)
         pc.addTrack(track, listOf("talon-call"))
         micTrack = track
+        // A sendrecv video transceiver in the very first offer, with no
+        // track on it. Attaching a camera later is then a sender
+        // setTrack, which needs no renegotiation — so trunk never
+        // learns what video is. The cost is one extra m-line on every
+        // call, which an audio-only peer simply rejects.
+        videoSender = runCatching {
+            pc.addTransceiver(
+                MediaStreamTrack.MediaType.MEDIA_TYPE_VIDEO,
+                RtpTransceiver.RtpTransceiverInit(
+                    RtpTransceiver.RtpTransceiverDirection.SEND_RECV,
+                ),
+            ).sender
+        }.onFailure { Log.w(TAG, "no video transceiver; call stays audio-only", it) }
+            .getOrNull()
         audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
     }
 
@@ -117,6 +172,67 @@ class AndroidCallEngine(
         return SessionDesc(sdp, sdpFingerprint(sdp))
     }
 
+    /**
+     * Open the camera and hang it on the pre-negotiated sender, or take
+     * it back off.
+     *
+     * Front camera by preference — this is a chat client, not a
+     * documentary tool. 640x480 at 30fps: high enough to read a face,
+     * low enough that a phone on cellular does not melt, and Talon has
+     * no simulcast to fall back on.
+     */
+    override suspend fun setCameraEnabled(enabled: Boolean): Boolean {
+        val sender = videoSender ?: return false
+        if (!enabled) {
+            runCatching { capturer?.stopCapture() }
+            runCatching { sender.setTrack(null, false) }
+            releaseCamera()
+            _video.value = _video.value.copy(localOn = false)
+            return true
+        }
+        if (localVideo != null) return true
+        return runCatching {
+            val enumerator = Camera2Enumerator(appContext)
+            val names = enumerator.deviceNames
+            val name = names.firstOrNull { enumerator.isFrontFacing(it) }
+                ?: names.firstOrNull()
+                ?: error("no camera on this device")
+            val cap = enumerator.createCapturer(name, null)
+                ?: error("could not open camera $name")
+            val helper = SurfaceTextureHelper.create(
+                "talon-capture", WebRtcFactory.eglBase.eglBaseContext,
+            )
+            val source = factory.createVideoSource(false)
+            cap.initialize(helper, appContext, source.capturerObserver)
+            cap.startCapture(640, 480, 30)
+            val track = factory.createVideoTrack("talon-cam", source)
+            sender.setTrack(track, false)
+            capturer = cap
+            surfaceHelper = helper
+            videoSource = source
+            localVideo = track
+            _video.value = _video.value.copy(localOn = true)
+            true
+        }.getOrElse {
+            // A refused permission and a camera already in use look the
+            // same from here; both mean "no picture", and the caller
+            // says so rather than leaving a dead button.
+            Log.w(TAG, "could not start the camera", it)
+            releaseCamera()
+            false
+        }
+    }
+
+    private fun releaseCamera() {
+        runCatching { capturer?.dispose() }
+        runCatching { surfaceHelper?.dispose() }
+        runCatching { videoSource?.dispose() }
+        capturer = null
+        surfaceHelper = null
+        videoSource = null
+        localVideo = null
+    }
+
     override suspend fun setAnswer(remote: SessionDesc) {
         val desc = SessionDescription(SessionDescription.Type.ANSWER, remote.sdp)
         suspendSet { pc.setRemoteDescription(it, desc) }
@@ -132,6 +248,13 @@ class AndroidCallEngine(
         // a double native teardown.
         if (!closed.compareAndSet(false, true)) return
         runCatching { micTrack?.setEnabled(false) }
+        // Stop capture before the pc goes: a running capturer feeding a
+        // closed source is a native callback into freed memory, the
+        // same hazard as disposing the factory mid-gather.
+        runCatching { capturer?.stopCapture() }
+        releaseCamera()
+        remoteVideoTrack = null
+        _video.value = VideoState()
         // Close, don't dispose the factory: it is process-wide, and
         // tearing it down while ICE gathering is still running on a
         // native thread crashes the app seconds later, once a callback
@@ -177,6 +300,9 @@ class AndroidCallEngine(
         d.await()
     }
 
+    private companion object {
+        private const val TAG = "AndroidCallEngine"
+    }
 }
 
 /**
@@ -192,6 +318,16 @@ class AndroidCallEngine(
 internal object WebRtcFactory {
     private var factory: PeerConnectionFactory? = null
 
+    /**
+     * One EGL context for the process.
+     *
+     * Hardware encode/decode and every SurfaceViewRenderer have to
+     * share it — a renderer initialised against a different context
+     * shows black. Created lazily so an audio-only install never
+     * touches EGL at all.
+     */
+    val eglBase: EglBase by lazy { EglBase.create() }
+
     @Synchronized
     fun get(context: Context): PeerConnectionFactory {
         factory?.let { return it }
@@ -204,6 +340,13 @@ internal object WebRtcFactory {
             .setAudioDeviceModule(
                 JavaAudioDeviceModule.builder(app).createAudioDeviceModule(),
             )
+            // Without these the factory has no video codecs at all and
+            // a video m-line negotiates to nothing. Harmless for party
+            // lines, which never attach a camera.
+            .setVideoEncoderFactory(
+                DefaultVideoEncoderFactory(eglBase.eglBaseContext, true, true),
+            )
+            .setVideoDecoderFactory(DefaultVideoDecoderFactory(eglBase.eglBaseContext))
             .createPeerConnectionFactory()
             .also { factory = it }
     }
