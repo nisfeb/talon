@@ -22,6 +22,7 @@ import kotlin.uuid.ExperimentalUuidApi
 import kotlin.uuid.Uuid
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonPrimitive
 
 /**
@@ -242,7 +243,14 @@ class CallController(
                 runCatching { _ice.value = TrunkWire.parseIce(ch.scry(TrunkWire.AGENT, "/ice")) }
                     .onSuccess { Log.i(TAG, "ice config: ${iceServers.size} servers") }
                     .onFailure { Log.w(TAG, "ice scry failed (Tier 0 only)", it) }
-                adoptDefaultIce(ch)
+                // Guarded like every other step here. It is internally
+                // safe today, but a throw between opening the channel
+                // and subscribing is the worst failure this loop has:
+                // `channel` is already assigned, so pokes keep working
+                // and the ship looks reachable while no fact ever
+                // arrives again.
+                runCatching { adoptDefaultIce(ch) }
+                    .onFailure { Log.w(TAG, "adopting default ice failed", it) }
                 // No %trunk (or a desk predating policy) leaves this
                 // null, and the settings editor stays hidden.
                 runCatching { _policy.value = TrunkWire.parsePolicy(ch.scry(TrunkWire.AGENT, "/policy")) }
@@ -292,6 +300,37 @@ class CallController(
                         // Surface poke nacks — a silently-refused poke cost
                         // us a day of "the accept never arrives" debugging.
                         body["err"]?.let { Log.e(TAG, "channel error: $it") }
+
+                        // A kicked or refused subscription is silent
+                        // otherwise, and permanent: gall sends %kick,
+                        // eyre turns it into {"response":"quit"} with no
+                        // error text and no payload, and nothing here or
+                        // in the channel layer ever asked again. The
+                        // result is a client that pokes fine — so calls
+                        // can still be placed — while no ring, accept or
+                        // hangup ever arrives, until the app is killed.
+                        // Tlon's agents kick subscribers during state
+                        // migrations, and a nacked watch lands the same
+                        // way, so this has to recover on its own.
+                        when (body["response"]?.jsonPrimitive?.contentOrNull) {
+                            "quit" -> {
+                                Log.w(TAG, "calls subscription was kicked; resubscribing")
+                                runCatching { ch.subscribe(TrunkWire.AGENT, TrunkWire.CALLS_PATH) }
+                                    .onFailure { Log.e(TAG, "resubscribe failed", it) }
+                                return@collect
+                            }
+                            "subscribe" -> {
+                                val err = body["err"]
+                                if (err != null && err !is kotlinx.serialization.json.JsonNull) {
+                                    // Refused. Retrying the same path in a
+                                    // tight loop would spin, so let the
+                                    // outer reconnect back off instead.
+                                    Log.e(TAG, "calls subscription refused: $err")
+                                    throw IllegalStateException("calls watch refused: $err")
+                                }
+                                return@collect
+                            }
+                        }
                         val fact = body["json"] ?: return@collect
                         when (val up = TrunkWire.parseUpdate(fact)) {
                             is TrunkUpdate.Recv -> onSignal(up)
