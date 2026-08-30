@@ -15,6 +15,10 @@ import dev.onvoid.webrtc.RTCSessionDescription
 import dev.onvoid.webrtc.SetSessionDescriptionObserver
 import dev.onvoid.webrtc.media.audio.AudioOptions
 import dev.onvoid.webrtc.media.audio.AudioTrack
+import dev.onvoid.webrtc.media.MediaDevices
+import dev.onvoid.webrtc.media.video.VideoCaptureCapability
+import dev.onvoid.webrtc.media.video.VideoDeviceSource
+import dev.onvoid.webrtc.media.video.VideoTrack
 import io.nisfeb.talon.util.Log
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -36,6 +40,28 @@ class DesktopCallEngine(configuredIce: List<IceServer> = emptyList()) : CallEngi
     private val gathered = CompletableDeferred<Unit>()
     private var micTrack: AudioTrack? = null
 
+    // ── video ────────────────────────────────────────────────────
+    private val _video = MutableStateFlow(VideoState())
+    override val video: StateFlow<VideoState> = _video
+
+    /**
+     * The camera source, created but never started until asked.
+     *
+     * webrtc-java has no kind-based addTransceiver — it takes a track —
+     * so unlike Android the track has to exist before the first offer.
+     * A VideoDeviceSource that was never start()ed holds no device, so
+     * this still costs nothing and lights no indicator until
+     * [setCameraEnabled]; the track simply carries no frames.
+     */
+    private var cameraSource: VideoDeviceSource? = null
+    private var localVideo: VideoTrack? = null
+
+    /** Tracks the renderer attaches a sink to. Desktop-only members:
+     *  webrtc-java's types cannot cross into commonMain. */
+    val localVideoTrack: VideoTrack? get() = localVideo
+    @Volatile var remoteVideoTrack: VideoTrack? = null
+        private set
+
     private val rtcConfig = RTCConfiguration().apply {
         for (s in configuredIce) {
             val server = dev.onvoid.webrtc.RTCIceServer()
@@ -54,6 +80,13 @@ class DesktopCallEngine(configuredIce: List<IceServer> = emptyList()) : CallEngi
             override fun onIceCandidate(candidate: RTCIceCandidate?) {
                 // Non-trickle: candidates accumulate into the local SDP.
                 Log.i("Trunk", "ice candidate: ${candidate?.sdp}")
+            }
+
+            override fun onTrack(transceiver: dev.onvoid.webrtc.RTCRtpTransceiver?) {
+                val track = transceiver?.receiver?.track as? VideoTrack ?: return
+                remoteVideoTrack = track
+                _video.value = _video.value.copy(remoteOn = true)
+                Log.i("Trunk", "remote video track ${track.id}")
             }
 
             override fun onIceGatheringChange(gatherState: RTCIceGatheringState?) {
@@ -82,6 +115,55 @@ class DesktopCallEngine(configuredIce: List<IceServer> = emptyList()) : CallEngi
         val track = factory.createAudioTrack("talon-mic", source)
         pc.addTrack(track, listOf("talon-call"))
         micTrack = track
+        // Video negotiated in the first offer, camera closed. See
+        // CallEngine.setCameraEnabled for why this avoids
+        // renegotiation entirely.
+        runCatching {
+            val camSource = VideoDeviceSource()
+            val camTrack = factory.createVideoTrack("talon-cam", camSource)
+            camTrack.isEnabled = false
+            pc.addTransceiver(
+                camTrack,
+                dev.onvoid.webrtc.RTCRtpTransceiverInit().apply {
+                    direction = dev.onvoid.webrtc.RTCRtpTransceiverDirection.SEND_RECV
+                },
+            )
+            cameraSource = camSource
+            localVideo = camTrack
+        }.onFailure {
+            Log.w("Trunk", "no video transceiver; call stays audio-only", it)
+        }
+    }
+
+    /**
+     * Start or stop the camera. See [CallEngine.setCameraEnabled] —
+     * the transceiver is already negotiated, so this is local only.
+     */
+    override suspend fun setCameraEnabled(enabled: Boolean): Boolean {
+        val source = cameraSource ?: return false
+        val track = localVideo ?: return false
+        if (!enabled) {
+            runCatching { track.isEnabled = false }
+            runCatching { source.stop() }
+            _video.value = _video.value.copy(localOn = false)
+            return true
+        }
+        return runCatching {
+            val device = MediaDevices.getVideoCaptureDevices().firstOrNull()
+                ?: error("no camera on this machine")
+            source.setVideoCaptureDevice(device)
+            // 640x480@30 to match the other platforms. Talon has no
+            // simulcast, so one modest stream is the whole budget.
+            source.setVideoCaptureCapability(VideoCaptureCapability(640, 480, 30))
+            source.start()
+            track.isEnabled = true
+            _video.value = _video.value.copy(localOn = true)
+            true
+        }.getOrElse {
+            Log.w("Trunk", "could not start the camera", it)
+            runCatching { source.stop() }
+            false
+        }
     }
 
     override suspend fun createOffer(): SessionDesc {
@@ -129,6 +211,15 @@ class DesktopCallEngine(configuredIce: List<IceServer> = emptyList()) : CallEngi
         // still running on a native thread is a use-after-free.
         if (!closed.compareAndSet(false, true)) return
         runCatching { micTrack?.isEnabled = false }
+        // Stop capture before the pc goes: a running device feeding a
+        // closed source is a native callback into freed memory.
+        runCatching { localVideo?.isEnabled = false }
+        runCatching { cameraSource?.stop() }
+        runCatching { cameraSource?.dispose() }
+        cameraSource = null
+        localVideo = null
+        remoteVideoTrack = null
+        _video.value = VideoState()
         runCatching { pc.close() }
         // The pc never owned the track: without an explicit dispose its
         // native object leaks per call. Its AudioTrackSource can't be

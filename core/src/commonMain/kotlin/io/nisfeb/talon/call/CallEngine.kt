@@ -18,6 +18,20 @@ data class IceServer(val url: String, val user: String, val cred: String)
 enum class MediaState { Idle, Gathering, Connecting, Live, Failed, Closed }
 
 /**
+ * Who is showing a camera on a 1:1 call.
+ *
+ * Both sides start false: a call is audio until someone turns their
+ * camera on, which is the behaviour a voice-first client should have
+ * and also what keeps the camera indicator dark on an ordinary call.
+ */
+data class VideoState(
+    val localOn: Boolean = false,
+    val remoteOn: Boolean = false,
+) {
+    val anyOn: Boolean get() = localOn || remoteOn
+}
+
+/**
  * One call's media half. Created per call by [CallEngineProvider];
  * the platform impl wraps libwebrtc (webrtc-java on desktop). The
  * signaling half (CallController) never touches WebRTC types.
@@ -38,6 +52,35 @@ interface CallEngine {
     suspend fun setAnswer(remote: SessionDesc)
 
     fun setMuted(muted: Boolean)
+
+    /**
+     * Who is showing a camera, ours and theirs.
+     *
+     * The renderer watches this rather than polling: a remote camera
+     * can start at any point in a call, and the surface has to appear
+     * when it does.
+     */
+    val video: StateFlow<VideoState>
+
+    /**
+     * Open (or close) our camera and send it.
+     *
+     * Deliberately free of renegotiation. Every engine negotiates a
+     * sendrecv video transceiver in its very first offer, with no
+     * track attached; enabling swaps a camera track onto that sender,
+     * which WebRTC allows without a new offer/answer round. So trunk
+     * never learns what video is, CallController gains no protocol,
+     * and an old peer that answered with a rejected m-line simply
+     * never shows a picture.
+     *
+     * The camera is not opened until this is called, so an audio call
+     * leaves the indicator light off and never prompts.
+     *
+     * Returns false when the camera could not be opened — permission
+     * refused, no device, already in use — so the caller can say so
+     * rather than leaving a button that appears to do nothing.
+     */
+    suspend fun setCameraEnabled(enabled: Boolean): Boolean
 
     fun close()
 }
@@ -63,6 +106,8 @@ class UnavailableCallEngine(private val why: String) : CallEngine {
     override suspend fun acceptOffer(remote: SessionDesc): SessionDesc = error(why)
     override suspend fun setAnswer(remote: SessionDesc) = error(why)
     override fun setMuted(muted: Boolean) {}
+    override val video: StateFlow<VideoState> = MutableStateFlow(VideoState())
+    override suspend fun setCameraEnabled(enabled: Boolean) = false
     override fun close() {}
 }
 

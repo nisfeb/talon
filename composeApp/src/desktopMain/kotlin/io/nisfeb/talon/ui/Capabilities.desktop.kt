@@ -62,6 +62,8 @@ actual val isCallRecordingSupported: Boolean = true
 actual val isBackgroundCallRingSupported: Boolean = true
 
 // No touch edge on desktop; the logo click opens the switcher.
+actual val isVideoCallsSupported: Boolean = true
+
 actual val isEdgeSwipeBackSupported: Boolean = false
 
 // Desktop resolves a bundled emoji family; the span does the work.

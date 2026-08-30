@@ -24,6 +24,8 @@ actual val isCallRecordingSupported: Boolean = false
 actual val isBackgroundCallRingSupported: Boolean = true
 
 // The system back gesture already owns the left edge here.
+actual val isVideoCallsSupported: Boolean = true
+
 actual val isEdgeSwipeBackSupported: Boolean = false
 
 // Android draws colour emoji in the default family already.

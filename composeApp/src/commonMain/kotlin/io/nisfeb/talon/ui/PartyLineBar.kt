@@ -15,6 +15,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CallEnd
 import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.Videocam
+import androidx.compose.material.icons.filled.VideocamOff
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.MicOff
@@ -163,6 +165,15 @@ fun PartyLineBarContent(
     recordedBy: Set<String> = emptySet(),
     /** Toggle recording, or null to hide the control. */
     onToggleRecord: (() -> Unit)? = null,
+    /**
+     * Camera toggle, shown only when non-null.
+     *
+     * Null for party lines, which are audio-only — so the button
+     * exists exactly where video does, rather than being greyed out
+     * somewhere it can never work (CLAUDE.md #3).
+     */
+    onToggleCamera: (() -> Unit)? = null,
+    cameraOn: Boolean = false,
 ) {
     if (state is PartyState.Idle) return
     var expanded by remember { mutableStateOf(false) }
@@ -315,6 +326,17 @@ fun PartyLineBarContent(
                                 },
                                 modifier = Modifier.padding(horizontal = 8.dp),
                             )
+                        }
+                        if (onToggleCamera != null) {
+                            IconButton(onClick = onToggleCamera) {
+                                Icon(
+                                    if (cameraOn) Icons.Filled.Videocam
+                                    else Icons.Filled.VideocamOff,
+                                    contentDescription =
+                                        if (cameraOn) "Turn the camera off"
+                                        else "Turn the camera on",
+                                )
+                            }
                         }
                         if (expandable) {
                             IconButton(onClick = {

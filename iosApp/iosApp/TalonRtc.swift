@@ -1,4 +1,5 @@
 import AVFoundation
+import CoreMedia
 import ComposeApp
 import Foundation
 import WebRTC
@@ -54,6 +55,18 @@ final class TalonRtcPeer: NSObject, NativeRtcPeer, RTCPeerConnectionDelegate {
     private var lastLocalLevel: Double = -1
     private var localStatsInFlight = false
 
+    // MARK: - video
+    /// The sendrecv video sender, created up-front with no track, so
+    /// turning the camera on later needs no renegotiation.
+    private var videoSender: RTCRtpSender?
+    private var capturer: RTCCameraVideoCapturer?
+    private var localVideoTrack: RTCVideoTrack?
+    private var remoteVideoTrack: RTCVideoTrack?
+    private var videoListener: ((VideoState) -> Void)?
+    private var videoState = VideoState(localOn: false, remoteOn: false)
+    private lazy var localView: RTCMTLVideoView = RTCMTLVideoView(frame: .zero)
+    private lazy var remoteView: RTCMTLVideoView = RTCMTLVideoView(frame: .zero)
+
     init(iceServers: [IceServer], sendAudio: Bool, trickle: Bool) {
         self.trickle = trickle
         super.init()
@@ -97,6 +110,16 @@ final class TalonRtcPeer: NSObject, NativeRtcPeer, RTCPeerConnectionDelegate {
             let params = RTCRtpTransceiverInit()
             params.direction = trickle ? .sendOnly : .sendRecv
             pc?.addTransceiver(with: track, init: params)
+        }
+
+        // Video on 1:1 calls only. A party line's links are
+        // one-directional by Galène's rules and carry audio; adding a
+        // video m-line to each of N down links would negotiate N
+        // streams nobody asked for.
+        if !trickle {
+            let vparams = RTCRtpTransceiverInit()
+            vparams.direction = .sendRecv
+            videoSender = pc?.addTransceiver(of: .video, init: vparams)?.sender
         }
     }
 
@@ -272,12 +295,103 @@ final class TalonRtcPeer: NSObject, NativeRtcPeer, RTCPeerConnectionDelegate {
         main { [weak self] in self?.micTrack?.isEnabled = !muted }
     }
 
+    func onVideoChange(listener: @escaping (VideoState) -> Void) {
+        videoListener = listener
+    }
+
+    func localVideoView() -> Any? { localView }
+    func remoteVideoView() -> Any? { remoteView }
+
+    /// Open or close the camera and hang it on the pre-negotiated
+    /// sender. Front camera by preference, ~640x480 to match the other
+    /// platforms — Talon has no simulcast, so one modest stream is the
+    /// entire budget.
+    func setCameraEnabled(enabled: Bool, done: @escaping (String?) -> Void) {
+        guard let sender = videoSender else {
+            return done("this call negotiated no video")
+        }
+        if !enabled {
+            // No capturer means nothing to stop — and stopCapture's
+            // completion would never fire, leaving `done` uncalled and
+            // the caller awaiting forever.
+            guard let cap = capturer else {
+                sender.track = nil
+                localVideoTrack = nil
+                publishVideo(local: false, remote: videoState.remoteOn)
+                return done(nil)
+            }
+            cap.stopCapture { [weak self] in
+                self?.main {
+                    guard let self = self else { return }
+                    self.localVideoTrack?.remove(self.localView)
+                    sender.track = nil
+                    self.capturer = nil
+                    self.localVideoTrack = nil
+                    self.publishVideo(local: false, remote: self.videoState.remoteOn)
+                    done(nil)
+                }
+            }
+            return
+        }
+        if localVideoTrack != nil { return done(nil) }
+
+        let devices = RTCCameraVideoCapturer.captureDevices()
+        guard let device = devices.first(where: { $0.position == .front }) ?? devices.first else {
+            return done("no camera on this device")
+        }
+        let formats = RTCCameraVideoCapturer.supportedFormats(for: device)
+        // Closest to 640x480 rather than largest: the biggest format a
+        // modern iPhone offers is 4K, which would saturate the link.
+        guard let format = formats.min(by: { a, b in
+            let da = CMVideoFormatDescriptionGetDimensions(a.formatDescription)
+            let db = CMVideoFormatDescriptionGetDimensions(b.formatDescription)
+            return abs(Int(da.width) - 640) < abs(Int(db.width) - 640)
+        }) else {
+            return done("this camera offers no usable format")
+        }
+        let fps = min(
+            30,
+            Int(format.videoSupportedFrameRateRanges.map { $0.maxFrameRate }.max() ?? 30)
+        )
+
+        let source = TalonRtcPeer.factory.videoSource()
+        let cap = RTCCameraVideoCapturer(delegate: source)
+        let track = TalonRtcPeer.factory.videoTrack(with: source, trackId: "talon-cam")
+        cap.startCapture(with: device, format: format, fps: fps) { [weak self] error in
+            self?.main {
+                guard let self = self else { return }
+                if let error = error {
+                    return done("camera failed to start: \(error.localizedDescription)")
+                }
+                track.add(self.localView)
+                sender.track = track
+                self.capturer = cap
+                self.localVideoTrack = track
+                self.publishVideo(local: true, remote: self.videoState.remoteOn)
+                done(nil)
+            }
+        }
+    }
+
+    private func publishVideo(local: Bool, remote: Bool) {
+        videoState = VideoState(localOn: local, remoteOn: remote)
+        videoListener?(videoState)
+    }
+
     func close() {
         main { [weak self] in
             guard let self = self, !self.closed else { return }
             self.closed = true
             self.micTrack?.isEnabled = false
             self.micTrack = nil
+            // Stop capture before the peer connection goes: a running
+            // capturer feeding a closed source is a callback into freed
+            // memory, the same hazard as tearing down mid-gather.
+            self.capturer?.stopCapture()
+            self.capturer = nil
+            self.localVideoTrack = nil
+            self.remoteVideoTrack = nil
+            self.videoSender = nil
             self.pc?.close()
             self.pc = nil
             // A parked non-trickle completion must fire, not vanish:
@@ -405,6 +519,19 @@ final class TalonRtcPeer: NSObject, NativeRtcPeer, RTCPeerConnectionDelegate {
     }
 
     // Unused delegate requirements.
+    func peerConnection(
+        _ pc: RTCPeerConnection,
+        didStartReceivingOn transceiver: RTCRtpTransceiver
+    ) {
+        guard let track = transceiver.receiver.track as? RTCVideoTrack else { return }
+        main { [weak self] in
+            guard let self = self else { return }
+            self.remoteVideoTrack = track
+            track.add(self.remoteView)
+            self.publishVideo(local: self.videoState.localOn, remote: true)
+        }
+    }
+
     func peerConnection(_ pc: RTCPeerConnection, didChange s: RTCSignalingState) {}
     func peerConnection(_ pc: RTCPeerConnection, didAdd s: RTCMediaStream) {}
     func peerConnection(_ pc: RTCPeerConnection, didRemove s: RTCMediaStream) {}

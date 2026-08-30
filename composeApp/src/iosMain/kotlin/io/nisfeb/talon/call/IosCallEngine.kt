@@ -23,9 +23,25 @@ class IosCallEngine(private val native: NativeRtcPeer) : CallEngine {
     private val _state = MutableStateFlow(MediaState.Idle)
     override val state: StateFlow<MediaState> = _state.asStateFlow()
 
+    private val _video = MutableStateFlow(VideoState())
+    override val video: StateFlow<VideoState> = _video.asStateFlow()
+
     init {
         native.onStateChange { _state.value = it }
+        native.onVideoChange { _video.value = it }
     }
+
+    /** The views [VideoSurface] renders. iOS-only members. */
+    fun localView(): Any? = native.localVideoView()
+    fun remoteView(): Any? = native.remoteVideoView()
+
+    override suspend fun setCameraEnabled(enabled: Boolean): Boolean =
+        suspendCancellableCoroutine { cont ->
+            native.setCameraEnabled(enabled) { err ->
+                if (err != null) io.nisfeb.talon.util.Log.w(TAG, "camera: $err")
+                cont.resume(err == null)
+            }
+        }
 
     override suspend fun createOffer(): SessionDesc {
         _state.value = MediaState.Gathering
@@ -53,6 +69,8 @@ class IosCallEngine(private val native: NativeRtcPeer) : CallEngine {
     override fun setMuted(muted: Boolean) {
         native.setMuted(muted)
     }
+
+    private companion object { private const val TAG = "IosCallEngine" }
 
     private val closed = atomic(false)
 

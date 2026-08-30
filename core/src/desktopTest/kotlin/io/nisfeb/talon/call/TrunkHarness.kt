@@ -155,6 +155,8 @@ internal class HangingCallEngine : CallEngine {
     override suspend fun acceptOffer(remote: SessionDesc): SessionDesc = awaitCancellation()
     override suspend fun setAnswer(remote: SessionDesc) = Unit
     override fun setMuted(muted: Boolean) = Unit
+    override val video: StateFlow<VideoState> = MutableStateFlow(VideoState())
+    override suspend fun setCameraEnabled(enabled: Boolean): Boolean = false
     override fun close() = Unit
 }
 
@@ -175,5 +177,7 @@ internal class ScriptedCallEngine(
     override suspend fun acceptOffer(remote: SessionDesc): SessionDesc = desc
     override suspend fun setAnswer(remote: SessionDesc) { answersSet++ }
     override fun setMuted(muted: Boolean) = Unit
+    override val video: StateFlow<VideoState> = MutableStateFlow(VideoState())
+    override suspend fun setCameraEnabled(enabled: Boolean): Boolean = false
     override fun close() = Unit
 }
