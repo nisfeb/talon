@@ -27,13 +27,8 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.expandVertically
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.CircleShape
@@ -1160,11 +1155,28 @@ fun DmListScreen(
                                             ),
                                         )
                                         HorizontalDivider()
-                                        AnimatedVisibility(
-                                            visible = row.expanded,
-                                            enter = expandVertically() + fadeIn(),
-                                            exit = shrinkVertically() + fadeOut(),
-                                        ) {
+                                        // Instant, not animated, and that is the
+                                        // fix rather than a simplification.
+                                        // AnimatedVisibility animates the *measured
+                                        // height* of the container, so while that
+                                        // animation is in flight the item reports a
+                                        // height its content does not have.
+                                        // Backgrounding the app pauses Compose's
+                                        // frame clock, and a resume could leave the
+                                        // transition parked partway: the item then
+                                        // measured collapsed while its children
+                                        // still drew, every row below rode up over
+                                        // them, and nothing short of killing the
+                                        // app put it back. A plain `if` cannot
+                                        // desynchronise — height and content are
+                                        // the same decision.
+                                        //
+                                        // The children still live in the group's own
+                                        // lazy item, which is what stopped the
+                                        // reorder placement animation fighting the
+                                        // expansion earlier. Only the animated
+                                        // height is gone.
+                                        if (row.expanded) {
                                             Column {
                                                 childrenSnapshot.forEach { child ->
                                                     GroupChannelRow(
@@ -1293,11 +1305,28 @@ fun DmListScreen(
                                             ),
                                         )
                                         HorizontalDivider()
-                                        AnimatedVisibility(
-                                            visible = row.expanded,
-                                            enter = expandVertically() + fadeIn(),
-                                            exit = shrinkVertically() + fadeOut(),
-                                        ) {
+                                        // Instant, not animated, and that is the
+                                        // fix rather than a simplification.
+                                        // AnimatedVisibility animates the *measured
+                                        // height* of the container, so while that
+                                        // animation is in flight the item reports a
+                                        // height its content does not have.
+                                        // Backgrounding the app pauses Compose's
+                                        // frame clock, and a resume could leave the
+                                        // transition parked partway: the item then
+                                        // measured collapsed while its children
+                                        // still drew, every row below rode up over
+                                        // them, and nothing short of killing the
+                                        // app put it back. A plain `if` cannot
+                                        // desynchronise — height and content are
+                                        // the same decision.
+                                        //
+                                        // The children still live in the group's own
+                                        // lazy item, which is what stopped the
+                                        // reorder placement animation fighting the
+                                        // expansion earlier. Only the animated
+                                        // height is gone.
+                                        if (row.expanded) {
                                             Column {
                                                 childrenSnapshot.forEach { child ->
                                                     GroupChannelRow(
