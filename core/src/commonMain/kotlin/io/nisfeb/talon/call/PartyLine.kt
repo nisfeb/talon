@@ -100,6 +100,9 @@ class PartyLine(
     private val http: HttpClient,
     private val links: PeerLinkFactory,
     private val sounds: CallSoundPlayer = CallSoundPlayer.Noop,
+    /** Base backoff before republishing a failed up link. A knob only
+     *  so tests can run the retry path in real milliseconds. */
+    private val upRetryBaseMs: Long = 2_000L,
 ) {
     private val scope =
         CoroutineScope(SupervisorJob() + ioDispatcher + backgroundExceptionHandler)
@@ -166,6 +169,7 @@ class PartyLine(
         // mic is not recoverable.
         muted = true
         connectionId = "$ourShip-${Uuid.random()}"
+        upRetries = 3
         upId = "up-$connectionId"
         _state.value = PartyState.Connecting(ticket.name)
         pump = scope.launch { run(ticket, ourShip) }
@@ -282,6 +286,23 @@ class PartyLine(
             // The server offers us one stream per remote speaker.
             "offer" -> onRemoteOffer(msg)
 
+            // The server killed a stream. For a down link, drop it —
+            // a stale entry would hold a dead connection forever. For
+            // OUR up link this is the server saying our mic stream is
+            // gone, which nothing else reports; republish rather than
+            // sit in a line nobody can hear us in.
+            "abort" -> {
+                val id = msg["id"]?.jsonPrimitive?.content ?: return
+                if (id == upId) {
+                    Log.w(TAG, "server aborted our up stream; republishing")
+                    if (joined) publishUp()
+                } else {
+                    downLinks.remove(id)?.close()
+                    streamOwner.remove(id)
+                    publishRoster()
+                }
+            }
+
             "answer" -> {
                 val id = msg["id"]?.jsonPrimitive?.content ?: return
                 val sdp = msg["sdp"]?.jsonPrimitive?.content ?: return
@@ -388,20 +409,51 @@ class PartyLine(
         })
 
         // Publish our mic as one up stream.
-        val up = links.create(ice, sendAudio = true)
+        publishUp()
+        publishRoster()
+    }
+
+    /** Republish attempts left for the current line. Reset on join. */
+    private var upRetries = 3
+
+    /**
+     * Stand up (or re-stand) the mic's up link and offer it.
+     *
+     * Failure here was the invisible one: the down links and the
+     * roster ride separate connections, so a member whose up link
+     * died heard everyone, showed as unmuted, and published nothing —
+     * with no error anywhere and nothing that ever retried. Now a
+     * Failed up link tears down and re-offers, a few times with
+     * backoff; if it still won't connect, the roster row's media dot
+     * is at least telling the truth.
+     */
+    private suspend fun publishUp() {
+        upLink?.close()
+        val up = links.create(sfuIce, sendAudio = true)
         upLink = up
         startLevelPolling()
         up.setMuted(muted)
-        // We join muted, so say so before anyone renders us as live.
+        // Say our mute state before anyone renders us as live.
         broadcastMuted()
-        scope.launch { up.state.collect { upState = it; publishRoster() } }
+        scope.launch {
+            up.state.collect { st ->
+                upState = st
+                publishRoster()
+                if (st == MediaState.Failed && upLink === up && joined && upRetries > 0) {
+                    upRetries -= 1
+                    val wait = upRetryBaseMs * (3 - upRetries)
+                    Log.w(TAG, "up link failed; republishing in ${wait}ms ($upRetries left)")
+                    delay(wait)
+                    if (upLink === up && joined) publishUp()
+                }
+            }
+        }
         up.onLocalCandidate { c -> scope.launch { sendIce(upId, c) } }
         val sdp = up.offer()
         send(buildJsonObject {
             put("type", "offer"); put("id", upId); put("label", "")
             put("username", ourId); put("sdp", sdp)
         })
-        publishRoster()
     }
 
     internal suspend fun onRemoteOffer(msg: JsonObject) {

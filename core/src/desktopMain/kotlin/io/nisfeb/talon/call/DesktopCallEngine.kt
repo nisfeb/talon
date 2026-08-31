@@ -78,7 +78,19 @@ class DesktopCallEngine(configuredIce: List<IceServer> = emptyList()) : CallEngi
     )
 
     init {
-        val source = factory.createAudioSource(AudioOptions())
+        val source = factory.createAudioSource(AudioOptions().apply {
+                // All four default to false, and the bare constructor
+                // shipped for months: desktop published a completely
+                // unprocessed microphone. No echo cancellation meant a
+                // desktop user on speakers fed the whole line back to
+                // itself; no auto gain meant whisper-or-clipping mics;
+                // no noise suppression meant fans and keyboards. These
+                // are the defaults every browser applies to a call.
+                echoCancellation = true
+                autoGainControl = true
+                noiseSuppression = true
+                highpassFilter = true
+            })
         val track = factory.createAudioTrack("talon-mic", source)
         pc.addTrack(track, listOf("talon-call"))
         micTrack = track
