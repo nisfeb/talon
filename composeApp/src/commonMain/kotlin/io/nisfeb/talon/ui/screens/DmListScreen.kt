@@ -182,6 +182,12 @@ fun DmListScreen(
      *  takes effect without a relaunch. */
     groupChannelOrder: io.nisfeb.talon.ui.GroupChannelOrder =
         io.nisfeb.talon.ui.GroupChannelOrder.Recent,
+    /** When a detail pane sits beside this list (the wide split
+     *  layout), expanding a group also opens its most recently
+     *  active channel there — the tap's obvious next act. Off by
+     *  default because on compact layouts "open" navigates away
+     *  from the list the user was in the middle of browsing. */
+    autoOpenOnExpand: Boolean = false,
     /** How the home list's Groups section and any custom folder's
      *  top-level entries sort. Same UiSettings-driven plumbing as
      *  [groupChannelOrder]. */
@@ -1143,7 +1149,19 @@ fun DmListScreen(
                                             totalUnread = row.totalUnread,
                                             expanded = row.expanded,
                                             lastActiveMs = lastActive,
-                                            onToggle = onGroupHeadToggle,
+                                            onToggle = { flag ->
+                                                // Read BEFORE the toggle flips it.
+                                                val expanding = !row.expanded
+                                                onGroupHeadToggle(flag)
+                                                // Only on expand, never collapse; and
+                                                // not in edit mode, where expansion is
+                                                // part of reordering, not reading.
+                                                if (autoOpenOnExpand && expanding && !editMode) {
+                                                    childrenSnapshot
+                                                        .maxByOrNull { it.m?.sentMs ?: 0L }
+                                                        ?.let { onRowOpen(it.whom) }
+                                                }
+                                            },
                                             onLongClick = if (editMode) null else onGroupHeadLongPress,
                                             editMode = editMode,
                                             dragHandleModifier = if (!canReorder) null else Modifier.longPressDraggableHandle(
@@ -1289,7 +1307,19 @@ fun DmListScreen(
                                             totalUnread = row.totalUnread,
                                             expanded = row.expanded,
                                             lastActiveMs = lastActive,
-                                            onToggle = onGroupHeadToggle,
+                                            onToggle = { flag ->
+                                                // Read BEFORE the toggle flips it.
+                                                val expanding = !row.expanded
+                                                onGroupHeadToggle(flag)
+                                                // Only on expand, never collapse; and
+                                                // not in edit mode, where expansion is
+                                                // part of reordering, not reading.
+                                                if (autoOpenOnExpand && expanding && !editMode) {
+                                                    childrenSnapshot
+                                                        .maxByOrNull { it.m?.sentMs ?: 0L }
+                                                        ?.let { onRowOpen(it.whom) }
+                                                }
+                                            },
                                             onLongClick = if (editMode) null else onGroupHeadLongPress,
                                             editMode = editMode,
                                             dragHandleModifier = if (!canReorder) null else Modifier.longPressDraggableHandle(

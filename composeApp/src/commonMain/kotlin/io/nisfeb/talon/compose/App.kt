@@ -1969,6 +1969,10 @@ fun App(
                                         drafts = drafts,
                                         updateState = updateState,
                                         menuSeen = menuSeen,
+                                        // The detail pane is beside us at this width,
+                                        // so expanding a group can land its most
+                                        // recent channel there without navigating.
+                                        autoOpenOnExpand = expanded,
                                         onOpenConversation = { whom ->
                                             openConversationAction()
                                             openChat = whom
