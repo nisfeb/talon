@@ -41,44 +41,66 @@ class DesktopCallSoundPlayer : CallSoundPlayer {
     override fun loop(pcm: ByteArray, gapMs: Int, stream: ToneStream) {
         stopLoop()
         looping = true
-        loopThread = thread(isDaemon = true, name = "talon-ring") {
-            while (looping) {
-                writeOnce(pcm)
+        // The loop condition is ownership, not just the flag: a stopped
+        // thread stuck in line.write outlives its 300ms join, and a
+        // shared flag would resurrect it when the next loop() sets
+        // `looping` back — two rings at once. start=false so loopThread
+        // is assigned before the body's first ownership check.
+        val t = thread(isDaemon = true, name = "talon-ring", start = false) {
+            val self = Thread.currentThread()
+            while (looping && loopThread === self) {
+                writeOnce(pcm, loop = true)
                 // Sleep in slices so stopping is felt immediately
                 // rather than after a four-second gap.
                 var slept = 0
-                while (looping && slept < gapMs) {
+                while (looping && loopThread === self && slept < gapMs) {
                     Thread.sleep(50)
                     slept += 50
                 }
             }
         }
+        loopThread = t
+        t.start()
     }
 
     override fun stopLoop() {
-        looping = false
-        loopThread?.let { runCatching { it.join(300) } }
+        // Null the thread before the flag: an orphan checks ownership,
+        // so it dies at its next check even if a new loop() has already
+        // set `looping` true again.
+        val t = loopThread
         loopThread = null
+        looping = false
+        t?.let { runCatching { it.join(300) } }
     }
 
-    private fun writeOnce(pcm: ByteArray) {
+    private fun writeOnce(pcm: ByteArray, loop: Boolean = false) {
         var line: SourceDataLine? = null
         runCatching {
             line = AudioSystem.getSourceDataLine(format).apply {
-                open(format)
+                // A small buffer, or the stop check below is theater:
+                // the default holds ~half a second, writes race that
+                // far ahead of playback, and a stopped ring keeps
+                // sounding out of the buffer.
+                open(format, 8192)
                 start()
             }
-            // Write in chunks and re-check `looping`, so a ring that is
-            // answered mid-tone stops now rather than finishing.
+            // Write in chunks and re-check between them, so a ring that
+            // is answered mid-tone stops now rather than finishing.
             var off = 0
             val chunk = 4096
+            var cut = false
             while (off < pcm.size) {
-                if (loopThread === Thread.currentThread() && !looping) break
+                if (loop && (!looping || loopThread !== Thread.currentThread())) {
+                    cut = true
+                    break
+                }
                 val n = minOf(chunk, pcm.size - off)
                 line!!.write(pcm, off, n)
                 off += n
             }
-            line!!.drain()
+            // drain would play out what's buffered — an answered ring
+            // must go silent now, so a cut discards it instead.
+            if (cut) line!!.flush() else line!!.drain()
         }.onFailure {
             // A machine with no audio device is not an error worth
             // interrupting a call for.

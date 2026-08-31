@@ -78,19 +78,7 @@ class DesktopCallEngine(configuredIce: List<IceServer> = emptyList()) : CallEngi
     )
 
     init {
-        val source = factory.createAudioSource(AudioOptions().apply {
-                // All four default to false, and the bare constructor
-                // shipped for months: desktop published a completely
-                // unprocessed microphone. No echo cancellation meant a
-                // desktop user on speakers fed the whole line back to
-                // itself; no auto gain meant whisper-or-clipping mics;
-                // no noise suppression meant fans and keyboards. These
-                // are the defaults every browser applies to a call.
-                echoCancellation = true
-                autoGainControl = true
-                noiseSuppression = true
-                highpassFilter = true
-            })
+        val source = factory.createAudioSource(micAudioOptions())
         val track = factory.createAudioTrack("talon-mic", source)
         pc.addTrack(track, listOf("talon-call"))
         micTrack = track
@@ -127,7 +115,10 @@ class DesktopCallEngine(configuredIce: List<IceServer> = emptyList()) : CallEngi
     }
 
     override fun setMuted(muted: Boolean) {
-        micTrack?.isEnabled = !muted
+        // Guarded: close() disposes the track, and a mute tap racing a
+        // republish/hang-up would call into freed native memory.
+        if (closed.value) return
+        runCatching { micTrack?.isEnabled = !muted }
     }
 
     private val closed = kotlinx.atomicfu.atomic(false)
@@ -139,6 +130,12 @@ class DesktopCallEngine(configuredIce: List<IceServer> = emptyList()) : CallEngi
         if (!closed.compareAndSet(false, true)) return
         runCatching { micTrack?.isEnabled = false }
         runCatching { pc.close() }
+        // The pc never owned the track: without an explicit dispose its
+        // native object leaks per call. Its AudioTrackSource can't be
+        // freed at all — webrtc-java 0.14.0 exposes no dispose on it —
+        // so dropping the track's ref is the whole fix available.
+        runCatching { micTrack?.dispose() }
+        micTrack = null
         _state.value = MediaState.Closed
     }
 
@@ -177,6 +174,24 @@ class DesktopCallEngine(configuredIce: List<IceServer> = emptyList()) : CallEngi
 
 val DesktopCallEngineProvider: CallEngineProvider =
     CallEngineProvider { ice -> DesktopCallEngine(ice) }
+
+/**
+ * The mic-processing profile for every outgoing desktop audio source.
+ *
+ * All four default to false, and the bare constructor shipped for
+ * months: desktop published a completely unprocessed microphone. No
+ * echo cancellation meant a desktop user on speakers fed the whole
+ * line back to itself; no auto gain meant whisper-or-clipping mics;
+ * no noise suppression meant fans and keyboards. These are the
+ * defaults every browser applies to a call. One function so the 1:1
+ * and party-line paths can't drift apart; MicAudioOptionsTest pins it.
+ */
+internal fun micAudioOptions(): AudioOptions = AudioOptions().apply {
+    echoCancellation = true
+    autoGainControl = true
+    noiseSuppression = true
+    highpassFilter = true
+}
 
 /**
  * One [PeerConnectionFactory] for the process.

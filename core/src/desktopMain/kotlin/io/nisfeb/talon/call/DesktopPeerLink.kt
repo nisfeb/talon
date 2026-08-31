@@ -15,7 +15,6 @@ import dev.onvoid.webrtc.RTCSdpType
 import dev.onvoid.webrtc.RTCSessionDescription
 import dev.onvoid.webrtc.SetSessionDescriptionObserver
 import dev.onvoid.webrtc.media.MediaStreamTrack
-import dev.onvoid.webrtc.media.audio.AudioOptions
 import dev.onvoid.webrtc.media.audio.AudioTrack
 import io.nisfeb.talon.util.Log
 import kotlinx.coroutines.CompletableDeferred
@@ -95,19 +94,7 @@ class DesktopPeerLink(
 
     init {
         if (sendAudio) {
-            val source = micPcm ?: factory.createAudioSource(AudioOptions().apply {
-                // All four default to false, and the bare constructor
-                // shipped for months: desktop published a completely
-                // unprocessed microphone. No echo cancellation meant a
-                // desktop user on speakers fed the whole line back to
-                // itself; no auto gain meant whisper-or-clipping mics;
-                // no noise suppression meant fans and keyboards. These
-                // are the defaults every browser applies to a call.
-                echoCancellation = true
-                autoGainControl = true
-                noiseSuppression = true
-                highpassFilter = true
-            })
+            val source = micPcm ?: factory.createAudioSource(micAudioOptions())
             val track = factory.createAudioTrack("talon-mic", source)
             // Galène requires every stream to be one-directional: the
             // offerer is always the sender.
@@ -152,7 +139,10 @@ class DesktopPeerLink(
     }
 
     override fun setMuted(muted: Boolean) {
-        micTrack?.isEnabled = !muted
+        // Guarded: close() disposes the track, and a mute tap racing a
+        // republish/hang-up would call into freed native memory.
+        if (closed.value) return
+        runCatching { micTrack?.isEnabled = !muted }
     }
 
     /**
@@ -231,6 +221,13 @@ class DesktopPeerLink(
         if (!closed.compareAndSet(false, true)) return
         runCatching { micTrack?.isEnabled = false }
         runCatching { pc.close() }
+        // Ours to free even when the source is a caller-owned
+        // CustomAudioSource — and up links republish on flaky
+        // networks, so this leaked per republish, not per call. The
+        // factory-made AudioTrackSource can't be freed: webrtc-java
+        // 0.14.0 exposes no dispose on it.
+        runCatching { micTrack?.dispose() }
+        micTrack = null
         _state.value = MediaState.Closed
     }
 
