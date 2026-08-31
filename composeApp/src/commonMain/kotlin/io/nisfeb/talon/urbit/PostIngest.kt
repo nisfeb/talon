@@ -249,3 +249,26 @@ internal suspend fun MessageDao.softDeleteWithMedia(
     softDelete(whom, id)
     media.replaceForMessage(whom = whom, messageId = id, rows = emptyList())
 }
+
+/**
+ * Every bot author in a post, its replies included.
+ *
+ * A bot carries its own profile inline — a nickname and an avatar the
+ * %contacts store knows nothing about, because a bot is not a contact.
+ * Collected here, pure, so the repo can write it somewhere the display
+ * stack already looks. Humans are skipped: their author is a bare
+ * ship, so [PostAuthor.isBot] is false and nothing is emitted.
+ */
+internal fun botAuthorsIn(post: JsonElement): List<PostAuthor> {
+    val obj = post as? JsonObject ?: return emptyList()
+    val out = mutableListOf<PostAuthor>()
+    (obj["essay"] as? JsonObject)?.get("author").asAuthor()
+        ?.takeIf { it.isBot }?.let { out += it }
+    val seal = obj["seal"] as? JsonObject
+    (seal?.get("replies") as? JsonObject)?.forEach { (_, replyEl) ->
+        val reply = replyEl as? JsonObject ?: return@forEach
+        (reply["reply-essay"] as? JsonObject)?.get("author").asAuthor()
+            ?.takeIf { it.isBot }?.let { out += it }
+    }
+    return out
+}

@@ -3874,6 +3874,8 @@ class TlonChatRepo(
         reactionsOut: MutableList<ReactionEntity>,
     ) {
         // Pure classification lives in PostIngest.kt.
+        // Covers the essay and every reply, which toEntity does not see.
+        rememberBots(botAuthorsIn(post))
         val result = ingestedPost(whom, post)
         messagesOut.addAll(result.messages)
         reactionsOut.addAll(result.reactions)
@@ -3899,9 +3901,49 @@ class TlonChatRepo(
         }
     }
 
-    private fun toEntity(whom: String, id: String, essay: JsonObject): MessageEntity {
+
+    /**
+     * Give a bot a contact row so it renders like anyone else.
+     *
+     * A bot is not in %contacts and never will be — it carries its
+     * nickname and avatar inline on every post instead. ContactEntity
+     * already has exactly those fields, and ContactMap already reads
+     * nickname for the label and avatarUrl for the icon, so writing
+     * one row lights up the whole display stack with no schema change
+     * and no special case at any call site.
+     *
+     * Merged, not overwritten. A bot supplies only the two fields it
+     * knows about; everything %contacts owns — bio, status, colour —
+     * is carried through, and a field the bot left empty never blanks
+     * an existing one. The equality check matters more than it looks:
+     * this runs on every ingested post, and without it a busy bot
+     * channel would rewrite the same row hundreds of times and wake
+     * every contacts observer each time.
+     */
+    private suspend fun rememberBots(authors: List<PostAuthor>) {
+        for (a in authors) {
+            if (!a.isBot) continue
+            val existing = runCatching { db.contacts().get(a.ship) }.getOrNull()
+            val merged = ContactEntity(
+                ship = a.ship,
+                nickname = a.nickname ?: existing?.nickname,
+                bio = existing?.bio,
+                avatarUrl = a.avatarUrl ?: existing?.avatarUrl,
+                status = existing?.status,
+                statusUpdatedMs = existing?.statusUpdatedMs,
+                color = existing?.color,
+            )
+            if (merged != existing) {
+                runCatching { db.contacts().upsert(merged) }
+                    .onFailure { Log.w(TAG, "could not record bot ${a.ship}", it) }
+            }
+        }
+    }
+
+    private suspend fun toEntity(whom: String, id: String, essay: JsonObject): MessageEntity {
         // Thin wrapper so the two applyChannelDelta ingestion branches
         // (full post set vs full post ingest) produce identical rows.
+        rememberBots(listOfNotNull(essay["author"].asAuthor()?.takeIf { it.isBot }))
         val entity = pureEntity(whom, id, essay)
         StoryCache.partsFor(entity.id, entity.contentJson)
         return entity
