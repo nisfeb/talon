@@ -56,6 +56,10 @@ actual fun isOnDeviceAiFeatureSupported(
 // Trunkline calls: webrtc-java engine (v0 spike surface).
 actual val isCallsSupported: Boolean = true
 
+// A long-running process: the channel stays open, so rings land even
+// with the window unfocused or minimised.
+actual val isBackgroundCallRingSupported: Boolean = true
+
 // No touch edge on desktop; the logo click opens the switcher.
 actual val isEdgeSwipeBackSupported: Boolean = false
 

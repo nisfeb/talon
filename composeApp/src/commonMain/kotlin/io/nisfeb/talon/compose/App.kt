@@ -586,16 +586,48 @@ fun App(
                 db.groups().streamChannelGroups(),
             )
         }.collectAsState(initial = io.nisfeb.talon.ui.ContactMap.EMPTY)
+        // True exactly while the chat pane's partyLineBar slot is
+        // composing the inline call/party surfaces (a DisposableEffect
+        // in that slot flips it). Tracking actual composition instead
+        // of `openChat != null` matters: plenty of branches keep
+        // openChat set without rendering DmChatScreen — the compact
+        // thread, compact group info, notes/ channels, full-screen
+        // overlays — and a live call must float its strip there.
+        val inlineCallUiShown = remember { mutableStateOf(false) }
         callController?.let {
             io.nisfeb.talon.ui.CallOverlay(
                 it,
                 nameFor = { ship -> callContacts.displayName(ship) },
                 audioDevices = audioDevices,
-                // With a chat open the strip renders under its header,
-                // beside the party-line bar. Floating it as well would
-                // put the same call in two places.
-                stripShownInline = openChat != null,
+                // With the chat slot on screen the strip renders under
+                // its header, beside the party-line bar. Floating it as
+                // well would put the same call in two places.
+                stripShownInline = inlineCallUiShown.value,
             )
+        }
+        // A live party line whose chat slot is gone (back on the list,
+        // a compact thread, settings…) still needs a surface — the mic
+        // can be live and unmuted. Same floating container CallOverlay
+        // uses for its own strip, same bar the chat renders inline.
+        partyLine?.let { line ->
+            val partyState by line.state.collectAsState()
+            if (partyState !is io.nisfeb.talon.call.PartyState.Idle &&
+                !inlineCallUiShown.value
+            ) {
+                androidx.compose.ui.window.Popup(
+                    alignment = androidx.compose.ui.Alignment.TopCenter,
+                ) {
+                    io.nisfeb.talon.ui.PartyLineBar(
+                        line,
+                        nameFor = { ship -> callContacts.displayName(ship) },
+                        audioDevices = audioDevices,
+                        // Failed is sticky; floated with no chat slot
+                        // to return to, this is its only way off the
+                        // screen.
+                        onDismiss = { line.dismissFailure() },
+                    )
+                }
+            }
         }
         // Curated contact book (from %contacts /v1/book) — gates the
         // "Add to contacts" affordances and backs the Contacts screen.
@@ -1787,7 +1819,12 @@ fun App(
                                                 if (host == ship) {
                                                     loopScope.launch {
                                                         io.nisfeb.talon.call.PartyLineHost.startLine(
-                                                            callController, repo, db, whom, whom,
+                                                            callController, repo, db, whom,
+                                                            // The room title everyone
+                                                            // sees — the conversation's
+                                                            // human label, not the raw
+                                                            // channel key.
+                                                            partyContacts.conversationLabel(whom),
                                                         )
                                                     }
                                                 } else {
@@ -1807,12 +1844,54 @@ fun App(
                                     // bounded by the chat pane rather
                                     // than spanning the window.
                                     partyLineBar = {
+                                        // Tell the app-level overlays the
+                                        // inline surfaces are on screen, so
+                                        // the floating fallbacks stay hidden
+                                        // exactly while this slot composes.
+                                        // The guarded composition-time write
+                                        // exists because DisposableEffect
+                                        // fires only after the frame draws —
+                                        // without it the first frame showed
+                                        // the floating strip AND the inline
+                                        // bar at once.
+                                        if (!inlineCallUiShown.value) {
+                                            inlineCallUiShown.value = true
+                                        }
+                                        DisposableEffect(Unit) {
+                                            inlineCallUiShown.value = true
+                                            onDispose {
+                                                inlineCallUiShown.value = false
+                                            }
+                                        }
                                         partyLine?.let { line ->
                                             io.nisfeb.talon.ui.PartyLineBar(
                                                 line,
                                                 nameFor = { partyContacts.displayName(it) },
                                                 audioDevices = audioDevices,
                                             )
+                                            // Between tapping the party icon
+                                            // and the host's grant the line
+                                            // is still Idle and the bar above
+                                            // renders nothing — show the ask
+                                            // in flight, with its only
+                                            // meaningful control: withdrawing.
+                                            callController?.let { c ->
+                                                val pendingAsk by
+                                                    c.pendingJoin.collectAsState()
+                                                val lineState by
+                                                    line.state.collectAsState()
+                                                val roomKey = groupRoom
+                                                    ?.let { (h, n) -> "$h/$n" }
+                                                if (pendingAsk != null &&
+                                                    pendingAsk == roomKey &&
+                                                    lineState is
+                                                        io.nisfeb.talon.call.PartyState.Idle
+                                                ) {
+                                                    io.nisfeb.talon.ui.PartyLineAsking(
+                                                        onCancel = { c.cancelJoin() },
+                                                    )
+                                                }
+                                            }
                                         }
                                         callController?.let { c ->
                                             io.nisfeb.talon.ui.CallStrip(
@@ -1821,8 +1900,14 @@ fun App(
                                                 audioDevices = audioDevices,
                                             )
                                         }
-                                        peekProblem?.let { why ->
-                                            io.nisfeb.talon.ui.PartyLineUnavailable(why)
+                                        // Only while the line is actually
+                                        // unknown. A stale failure entry next
+                                        // to a working line read as the line
+                                        // being broken.
+                                        if (partyRoomHere == null) {
+                                            peekProblem?.let { why ->
+                                                io.nisfeb.talon.ui.PartyLineUnavailable(why)
+                                            }
                                         }
                                     },
                                     onOpenGroupInfo = {

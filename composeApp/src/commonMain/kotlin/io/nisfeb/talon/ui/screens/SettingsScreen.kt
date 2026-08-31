@@ -67,6 +67,7 @@ import io.nisfeb.talon.ai.LoopPrompt
 import io.nisfeb.talon.ui.UiSettings
 import io.nisfeb.talon.ui.isOnDeviceAiFeatureSupported
 import io.nisfeb.talon.ui.isAssistantSupported
+import io.nisfeb.talon.ui.isBackgroundCallRingSupported
 import io.nisfeb.talon.ui.isCallsSupported
 import io.nisfeb.talon.ui.isLoopsSupported
 import io.nisfeb.talon.ui.isOnDeviceAiSupported
@@ -768,6 +769,16 @@ fun SettingsScreen(
             if (isCallsSupported && callController != null) {
                 CallPolicySection(callController)
                 CallServersSection(callController)
+                // No background ring on this platform — say so plainly
+                // rather than letting a missed call be the discovery.
+                if (!isBackgroundCallRingSupported) {
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "Incoming calls ring only while Talon is open.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
 
             // Loops — scheduled agent prompts. Needs a cloud key (it runs

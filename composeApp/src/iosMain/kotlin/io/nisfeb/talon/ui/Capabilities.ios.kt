@@ -30,6 +30,10 @@ actual fun isOnDeviceAiFeatureSupported(
 // passing a factory, so a build without it shows no call UI.
 actual val isCallsSupported: Boolean = true
 
+// No CallKit/PushKit by design; UIBackgroundModes audio only sustains
+// a call already in progress. Backgrounded, the app can't hear a ring.
+actual val isBackgroundCallRingSupported: Boolean = false
+
 // Supplied by MainViewController's edge strip -> IosBackDispatcher.
 actual val isEdgeSwipeBackSupported: Boolean = true
 

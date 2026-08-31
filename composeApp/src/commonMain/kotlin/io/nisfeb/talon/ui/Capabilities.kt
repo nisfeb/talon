@@ -120,6 +120,16 @@ expect fun isOnDeviceAiFeatureSupported(
 expect val isCallsSupported: Boolean
 
 /**
+ * Whether an incoming call can ring this device while the app is in
+ * the background. Android: true (UnifiedPush wakes the process).
+ * Desktop: true (a long-running process hears the channel). iOS: false
+ * — no CallKit/PushKit by design, and UIBackgroundModes audio only
+ * sustains a call already in progress. Gates only an informational
+ * line in Settings' calls section; nothing is greyed out.
+ */
+expect val isBackgroundCallRingSupported: Boolean
+
+/**
  * A swipe in from the left edge navigates *back* rather than opening
  * the ship switcher.
  *

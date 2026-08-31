@@ -19,6 +19,9 @@ actual fun isOnDeviceAiFeatureSupported(
 // Trunkline calls: libwebrtc via getstream build (AndroidCallEngine).
 actual val isCallsSupported: Boolean = true
 
+// UnifiedPush wakes the process, so a ring lands with the app closed.
+actual val isBackgroundCallRingSupported: Boolean = true
+
 // The system back gesture already owns the left edge here.
 actual val isEdgeSwipeBackSupported: Boolean = false
 

@@ -65,6 +65,11 @@ fun PartyLineBar(
      *  owns routing rather than shown empty. */
     audioDevices: io.nisfeb.talon.call.AudioDevices =
         io.nisfeb.talon.call.AudioDevices.Noop,
+    /** Clears a Failed banner. Defaulted so existing call sites keep
+     *  compiling; the floating fallback MUST pass one — Failed is
+     *  sticky, and a floated banner without it overlays every screen
+     *  with no way out. */
+    onDismiss: (() -> Unit)? = null,
 ) {
     val state by party.state.collectAsState()
     PartyLineBarContent(
@@ -75,6 +80,7 @@ fun PartyLineBar(
         onLeave = { party.leave() },
         nameFor = nameFor,
         audioDevices = audioDevices,
+        onDismiss = onDismiss,
     )
 }
 
@@ -131,8 +137,25 @@ fun PartyLineBarContent(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             when (val s = state) {
-                is PartyState.Connecting ->
-                    Text("Joining the line…", style = MaterialTheme.typography.bodyMedium)
+                is PartyState.Connecting -> {
+                    Text(
+                        "Joining the line…",
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.weight(1f),
+                    )
+                    // Same way out the Live branch has. A blackholed
+                    // SFU connect otherwise leaves "Joining…" with no
+                    // control at all.
+                    FilledIconButton(
+                        onClick = onLeave,
+                        colors = IconButtonDefaults.filledIconButtonColors(
+                            containerColor = MaterialTheme.colorScheme.error,
+                            contentColor = MaterialTheme.colorScheme.onError,
+                        ),
+                    ) {
+                        Icon(Icons.Filled.CallEnd, contentDescription = "Leave the line")
+                    }
+                }
 
                 is PartyState.Failed -> {
                     Text(
@@ -183,8 +206,20 @@ fun PartyLineBarContent(
                     // real reading space. Ordered so that truncation
                     // eats the least important part — the count and
                     // the listener warning survive; names go first.
+                    // A 1:1 call (headline != null) has no real roster —
+                    // CallStrip fabricates one member whose speaking/
+                    // muted never update, which read as "peer is silent
+                    // and never muted". The expander survives only where
+                    // it still has a job: picking audio devices.
+                    val expandable = headline == null || audioDevices.supported
                     Column(
-                        Modifier.weight(1f).clickable { expanded = !expanded },
+                        Modifier.weight(1f).then(
+                            if (expandable) {
+                                Modifier.clickable { expanded = !expanded }
+                            } else {
+                                Modifier
+                            },
+                        ),
                     ) {
                         Text(
                             label,
@@ -212,13 +247,15 @@ fun PartyLineBarContent(
                                 contentDescription = if (s.muted) "Unmute" else "Mute",
                             )
                         }
-                        IconButton(onClick = { expanded = !expanded }) {
-                            Icon(
-                                if (expanded) Icons.Filled.ExpandLess
-                                else Icons.Filled.ExpandMore,
-                                contentDescription =
-                                    if (expanded) "Hide who's on the line" else "Who's on the line",
-                            )
+                        if (expandable) {
+                            IconButton(onClick = { expanded = !expanded }) {
+                                Icon(
+                                    if (expanded) Icons.Filled.ExpandLess
+                                    else Icons.Filled.ExpandMore,
+                                    contentDescription =
+                                        if (expanded) "Hide who's on the line" else "Who's on the line",
+                                )
+                            }
                         }
                         FilledIconButton(
                             onClick = onLeave,
@@ -237,7 +274,9 @@ fun PartyLineBarContent(
         }
     }
     if (state is PartyState.Live && expanded) {
-        Roster(state, nameFor)
+        // No roster for a 1:1 call (headline != null): its single row
+        // is fabricated and its speaking/muted flags never update.
+        if (headline == null) Roster(state, nameFor)
         // Behind the same expander as the roster: picking a headset is
         // a thing you do once, not something worth a permanent row over
         // the conversation. Renders nothing where the OS owns routing.
@@ -261,6 +300,34 @@ data class PartyLineAdmin(
     val onShare: () -> Unit,
     val onDismissLink: () -> Unit,
 )
+
+/**
+ * The moment between tapping the party icon and the host's answer:
+ * the ask is in flight ([io.nisfeb.talon.call.CallController.pendingJoin])
+ * while the line itself is still Idle, so [PartyLineBar] renders
+ * nothing. One row of feedback, with the only control that means
+ * anything yet — withdrawing the ask.
+ */
+@Composable
+fun PartyLineAsking(
+    onCancel: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        color = MaterialTheme.colorScheme.secondaryContainer,
+        tonalElevation = 2.dp,
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text("Asking the host…", style = MaterialTheme.typography.bodyMedium)
+            TextButton(onClick = onCancel) { Text("Cancel") }
+        }
+    }
+}
 
 /**
  * Anonymous listening, for admins only.
