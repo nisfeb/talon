@@ -101,6 +101,29 @@ class PartyLineMuteTest {
     }
 
     @Test
+    fun aGaleneModerationMuteTakesOurMicOff() = runTest {
+        // Galène's own /mute moderation arrives as a usermessage of
+        // kind "mute" (unlike MUTE_KIND, which is Talon's gossip about
+        // other people's mics). Every other client honours it; being
+        // the one that keeps broadcasting makes /mute useless against
+        // a Talon participant.
+        val l = line()
+        l.handle(userAdd("c1", "~hapnyl-fotlyx"))
+        assertFalse((l.state.value as PartyState.Live).muted)
+
+        l.handle(
+            json.decodeFromString(
+                """{"type":"usermessage","kind":"mute","source":"op",
+                    "dest":"","username":"~hapnyl-fotlyx"}""",
+            ),
+        )
+        assertTrue(
+            (l.state.value as PartyState.Live).muted,
+            "an operator mute request must take our mic off",
+        )
+    }
+
+    @Test
     fun listenersAreNotRosterRows() = runTest {
         // Anonymous listeners don't carry a @p, so they must not appear
         // as people with mic state.

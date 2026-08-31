@@ -1,6 +1,7 @@
 package io.nisfeb.talon.call
 
 import io.ktor.client.HttpClient
+import io.nisfeb.talon.util.nowMs
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -81,12 +82,23 @@ class PartyLineUpRecoveryTest {
             upRetryBaseMs = 5,
         )
         line.handle(joined())
-        // All retries at 5ms base finish well inside a second; wait
-        // long enough that an unbounded loop would blow the cap.
-        delay(2_000)
-        assertTrue(
-            made.size in 2..5,
-            "expected a bounded number of attempts, got ${made.size}",
-        )
+        // Wait for the retry ladder to go quiet: the gaps are 5/10/15ms,
+        // so a count unchanged for 300ms means no republish is in
+        // flight. An unbounded loop keeps the count moving until the
+        // 2s cap and then fails the exact assertion below.
+        val deadline = nowMs() + 2_000
+        var seen = made.size
+        var stableSince = nowMs()
+        while (nowMs() < deadline) {
+            delay(20)
+            if (made.size != seen) {
+                seen = made.size
+                stableSince = nowMs()
+            } else if (nowMs() - stableSince >= 300) break
+        }
+        // Deterministic: the first link plus exactly the field-default
+        // budget of 3 retries (join() was never called, so nothing
+        // reset it, and no link ever went Live to replenish it).
+        assertEquals(4, made.size, "expected 1 initial + 3 retries, got ${made.size}")
     }
 }

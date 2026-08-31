@@ -11,6 +11,7 @@ import io.ktor.websocket.readText
 import io.nisfeb.talon.util.Log
 import io.nisfeb.talon.util.backgroundExceptionHandler
 import io.nisfeb.talon.util.ioDispatcher
+import io.nisfeb.talon.util.nowMs
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -117,7 +118,9 @@ class PartyLine(
     // Stream id -> link. "up" is our mic; the rest are the server's.
     private val downLinks = mutableMapOf<String, PeerLink>()
     private var upLink: PeerLink? = null
-    private var upId: String = ""
+    // internal so tests can drive handle() with an abort for our own
+    // up stream without going through a real join.
+    internal var upId: String = ""
     private val roster = mutableMapOf<String, PartyMember>()
     // stream id -> the ship publishing it, from the offer.
     private val streamOwner = mutableMapOf<String, String>()
@@ -168,11 +171,30 @@ class PartyLine(
         // speak — the mic button is one tap away, an accidental hot
         // mic is not recoverable.
         muted = true
+        leaving = false
+        // A new line must not inherit the old line's last server
+        // notice as its failure reason. The topic is NOT reset here:
+        // every caller sets it (possibly to "") right before join, and
+        // wiping it after that call erased every topic ever set.
+        lastNotice = null
         connectionId = "$ourShip-${Uuid.random()}"
         upRetries = 3
         upId = "up-$connectionId"
         _state.value = PartyState.Connecting(ticket.name)
-        pump = scope.launch { run(ticket, ourShip) }
+        val old = pump
+        pump = scope.launch {
+            // A quick leave→join must wait out the old pump: its
+            // finally-teardown runs on cancellation, and letting it
+            // run AFTER this join stood up a new session tore the new
+            // session down — socket closed, up link gone, state
+            // clobbered to Idle mid-connect.
+            old?.let {
+                it.cancel()
+                it.join()
+                _state.value = PartyState.Connecting(ticket.name)
+            }
+            run(ticket, ourShip)
+        }
     }
 
     /** Show why a host refused us, so the strip explains itself. */
@@ -181,10 +203,33 @@ class PartyLine(
         _state.value = PartyState.Failed(room, why)
     }
 
+    /** Clear a Failed banner the user has read. Failed is sticky by
+     *  design (teardown preserves it so the reason survives the
+     *  socket's death) — this is the one way it leaves the screen,
+     *  and the floating fallback bar has no other control for it. */
+    fun dismissFailure() {
+        if (_state.value is PartyState.Failed) _state.value = PartyState.Idle
+    }
+
     fun leave() {
+        // Chosen, not suffered: the pump's stream-end path checks this
+        // to tell "user left" from "server dropped us".
+        leaving = true
+        val p = pump
+        // pump stays set: join()'s await-the-old-pump guard reads it,
+        // and nulling it here handed a quick leave→join an old pump to
+        // never wait for — whose delayed teardown then killed the new
+        // session. Cancelling an already-cancelled job is free.
+        // Feedback now — the strip clears on the tap, not after the
+        // close handshake.
+        if (_state.value !is PartyState.Failed) _state.value = PartyState.Idle
         scope.launch {
             runCatching { send(buildJsonObject { put("type", "join"); put("kind", "leave"); put("group", galeneGroup) }) }
-            teardown()
+            // The pump owns teardown (its finally); cancelling runs it
+            // exactly once. Tearing down here as well raced a quick
+            // re-join — the old pump's delayed finally executed
+            // against the NEW session's links.
+            if (p != null) p.cancel() else teardown()
         }
     }
 
@@ -223,6 +268,16 @@ class PartyLine(
 
     private var galeneGroup = ""
     private var topic = ""
+    // True from leave() until the next join: the one case where the
+    // socket ending is not news.
+    private var leaving = false
+    // The server's last explanatory usermessage (an operator kick says
+    // why before the close lands). Shown as the Failed reason instead
+    // of a generic "connection lost" — but only when it arrived just
+    // before the close, or an informational notice from hours earlier
+    // would masquerade as the reason for an unrelated drop.
+    private var lastNotice: String? = null
+    private var lastNoticeAtMs = 0L
 
     private suspend fun run(ticket: TrunkTicket, ourShip: String) {
         try {
@@ -252,6 +307,20 @@ class PartyLine(
                 handle(msg)
             }
             Log.i(TAG, "party line stream ended")
+            // A clean close we didn't ask for — server restart, an
+            // operator kick, an idle reap — used to fall through to
+            // Idle, which is exactly the state after a voluntary
+            // leave: the strip vanished mid-conversation with zero
+            // explanation while everyone else stayed on the line.
+            if (joined && !leaving) {
+                val fresh = lastNotice?.takeIf {
+                    nowMs() - lastNoticeAtMs < NOTICE_FRESH_MS
+                }
+                _state.value = PartyState.Failed(
+                    room,
+                    fresh ?: "connection to the line was lost",
+                )
+            }
         } catch (t: kotlinx.coroutines.CancellationException) {
             // Being cancelled is not a failure — it is leave(), a ship
             // switch closing the shared client, or our owner going
@@ -368,7 +437,8 @@ class PartyLine(
             }
 
             "usermessage" -> {
-                if (msg["kind"]?.jsonPrimitive?.content == MUTE_KIND) {
+                val kind = msg["kind"]?.jsonPrimitive?.content
+                if (kind == MUTE_KIND) {
                     val who = msg["username"]?.jsonPrimitive?.content ?: return
                     // Keyed by ship, not connection: the roster dedupes
                     // by ship too, so a person on two devices reads as
@@ -378,7 +448,21 @@ class PartyLine(
                     publishRoster()
                     return
                 }
-                Log.w(TAG, "sfu: ${msg["value"]?.jsonPrimitive?.content}")
+                if (kind == "mute") {
+                    // Galène's own moderation: an operator asked us to
+                    // mute. Every other client honours it; being the
+                    // one that keeps broadcasting makes /mute useless
+                    // against a Talon participant.
+                    Log.i(TAG, "sfu requested mute")
+                    setMuted(true)
+                    return
+                }
+                val notice = msg["value"]?.jsonPrimitive?.content
+                if (!notice.isNullOrBlank()) {
+                    lastNotice = notice
+                    lastNoticeAtMs = nowMs()
+                }
+                Log.w(TAG, "sfu: $notice")
             }
         }
     }
@@ -413,8 +497,18 @@ class PartyLine(
         publishRoster()
     }
 
-    /** Republish attempts left for the current line. Reset on join. */
+    /** Republish attempts left for the current line. Reset on join and
+     *  replenished when a republish actually connects — a budget spent
+     *  over hours of recovered blips must not leave the fourth failure,
+     *  days later, silently unretried. */
     private var upRetries = 3
+
+    /** The current up link's state collector. Cancelled on republish:
+     *  the OLD link's flow keeps emitting after close(), and a stale
+     *  collector overwrote upState — the media dot showed Failed while
+     *  the new link was live, the exact lie the retry was built to
+     *  kill. It also leaked one collector per republish. */
+    private var upWatch: Job? = null
 
     /**
      * Stand up (or re-stand) the mic's up link and offer it.
@@ -428,23 +522,34 @@ class PartyLine(
      * is at least telling the truth.
      */
     private suspend fun publishUp() {
-        upLink?.close()
+        // Create before close: the platforms refcount the shared audio
+        // session by live mic links, and a close-then-create republish
+        // transited zero — Android's last-one-out cleanup reset the
+        // user's speaker/Bluetooth route and audio mode mid-line.
+        val old = upLink
         val up = links.create(sfuIce, sendAudio = true)
+        old?.close()
         upLink = up
         startLevelPolling()
         up.setMuted(muted)
         // Say our mute state before anyone renders us as live.
         broadcastMuted()
-        scope.launch {
+        upWatch?.cancel()
+        upWatch = scope.launch {
             up.state.collect { st ->
+                if (upLink !== up) return@collect
                 upState = st
                 publishRoster()
-                if (st == MediaState.Failed && upLink === up && joined && upRetries > 0) {
+                if (st == MediaState.Live) upRetries = 3
+                if (st == MediaState.Failed && joined && upRetries > 0) {
                     upRetries -= 1
                     val wait = upRetryBaseMs * (3 - upRetries)
                     Log.w(TAG, "up link failed; republishing in ${wait}ms ($upRetries left)")
                     delay(wait)
-                    if (upLink === up && joined) publishUp()
+                    // A fresh coroutine: publishUp cancels this
+                    // collector, and a coroutine must not saw off the
+                    // branch it is sitting on.
+                    if (upLink === up && joined) scope.launch { publishUp() }
                 }
             }
         }
@@ -561,6 +666,8 @@ class PartyLine(
     private suspend fun teardown() {
         levelPoll?.cancel()
         levelPoll = null
+        upWatch?.cancel()
+        upWatch = null
         streamOwner.clear()
         speaking = emptySet()
         joined = false
@@ -588,6 +695,10 @@ class PartyLine(
     companion object {
         /** Fast enough to look live, slow enough to cost nothing. */
         private const val SPEAKING_POLL_MS = 250L
+
+        /** How recent a server notice must be to count as the reason
+         *  the stream then ended. */
+        private const val NOTICE_FRESH_MS = 10_000L
 
         /** Above this counts as talking. WebRTC's level is linear
          *  0..1; room noise sits well below it. */
