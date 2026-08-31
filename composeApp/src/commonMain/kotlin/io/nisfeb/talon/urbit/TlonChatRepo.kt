@@ -2903,7 +2903,7 @@ class TlonChatRepo(
             return
         }
         (response["add-react"] as? JsonObject)?.let { ar ->
-            val author = ar["author"].asStr() ?: return@let
+            val author = ar["author"].asAuthorShip() ?: return@let
             val react = ar["react"].asStr() ?: return@let
             db.reactions().upsert(ReactionEntity(whom, id, author, ReactionPalette.normalize(react)))
             return
@@ -2947,7 +2947,7 @@ class TlonChatRepo(
             return
         }
         (delta["add-react"] as? JsonObject)?.let { ar ->
-            val author = ar["author"].asStr() ?: return@let
+            val author = ar["author"].asAuthorShip() ?: return@let
             val react = ar["react"].asStr() ?: return@let
             db.reactions().upsert(ReactionEntity(whom, replyId, author, ReactionPalette.normalize(react)))
             return

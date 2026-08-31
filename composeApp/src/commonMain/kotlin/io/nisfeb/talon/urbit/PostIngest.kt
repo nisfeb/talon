@@ -84,7 +84,7 @@ internal fun JsonObject.isTombstone(): Boolean =
 
 /** Pure essay → MessageEntity (top-level post). */
 internal fun pureEntity(whom: String, id: String, essay: JsonObject): MessageEntity {
-    val author = essay["author"].asText() ?: ""
+    val author = essay["author"].asAuthorShip() ?: ""
     val sent = essay["sent"].asLong() ?: 0L
     val kind = essay["kind"].asText() ?: "/chat"
     val content = essay["content"] ?: JsonArray(emptyList())
@@ -117,7 +117,7 @@ internal fun pureReplyEntity(
     replyId: String,
     replyEssay: JsonObject,
 ): MessageEntity {
-    val author = replyEssay["author"].asText() ?: ""
+    val author = replyEssay["author"].asAuthorShip() ?: ""
     val sent = replyEssay["sent"].asLong() ?: 0L
     val content = replyEssay["content"] ?: JsonArray(emptyList())
     val merged = mergeBlobIntoContent(content, replyEssay["blob"])

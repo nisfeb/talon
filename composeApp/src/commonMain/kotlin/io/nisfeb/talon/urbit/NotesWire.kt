@@ -221,7 +221,7 @@ object NotesParser {
         return NotesNoteRevision(
             rev = rev,
             atMs = o["at"].asEpochMs(),
-            author = o["author"].asStr() ?: "",
+            author = o["author"].asAuthorShip() ?: "",
             title = o["title"].asStr() ?: "",
             bodyMd = o["bodyMd"].asStr() ?: "",
         )
