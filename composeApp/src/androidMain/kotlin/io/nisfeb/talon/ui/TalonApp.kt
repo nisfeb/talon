@@ -77,6 +77,10 @@ import io.nisfeb.talon.ui.RightPaneStateReducer
 import io.nisfeb.talon.urbit.MediaCategory
 import kotlinx.coroutines.launch
 
+/** How many times to ask a group's host whether a party line exists
+ *  before giving up — same widening backoff App.kt uses. */
+private const val PEEK_ATTEMPTS = 3
+
 /** Cheap substring test — Story mention spans serialize as {"ship":"~patp"}. */
 private fun isMentioned(contentJson: String, ourPatp: String): Boolean {
     if (ourPatp.isBlank()) return false
@@ -143,6 +147,9 @@ fun TalonApp(
     onDeepLinkConsumed: () -> Unit = {},
     /** The @p whose call the user answered from the notification. */
     initialAnswerFrom: String? = null,
+    /** The ring the Answer action was posted for — accept() pins on it
+     *  so a stale notification can't answer a different caller. */
+    initialAnswerCallId: String? = null,
     onAnswerConsumed: () -> Unit = {},
 ) {
     val app = LocalContext.current.applicationContext as TalonApplication
@@ -201,7 +208,12 @@ fun TalonApp(
         }
     }
     androidx.compose.runtime.DisposableEffect(callController) {
+        // The push path rings the system ringtone unless it knows the
+        // in-app ring will sound; that is only true while a controller
+        // is actually composed (not on the login screen).
+        io.nisfeb.talon.Notifications.callControllerLive = callController != null
         onDispose {
+            io.nisfeb.talon.Notifications.callControllerLive = false
             partyLine?.leave()
             callController?.stop()
         }
@@ -226,7 +238,7 @@ fun TalonApp(
         // arrived over SSE yet, so wait for it rather than firing once
         // and missing.
         if (initialAnswerFrom != null) {
-            androidx.compose.runtime.LaunchedEffect(initialAnswerFrom) {
+            androidx.compose.runtime.LaunchedEffect(initialAnswerFrom, initialAnswerCallId) {
                 // Matched to the ring timeout rather than picked: a
                 // cold start has to open the channel and run its
                 // scries before the ring can land, and giving up
@@ -240,7 +252,7 @@ fun TalonApp(
                             s.peer == initialAnswerFrom
                     }
                 }
-                if (rang != null) callController.accept()
+                if (rang != null) callController.accept(forCallId = initialAnswerCallId)
                 onAnswerConsumed()
             }
         }
@@ -304,15 +316,47 @@ fun TalonApp(
     var openWhom by remember {
         mutableStateOf(initialOpenWhom?.takeUnless { it.startsWith("group:") })
     }
+    // True exactly while the chat's partyLineBar slot is composing the
+    // inline call/party surfaces (a DisposableEffect in that slot flips
+    // it). Tracking actual composition instead of `openWhom != null`
+    // matters: plenty of branches keep openWhom set without rendering
+    // DmChatScreen — the thread screen, group info, notes/ channels,
+    // full-screen overlays — and a live call must float its strip
+    // there. Mirrors App.kt.
+    val inlineCallUiShown = remember { mutableStateOf(false) }
     callController?.let {
         io.nisfeb.talon.ui.CallOverlay(
             it,
             nameFor = { ship -> contactMap.displayName(ship) },
             audioDevices = androidAudioDevices,
-            // Under the chat's header when there is one, rather than
-            // floating across the whole window.
-            stripShownInline = openWhom != null,
+            // With the chat slot on screen the strip renders under its
+            // header, beside the party-line bar. Floating it as well
+            // would put the same call in two places.
+            stripShownInline = inlineCallUiShown.value,
         )
+    }
+    // A live party line whose chat slot is gone (back on the list, a
+    // thread, settings…) still needs a surface — the mic can be live
+    // and unmuted. Same floating container CallOverlay uses for its
+    // own strip, same bar the chat renders inline. Mirrors App.kt.
+    partyLine?.let { line ->
+        val floatingPartyState by line.state.collectAsState()
+        if (floatingPartyState !is io.nisfeb.talon.call.PartyState.Idle &&
+            !inlineCallUiShown.value
+        ) {
+            androidx.compose.ui.window.Popup(
+                alignment = androidx.compose.ui.Alignment.TopCenter,
+            ) {
+                io.nisfeb.talon.ui.PartyLineBar(
+                    line,
+                    nameFor = { ship -> contactMap.displayName(ship) },
+                    audioDevices = androidAudioDevices,
+                    // Failed is sticky; floated with no chat slot to
+                    // return to, this is its only way off the screen.
+                    onDismiss = { line.dismissFailure() },
+                )
+            }
+        }
     }
 
     var openGroupFlag by remember {
@@ -1595,8 +1639,43 @@ fun TalonApp(
                         io.nisfeb.talon.call.PartyLineHost.roomFor(app.db, it)
                     }
                 }
+                // Ask the host once per group whether a line exists,
+                // when we hold no invite. A member whose ship had no
+                // %trunk when the host announced never heard about it,
+                // and before this the only cure was an admin toggling
+                // the line off and on. Mirrors App.kt.
+                LaunchedEffect(groupRoom, knownInvites.keys, hostedRooms.keys) {
+                    val (h, n) = groupRoom ?: return@LaunchedEffect
+                    val key = "$h/$n"
+                    // A few widening attempts, then stop. One try per
+                    // group open was enough only when the host happened
+                    // to be reachable at that instant; an ames round
+                    // trip to a sleeping ship is not.
+                    var wait = 2_000L
+                    repeat(PEEK_ATTEMPTS) { attempt ->
+                        if (hostedRooms.containsKey(key)) return@LaunchedEffect
+                        if (knownInvites.containsKey(key)) return@LaunchedEffect
+                        callController?.peekRoom(h, n)
+                        if (attempt < PEEK_ATTEMPTS - 1) {
+                            kotlinx.coroutines.delay(wait)
+                            wait *= 3
+                        }
+                    }
+                }
                 val partyRoomHere = groupRoom?.takeIf { (h, n) ->
                     hostedRooms.containsKey("$h/$n") || knownInvites.containsKey("$h/$n")
+                }
+                // Why we couldn't find out, when we couldn't. Silence
+                // here is what turns "no line in this group" and "your
+                // ship can't ask" into the same thing.
+                val peekProblems by (
+                    callController?.peekFailed
+                        ?: kotlinx.coroutines.flow.MutableStateFlow(
+                            emptyMap<String, String>(),
+                        )
+                    ).collectAsState()
+                val peekProblem = groupRoom?.let { (h, n) ->
+                    peekProblems["$h/$n"]
                 }
                 DmChatScreen(
                     db = app.db,
@@ -1635,7 +1714,11 @@ fun TalonApp(
                                 if (host == loggedInShip) {
                                     appScope.launch {
                                         io.nisfeb.talon.call.PartyLineHost.startLine(
-                                            callController, app.repo, app.db, whom, whom,
+                                            callController, app.repo, app.db, whom,
+                                            // The room title everyone sees —
+                                            // the conversation's human label,
+                                            // not the raw channel key.
+                                            contactMap.conversationLabel(whom),
                                         )
                                     }
                                 } else {
@@ -1650,17 +1733,58 @@ fun TalonApp(
                         },
                     partyLineBar = partyLine?.let { line ->
                         {
+                            // Tell the app-level overlays the inline
+                            // surfaces are on screen, so the floating
+                            // fallbacks stay hidden exactly while this
+                            // slot composes. Mirrors App.kt — including
+                            // the guarded composition-time write, since
+                            // DisposableEffect fires only after the
+                            // frame draws and the first frame otherwise
+                            // shows both surfaces at once.
+                            if (!inlineCallUiShown.value) {
+                                inlineCallUiShown.value = true
+                            }
+                            DisposableEffect(Unit) {
+                                inlineCallUiShown.value = true
+                                onDispose { inlineCallUiShown.value = false }
+                            }
                             io.nisfeb.talon.ui.PartyLineBar(
                                 line,
                                 nameFor = { contactMap.displayName(it) },
                                 audioDevices = androidAudioDevices,
                             )
+                            // Between tapping the party icon and the
+                            // host's grant the line is still Idle and
+                            // the bar above renders nothing — show the
+                            // ask in flight, with its only meaningful
+                            // control: withdrawing. Mirrors App.kt.
+                            callController?.let { c ->
+                                val pendingAsk by c.pendingJoin.collectAsState()
+                                val lineState by line.state.collectAsState()
+                                val roomKey = groupRoom?.let { (h, n) -> "$h/$n" }
+                                if (pendingAsk != null &&
+                                    pendingAsk == roomKey &&
+                                    lineState is io.nisfeb.talon.call.PartyState.Idle
+                                ) {
+                                    io.nisfeb.talon.ui.PartyLineAsking(
+                                        onCancel = { c.cancelJoin() },
+                                    )
+                                }
+                            }
                             callController?.let { c ->
                                 io.nisfeb.talon.ui.CallStrip(
                                     c,
                                     nameFor = { contactMap.displayName(it) },
                                     audioDevices = androidAudioDevices,
                                 )
+                            }
+                            // Only while the line is actually unknown.
+                            // A stale failure entry next to a working
+                            // line read as the line being broken.
+                            if (partyRoomHere == null) {
+                                peekProblem?.let { why ->
+                                    io.nisfeb.talon.ui.PartyLineUnavailable(why)
+                                }
                             }
                         }
                     },
@@ -1858,25 +1982,47 @@ fun TalonApp(
 
 /**
  * Trunkline engine factory with the mic-permission gate. If
- * RECORD_AUDIO isn't granted yet, launch the system prompt and hand
- * back an engine that fails fast — the user grants and retries the
- * call. Mirrors the voice-record button's permission pattern.
+ * RECORD_AUDIO isn't granted yet, launch the system prompt and HOLD
+ * the call on its result instead of failing fast — the fail-fast
+ * engine answered an incoming call with an error poke while the
+ * permission dialog was still on screen, burning the user's
+ * first-ever call on the prompt. Deny (or dismiss) still falls
+ * through to the Unavailable engine, whose message says what to fix.
  */
 @Composable
 private fun rememberCallEngineProvider(): io.nisfeb.talon.call.CallEngineProvider {
     val context = LocalContext.current
+    // Completed by the system dialog's result; non-null exactly while
+    // a call below is holding for the answer.
+    val pendingGrant = androidx.compose.runtime.remember {
+        java.util.concurrent.atomic.AtomicReference<
+            kotlinx.coroutines.CompletableDeferred<Boolean>?,
+            >(null)
+    }
     val launcher = androidx.activity.compose.rememberLauncherForActivityResult(
         androidx.activity.result.contract.ActivityResultContracts.RequestPermission(),
-    ) { }
+    ) { granted -> pendingGrant.getAndSet(null)?.complete(granted) }
     return androidx.compose.runtime.remember {
         io.nisfeb.talon.call.CallEngineProvider { ice ->
             val granted = androidx.core.content.ContextCompat.checkSelfPermission(
                 context, android.Manifest.permission.RECORD_AUDIO,
             ) == android.content.pm.PackageManager.PERMISSION_GRANTED
-            if (granted) {
+            val nowGranted = granted || run {
+                val wait = kotlinx.coroutines.CompletableDeferred<Boolean>()
+                pendingGrant.set(wait)
+                launcher.launch(android.Manifest.permission.RECORD_AUDIO)
+                // ponytail: create() runs on CallController's IO
+                // dispatcher, so blocking one pool thread on the dialog
+                // beats a delegating gate engine. Capped at the
+                // controller's own 60s connect watchdog, past which
+                // the call is over anyway.
+                kotlinx.coroutines.runBlocking {
+                    kotlinx.coroutines.withTimeoutOrNull(60_000L) { wait.await() } ?: false
+                }
+            }
+            if (nowGranted) {
                 io.nisfeb.talon.call.AndroidCallEngine(context.applicationContext, ice)
             } else {
-                launcher.launch(android.Manifest.permission.RECORD_AUDIO)
                 io.nisfeb.talon.call.UnavailableCallEngine(
                     "Microphone access needed — grant it, then call again",
                 )

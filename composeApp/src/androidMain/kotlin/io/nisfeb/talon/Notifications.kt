@@ -7,8 +7,12 @@ import android.content.Context
 import android.content.Intent
 import android.os.Build
 import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationManagerCompat
 import androidx.core.app.Person
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.ProcessLifecycleOwner
+import io.nisfeb.talon.util.Log
 
 /**
  * Thin wrapper around NotificationManager for new-message alerts.
@@ -175,6 +179,21 @@ object Notifications {
         val mgr = ContextCompat.getSystemService(context, NotificationManager::class.java)
             ?: return
 
+        // A foregrounded app is already ringing this call itself —
+        // CallController loops its own incoming tone under the in-app
+        // answer UI — so ringing here too plays both at once. Post
+        // silently instead of skipping: if the user backgrounds
+        // mid-ring, answer and decline are still one notification away.
+        // Visibility alone isn't enough: on the login screen there is
+        // no controller and nothing else will ring, so the check also
+        // requires one to be alive. ponytail: a live controller whose
+        // SSE channel is mid-backoff still reads as "will ring" — the
+        // user gets a visible-but-silent notification in that window;
+        // publish real ring state from the controller if it ever bites.
+        val inAppRingExpected = callControllerLive &&
+            ProcessLifecycleOwner.get()
+                .lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)
+
         val answerIntent = Intent(context, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
             putExtra(EXTRA_ANSWER_FROM, from)
@@ -209,7 +228,14 @@ object Notifications {
             // would leave "Incoming call" on screen forever.
             .setTimeoutAfter(io.nisfeb.talon.call.CallController.DEFAULT_RING_TIMEOUT_MS)
             .setContentIntent(answer)
-            .setFullScreenIntent(answer, true)
+
+        // The full-screen intent stays on in BOTH branches: Android 12+
+        // refuses a CallStyle notification without one — build() throws
+        // IllegalArgumentException — and the system only launches an
+        // FSI over a locked or dark screen, never over the app the
+        // user is currently looking at.
+        builder.setFullScreenIntent(answer, true)
+        if (inAppRingExpected) builder.setSilent(true)
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             builder.setStyle(
@@ -225,19 +251,55 @@ object Notifications {
                 .addAction(android.R.drawable.sym_action_call, "Answer", answer)
         }
         mgr.notify(CALL_NOTIFICATION_ID, builder.build())
-        io.nisfeb.talon.notify.Ringer.start(
-            context,
-            io.nisfeb.talon.call.CallController.DEFAULT_RING_TIMEOUT_MS,
-        )
+        shownCallId = callId
+        when {
+            inAppRingExpected -> Unit // the in-app ring is already sounding
+            // Notifications denied means notify() above was dropped on
+            // the floor — 45 seconds of ringing with no surface to
+            // answer or decline from is worse than staying quiet.
+            !NotificationManagerCompat.from(context).areNotificationsEnabled() ->
+                Log.i(TAG, "notifications disabled; skipping the ring for call $callId")
+            // Same hole one level down: blocking just the calls
+            // channel (long-press the notification → turn off) drops
+            // notify() while areNotificationsEnabled stays true.
+            mgr.getNotificationChannel(CHANNEL_CALLS)?.importance ==
+                NotificationManager.IMPORTANCE_NONE ->
+                Log.i(TAG, "calls channel blocked; skipping the ring for call $callId")
+            else -> io.nisfeb.talon.notify.Ringer.start(
+                context,
+                io.nisfeb.talon.call.CallController.DEFAULT_RING_TIMEOUT_MS,
+            )
+        }
     }
+
+    /** The call the current ring surface belongs to. Lets a late
+     *  ring-cancel push for an earlier call leave a newer ring alone —
+     *  there is only one call notification id, so without this the
+     *  cancel for caller A would silence caller B's ring. */
+    @Volatile
+    private var shownCallId: String? = null
+
+    /** True while TalonApp has a live CallController composed — the
+     *  thing that actually plays the in-app ring. Set by TalonApp; the
+     *  push path reads it to decide whether ringing here would double
+     *  up or be the only ring this call gets. */
+    @Volatile
+    var callControllerLive: Boolean = false
 
     /** Stop ringing — answered, declined, or the caller gave up. */
     fun cancelIncomingCall(context: Context) {
         // Stop the noise first: the notification going away while the
         // phone keeps buzzing is worse than either alone.
         io.nisfeb.talon.notify.Ringer.stop()
+        shownCallId = null
         ContextCompat.getSystemService(context, NotificationManager::class.java)
             ?.cancel(CALL_NOTIFICATION_ID)
+    }
+
+    /** Cancel only if the ring surface still belongs to [callId] —
+     *  the relay's ring-cancel push races the next incoming ring. */
+    fun cancelIncomingCall(context: Context, callId: String) {
+        if (shownCallId == callId) cancelIncomingCall(context)
     }
 
     fun showMessage(
@@ -449,4 +511,5 @@ object Notifications {
     }
 
     private const val NOTIFICATION_ID = 1001
+    private const val TAG = "Notifications"
 }

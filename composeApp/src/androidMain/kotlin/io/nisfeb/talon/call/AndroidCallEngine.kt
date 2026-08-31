@@ -1,7 +1,6 @@
 package io.nisfeb.talon.call
 
 import android.content.Context
-import android.media.AudioManager
 import io.nisfeb.talon.util.Log
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -21,9 +20,9 @@ import org.webrtc.audio.JavaAudioDeviceModule
 /**
  * Android CallEngine over libwebrtc (getstream build). Mirrors
  * DesktopCallEngine: audio-only, non-trickle (gather-complete SDPs).
- * Puts the device in MODE_IN_COMMUNICATION for the call (default
- * routing — earpiece on handsets) and restores the prior mode on
- * close.
+ * Audio mode and focus go through [CallAudioSession] (default
+ * routing — earpiece on handsets), refcounted so an overlapping
+ * party line can't restore the wrong mode under us.
  * ponytail: no speakerphone/proximity handling yet — default routing
  * only; add an audio-route control when real-device testing demands it.
  */
@@ -37,8 +36,6 @@ class AndroidCallEngine(
 
     private val gathered = CompletableDeferred<Unit>()
     private var micTrack: AudioTrack? = null
-    private val audioManager = appContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager
-    private val priorAudioMode = audioManager.mode
 
     private val observer = object : PeerConnection.Observer {
         override fun onIceCandidate(candidate: IceCandidate?) {}
@@ -94,7 +91,7 @@ class AndroidCallEngine(
         val track = factory.createAudioTrack("talon-mic", source)
         pc.addTrack(track, listOf("talon-call"))
         micTrack = track
-        audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
+        CallAudioSession.acquire(appContext)
     }
 
     override suspend fun createOffer(): SessionDesc {
@@ -137,7 +134,9 @@ class AndroidCallEngine(
         // native thread crashes the app seconds later, once a callback
         // fires into freed memory.
         runCatching { pc.close() }
-        audioManager.mode = priorAudioMode
+        // Inside the closed-guard, so a double close can't double-
+        // decrement the session refcount.
+        CallAudioSession.release()
         _state.value = MediaState.Closed
     }
 

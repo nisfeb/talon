@@ -75,9 +75,16 @@
         android:theme="@style/Theme.Talon"
         android:usesCleartextTraffic="true">
 
+        <!-- configChanges: CallController / PartyLine live in this
+             activity's composition, so recreating the activity on a
+             rotation, split-screen resize, dark-mode flip, or density
+             change hangs up a live call. Handle them in-process —
+             Compose relayouts on its own; nothing here needs the
+             recreate. -->
         <activity
             android:name="io.nisfeb.talon.MainActivity"
             android:exported="true"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|uiMode|density"
             android:windowSoftInputMode="adjustResize"
             android:theme="@style/Theme.Talon">
             <intent-filter>

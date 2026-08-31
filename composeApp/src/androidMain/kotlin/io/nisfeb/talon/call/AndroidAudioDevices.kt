@@ -32,8 +32,6 @@ class AndroidAudioDevices(context: Context) : AudioDevices {
 
     override val unifiedRoute: Boolean = true
 
-    private var chosen: String? = null
-
     override val selectedInput: String? get() = chosen
     override val selectedOutput: String? get() = chosen
 
@@ -113,7 +111,22 @@ class AndroidAudioDevices(context: Context) : AudioDevices {
         else -> d.productName?.toString()?.takeIf { it.isNotBlank() } ?: "Audio device"
     }
 
-    private companion object {
+    companion object {
         private const val TAG = "AndroidAudioDevices"
+
+        // Companion, not instance state: setCommunicationDevice is
+        // process-global, so the record of what we picked must be too.
+        @Volatile
+        private var chosen: String? = null
+
+        /**
+         * Forget the recorded route. [CallAudioSession] calls this when
+         * the last call/line ends, right after clearCommunicationDevice
+         * hands routing back to the platform — so the pane doesn't show
+         * a selection that is no longer in force.
+         */
+        internal fun clearSelection() {
+            chosen = null
+        }
     }
 }

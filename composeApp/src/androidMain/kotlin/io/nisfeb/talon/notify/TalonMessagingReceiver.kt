@@ -88,6 +88,18 @@ class TalonMessagingReceiver : MessagingReceiver() {
             return
         }
 
+        // The ring's undoing: the caller hung up (or another of the
+        // user's clients answered) before this device did anything.
+        // Without it a dead process rang the full 45 seconds after
+        // the caller had already given up. Id-matched so a late
+        // cancel for a previous call leaves a newer ring alone.
+        if (event == "ring-cancel") {
+            if (!eventId.isNullOrBlank()) {
+                io.nisfeb.talon.Notifications.cancelIncomingCall(context, eventId)
+            }
+            return
+        }
+
         if (whom.isNullOrBlank()) return
         val title = patp ?: "Talon"
         val body = "New activity in $whom"

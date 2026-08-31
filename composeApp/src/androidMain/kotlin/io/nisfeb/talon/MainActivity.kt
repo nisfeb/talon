@@ -41,6 +41,10 @@ class MainActivity : ComponentActivity() {
      *  The action can only open the activity — accepting needs the
      *  running CallController — so TalonApp does the accept. */
     private val pendingAnswerFrom = mutableStateOf<String?>(null)
+    /** The call id the Answer action was posted for. A notification
+     *  can outlive its ring, and accepting whatever rings *now* would
+     *  answer a different caller — the id pins the accept. */
+    private val pendingAnswerCallId = mutableStateOf<String?>(null)
     private val pendingShare = mutableStateOf<ShareIntent?>(null)
     /** When the system share sheet routes through a published Sharing
      *  Shortcut (one of the per-channel shortcuts ShortcutsPublisher
@@ -48,6 +52,14 @@ class MainActivity : ComponentActivity() {
      *  ACTION_SEND. The id is the channel's `whom`, so we use it to
      *  bypass the picker and deliver the share directly. */
     private val pendingShareTarget = mutableStateOf<String?>(null)
+
+    override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
+        super.onConfigurationChanged(newConfig)
+        // The manifest handles uiMode (recreation would hang up a live
+        // call), so the system-bar contrast enableEdgeToEdge derived in
+        // onCreate goes stale on a light/dark flip — re-derive it.
+        enableEdgeToEdge()
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -83,6 +95,7 @@ class MainActivity : ComponentActivity() {
             val share by pendingShare
             val shareTarget by pendingShareTarget
             val answerFrom by pendingAnswerFrom
+            val answerCallId by pendingAnswerCallId
             val themeMode by app.themePreference.mode.collectAsState()
             val systemDark = isSystemInDarkTheme()
             val darkTheme = when (themeMode) {
@@ -163,7 +176,11 @@ class MainActivity : ComponentActivity() {
                             deepLinkOpenDigest.value = null
                         },
                         initialAnswerFrom = answerFrom,
-                        onAnswerConsumed = { pendingAnswerFrom.value = null },
+                        initialAnswerCallId = answerCallId,
+                        onAnswerConsumed = {
+                            pendingAnswerFrom.value = null
+                            pendingAnswerCallId.value = null
+                        },
                     )
                 }
             }
@@ -201,6 +218,8 @@ class MainActivity : ComponentActivity() {
         }
         intent.getStringExtra(Notifications.EXTRA_ANSWER_FROM)?.let {
             pendingAnswerFrom.value = it
+            pendingAnswerCallId.value =
+                intent.getStringExtra(Notifications.EXTRA_ANSWER_CALL_ID)
             // Cleared here as well as in the block below: a retained
             // answer extra would re-accept on the next cold launch.
             intent.removeExtra(Notifications.EXTRA_ANSWER_FROM)

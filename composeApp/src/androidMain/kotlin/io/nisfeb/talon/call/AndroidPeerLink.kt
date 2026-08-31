@@ -1,7 +1,6 @@
 package io.nisfeb.talon.call
 
 import android.content.Context
-import android.media.AudioManager
 import io.nisfeb.talon.util.Log
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -32,8 +31,6 @@ class AndroidPeerLink(
 
     private var micTrack: AudioTrack? = null
     private var onCandidate: ((IceCandidate) -> Unit)? = null
-    private val audioManager = appContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager
-    private val priorAudioMode = audioManager.mode
 
     private val observer = object : PeerConnection.Observer {
         override fun onIceCandidate(candidate: WebRtcIceCandidate?) {
@@ -94,7 +91,9 @@ class AndroidPeerLink(
                 ),
             )
             micTrack = track
-            audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
+            // Only the up link holds the audio session: one party line
+            // means one refcount, however many down links it fans out.
+            CallAudioSession.acquire(appContext)
         }
     }
 
@@ -197,7 +196,9 @@ class AndroidPeerLink(
         runCatching { micTrack?.setEnabled(false) }
         // The factory is process-wide; see WebRtcFactory.
         runCatching { pc.close() }
-        if (micTrack != null) audioManager.mode = priorAudioMode
+        // Inside the closed-guard, so a double close can't double-
+        // decrement the session refcount.
+        if (micTrack != null) CallAudioSession.release()
         _state.value = MediaState.Closed
     }
 
