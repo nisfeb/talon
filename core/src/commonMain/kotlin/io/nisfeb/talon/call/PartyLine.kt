@@ -248,6 +248,16 @@ class PartyLine(
                 handle(msg)
             }
             Log.i(TAG, "party line stream ended")
+        } catch (t: kotlinx.coroutines.CancellationException) {
+            // Being cancelled is not a failure — it is leave(), a ship
+            // switch closing the shared client, or our owner going
+            // away. Recording it as Failed put a sticky red bar at the
+            // top of chats reading "Party line: The coroutine scope
+            // left the composition" — internal machinery text shown as
+            // if the line had broken. Rethrow so cancellation completes
+            // properly; teardown() in finally resets the state to Idle.
+            Log.i(TAG, "party line cancelled: ${t.message}")
+            throw t
         } catch (t: Throwable) {
             Log.e(TAG, "party line failed", t)
             _state.value = PartyState.Failed(room, t.message ?: "connection failed")
