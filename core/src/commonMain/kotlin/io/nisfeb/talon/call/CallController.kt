@@ -784,11 +784,18 @@ class CallController(
     suspend fun peekRoom(host: String, name: String) {
         val ch = channel ?: return
         val key = "$host/$name"
-        runCatching {
+        try {
             ch.poke(TrunkWire.AGENT, TrunkWire.ACTION_MARK, TrunkWire.peekRoomAction(host, name))
-        }.onSuccess {
             _peekFailed.value = _peekFailed.value - key
-        }.onFailure { t ->
+        } catch (t: kotlinx.coroutines.CancellationException) {
+            // Navigating away while the ack is in flight cancels this
+            // coroutine — it says nothing about the host. Recording it
+            // was the bug users saw as a permanent "Party line: The
+            // coroutine scope left the composition" banner: peekFailed
+            // outlives the screen, so the internal message came back
+            // every time the chat reopened.
+            throw t
+        } catch (t: Throwable) {
             // A nack here is information, not noise: our own ship
             // refusing the action means our desk is too old, and the
             // host refusing means theirs is.
