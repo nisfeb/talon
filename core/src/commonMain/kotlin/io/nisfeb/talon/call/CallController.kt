@@ -16,6 +16,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlin.uuid.ExperimentalUuidApi
@@ -82,6 +83,9 @@ class CallController(
     /** Call tones. Noop where a platform has no playback path, so
      *  nothing here has to check. */
     private val sounds: CallSoundPlayer = CallSoundPlayer.Noop,
+    /** How long a party-line ask may sit unanswered before the pending
+     *  indicator gives up on the host. A knob for tests. */
+    private val joinAskTimeoutMs: Long = JOIN_ASK_TIMEOUT_MS,
     /** Fallback ICE and sidecar this build ships, adopted by a ship
      *  that has none. [CallDefaults.None] adopts nothing. */
     private val defaults: CallDefaults = CallDefaults.None,
@@ -161,8 +165,22 @@ class CallController(
     private val _shipSfuBase = MutableStateFlow("")
     val shipSfuBase: StateFlow<String> = _shipSfuBase.asStateFlow()
 
-    /** "host/room" this device asked to join, or null. */
-    private var pendingJoin: String? = null
+    /** "host/room" this device asked to join, or null. Exposed so the
+     *  bar can show "asking the host…" the moment the button is
+     *  tapped — the grant rides ames and a sleeping host answers in
+     *  seconds-to-never, and silence reads as a dead button. */
+    private val _pendingJoin = MutableStateFlow<String?>(null)
+    val pendingJoin: StateFlow<String?> = _pendingJoin.asStateFlow()
+
+    /** Peeks in flight, by "host/name". A peek is answered
+     *  asynchronously — an %open fact on success, a %denied fact
+     *  otherwise — so the poke's own ack says nothing. This is how
+     *  those answers find their way back to [peekFailed].
+     *  A StateFlow, not a plain set: peekRoom mutates from the UI
+     *  dispatcher while the signal loop mutates from ioDispatcher,
+     *  and a torn LinkedHashSet iteration inside events.collect
+     *  would tear down the whole SSE channel. */
+    private val pendingPeeks = MutableStateFlow<Set<String>>(emptySet())
 
     /** The wire the ship speaks, once known. */
     private val _wire = MutableStateFlow(0)
@@ -361,8 +379,8 @@ class CallController(
                                 // streams the listener has to pick
                                 // between.
                                 val key = "${up.from}/${up.ticket.name}"
-                                if (pendingJoin == key) {
-                                    pendingJoin = null
+                                if (_pendingJoin.value == key) {
+                                    _pendingJoin.value = null
                                     onTicket?.invoke(up.from, up.ticket)
                                 } else {
                                     Log.i(TAG, "ignoring ticket for $key; this device didn't ask")
@@ -373,8 +391,15 @@ class CallController(
                             // us as well, so the switch reflects the
                             // ship rather than a re-scry that races it.
                             is TrunkUpdate.Open -> {
-                                _invites.value = _invites.value +
-                                    ("${up.invite.host}/${up.invite.name}" to up.invite)
+                                val key = "${up.invite.host}/${up.invite.name}"
+                                // An announcement answers any peek we had
+                                // in flight — and retires the failure
+                                // banner a slower earlier attempt left,
+                                // which otherwise sat beside a working
+                                // line until the chat was reopened.
+                                pendingPeeks.update { it - key }
+                                _peekFailed.value = _peekFailed.value - key
+                                _invites.value = _invites.value + (key to up.invite)
                                 if (up.invite.host == session.shipName) refreshRooms()
                             }
                             is TrunkUpdate.Shut -> {
@@ -384,8 +409,52 @@ class CallController(
                             is TrunkUpdate.ListenLink ->
                                 _listenLink.value = ListenLink(up.room, up.url, up.expiresSecs)
                             is TrunkUpdate.Denied -> {
-                                Log.w(TAG, "room " + up.name + " denied: " + up.why)
-                                onDenied?.invoke(up.name, up.why)
+                                Log.w(
+                                    TAG,
+                                    "room " + up.name + " denied by " + up.from + ": " + up.why,
+                                )
+                                // A relay nack names only the host, not
+                                // the room, so an empty name matches any
+                                // ask outstanding against that host.
+                                fun matches(k: String) = k == "${up.from}/${up.name}" ||
+                                    (up.name.isEmpty() && k.startsWith("${up.from}/"))
+                                val why = if (up.why == "host unreachable") {
+                                    "the host couldn't be reached"
+                                } else {
+                                    up.why
+                                }
+                                val peeked = pendingPeeks.value.filter(::matches)
+                                if (peeked.isNotEmpty()) {
+                                    pendingPeeks.update { it - peeked.toSet() }
+                                    _peekFailed.value =
+                                        _peekFailed.value + peeked.associateWith { why }
+                                }
+                                when {
+                                    // A denial settles the ask. Leaving
+                                    // pendingJoin set meant a grant fact
+                                    // fanned out by another device months
+                                    // later dragged this one onto the
+                                    // line too.
+                                    _pendingJoin.value?.let(::matches) == true -> {
+                                        // A relay nack names no room, so
+                                        // take it from the ask we're
+                                        // settling — the banner should
+                                        // never name an empty line.
+                                        val asked = _pendingJoin.value
+                                        _pendingJoin.value = null
+                                        val name = up.name.ifEmpty {
+                                            asked?.substringAfter('/').orEmpty()
+                                        }
+                                        onDenied?.invoke(name, why)
+                                    }
+                                    up.name.isNotEmpty() -> onDenied?.invoke(up.name, why)
+                                    // Nameless, and nothing here asked:
+                                    // a host-side relay reflection (one
+                                    // unreachable member nacks an
+                                    // announce). Not this user's failure
+                                    // — no banner.
+                                    else -> {}
+                                }
                             }
                             null -> {}
                         }
@@ -410,51 +479,109 @@ class CallController(
             tPlaced = nowMs()
             _state.value = CallUiState.Outgoing(target)
             armRingWatchdog()
-            poke(target, TrunkSig.Ring(id))
+            // Checked, not fire-and-forget: a ring that never left the
+            // device used to play 45s of ringback and then blame the
+            // callee with "no answer" for a call they never heard of.
+            if (!pokeChecked(target, TrunkSig.Ring(id))) {
+                if (callId == id) endLocal("couldn't reach your ship")
+                return@launch
+            }
+            // The ack wait above can outlive the call (hangup, glare
+            // adoption). A superseded coroutine must not open a mic —
+            // and must close the one it opened, because endLocal has
+            // already run for this call and will not run again.
+            if (callId != id) return@launch
             // Gather while the far end rings (design D3: the slow parts overlap).
             val eng = engineProvider.create(iceServers)
+            if (callId != id) {
+                eng.close()
+                return@launch
+            }
             engine = eng
             watchMedia(eng, target)
             runCatching { eng.createOffer() }
                 .onSuccess { offer ->
+                    // Still ours? A hangup during gathering (or a glare
+                    // tie-break) supersedes this coroutine, and its
+                    // stale offer must not poke — or worse, its stale
+                    // failure must not end the NEXT call. The desktop
+                    // engine makes that real: close() mid-gather leaves
+                    // createOffer to throw a full 8s later.
+                    if (callId != id) return@onSuccess
                     tOfferSent = nowMs()
                     Log.i(TAG, "Trunk metric: gather took ${tOfferSent - tPlaced}ms")
-                    poke(target, TrunkSig.Offer(id, offer.sdp, offer.fingerprint))
+                    // A lost offer strands the callee ringing toward
+                    // "no offer arrived" — end honestly instead.
+                    if (!pokeChecked(target, TrunkSig.Offer(id, offer.sdp, offer.fingerprint)) &&
+                        callId == id
+                    ) {
+                        endLocal("couldn't reach your ship")
+                        poke(target, TrunkSig.Hangup(id))
+                    }
                 }
                 .onFailure {
+                    if (callId != id) return@onFailure
                     Log.e(TAG, "offer failed", it)
-                    poke(target, TrunkSig.Hangup(id))
+                    // Locally first — same rule as hangup(): the state
+                    // change shouldn't wait on the poke's ack.
                     endLocal(it.message ?: "media error")
+                    poke(target, TrunkSig.Hangup(id))
                 }
         }
     }
 
-    fun accept() {
+    /** Answer the ringing call. [forCallId] pins which call the caller
+     *  of this function meant — a notification action can outlive the
+     *  ring it was posted for, and answering whatever rings *now*
+     *  would accept a different caller. Null answers unconditionally
+     *  (the in-app button, which renders live state). */
+    fun accept(forCallId: String? = null) {
         scope.launch {
-            ringToken++ // answered: stop the give-up timer
             val id = callId ?: return@launch
+            if (forCallId != null && forCallId != id) {
+                Log.i(TAG, "stale accept for $forCallId; ringing call is $id")
+                return@launch
+            }
+            ringToken++ // answered: stop the give-up timer
             val from = peer ?: return@launch
             _state.value = CallUiState.Active(from, MediaState.Connecting, muted = false)
             armConnectWatchdog()
             val offer = runCatching {
                 kotlinx.coroutines.withTimeout(20_000) { pendingOffer.await() }
             }.getOrElse {
+                if (callId != id) return@launch
                 Log.e(TAG, "no offer within 20s of answering")
-                poke(from, TrunkSig.Hangup(id))
                 endLocal("no offer arrived")
+                poke(from, TrunkSig.Hangup(id))
                 return@launch
             }
+            // The offer wait above is up to 20s, and Android's engine
+            // provider can itself block on the mic-permission prompt —
+            // the call may be long gone when either returns. A stale
+            // engine here is a hot mic nothing will ever close.
+            if (callId != id) return@launch
             val eng = engineProvider.create(iceServers)
+            if (callId != id) {
+                eng.close()
+                return@launch
+            }
             engine = eng
             watchMedia(eng, from)
             runCatching { eng.acceptOffer(offer) }
                 .onSuccess { answer ->
-                    poke(from, TrunkSig.Accept(id, answer.sdp, answer.fingerprint))
+                    if (callId != id) return@onSuccess
+                    if (!pokeChecked(from, TrunkSig.Accept(id, answer.sdp, answer.fingerprint)) &&
+                        callId == id
+                    ) {
+                        endLocal("couldn't reach your ship")
+                        poke(from, TrunkSig.Hangup(id))
+                    }
                 }
                 .onFailure {
+                    if (callId != id) return@onFailure
                     Log.e(TAG, "answer failed", it)
-                    poke(from, TrunkSig.Hangup(id))
                     endLocal(it.message ?: "media error")
+                    poke(from, TrunkSig.Hangup(id))
                 }
         }
     }
@@ -785,9 +912,11 @@ class CallController(
         val ch = channel ?: return
         val key = "$host/$name"
         try {
+            pendingPeeks.update { it + key }
             ch.poke(TrunkWire.AGENT, TrunkWire.ACTION_MARK, TrunkWire.peekRoomAction(host, name))
             _peekFailed.value = _peekFailed.value - key
         } catch (t: kotlinx.coroutines.CancellationException) {
+            pendingPeeks.update { it - key }
             // Navigating away while the ack is in flight cancels this
             // coroutine — it says nothing about the host. Recording it
             // was the bug users saw as a permanent "Party line: The
@@ -802,11 +931,19 @@ class CallController(
             // sentence we wrote, never t.message — a Ktor timeout's
             // message is a URL and a config dump, and rc31 shipped it
             // verbatim above people's pinned messages.
+            // This poke goes to our OWN ship — the host only hears
+            // about it later, over ames. So a nack here is our desk
+            // refusing the action (bad-key = it predates %peek-room),
+            // never the host's answer; blaming "$host is running an
+            // older Trunk" pointed users at the one ship that had
+            // done nothing wrong. The host's side arrives async as an
+            // %open or %denied fact and is handled there.
+            pendingPeeks.update { it - key }
             val why = when {
                 t is PokeNacked && t.reason.contains("bad-key") ->
-                    "$host is running an older Trunk that can't answer this yet"
-                t is PokeNacked -> "the host declined to answer"
-                else -> "your ship didn't answer in time — will retry"
+                    "your ship's Trunk is too old to ask — update %trunk"
+                t is PokeNacked -> "your ship declined to ask"
+                else -> "your ship didn't answer in time"
             }
             Log.w(TAG, "peek $key failed: $why (${t.message})")
             _peekFailed.value = _peekFailed.value + (key to why)
@@ -833,19 +970,78 @@ class CallController(
         val ch = channel ?: return
         // Claim the answer before asking: the grant comes back as a
         // fact every device of this ship can see.
-        pendingJoin = "$host/$name"
+        val key = "$host/$name"
+        val token = ++joinToken
+        _pendingJoin.value = key
         runCatching {
             ch.poke(
                 TrunkWire.AGENT, TrunkWire.ACTION_MARK,
                 TrunkWire.joinRoomAction(host, name),
             )
-        }.onFailure { Log.e(TAG, "join-room poke failed", it) }
+        }.onFailure {
+            // Never asked; nothing can ever answer.
+            _pendingJoin.value = null
+            Log.e(TAG, "join-room poke failed", it)
+            onDenied?.invoke(name, "your ship declined to ask")
+        }
+        // The grant rides ames; a sleeping host answers in seconds to
+        // never. Give the ask a deadline so the pending indicator
+        // can't sit forever, and so a grant provoked much later (by
+        // another device's ask) can't drag this one onto the line.
+        scope.launch {
+            delay(joinAskTimeoutMs)
+            if (joinToken == token && _pendingJoin.value == key) {
+                _pendingJoin.value = null
+                onDenied?.invoke(name, "the host didn't answer")
+            }
+        }
     }
+
+    /** Withdraw a pending ask — the bar's cancel while "asking…". The
+     *  grant may still arrive; with the claim cleared it is ignored,
+     *  exactly like a grant another device asked for. */
+    fun cancelJoin() {
+        joinToken++
+        _pendingJoin.value = null
+    }
+
+    /** Disarms a superseded ask's deadline, ringToken-style. */
+    private var joinToken = 0
 
     private suspend fun onSignal(recv: TrunkUpdate.Recv) {
         val sig = recv.sig
         when (sig) {
             is TrunkSig.Ring -> {
+                // Glare: a ring FROM the ship we are currently dialing
+                // is unambiguous mutual intent, not a busy signal.
+                // Ignoring it (as any other mid-call ring is ignored)
+                // meant two people dialing each other both sat through
+                // the full ring timeout and both got "no answer". Tie-
+                // break deterministically: the lexicographically lower
+                // ship abandons its own attempt and takes the incoming
+                // ring; the higher one keeps ringing and is answered.
+                val cur = _state.value
+                if (cur is CallUiState.Outgoing && recv.from == peer) {
+                    val ours = session.shipName.orEmpty()
+                    if (ours >= recv.from) return
+                    Log.i(TAG, "glare with ${recv.from}; adopting their ring")
+                    val oldId = callId
+                    connectToken++
+                    mediaWatch?.cancel()
+                    mediaWatch = null
+                    engine?.close()
+                    engine = null
+                    // Their other devices may be ringing for our
+                    // abandoned call — tell them it's over.
+                    oldId?.let { old ->
+                        scope.launch { poke(recv.from, TrunkSig.Hangup(old)) }
+                    }
+                    callId = sig.id
+                    pendingOffer = CompletableDeferred()
+                    _state.value = CallUiState.Incoming(recv.from)
+                    armRingWatchdog()
+                    return
+                }
                 if (!isFree) {
                     // Stay silent rather than replying busy.
                     //
@@ -882,6 +1078,17 @@ class CallController(
             }
             is TrunkSig.Accept -> {
                 if (sig.id != callId) return
+                // Only the first accept transitions the call. Every
+                // callee device rings and the handled-elsewhere
+                // suppression is asynchronous, so two of them answering
+                // within an ames round trip sends two accepts with the
+                // same id — and the second used to knock a live call
+                // back to Connecting and then drop it when libwebrtc
+                // refused the duplicate remote description.
+                if (_state.value !is CallUiState.Outgoing) {
+                    Log.i(TAG, "duplicate accept for ${sig.id} ignored")
+                    return
+                }
                 if (sdpFingerprint(sig.sdp) != sig.fpr) {
                     Log.e(TAG, "fingerprint mismatch from ${recv.from} — dropping call")
                     endCall("security error")
@@ -898,8 +1105,23 @@ class CallController(
                     }
             }
             is TrunkSig.Reject -> {
-                if (sig.id != callId) return
-                endLocal(if (sig.reason == "busy") "busy" else "declined")
+                // An old desk's relay nack can't echo the call id — it
+                // wasn't in the wire — so it rejects as id "unknown".
+                // Coming from the ship we are calling, that can only
+                // mean our signaling never got through (no %trunk, or
+                // unreachable); dropping it left the caller hearing
+                // ringback for the full timeout and then a "no answer"
+                // that blamed the callee.
+                val unreachable = sig.id == "unknown" && recv.from == peer &&
+                    (_state.value is CallUiState.Outgoing || _state.value is CallUiState.Active)
+                if (sig.id != callId && !unreachable) return
+                endLocal(
+                    when {
+                        sig.reason == "unreachable" || unreachable -> "couldn't be reached"
+                        sig.reason == "busy" -> "busy"
+                        else -> "declined"
+                    },
+                )
             }
             is TrunkSig.Hangup -> {
                 if (sig.id != callId) return
@@ -919,7 +1141,7 @@ class CallController(
             if (connectToken != token) return@launch
             val cur = _state.value
             if (cur is CallUiState.Active && cur.media != MediaState.Live) {
-                Log.w(TAG, "media never connected after ${'$'}{connectTimeoutMs}ms")
+                Log.w(TAG, "media never connected after ${connectTimeoutMs}ms")
                 endCall("couldn't connect")
             }
         }
@@ -938,7 +1160,15 @@ class CallController(
                         val cur = _state.value
                         if (cur is CallUiState.Active) _state.value = cur.copy(media = media)
                     }
-                    MediaState.Failed -> endCall("connection failed")
+                    MediaState.Failed -> {
+                        // Before the call is Active, the offer/answer
+                        // path is mid-flight and fails with the
+                        // engine's own message — the actionable one
+                        // (the unavailable-engine says how to fix the
+                        // mic). Ending here first replaced it with a
+                        // generic "connection failed".
+                        if (_state.value is CallUiState.Active) endCall("connection failed")
+                    }
                     else -> {
                         val cur = _state.value
                         if (cur is CallUiState.Active) _state.value = cur.copy(media = media)
@@ -956,6 +1186,23 @@ class CallController(
     }
 
     private fun endLocal(reason: String) {
+        // A call can end down more than one path at once — an engine
+        // failure racing its own cleanup poke. The first arrival wins;
+        // a second must not downgrade the Ended banner (and its
+        // reason) to None.
+        val cur = _state.value
+        if (callId == null && peer == null &&
+            (cur is CallUiState.None || cur is CallUiState.Ended)
+        ) {
+            // Still sweep the engine: a superseded coroutine may have
+            // parked one after its call already ended, and this guard
+            // must never turn that into a permanently hot mic.
+            mediaWatch?.cancel()
+            mediaWatch = null
+            engine?.close()
+            engine = null
+            return
+        }
         ringToken++
         connectToken++
         mediaWatch?.cancel()
@@ -991,14 +1238,18 @@ class CallController(
             if (ringToken != token) return@launch
             when (_state.value) {
                 is CallUiState.Outgoing -> {
-                    // Tell the far end to stop ringing before we forget
-                    // the call id.
-                    if (id != null && target != null) poke(target, TrunkSig.Hangup(id))
                     Log.i(TAG, "no answer after ${ringTimeoutMs}ms")
+                    // Locally first, poke second — same rule as
+                    // hangup(): waiting on the poke's ack kept the
+                    // ringback going up to 15s past the timeout on a
+                    // connection whose ack path had died. id and
+                    // target were captured when the watchdog was
+                    // armed, so ending first loses nothing.
                     endLocal("no answer")
+                    if (id != null && target != null) poke(target, TrunkSig.Hangup(id))
                 }
                 is CallUiState.Incoming -> {
-                    Log.i(TAG, "missed call from ${'$'}target")
+                    Log.i(TAG, "missed call from $target")
                     endLocal("missed")
                 }
                 else -> {}
@@ -1007,10 +1258,19 @@ class CallController(
     }
 
     private suspend fun poke(target: String, sig: TrunkSig) {
-        val ch = channel ?: return
-        runCatching {
+        pokeChecked(target, sig)
+    }
+
+    /** Like [poke], but the caller learns whether it left the device.
+     *  Ring/Offer/Accept need to know — a signal that never went out
+     *  must end the call now, not after a watchdog blames the peer.
+     *  Hangup/Reject stay fire-and-forget: the call is already over
+     *  locally and the peer's own watchdog covers the loss. */
+    private suspend fun pokeChecked(target: String, sig: TrunkSig): Boolean {
+        val ch = channel ?: return false
+        return runCatching {
             ch.poke(TrunkWire.AGENT, TrunkWire.ACTION_MARK, TrunkWire.sendAction(target, sig))
-        }.onFailure { Log.e(TAG, "poke ${sig::class.simpleName} failed", it) }
+        }.onFailure { Log.e(TAG, "poke ${sig::class.simpleName} failed", it) }.isSuccess
     }
 
     companion object {
@@ -1049,6 +1309,10 @@ class CallController(
          *  Android's ring notification has to expire no later than
          *  this — see Notifications.showIncomingCall. */
         const val DEFAULT_RING_TIMEOUT_MS = 45_000L
+
+        /** How long a party-line ask may sit unanswered before the
+         *  pending indicator gives up on the host. */
+        internal const val JOIN_ASK_TIMEOUT_MS = 15_000L
 
         /** How long the "call ended" notice lingers before the surface
          *  goes quiet. Cleared here, not in the UI, so a backgrounded

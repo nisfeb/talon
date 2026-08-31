@@ -402,7 +402,7 @@ object TrunkWire {
         // reply path (enjs's +ship drops the leading sig).
         fun who(o: JsonObject): String? =
             o["from"]?.jsonPrimitive?.content
-                ?.let { if (it.startsWith("~")) it else "~${'$'}it" }
+                ?.let { if (it.startsWith("~")) it else "~$it" }
 
         (obj["recv"] as? JsonObject)?.let { recv ->
             val from = who(recv) ?: return null

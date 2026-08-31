@@ -121,12 +121,42 @@ class ToneStreamTest {
     }
 
     @Test
-    fun `ringback is a call tone, so a silent phone still hears it`() {
-        // The bug itself: this is the tone that vanished. It is the
-        // default for every tone that is not an incoming ring, so the
-        // check is that the default has not drifted.
+    fun `ringback is a call tone, so a silent phone still hears it`() = runBlocking {
+        // The bug itself: this is the tone that vanished. Driven
+        // through the controller, because the choice being pinned is
+        // the controller's — a version of this test that called the
+        // player directly only ever pinned the interface default.
+        val h = TrunkHarness()
         val rec = Recorder()
-        rec.loop(CallSounds.ringback(), 0)
-        assertEquals(ToneStream.Call, rec.loops.single().second)
+        val controller = CallController(
+            h.session,
+            CallEngineProvider { HangingCallEngine() },
+            sounds = rec,
+        )
+        try {
+            controller.start()
+            h.awaitConnected()
+            // placeCall consults the policy first; wait out the scry.
+            withTimeout(10_000) { controller.policy.first { it != null } }
+            controller.placeCall("~zod")
+            withTimeout(10_000) {
+                controller.state.first { it is CallUiState.Outgoing }
+            }
+            withTimeout(5_000) {
+                while (rec.loops.isEmpty()) kotlinx.coroutines.delay(20)
+            }
+            val (pcm, stream) = rec.loops.first()
+            assertTrue(
+                pcm.contentEquals(CallSounds.ringback()),
+                "expected the ringback tone, got some other tone",
+            )
+            assertEquals(
+                ToneStream.Call,
+                stream,
+                "ringback must stay audible with the ringer off — the user placed this call",
+            )
+        } finally {
+            controller.stop()
+        }
     }
 }
