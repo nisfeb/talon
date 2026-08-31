@@ -91,4 +91,62 @@ class PeekCancelTest {
             controller.stop()
         }
     }
+
+    @Test
+    fun aTransportFailureShowsASentenceNotAStackDump() = runBlocking {
+        // The PUT itself fails, the way a 30s Ktor timeout does. What
+        // lands in peekFailed is rendered verbatim in the UI, so it
+        // must be our sentence — rc31 showed users a raw
+        // "Request timeout has expired [url=... request_timeout=...]".
+        val engine = MockEngine { req ->
+            when {
+                // The exact exception text rc31 shipped to users: a 504
+                // was too polite to catch the leak — its message has no
+                // internals in it — so throw what Ktor's timeout throws.
+                req.method.value == "PUT" -> throw RuntimeException(
+                    "Request timeout has expired " +
+                        "[url=https://ship.test/~/channel/1788, request_timeout=30000 ms]",
+                )
+                req.url.encodedPath.startsWith("/~/scry") ->
+                    respond("{}", HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "application/json"))
+                else -> respond(
+                    "id: 1\ndata: {\"id\":1,\"response\":\"poke\",\"ok\":true}\n\n",
+                    HttpStatusCode.OK,
+                    headersOf(HttpHeaders.ContentType, "text/event-stream"),
+                )
+            }
+        }
+        val ship = "~nec"
+        val session = UrbitSession(
+            HttpClient(engine),
+            Store(
+                SavedSession(
+                    shipUrl = "https://ship.test",
+                    ship = ship,
+                    cookieName = "urbauth-" + ship,
+                    cookieValue = "0v1",
+                    cookieDomain = "ship.test",
+                ),
+            ),
+        )
+        session.tryRestore()
+        val controller = CallController(
+            session,
+            CallEngineProvider { error("no media in a peek") },
+        )
+        try {
+            controller.start()
+            delay(500)
+            controller.peekRoom("~zod", "someline")
+            val why = controller.peekFailed.value["~zod/someline"]
+            assertTrue(why != null, "a failed peek must be recorded")
+            assertTrue(
+                !why.contains("url=") && !why.contains("http") &&
+                    !why.contains("timeout has expired"),
+                "internals leaked into the banner: $why",
+            )
+        } finally {
+            controller.stop()
+        }
+    }
 }

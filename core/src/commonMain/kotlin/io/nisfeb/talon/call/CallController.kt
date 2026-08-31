@@ -798,13 +798,17 @@ class CallController(
         } catch (t: Throwable) {
             // A nack here is information, not noise: our own ship
             // refusing the action means our desk is too old, and the
-            // host refusing means theirs is.
+            // host refusing means theirs is. But the banner gets a
+            // sentence we wrote, never t.message — a Ktor timeout's
+            // message is a URL and a config dump, and rc31 shipped it
+            // verbatim above people's pinned messages.
             val why = when {
                 t is PokeNacked && t.reason.contains("bad-key") ->
                     "$host is running an older Trunk that can't answer this yet"
-                else -> t.message ?: "the host didn't answer"
+                t is PokeNacked -> "the host declined to answer"
+                else -> "your ship didn't answer in time — will retry"
             }
-            Log.w(TAG, "peek $key failed: $why")
+            Log.w(TAG, "peek $key failed: $why (${t.message})")
             _peekFailed.value = _peekFailed.value + (key to why)
         }
     }
