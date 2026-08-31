@@ -66,6 +66,7 @@ class ShipConnection(
     private val factory by lazy { EventSources.createFactory(http) }
     private var sourceJob: Job? = null
     private val ackedIds = ConcurrentHashMap.newKeySet<String>()
+    private val rungCalls = RungCalls()
 
     fun start() {
         sourceJob = scope.launch {
@@ -289,9 +290,10 @@ class ShipConnection(
     }
 
     /**
-     * An incoming 1:1 signal. Only a ring wakes the device: the rest of
-     * the exchange (offer / accept / hangup) is for a client that is
-     * already awake and subscribed.
+     * An incoming 1:1 signal. Only a ring wakes the device — plus the
+     * cancel that un-rings it when the caller hangs up first: the rest
+     * of the exchange (offer / accept) is for a client that is already
+     * awake and subscribed.
      *
      * Deliberately outside the suppression layer. Warmup exists to
      * swallow %activity's subscribe-time backlog, and a ring has no
@@ -304,19 +306,33 @@ class ShipConnection(
      * message stream after a crash, and a call is not a message.
      */
     private fun handleRing(json: JsonObject) {
-        val recv = json["recv"]?.jsonObject ?: return
-        val from = recv["from"]?.jsonPrimitive?.contentOrNull ?: return
-        val callId = recv["sig"]?.jsonObject
-            ?.get("ring")?.jsonObject
-            ?.get("id")?.jsonPrimitive?.contentOrNull
-            ?: return
-
-        val pushEndpoint = db.pushEndpointFor(deviceId) ?: run {
-            log.warn("device $deviceId has no push endpoint; dropping ring")
-            return
+        when (val fact = parseCallFact(json)) {
+            is CallFact.Ring -> {
+                val pushEndpoint = db.pushEndpointFor(deviceId) ?: run {
+                    log.warn("device $deviceId has no push endpoint; dropping ring")
+                    return
+                }
+                log.info("push ring from=${fact.from} call=${fact.callId}")
+                push.sendRing(
+                    endpoint = pushEndpoint,
+                    patp = patp,
+                    from = fact.from,
+                    callId = fact.callId,
+                )
+                rungCalls.rang(fact.callId, pushEndpoint)
+            }
+            // The ring's undoing — a hangup for the id, or a "handled"
+            // fact (another of the user's clients answered). Only a
+            // call we actually pushed a ring for gets a cancel, and
+            // only while the device could still be ringing; RungCalls
+            // enforces both.
+            is CallFact.Settled -> {
+                val endpoint = rungCalls.settle(fact.callId) ?: return
+                log.info("push ring-cancel call=${fact.callId}")
+                push.sendRingCancel(endpoint = endpoint, patp = patp, callId = fact.callId)
+            }
+            null -> Unit
         }
-        log.info("push ring from=$from call=$callId")
-        push.sendRing(endpoint = pushEndpoint, patp = patp, from = from, callId = callId)
     }
 
     /** Pull the globally-unique post id out of an %activity event.
@@ -367,6 +383,63 @@ class ShipConnection(
         const val SUB_CALLS = 2
 
         private val JSON_MEDIA = "application/json".toMediaType()
+    }
+}
+
+/**
+ * The two %trunk /calls fact shapes the relay acts on: a ring to push,
+ * and the fact that settles it. Everything else on the stream
+ * (offer / accept / reject, room opens, tickets…) is for a client
+ * that is already awake.
+ */
+internal sealed interface CallFact {
+    data class Ring(val from: String, val callId: String) : CallFact
+    data class Settled(val callId: String) : CallFact
+}
+
+/** Classify a /calls fact. Wire shapes (see core's TrunkWire):
+ *  ring    {"recv":{"from":"~zod","sig":{"ring":{"id":i}}}}
+ *  hangup  {"recv":{"from":"~zod","sig":{"hangup":{"id":i}}}}
+ *  handled {"handled":"<id>"} — our own ship saying another of the
+ *          user's clients answered. */
+internal fun parseCallFact(json: JsonObject): CallFact? {
+    fun JsonElement?.str(): String? =
+        runCatching { (this as? JsonPrimitive)?.content }.getOrNull()
+    val recv = json["recv"] as? JsonObject
+    val sig = recv?.get("sig") as? JsonObject
+    (sig?.get("ring") as? JsonObject)?.get("id").str()?.let { id ->
+        val from = recv?.get("from").str() ?: return null
+        return CallFact.Ring(from, id)
+    }
+    (sig?.get("hangup") as? JsonObject)?.get("id").str()?.let { return CallFact.Settled(it) }
+    json["handled"].str()?.let { return CallFact.Settled(it) }
+    return null
+}
+
+/**
+ * The rings this connection actually pushed, so a settling fact only
+ * produces a cancel push for a device that was told to ring in the
+ * first place. Entries expire at ring-timeout age: past that the
+ * client's own 45s ring watchdog has already gone quiet and a cancel
+ * is noise the push server may bill us battery for.
+ */
+internal class RungCalls(private val maxAgeMs: Long = 60_000L) {
+
+    private data class Rung(val endpoint: String, val atMs: Long)
+    private val rung = ConcurrentHashMap<String, Rung>()
+
+    fun rang(callId: String, endpoint: String, nowMs: Long = System.currentTimeMillis()) {
+        rung[callId] = Rung(endpoint, nowMs)
+        // Prune on write — the map only ever holds the handful of
+        // rings from the last minute, so a scan here is nothing.
+        rung.entries.removeIf { nowMs - it.value.atMs > maxAgeMs }
+    }
+
+    /** The endpoint to cancel on, or null if this id wasn't recently
+     *  rung. One-shot: a second settle for the same id is a no-op. */
+    fun settle(callId: String, nowMs: Long = System.currentTimeMillis()): String? {
+        val r = rung.remove(callId) ?: return null
+        return r.endpoint.takeIf { nowMs - r.atMs <= maxAgeMs }
     }
 }
 

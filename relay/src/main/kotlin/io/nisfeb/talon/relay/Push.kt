@@ -64,6 +64,21 @@ class Push {
         post(endpoint, body, urgency = "high", ttlSecs = RING_TTL_SECS)
     }
 
+    /** Un-ring the device: the caller hung up, or another of the
+     *  user's clients answered. Same urgency/TTL treatment as the
+     *  ring itself — a cancel is worthless late, better dropped than
+     *  delivered to a phone that stopped ringing minutes ago. */
+    fun sendRingCancel(endpoint: String, patp: String, callId: String) {
+        val body = buildString {
+            append("""{"event":"ring-cancel","patp":"""")
+            append(escape(patp))
+            append("""","id":"""")
+            append(escape(callId))
+            append("\"}")
+        }
+        post(endpoint, body, urgency = "high", ttlSecs = RING_TTL_SECS)
+    }
+
     fun send(endpoint: String, patp: String, whom: String, postId: String) {
         // Hand-rolled JSON to avoid pulling kotlinx-serialization
         // through Push's hot path. The fields are all server-
