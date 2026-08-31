@@ -2,6 +2,7 @@ package io.nisfeb.talon.call
 
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
@@ -48,6 +49,9 @@ data class PartyRoom(
     val customSfu: Boolean,
     val members: Set<String> = emptySet(),
     val admins: Set<String> = emptySet(),
+    /** "~host/name" of the group this room's roster mirrors, or null
+     *  for a manual roster (the only kind before wire 4). */
+    val groupFlag: String? = null,
 )
 
 /** A line another ship has invited us onto. */
@@ -147,7 +151,9 @@ object TrunkWire {
      * lib/trunk-json.hoon by hand, so bump both together — a drift is
      * otherwise a silent no-op rather than an error.
      */
-    const val WIRE_VERSION = 3
+    // 4: rooms carry an optional group binding, and %bind-room mirrors
+    // a room's roster from a Tlon group on the host ship.
+    const val WIRE_VERSION = 4
 
     const val PUBLISHER = "~ricsul-bilwyt"
     const val DESK = "trunk"
@@ -219,6 +225,27 @@ object TrunkWire {
                 put("title", title)
                 putJsonArray("members") { members.forEach { add(JsonPrimitive(it)) } }
                 putJsonArray("admins") { admins.forEach { add(JsonPrimitive(it)) } }
+            }
+        }
+
+    /**
+     * Bind (or with [groupFlag] null, unbind) a hosted room's roster
+     * to a Tlon group, "~host/name". Wire 4 and up: an older ship
+     * cannot cast the variant and nacks, so callers gate on
+     * [WIRE_VERSION] — see PartyLineHost.startLine.
+     */
+    fun bindRoomAction(name: String, groupFlag: String?): JsonElement =
+        buildJsonObject {
+            putJsonObject("bind-room") {
+                put("name", name)
+                if (groupFlag == null) {
+                    put("group", JsonNull)
+                } else {
+                    putJsonObject("group") {
+                        put("ship", groupFlag.substringBefore('/'))
+                        put("name", groupFlag.substringAfter('/'))
+                    }
+                }
             }
         }
 
@@ -481,6 +508,11 @@ object TrunkWire {
                 customSfu = o["custom-sfu"]?.jsonPrimitive?.content == "true",
                 members = ships("members"),
                 admins = ships("admins"),
+                groupFlag = (o["group"] as? JsonObject)?.let { g ->
+                    val ship = g["ship"]?.jsonPrimitive?.content ?: return@let null
+                    val nm = g["name"]?.jsonPrimitive?.content ?: return@let null
+                    "$ship/$nm"
+                },
             )
         } ?: emptyList()
 

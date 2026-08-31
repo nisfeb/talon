@@ -63,6 +63,14 @@ object PartyLineHost {
         // Ordered deliberately: the join must not reach the ship
         // before the room it names exists.
         controller.openRoom(room, title, members, admins)
+        // Wire 4 ships mirror the roster from the group itself, so
+        // someone added to the group after this moment can still
+        // join — the snapshot above is just the opening state. Older
+        // ships would nack the poke, so gate on the wire; they keep
+        // the wire-3 behaviour (frozen roster) they already had.
+        if (controller.wire.value >= 4) {
+            controller.bindRoom(room, flag)
+        }
         controller.joinRoom(host, room)
         return true
     }

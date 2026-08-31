@@ -802,6 +802,20 @@ class CallController(
         }
     }
 
+    /**
+     * Bind a room we host to a Tlon group, so its roster mirrors the
+     * group's from now on. Wire 4+; callers gate on [wire].
+     */
+    suspend fun bindRoom(name: String, groupFlag: String?) {
+        val ch = channel ?: return
+        runCatching {
+            ch.poke(
+                TrunkWire.AGENT, TrunkWire.ACTION_MARK,
+                TrunkWire.bindRoomAction(name, groupFlag),
+            )
+        }.onFailure { Log.w(TAG, "bind-room poke failed", it) }
+    }
+
     /** Ask [host] to let us onto its party line. */
     suspend fun joinRoom(host: String, name: String) {
         if (offerInstallIfMissing()) return

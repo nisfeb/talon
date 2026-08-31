@@ -1,11 +1,14 @@
 package io.nisfeb.talon.call
 
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.jsonArray
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 import kotlin.test.assertNull
 
 /** Wire shapes must match lib/trunk-json.hoon in gwbtc/trunk. */
@@ -229,6 +232,55 @@ class TrunkWireTest {
         // The agent answers /x/version with ++wire-version. Bump both or
         // neither: a client claiming a version the desk doesn't speak
         // reports every ship as out of date.
-        assertEquals(3, TrunkWire.WIRE_VERSION)
+        assertEquals(4, TrunkWire.WIRE_VERSION)
+    }
+
+    // ── wire 4: group-mirrored rosters ────────────────────────────
+
+    @Test
+    fun bindRoomActionCarriesTheFlagSplit() {
+        val json = TrunkWire.bindRoomAction("v12s6q7e", "~darduc-mitfen/v12s6q7e")
+        val bind = (json as JsonObject)["bind-room"] as JsonObject
+        assertEquals("v12s6q7e", bind["name"]?.jsonPrimitive?.content)
+        val group = bind["group"] as JsonObject
+        assertEquals("~darduc-mitfen", group["ship"]?.jsonPrimitive?.content)
+        assertEquals("v12s6q7e", group["name"]?.jsonPrimitive?.content)
+    }
+
+    @Test
+    fun unbindIsExplicitNullNotAbsent() {
+        // The agent's (mu ...) decoder needs the key present: a
+        // missing key would fail the ot and nack the whole poke.
+        val json = TrunkWire.bindRoomAction("v12s6q7e", null)
+        val bind = (json as JsonObject)["bind-room"] as JsonObject
+        assertTrue(bind.containsKey("group"), "group key must be present")
+        assertTrue(bind["group"] is JsonNull, "unbind is JSON null")
+    }
+
+    @Test
+    fun parseRoomsReadsTheGroupBinding() {
+        val body = Json.parseToJsonElement(
+            """[{"name":"a","title":"A","listen":false,"sfu-base":"",""" +
+                """"custom-sfu":false,"members":[],"admins":[],""" +
+                """"group":{"ship":"~nec","name":"g"}},""" +
+                """{"name":"b","title":"B","listen":false,"sfu-base":"",""" +
+                """"custom-sfu":false,"members":[],"admins":[],"group":null}]""",
+        )
+        val rooms = TrunkWire.parseRooms(body)
+        assertEquals("~nec/g", rooms.first { it.name == "a" }.groupFlag)
+        assertEquals(null, rooms.first { it.name == "b" }.groupFlag)
+    }
+
+    @Test
+    fun aWire3ShipsRoomsStillParse() {
+        // No "group" key at all — the shape every ship served before
+        // wire 4. Must parse as unbound, not fail.
+        val body = Json.parseToJsonElement(
+            """[{"name":"old","title":"O","listen":false,"sfu-base":"",""" +
+                """"custom-sfu":false,"members":["~nec"],"admins":[]}]""",
+        )
+        val rooms = TrunkWire.parseRooms(body)
+        assertEquals(1, rooms.size)
+        assertEquals(null, rooms.single().groupFlag)
     }
 }
