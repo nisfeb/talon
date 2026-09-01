@@ -1285,6 +1285,22 @@ class TlonChatRepo(
     }
 
     /**
+     * Report a message to the group's admins — Tlon's flag-content.
+     * The poke goes to our own %groups, which relays it to the group
+     * host; it lands in the group's flagged-content for admin review
+     * and fires the admins' activity notification. For a thread reply
+     * pass the reply's own id as [postId] and its [parentId] too.
+     */
+    suspend fun reportMessage(
+        groupFlag: String,
+        nest: String,
+        postId: String,
+        parentId: String?,
+    ) {
+        pokeAGroup(groupFlag, aGroupFlagContent(nest, postId, parentId, ourPatp))
+    }
+
+    /**
      * Toggle a role on a single member via `seat.a-seat.{add,del}-roles`.
      */
     suspend fun setMemberRole(flag: String, ship: String, role: String, add: Boolean) {

@@ -559,6 +559,7 @@ fun DmChatScreen(
         mutableStateOf<List<ReactionEntity>?>(null)
     }
     var confirmingDelete by remember { mutableStateOf<MessageEntity?>(null) }
+    var confirmingReport by remember { mutableStateOf<MessageEntity?>(null) }
 
     val canSend = remember(whom) {
         whom.startsWith("~") || whom.startsWith("0v") || whom.startsWith("chat/")
@@ -919,6 +920,10 @@ fun DmChatScreen(
                     actionTarget = null
                     confirmingDelete = target
                 },
+                onReport = {
+                    actionTarget = null
+                    confirmingReport = target
+                },
                 onTogglePin = {
                     val wasPinned = pinnedPostId == target.id
                     actionTarget = null
@@ -1176,6 +1181,43 @@ fun DmChatScreen(
             },
             dismissButton = {
                 TextButton(onClick = { confirmingDelete = null }) { Text("Cancel") }
+            },
+        )
+    }
+
+    confirmingReport?.let { target ->
+        AlertDialog(
+            onDismissRequest = { confirmingReport = null },
+            title = { Text("Report message?") },
+            text = {
+                Text(
+                    "Sends this message to the group's admins for review. " +
+                        "They'll see who reported it.",
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    val toReport = target
+                    confirmingReport = null
+                    val flag = contactMap.groupOfChannel(whom)
+                    if (flag == null) {
+                        composerState.sendError = "report failed: no group for this channel"
+                    } else {
+                        scope.launch {
+                            runCatching {
+                                repo.reportMessage(flag, whom, toReport.id, toReport.parentId)
+                            }.onSuccess {
+                                composerState.sendError = "Reported to the group's admins"
+                            }.onFailure {
+                                composerState.sendError =
+                                    "report failed: ${it.message ?: it::class.simpleName}"
+                            }
+                        }
+                    }
+                }) { Text("Report") }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmingReport = null }) { Text("Cancel") }
             },
         )
     }
@@ -1901,6 +1943,7 @@ private fun MessageActionMenu(
     onToggleBookmark: () -> Unit,
     onEdit: () -> Unit,
     onDelete: () -> Unit,
+    onReport: () -> Unit,
     onTogglePin: () -> Unit,
 ) {
     val isMine = message.author == ourPatp
@@ -2081,6 +2124,16 @@ private fun MessageActionMenu(
             // the ship refuse was the old behaviour: the row stayed
             // put, nothing said why, and the app had advertised a
             // power the reader did not have.
+            // Report — other people's messages in group channels only:
+            // flag-content routes through the group host, so DMs have
+            // nowhere to send it, and reporting yourself is noise.
+            if (!isMine && isChannel) {
+                ActionRow(
+                    onClick = onReport,
+                    label = "Report",
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
             if (isMine || (isChannel && canModerate)) {
                 ActionRow(
                     onClick = onDelete,

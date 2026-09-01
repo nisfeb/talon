@@ -284,4 +284,53 @@ class WireShapesTest {
             id,
         )
     }
+
+    // ─── flag-content (report message) ──────────────────────────
+
+    @Test
+    fun `flagContent reports a top-level post with dotted time and null reply`() {
+        val out = groupAction4(
+            "~host/group",
+            aGroupFlagContent(
+                nest = "chat/~host/slug",
+                postId = "~sampel-palnet/170141184507932790143209384169177088000",
+                parentId = null,
+                src = "sampel-palnet",
+            ),
+        )
+        val fc = out["group"]!!.jsonObject["a-group"]!!.jsonObject["flag-content"]!!.jsonObject
+        assertEquals("chat/~host/slug", fc["nest"]!!.jsonPrimitive.content)
+        assertEquals("~sampel-palnet", fc["src"]!!.jsonPrimitive.content)
+        val key = fc["post-key"]!!.jsonObject
+        // The dejs wants the bare TIME, dotted — not the writ id.
+        assertEquals(
+            "170.141.184.507.932.790.143.209.384.169.177.088.000",
+            key["post"]!!.jsonPrimitive.content,
+        )
+        assertEquals(JsonNull, key["reply"])
+        assertEquals("~host/group", out["group"]!!.jsonObject["flag"]!!.jsonPrimitive.content)
+    }
+
+    @Test
+    fun `flagContent reports a thread reply keyed under its parent`() {
+        val out = groupAction4(
+            "~host/group",
+            aGroupFlagContent(
+                nest = "chat/~host/slug",
+                postId = "~troll/170141184507932790143209384169177088999",
+                parentId = "~sampel-palnet/170141184507932790143209384169177088000",
+                src = "~ricsul",
+            ),
+        )
+        val key = out["group"]!!.jsonObject["a-group"]!!.jsonObject["flag-content"]!!
+            .jsonObject["post-key"]!!.jsonObject
+        assertEquals(
+            "170.141.184.507.932.790.143.209.384.169.177.088.000",
+            key["post"]!!.jsonPrimitive.content,
+        )
+        assertEquals(
+            "170.141.184.507.932.790.143.209.384.169.177.088.999",
+            key["reply"]!!.jsonPrimitive.content,
+        )
+    }
 }

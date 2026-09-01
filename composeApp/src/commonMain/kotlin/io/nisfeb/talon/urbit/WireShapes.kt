@@ -111,6 +111,33 @@ internal fun replyDelta(replyId: String, replyEssay: JsonObject): JsonObject =
         })
     }
 
+/**
+ * %groups a-group flag-content diff — report a post (or a reply under
+ * [parentId]) to the group's admins. The dejs keys the post by its
+ * bare TIME atom, dot-grouped (`(se %ud)`), not the full writ id, so
+ * the author half of `~author/<da>` is stripped here. `src` is
+ * advisory to the dejs; the host trusts src.bowl.
+ */
+internal fun aGroupFlagContent(
+    nest: String,
+    postId: String,
+    parentId: String?,
+    src: String,
+): JsonObject {
+    fun timeOf(id: String) = dotAtom(id.substringAfterLast('/'))
+    return buildJsonObject {
+        put("flag-content", buildJsonObject {
+            put("nest", nest)
+            put("post-key", buildJsonObject {
+                put("post", timeOf(parentId ?: postId))
+                if (parentId == null) put("reply", JsonNull)
+                else put("reply", timeOf(postId))
+            })
+            put("src", normalisePatp(src))
+        })
+    }
+}
+
 /** %groups group-action-4 `{group: {flag, a-group: <diff>}}` envelope. */
 internal fun groupAction4(flag: String, aGroup: JsonObject): JsonObject =
     buildJsonObject {

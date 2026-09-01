@@ -283,6 +283,7 @@ fun ThreadList(
         whom.startsWith("~") || whom.startsWith("0v") || whom.startsWith("chat/")
     }
     var pendingDelete by remember(parentId) { mutableStateOf<MessageEntity?>(null) }
+    var pendingReport by remember(parentId) { mutableStateOf<MessageEntity?>(null) }
     var editing by remember(parentId) { mutableStateOf<MessageEntity?>(null) }
     // Long-press on any thread message opens this sheet — same role
     // as DmChatScreen.actionTarget. We keep `pendingDelete` for the
@@ -342,6 +343,7 @@ fun ThreadList(
             ourPatp = ourPatp,
             canDelete = isMine || isChannel,
             canEdit = isMine && isChannel,
+            canReport = !isMine && isChannel,
             onPickReaction = { code ->
                 actionTarget = null
                 scope.launch {
@@ -370,6 +372,10 @@ fun ThreadList(
             onDelete = {
                 actionTarget = null
                 pendingDelete = target
+            },
+            onReport = {
+                actionTarget = null
+                pendingReport = target
             },
         )
     }
@@ -527,6 +533,45 @@ fun ThreadList(
             },
             dismissButton = {
                 TextButton(onClick = { pendingDelete = null }) {
+                    Text("Cancel")
+                }
+            },
+        )
+    }
+
+    pendingReport?.let { target ->
+        AlertDialog(
+            onDismissRequest = { pendingReport = null },
+            title = { Text("Report message?") },
+            text = {
+                Text(
+                    "Sends this message to the group's admins for review. " +
+                        "They'll see who reported it.",
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    val t = target
+                    pendingReport = null
+                    val flag = contactMap.groupOfChannel(whom)
+                    if (flag == null) {
+                        composerState.sendError = "report failed: no group for this channel"
+                    } else {
+                        scope.launch {
+                            runCatching {
+                                repo.reportMessage(flag, whom, t.id, t.parentId)
+                            }.onSuccess {
+                                composerState.sendError = "Reported to the group's admins"
+                            }.onFailure {
+                                composerState.sendError =
+                                    "report failed: ${it.message ?: it::class.simpleName}"
+                            }
+                        }
+                    }
+                }) { Text("Report") }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingReport = null }) {
                     Text("Cancel")
                 }
             },
@@ -802,11 +847,13 @@ private fun ThreadActionMenu(
     ourPatp: String,
     canDelete: Boolean,
     canEdit: Boolean,
+    canReport: Boolean,
     onPickReaction: (String) -> Unit,
     onCopy: () -> Unit,
     onCopyMarkdown: () -> Unit,
     onEdit: () -> Unit,
     onDelete: () -> Unit,
+    onReport: () -> Unit,
 ) {
     val itemPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
     val itemMinHeight = 36.dp
@@ -943,6 +990,13 @@ private fun ThreadActionMenu(
             ActionRow(onClick = onCopyMarkdown, label = "Copy as Markdown")
             if (canEdit) {
                 ActionRow(onClick = onEdit, label = "Edit")
+            }
+            if (canReport) {
+                ActionRow(
+                    onClick = onReport,
+                    label = "Report",
+                    color = MaterialTheme.colorScheme.error,
+                )
             }
             if (canDelete) {
                 ActionRow(

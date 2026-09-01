@@ -29,10 +29,14 @@ client.
 
 USER-GENERATED CONTENT (Guideline 1.2)
 All content lives on users' own private servers; there is no public
-feed and no content hosted by the developer. Group hosts can remove
-(kick) and ban members; users can block ships from contacting them.
-Conversations are private, invitation-based groups — analogous to a
-self-hosted IRC or Matrix server.
+feed and no content hosted by the developer. Users can report any
+message in a group channel (long-press → Report, with confirmation);
+the report goes to the group's admins for review and notifies them.
+Group admins can delete reported or objectionable messages in-app,
+and group hosts can remove (kick) and ban members; users can block
+ships from contacting them. Conversations are private,
+invitation-based groups — analogous to a self-hosted IRC or Matrix
+server.
 
 ENCRYPTION
 Standard HTTPS/TLS only — ITSAppUsesNonExemptEncryption is false.
