@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- The three jpackage defaults every hardened-runtime JVM needs.
+         Replacing the default entitlements file REPLACES, not merges —
+         dropping any of these kills the JVM at launch. -->
+    <key>com.apple.security.cs.allow-jit</key>
+    <true/>
+    <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+    <true/>
+    <key>com.apple.security.cs.disable-library-validation</key>
+    <true/>
+    <!-- The one jpackage omits: under hardened runtime (which jpackage
+         sets even for ad-hoc signing), microphone capture without this
+         entitlement is denied SILENTLY — no prompt, no entry in
+         System Settings > Microphone, CoreAudio just records zeros.
+         Field symptom: "everyone hears the party line, nobody hears
+         me, and Talon never appears in the mic permission list." -->
+    <key>com.apple.security.device.audio-input</key>
+    <true/>
+</dict>
+</plist>

@@ -463,6 +463,15 @@ compose.desktop {
                 if (icnsFile.exists()) {
                     iconFile.set(icnsFile)
                 }
+                // The usage string alone is NOT enough: jpackage signs
+                // the bundle ad-hoc WITH the hardened-runtime flag, and
+                // hardened runtime additionally requires the
+                // audio-input ENTITLEMENT or the mic is denied silently
+                // (no prompt, no TCC listing). Both files below carry
+                // jpackage's three JVM defaults plus audio-input;
+                // replacing the default file replaces, never merges.
+                entitlementsFile.set(project.file("macos-entitlements.plist"))
+                runtimeEntitlementsFile.set(project.file("macos-entitlements.plist"))
                 // Without this key macOS TCC never shows the microphone
                 // prompt, so webrtc-java's CoreAudio capture silently
                 // records nothing — calls connect and playback works,
