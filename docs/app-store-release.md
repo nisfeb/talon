@@ -26,9 +26,11 @@ silently ignores and starts a paid release build (this burned build
 logs swallow, which is how the WebRTC-151 resolution failure was
 finally diagnosed.
 
-Latest at time of writing: **build #38, live on TestFlight**,
-MARKETING_VERSION 0.16.0, WebRTC pinned to 152 (upstream deleted 151's
-binary asset; see commit d61a880).
+Latest at time of writing: **build #40, live on TestFlight**
+(carries wire-5 role gates + rc36), MARKETING_VERSION 0.16.0, WebRTC
+pinned to 152 (upstream deleted 151's binary asset; see d61a880).
+Note: the MCP `push_project` tool 413s on this repo (payload limit) —
+always push with the CLI, which uploads out-of-band.
 
 MCP-only tools (`publish`, `get_metadata`, `set_metadata`,
 `upload_screenshots`) are reachable via the committed wrapper:
