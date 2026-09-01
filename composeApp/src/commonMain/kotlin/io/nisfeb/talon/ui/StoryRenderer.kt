@@ -11,6 +11,7 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -19,6 +20,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.BrokenImage
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -40,6 +43,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -249,19 +253,36 @@ fun StoryRenderer(
                 }
 
                 is StoryPart.Image -> {
-                    val aspect = if (part.width != null && part.height != null && part.height > 0) {
+                    // Both dims must be positive: width comes off the
+                    // wire unclamped, and aspectRatio() throws on <= 0
+                    // — a remote message with width: 0 would crash the
+                    // whole screen every time it scrolled into view.
+                    val aspect = if (part.width != null && part.height != null &&
+                        part.width > 0 && part.height > 0
+                    ) {
                         part.width.toFloat() / part.height.toFloat()
                     } else null
                     AsyncImage(
                         model = part.src,
                         contentDescription = part.alt,
                         contentScale = ContentScale.Fit,
+                        // A dead URL used to render as a 0-height nothing —
+                        // the message looked empty. The tile makes the
+                        // failure visible.
+                        error = rememberVectorPainter(Icons.Filled.BrokenImage),
                         modifier = Modifier
                             .widthIn(max = 320.dp)
                             .heightIn(max = 360.dp)
                             .clip(RoundedCornerShape(12.dp))
+                            .background(MaterialTheme.colorScheme.surfaceVariant)
                             .clickable { onImageTap(part.src) }
-                            .let { if (aspect != null) it.fillMaxWidth() else it },
+                            // Reserve the declared aspect so the reversed
+                            // list doesn't reflow under the reader when
+                            // the bitmap lands.
+                            .let {
+                                if (aspect != null) it.fillMaxWidth().aspectRatio(aspect)
+                                else it
+                            },
                     )
                 }
 

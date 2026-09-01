@@ -144,7 +144,12 @@ object RawMarkdown {
                 val items = list["items"] as? JsonArray ?: return ""
                 return items.mapIndexed { i, item ->
                     val prefix = if (type == "ordered") "${i + 1}." else "-"
-                    "$prefix ${renderInlinesOrString(item)}"
+                    // The composer wraps each entry as {"item": [inlines]};
+                    // older payloads put the inline array here directly.
+                    // Without the unwrap every composed list copied as
+                    // empty "- " lines.
+                    val inlines = (item as? JsonObject)?.get("item") ?: item
+                    "$prefix ${renderInlinesOrString(inlines)}"
                 }.joinToString("\n")
             }
         }

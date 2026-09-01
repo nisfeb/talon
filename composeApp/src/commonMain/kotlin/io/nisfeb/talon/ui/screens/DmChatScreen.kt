@@ -253,6 +253,10 @@ fun DmChatScreen(
     var catchUpSummary by remember(whom) { mutableStateOf<String?>(null) }
     var catchingUp by remember(whom) { mutableStateOf(false) }
     var catchUpError by remember(whom) { mutableStateOf<String?>(null) }
+    // Latches once a summary succeeds — unreadSnapshot never clears, so
+    // without this the banner reoffered (and would re-spend an AI call
+    // on) the exact content the user just dismissed.
+    var caughtUp by remember(whom) { mutableStateOf(false) }
     var topicsSheetOpen by remember(whom) { mutableStateOf(false) }
     val composerState = io.nisfeb.talon.ui.rememberComposerState(whom, drafts)
     val rows by remember(whom) {
@@ -743,7 +747,8 @@ fun DmChatScreen(
         val showCatchUp = aiConfigured.hasKey() &&
             aiConfigured.catchMeUpEnabled &&
             (unreadSnapshot ?: 0) >= CATCH_UP_MIN_UNREAD &&
-            catchUpSummary == null
+            catchUpSummary == null &&
+            !caughtUp
         if (showCatchUp) {
             CatchMeUpBanner(
                 count = unreadSnapshot ?: 0,
@@ -760,7 +765,10 @@ fun DmChatScreen(
                             aiFeatures.catchMeUp(ordered) { patp ->
                                 contactMap.displayName(patp)
                             }
-                        }.onSuccess { catchUpSummary = it }
+                        }.onSuccess {
+                            catchUpSummary = it
+                            caughtUp = true
+                        }
                             .onFailure { catchUpError = it.message ?: it::class.simpleName }
                         catchingUp = false
                     }
@@ -785,6 +793,11 @@ fun DmChatScreen(
                         val reverseIdx = displayRows.size - 1 - idx
                         scope.launch { listState.animateScrollToItem(reverseIdx) }
                         flashMessageId = pinId
+                    } else {
+                        // Pinned post sits outside the loaded window —
+                        // say so instead of a dead tap.
+                        composerState.sendError =
+                            "Pinned message is older than what's loaded — scroll up to load more"
                     }
                 },
             )
@@ -891,6 +904,7 @@ fun DmChatScreen(
                     // Into the composer, not a dialog: same keyboard,
                     // same autocomplete, and the conversation stays
                     // visible behind what you are changing.
+                    val prior = composerState.draft.text
                     composerState.draft = androidx.compose.ui.text.input.TextFieldValue(
                         io.nisfeb.talon.urbit.editableText(target.contentJson),
                     )
@@ -898,6 +912,7 @@ fun DmChatScreen(
                         postId = target.id,
                         originalSentMs = target.sentMs,
                         originalContentJson = target.contentJson,
+                        priorDraftText = prior,
                     )
                 },
                 onDelete = {
@@ -969,6 +984,23 @@ fun DmChatScreen(
                     }
                 }
             }
+            // reverseLayout floats this footer to the visual top — right
+            // where older history is loading in. Without it, hitting the
+            // top of the loaded window during a slow loadOlder is
+            // indistinguishable from "that's all there is".
+            if (paginating) {
+                item(key = "__paging") {
+                    Row(
+                        Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                        horizontalArrangement = Arrangement.Center,
+                    ) {
+                        CircularProgressIndicator(
+                            Modifier.size(16.dp),
+                            strokeWidth = 2.dp,
+                        )
+                    }
+                }
+            }
         }
         } // close empty-state Box
         TypingIndicator(whom = whom, repo = repo, contactMap = contactMap)
@@ -1019,6 +1051,7 @@ fun DmChatScreen(
                         .filter { it.author == ourPatp && it.parentId == null }
                         .maxByOrNull { it.sentMs }
                         ?.let { target ->
+                            val prior = composerState.draft.text
                             composerState.draft =
                                 androidx.compose.ui.text.input.TextFieldValue(
                                     io.nisfeb.talon.urbit.editableText(target.contentJson),
@@ -1027,6 +1060,7 @@ fun DmChatScreen(
                                 postId = target.id,
                                 originalSentMs = target.sentMs,
                                 originalContentJson = target.contentJson,
+                                priorDraftText = prior,
                             )
                         }
                 }
@@ -1328,15 +1362,12 @@ private fun MessageRow(
                     // Channel-chat send-state indicator. status is set
                     // only on our own outgoing channel posts (see
                     // TlonChatRepo.postContent / reply); DM rows leave
-                    // status null and render nothing here.
-                    when (m.status) {
-                        "failed" -> Icon(
-                            imageVector = Icons.Filled.ErrorOutline,
-                            contentDescription = "Send failed",
-                            tint = MaterialTheme.colorScheme.error,
-                            modifier = Modifier.size(14.dp),
-                        )
-                        "pending" -> Icon(
+                    // status null and render nothing here. "failed"
+                    // renders below the body instead — grouped rows
+                    // (a burst of your own sends) have no header, and
+                    // a failed send must never be invisible.
+                    if (m.status == "pending") {
+                        Icon(
                             imageVector = Icons.Filled.Schedule,
                             contentDescription = "Sending",
                             tint = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -1359,6 +1390,24 @@ private fun MessageRow(
                 // opening the menu (right-click opens it instead).
                 onMessageTap = if (io.nisfeb.talon.ui.isTapToOpenMenuSupported) onMenuExpand else null,
             )
+            if (m.status == "failed") {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.ErrorOutline,
+                        contentDescription = "Send failed",
+                        tint = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.size(14.dp),
+                    )
+                    Text(
+                        "Not sent",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+            }
             val firstLink = remember(parts) { firstLinkUrl(parts) }
             if (firstLink != null) {
                 LinkPreviewCard(

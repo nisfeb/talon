@@ -52,8 +52,13 @@ fun UpdateBanner(
             onDismiss = null,
         )
         is UpdateStatus.Failed -> BannerSurface(
-            primary = "Update failed",
-            secondary = status.message + " · tap to retry",
+            // The message IS the headline: desktop's browser-open path
+            // reports through Failed by design, and a hardcoded
+            // "Update failed" read as an error above a sentence
+            // describing success. Android's real failures ("Couldn't
+            // …") still read as failures on their own.
+            primary = status.message,
+            secondary = "Tap to retry.",
             onTap = onTap,
             onDismiss = onDismiss,
         )

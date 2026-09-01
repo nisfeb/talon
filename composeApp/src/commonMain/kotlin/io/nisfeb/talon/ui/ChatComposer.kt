@@ -149,6 +149,9 @@ data class EditTarget(
     val postId: String,
     val originalSentMs: Long,
     val originalContentJson: String?,
+    /** Composer text the edit displaced. Restored on save/cancel so
+     *  entering edit mode never destroys a half-typed message. */
+    val priorDraftText: String = "",
 )
 
 /**
@@ -329,17 +332,19 @@ fun ChatComposer(
     // posts the bare URL the way the file button does. Clears the
     // draft afterwards for the same reason the picker buttons do —
     // the user finalized a send, the textual draft is orphaned.
-    val uploadAndSend: (DroppedFile) -> Unit = { file ->
-        scope.launch {
+    // suspend, not fire-and-forget: a multi-file drop iterates files
+    // through one coroutine so `uploading` stays true until the LAST
+    // file lands — per-file coroutines re-enabled the composer (and
+    // retracted the uploading presence) as soon as the FIRST finished.
+    suspend fun uploadOne(file: DroppedFile) {
             if (file.bytes.isEmpty()) {
                 // Same guard the staged paths get — a multi-file drop was the
                 // one path that could still upload a blank object and post an
                 // empty message.
                 state.sendError = EMPTY_ATTACHMENT_ERROR
-                return@launch
+                return
             }
             state.uploading = true
-            state.sendError = null
             runCatching {
                 val hostedUrl = repo.uploadImage(file.bytes, file.mimeType, file.name)
                 if (file.isImage) {
@@ -359,6 +364,12 @@ fun ChatComposer(
                 state.sendError = "upload failed: ${err.message ?: err::class.simpleName}"
             }
             state.uploading = false
+    }
+
+    val uploadAndSend: (DroppedFile) -> Unit = { file ->
+        scope.launch {
+            state.sendError = null
+            uploadOne(file)
         }
     }
 
@@ -431,8 +442,21 @@ fun ChatComposer(
     // the typed query changes so it always starts at the best match.
     var mentionSel by remember(mention?.first) { mutableStateOf(0) }
     val slashTrigger = detectSlashTrigger(state.draft.text, state.draft.selection.start)
-    val slashSuggestions = remember(slashTrigger) {
-        slashTrigger?.let { filterSlashCommands(it.query) } ?: emptyList()
+    // Only advertise commands this surface can actually run — /call,
+    // /mic and /loc are wiring-dependent, and offering them where the
+    // wiring is null just autocompletes into an error. Typed
+    // invocations still hit the per-command error strings as a backstop.
+    val slashSuggestions = remember(slashTrigger, onSlashCall, onSlashMic, locationProvider) {
+        slashTrigger?.let {
+            filterSlashCommands(it.query).filter { s ->
+                when (s.name) {
+                    "call" -> onSlashCall != null
+                    "mic" -> onSlashMic != null
+                    "loc" -> locationProvider != null
+                    else -> true
+                }
+            }
+        } ?: emptyList()
     }
 
     // Replace the active trigger token (`@x`, `:x`, `/x`) with a pick.
@@ -470,8 +494,18 @@ fun ChatComposer(
             ) { files ->
                 // A single drop stages into the preview like a paste; a
                 // multi-file drop still sends immediately (one preview slot).
-                if (files.size == 1) stageDropped(files.first())
-                else files.forEach(uploadAndSend)
+                if (files.size == 1) {
+                    stageDropped(files.first())
+                } else {
+                    // Sequential on purpose — see uploadOne. sendError
+                    // is cleared once for the whole batch: clearing
+                    // per-file erased file N's failure the moment file
+                    // N+1 started, and a missing message read as sent.
+                    scope.launch {
+                        state.sendError = null
+                        files.forEach { uploadOne(it) }
+                    }
+                }
             },
     ) {
         if (state.sendError != null) {
@@ -519,7 +553,10 @@ fun ChatComposer(
                 val text = state.draft.text.trim()
                 if (text.isEmpty() || !canSend) return@doSend false
                 state.editing = null
-                state.draft = TextFieldValue("")
+                state.draft = TextFieldValue(
+                    edit.priorDraftText,
+                    TextRange(edit.priorDraftText.length),
+                )
                 onSaveEdit(edit, text)
                 return@doSend true
             }
@@ -583,7 +620,17 @@ fun ChatComposer(
                     when (cmd) {
                         is CommandResult.Send -> strategy.sendText(cmd.body)
                         is CommandResult.Handled -> {}
-                        is CommandResult.Error -> state.sendError = cmd.message
+                        is CommandResult.Error -> {
+                            state.sendError = cmd.message
+                            // Give the typed command back — commands have
+                            // no optimistic echo, so the cleared draft
+                            // meant retyping a long /poll to fix one
+                            // character. Skip if they've started typing
+                            // something new meanwhile.
+                            if (state.draft.text.isEmpty()) {
+                                state.draft = TextFieldValue(body, TextRange(body.length))
+                            }
+                        }
                         is CommandResult.NotACommand -> {
                             if (quote != null && strategy.supportsQuote) {
                                 strategy.sendQuote(body, quote.whom, quote.id)
@@ -626,8 +673,9 @@ fun ChatComposer(
                     modifier = Modifier.weight(1f),
                 )
                 TextButton(onClick = {
+                    val prior = state.editing?.priorDraftText.orEmpty()
                     state.editing = null
-                    state.draft = TextFieldValue("")
+                    state.draft = TextFieldValue(prior, TextRange(prior.length))
                 }) { Text("Cancel") }
             }
         }
@@ -650,9 +698,6 @@ fun ChatComposer(
                 onSend = {
                     state.uploading = true
                     state.sendError = null
-                    state.pendingVoice = null
-                    state.draft = TextFieldValue("")
-                    drafts.clear(whom)
                     scope.launch {
                         runCatching {
                             val bytes = readFileBytes(pv.path)
@@ -664,6 +709,14 @@ fun ChatComposer(
                             val seconds = (pv.durationMs / 1000L).coerceAtLeast(1L)
                             val label = "🎙 Voice ${seconds}s"
                             strategy.sendText("[$label]($hostedUrl)")
+                            // Success only — mirrors sendAttachment: on
+                            // failure the recording stays staged (spinner
+                            // row and all) so the user can retry instead
+                            // of losing it, and the temp file survives
+                            // for the DisposableEffect to reap.
+                            state.pendingVoice = null
+                            state.draft = TextFieldValue("")
+                            drafts.clear(whom)
                             deleteFile(pv.path)
                         }.onFailure { err ->
                             Log.e("ChatComposer", "voice send failed", err)
@@ -891,14 +944,46 @@ fun ChatComposer(
                             )
                             return@onPreviewKeyEvent true
                         }
+                        // Enter with a live emoji / mention picker accepts
+                        // the highlighted item, exactly like Tab — sending
+                        // mid-completion put ":smi" or a half-typed name
+                        // into the room. Accepting closes the picker (the
+                        // query no longer parses), so the NEXT Enter sends:
+                        // pick-then-send is a double tap of the same key.
+                        if (emojiQuery != null && emojiSuggestions.isNotEmpty()) {
+                            applyEmojiPick(
+                                emojiSuggestions[emojiSel.coerceIn(0, emojiSuggestions.lastIndex)],
+                            )
+                            return@onPreviewKeyEvent true
+                        }
+                        if (mention != null && suggestions.isNotEmpty()) {
+                            applyMentionPick(
+                                suggestions[mentionSel.coerceIn(0, suggestions.lastIndex)].ship,
+                            )
+                            return@onPreviewKeyEvent true
+                        }
+                        // Slash too, same double-Enter rhythm: the pick's
+                        // trailing space ends the trigger (whitespace kills
+                        // detectSlashTrigger), so the popup closes and the
+                        // second Enter runs the completed command.
+                        if (slashTrigger != null && slashSuggestions.isNotEmpty()) {
+                            applySlashPick(slashSuggestions.first())
+                            return@onPreviewKeyEvent true
+                        }
                         doSend()
                         true
                     },
             )
             val isEditing = state.editing != null
+            // A staged quote with no text is sendable (doSend allows the
+            // bare-quote "react" gesture) — the button must agree, or on
+            // touch, where hardware Enter doesn't exist, a bare quote is
+            // unreachable.
+            val sendable = canSend &&
+                (state.draft.text.isNotBlank() || state.pendingQuote != null)
             IconButton(
                 onClick = { doSend() },
-                enabled = canSend && state.draft.text.isNotBlank(),
+                enabled = sendable,
                 modifier = Modifier.size(36.dp),
             ) {
                 // A tick, not a paper plane. Editing and sending are
@@ -908,7 +993,7 @@ fun ChatComposer(
                     if (isEditing) Icons.Filled.Check else Icons.AutoMirrored.Filled.Send,
                     contentDescription = if (isEditing) "Save edit" else "Send",
                     modifier = Modifier.size(22.dp),
-                    tint = if (canSend && state.draft.text.isNotBlank()) sendAccent
+                    tint = if (sendable) sendAccent
                     else LocalContentColor.current,
                 )
             }
