@@ -16,10 +16,14 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -33,6 +37,20 @@ fun BatteryExemptionBanner(modifier: Modifier = Modifier) {
 
     var dismissed by remember { mutableStateOf(prefs.getBoolean(KEY_DISMISSED, false)) }
     var isExempt by remember { mutableStateOf(isIgnoringBatteryOptimizations(context)) }
+
+    // Re-check when we come back from the system exemption dialog (or
+    // the settings fallback): the banner hides itself once the grant
+    // lands and stays if it was denied.
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                isExempt = isIgnoringBatteryOptimizations(context)
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
 
     if (dismissed || isExempt) return
 
@@ -61,11 +79,10 @@ fun BatteryExemptionBanner(modifier: Modifier = Modifier) {
                     dismissed = true
                 }) { Text("Not now") }
                 TextButton(onClick = {
-                    if (requestBatteryOptimizationsExemption(context)) {
-                        prefs.edit { putBoolean(KEY_DISMISSED, true) }
-                        dismissed = true
-                    }
-                    isExempt = isIgnoringBatteryOptimizations(context)
+                    // Don't persist dismissal here — the user hasn't
+                    // answered the system dialog yet. The ON_RESUME
+                    // check above picks up the outcome.
+                    requestBatteryOptimizationsExemption(context)
                 }) { Text("Allow") }
             }
         }

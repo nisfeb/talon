@@ -335,7 +335,7 @@ object Notifications {
         )
 
         val notification = NotificationCompat.Builder(context, CHANNEL_MESSAGES)
-            .setSmallIcon(android.R.drawable.ic_dialog_email)
+            .setSmallIcon(R.drawable.ic_stat_talon)
             .setContentTitle(title)
             .setContentText(body)
             .setStyle(NotificationCompat.BigTextStyle().bigText(body))
@@ -390,7 +390,7 @@ object Notifications {
         val title = "${terms.joinToString(", ")} in $label"
 
         val notification = NotificationCompat.Builder(context, CHANNEL_WATCHWORDS)
-            .setSmallIcon(android.R.drawable.ic_dialog_email)
+            .setSmallIcon(R.drawable.ic_stat_talon)
             .setContentTitle(title)
             .setContentText(body)
             .setStyle(NotificationCompat.BigTextStyle().bigText(body))
@@ -441,7 +441,7 @@ object Notifications {
         )
 
         val notification = NotificationCompat.Builder(context, CHANNEL_DAILY_DIGEST)
-            .setSmallIcon(android.R.drawable.ic_dialog_email)
+            .setSmallIcon(R.drawable.ic_stat_talon)
             .setContentTitle(title)
             .setContentText(body)
             .setStyle(NotificationCompat.BigTextStyle().bigText(body))
@@ -479,7 +479,7 @@ object Notifications {
         )
 
         val notification = NotificationCompat.Builder(context, CHANNEL_LOOPS)
-            .setSmallIcon(android.R.drawable.ic_dialog_email)
+            .setSmallIcon(R.drawable.ic_stat_talon)
             .setContentTitle(title)
             .setContentText(body)
             .setStyle(NotificationCompat.BigTextStyle().bigText(body))

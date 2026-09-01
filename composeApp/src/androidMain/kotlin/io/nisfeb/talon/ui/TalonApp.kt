@@ -851,7 +851,7 @@ fun TalonApp(
 
     // Dismiss any lingering notification for the conversation we just opened.
     LaunchedEffect(openWhom) {
-        openWhom?.let { Notifications.clear(context, it) }
+        openWhom?.let { Notifications.cancelAllForChat(context, it) }
     }
 
     // Screens handle their own window insets via Modifier.windowInsetsPadding
@@ -1232,6 +1232,10 @@ fun TalonApp(
                 repo = app.repo,
                 onOpenConversation = { whom ->
                     activityOpen = false
+                    // A plain open drops any armed anchor — an
+                    // unconsumed one re-fires on the next open of that
+                    // chat and yanks the scroll to an old message.
+                    pendingScrollMessageId = null
                     openWhom = whom
                 },
                 onOpenReply = { whom, parent, replyId ->
@@ -1239,6 +1243,11 @@ fun TalonApp(
                     openWhom = whom
                     pendingThreadAnchor = replyId
                     openThread = parent
+                },
+                onOpenPost = { whom, postId ->
+                    activityOpen = false
+                    pendingScrollMessageId = postId
+                    openWhom = whom
                 },
                 onBack = { activityOpen = false },
                 modifier = mod,
@@ -1835,6 +1844,7 @@ fun TalonApp(
                 // home. The when-block ordering hides SearchScreen
                 // while a conversation is open.
                 onOpenConversation = { whom ->
+                    pendingScrollMessageId = null
                     openWhom = whom
                 },
                 onOpenMessage = { whom, postId, parentId ->
@@ -1877,7 +1887,10 @@ fun TalonApp(
                 drafts = app.drafts,
                 updateState = app.updateState,
                 menuSeen = app.menuSeen,
-                onOpenConversation = { openWhom = it },
+                onOpenConversation = {
+                    pendingScrollMessageId = null
+                    openWhom = it
+                },
                 onOpenSearch = { searchOpen = true },
                 // Opt-in + key-gated assistant entry point. Mirrors
                 // App.kt's gate. isAssistantSupported is true on both

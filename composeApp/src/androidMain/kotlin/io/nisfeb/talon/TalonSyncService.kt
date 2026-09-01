@@ -145,9 +145,12 @@ class TalonSyncService : Service() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
         return NotificationCompat.Builder(this, Notifications.CHANNEL_SYNC)
-            .setSmallIcon(android.R.drawable.stat_notify_sync)
+            .setSmallIcon(R.drawable.ic_stat_talon)
             .setContentTitle("Talon")
-            .setContentText("Connected")
+            // Unconditionally true: the service only pins the process —
+            // the SSE channel can be down while this row is showing, so
+            // it must not claim "Connected".
+            .setContentText("Listening for new messages")
             .setContentIntent(pending)
             .setOngoing(true)
             .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)

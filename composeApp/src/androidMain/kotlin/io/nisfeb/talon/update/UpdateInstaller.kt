@@ -6,6 +6,7 @@ import android.content.Intent
 import android.database.Cursor
 import android.net.Uri
 import android.util.Log
+import android.widget.Toast
 import androidx.core.content.FileProvider
 import kotlinx.coroutines.delay
 import java.io.File
@@ -57,12 +58,14 @@ class UpdateInstaller(private val context: Context) : UpdateInstallerHook {
         while (true) {
             val q = DownloadManager.Query().setFilterById(downloadId)
             val cursor: Cursor = dm.query(q) ?: run {
-                onFailure("download manager returned null cursor")
+                onFailure("Download failed — please retry")
                 return
             }
             cursor.use { c ->
                 if (!c.moveToFirst()) {
-                    onFailure("download id $downloadId not found")
+                    // The row vanishing means the user cancelled it from
+                    // the download notification.
+                    onFailure("Download was cancelled")
                     return
                 }
                 val statusIdx = c.getColumnIndex(DownloadManager.COLUMN_STATUS)
@@ -87,7 +90,8 @@ class UpdateInstaller(private val context: Context) : UpdateInstallerHook {
                     DownloadManager.STATUS_FAILED -> {
                         val reasonIdx = c.getColumnIndex(DownloadManager.COLUMN_REASON)
                         val reason = c.getInt(reasonIdx)
-                        onFailure("download failed (reason $reason)")
+                        Log.w("UpdateInstaller", "download failed, reason=$reason")
+                        onFailure(downloadFailureMessage(reason))
                         return
                     }
                     DownloadManager.STATUS_RUNNING,
@@ -120,7 +124,26 @@ class UpdateInstaller(private val context: Context) : UpdateInstallerHook {
             context.startActivity(intent)
         } catch (e: Exception) {
             Log.e("UpdateInstaller", "install intent failed", e)
+            // Without this the banner keeps offering Install and taps
+            // silently do nothing.
+            Toast.makeText(
+                context,
+                "Couldn't launch the system installer",
+                Toast.LENGTH_LONG,
+            ).show()
         }
+    }
+
+    /** The contract says onFailure carries a human message — map the
+     *  DownloadManager reason codes the user can act on; the raw code
+     *  goes to logcat. */
+    private fun downloadFailureMessage(reason: Int): String = when (reason) {
+        DownloadManager.ERROR_INSUFFICIENT_SPACE ->
+            "Not enough storage space to download the update"
+        DownloadManager.ERROR_HTTP_DATA_ERROR,
+        DownloadManager.ERROR_CANNOT_RESUME ->
+            "Network error — check your connection and retry"
+        else -> "Download failed — please retry"
     }
 
     private fun verifySha256(file: File, expected: String): Boolean {

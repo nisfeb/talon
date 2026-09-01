@@ -129,9 +129,10 @@ fun ShareTargetScreen(
                 .padding(horizontal = 12.dp, vertical = 8.dp),
         )
 
-        if (filtered.isEmpty() && query.isNotBlank()) {
+        if (filtered.isEmpty()) {
             Text(
-                "No matches.",
+                if (query.isBlank()) "No conversations yet — open a chat in Talon first."
+                else "No matches.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(16.dp),

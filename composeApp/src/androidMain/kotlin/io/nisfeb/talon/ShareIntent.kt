@@ -22,8 +22,15 @@ sealed class ShareIntent {
             return when {
                 type != null && type.startsWith("text/") -> {
                     val text = intent.getStringExtra(Intent.EXTRA_TEXT)?.takeIf { it.isNotBlank() }
-                        ?: return null
-                    Text(text)
+                    if (text != null) {
+                        Text(text)
+                    } else {
+                        // File managers share .txt/.csv/.log as text/*
+                        // with EXTRA_STREAM and no EXTRA_TEXT — treat
+                        // those as a file upload, not a dead end.
+                        val uri = extractStream(intent) ?: return null
+                        File(uri, type)
+                    }
                 }
                 type != null && type.startsWith("image/") -> {
                     val uri = extractStream(intent) ?: return null

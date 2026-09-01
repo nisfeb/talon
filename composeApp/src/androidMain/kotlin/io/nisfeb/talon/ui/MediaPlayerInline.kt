@@ -65,10 +65,20 @@ fun InlineAudioPlayer(url: String, modifier: Modifier = Modifier) {
     var isPlaying by remember(player) { mutableStateOf(false) }
     var positionMs by remember(player) { mutableLongStateOf(0L) }
     var durationMs by remember(player) { mutableLongStateOf(0L) }
+    // While the finger is down the slider owns positionMs; the poll
+    // must not overwrite it, and the seek waits for release.
+    var isDragging by remember(player) { mutableStateOf(false) }
 
     DisposableEffect(player) {
         val listener = object : Player.Listener {
             override fun onIsPlayingChanged(playing: Boolean) { isPlaying = playing }
+            // Duration is TIME_UNSET until prepare completes — pick it
+            // up here so the scrubber works before the first play.
+            override fun onPlaybackStateChanged(state: Int) {
+                if (state == Player.STATE_READY) {
+                    durationMs = player.duration.coerceAtLeast(0L)
+                }
+            }
         }
         player.addListener(listener)
         onDispose { player.removeListener(listener) }
@@ -78,19 +88,21 @@ fun InlineAudioPlayer(url: String, modifier: Modifier = Modifier) {
     // the player is actively moving.
     LaunchedEffect(isPlaying, player) {
         while (isPlaying) {
-            positionMs = player.currentPosition.coerceAtLeast(0L)
+            if (!isDragging) positionMs = player.currentPosition.coerceAtLeast(0L)
             durationMs = player.duration.coerceAtLeast(0L)
             delay(200)
         }
         // One trailing sample so the scrubber settles on pause.
-        positionMs = player.currentPosition.coerceAtLeast(0L)
+        if (!isDragging) positionMs = player.currentPosition.coerceAtLeast(0L)
         durationMs = player.duration.coerceAtLeast(0L)
     }
 
     Row(
+        // widthIn must precede fillMaxWidth: modifiers constrain
+        // outside-in, so the reverse order makes the 420dp cap a no-op.
         modifier = modifier
-            .fillMaxWidth()
             .widthIn(max = 420.dp)
+            .fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
             .background(MaterialTheme.colorScheme.surfaceVariant)
             .padding(horizontal = 10.dp, vertical = 6.dp),
@@ -112,7 +124,16 @@ fun InlineAudioPlayer(url: String, modifier: Modifier = Modifier) {
                 value = if (durationMs > 0) positionMs.toFloat() / durationMs else 0f,
                 onValueChange = { frac ->
                     val d = durationMs
-                    if (d > 0) player.seekTo((frac * d).toLong())
+                    if (d > 0) {
+                        isDragging = true
+                        positionMs = (frac * d).toLong()
+                    }
+                },
+                onValueChangeFinished = {
+                    if (isDragging) {
+                        player.seekTo(positionMs)
+                        isDragging = false
+                    }
                 },
                 valueRange = 0f..1f,
             )
@@ -144,9 +165,11 @@ fun InlineVideoPlayer(url: String, modifier: Modifier = Modifier) {
     var fullscreen by remember(url) { mutableStateOf(false) }
 
     Box(
+        // widthIn before fillMaxWidth — same cap-then-fill order as the
+        // audio player above.
         modifier = modifier
-            .fillMaxWidth()
             .widthIn(max = 420.dp)
+            .fillMaxWidth()
             .aspectRatio(16f / 9f)
             .clip(RoundedCornerShape(12.dp))
             .background(MaterialTheme.colorScheme.surfaceVariant),
