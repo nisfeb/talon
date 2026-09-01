@@ -24,6 +24,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -298,6 +299,7 @@ fun LoopDetail(
     // until that row appears (or a safety timeout) so the button visibly does
     // something instead of looking dead.
     var runStartedAt by remember(loop.id) { mutableStateOf<Long?>(null) }
+    var confirmDelete by remember(loop.id) { mutableStateOf(false) }
     val latestRun by remember(loop.id) { db.loopRuns().streamForLoop(loop.id, 1) }
         .collectAsState(initial = emptyList())
     val latestRanAt = latestRun.firstOrNull()?.ranAt
@@ -463,16 +465,33 @@ fun LoopDetail(
                     }
                 }
                 TextButton(onClick = { editing = true }) { Text("Edit") }
-                TextButton(onClick = {
-                    scope.launch {
-                        val gid = loop.gid
-                        loopDao.delete(loop.id)
-                        db.loopRuns().deleteForLoop(loop.id)
-                        settingsSync?.deleteLoop(gid)
-                        scheduler.reschedule()
-                        onClose()
-                    }
-                }) { Text("Delete") }
+                TextButton(onClick = { confirmDelete = true }) { Text("Delete") }
+            }
+            // Deleting removes the loop, its run history, AND the synced
+            // definition on the ship (so it vanishes from other devices) —
+            // and the button sits right beside Edit. Confirm first.
+            if (confirmDelete) {
+                AlertDialog(
+                    onDismissRequest = { confirmDelete = false },
+                    title = { Text("Delete '${loop.name}'?") },
+                    text = { Text("Its run history is removed too.") },
+                    confirmButton = {
+                        TextButton(onClick = {
+                            confirmDelete = false
+                            scope.launch {
+                                val gid = loop.gid
+                                loopDao.delete(loop.id)
+                                db.loopRuns().deleteForLoop(loop.id)
+                                settingsSync?.deleteLoop(gid)
+                                scheduler.reschedule()
+                                onClose()
+                            }
+                        }) { Text("Delete") }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { confirmDelete = false }) { Text("Cancel") }
+                    },
+                )
             }
             HorizontalDivider()
             Text("Run history", style = MaterialTheme.typography.titleSmall)

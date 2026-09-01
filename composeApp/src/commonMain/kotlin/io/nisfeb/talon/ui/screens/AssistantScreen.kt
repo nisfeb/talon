@@ -23,6 +23,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -498,6 +499,12 @@ fun AssistantScreen(
             }.onFailure {
                 if (it is CancellationException) throw it
                 error = it.message ?: it::class.simpleName
+                // Restore the question so a network timeout doesn't cost
+                // the user their typed text — unless they've started
+                // typing something new while the run was in flight.
+                if (questionField.text.isBlank()) {
+                    questionField = TextFieldValue(q, TextRange(q.length))
+                }
             }
             busy = false
         }
@@ -878,6 +885,25 @@ private fun ConversationsTab(
     onClearAll: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    // Clearing wipes every conversation locally AND on the ship, with no
+    // undo — gate it behind a confirmation like watchword-term deletion.
+    var confirmClear by remember { mutableStateOf(false) }
+    if (confirmClear) {
+        AlertDialog(
+            onDismissRequest = { confirmClear = false },
+            title = { Text("Delete all conversations?") },
+            text = { Text("This also removes them from your ship.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmClear = false
+                    onClearAll()
+                }) { Text("Delete") }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmClear = false }) { Text("Cancel") }
+            },
+        )
+    }
     Column(modifier.fillMaxSize()) {
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
@@ -886,7 +912,7 @@ private fun ConversationsTab(
         ) {
             TextButton(onClick = onNew) { Text("New conversation") }
             if (conversations.isNotEmpty()) {
-                TextButton(onClick = onClearAll) { Text("Clear") }
+                TextButton(onClick = { confirmClear = true }) { Text("Clear all") }
             }
         }
         if (conversations.isEmpty()) {

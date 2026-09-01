@@ -29,9 +29,12 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -90,7 +93,29 @@ fun DailyDigestScreen(
         Box(modifier = Modifier.padding(padding).fillMaxSize()) {
             val today = digest?.takeIf { isTodayLocal(it.dateLocal) }
             if (today == null) {
-                EmptyDigest(onGenerateNow = onGenerateNow)
+                // Generation is an async LLM call taking many seconds with
+                // no DB signal until the digest row lands — disable the
+                // button meanwhile so a second tap can't fire a second paid
+                // generation. The timeout re-arms it if the run fails
+                // silently (same shape as LoopDetail's runStartedAt).
+                var generating by remember { mutableStateOf(false) }
+                LaunchedEffect(generating) {
+                    if (generating) {
+                        // Generation is fire-and-forget with no failure
+                        // signal back; a fast failure (no key, offline)
+                        // writes no digest row, so this timeout is the
+                        // only re-arm. 30s keeps a dead button short.
+                        kotlinx.coroutines.delay(30_000)
+                        generating = false
+                    }
+                }
+                EmptyDigest(
+                    generating = generating,
+                    onGenerateNow = {
+                        generating = true
+                        onGenerateNow()
+                    },
+                )
             } else {
                 Body(today, onOpenMessage)
             }
@@ -207,7 +232,7 @@ private fun ItemRow(item: DigestItem, onOpen: (String, String) -> Unit) {
 }
 
 @Composable
-private fun EmptyDigest(onGenerateNow: () -> Unit) {
+private fun EmptyDigest(generating: Boolean, onGenerateNow: () -> Unit) {
     Column(
         modifier = Modifier.fillMaxSize().padding(24.dp),
         verticalArrangement = Arrangement.Center,
@@ -215,7 +240,9 @@ private fun EmptyDigest(onGenerateNow: () -> Unit) {
     ) {
         Text("Nothing to brief today.", style = MaterialTheme.typography.titleMedium)
         Spacer(Modifier.height(12.dp))
-        OutlinedButton(onClick = onGenerateNow) { Text("Generate now") }
+        OutlinedButton(onClick = onGenerateNow, enabled = !generating) {
+            Text(if (generating) "Generating…" else "Generate now")
+        }
     }
 }
 

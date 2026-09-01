@@ -28,6 +28,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -71,6 +72,12 @@ fun WatchwordsScreen(
     }
 
     var selectedTerm by remember { mutableStateOf<String?>(null) }
+    // Deleting the selected term (via Manage) would otherwise leave a
+    // phantom filter: no chip selected, hits stream empty, and a false
+    // "no hits yet" body. Fall back to All when the term disappears.
+    LaunchedEffect(terms) {
+        if (selectedTerm != null && terms.none { it.term == selectedTerm }) selectedTerm = null
+    }
     val hits by remember(selectedTerm) {
         if (selectedTerm == null)
             db.watchwords().streamAllHits()

@@ -212,8 +212,10 @@ fun SearchScreen(
         // parser actually understood so the user notices typos
         // (`fromm:~ship` falls back to keyword text and no chip
         // appears) and confirms the active filters before scrolling
-        // results.
-        ParsedFilterChips(filter)
+        // results. Hidden in smart mode — semantic search embeds the
+        // raw query and applies none of these filters, so showing the
+        // chips would assert filtering that isn't happening.
+        if (!smartMode) ParsedFilterChips(filter)
         // Smart-mode toggle + index status. Visible only when the
         // feature is enabled in Settings (so the indexer is also
         // running). Toggling the chip flips the per-device
@@ -274,6 +276,16 @@ fun SearchScreen(
         } else if (trimmed.length < 2) {
             Text(
                 "Type at least two characters.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(16.dp),
+            )
+        } else if (smartMode && semanticBusy && results.isEmpty() && people.isEmpty() && groups.isEmpty()) {
+            // The semantic query is still embedding — showing "No
+            // matches." here would flash a false negative on every
+            // debounce tick.
+            Text(
+                "Searching…",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(16.dp),
@@ -493,7 +505,7 @@ private fun ParsedFilterChips(filter: io.nisfeb.talon.ui.SearchFilter) {
     val chips = buildList {
         filter.fromShip?.let { add("from $it") }
         filter.inWhom?.let { add("in $it") }
-        filter.sinceMs?.let { _ -> add("since (parsed)") }
+        filter.sinceMs?.let { add("since " + formatMonthDayTime(it)) }
         if (filter.hasImage) add("has image")
         if (filter.hasLink) add("has link")
     }
