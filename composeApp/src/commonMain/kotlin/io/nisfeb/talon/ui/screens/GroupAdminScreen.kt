@@ -58,6 +58,7 @@ import io.nisfeb.talon.ui.ContactMap
 import io.nisfeb.talon.ui.contactMapFlow
 import io.nisfeb.talon.urbit.AdminGroup
 import io.nisfeb.talon.urbit.AdminMember
+import io.nisfeb.talon.urbit.PATP_REGEX
 import io.nisfeb.talon.urbit.TlonChatRepo
 import io.nisfeb.talon.util.decodeImageDimensions
 import io.nisfeb.talon.util.rememberImagePicker
@@ -89,6 +90,8 @@ fun GroupAdminScreen(
     var pendingBan by remember { mutableStateOf<String?>(null) }
     var newChannelOpen by remember { mutableStateOf(false) }
     var creatingChannel by remember { mutableStateOf(false) }
+    var newChannelError by remember { mutableStateOf<String?>(null) }
+    var savingMeta by remember { mutableStateOf(false) }
 
     // Contact map for nicknames on member rows. Updates live as
     // %contacts events come in.
@@ -141,26 +144,50 @@ fun GroupAdminScreen(
                 horizontalArrangement = Arrangement.Center,
             ) { CircularProgressIndicator() }
 
-            error != null -> Text(
+            // Full-screen error only when there's nothing to show. A
+            // failed *action* on a loaded group renders as a dismissible
+            // banner instead — replacing the body would throw away
+            // unsaved metadata edits.
+            error != null && group == null -> Text(
                 "Couldn't load: $error",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.error,
                 modifier = Modifier.padding(24.dp),
             )
 
-            group != null -> AdminBody(
+            group != null -> Column {
+                error?.let { e ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            e,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.weight(1f),
+                            maxLines = 2,
+                        )
+                        TextButton(onClick = { error = null }) { Text("Dismiss") }
+                    }
+                }
+                AdminBody(
                 repo = repo,
                     callController = callController,
                     me = me,
                 flag = flag,
                 group = group!!,
                 contactMap = contactMap,
+                savingMeta = savingMeta,
                 onSaveMeta = { title, desc, img, cover ->
                     scope.launch {
+                        savingMeta = true
                         runCatching {
                             repo.updateGroupMeta(flag, title, desc, img, cover)
                         }.onSuccess { refresh() }
                             .onFailure { error = it.message ?: it::class.simpleName }
+                        savingMeta = false
                     }
                 },
                 onInvite = { ship ->
@@ -246,7 +273,8 @@ fun GroupAdminScreen(
                 },
                 onMemberLongPress = { memberActionTarget = it },
                 onReportError = { e -> error = e },
-            )
+                )
+            }
         }
     }
 
@@ -278,17 +306,24 @@ fun GroupAdminScreen(
                             Text(if (hasAdminRole) "Revoke admin" else "Make admin")
                         }
                     }
-                    TextButton(onClick = {
-                        memberActionTarget = null
-                        pendingKick = m.ship
-                    }) { Text("Kick") }
+                    // The ship always refuses kicking/banning the host,
+                    // and kicking yourself is "leave", not admin —
+                    // don't offer actions that can only fail.
+                    if (!isHostRow && m.ship != me) {
+                        TextButton(onClick = {
+                            memberActionTarget = null
+                            pendingKick = m.ship
+                        }) { Text("Kick") }
+                    }
                 }
             },
             dismissButton = {
-                TextButton(onClick = {
-                    memberActionTarget = null
-                    pendingBan = m.ship
-                }) { Text("Ban") }
+                if (!isHostRow && m.ship != me) {
+                    TextButton(onClick = {
+                        memberActionTarget = null
+                        pendingBan = m.ship
+                    }) { Text("Ban") }
+                }
             },
         )
     }
@@ -345,10 +380,16 @@ fun GroupAdminScreen(
     if (newChannelOpen) {
         NewChannelDialog(
             busy = creatingChannel,
-            onDismiss = { if (!creatingChannel) newChannelOpen = false },
+            error = newChannelError,
+            onDismiss = {
+                if (!creatingChannel) {
+                    newChannelOpen = false
+                    newChannelError = null
+                }
+            },
             onCreate = { kind, title, description ->
                 creatingChannel = true
-                error = null
+                newChannelError = null
                 scope.launch {
                     runCatching {
                         repo.createChannel(flag, kind, title, description)
@@ -357,7 +398,10 @@ fun GroupAdminScreen(
                         newChannelOpen = false
                     }.onFailure {
                         creatingChannel = false
-                        error = it.message ?: it::class.simpleName
+                        // Into the dialog, not the screen: the screen-level
+                        // error renders behind the dialog where it can't
+                        // be seen.
+                        newChannelError = it.message ?: it::class.simpleName
                     }
                 }
             },
@@ -370,6 +414,7 @@ private fun NewChannelDialog(
     busy: Boolean,
     onDismiss: () -> Unit,
     onCreate: (kind: String, title: String, description: String) -> Unit,
+    error: String? = null,
 ) {
     var kind by remember { mutableStateOf("chat") }
     var title by remember { mutableStateOf("") }
@@ -439,6 +484,13 @@ private fun NewChannelDialog(
                         )
                     }
                 }
+                error?.let {
+                    Text(
+                        it,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
             }
         },
         confirmButton = {
@@ -462,6 +514,7 @@ private fun AdminBody(
     callController: io.nisfeb.talon.call.CallController?,
     me: String,
     contactMap: ContactMap,
+    savingMeta: Boolean = false,
     onSaveMeta: (title: String, description: String, image: String, cover: String) -> Unit,
     onInvite: (ship: String) -> Unit,
     onRevokeInvite: (ship: String) -> Unit,
@@ -593,8 +646,8 @@ private fun AdminBody(
         }
         Button(
             onClick = { onSaveMeta(title, description, image, cover) },
-            enabled = metaDirty && !uploading,
-        ) { Text("Save metadata") }
+            enabled = metaDirty && !uploading && !savingMeta,
+        ) { Text(if (savingMeta) "Saving…" else "Save metadata") }
 
         HorizontalDivider()
         }
@@ -628,10 +681,15 @@ private fun AdminBody(
                 modifier = Modifier.weight(1f),
                 singleLine = true,
             )
+            // Same shape check + sig normalization as NewDmScreen, so
+            // a typo or a missing ~ never goes on the wire raw.
+            val inviteTrimmed = inviteText.trim()
+            val invitePatp =
+                if (inviteTrimmed.startsWith("~")) inviteTrimmed else "~$inviteTrimmed"
             Button(
-                enabled = inviteText.trim().isNotEmpty(),
+                enabled = PATP_REGEX.matches(invitePatp),
                 onClick = {
-                    onInvite(inviteText.trim())
+                    onInvite(invitePatp)
                     inviteText = ""
                 },
             ) { Text("Invite") }

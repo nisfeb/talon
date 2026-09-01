@@ -36,8 +36,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import io.nisfeb.talon.data.AppDatabase
 import io.nisfeb.talon.ui.Avatar
-import io.nisfeb.talon.ui.ContactMap
-import io.nisfeb.talon.ui.contactMapFlow
 import io.nisfeb.talon.urbit.PATP_REGEX
 
 @Composable
@@ -57,14 +55,6 @@ fun NewDmScreen(
     var query by remember { mutableStateOf("") }
     var newContactName by remember { mutableStateOf("") }
     val contacts by remember { db.contacts().stream() }.collectAsState(initial = emptyList())
-    val contactMap by remember {
-        contactMapFlow(
-            db.contacts().stream(),
-            db.clubs().stream(),
-            db.groups().streamGroups(),
-            db.groups().streamChannelGroups(),
-        )
-    }.collectAsState(initial = ContactMap.EMPTY)
 
     val q = query.trim().lowercase().removePrefix("~")
     val filtered = remember(q, contacts) {
@@ -132,7 +122,8 @@ fun NewDmScreen(
                     onClick = {
                         onAddContact(asPatp, newContactName.trim().takeIf { it.isNotBlank() })
                         newContactName = ""
-                        query = ""
+                        // Keep `query`: the natural flow is add-then-Start,
+                        // and clearing it would disable the Start button.
                     },
                 ) { Text("Add contact") }
             }

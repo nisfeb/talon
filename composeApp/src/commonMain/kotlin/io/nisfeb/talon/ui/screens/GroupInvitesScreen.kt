@@ -102,7 +102,9 @@ fun GroupInvitesScreen(
                 horizontalArrangement = Arrangement.Center,
             ) { CircularProgressIndicator() }
 
-            error != null -> Text(
+            // Full-screen error only when the cache has nothing to show;
+            // a failed refresh over a populated list becomes a banner.
+            error != null && invites.isEmpty() -> Text(
                 "Couldn't load invites: $error",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.error,
@@ -116,7 +118,17 @@ fun GroupInvitesScreen(
                 modifier = Modifier.padding(24.dp),
             )
 
-            else -> LazyColumn(
+            else -> Column {
+                error?.let {
+                    Text(
+                        "Couldn't refresh: $it",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                        maxLines = 1,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+                    )
+                }
+                LazyColumn(
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(vertical = 4.dp),
             ) {
@@ -142,6 +154,7 @@ fun GroupInvitesScreen(
                         },
                     )
                     HorizontalDivider()
+                }
                 }
             }
         }

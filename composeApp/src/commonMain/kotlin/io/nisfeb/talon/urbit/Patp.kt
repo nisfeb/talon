@@ -11,5 +11,8 @@ package io.nisfeb.talon.urbit
 // greedily matches as `~fin` (3 letters) and aborts because the next
 // char `n` is still a patp-char — so we'd never recognize real stars
 // or planets like ~sarlev / ~finned-palmer.
+// `--?`: comets join their two halves with a double dash
+// (~satnet-rinsyr-silsul-bacnec--todmeb-harwen-fadpem-ribdyr) — a
+// single-dash-only pattern locked comets out of every gate using this.
 val PATP_REGEX: Regex =
-    Regex("~(?:[a-z]{6}|[a-z]{3})(?:-(?:[a-z]{6}|[a-z]{3}))*")
+    Regex("~(?:[a-z]{6}|[a-z]{3})(?:--?(?:[a-z]{6}|[a-z]{3}))*")

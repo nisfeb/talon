@@ -113,7 +113,9 @@ fun GroupAdminListScreen(
                 horizontalArrangement = Arrangement.Center,
             ) { CircularProgressIndicator() }
 
-            error != null -> Text(
+            // Full-screen error only when the cache has nothing to show;
+            // a failed refresh over a populated list becomes a banner.
+            error != null && groups.isEmpty() -> Text(
                 "Couldn't load groups: $error",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.error,
@@ -127,7 +129,17 @@ fun GroupAdminListScreen(
                 modifier = Modifier.padding(24.dp),
             )
 
-            else -> LazyColumn(
+            else -> Column {
+                error?.let {
+                    Text(
+                        "Couldn't refresh: $it",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                        maxLines = 1,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+                    )
+                }
+                LazyColumn(
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(vertical = 4.dp),
             ) {
@@ -163,6 +175,7 @@ fun GroupAdminListScreen(
                     }
                     HorizontalDivider()
                 }
+                }
             }
         }
     }
@@ -170,6 +183,9 @@ fun GroupAdminListScreen(
     if (newGroupOpen) {
         var title by remember { mutableStateOf("") }
         var description by remember { mutableStateOf("") }
+        // Dialog-local: the screen-level `error` renders behind the
+        // dialog where the user can't see it.
+        var dialogError by remember { mutableStateOf<String?>(null) }
         AlertDialog(
             onDismissRequest = { if (!creating) newGroupOpen = false },
             title = { Text("New group") },
@@ -204,6 +220,13 @@ fun GroupAdminListScreen(
                             )
                         }
                     }
+                    dialogError?.let {
+                        Text(
+                            it,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                    }
                 }
             },
             confirmButton = {
@@ -211,7 +234,7 @@ fun GroupAdminListScreen(
                     enabled = title.trim().isNotEmpty() && !creating,
                     onClick = {
                         creating = true
-                        error = null
+                        dialogError = null
                         scope.launch {
                             runCatching {
                                 repo.createGroup(title.trim(), description.trim())
@@ -224,7 +247,7 @@ fun GroupAdminListScreen(
                                 onOpenGroup(flag)
                             }.onFailure {
                                 creating = false
-                                error = it.message ?: it::class.simpleName
+                                dialogError = it.message ?: it::class.simpleName
                             }
                         }
                     },

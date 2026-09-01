@@ -19,11 +19,13 @@ import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.NotificationsOff
 import androidx.compose.material.icons.filled.People
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -76,7 +78,10 @@ fun GroupInfoPane(
     // either don't know the group yet or this isn't a group channel
     // (DM/club). The leave row hides in that case.
     var groupFlag by remember(whom) { mutableStateOf<String?>(null) }
-    var memberCount by remember(whom) { mutableStateOf(0) }
+    // Null until the fetch lands (or forever if it fails) — the count
+    // lines render only when we actually know the number, never "0".
+    var memberCount by remember(whom) { mutableStateOf<Int?>(null) }
+    var pendingLeave by remember(whom) { mutableStateOf(false) }
     LaunchedEffect(whom) {
         val mapping = runCatching { db.groups().channelGroupFor(whom) }.getOrNull()
         groupFlag = mapping?.groupFlag
@@ -123,12 +128,14 @@ fun GroupInfoPane(
                     groupRow?.title ?: whom,
                     style = MaterialTheme.typography.titleLarge,
                 )
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    "$memberCount members",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                memberCount?.let {
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        "$it members",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
             HorizontalDivider()
         }
@@ -217,28 +224,32 @@ fun GroupInfoPane(
             HorizontalDivider()
         }
 
-        item {
-            // Members link → opens existing GroupAdminScreen via the
-            // caller-supplied onOpenMembers handler.
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable(onClick = onOpenMembers)
-                    .padding(horizontal = 16.dp, vertical = 12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Icon(Icons.Filled.People, contentDescription = null)
-                Spacer(Modifier.size(12.dp))
-                Text(
-                    "View members ($memberCount)",
-                    modifier = Modifier.weight(1f).padding(end = 8.dp),
-                )
-                Icon(
-                    Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                    contentDescription = "Open members",
-                )
+        // Members link → opens existing GroupAdminScreen via the
+        // caller-supplied onOpenMembers handler. Hidden when no group
+        // flag resolved (DM/unmapped channel) — the handler would
+        // silently no-op, same as the leave row below.
+        if (groupFlag != null) {
+            item {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable(onClick = onOpenMembers)
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(Icons.Filled.People, contentDescription = null)
+                    Spacer(Modifier.size(12.dp))
+                    Text(
+                        memberCount?.let { "View members ($it)" } ?: "View members",
+                        modifier = Modifier.weight(1f).padding(end = 8.dp),
+                    )
+                    Icon(
+                        Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                        contentDescription = "Open members",
+                    )
+                }
+                HorizontalDivider()
             }
-            HorizontalDivider()
         }
 
         item {
@@ -264,11 +275,9 @@ fun GroupInfoPane(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clickable {
-                            scope.launch {
-                                runCatching { repo.leaveGroup(flag) }
-                            }
-                        }
+                        // Destructive — confirm via dialog rather than
+                        // firing on a single tap of a list row.
+                        .clickable { pendingLeave = true }
                         .padding(horizontal = 16.dp, vertical = 12.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
@@ -286,6 +295,25 @@ fun GroupInfoPane(
                 }
             }
         }
+    }
+
+    if (pendingLeave) {
+        AlertDialog(
+            onDismissRequest = { pendingLeave = false },
+            title = { Text("Leave ${groupRow?.title ?: "this group"}?") },
+            text = { Text("You'll be removed from every channel in the group.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    pendingLeave = false
+                    groupFlag?.let { flag ->
+                        scope.launch { runCatching { repo.leaveGroup(flag) } }
+                    }
+                }) { Text("Leave") }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingLeave = false }) { Text("Cancel") }
+            },
+        )
     }
 }
 
