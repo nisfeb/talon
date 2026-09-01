@@ -11,11 +11,15 @@ import io.nisfeb.talon.ai.AiSettings
 import io.nisfeb.talon.ai.AiSettingsRepository
 import io.nisfeb.talon.data.AppDatabase
 import io.nisfeb.talon.data.ContactEntity
+import io.nisfeb.talon.data.GroupEntity
+import io.nisfeb.talon.data.ChannelGroupEntity
 import io.nisfeb.talon.data.MessageEntity
 import io.nisfeb.talon.ui.InMemoryDraftStore
 import io.nisfeb.talon.ui.InMemoryUiSettings
 import io.nisfeb.talon.ui.screens.DmChatScreen
 import io.nisfeb.talon.ui.screens.DmListScreen
+import io.nisfeb.talon.ui.screens.SettingsScreen
+import io.nisfeb.talon.ui.theme.InMemoryThemePreference
 import io.nisfeb.talon.ui.theme.TalonTheme
 import io.nisfeb.talon.update.NoopUpdateInstallerHook
 import io.nisfeb.talon.update.StaticUpdateRuntime
@@ -36,7 +40,7 @@ import kotlin.test.Test
 
 /**
  * Renders App Store screenshots headlessly at the exact 6.9" size Apple
- * requires (1290x2796 @3x). Staged demo data only — never a real ship.
+ * requires (1320x2868 @3x). Staged demo data only — never a real ship.
  * Run:  ./gradlew :composeApp:desktopTest --tests '*StoreScreenshots*'
  * Output: PNG files under build/store-screenshots/
  */
@@ -44,6 +48,7 @@ class StoreScreenshots {
 
     private val outDir = File("build/store-screenshots").apply { mkdirs() }
     private val us = "~sampel-palnet"
+    private val chan = "chat/~sorreg-namtyv/commons-general"
 
     private object StubAi : AiSettingsRepository {
         override val state: StateFlow<AiSettings.Config> = MutableStateFlow(
@@ -105,12 +110,46 @@ class StoreScreenshots {
                 dm("~fogzod", 31, "~fogzod", 1500, "Thanks again for the sourdough starter!"),
             ),
         )
+        // A group with one channel, so the home list shows a Groups
+        // section and we can render a real group-channel conversation.
+        db.groups().upsertGroups(
+            listOf(GroupEntity("~sorreg-namtyv/commons", "The Commons", null)),
+        )
+        db.groups().upsertChannelGroups(
+            listOf(
+                ChannelGroupEntity(
+                    nest = "$chan",
+                    groupFlag = "~sorreg-namtyv/commons",
+                    title = "General",
+                ),
+                ChannelGroupEntity(
+                    nest = "chat/~sorreg-namtyv/photos",
+                    groupFlag = "~sorreg-namtyv/commons",
+                    title = "Photography",
+                ),
+            ),
+        )
+        fun chan(id: Int, author: String, mins: Long, body: String) =
+            MessageEntity(
+                whom = chan, id = "0vc$id", author = author,
+                sentMs = now - mins * min, contentJson = text(body), kind = "chat",
+            )
+        db.messages().upsertAll(
+            listOf(
+                chan(1, "~davzod", 240, "Morning all — trail cleanup is still on for Saturday, 9am at the north gate."),
+                chan(2, "~litzod", 232, "Count me in. I can bring extra gloves and a couple of rakes."),
+                chan(3, "~timzod", 228, "I'll haul the green-waste bags in the truck. How many are we expecting?"),
+                chan(4, "~davzod", 225, "Fifteen signed up so far. Plenty. Bring water — it's going to be warm."),
+                chan(5, us, 20, "Just added the route map to Photography so everyone can see the sections."),
+                chan(6, "~fogzod", 8, "Perfect. See everyone Saturday — first coffee's on me."),
+            ),
+        )
     }
 
     private fun shot(name: String, dark: Boolean = false, warmMs: Long = 4_000, content: @Composable () -> Unit) {
         ImageComposeScene(
-            width = 1290,
-            height = 2796,
+            width = 1320,
+            height = 2868,
             density = Density(3f),
         ).use { scene ->
             scene.setContent {
@@ -193,7 +232,36 @@ class StoreScreenshots {
             )
         }
 
-        shot("03-home-dark", dark = true) {
+        shot("03-group") {
+            DmChatScreen(
+                db = db,
+                repo = repo,
+                drafts = drafts,
+                http = http,
+                aiSettings = StubAi,
+                uiSettings = InMemoryUiSettings(),
+                ourPatp = us,
+                whom = chan,
+                onBack = {},
+                onOpenThread = {},
+                onOpenConversation = {},
+                onOpenImage = {},
+                onOpenSelfProfile = {},
+                onStartCall = {},
+                onPartyLine = {},
+            )
+        }
+
+        shot("04-settings") {
+            SettingsScreen(
+                aiSettings = StubAi,
+                themePreference = InMemoryThemePreference(),
+                uiSettings = InMemoryUiSettings(),
+                onBack = {},
+            )
+        }
+
+        shot("05-home-dark", dark = true) {
             DmListScreen(
                 db = db,
                 repo = repo,
