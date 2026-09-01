@@ -16,6 +16,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -79,6 +80,13 @@ fun NotebookComposeScreen(
     var sending by remember { mutableStateOf(false) }
     var uploading by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
+    var confirmDiscard by remember { mutableStateOf(false) }
+    val dirty = title != initialTitle || imageUrl != initialImage || body != initialBody
+    // System back must ask the same question the toolbar arrow does —
+    // App.kt's own back handler would otherwise silently discard the
+    // draft. Composed deeper than App.kt's handler, so it wins while
+    // dirty and falls through once clean or confirmed.
+    io.nisfeb.talon.ui.PlatformBackHandler(enabled = dirty) { confirmDiscard = true }
 
     val pickImage = rememberImagePicker()
     val onPickCover: () -> Unit = {
@@ -108,7 +116,9 @@ fun NotebookComposeScreen(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            IconButton(onClick = onBack) {
+            // A long-form draft lives only in memory — confirm before an
+            // accidental back-tap destroys it.
+            IconButton(onClick = { if (dirty) confirmDiscard = true else onBack() }) {
                 Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
             }
             Text(
@@ -233,5 +243,22 @@ fun NotebookComposeScreen(
             }
             Spacer(Modifier.height(24.dp))
         }
+    }
+
+    if (confirmDiscard) {
+        AlertDialog(
+            onDismissRequest = { confirmDiscard = false },
+            title = { Text("Discard this draft?") },
+            text = { Text("Your changes will be lost.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmDiscard = false
+                    onBack()
+                }) { Text("Discard") }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmDiscard = false }) { Text("Keep writing") }
+            },
+        )
     }
 }

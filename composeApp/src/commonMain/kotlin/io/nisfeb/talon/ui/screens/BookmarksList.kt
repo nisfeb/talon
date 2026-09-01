@@ -2,6 +2,7 @@ package io.nisfeb.talon.ui.screens
 
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
@@ -111,12 +112,36 @@ fun BookmarksList(
                 )
             }
             items(items = folders, key = { "fld:${it.id}" }) { f ->
-                FolderChipWithMenu(
-                    folder = f,
-                    selected = selectedFolderId == f.id,
-                    onClick = { selectedFolderId = f.id },
-                    onLongPress = { folderMenuFor = f },
-                )
+                // The Box anchors the long-press menu to this chip — a
+                // menu emitted at the list root pops at the screen's
+                // top-left corner, nowhere near the chip.
+                Box {
+                    FolderChipWithMenu(
+                        folder = f,
+                        selected = selectedFolderId == f.id,
+                        onClick = { selectedFolderId = f.id },
+                        onLongPress = { folderMenuFor = f },
+                    )
+                    DropdownMenu(
+                        expanded = folderMenuFor?.id == f.id,
+                        onDismissRequest = { folderMenuFor = null },
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text("Rename") },
+                            onClick = {
+                                renamingFolder = f
+                                folderMenuFor = null
+                            },
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Delete folder") },
+                            onClick = {
+                                confirmDeleteFolder = f
+                                folderMenuFor = null
+                            },
+                        )
+                    }
+                }
             }
             item(key = "__new") {
                 FilterChip(
@@ -156,29 +181,6 @@ fun BookmarksList(
                     HorizontalDivider()
                 }
             }
-        }
-    }
-
-    // ───────── Folder long-press menu (rename / delete) ─────────
-    folderMenuFor?.let { f ->
-        DropdownMenu(
-            expanded = true,
-            onDismissRequest = { folderMenuFor = null },
-        ) {
-            DropdownMenuItem(
-                text = { Text("Rename") },
-                onClick = {
-                    renamingFolder = f
-                    folderMenuFor = null
-                },
-            )
-            DropdownMenuItem(
-                text = { Text("Delete folder") },
-                onClick = {
-                    confirmDeleteFolder = f
-                    folderMenuFor = null
-                },
-            )
         }
     }
 

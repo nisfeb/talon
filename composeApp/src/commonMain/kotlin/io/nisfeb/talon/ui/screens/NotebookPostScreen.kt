@@ -22,6 +22,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
@@ -34,6 +35,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -52,10 +54,18 @@ import io.nisfeb.talon.ui.Avatar
 import io.nisfeb.talon.ui.ContactMap
 import io.nisfeb.talon.ui.StoryRenderer
 import io.nisfeb.talon.ui.contactMapFlow
+import io.nisfeb.talon.urbit.RawMarkdown
+import io.nisfeb.talon.urbit.Story
 import io.nisfeb.talon.urbit.StoryCache
 import io.nisfeb.talon.urbit.TlonChatRepo
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonArray
 
 /**
  * Single notebook-post detail view: title, cover, author, rendered
@@ -107,6 +117,22 @@ fun NotebookPostScreen(
     var sending by remember { mutableStateOf(false) }
     var menuOpen by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
+    /** Send / delete failures — repo throws when offline, and losing
+     *  the tap silently is indistinguishable from success. */
+    var actionError by remember { mutableStateOf<String?>(null) }
+    /** False only while we're still waiting for the row to show up. */
+    var settled by remember(postId) { mutableStateOf(false) }
+
+    LaunchedEffect(postId, post) {
+        if (post != null) {
+            settled = true
+        } else {
+            // Long enough to cover a sync on a slow ship, short enough
+            // that a deleted post doesn't read as a hang. Mirrors NoteScreen.
+            kotlinx.coroutines.delay(6_000)
+            settled = true
+        }
+    }
 
     val isOurs = post?.author == ourPatp
 
@@ -138,8 +164,7 @@ fun NotebookPostScreen(
                             onClick = {
                                 menuOpen = false
                                 val p = post ?: return@DropdownMenuItem
-                                val bodyText = io.nisfeb.talon.urbit.StoryCache
-                                    .textFor(p.id, p.contentJson)
+                                val bodyText = editSeedMarkdown(p.id, p.contentJson)
                                 onEdit(
                                     p.title.orEmpty(),
                                     p.image.orEmpty(),
@@ -169,7 +194,25 @@ fun NotebookPostScreen(
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            val p = post ?: return@Column
+            // Mirror NoteScreen: bounded spinner, then say the post is
+            // gone — a blank body with a live comment box reads as broken.
+            val p = post
+            if (p == null) {
+                androidx.compose.foundation.layout.Box(
+                    Modifier.fillMaxWidth().padding(top = 48.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    if (!settled) {
+                        CircularProgressIndicator()
+                    } else {
+                        Text(
+                            "This post isn't here — it may have been deleted.",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+                return@Column
+            }
 
             p.image?.takeIf { it.isNotBlank() }?.let { url ->
                 AsyncImage(
@@ -234,6 +277,14 @@ fun NotebookPostScreen(
         }
 
         HorizontalDivider()
+        actionError?.let {
+            Text(
+                it,
+                color = MaterialTheme.colorScheme.error,
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+            )
+        }
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -249,16 +300,25 @@ fun NotebookPostScreen(
                 onValueChange = { replyText = it },
                 placeholder = { Text("Write a comment") },
                 modifier = Modifier.weight(1f),
-                enabled = !sending,
+                // No target to reply to while the post row is missing.
+                enabled = !sending && post != null,
             )
             IconButton(
-                enabled = replyText.trim().isNotEmpty() && !sending,
+                enabled = replyText.trim().isNotEmpty() && !sending && post != null,
                 onClick = {
                     val text = replyText.trim()
                     replyText = ""
+                    actionError = null
                     sending = true
                     scope.launch {
+                        // repo.reply throws when offline / not connected —
+                        // put the draft back so a failed send doesn't eat
+                        // the comment.
                         runCatching { repo.reply(whom, postId, text) }
+                            .onFailure {
+                                replyText = text
+                                actionError = "Couldn't send — check your connection."
+                            }
                         sending = false
                     }
                 },
@@ -281,9 +341,13 @@ fun NotebookPostScreen(
             confirmButton = {
                 TextButton(onClick = {
                     confirmDelete = false
+                    actionError = null
                     scope.launch {
                         runCatching { repo.delete(whom, postId) }
                             .onSuccess { onBack() }
+                            .onFailure {
+                                actionError = "Couldn't delete — check your connection."
+                            }
                     }
                 }) { Text("Delete") }
             },
@@ -337,3 +401,49 @@ private fun CommentRow(
 }
 
 private fun formatDate(ms: Long): String = formatMonthDayYear(ms)
+
+/**
+ * Markdown source to seed the edit composer. [RawMarkdown] is the
+ * composer's inverse — headings, blockquotes, fences and inline styles
+ * survive the round trip, where [StoryCache.textFor] flattened them so
+ * a single edit-and-save silently rewrote the published post. Listing
+ * and table verses are rendered here because RawMarkdown doesn't emit
+ * the composer's `{"item": […]}` / `block.table` shapes; any verse
+ * neither can express falls back to plain text so no content is
+ * dropped. Known limit: nested sub-lists flatten (the composer only
+ * writes flat lists) and cite/link blocks degrade to their text label.
+ */
+private fun editSeedMarkdown(id: String, contentJson: String): String {
+    val story = runCatching {
+        Json.parseToJsonElement(contentJson) as? JsonArray
+    }.getOrNull() ?: return StoryCache.textFor(id, contentJson)
+    val md = story.mapNotNull { verse ->
+        val block = (verse as? JsonObject)?.get("block") as? JsonObject
+        val table = block?.get("table") as? JsonObject
+        val rendered = when {
+            // Listings go through RawMarkdown.fromStory's own renderer
+            // (the else branch): it accepts both the composer's
+            // {"item": [...]} wrapper and the older direct-array item
+            // shape — a local re-implementation here handled only one
+            // and silently dropped the other's items.
+            table != null -> {
+                fun cellsOf(arr: JsonElement?): List<String> =
+                    ((arr as? JsonArray) ?: JsonArray(emptyList())).map {
+                        RawMarkdown.renderInlines((it as? JsonArray) ?: JsonArray(emptyList()))
+                    }
+                fun line(cells: List<String>) = cells.joinToString(" | ", "| ", " |")
+                val header = cellsOf(table["header"])
+                val rows = ((table["rows"] as? JsonArray) ?: JsonArray(emptyList()))
+                    .map { cellsOf(it) }
+                (listOf(line(header), line(List(header.size) { "---" })) + rows.map(::line))
+                    .joinToString("\n")
+            }
+            else -> {
+                val single = buildJsonArray { add(verse) }
+                RawMarkdown.fromStory(single).ifBlank { Story.plainText(single) }
+            }
+        }
+        rendered.takeIf { it.isNotBlank() }
+    }.joinToString("\n\n").trim()
+    return md.ifBlank { StoryCache.textFor(id, contentJson) }
+}

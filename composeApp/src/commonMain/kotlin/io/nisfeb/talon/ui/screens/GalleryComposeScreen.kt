@@ -25,6 +25,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Tab
 import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Text
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -92,6 +93,14 @@ fun GalleryComposeScreen(
 
     var sending by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
+    var confirmDiscard by remember { mutableStateOf(false) }
+    // Anything typed or picked counts: backing out of a composed post
+    // must ask, same as NotebookComposeScreen.
+    val dirty = imageSrc != null || imageAlt.isNotBlank() ||
+        linkUrl.isNotBlank() || textBody.isNotBlank()
+    // Same guard for system back as the toolbar arrow — see
+    // NotebookComposeScreen.
+    io.nisfeb.talon.ui.PlatformBackHandler(enabled = dirty) { confirmDiscard = true }
 
     val pickImage = rememberImagePicker()
     val onPickImage: () -> Unit = {
@@ -129,7 +138,7 @@ fun GalleryComposeScreen(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            IconButton(onClick = onBack) {
+            IconButton(onClick = { if (dirty) confirmDiscard = true else onBack() }) {
                 Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
             }
             Text(
@@ -289,5 +298,19 @@ fun GalleryComposeScreen(
             }
             Spacer(Modifier.height(24.dp))
         }
+    }
+
+    if (confirmDiscard) {
+        AlertDialog(
+            onDismissRequest = { confirmDiscard = false },
+            title = { Text("Discard this post?") },
+            text = { Text("What you've added here will be lost.") },
+            confirmButton = {
+                TextButton(onClick = { confirmDiscard = false; onBack() }) { Text("Discard") }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmDiscard = false }) { Text("Keep editing") }
+            },
+        )
     }
 }

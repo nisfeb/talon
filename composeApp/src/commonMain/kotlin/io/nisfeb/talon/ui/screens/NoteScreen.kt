@@ -84,11 +84,18 @@ fun NoteScreen(
     var published by remember(noteId) { mutableStateOf(false) }
     var confirmPublish by remember(noteId) { mutableStateOf(false) }
     var publicPath by remember(noteId) { mutableStateOf<String?>(null) }
+    /** In-flight save; disables the check button so a double-tap can't
+     *  send a stale baseRevision and trigger a false conflict. */
+    var saving by remember(noteId) { mutableStateOf(false) }
+    /** Publish / unpublish / delete failures — these otherwise fail
+     *  with no visible change at all. */
+    var actionError by remember(noteId) { mutableStateOf<String?>(null) }
 
     // Ask the host what's published rather than tracking it locally —
     // someone else with edit rights may have published or pulled this.
     LaunchedEffect(noteId, flag) {
-        val key = "${'$'}{flag.flagString}#${'$'}noteId"
+        // Matches NotesParser.publishedKeys: "<host>/<name>#<id>".
+        val key = "${flag.flagString}#$noteId"
         published = repo.notes.publishedKeys().contains(key)
         if (published) publicPath = io.nisfeb.talon.urbit.NotesPaths.publicPath(flag, noteId)
     }
@@ -144,24 +151,37 @@ fun NoteScreen(
             }
             if (editing) {
                 IconButton(
+                    enabled = !saving,
                     onClick = {
                         val body = draft
+                        saving = true
                         scope.launch {
                             val ok = repo.notes.updateNote(flag, noteId, body, baseRevision)
+                            saving = false
                             if (ok) editing = false else conflict = true
                         }
                     },
-                ) { Icon(Icons.Filled.Check, contentDescription = "Save") }
+                ) {
+                    if (saving) {
+                        CircularProgressIndicator(Modifier.padding(12.dp), strokeWidth = 2.dp)
+                    } else {
+                        Icon(Icons.Filled.Check, contentDescription = "Save")
+                    }
+                }
             } else {
                 IconButton(onClick = { editing = true }) {
                     Icon(Icons.Filled.Edit, contentDescription = "Edit")
                 }
                 IconButton(onClick = {
                     if (published) {
+                        actionError = null
                         scope.launch {
                             if (repo.notes.unpublishNote(flag, noteId)) {
                                 published = false
                                 publicPath = null
+                            } else {
+                                actionError =
+                                    "Couldn't unpublish — check your connection and try again."
                             }
                         }
                     } else {
@@ -205,6 +225,15 @@ fun NoteScreen(
                     )
                 }
             }
+        }
+
+        actionError?.let {
+            Text(
+                it,
+                color = MaterialTheme.colorScheme.error,
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+            )
         }
 
         when {
@@ -279,9 +308,14 @@ fun NoteScreen(
             confirmButton = {
                 TextButton(onClick = {
                     confirmPublish = false
+                    actionError = null
                     scope.launch {
                         publicPath = repo.notes.publishNote(flag, noteId)
                         published = publicPath != null
+                        if (!published) {
+                            actionError =
+                                "Couldn't publish — check your connection and try again."
+                        }
                     }
                 }) { Text("Publish") }
             },
@@ -299,8 +333,13 @@ fun NoteScreen(
             confirmButton = {
                 TextButton(onClick = {
                     confirmDelete = false
+                    actionError = null
                     scope.launch {
-                        if (repo.notes.deleteNote(flag, noteId)) onBack()
+                        if (repo.notes.deleteNote(flag, noteId)) {
+                            onBack()
+                        } else {
+                            actionError = "Couldn't delete — check your connection."
+                        }
                     }
                 }) { Text("Delete") }
             },

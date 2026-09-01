@@ -139,8 +139,14 @@ fun NotesChannelScreen(
             // One "+" that asks what to add. Two bare icon buttons here
             // (plus = folder, pencil = note) read as "add" and "edit", so
             // reaching for the obvious one created a folder every time.
+            // Disabled until the notebook root is known — the create
+            // handlers need a parent folder, so confirming earlier would
+            // silently do nothing.
             Box {
-                IconButton(onClick = { addMenuOpen = true }) {
+                IconButton(
+                    enabled = currentFolderId != null,
+                    onClick = { addMenuOpen = true },
+                ) {
                     Icon(Icons.Filled.Add, contentDescription = "Add")
                 }
                 DropdownMenu(

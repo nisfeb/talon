@@ -104,6 +104,7 @@ fun GalleryPostScreen(
 
     var replyText by remember { mutableStateOf("") }
     var sending by remember { mutableStateOf(false) }
+    var actionError by remember { mutableStateOf<String?>(null) }
     var menuOpen by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
     val isOurs = post?.author == ourPatp
@@ -225,6 +226,14 @@ fun GalleryPostScreen(
         }
 
         HorizontalDivider()
+        actionError?.let {
+            Text(
+                it,
+                color = MaterialTheme.colorScheme.error,
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+            )
+        }
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -247,9 +256,16 @@ fun GalleryPostScreen(
                 onClick = {
                     val text = replyText.trim()
                     replyText = ""
+                    actionError = null
                     sending = true
                     scope.launch {
+                        // A failed send restores the text — swallowing a
+                        // typed comment is the one unforgivable outcome.
                         runCatching { repo.reply(whom, postId, text) }
+                            .onFailure {
+                                replyText = text
+                                actionError = "Couldn't send — check your connection."
+                            }
                         sending = false
                     }
                 },
@@ -275,6 +291,7 @@ fun GalleryPostScreen(
                     scope.launch {
                         runCatching { repo.delete(whom, postId) }
                             .onSuccess { onBack() }
+                            .onFailure { actionError = "Couldn't delete — check your connection." }
                     }
                 }) { Text("Delete") }
             },
