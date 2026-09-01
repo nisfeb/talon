@@ -85,10 +85,13 @@ screenshots are exactly 1320x2868, which Apple accepts as-is. Take
 4–6: chat list, a channel with threads/reactions, a DM with an image,
 settings/themes. Then upload:
 
-```sh
-scripts/nomaccall upload_screenshots \
-  '{"display_type":"APP_IPHONE_67","paths":["/path/1.png","/path/2.png"]}'
-```
+The renderer is committed: `./gradlew :composeApp:desktopTest --tests
+'*StoreScreenshots*'` writes five 1320x2868 PNGs to
+`composeApp/build/store-screenshots/` (headless, staged demo data,
+never a real ship). Upload takes `images: [{filename, data: base64}]`
+(NOT `paths`), and the base64 set is ~1.4MB — too big for a shell
+arg, so drive the MCP `upload_screenshots` tool over stdio from a
+file, not via `scripts/nomaccall '<inline json>'`.
 
 Accepted sizes (exact, one pixel off = rejected): 1320x2868, 2868x1320,
 1290x2796, 2796x1290. Optional families: APP_IPHONE_65, APP_IPHONE_61,
