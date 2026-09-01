@@ -17,6 +17,9 @@ import io.nisfeb.talon.data.MessageEntity
 import io.nisfeb.talon.ui.InMemoryDraftStore
 import io.nisfeb.talon.ui.InMemoryUiSettings
 import io.nisfeb.talon.ui.screens.DmChatScreen
+import io.nisfeb.talon.ui.DesktopShell
+import io.nisfeb.talon.ui.RailItem
+import io.nisfeb.talon.ui.RailTab
 import io.nisfeb.talon.ui.screens.DmListScreen
 import io.nisfeb.talon.ui.screens.SettingsScreen
 import io.nisfeb.talon.ui.theme.InMemoryThemePreference
@@ -146,11 +149,19 @@ class StoreScreenshots {
         )
     }
 
-    private fun shot(name: String, dark: Boolean = false, warmMs: Long = 4_000, content: @Composable () -> Unit) {
+    private fun shot(
+        name: String,
+        dark: Boolean = false,
+        warmMs: Long = 4_000,
+        width: Int = 1320,
+        height: Int = 2868,
+        density: Float = 3f,
+        content: @Composable () -> Unit,
+    ) {
         ImageComposeScene(
-            width = 1320,
-            height = 2868,
-            density = Density(3f),
+            width = width,
+            height = height,
+            density = Density(density),
         ).use { scene ->
             scene.setContent {
                 TalonTheme(darkTheme = dark) {
@@ -278,6 +289,57 @@ class StoreScreenshots {
                 onOpenSettings = {},
                 activeShip = us,
                 allShips = listOf(us),
+            )
+        }
+
+        // 13" iPad — Apple requires this family because the app ships
+        // universal. Renders the real tablet two-pane shell (rail +
+        // list + open conversation) at 2048x2732 @2x.
+        shot("06-ipad", width = 2048, height = 2732, density = 2f) {
+            DesktopShell(
+                activeRailTab = RailTab.Chats,
+                enabledItems = RailItem.entries.toList(),
+                onItemClicked = {},
+                listFraction = 0.34f,
+                onListFractionChange = {},
+                list = {
+                    DmListScreen(
+                        db = db,
+                        repo = repo,
+                        drafts = drafts,
+                        updateState = updateState,
+                        onOpenConversation = {},
+                        onOpenSearch = {},
+                        onNewMessage = {},
+                        onSignOut = {},
+                        onOpenSelfProfile = {},
+                        onOpenStatusFeed = {},
+                        onOpenBookmarks = {},
+                        onOpenActivity = {},
+                        onOpenSettings = {},
+                        activeShip = us,
+                        allShips = listOf(us),
+                    )
+                },
+                detail = {
+                    DmChatScreen(
+                        db = db,
+                        repo = repo,
+                        drafts = drafts,
+                        http = http,
+                        aiSettings = StubAi,
+                        uiSettings = InMemoryUiSettings(),
+                        ourPatp = us,
+                        whom = chan,
+                        onBack = {},
+                        onOpenThread = {},
+                        onOpenConversation = {},
+                        onOpenImage = {},
+                        onOpenSelfProfile = {},
+                        onStartCall = {},
+                        onPartyLine = {},
+                    )
+                },
             )
         }
 
