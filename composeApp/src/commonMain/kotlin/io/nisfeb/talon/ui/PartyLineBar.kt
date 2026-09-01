@@ -18,6 +18,9 @@ import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.MicOff
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -70,6 +73,16 @@ fun PartyLineBar(
      *  sticky, and a floated banner without it overlays every screen
      *  with no way out. */
     onDismiss: (() -> Unit)? = null,
+    /** Our own @p — the moderation menu is for OTHER people, so our
+     *  own roster row never grows one. Empty means "unknown". */
+    selfShip: String = "",
+    /**
+     * Persist a moderation mute/unmute on the host ship
+     * (CallController.moderateMember). The SFU-side revoke/restore is
+     * wired here regardless; without this the change lasts only until
+     * the target rejoins. Wire 5.
+     */
+    onModerate: ((ship: String, mute: Boolean) -> Unit)? = null,
 ) {
     val state by party.state.collectAsState()
     PartyLineBarContent(
@@ -81,6 +94,15 @@ fun PartyLineBar(
         nameFor = nameFor,
         audioDevices = audioDevices,
         onDismiss = onDismiss,
+        selfShip = selfShip,
+        onRevokeSpeaking = { ship ->
+            party.revokeSpeaking(ship)
+            onModerate?.invoke(ship, true)
+        },
+        onRestoreSpeaking = { ship ->
+            party.restoreSpeaking(ship)
+            onModerate?.invoke(ship, false)
+        },
     )
 }
 
@@ -118,6 +140,14 @@ fun PartyLineBarContent(
      * just was.
      */
     onDismiss: (() -> Unit)? = null,
+    /** Our own @p; rows matching it get no moderation menu. */
+    selfShip: String = "",
+    /** Ops moderation: mute [ship] for everyone on the line. The
+     *  per-member menu renders only when both callbacks are non-null
+     *  AND the SFU granted us op. Wire 5. */
+    onRevokeSpeaking: ((String) -> Unit)? = null,
+    /** Inverse of [onRevokeSpeaking]: let [ship] speak again. */
+    onRestoreSpeaking: ((String) -> Unit)? = null,
 ) {
     if (state is PartyState.Idle) return
     var expanded by remember { mutableStateOf(false) }
@@ -241,10 +271,22 @@ fun PartyLineBarContent(
                         }
                     }
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        IconButton(onClick = { onToggleMute(!s.muted) }) {
-                            Icon(
-                                if (s.muted) Icons.Filled.MicOff else Icons.Filled.Mic,
-                                contentDescription = if (s.muted) "Unmute" else "Mute",
+                        if (s.canSpeak) {
+                            IconButton(onClick = { onToggleMute(!s.muted) }) {
+                                Icon(
+                                    if (s.muted) Icons.Filled.MicOff else Icons.Filled.Mic,
+                                    contentDescription = if (s.muted) "Unmute" else "Mute",
+                                )
+                            }
+                        } else {
+                            // A listener has no mic to toggle — a dead
+                            // mute button would read as broken. Say
+                            // what we are instead, quietly.
+                            Text(
+                                "Listening",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(horizontal = 8.dp),
                             )
                         }
                         if (expandable) {
@@ -276,7 +318,9 @@ fun PartyLineBarContent(
     if (state is PartyState.Live && expanded) {
         // No roster for a 1:1 call (headline != null): its single row
         // is fabricated and its speaking/muted flags never update.
-        if (headline == null) Roster(state, nameFor)
+        if (headline == null) {
+            Roster(state, nameFor, selfShip, onRevokeSpeaking, onRestoreSpeaking)
+        }
         // Behind the same expander as the roster: picking a headset is
         // a thing you do once, not something worth a permanent row over
         // the conversation. Renders nothing where the OS owns routing.
@@ -343,7 +387,13 @@ fun PartyLineAsking(
  * this only costs space when someone asks for it.
  */
 @Composable
-private fun Roster(s: PartyState.Live, nameFor: (String) -> String) {
+private fun Roster(
+    s: PartyState.Live,
+    nameFor: (String) -> String,
+    selfShip: String = "",
+    onRevokeSpeaking: ((String) -> Unit)? = null,
+    onRestoreSpeaking: ((String) -> Unit)? = null,
+) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
         color = MaterialTheme.colorScheme.surfaceVariant,
@@ -385,6 +435,46 @@ private fun Roster(s: PartyState.Live, nameFor: (String) -> String) {
                             tint = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.size(14.dp),
                         )
+                    }
+                    // Op moderation, other people only: we can't know
+                    // another member's permissions from here, so both
+                    // actions are always offered and the SFU sorts it
+                    // out. Wire 5.
+                    if (s.ops && m.ship != selfShip &&
+                        onRevokeSpeaking != null && onRestoreSpeaking != null
+                    ) {
+                        Box {
+                            var menuOpen by remember(m.id) { mutableStateOf(false) }
+                            IconButton(
+                                onClick = { menuOpen = true },
+                                modifier = Modifier.size(24.dp),
+                            ) {
+                                Icon(
+                                    Icons.Filled.MoreVert,
+                                    contentDescription = "Moderate ${nameFor(m.ship)}",
+                                    modifier = Modifier.size(16.dp),
+                                )
+                            }
+                            DropdownMenu(
+                                expanded = menuOpen,
+                                onDismissRequest = { menuOpen = false },
+                            ) {
+                                DropdownMenuItem(
+                                    text = { Text("Mute for everyone") },
+                                    onClick = {
+                                        menuOpen = false
+                                        onRevokeSpeaking(m.ship)
+                                    },
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Allow speaking") },
+                                    onClick = {
+                                        menuOpen = false
+                                        onRestoreSpeaking(m.ship)
+                                    },
+                                )
+                            }
+                        }
                     }
                 }
             }

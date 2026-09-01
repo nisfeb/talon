@@ -408,6 +408,9 @@ class CallController(
                             }
                             is TrunkUpdate.ListenLink ->
                                 _listenLink.value = ListenLink(up.room, up.url, up.expiresSecs)
+                            is TrunkUpdate.AccessState ->
+                                _roomAccess.value = _roomAccess.value +
+                                    ("${up.from}/${up.name}" to up.access)
                             is TrunkUpdate.Denied -> {
                                 Log.w(
                                     TAG,
@@ -965,6 +968,71 @@ class CallController(
             }
             Log.w(TAG, "peek $key failed: $why (${t.message})")
             _peekFailed.value = _peekFailed.value + (key to why)
+        }
+    }
+
+    /**
+     * Role gates per room, keyed "~host/name", fed by %access-state
+     * facts — the host's answer to every one of the three role
+     * actions below. Empty until [getRoomAccess] (or an edit) asks.
+     */
+    private val _roomAccess = MutableStateFlow<Map<String, RoomAccess>>(emptyMap())
+    val roomAccess: StateFlow<Map<String, RoomAccess>> = _roomAccess.asStateFlow()
+
+    /**
+     * Why the last role action failed, or null. Only the wire-5 role
+     * pokes write it: a host desk that predates roles can't cast the
+     * action mark and nacks, and the admin screen shows this instead
+     * of a switch that silently snaps back. Cleared by
+     * [dismissRoleError] and by the next role poke that succeeds.
+     */
+    private val _roleError = MutableStateFlow<String?>(null)
+    val roleError: StateFlow<String?> = _roleError.asStateFlow()
+
+    fun dismissRoleError() { _roleError.value = null }
+
+    /** Set who may join / speak on [host]'s line. Null = everyone.
+     *  The host answers with an %access-state fact → [roomAccess]. */
+    suspend fun setRoomAccess(
+        host: String,
+        name: String,
+        joinRoles: List<String>?,
+        speakRoles: List<String>?,
+    ) = pokeRoles(
+        "set-room-access",
+        TrunkWire.setRoomAccessAction(host, name, joinRoles, speakRoles),
+    )
+
+    /** Mute (or unmute) [who] on [host]'s line — moderation. */
+    suspend fun moderateMember(host: String, name: String, who: String, mute: Boolean) =
+        pokeRoles("moderate-member", TrunkWire.moderateMemberAction(host, name, who, mute))
+
+    /** Ask [host] for a room's gates; the answer lands in [roomAccess]. */
+    suspend fun getRoomAccess(host: String, name: String) =
+        pokeRoles("get-room-access", TrunkWire.getRoomAccessAction(host, name))
+
+    private suspend fun pokeRoles(what: String, action: kotlinx.serialization.json.JsonElement) {
+        val ch = channel
+        if (ch == null) {
+            // A silent no-op here read as "saved" in the admin UI.
+            _roleError.value = "not connected to your ship"
+            return
+        }
+        try {
+            ch.poke(TrunkWire.AGENT, TrunkWire.ACTION_MARK, action)
+            _roleError.value = null
+        } catch (t: kotlinx.coroutines.CancellationException) {
+            // Navigating away mid-ack says nothing about the host.
+            throw t
+        } catch (t: Throwable) {
+            Log.e(TAG, "$what poke failed", t)
+            _roleError.value = if (t is PokeNacked) {
+                // Our own ship acks these pokes; a remote wire-4 host
+                // just drops the sig, which no ack ever reports.
+                "your ship's %trunk doesn't support roles yet"
+            } else {
+                "your ship didn't answer"
+            }
         }
     }
 

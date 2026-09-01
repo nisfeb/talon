@@ -1,6 +1,7 @@
 package io.nisfeb.talon.call
 
 import io.ktor.client.HttpClient
+import kotlin.concurrent.Volatile
 import io.ktor.client.plugins.websocket.webSocketSession
 import io.ktor.client.request.get
 import io.ktor.client.statement.bodyAsText
@@ -77,6 +78,16 @@ sealed interface PartyState {
          * that nobody should be able to forget the line is open.
          */
         val listeners: Int = 0,
+        /**
+         * Whether our token lets us publish audio. False is a
+         * listener: no up link, no mic capture — the bar hides the
+         * mic toggle and shows "listening" instead. Wire 5; a
+         * pre-roles token reads as a speaker.
+         */
+        val canSpeak: Boolean = true,
+        /** Whether the SFU granted us operator rights (room admin) —
+         *  gates the per-member moderation menu. */
+        val ops: Boolean = false,
     ) : PartyState
     data class Failed(val room: String, val why: String) : PartyState
 }
@@ -111,7 +122,9 @@ class PartyLine(
     val state: StateFlow<PartyState> = _state.asStateFlow()
 
     private val json = Json { ignoreUnknownKeys = true }
-    private var session: io.ktor.websocket.WebSocketSession? = null
+    // internal so tests can inject a recording socket and observe the
+    // frames moderation sends.
+    internal var session: io.ktor.websocket.WebSocketSession? = null
     private var pump: Job? = null
     private val sendLock = Mutex()
 
@@ -141,7 +154,7 @@ class PartyLine(
     // person already on the line is not an arrival.
     private var joined = false
     private var levelPoll: Job? = null
-    private var muted = false
+    @Volatile private var muted = false
     private var upState: MediaState = MediaState.Idle
     private var room = ""
     private var ourId = ""
@@ -151,6 +164,12 @@ class PartyLine(
     // The name shown to others comes from the token's subject, so this
     // being opaque costs nothing.
     private var connectionId = ""
+    // What our token lets us do on this line — seeded from the
+    // ticket's JWT at join, corrected by the server's own "joined"
+    // echo, and moved by "change" when an admin edits roles mid-line.
+    // internal so tests can seed a listener without a real ticket.
+    @Volatile internal var canSpeak = true
+    @Volatile internal var ops = false
 
     /** Join the room named by [ticket]. Idempotent while connected. */
     /** Set the line's topic for display. Comes from the host's room,
@@ -180,6 +199,12 @@ class PartyLine(
         connectionId = "$ourShip-${Uuid.random()}"
         upRetries = 3
         upId = "up-$connectionId"
+        // The token says what we may do before the server does: a
+        // listener must not even try to open a mic. The server's
+        // "joined" echo corrects this if the two disagree.
+        val perms = TrunkWire.jwtPermissions(ticket.token)
+        canSpeak = "present" in perms
+        ops = "op" in perms
         _state.value = PartyState.Connecting(ticket.name)
         val old = pump
         pump = scope.launch {
@@ -345,6 +370,7 @@ class PartyLine(
 
             "joined" -> when (msg["kind"]?.jsonPrimitive?.content) {
                 "join" -> onJoined(msg)
+                "change" -> onPermissionsChanged(msg)
                 "fail" -> _state.value = PartyState.Failed(
                     room,
                     msg["value"]?.jsonPrimitive?.content ?: "join refused",
@@ -363,8 +389,13 @@ class PartyLine(
             "abort" -> {
                 val id = msg["id"]?.jsonPrimitive?.content ?: return
                 if (id == upId) {
-                    Log.w(TAG, "server aborted our up stream; republishing")
-                    if (joined) publishUp()
+                    // Budgeted like the Failed retry: a server that
+                    // aborts every offer must not spin the mic forever.
+                    if (joined && canSpeak && upRetries > 0) {
+                        upRetries -= 1
+                        Log.w(TAG, "server aborted our up stream; republishing ($upRetries left)")
+                        publishUp()
+                    }
                 } else {
                     downLinks.remove(id)?.close()
                     streamOwner.remove(id)
@@ -486,15 +517,67 @@ class PartyLine(
         // Anyone reported from here on is genuinely arriving.
         joined = true
 
+        // The server's own word on what we may do beats the JWT's —
+        // the host can have edited roles after minting our token.
+        permissionsIn(msg)?.let {
+            canSpeak = "present" in it
+            ops = "op" in it
+        }
+
         // Ask for everyone's audio.
         send(buildJsonObject {
             put("type", "request")
             putJsonObject("request") { putJsonArray("") { add(kotlinx.serialization.json.JsonPrimitive("audio")) } }
         })
 
-        // Publish our mic as one up stream.
-        publishUp()
+        // Publish our mic as one up stream — unless we're a listener,
+        // whose whole contract is that no mic is ever captured.
+        if (canSpeak) publishUp()
         publishRoster()
+    }
+
+    /** The "permissions" array on a joined message, or null when the
+     *  server (pre-1.1, or a "change" about something else) omits it. */
+    private fun permissionsIn(msg: JsonObject): Set<String>? =
+        (msg["permissions"] as? kotlinx.serialization.json.JsonArray)
+            ?.mapNotNull { (it as? kotlinx.serialization.json.JsonPrimitive)?.content }
+            ?.toSet()
+
+    /**
+     * The server changed our permissions mid-line — an admin edited
+     * the speak roles, or moderation-muted us. Present revoked: tear
+     * the mic down. Galène 1.1 deletes the up conn server-side on
+     * unpresent, but close locally regardless so the state is honest
+     * on any server. Present granted: stand the mic back up.
+     */
+    private suspend fun onPermissionsChanged(msg: JsonObject) {
+        val perms = permissionsIn(msg) ?: return
+        ops = "op" in perms
+        val speak = "present" in perms
+        val had = canSpeak
+        canSpeak = speak
+        when {
+            had && !speak -> {
+                upWatch?.cancel()
+                upWatch = null
+                upLink?.close()
+                upLink = null
+                upState = MediaState.Idle
+                // Re-arm the join-muted rule: if speaking is later
+                // restored, the mic comes back muted, never live. A
+                // restore hours after a revoke must not broadcast
+                // whatever room the user is sitting in.
+                muted = true
+                publishRoster()
+            }
+            !had && speak -> {
+                upRetries = 3
+                publishUp()
+                publishRoster()
+            }
+            // Only ops moved (or nothing did); say so.
+            else -> publishRoster()
+        }
     }
 
     /** Republish attempts left for the current line. Reset on join and
@@ -522,6 +605,11 @@ class PartyLine(
      * is at least telling the truth.
      */
     private suspend fun publishUp() {
+        // The one guard that matters lives here, not at the call
+        // sites: a retry coroutine queued just before a revoke
+        // landed would otherwise stand up a capturing mic link
+        // while the bar says "Listening".
+        if (!canSpeak) return
         // Create before close: the platforms refcount the shared audio
         // session by live mic links, and a close-then-create republish
         // transited zero — Android's last-one-out cleanup reset the
@@ -548,8 +636,9 @@ class PartyLine(
                     delay(wait)
                     // A fresh coroutine: publishUp cancels this
                     // collector, and a coroutine must not saw off the
-                    // branch it is sitting on.
-                    if (upLink === up && joined) scope.launch { publishUp() }
+                    // branch it is sitting on. canSpeak re-checked:
+                    // a revoke during the backoff must win.
+                    if (upLink === up && joined && canSpeak) scope.launch { publishUp() }
                 }
             }
         }
@@ -614,7 +703,40 @@ class PartyLine(
             muted = muted,
             media = upState,
             listeners = anon.size,
+            canSpeak = canSpeak,
+            ops = ops,
         )
+    }
+
+    /**
+     * Op moderation over the socket: revoke (or restore) [ship]'s
+     * ability to publish. Sent once per *connection* of that ship — a
+     * person on two devices has two, and half-muting them mutes
+     * nobody. Galène enforces op rights; a non-op's ask is refused
+     * server-side, so there is nothing to gate here. Pair with
+     * CallController.moderateMember so the revocation survives a
+     * rejoin — this alone only reaches the connections live now.
+     */
+    fun revokeSpeaking(ship: String) = sendUserAction(ship, "unpresent")
+
+    fun restoreSpeaking(ship: String) = sendUserAction(ship, "present")
+
+    private fun sendUserAction(ship: String, kind: String) {
+        // Snapshot before launching: the roster mutates on the pump.
+        val targets = roster.values.filter { it.ship == ship }.map { it.id }
+        scope.launch {
+            for (dest in targets) {
+                send(
+                    buildJsonObject {
+                        put("type", "useraction")
+                        put("source", connectionId)
+                        put("dest", dest)
+                        put("username", ourId)
+                        put("kind", kind)
+                    },
+                )
+            }
+        }
     }
 
     /**

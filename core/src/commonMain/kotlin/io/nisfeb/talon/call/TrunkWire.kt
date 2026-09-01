@@ -1,9 +1,12 @@
 package io.nisfeb.talon.call
 
+import kotlin.io.encoding.Base64
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonObjectBuilder
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
@@ -52,6 +55,23 @@ data class PartyRoom(
     /** "~host/name" of the group this room's roster mirrors, or null
      *  for a manual roster (the only kind before wire 4). */
     val groupFlag: String? = null,
+    /** Roles allowed to join, or null for everyone on the roster —
+     *  the pre-wire-5 default, and what an old host always reports. */
+    val joinRoles: List<String>? = null,
+    /** Roles allowed to speak, or null for everyone who can join. */
+    val speakRoles: List<String>? = null,
+    /** Ships an admin has muted (moderation, not mic state). */
+    val muted: Set<String> = emptySet(),
+)
+
+/**
+ * A room's role gates as the host reports them. A null role set means
+ * "everyone" — the default, and the only state before wire 5.
+ */
+data class RoomAccess(
+    val joinRoles: List<String>?,
+    val speakRoles: List<String>?,
+    val muted: List<String> = emptyList(),
 )
 
 /** A line another ship has invited us onto. */
@@ -133,6 +153,14 @@ sealed interface TrunkUpdate {
         val url: String,
         val expiresSecs: Long,
     ) : TrunkUpdate
+
+    /** The host's answer to %access, %get-access or %moderate: the
+     *  room's current role gates. Wire 5. */
+    data class AccessState(
+        override val from: String,
+        val name: String,
+        val access: RoomAccess,
+    ) : TrunkUpdate
 }
 
 object TrunkWire {
@@ -153,7 +181,9 @@ object TrunkWire {
      */
     // 4: rooms carry an optional group binding, and %bind-room mirrors
     // a room's roster from a Tlon group on the host ship.
-    const val WIRE_VERSION = 4
+    // 5: role-gated party lines — join/speak role sets, moderation
+    // mutes, and %access-state facts answering the three role actions.
+    const val WIRE_VERSION = 5
 
     const val PUBLISHER = "~ricsul-bilwyt"
     const val DESK = "trunk"
@@ -248,6 +278,54 @@ object TrunkWire {
                 }
             }
         }
+
+    /** Null → JSON null ("everyone"); a list → a JSON array. The key
+     *  is always present: the agent's ot needs it or the poke nacks. */
+    private fun JsonObjectBuilder.putRoles(key: String, roles: List<String>?) {
+        if (roles == null) {
+            put(key, JsonNull)
+        } else {
+            putJsonArray(key) { roles.forEach { add(JsonPrimitive(it)) } }
+        }
+    }
+
+    /**
+     * Set who may join and who may speak on a line [host] runs and we
+     * administer. Null means everyone. Wire 5: an older host cannot
+     * cast the variant and nacks — see CallController.roleError.
+     */
+    fun setRoomAccessAction(
+        host: String,
+        name: String,
+        joinRoles: List<String>?,
+        speakRoles: List<String>?,
+    ): JsonElement = buildJsonObject {
+        putJsonObject("set-room-access") {
+            put("host", host); put("name", name)
+            putRoles("join", joinRoles)
+            putRoles("speak", speakRoles)
+        }
+    }
+
+    /** Mute (or unmute) [who] on [host]'s line — moderation, which
+     *  overrides the role gates for everyone but the host. Wire 5. */
+    fun moderateMemberAction(
+        host: String,
+        name: String,
+        who: String,
+        mute: Boolean,
+    ): JsonElement = buildJsonObject {
+        putJsonObject("moderate-member") {
+            put("host", host); put("name", name)
+            put("who", who); put("mute", mute)
+        }
+    }
+
+    /** Ask [host] for a room's role gates; answered with an
+     *  %access-state fact on /calls. Wire 5. */
+    fun getRoomAccessAction(host: String, name: String): JsonElement = buildJsonObject {
+        putJsonObject("get-room-access") { put("host", host); put("name", name) }
+    }
 
     /**
      * Ask a remote host to reconfigure a line we administer. The host
@@ -459,8 +537,34 @@ object TrunkWire {
                 why = d["why"]?.jsonPrimitive?.content ?: "",
             )
         }
+        (obj["access-state"] as? JsonObject)?.let { a ->
+            return TrunkUpdate.AccessState(
+                from = who(a) ?: return null,
+                name = a["name"]?.jsonPrimitive?.content ?: return null,
+                access = RoomAccess(
+                    joinRoles = rolesOrNull(a, "join"),
+                    speakRoles = rolesOrNull(a, "speak"),
+                    muted = strings(a, "muted"),
+                ),
+            )
+        }
         return null
     }
+
+    /** A role set: null (or absent, or junk) means "everyone". */
+    private fun rolesOrNull(o: JsonObject, key: String): List<String>? =
+        when (val v = o[key]) {
+            is JsonArray -> v.mapNotNull { (it as? JsonPrimitive)?.content }
+            else -> null
+        }
+
+    // Ship lists get the same sig belt-and-suspenders as `from`:
+    // enjs's +ship drops the leading sig on a stale desk.
+    private fun strings(o: JsonObject, key: String): List<String> =
+        (o[key] as? JsonArray)
+            ?.mapNotNull { (it as? JsonPrimitive)?.content }
+            ?.map { if (it.startsWith("~")) it else "~$it" }
+            .orEmpty()
 
     private fun parseSig(sig: JsonObject): TrunkSig? {
         fun JsonObject.str(k: String) = this[k]?.jsonPrimitive?.content
@@ -499,7 +603,9 @@ object TrunkWire {
             val o = el as? JsonObject ?: return@mapNotNull null
             fun ships(k: String) =
                 (o[k] as? kotlinx.serialization.json.JsonArray)
-                    ?.mapNotNull { (it as? JsonPrimitive)?.content }?.toSet().orEmpty()
+                    ?.mapNotNull { (it as? JsonPrimitive)?.content }
+                    ?.map { if (it.startsWith("~")) it else "~$it" }
+                    ?.toSet().orEmpty()
             PartyRoom(
                 name = o["name"]?.jsonPrimitive?.content ?: return@mapNotNull null,
                 title = o["title"]?.jsonPrimitive?.content.orEmpty(),
@@ -513,6 +619,10 @@ object TrunkWire {
                     val nm = g["name"]?.jsonPrimitive?.content ?: return@let null
                     "$ship/$nm"
                 },
+                // Wire 5. Absent on an older ship's scry: no gates.
+                joinRoles = rolesOrNull(o, "join-roles"),
+                speakRoles = rolesOrNull(o, "speak-roles"),
+                muted = ships("muted"),
             )
         } ?: emptyList()
 
@@ -554,6 +664,31 @@ object TrunkWire {
                 cred = o["cred"]?.jsonPrimitive?.content ?: "",
             )
         } ?: emptyList()
+
+    /**
+     * The Galène permissions minted into a trunk-jwt [token]:
+     * "op" for an admin, "present" for anyone allowed to speak,
+     * "message" for everyone (talon-mute gossip rides it).
+     *
+     * Pure and unverified — no crypto, no expiry check. The SFU
+     * enforces; this only lets the client pre-shape itself (a
+     * listener opens no mic). ANY failure — an old host's opaque
+     * token, garbage, a payload with no permissions claim — reads
+     * as the legacy speaker pair, exactly what every token meant
+     * before wire 5.
+     */
+    fun jwtPermissions(token: String): Set<String> = runCatching {
+        val payload = token.split('.')[1]
+        // JWTs are base64url ('-'/'_') and minted unpadded; tolerate
+        // padding anyway rather than fail a token that carries it.
+        val bytes = Base64.UrlSafe
+            .withPadding(Base64.PaddingOption.ABSENT_OPTIONAL)
+            .decode(payload)
+        val claims = json.parseToJsonElement(bytes.decodeToString()) as JsonObject
+        (claims["permissions"] as JsonArray)
+            .map { it.jsonPrimitive.content }
+            .toSet()
+    }.getOrDefault(setOf("present", "message"))
 
     val json = Json { ignoreUnknownKeys = true }
 }

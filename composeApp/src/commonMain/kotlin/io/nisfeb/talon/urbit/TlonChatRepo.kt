@@ -1130,6 +1130,22 @@ class TlonChatRepo(
         return parseAdminGroup(flag, body)
     }
 
+    /**
+     * The group's role vocabulary: role id → display title. Backs the
+     * wire-5 party-line role gates, which store ids but should read as
+     * titles. Same scry [fetchGroupAdmin] uses; `cabals` is the legacy
+     * name for the same map. Empty when the group can't be read.
+     */
+    suspend fun fetchGroupRoles(flag: String): Map<String, String> {
+        val ch = channel ?: error("not connected")
+        val body = ch.scry("groups", "/v2/groups/$flag") as? JsonObject ?: return emptyMap()
+        val roles = (body["roles"] ?: body["cabals"]) as? JsonObject ?: return emptyMap()
+        return roles.mapValues { (id, v) ->
+            ((v as? JsonObject)?.get("meta") as? JsonObject)?.get("title").asStr()
+                ?.takeIf { it.isNotBlank() } ?: id
+        }
+    }
+
     // parseAdminGroup extracted to GroupAdminParser.kt for testability.
 
     /**

@@ -639,6 +639,12 @@ fun App(
                         // to return to, this is its only way off the
                         // screen.
                         onDismiss = { line.dismissFailure() },
+                        selfShip = shipKey,
+                        // No onModerate here: this floating fallback
+                        // doesn't know which room the line belongs to
+                        // (that lives with the chat slot). SFU-side
+                        // moderation still works; it just isn't
+                        // persisted on the host ship from here.
                     )
                 }
             }
@@ -1896,10 +1902,40 @@ fun App(
                                             }
                                         }
                                         partyLine?.let { line ->
+                                            // Persist mutes only when the
+                                            // line we're on IS this chat's
+                                            // line: the bar renders in every
+                                            // chat slot, and an op moderating
+                                            // line A from group B's chat must
+                                            // not poison B's muted list.
+                                            // SFU-side moderation still lands
+                                            // either way.
+                                            val moderateState by line.state.collectAsState()
+                                            val moderateRoom =
+                                                (moderateState as? io.nisfeb.talon.call.PartyState.Live)?.room
                                             io.nisfeb.talon.ui.PartyLineBar(
                                                 line,
                                                 nameFor = { partyContacts.displayName(it) },
                                                 audioDevices = audioDevices,
+                                                selfShip = ship.orEmpty(),
+                                                // Persist ops mutes on the
+                                                // host ship, so they outlive
+                                                // the target's connection.
+                                                onModerate =
+                                                    if (callController != null &&
+                                                        partyRoomHere != null &&
+                                                        partyRoomHere!!.second == moderateRoom
+                                                    ) {
+                                                        { who, mute ->
+                                                            val (h, n) = partyRoomHere!!
+                                                            loopScope.launch {
+                                                                callController
+                                                                    .moderateMember(h, n, who, mute)
+                                                            }
+                                                        }
+                                                    } else {
+                                                        null
+                                                    },
                                             )
                                             // Between tapping the party icon
                                             // and the host's grant the line

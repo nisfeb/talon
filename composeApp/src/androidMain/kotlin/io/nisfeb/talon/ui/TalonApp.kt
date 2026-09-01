@@ -366,6 +366,12 @@ fun TalonApp(
                     // Failed is sticky; floated with no chat slot to
                     // return to, this is its only way off the screen.
                     onDismiss = { line.dismissFailure() },
+                    selfShip = loggedInShip.orEmpty(),
+                    // No onModerate here: this floating fallback doesn't
+                    // know which room the line belongs to (that lives
+                    // with the chat slot). SFU-side moderation still
+                    // works; it just isn't persisted on the host ship
+                    // from here.
                 )
             }
         }
@@ -1769,10 +1775,37 @@ fun TalonApp(
                                 inlineCallUiShown.value = true
                                 onDispose { inlineCallUiShown.value = false }
                             }
+                            // Persist mutes only when the line we're on
+                            // IS this chat's line: the bar renders in
+                            // every chat slot, and an op moderating
+                            // line A from group B's chat must not
+                            // poison B's muted list. SFU-side
+                            // moderation still lands either way.
+                            val moderateState by line.state.collectAsState()
+                            val moderateRoom =
+                                (moderateState as? io.nisfeb.talon.call.PartyState.Live)?.room
                             io.nisfeb.talon.ui.PartyLineBar(
                                 line,
                                 nameFor = { contactMap.displayName(it) },
                                 audioDevices = androidAudioDevices,
+                                selfShip = loggedInShip.orEmpty(),
+                                // Persist ops mutes on the host ship, so
+                                // they outlive the target's connection.
+                                onModerate =
+                                    if (callController != null &&
+                                        partyRoomHere != null &&
+                                        partyRoomHere!!.second == moderateRoom
+                                    ) {
+                                        { who, mute ->
+                                            val (h, n) = partyRoomHere!!
+                                            appScope.launch {
+                                                callController
+                                                    .moderateMember(h, n, who, mute)
+                                            }
+                                        }
+                                    } else {
+                                        null
+                                    },
                             )
                             // Between tapping the party icon and the
                             // host's grant the line is still Idle and

@@ -772,7 +772,7 @@ private fun AdminBody(
 
         // ───────── Party line ─────────
         if (callController != null && isCallsSupported) {
-            PartyLineSection(callController, flag, group, me)
+            PartyLineSection(callController, repo, flag, group, me, contactMap)
             HorizontalDivider()
         }
 
@@ -829,9 +829,11 @@ private const val MEMBER_PAGE = 50
 @Composable
 private fun PartyLineSection(
     controller: io.nisfeb.talon.call.CallController,
+    repo: TlonChatRepo,
     flag: String,
     group: AdminGroup,
     me: String,
+    contactMap: ContactMap,
 ) {
     val target = io.nisfeb.talon.call.PartyLineHost.roomForGroup(flag) ?: return
     val (host, roomName) = target
@@ -1059,6 +1061,204 @@ private fun PartyLineSection(
                         sfuOpen = false
                     }
                 }) { Text("Use the host's") }
+            }
+        }
+    }
+
+    // ───── Role gates + moderation (wire 5) ─────
+    // Two surfaces share these controls. Hosting the room ourselves:
+    // shown when it's bound to a group (roles come from the group
+    // mirror). A line someone else hosts: any group admin may reach
+    // the gates over ames (%get-access/%access), so show them
+    // whenever the line exists — RoomAccessControls times out with
+    // an honest message if the host's %trunk is too old to answer.
+    // `wire` is our own ship's; without 5 locally the pokes nack.
+    val wire by controller.wire.collectAsState()
+    val roleSurface = when {
+        room != null -> room.groupFlag
+        invite != null -> flag
+        else -> null
+    }
+    if (roleSurface != null && wire >= 5) {
+        RoomAccessControls(controller, repo, host, roomName, roleSurface, contactMap)
+    }
+}
+
+/**
+ * Who may join and who may speak on a bound room, plus the ships an
+ * admin has muted. Reads [io.nisfeb.talon.call.CallController.roomAccess]
+ * (asking the host on first compose); every edit submits the full
+ * desired role list, null meaning everyone. Wire 5.
+ */
+@Composable
+private fun RoomAccessControls(
+    controller: io.nisfeb.talon.call.CallController,
+    repo: TlonChatRepo,
+    host: String,
+    roomName: String,
+    groupFlag: String,
+    contactMap: ContactMap,
+) {
+    val scope = rememberCoroutineScope()
+    val key = "$host/$roomName"
+    val accessMap by controller.roomAccess.collectAsState()
+    val access = accessMap[key]
+    val roleError by controller.roleError.collectAsState()
+
+    // The host's word on the gates, asked once per room; the answer is
+    // an %access-state fact that lands in controller.roomAccess.
+    LaunchedEffect(key) { controller.getRoomAccess(host, roomName) }
+    // No answer isn't an error state the wire reports: a wire-4 host
+    // drops %get-access on the floor, and a deleted room is a silent
+    // positive ack. The clock is the only honest signal.
+    var timedOut by remember(key) { mutableStateOf(false) }
+    LaunchedEffect(key) {
+        kotlinx.coroutines.delay(8_000)
+        timedOut = true
+    }
+
+    // Role id → display title, for the checkboxes. Ids go on the wire.
+    var roles by remember(groupFlag) {
+        mutableStateOf<Map<String, String>>(emptyMap())
+    }
+    LaunchedEffect(groupFlag) {
+        roles = try {
+            repo.fetchGroupRoles(groupFlag)
+        } catch (c: kotlinx.coroutines.CancellationException) {
+            throw c
+        } catch (t: Throwable) {
+            emptyMap()
+        }
+    }
+
+    Spacer(Modifier.height(8.dp))
+    roleError?.let { e ->
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                e,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+                modifier = Modifier.weight(1f),
+                maxLines = 2,
+            )
+            TextButton(onClick = { controller.dismissRoleError() }) { Text("Dismiss") }
+        }
+    }
+
+    // Never write a gate we haven't read: every edit submits BOTH
+    // gates, so acting on a null `access` would silently reset the
+    // other one to "everyone".
+    if (access == null) {
+        Text(
+            if (timedOut) {
+                "The line's host hasn't answered — it may be running an older %trunk."
+            } else {
+                "Asking the host who may join and speak…"
+            },
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        return
+    }
+
+    RoleGate(
+        label = "Who can join",
+        selected = access.joinRoles,
+        roles = roles,
+        onChange = { join ->
+            scope.launch {
+                controller.setRoomAccess(host, roomName, join, access.speakRoles)
+            }
+        },
+    )
+    RoleGate(
+        label = "Who can speak",
+        selected = access.speakRoles,
+        roles = roles,
+        onChange = { speak ->
+            scope.launch {
+                controller.setRoomAccess(host, roomName, access.joinRoles, speak)
+            }
+        },
+    )
+
+    val muted = access.muted
+    if (muted.isNotEmpty()) {
+        Spacer(Modifier.height(4.dp))
+        Text("Muted on the line", style = MaterialTheme.typography.bodyMedium)
+        for (ship in muted.sorted()) {
+            ShipRow(
+                ship = ship,
+                contactMap = contactMap,
+                trailing = {
+                    OutlinedButton(onClick = {
+                        scope.launch {
+                            controller.moderateMember(host, roomName, ship, mute = false)
+                        }
+                    }) { Text("Unmute") }
+                },
+            )
+        }
+    }
+}
+
+/**
+ * One gate: Everyone ⟷ only these roles, with the role checkboxes
+ * shown while restricted. [selected] null means everyone — switching
+ * to "Only these roles" starts from an empty list (admins and the
+ * host always pass the gates regardless).
+ */
+@Composable
+private fun RoleGate(
+    label: String,
+    selected: List<String>?,
+    roles: Map<String, String>,
+    onChange: (List<String>?) -> Unit,
+) {
+    val everyone = selected == null
+    Spacer(Modifier.height(4.dp))
+    Text(label, style = MaterialTheme.typography.bodyMedium)
+    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        listOf(true to "Everyone", false to "Only these roles").forEach { (all, text) ->
+            OutlinedButton(
+                onClick = { if (everyone != all) onChange(if (all) null else emptyList()) },
+                colors = if (everyone == all) {
+                    androidx.compose.material3.ButtonDefaults.outlinedButtonColors(
+                        containerColor = MaterialTheme.colorScheme.primaryContainer,
+                    )
+                } else {
+                    androidx.compose.material3.ButtonDefaults.outlinedButtonColors()
+                },
+            ) { Text(text) }
+        }
+    }
+    if (selected != null) {
+        if (roles.isEmpty()) {
+            Text(
+                "This group has no roles — only admins pass this gate.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        for ((id, title) in roles.toList().sortedBy { it.second.lowercase() }) {
+            val checked = id in selected
+            Row(
+                modifier = Modifier.fillMaxWidth()
+                    .clickable {
+                        onChange(if (checked) selected - id else selected + id)
+                    },
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                androidx.compose.material3.Checkbox(
+                    checked = checked,
+                    onCheckedChange = { on ->
+                        onChange(if (on) selected + id else selected - id)
+                    },
+                )
+                Text(title, style = MaterialTheme.typography.bodyMedium)
             }
         }
     }
