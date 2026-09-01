@@ -426,8 +426,19 @@ class CallController(
                                 val peeked = pendingPeeks.value.filter(::matches)
                                 if (peeked.isNotEmpty()) {
                                     pendingPeeks.update { it - peeked.toSet() }
-                                    _peekFailed.value =
-                                        _peekFailed.value + peeked.associateWith { why }
+                                    // "no such room" answering a peek is
+                                    // not a failure — it is the host
+                                    // saying this group has no line.
+                                    // Every group chat peeks on open, so
+                                    // bannering it painted red text over
+                                    // healthy line-less groups the moment
+                                    // trunk v15 made denials deliverable
+                                    // at all. Silence is correct: the
+                                    // icon's absence already says it.
+                                    if (up.why != "no such room") {
+                                        _peekFailed.value =
+                                            _peekFailed.value + peeked.associateWith { why }
+                                    }
                                 }
                                 when {
                                     // A denial settles the ask. Leaving
@@ -447,6 +458,13 @@ class CallController(
                                         }
                                         onDenied?.invoke(name, why)
                                     }
+                                    // A denial that settled a peek stays
+                                    // in the peek lane: falling through
+                                    // painted the sticky join-refusal
+                                    // Failed bar for what was only the
+                                    // client's automatic background
+                                    // question.
+                                    peeked.isNotEmpty() -> {}
                                     up.name.isNotEmpty() -> onDenied?.invoke(up.name, why)
                                     // Nameless, and nothing here asked:
                                     // a host-side relay reflection (one
