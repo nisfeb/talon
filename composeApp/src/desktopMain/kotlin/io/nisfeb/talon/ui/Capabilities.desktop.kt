@@ -68,3 +68,4 @@ actual val needsEmojiFontSpans: Boolean = true
 
 // Handled by the composer's Ctrl+V intercept.
 actual val needsManualImagePaste: Boolean = false
+actual val isImmersiveCallSupported: Boolean = false

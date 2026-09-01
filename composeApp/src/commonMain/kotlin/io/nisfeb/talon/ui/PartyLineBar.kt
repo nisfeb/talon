@@ -151,6 +151,12 @@ fun PartyLineBarContent(
 ) {
     if (state is PartyState.Idle) return
     var expanded by remember { mutableStateOf(false) }
+    // On a phone the expand arrow opens a full-screen call view with
+    // big controls instead of the inline roster; the compact strip and
+    // "browse chats" stay one minimize-tap away. A 1:1 call (headline)
+    // keeps the inline behaviour — its roster is fabricated.
+    var fullScreen by remember { mutableStateOf(false) }
+    val immersive = isImmersiveCallSupported && headline == null
 
     // One node, not two siblings: the bar and the admin strip have to
     // stack vertically, and emitting them loose leaves that to whatever
@@ -245,7 +251,9 @@ fun PartyLineBarContent(
                     Column(
                         Modifier.weight(1f).then(
                             if (expandable) {
-                                Modifier.clickable { expanded = !expanded }
+                                Modifier.clickable {
+                                    if (immersive) fullScreen = true else expanded = !expanded
+                                }
                             } else {
                                 Modifier
                             },
@@ -294,12 +302,16 @@ fun PartyLineBarContent(
                             )
                         }
                         if (expandable) {
-                            IconButton(onClick = { expanded = !expanded }) {
+                            IconButton(onClick = {
+                                if (immersive) fullScreen = true else expanded = !expanded
+                            }) {
                                 Icon(
                                     if (expanded) Icons.Filled.ExpandLess
                                     else Icons.Filled.ExpandMore,
                                     contentDescription =
-                                        if (expanded) "Hide who's on the line" else "Who's on the line",
+                                        if (immersive) "Open the full-screen call"
+                                        else if (expanded) "Hide who's on the line"
+                                        else "Who's on the line",
                                 )
                             }
                         }
@@ -333,6 +345,30 @@ fun PartyLineBarContent(
     if (state is PartyState.Live && admin != null) {
         ListenControls(admin, state.listeners)
     }
+    }
+    // Full-screen over everything, so it covers the chat regardless of
+    // where the strip is mounted. onDismissRequest is the Android back
+    // button — same as tapping minimize.
+    if (immersive && fullScreen && state is PartyState.Live) {
+        androidx.compose.ui.window.Dialog(
+            onDismissRequest = { fullScreen = false },
+            properties = androidx.compose.ui.window.DialogProperties(
+                usePlatformDefaultWidth = false,
+            ),
+        ) {
+            PartyLineFullScreen(
+                state = state,
+                roomName = state.room,
+                nameFor = nameFor,
+                selfShip = selfShip,
+                onToggleMute = onToggleMute,
+                onLeave = { fullScreen = false; onLeave() },
+                onMinimize = { fullScreen = false },
+                audioDevices = audioDevices,
+                onRevokeSpeaking = onRevokeSpeaking,
+                onRestoreSpeaking = onRestoreSpeaking,
+            )
+        }
     }
 }
 

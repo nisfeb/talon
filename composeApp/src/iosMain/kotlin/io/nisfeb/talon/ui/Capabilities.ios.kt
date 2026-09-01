@@ -43,3 +43,4 @@ actual val needsEmojiFontSpans: Boolean = false
 
 // No rich-content hook on iOS; the composer shows a paste button.
 actual val needsManualImagePaste: Boolean = true
+actual val isImmersiveCallSupported: Boolean = true

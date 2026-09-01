@@ -164,3 +164,11 @@ expect val needsEmojiFontSpans: Boolean
  * needs a button of its own, or it silently does nothing.
  */
 expect val needsManualImagePaste: Boolean
+
+/**
+ * Whether the party-line / call bar's expand arrow opens a full-screen
+ * call view with large touch targets (phones), versus toggling the
+ * inline roster in place (desktop, where the strip has room and the
+ * pointer is precise). Android/iOS: true. Desktop: false.
+ */
+expect val isImmersiveCallSupported: Boolean
