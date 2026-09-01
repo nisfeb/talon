@@ -1784,6 +1784,11 @@ fun TalonApp(
                             val moderateState by line.state.collectAsState()
                             val moderateRoom =
                                 (moderateState as? io.nisfeb.talon.call.PartyState.Live)?.room
+                            // Our own desk relays the moderate poke; a
+                            // wire-4 desk nacks it invisibly, so don't
+                            // pretend to persist.
+                            val moderateWire =
+                                callController?.wire?.collectAsState()?.value ?: 0
                             io.nisfeb.talon.ui.PartyLineBar(
                                 line,
                                 nameFor = { contactMap.displayName(it) },
@@ -1793,6 +1798,7 @@ fun TalonApp(
                                 // they outlive the target's connection.
                                 onModerate =
                                     if (callController != null &&
+                                        moderateWire >= 5 &&
                                         partyRoomHere != null &&
                                         partyRoomHere!!.second == moderateRoom
                                     ) {
