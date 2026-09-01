@@ -1402,6 +1402,11 @@ fun App(
                         onBack = { showActivity = false },
                         onOpenConversation = { other ->
                             showActivity = false
+                            // A plain open must drop any armed anchor: an
+                            // unconsumed one (message not in the local DB)
+                            // otherwise re-fires on the next open of that
+                            // chat and yanks the scroll to an old message.
+                            openChatFocusMessageId = null
                             openChat = other
                         },
                         onOpenReply = { whomTarget, parentId, replyId ->
@@ -1409,6 +1414,11 @@ fun App(
                             openChat = whomTarget
                             openThreadParent = parentId
                             openThreadReplyAnchor = replyId
+                        },
+                        onOpenPost = { whomTarget, postId ->
+                            showActivity = false
+                            openChatFocusMessageId = postId
+                            openChat = whomTarget
                         },
                     )
                     // showAssistant is NOT a full-screen branch — it renders
@@ -1425,11 +1435,16 @@ fun App(
                             showSearch = false
                             openChat = other
                         },
-                        onOpenMessage = { whomTarget, _, parentId ->
+                        onOpenMessage = { whomTarget, postId, parentId ->
                             showSearch = false
                             openChat = whomTarget
+                            // Land on the tapped hit, not the bottom of the
+                            // chat — same anchors Bookmarks/Activity use.
                             if (parentId != null) {
                                 openThreadParent = parentId
+                                openThreadReplyAnchor = postId
+                            } else {
+                                openChatFocusMessageId = postId
                             }
                         },
                         onOpenGroup = { flag ->
@@ -1471,8 +1486,9 @@ fun App(
                         watchwordsSyncEnabled = watchwordsSyncEnabled,
                         onSetWatchwordsSyncEnabled = watchwordsSync::setEnabled,
                         onBack = { showWatchwords = false },
-                        onOpenConversation = { other, _ ->
+                        onOpenConversation = { other, postId ->
                             showWatchwords = false
+                            openChatFocusMessageId = postId
                             openChat = other
                         },
                     )
@@ -1480,8 +1496,9 @@ fun App(
                         db = db,
                         activeShip = ship,
                         onBack = { showDailyDigest = false },
-                        onOpenMessage = { whomTarget, _ ->
+                        onOpenMessage = { whomTarget, postId ->
                             showDailyDigest = false
+                            openChatFocusMessageId = postId
                             openChat = whomTarget
                         },
                         // Desktop has no AlarmManager-equivalent
@@ -1794,6 +1811,7 @@ fun App(
                                     },
                                     onOpenConversation = { other ->
                                         openConversationAction()
+                                        openChatFocusMessageId = null
                                         openChat = other
                                     },
                                     onOpenImage = { url -> viewerImageUrl = url },
@@ -2060,6 +2078,7 @@ fun App(
                                         autoOpenOnExpand = expanded,
                                         onOpenConversation = { whom ->
                                             openConversationAction()
+                                            openChatFocusMessageId = null
                                             openChat = whom
                                         },
                                         onOpenSearch = { showSearch = true },
@@ -2192,7 +2211,13 @@ fun App(
                                     repo = repo,
                                     onOpenConversation = { other ->
                                         showActivity = false
+                                        openChatFocusMessageId = null
                                         openChat = other
+                                    },
+                                    onOpenPost = { whomTarget, postId ->
+                                        showActivity = false
+                                        openChatFocusMessageId = postId
+                                        openChat = whomTarget
                                     },
                                     onOpenReply = { whomTarget, parentId, replyId ->
                                         showActivity = false

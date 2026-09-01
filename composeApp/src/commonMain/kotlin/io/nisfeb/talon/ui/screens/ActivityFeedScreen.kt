@@ -31,6 +31,10 @@ fun ActivityFeedScreen(
      *  on [replyId]. Used for reply / mention-in-reply rows so taps
      *  land on the exact reply rather than just the chat. */
     onOpenReply: (whom: String, parentId: String, replyId: String) -> Unit = { w, _, _ -> onOpenConversation(w) },
+    /** Open [whom] anchored on top-level [postId] — mention rows land
+     *  on the message, not just the chat. Defaults to the plain open
+     *  so unwired call sites keep today's behavior. */
+    onOpenPost: (whom: String, postId: String) -> Unit = { w, _ -> onOpenConversation(w) },
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -54,6 +58,7 @@ fun ActivityFeedScreen(
             repo = repo,
             onOpenConversation = onOpenConversation,
             onOpenReply = onOpenReply,
+            onOpenPost = onOpenPost,
         )
     }
 }

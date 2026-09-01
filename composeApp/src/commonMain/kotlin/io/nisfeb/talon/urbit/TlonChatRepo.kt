@@ -4095,7 +4095,14 @@ class TlonChatRepo(
                             eventObj["react"].asStr()
                                 ?.let { "Reacted ${ReactionPalette.display(it)}" }
                                 ?: "Reacted"
-                        else -> tag
+                        "flag-post", "flag-reply" -> "Reported a post"
+                        "group-kick" -> "Removed from group"
+                        "group-join" -> "Joined the group"
+                        "group-role" -> "Role changed"
+                        // Unknown wire tags: humanize rather than leaking
+                        // a raw hyphenated key into the row header.
+                        else -> tag.replace('-', ' ')
+                            .replaceFirstChar { it.uppercase() }
                     }
                     val author = eventObj["mention-author"].asStr()
                         ?: eventObj["author"].asStr()

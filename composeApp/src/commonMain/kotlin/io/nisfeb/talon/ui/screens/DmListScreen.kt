@@ -366,8 +366,11 @@ fun DmListScreen(
     var folderSheetGroup by remember { mutableStateOf<String?>(null) }
     var renamingFolder by remember { mutableStateOf<FolderEntity?>(null) }
     // Long-press on a tab chip → "Mark all read" confirmation dialog.
-    // Cleared once the user confirms or cancels.
+    // Cleared once the user confirms or cancels. A folder chip carries
+    // its folder through so only that folder's chats are cleared —
+    // unread state is unrecoverable once poked, so scope matters.
     var confirmMarkAllRead by remember { mutableStateOf(false) }
+    var confirmMarkFolderRead by remember { mutableStateOf<FolderEntity?>(null) }
     var confirmDeleteFolder by remember { mutableStateOf<FolderEntity?>(null) }
     var creatingFolder by remember { mutableStateOf(false) }
     // Edit mode: when on, rows are drag-reorderable (long-press anywhere
@@ -953,7 +956,7 @@ fun DmListScreen(
                 // shortcut so a freshly-installed client can clear
                 // a backlog of stale unreads in one tap.
                 if (editMode) renamingFolder = f
-                else confirmMarkAllRead = true
+                else confirmMarkFolderRead = f
             },
             onSpecialLongPress = { confirmMarkAllRead = true },
             onCreateNew = { creatingFolder = true },
@@ -1107,6 +1110,14 @@ fun DmListScreen(
                 // and the next item below relayouts smoothly without
                 // a placement-animation lag (which caused visible
                 // overlap during expansion).
+                if (folderRows.isEmpty()) {
+                    // A fresh folder has zero members and the add
+                    // gesture (long-press a chat) is undiscoverable —
+                    // say so instead of rendering a blank list.
+                    item(key = "__folder_empty") {
+                        SpecialEmpty("This folder is empty. Long-press a chat or group to add it.")
+                    }
+                }
                 var i = 0
                 while (i < folderRows.size) {
                     val row = folderRows[i]
@@ -1255,14 +1266,19 @@ fun DmListScreen(
                 // All view — structured home list. See folder-view
                 // branch above for why GroupHead bundles its children
                 // into a single lazy item with AnimatedVisibility.
-                if (homeRows.isEmpty() && bootstrapping) {
+                if (homeRows.isEmpty()) {
                     // First-launch limbo: scries haven't returned any
                     // rows yet. The top-of-screen sync caption is
                     // visible, but users were missing it on tall
                     // screens — a centered loading panel makes
-                    // "still loading" unmistakable.
+                    // "still loading" unmistakable. Once bootstrap
+                    // completes on a ship with zero conversations,
+                    // point at the FAB instead of a blank list.
                     item(key = "__home_loading") {
-                        SpecialEmpty("Loading your chats and groups…")
+                        SpecialEmpty(
+                            if (bootstrapping) "Loading your chats and groups…"
+                            else "No chats yet. Tap + to start a conversation."
+                        )
                     }
                 }
                 var i = 0
@@ -1488,17 +1504,41 @@ fun DmListScreen(
         )
     }
 
-    if (confirmMarkAllRead) {
+    val markReadFolder = confirmMarkFolderRead
+    if (confirmMarkAllRead || markReadFolder != null) {
         // Compute the unread set right at confirm time so the dialog
         // count reflects the current snapshot. We mark every whom in
         // `rows` with unread > 0 — the user's stated goal is clearing
         // a backlog of stale unreads, and pokes against zero-unread
-        // whoms are wasted work.
+        // whoms are wasted work. When a folder chip was long-pressed,
+        // scope down to that folder's members, expanding group-kind
+        // members to their channel whoms via contactMap.
+        val folderWhoms = markReadFolder?.let { folder ->
+            members.filter { it.folderId == folder.id }
+                .flatMap { m ->
+                    if (m.kind == FolderMemberEntity.KIND_GROUP) {
+                        contactMap.channelGroups
+                            .filter { it.groupFlag == m.whom }
+                            .map { it.nest }
+                    } else listOf(m.whom)
+                }
+                .toSet()
+        }
         val unreadWhoms = rows.filter { (_, count) -> count > 0 }
             .map { (m, _) -> m.whom }
+            .filter { folderWhoms == null || it in folderWhoms }
+        val dismiss = {
+            confirmMarkAllRead = false
+            confirmMarkFolderRead = null
+        }
         AlertDialog(
-            onDismissRequest = { confirmMarkAllRead = false },
-            title = { Text("Mark all as read?") },
+            onDismissRequest = dismiss,
+            title = {
+                Text(
+                    if (markReadFolder != null) "Mark '${markReadFolder.name}' as read?"
+                    else "Mark all chats as read?"
+                )
+            },
             text = {
                 Text(
                     if (unreadWhoms.isEmpty()) "No unread chats."
@@ -1510,7 +1550,7 @@ fun DmListScreen(
                 TextButton(
                     enabled = unreadWhoms.isNotEmpty(),
                     onClick = {
-                        confirmMarkAllRead = false
+                        dismiss()
                         scope.launch {
                             runCatching { repo.markAllRead(unreadWhoms) }
                         }
@@ -1518,7 +1558,7 @@ fun DmListScreen(
                 ) { Text("Mark read") }
             },
             dismissButton = {
-                TextButton(onClick = { confirmMarkAllRead = false }) { Text("Cancel") }
+                TextButton(onClick = dismiss) { Text("Cancel") }
             },
         )
     }

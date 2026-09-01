@@ -162,9 +162,18 @@ internal fun EditStatusDialog(
             )
         },
         confirmButton = {
-            TextButton(onClick = { onSave(field.text.trim()) }) { Text("Save") }
+            // Disabled on blank so tapping Save on the untouched empty
+            // field can't silently wipe the current status; clearing is
+            // the explicit button below instead.
+            TextButton(
+                enabled = field.text.isNotBlank(),
+                onClick = { onSave(field.text.trim()) },
+            ) { Text("Save") }
         },
         dismissButton = {
+            if (initial.isNotBlank()) {
+                TextButton(onClick = { onSave("") }) { Text("Clear status") }
+            }
             TextButton(onClick = onDismiss) { Text("Cancel") }
         },
     )

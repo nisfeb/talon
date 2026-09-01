@@ -18,6 +18,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -52,6 +53,10 @@ fun ActivityList(
      *  on [replyId]. Used for reply / mention-in-reply rows so taps
      *  land on the exact reply rather than just the chat. */
     onOpenReply: (whom: String, parentId: String, replyId: String) -> Unit = { w, _, _ -> onOpenConversation(w) },
+    /** Open [whom] anchored on a top-level [postId] (post-mentions).
+     *  Callers wire this like the Bookmarks/Search focus-message path
+     *  so the tap lands on the mentioned message, not the chat bottom. */
+    onOpenPost: (whom: String, postId: String) -> Unit = { w, _ -> onOpenConversation(w) },
     modifier: Modifier = Modifier,
 ) {
     val contactMap by remember {
@@ -72,13 +77,18 @@ fun ActivityList(
     val items = cached?.forTab(tab) ?: emptyList()
     var refreshing by remember { mutableStateOf(cached == null) }
     var error by remember { mutableStateOf<String?>(null) }
+    // Bumped by the error-state Retry button; re-keys the fetch effect.
+    // Without it a failed first load was terminal on the desktop rail,
+    // where the tab stays mounted and the effect never re-ran.
+    var retryCount by remember { mutableStateOf(0) }
 
     // Always kick a background refresh on mount. With the cache in
     // place this isn't blocking — UI shows last-known immediately and
     // upgrades when the fetch lands. Errors only surface if there's
     // nothing cached to fall back on.
-    LaunchedEffect(Unit) {
+    LaunchedEffect(retryCount) {
         refreshing = true
+        error = null
         runCatching { repo.fetchActivityFeed() }
             .onFailure { error = it.message ?: it::class.simpleName }
         refreshing = false
@@ -119,12 +129,24 @@ fun ActivityList(
 
             // Error AND nothing cached to render. If we have cached
             // data, swallow the error silently — stale > broken.
-            cached == null && error != null -> Text(
-                "Couldn't load activity: $error",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.error,
+            cached == null && error != null -> Column(
                 modifier = Modifier.padding(24.dp),
-            )
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Text(
+                    "Couldn't load activity. Check your connection.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.error,
+                )
+                error?.let {
+                    Text(
+                        it,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                TextButton(onClick = { retryCount++ }) { Text("Retry") }
+            }
 
             items.isEmpty() -> Text(
                 when (tab) {
@@ -156,6 +178,8 @@ fun ActivityList(
                         val post = item.postId
                         if (parent != null && post != null) {
                             onOpenReply(w, parent, post)
+                        } else if (post != null) {
+                            onOpenPost(w, post)
                         } else {
                             onOpenConversation(w)
                         }

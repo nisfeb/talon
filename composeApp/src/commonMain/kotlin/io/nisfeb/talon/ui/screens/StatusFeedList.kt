@@ -39,6 +39,10 @@ fun StatusFeedList(
     val contacts by remember {
         db.contacts().streamStatusFeed()
     }.collectAsState(initial = emptyList())
+    // streamStatusFeed doesn't exclude our own ship, and the header
+    // row above already shows it — filter self out so setting a status
+    // doesn't render it twice.
+    val others = remember(contacts, ourPatp) { contacts.filter { it.ship != ourPatp } }
     // Stream our own contact row so the header reflects edits made from
     // this screen the moment the optimistic upsert lands.
     val self by remember(ourPatp) {
@@ -55,7 +59,7 @@ fun StatusFeedList(
             onEdit = { editing = true },
         )
         HorizontalDivider()
-        if (contacts.isEmpty()) {
+        if (others.isEmpty()) {
             Text(
                 "No statuses yet. They'll show up here as your contacts update theirs.",
                 style = MaterialTheme.typography.bodyMedium,
@@ -67,7 +71,7 @@ fun StatusFeedList(
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(vertical = 4.dp),
             ) {
-                items(items = contacts, key = { it.ship }) { c ->
+                items(items = others, key = { it.ship }) { c ->
                     StatusRow(c) { onOpenContact(c.ship) }
                     HorizontalDivider()
                 }

@@ -88,7 +88,7 @@ class ActivityFeedParserTest {
     }
 
     @Test
-    fun `unknown tags fall through to the raw tag as kind`() {
+    fun `unknown tags fall through humanized, not as raw wire text`() {
         val body = buildBody {
             bundle(sourceKey = "ship/~zod") {
                 event(tag = "shimmer-glimmer", time = "1", eventObj = buildJsonObject {
@@ -98,7 +98,9 @@ class ActivityFeedParserTest {
         }
         val items = TlonChatRepo.parseActivityFeedBody(body)
         assertEquals(1, items.size)
-        assertEquals("shimmer-glimmer", items[0].kind)
+        // The kind is user-facing: an unmapped wire tag reads as words,
+        // never as the hyphenated internal token it used to leak.
+        assertEquals("Shimmer glimmer", items[0].kind)
     }
 
     @Test
