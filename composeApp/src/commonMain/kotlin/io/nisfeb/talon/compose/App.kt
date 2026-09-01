@@ -575,6 +575,20 @@ fun App(
                 callController?.stop()
             }
         }
+        // Lines created before wire 4 never got bound to their group,
+        // so their rosters froze at the opening snapshot and every
+        // later group joiner peeks into "not a member". Reconcile
+        // whenever the hosted set or the wire changes — idempotent,
+        // and a no-op for anyone who hosts nothing.
+        callController?.let { c ->
+            val bindRooms by c.rooms.collectAsState()
+            val bindWire by c.wire.collectAsState()
+            LaunchedEffect(bindRooms, bindWire) {
+                loggedInShip?.let { me ->
+                    io.nisfeb.talon.call.PartyLineHost.bindLegacyRooms(c, db, me)
+                }
+            }
+        }
         // Names for the call surface. A third collection of the same
         // local-Room flows in this function — cheap, but the three
         // (here, citeContacts, partyContacts) want hoisting into one.

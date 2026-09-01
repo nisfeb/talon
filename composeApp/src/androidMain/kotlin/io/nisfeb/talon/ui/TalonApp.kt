@@ -218,6 +218,18 @@ fun TalonApp(
             callController?.stop()
         }
     }
+    // Pre-wire-4 lines never bound to their group; reconcile so their
+    // rosters mirror instead of freezing at the opening snapshot.
+    // Mirrors App.kt.
+    callController?.let { c ->
+        val bindRooms by c.rooms.collectAsState()
+        val bindWire by c.wire.collectAsState()
+        androidx.compose.runtime.LaunchedEffect(bindRooms, bindWire) {
+            loggedInShip?.let { me ->
+                io.nisfeb.talon.call.PartyLineHost.bindLegacyRooms(c, app.db, me)
+            }
+        }
+    }
     // The push notification rings; the app decides when to stop. Once
     // the controller is showing anything other than an incoming call —
     // answered, declined, or the caller gave up — the notification has

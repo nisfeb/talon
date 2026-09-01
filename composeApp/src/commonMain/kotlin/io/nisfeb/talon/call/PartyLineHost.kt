@@ -3,6 +3,7 @@ package io.nisfeb.talon.call
 import io.nisfeb.talon.data.AppDatabase
 import io.nisfeb.talon.urbit.TlonChatRepo
 import io.nisfeb.talon.util.Log
+import kotlinx.coroutines.flow.first
 
 /**
  * Glue between a group and its party line.
@@ -73,6 +74,50 @@ object PartyLineHost {
         }
         controller.joinRoom(host, room)
         return true
+    }
+
+    /** The group flag a legacy (unbound) hosted room should bind to,
+     *  or null. Exactly one group we belong to must derive this room's
+     *  name via [roomForGroup], and its host must be us — the same
+     *  derivation members' clients use to find the line. Pure, for
+     *  tests. */
+    fun legacyFlagFor(
+        roomName: String,
+        ourShip: String,
+        groupFlags: List<String>,
+    ): String? = groupFlags.filter { flag ->
+        roomForGroup(flag)?.let { (h, slug) -> h == ourShip && slug == roomName } == true
+    }.singleOrNull()
+
+    /**
+     * One-time reconciliation for lines created before wire 4. New
+     * lines bind to their group at creation (see [startLine]), so the
+     * roster mirrors group membership from day one — but a line that
+     * existed before the ship spoke wire 4 sits unbound forever, its
+     * roster frozen at the snapshot that opened it, and everyone who
+     * joined the group later peeks into "not a member".
+     *
+     * Safe to call whenever rooms or the wire change: a bound room
+     * carries its groupFlag and is skipped, an ambiguous or matchless
+     * name is left alone, and binding triggers the agent's immediate
+     * roster sync.
+     */
+    suspend fun bindLegacyRooms(
+        controller: CallController,
+        db: AppDatabase,
+        ourShip: String,
+    ) {
+        if (controller.wire.value < 4) return
+        val unbound = controller.rooms.value.values.filter { it.groupFlag == null }
+        if (unbound.isEmpty()) return
+        val flags = runCatching {
+            db.groups().streamGroups().first().map { it.flag }
+        }.getOrNull() ?: return
+        for (room in unbound) {
+            val flag = legacyFlagFor(room.name, ourShip, flags) ?: continue
+            Log.i(TAG, "binding legacy line ${room.name} to $flag")
+            controller.bindRoom(room.name, flag)
+        }
     }
 
     /** Step onto a line someone else is hosting. */
