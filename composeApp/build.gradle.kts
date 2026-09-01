@@ -604,6 +604,8 @@ ksp {
 val iconsExtendedKeep = setOf(
     "androidx/compose/material/icons/automirrored/filled/LogoutKt.class",
     "androidx/compose/material/icons/filled/AttachFileKt.class",
+    // Broken-image tile for dead chat-image URLs (StoryRenderer).
+    "androidx/compose/material/icons/filled/BrokenImageKt.class",
     "androidx/compose/material/icons/filled/ContentCopyKt.class",
     "androidx/compose/material/icons/filled/DownloadKt.class",
     "androidx/compose/material/icons/filled/DragHandleKt.class",
