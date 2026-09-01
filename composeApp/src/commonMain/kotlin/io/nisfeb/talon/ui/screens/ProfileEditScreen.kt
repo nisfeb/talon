@@ -81,11 +81,20 @@ fun ProfileEditScreen(
     val pickImage = rememberImagePicker()
     val onPickAvatar: () -> Unit = {
         scope.launch {
-            val picked = runCatching { pickImage() }
-                .onFailure { error = "couldn't read image: ${it.message ?: it::class.simpleName}" }
-                .getOrNull() ?: return@launch
+            // Guard-AND-SET before the picker suspension: checking
+            // alone left the window open — two taps both saw
+            // uploading == false while the first sat inside
+            // pickImage(), and both uploads then raced for avatarUrl.
+            if (uploading) return@launch
             uploading = true
             error = null
+            val picked = runCatching { pickImage() }
+                .onFailure { error = "couldn't read image: ${it.message ?: it::class.simpleName}" }
+                .getOrNull()
+            if (picked == null) {
+                uploading = false
+                return@launch
+            }
             runCatching {
                 // Bounds-only decode validates the bytes are a real
                 // image without allocating the full bitmap. Null means

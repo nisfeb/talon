@@ -117,9 +117,11 @@ fun LoginScreen(
      *  real instance; desktop passes null (no checker wired). */
     updateState: UpdateState? = null,
 ) {
-    var shipUrl by remember { mutableStateOf("http://localhost:8080") }
+    var shipUrl by remember { mutableStateOf("") }
     var code by remember { mutableStateOf("") }
     var status by remember { mutableStateOf<String?>(null) }
+    // Failures render in error red; info/progress text stays neutral.
+    var statusIsError by remember { mutableStateOf(false) }
     var connecting by remember { mutableStateOf(false) }
     var codeVisible by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
@@ -230,6 +232,7 @@ fun LoginScreen(
                         value = shipUrl,
                         onValueChange = { shipUrl = it },
                         label = { Text("Ship URL") },
+                        placeholder = { Text("https://your-ship.example.com") },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
                         enabled = !connecting,
                         singleLine = true,
@@ -265,6 +268,7 @@ fun LoginScreen(
                             shipUrl = payload.url
                             code = payload.code
                             status = "QR scanned — tap Connect to sign in."
+                            statusIsError = false
                         } else {
                             // null = user cancelled OR the QR wasn't a
                             // talon:// login URI. Keep silent on cancel
@@ -297,15 +301,19 @@ fun LoginScreen(
                     Button(
                         onClick = {
                             status = "Connecting…"
+                            statusIsError = false
                             connecting = true
                             scope.launch {
                                 session.login(shipUrl, code)
                                     .onSuccess { ship ->
-                                        status = "Connected as ~$ship"
+                                        // login() keeps the leading ~ on the
+                                        // ship name — don't prepend another.
+                                        status = "Connected as $ship"
                                         onLoggedIn(ship)
                                     }
                                     .onFailure { err ->
                                         status = friendlyError(err)
+                                        statusIsError = true
                                     }
                                 connecting = false
                             }
@@ -331,7 +339,8 @@ fun LoginScreen(
                         Text(
                             it,
                             style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            color = if (statusIsError) MaterialTheme.colorScheme.error
+                                else MaterialTheme.colorScheme.onSurfaceVariant,
                             textAlign = TextAlign.Center,
                             modifier = Modifier.fillMaxWidth(),
                         )

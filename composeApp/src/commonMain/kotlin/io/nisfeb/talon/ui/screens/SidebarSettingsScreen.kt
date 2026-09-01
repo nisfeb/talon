@@ -25,7 +25,10 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
@@ -52,6 +55,9 @@ fun SidebarSettingsScreen(
     val railVisibility by uiSettings.railVisibility.collectAsState()
     val railItemOrder by uiSettings.railItemOrder.collectAsState()
     val haptics = LocalHapticFeedback.current
+    // A failed visibility write never ticks the railVisibility flow, so
+    // the Switch silently snaps back — surface why instead.
+    var syncError by remember { mutableStateOf<String?>(null) }
 
     val listState = rememberLazyListState()
     val reorderState = rememberReorderableLazyListState(listState) { from, to ->
@@ -89,6 +95,14 @@ fun SidebarSettingsScreen(
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
         )
+        syncError?.let {
+            Text(
+                it,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+            )
+        }
         HorizontalDivider()
         LazyColumn(
             state = listState,
@@ -102,8 +116,13 @@ fun SidebarSettingsScreen(
                         dailyDigestEnabled = dailyDigestEnabled,
                         onToggle = { newVisible ->
                             scope.launch {
-                                runCatching {
-                                    repo.settingsSync?.setRailItemVisibility(item, newVisible)
+                                val sync = repo.settingsSync
+                                syncError = when {
+                                    sync == null -> "Couldn't save — settings sync unavailable."
+                                    runCatching {
+                                        sync.setRailItemVisibility(item, newVisible)
+                                    }.isFailure -> "Couldn't save — check your connection."
+                                    else -> null
                                 }
                             }
                         },

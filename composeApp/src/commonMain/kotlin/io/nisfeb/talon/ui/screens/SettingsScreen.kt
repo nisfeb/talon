@@ -151,20 +151,30 @@ fun SettingsScreen(
         mutableStateOf(accentSettings.customHex.orEmpty())
     }
 
-    var provider by remember { mutableStateOf(aiState.provider) }
-    var apiKey by remember { mutableStateOf(aiState.apiKey) }
-    var model by remember { mutableStateOf(aiState.model.orEmpty()) }
-    var baseUrl by remember { mutableStateOf(aiState.baseUrl.orEmpty()) }
+    // Keyed to the fields these mirror — NOT the whole aiState — so a
+    // repo write refreshes the editor (a remote %settings sync landing,
+    // or a local Save) without a same-screen toggle or prompt edit
+    // wiping in-progress credential edits: Config also carries every
+    // feature switch, and keying on all of it re-bunted these fields
+    // whenever any switch flipped. Accepted edge: an unsaved edit is
+    // replaced when a remote sync changes that same field mid-edit.
+    var provider by remember(aiState.provider) { mutableStateOf(aiState.provider) }
+    var apiKey by remember(aiState.apiKey) { mutableStateOf(aiState.apiKey) }
+    var model by remember(aiState.model) { mutableStateOf(aiState.model.orEmpty()) }
+    var baseUrl by remember(aiState.baseUrl) { mutableStateOf(aiState.baseUrl.orEmpty()) }
     var revealKey by remember { mutableStateOf(false) }
     var providerMenuOpen by remember { mutableStateOf(false) }
-    var braveKey by remember { mutableStateOf(aiState.braveApiKey) }
+    var braveKey by remember(aiState.braveApiKey) { mutableStateOf(aiState.braveApiKey) }
     var revealBrave by remember { mutableStateOf(false) }
     var promptEditorKind by remember { mutableStateOf<AiSettings.PromptKind?>(null) }
 
+    // Compare on the same normalization Save persists (trim + blank→null)
+    // so e.g. a pasted key's trailing newline doesn't leave Save enabled
+    // forever after a successful save.
     val dirty = provider != aiState.provider ||
-        apiKey != aiState.apiKey ||
-        (model.ifBlank { null } != aiState.model) ||
-        (baseUrl.ifBlank { null } != aiState.baseUrl)
+        apiKey.trim() != aiState.apiKey ||
+        (model.trim().ifBlank { null } != aiState.model) ||
+        (baseUrl.trim().ifBlank { null } != aiState.baseUrl)
 
     Column(modifier = modifier.windowInsetsPadding(WindowInsets.safeDrawing)) {
         Row(
@@ -252,6 +262,7 @@ fun SettingsScreen(
                     io.nisfeb.talon.ui.MnemonymNames.set(on)
                     onMnemonymNamesChanged(on)
                 },
+                switchEnabled = !alwaysPatp,
             )
 
             // ── Accent color ────────────────────────────────────────
@@ -1280,6 +1291,11 @@ private fun FeatureToggleRow(
     description: String,
     enabled: Boolean,
     onChange: (Boolean) -> Unit,
+    // Whether the Switch is interactive ("enabled" is taken: it's the
+    // checked state). false greys the switch out instead of letting a
+    // flip bounce back — and write to the ship — while another setting
+    // overrides this one.
+    switchEnabled: Boolean = true,
 ) {
     Row(
         modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
@@ -1294,7 +1310,7 @@ private fun FeatureToggleRow(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-        Switch(checked = enabled, onCheckedChange = onChange)
+        Switch(checked = enabled, onCheckedChange = onChange, enabled = switchEnabled)
     }
 }
 
@@ -1761,8 +1777,8 @@ private class PromptPart(
 
 private val PROMPT_PARTS = listOf(
     PromptPart(AiSettings.PromptKind.UrbitKnowledge, "Urbit knowledge (shared)", AgentPrompt.urbitKnowledge),
-    PromptPart(AiSettings.PromptKind.Assistant, "assistant prompt", AgentPrompt.assistant),
-    PromptPart(AiSettings.PromptKind.Loop, "scheduled-job prompt", LoopPrompt.loop),
+    PromptPart(AiSettings.PromptKind.Assistant, "Assistant prompt", AgentPrompt.assistant),
+    PromptPart(AiSettings.PromptKind.Loop, "Scheduled-job prompt", LoopPrompt.loop),
 )
 
 /**
@@ -1798,7 +1814,7 @@ private fun SystemPromptEditorDialog(
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 Text(
-                    title.replaceFirstChar { it.uppercase() },
+                    title,
                     style = MaterialTheme.typography.titleMedium,
                 )
                 Text(

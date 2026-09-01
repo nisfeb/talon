@@ -65,13 +65,12 @@ import io.nisfeb.talon.login.TalonLoginUri
 @Composable
 fun LoginQrShareScreen(
     onBack: () -> Unit,
-    initialUrl: String = "http://localhost:8080",
+    initialUrl: String = "",
     modifier: Modifier = Modifier,
 ) {
     var url by remember { mutableStateOf(initialUrl) }
     var code by remember { mutableStateOf("") }
     val clipboard = LocalClipboardManager.current
-    var copyStatus by remember { mutableStateOf<String?>(null) }
 
     // Build the URI live as the user types. Both fields must be
     // non-blank — otherwise we'd render a QR for a payload that the
@@ -83,6 +82,9 @@ fun LoginQrShareScreen(
         else TalonLoginUri.Payload(url = u, code = c)
     }
     val uri = remember(payload) { payload?.let(TalonLoginUri::encode) }
+    // Keyed to the URI so editing either field clears a now-stale
+    // "Copied…" confirmation about the previous URI.
+    var copyStatus by remember(uri) { mutableStateOf<String?>(null) }
 
     Column(
         modifier = modifier.windowInsetsPadding(WindowInsets.safeDrawing),
@@ -134,6 +136,7 @@ fun LoginQrShareScreen(
                         value = url,
                         onValueChange = { url = it },
                         label = { Text("Ship URL") },
+                        placeholder = { Text("https://your-ship.example.com") },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth(),
