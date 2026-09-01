@@ -227,7 +227,7 @@ fun PartyLineBarContent(
                         else -> " · ${s.listeners} listening"
                     }
                     val label = headline ?: when {
-                        s.media != MediaState.Live -> "Connecting audio…"
+                        s.canSpeak && s.media != MediaState.Live -> "Connecting audio…"
                         n == 0 -> "On the line — waiting for others$listening"
                         else -> "$n on the line$listening: $who"
                     }
@@ -283,9 +283,13 @@ fun PartyLineBarContent(
                             // mute button would read as broken. Say
                             // what we are instead, quietly.
                             Text(
-                                "Listening",
+                                if (s.selfMutedByAdmin) "Muted by an admin" else "Listening",
                                 style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                color = if (s.selfMutedByAdmin) {
+                                    MaterialTheme.colorScheme.error
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                },
                                 modifier = Modifier.padding(horizontal = 8.dp),
                             )
                         }
@@ -427,7 +431,15 @@ private fun Roster(
                     // expected to be able to talk, so a mic icon on
                     // every row would be a column of noise; the
                     // exception is the thing worth seeing.
-                    if (m.muted) {
+                    if (m.mutedByAdmin) {
+                        Spacer(Modifier.width(6.dp))
+                        Icon(
+                            Icons.Filled.MicOff,
+                            contentDescription = "Muted by an admin",
+                            tint = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.size(14.dp),
+                        )
+                    } else if (m.muted) {
                         Spacer(Modifier.width(6.dp))
                         Icon(
                             Icons.Filled.MicOff,
@@ -436,10 +448,11 @@ private fun Roster(
                             modifier = Modifier.size(14.dp),
                         )
                     }
-                    // Op moderation, other people only: we can't know
-                    // another member's permissions from here, so both
-                    // actions are always offered and the SFU sorts it
-                    // out. Wire 5.
+                    // Op moderation, other people only. Wire 5. The
+                    // action shown follows the target's current admin-
+                    // mute state (learned over ADMIN_MUTE_KIND), so a
+                    // muted person offers only "Allow speaking" and an
+                    // unmuted one only "Mute for everyone".
                     if (s.ops && m.ship != selfShip &&
                         onRevokeSpeaking != null && onRestoreSpeaking != null
                     ) {
@@ -459,20 +472,23 @@ private fun Roster(
                                 expanded = menuOpen,
                                 onDismissRequest = { menuOpen = false },
                             ) {
-                                DropdownMenuItem(
-                                    text = { Text("Mute for everyone") },
-                                    onClick = {
-                                        menuOpen = false
-                                        onRevokeSpeaking(m.ship)
-                                    },
-                                )
-                                DropdownMenuItem(
-                                    text = { Text("Allow speaking") },
-                                    onClick = {
-                                        menuOpen = false
-                                        onRestoreSpeaking(m.ship)
-                                    },
-                                )
+                                if (m.mutedByAdmin) {
+                                    DropdownMenuItem(
+                                        text = { Text("Allow speaking") },
+                                        onClick = {
+                                            menuOpen = false
+                                            onRestoreSpeaking(m.ship)
+                                        },
+                                    )
+                                } else {
+                                    DropdownMenuItem(
+                                        text = { Text("Mute for everyone") },
+                                        onClick = {
+                                            menuOpen = false
+                                            onRevokeSpeaking(m.ship)
+                                        },
+                                    )
+                                }
                             }
                         }
                     }

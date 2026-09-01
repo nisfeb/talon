@@ -80,6 +80,15 @@ class AndroidPeerLink(
     }
 
     init {
+        // Communication mode BEFORE the mic is created: a track captured
+        // while AudioManager is still MODE_NORMAL comes up processed for
+        // media, not voice, and sounds crunchy until a rejoin. And every
+        // link acquires — not only the mic — so the session survives an
+        // admin-muted user's up link closing while their down links
+        // still play (the refcount is per link on the line, not per
+        // mic). CallAudioSession refcounts, so only the first configures
+        // and only the last tears down.
+        CallAudioSession.acquire(appContext)
         if (sendAudio) {
             val source = factory.createAudioSource(MediaConstraints())
             val track = factory.createAudioTrack("talon-mic", source)
@@ -91,9 +100,6 @@ class AndroidPeerLink(
                 ),
             )
             micTrack = track
-            // Only the up link holds the audio session: one party line
-            // means one refcount, however many down links it fans out.
-            CallAudioSession.acquire(appContext)
         }
     }
 
@@ -196,9 +202,10 @@ class AndroidPeerLink(
         runCatching { micTrack?.setEnabled(false) }
         // The factory is process-wide; see WebRtcFactory.
         runCatching { pc.close() }
-        // Inside the closed-guard, so a double close can't double-
-        // decrement the session refcount.
-        if (micTrack != null) CallAudioSession.release()
+        // Every link acquired the session; every link releases it,
+        // inside the closed-guard so a double close can't double-
+        // decrement. The last one out (up OR down) runs the teardown.
+        CallAudioSession.release()
         _state.value = MediaState.Closed
     }
 

@@ -79,8 +79,12 @@ final class TalonRtcPeer: NSObject, NativeRtcPeer, RTCPeerConnectionDelegate {
             delegate: self
         )
 
+        // Every link holds the audio session (not only the mic), so a
+        // muted user's up link closing keeps the refcount above zero
+        // while their down links still play. Configured before any mic
+        // track is created.
+        configureAudioSession()
         if sendAudio {
-            configureAudioSession()
             let source = TalonRtcPeer.factory.audioSource(with: constraints)
             let track = TalonRtcPeer.factory.audioTrack(with: source, trackId: "talon-mic")
             micTrack = track
@@ -111,6 +115,9 @@ final class TalonRtcPeer: NSObject, NativeRtcPeer, RTCPeerConnectionDelegate {
         defer { TalonRtcPeer.sessionLock.unlock() }
         TalonRtcPeer.audioPeers += 1
         ownsAudioSession = true
+        // Only the first link on the line configures the session; the
+        // rest just hold a ref so the last one out restores it.
+        guard TalonRtcPeer.audioPeers == 1 else { return }
 
         let session = RTCAudioSession.sharedInstance()
         session.lockForConfiguration()

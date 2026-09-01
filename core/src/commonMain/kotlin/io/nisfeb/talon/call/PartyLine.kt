@@ -54,6 +54,15 @@ data class PartyMember(
      * Clients tell each other over [PartyLine.MUTE_KIND] instead.
      */
     val muted: Boolean = false,
+    /**
+     * Whether an operator has muted this person for everyone
+     * (Galène `unpresent`). Distinct from [muted], which is a
+     * self-mute: an admin mute is not the person's own choice, it
+     * survives a rejoin, and it is what the moderation menu toggles.
+     * Learned over [PartyLine.ADMIN_MUTE_KIND] since Galène tells
+     * only the muted person about their own permission change.
+     */
+    val mutedByAdmin: Boolean = false,
 )
 
 sealed interface PartyState {
@@ -88,6 +97,10 @@ sealed interface PartyState {
         /** Whether the SFU granted us operator rights (room admin) —
          *  gates the per-member moderation menu. */
         val ops: Boolean = false,
+        /** Whether an operator muted US specifically (not a role
+         *  listener). Lets the bar say "Muted by an admin" instead of
+         *  the neutral "Listening". */
+        val selfMutedByAdmin: Boolean = false,
     ) : PartyState
     data class Failed(val room: String, val why: String) : PartyState
 }
@@ -149,6 +162,10 @@ class PartyLine(
     private var speaking: Set<String> = emptySet()
     // Ships that have told us their mic is off.
     private val mutedBy = mutableSetOf<String>()
+    // Ships an operator has muted for everyone. Fed by ADMIN_MUTE_KIND
+    // broadcasts (Galène only tells the muted person themselves), so
+    // every client can mark them and show the right moderation action.
+    private val adminMuted = mutableSetOf<String>()
     // False until our own join settles. Galène replays the existing
     // roster as a run of user-add messages, and chiming once per
     // person already on the line is not an arrival.
@@ -446,6 +463,14 @@ class PartyLine(
                         // making them show us wrong until we next touch
                         // the button.
                         if (id != connectionId) scope.launch { broadcastMuted() }
+                        // Galène doesn't replay past broadcasts to a
+                        // newcomer, so an op re-announces who is
+                        // admin-muted — otherwise the mark is invisible
+                        // to anyone who joined after the mute.
+                        if (id != connectionId && ops && adminMuted.isNotEmpty()) {
+                            val snapshot = adminMuted.toList()
+                            scope.launch { snapshot.forEach { broadcastAdminMute(it, true) } }
+                        }
                     }
                     "delete" -> {
                         if (roster[id]?.ship?.let { it != ourId } == true) {
@@ -469,6 +494,13 @@ class PartyLine(
 
             "usermessage" -> {
                 val kind = msg["kind"]?.jsonPrimitive?.content
+                if (kind == ADMIN_MUTE_KIND) {
+                    val who = msg["username"]?.jsonPrimitive?.content ?: return
+                    val on = msg["value"]?.jsonPrimitive?.content == "true"
+                    if (on) adminMuted.add(who) else adminMuted.remove(who)
+                    publishRoster()
+                    return
+                }
                 if (kind == MUTE_KIND) {
                     val who = msg["username"]?.jsonPrimitive?.content ?: return
                     // Keyed by ship, not connection: the roster dedupes
@@ -698,6 +730,7 @@ class PartyLine(
                         // receive our own broadcast, and the button
                         // should agree with the dot beside our name.
                         muted = if (it.ship == ourId) muted else it.ship in mutedBy,
+                        mutedByAdmin = it.ship in adminMuted,
                     )
                 },
             muted = muted,
@@ -705,6 +738,7 @@ class PartyLine(
             listeners = anon.size,
             canSpeak = canSpeak,
             ops = ops,
+            selfMutedByAdmin = ourId in adminMuted,
         )
     }
 
@@ -717,9 +751,37 @@ class PartyLine(
      * CallController.moderateMember so the revocation survives a
      * rejoin — this alone only reaches the connections live now.
      */
-    fun revokeSpeaking(ship: String) = sendUserAction(ship, "unpresent")
+    fun revokeSpeaking(ship: String) {
+        adminMuted.add(ship)
+        publishRoster()
+        scope.launch { broadcastAdminMute(ship, true) }
+        sendUserAction(ship, "unpresent")
+    }
 
-    fun restoreSpeaking(ship: String) = sendUserAction(ship, "present")
+    fun restoreSpeaking(ship: String) {
+        adminMuted.remove(ship)
+        publishRoster()
+        scope.launch { broadcastAdminMute(ship, false) }
+        sendUserAction(ship, "present")
+    }
+
+    /** Tell the whole group an operator muted (or unmuted) [ship].
+     *  Galène tells only the affected person about their own
+     *  permission change, so this broadcast is how the mark reaches
+     *  everyone else — and the muted person, so they can be told it
+     *  was an admin, not their own choice. */
+    private suspend fun broadcastAdminMute(ship: String, muted: Boolean) {
+        send(
+            buildJsonObject {
+                put("type", "usermessage")
+                put("source", connectionId)
+                put("dest", "")
+                put("username", ship)
+                put("kind", ADMIN_MUTE_KIND)
+                put("value", muted)
+            },
+        )
+    }
 
     private fun sendUserAction(ship: String, kind: String) {
         // Snapshot before launching: the roster mutates on the pump.
@@ -810,6 +872,7 @@ class PartyLine(
         downLinks.values.forEach { it.close() }
         downLinks.clear()
         roster.clear()
+        adminMuted.clear()
         upState = MediaState.Idle
         if (_state.value !is PartyState.Failed) _state.value = PartyState.Idle
     }
@@ -836,5 +899,6 @@ class PartyLine(
          * Galène client on the same line is unaffected.
          */
         internal const val MUTE_KIND = "talon-mute"
+        internal const val ADMIN_MUTE_KIND = "talon-adminmute"
     }
 }

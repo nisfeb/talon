@@ -217,4 +217,64 @@ class PartyLineRolesTest {
             "~bus was never the target",
         )
     }
+
+    /** Every ADMIN_MUTE_KIND broadcast (username -> muted) recorded. */
+    private fun adminMutes(ws: RecordingWs): List<Pair<String, Boolean>> =
+        synchronized(ws.sent) { ws.sent.toList() }.mapNotNull { raw ->
+            val o = json.parseToJsonElement(raw).jsonObject
+            if (o["type"]?.jsonPrimitive?.content != "usermessage") return@mapNotNull null
+            if (o["kind"]?.jsonPrimitive?.content != PartyLine.ADMIN_MUTE_KIND) return@mapNotNull null
+            (o["username"]?.jsonPrimitive?.content ?: "") to
+                (o["value"]?.jsonPrimitive?.content == "true")
+        }
+
+    @Test
+    fun revokingSpeakingMarksTheMemberAndBroadcastsIt() = runBlocking {
+        val line = lineWith(mutableListOf())
+        val ws = RecordingWs()
+        line.session = ws
+        line.ops = true
+        line.handle(joined(perms = listOf("op", "present", "message")))
+        line.handle(userAdd("c1", "~zod"))
+        line.handle(userAdd("c2", "~bus"))
+
+        line.revokeSpeaking("~zod")
+        // The op's own roster marks ~zod immediately, before any echo.
+        val zod = live(line).members.first { it.ship == "~zod" }
+        assertTrue(zod.mutedByAdmin, "the muted member is marked for the op at once")
+        assertTrue(live(line).members.first { it.ship == "~bus" }.mutedByAdmin.not())
+
+        withTimeout(5_000) { while (adminMutes(ws).none { it == "~zod" to true }) delay(10) }
+
+        line.restoreSpeaking("~zod")
+        assertTrue(live(line).members.first { it.ship == "~zod" }.mutedByAdmin.not())
+        withTimeout(5_000) { while (adminMutes(ws).none { it == "~zod" to false }) delay(10) }
+    }
+
+    @Test
+    fun anAdminMuteBroadcastMarksTheMemberForEveryone() = runBlocking {
+        // A non-op receiving the broadcast still marks the member —
+        // this is how the mark reaches clients Galène never told.
+        val line = lineWith(mutableListOf())
+        val ws = RecordingWs()
+        line.session = ws
+        line.handle(joined(perms = listOf("present", "message")))
+        line.handle(userAdd("c1", "~zod"))
+
+        line.handle(
+            json.decodeFromString(
+                """{"type":"usermessage","kind":"${PartyLine.ADMIN_MUTE_KIND}",""" +
+                    """"username":"~zod","value":"true"}""",
+            ),
+        )
+        assertTrue(live(line).members.first { it.ship == "~zod" }.mutedByAdmin)
+
+        line.handle(
+            json.decodeFromString(
+                """{"type":"usermessage","kind":"${PartyLine.ADMIN_MUTE_KIND}",""" +
+                    """"username":"~zod","value":"false"}""",
+            ),
+        )
+        assertTrue(live(line).members.first { it.ship == "~zod" }.mutedByAdmin.not())
+    }
 }
