@@ -399,6 +399,9 @@ fun main() {
                         Notification(title = title, message = body),
                     )
                 },
+                // Clicking the notification surfaces Talon — same
+                // bring-to-front routine as the tray click.
+                onActivate = showAndFocus,
             )
         }
         Window(

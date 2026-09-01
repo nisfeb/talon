@@ -24,6 +24,8 @@ import javax.swing.filechooser.FileNameExtensionFilter
  * modal dialogs — the user picks once, dismisses, then a second
  * picker pops up unexpectedly.
  */
+private const val TAG = "DesktopFilePicker"
+
 class DesktopFilePicker : FilePicker {
     private val mutex = Mutex()
 
@@ -37,7 +39,7 @@ class DesktopFilePicker : FilePicker {
                 )
                 isAcceptAllFileFilterUsed = false
             }
-            if (chooser.showOpenDialog(null) != JFileChooser.APPROVE_OPTION) null
+            if (chooser.showOpenDialog(appFrame()) != JFileChooser.APPROVE_OPTION) null
             else chooser.selectedFile
         } ?: return null
         return withContext(Dispatchers.IO) {
@@ -47,6 +49,8 @@ class DesktopFilePicker : FilePicker {
                     mimeType = mimeFromExtension(file.extension.lowercase()),
                     displayName = file.name,
                 )
+            }.onFailure {
+                Log.w(TAG, "read failed for ${file.absolutePath}: ${it.message}")
             }.getOrNull()
         }
     }
@@ -57,7 +61,7 @@ class DesktopFilePicker : FilePicker {
                 dialogTitle = "Pick a file"
                 isAcceptAllFileFilterUsed = true
             }
-            if (chooser.showOpenDialog(null) != JFileChooser.APPROVE_OPTION) null
+            if (chooser.showOpenDialog(appFrame()) != JFileChooser.APPROVE_OPTION) null
             else chooser.selectedFile
         } ?: return null
         return withContext(Dispatchers.IO) {
@@ -71,9 +75,18 @@ class DesktopFilePicker : FilePicker {
                         ?: mimeFromExtension(file.extension.lowercase()),
                     displayName = file.name,
                 )
+            }.onFailure {
+                Log.w(TAG, "read failed for ${file.absolutePath}: ${it.message}")
             }.getOrNull()
         }
     }
+
+    // Parent the chooser to the app window so it opens over Talon and
+    // stays in front — showOpenDialog(null) lets some WMs center it on
+    // the primary monitor or stack it behind the app. Same title-based
+    // lookup Main.kt's bring-to-front routine uses; runs on the EDT.
+    private fun appFrame(): java.awt.Frame? =
+        java.awt.Frame.getFrames().firstOrNull { it.title == "Talon" }
 
     private fun mimeFromExtension(ext: String): String = when (ext) {
         "jpg", "jpeg" -> "image/jpeg"

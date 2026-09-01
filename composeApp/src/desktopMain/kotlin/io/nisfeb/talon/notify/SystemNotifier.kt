@@ -38,6 +38,10 @@ import java.util.concurrent.atomic.AtomicReference
  */
 class SystemNotifier(
     private val trayFallback: (String, String) -> Unit,
+    // Invoked when the user clicks the notification (Linux
+    // notify-send path only — Main.kt passes its bring-to-front
+    // routine). Other backends have no click signal to hook.
+    private val onActivate: () -> Unit = {},
 ) : Notifier {
 
     private enum class Backend { LINUX_NOTIFY_SEND, LINUX_GDBUS, FALLBACK }
@@ -107,9 +111,33 @@ class SystemNotifier(
             args += "-i"
             args += it.absolutePath
         }
+        // The "default" action fires when the user clicks the
+        // notification body itself. With -A, notify-send stays alive
+        // until the toast closes and prints the activated action's
+        // name on stdout — we're already on the per-notification
+        // daemon thread, so blocking on that here is free.
+        args += "-A"
+        args += "default=Open"
+        // -A implies --wait, and the wait is only bounded when an
+        // expire-time is set: GNOME parks non-transient toasts in the
+        // tray without ever closing them, and each unbounded wait is a
+        // parked thread plus a live notify-send. Ten seconds trades
+        // clicks on tray-archived toasts for a bounded process count.
+        args += "-t"
+        args += "10000"
         args += title
         args += body
-        spawn(args)
+        val process = ProcessBuilder(args)
+            .redirectError(ProcessBuilder.Redirect.DISCARD)
+            .start()
+        val action = process.inputStream.bufferedReader().use { it.readLine() }
+        if (process.waitFor() != 0) {
+            // Likely a notify-send too old for -A (< 0.7.10). Throwing
+            // IOException routes through tryEmit's demotion so the
+            // retry lands on gdbus instead of silently dropping toasts.
+            throw IOException("notify-send exited ${process.exitValue()}")
+        }
+        if (action?.trim() == "default") onActivate()
     }
 
     private fun notifyGdbus(title: String, body: String) {

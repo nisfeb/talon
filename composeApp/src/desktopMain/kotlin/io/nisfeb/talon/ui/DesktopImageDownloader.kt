@@ -7,11 +7,12 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.File
 import java.io.IOException
+import java.util.concurrent.TimeUnit
 
 /**
- * Desktop backend for [ImageDownloader]. Drops files into
- * ~/Downloads/Talon/ — same default Firefox / Chrome use, no save
- * dialog so the action stays one-click. Caller-facing location
+ * Desktop backend for [ImageDownloader]. Drops files into a Talon/
+ * subfolder of the user's downloads dir — same default Firefox /
+ * Chrome use, no save dialog so the action stays one-click. Caller-facing location
  * string is the directory path so the snackbar can offer "Saved to
  * /home/.../Downloads/Talon".
  */
@@ -55,12 +56,35 @@ class DesktopImageDownloader(
         }
     }
 
-    /** ~/Downloads/Talon/ on Linux/macOS, %USERPROFILE%\Downloads\Talon on Windows. */
+    /**
+     * <downloads>/Talon/ — on Linux the real (possibly localized) XDG
+     * download dir via `xdg-user-dir` (~/Téléchargements etc.), else
+     * ~/Downloads (macOS) / %USERPROFILE%\Downloads (Windows).
+     */
     private fun downloadsDir(): File {
         val home = System.getProperty("user.home")
             ?: error("user.home not set")
-        return File(File(home, "Downloads"), "Talon")
+        val base = if ("linux" in System.getProperty("os.name").lowercase()) {
+            xdgDownloadDir(home) ?: File(home, "Downloads")
+        } else {
+            File(home, "Downloads")
+        }
+        return File(base, "Talon")
     }
+
+    private fun xdgDownloadDir(home: String): File? = runCatching {
+        val p = ProcessBuilder("xdg-user-dir", "DOWNLOAD")
+            .redirectError(ProcessBuilder.Redirect.DISCARD)
+            .start()
+        if (!p.waitFor(2, TimeUnit.SECONDS)) {
+            p.destroy()
+            return null
+        }
+        val out = p.inputStream.bufferedReader().readText().trim()
+        // xdg-user-dir echoes $HOME when DOWNLOAD is unset — don't
+        // create ~/Talon in that case.
+        File(out).takeIf { out.isNotBlank() && out != home && it.isDirectory }
+    }.getOrNull()
 
     /**
      * If `target` already exists, append " (1)", " (2)", ... before the

@@ -14,6 +14,7 @@ import java.awt.datatransfer.DataFlavor
 import java.io.File
 import java.net.URLConnection
 import javax.imageio.ImageIO
+import javax.swing.SwingUtilities
 
 private const val TAG = "FileDropTarget"
 
@@ -34,9 +35,28 @@ actual fun Modifier.fileDropTarget(
     val target = remember {
         object : DragAndDropTarget {
             override fun onDrop(event: DragAndDropEvent): Boolean {
-                val files = readDroppedFiles(event)
-                if (files.isEmpty()) return false
-                callback.onFiles(files)
+                // The transferable is only valid during this callback,
+                // so extract the (cheap) file list here on the AWT
+                // event thread — but push the actual disk reads onto a
+                // background thread: readBytes() on a large drop would
+                // otherwise freeze painting for the whole read.
+                val list = extractFileList(event)
+                if (list.isEmpty()) return false
+                // Pin delivery to the conversation that RECEIVED the
+                // drop: the holder is rebound on every recomposition,
+                // and switching chats while a large read runs would
+                // otherwise hand these files to the new conversation's
+                // lambda — auto-sending them into the wrong room.
+                val deliver = callback.onFiles
+                Thread {
+                    val files = list.mapNotNull { readDroppedFile(it) }
+                    if (files.isNotEmpty()) {
+                        SwingUtilities.invokeLater { deliver(files) }
+                    }
+                }.apply {
+                    isDaemon = true
+                    name = "Talon-drop-read"
+                }.start()
                 return true
             }
         }
@@ -52,7 +72,7 @@ private class CallbackHolder {
 }
 
 @OptIn(ExperimentalComposeUiApi::class)
-private fun readDroppedFiles(event: DragAndDropEvent): List<DroppedFile> {
+private fun extractFileList(event: DragAndDropEvent): List<File> {
     val transferable = runCatching { event.awtTransferable }.getOrElse {
         Log.w(TAG, "no awtTransferable on drop event: ${it.message}")
         return emptyList()
@@ -62,13 +82,12 @@ private fun readDroppedFiles(event: DragAndDropEvent): List<DroppedFile> {
         return emptyList()
     }
     @Suppress("UNCHECKED_CAST")
-    val list = runCatching {
+    return runCatching {
         transferable.getTransferData(DataFlavor.javaFileListFlavor) as? List<File>
     }.getOrElse {
         Log.w(TAG, "getTransferData(javaFileListFlavor) failed: ${it.message}")
         return emptyList()
-    } ?: return emptyList()
-    return list.mapNotNull { readDroppedFile(it) }
+    } ?: emptyList()
 }
 
 private fun readDroppedFile(file: File): DroppedFile? {
