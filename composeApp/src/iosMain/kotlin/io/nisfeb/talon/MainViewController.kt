@@ -121,6 +121,10 @@ fun MainViewController(rtc: NativeRtcFactory?): UIViewController {
             dailyDigestSettings = dailyDigestSettings,
             audioDevices = io.nisfeb.talon.call.IosAudioDevices(),
             callSounds = io.nisfeb.talon.call.IosCallSoundPlayer(),
+            // PushKit VoIP token → relay, so a backgrounded phone
+            // gets an APNs VoIP ring. The token itself arrives from
+            // CallPush.swift via IosVoipBridge.
+            pushTokenProvider = io.nisfeb.talon.notify.IosPushTokenProvider(),
         )
         // Back gesture. A Compose view controller gets none of UIKit's
         // navigation edge-swipe, so we draw our own: a narrow strip on
