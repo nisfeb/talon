@@ -67,7 +67,7 @@ docker run -d \
   talon-relay
 ```
 
-That's the whole deploy. No credentials files to mount.
+That's the whole deploy for UnifiedPush. iOS VoIP adds an APNs key — see below.
 
 ## Required env
 
@@ -81,6 +81,38 @@ That's the whole deploy. No credentials files to mount.
 |---|---|---|
 | `RELAY_PORT` | `8080` | HTTP port. |
 | `RELAY_DB` | `./relay.db` | SQLite file path. |
+
+## APNs VoIP (iOS native call ringing)
+
+Optional. Set these to push ring / ring-cancel to iOS devices as APNs
+VoIP so a backgrounded or killed iPhone rings like a phone call.
+Absent, the relay stays UnifiedPush-only and an `ios-voip` device's
+rings are dropped with a warning — nothing else is affected.
+
+| Var | Default | Purpose |
+|---|---|---|
+| `APNS_TEAM_ID` | — | Apple team id (10 chars). |
+| `APNS_KEY_ID` | — | The APNs auth key's id (10 chars). |
+| `APNS_P8` | — | The `.p8` key's PEM contents, inline. |
+| `APNS_P8_FILE` | — | Or a path to the `.p8` (use this with a mount). |
+| `APNS_BUNDLE_ID` | `io.nisfeb.talon` | Topic is `<bundle>.voip`. |
+| `APNS_PRODUCTION` | `true` | `true` = api.push.apple.com (TestFlight / App Store); `false` = sandbox (a development build). |
+
+All three of team id, key id, and a key (`APNS_P8` or `APNS_P8_FILE`)
+must be present or APNs stays off. The same `.p8` signs VoIP — no
+separate VoIP Services certificate is needed. Mount the key rather
+than inlining the PEM:
+
+```bash
+docker run -d --name talon-relay -p 8080:8080 \
+  -v $(pwd)/data:/data \
+  -v $(pwd)/AuthKey_XXXXXXXXXX.p8:/secrets/apns.p8:ro \
+  -e RELAY_MASTER_SECRET=... -e RELAY_DB=/data/relay.db \
+  -e APNS_TEAM_ID=XXXXXXXXXX \
+  -e APNS_KEY_ID=XXXXXXXXXX \
+  -e APNS_P8_FILE=/secrets/apns.p8 \
+  talon-relay
+```
 
 ## API
 

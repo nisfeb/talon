@@ -546,7 +546,12 @@ fun App(
             ) {
                 remember {
                     io.nisfeb.talon.call.CallController(session, callEngineProvider, sounds = callSounds, defaults = io.nisfeb.talon.call.buildCallDefaults)
-                        .also { it.start() }
+                        .also {
+                            it.start()
+                            // iOS wires CallKit answer/decline here;
+                            // no-op on Android/desktop.
+                            io.nisfeb.talon.call.bindNativeCallActions(it)
+                        }
                 }
             } else {
                 null
