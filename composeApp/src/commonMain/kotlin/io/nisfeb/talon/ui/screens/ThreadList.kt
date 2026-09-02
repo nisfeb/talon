@@ -20,6 +20,8 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.size
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
@@ -628,19 +630,28 @@ private fun EditThreadMessageDialog(
     onDismiss: () -> Unit,
     onSave: (String) -> Unit,
 ) {
-    var text by remember { mutableStateOf(initial) }
+    val focusRequester = remember { FocusRequester() }
+    var value by remember {
+        // Caret at the end, so an edit continues where the text stops.
+        mutableStateOf(TextFieldValue(initial, selection = TextRange(initial.length)))
+    }
+    // Bring the keyboard up as the dialog appears.
+    LaunchedEffect(Unit) { runCatching { focusRequester.requestFocus() } }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Edit message") },
         text = {
             OutlinedTextField(
-                value = text,
-                onValueChange = { text = it },
-                modifier = Modifier.fillMaxWidth(),
+                value = value,
+                onValueChange = { value = it },
+                modifier = Modifier.fillMaxWidth().focusRequester(focusRequester),
             )
         },
         confirmButton = {
-            TextButton(onClick = { onSave(text.trim()) }, enabled = text.isNotBlank()) {
+            TextButton(
+                onClick = { onSave(value.text.trim()) },
+                enabled = value.text.isNotBlank(),
+            ) {
                 Text("Save")
             }
         },

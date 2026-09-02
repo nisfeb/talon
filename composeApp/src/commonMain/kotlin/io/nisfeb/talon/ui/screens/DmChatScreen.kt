@@ -906,8 +906,13 @@ fun DmChatScreen(
                     // same autocomplete, and the conversation stays
                     // visible behind what you are changing.
                     val prior = composerState.draft.text
+                    val editText = io.nisfeb.talon.urbit.editableText(target.contentJson)
                     composerState.draft = androidx.compose.ui.text.input.TextFieldValue(
-                        io.nisfeb.talon.urbit.editableText(target.contentJson),
+                        editText,
+                        // Caret at the end of the text being edited, not
+                        // its start — you almost always append or fix a
+                        // typo near where you stopped typing.
+                        selection = androidx.compose.ui.text.TextRange(editText.length),
                     )
                     composerState.editing = io.nisfeb.talon.ui.EditTarget(
                         postId = target.id,
@@ -1057,9 +1062,14 @@ fun DmChatScreen(
                         .maxByOrNull { it.sentMs }
                         ?.let { target ->
                             val prior = composerState.draft.text
+                            val editText =
+                                io.nisfeb.talon.urbit.editableText(target.contentJson)
                             composerState.draft =
                                 androidx.compose.ui.text.input.TextFieldValue(
-                                    io.nisfeb.talon.urbit.editableText(target.contentJson),
+                                    editText,
+                                    selection = androidx.compose.ui.text.TextRange(
+                                        editText.length,
+                                    ),
                                 )
                             composerState.editing = io.nisfeb.talon.ui.EditTarget(
                                 postId = target.id,

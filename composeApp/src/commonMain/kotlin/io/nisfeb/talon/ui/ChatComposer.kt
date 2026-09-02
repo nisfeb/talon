@@ -32,6 +32,8 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -236,6 +238,16 @@ fun ChatComposer(
     strategy: ChatSendStrategy,
 ) {
     val scope = rememberCoroutineScope()
+    // Focus the composer when an edit begins, which brings the soft
+    // keyboard up on touch. Keyed on the post id so starting an edit
+    // (or switching to a different one) fires; ending an edit (-> null)
+    // does not.
+    val editFocusRequester = remember { FocusRequester() }
+    LaunchedEffect(state.editing?.postId) {
+        if (state.editing != null) {
+            runCatching { editFocusRequester.requestFocus() }
+        }
+    }
     val pickImage = rememberImagePicker()
     val pickAnyFile = io.nisfeb.talon.util.rememberAnyFilePicker()
 
@@ -836,6 +848,7 @@ fun ChatComposer(
                 visualTransformation = EmojiVisualTransformation,
                 modifier = Modifier
                     .weight(1f)
+                    .focusRequester(editFocusRequester)
                     // Android paste-image route (no-op on desktop, which
                     // uses the Ctrl+V intercept below). Same upload+send
                     // path as drag-drop and the picker.
