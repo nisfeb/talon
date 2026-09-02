@@ -36,7 +36,11 @@ import java.util.concurrent.TimeUnit
  * text nor any part of the media negotiation transits the relay or
  * the distributor.
  */
-class Push {
+class Push(
+    /** Set when APNs VoIP is configured; null keeps the relay running
+     *  UnifiedPush-only (iOS devices then get no native ring). */
+    private val apns: Apns? = null,
+) {
 
     private val log = LoggerFactory.getLogger("Push")
     private val http = OkHttpClient.Builder()
@@ -48,7 +52,13 @@ class Push {
     /** Wake the device for an incoming call. Same hint-only contract:
      *  the caller's @p and the call id are all that travel — the SDP
      *  and fingerprint stay on the ship's own channel. */
-    fun sendRing(endpoint: String, patp: String, from: String, callId: String) {
+    fun sendRing(
+        endpoint: String,
+        patp: String,
+        from: String,
+        callId: String,
+        platform: String = "",
+    ) {
         val body = buildString {
             append("""{"event":"ring","patp":"""")
             append(escape(patp))
@@ -57,6 +67,16 @@ class Push {
             append("""","id":"""")
             append(escape(callId))
             append("\"}")
+        }
+        if (platform == IOS_VOIP) {
+            // iOS: a VoIP push (endpoint is the PushKit token) that
+            // wakes the killed app to report the call to CallKit.
+            val a = apns ?: run {
+                log.warn("ios-voip ring but APNs not configured; dropping")
+                return
+            }
+            a.sendVoip(endpoint, body, expirationSecs = RING_TTL_SECS)
+            return
         }
         // A ring is worthless once the caller has given up, so it is
         // urgent and short-lived: better to drop it than deliver it
@@ -68,7 +88,12 @@ class Push {
      *  user's clients answered. Same urgency/TTL treatment as the
      *  ring itself — a cancel is worthless late, better dropped than
      *  delivered to a phone that stopped ringing minutes ago. */
-    fun sendRingCancel(endpoint: String, patp: String, callId: String) {
+    fun sendRingCancel(
+        endpoint: String,
+        patp: String,
+        callId: String,
+        platform: String = "",
+    ) {
         val body = buildString {
             append("""{"event":"ring-cancel","patp":"""")
             append(escape(patp))
@@ -76,10 +101,20 @@ class Push {
             append(escape(callId))
             append("\"}")
         }
+        if (platform == IOS_VOIP) {
+            apns?.sendVoip(endpoint, body, expirationSecs = RING_TTL_SECS)
+            return
+        }
         post(endpoint, body, urgency = "high", ttlSecs = RING_TTL_SECS)
     }
 
-    fun send(endpoint: String, patp: String, whom: String, postId: String) {
+    fun send(endpoint: String, patp: String, whom: String, postId: String, platform: String = "") {
+        if (platform == IOS_VOIP) {
+            // A VoIP push must trigger a call; Apple forbids using it
+            // for a message. iOS message alerts are a separate token
+            // and path, out of scope here.
+            return
+        }
         // Hand-rolled JSON to avoid pulling kotlinx-serialization
         // through Push's hot path. The fields are all server-
         // controlled: patp matches `~[a-z0-9-]+`, whom is one of
@@ -147,10 +182,14 @@ class Push {
         .replace("\\", "\\\\")
         .replace("\"", "\\\"")
 
-    private companion object {
+    companion object {
         private val JSON_MEDIA = "application/json".toMediaType()
 
         /** Slightly over the client's 45s ring timeout. */
         private const val RING_TTL_SECS = 60
+
+        /** [platform] value marking a device that takes APNs VoIP
+         *  pushes (its push_endpoint is the PushKit token). */
+        const val IOS_VOIP = "ios-voip"
     }
 }

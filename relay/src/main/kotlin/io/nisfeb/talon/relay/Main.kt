@@ -32,7 +32,11 @@ fun main() {
         ?: error("RELAY_MASTER_SECRET env var is required")
 
     val db = Db(dbPath).also { it.migrate() }
-    val push = Push()
+    // APNs VoIP is optional: set the four APNS_* vars to enable native
+    // iOS call ringing. Absent, the relay runs UnifiedPush-only and an
+    // ios-voip device's rings are dropped with a warning.
+    val apns = buildApns(log)
+    val push = Push(apns)
     val httpClient = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(0, TimeUnit.SECONDS)
@@ -40,7 +44,7 @@ fun main() {
         .build()
     val pool = ConnectionPool(db = db, push = push, masterSecret = masterSecret)
 
-    log.info("starting relay on :$port (db=$dbPath, transport=unifiedpush)")
+    log.info("starting relay on :$port (db=$dbPath, unifiedpush + apns=${apns != null})")
     pool.startAll()
 
     val server = embeddedServer(Netty, port = port) {
@@ -53,4 +57,31 @@ fun main() {
         server.stop(1_000, 5_000)
     })
     server.start(wait = true)
+}
+
+/**
+ * Build the APNs VoIP sender from env, or null if not fully
+ * configured. All four required vars must be present; APNS_P8 is the
+ * .p8 key's PEM contents, or APNS_P8_FILE a path to it.
+ *
+ *   APNS_TEAM_ID      Apple team id (10 chars)
+ *   APNS_KEY_ID       the .p8 key's id (10 chars)
+ *   APNS_P8 / APNS_P8_FILE   the .p8 PEM, inline or by path
+ *   APNS_BUNDLE_ID    default io.nisfeb.talon; topic is "<id>.voip"
+ *   APNS_PRODUCTION   "true" (default) for TestFlight/App Store
+ */
+private fun buildApns(log: org.slf4j.Logger): Apns? {
+    val teamId = System.getenv("APNS_TEAM_ID")
+    val keyId = System.getenv("APNS_KEY_ID")
+    val p8 = System.getenv("APNS_P8")
+        ?: System.getenv("APNS_P8_FILE")?.let { java.io.File(it).takeIf(java.io.File::exists)?.readText() }
+    if (teamId.isNullOrBlank() || keyId.isNullOrBlank() || p8.isNullOrBlank()) {
+        log.info("APNs not configured (set APNS_TEAM_ID/APNS_KEY_ID/APNS_P8); iOS VoIP disabled")
+        return null
+    }
+    val bundleId = System.getenv("APNS_BUNDLE_ID") ?: "io.nisfeb.talon"
+    val production = (System.getenv("APNS_PRODUCTION") ?: "true").toBoolean()
+    return Apns(teamId, keyId, p8, bundleId, production).also {
+        log.info("APNs VoIP enabled (team=$teamId key=$keyId bundle=$bundleId prod=$production)")
+    }
 }
