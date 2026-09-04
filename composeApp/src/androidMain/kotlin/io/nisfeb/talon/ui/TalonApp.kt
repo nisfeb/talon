@@ -919,6 +919,14 @@ fun TalonApp(
     val urbAwareUriHandler = remember(platformUriHandler, urbLinkHandler) {
         io.nisfeb.talon.ui.UrbAwareUriHandler(platformUriHandler, urbLinkHandler)
     }
+    val urbFetcher: suspend (String) -> io.nisfeb.talon.urbit.UrbUnfurlCache.Unfurl? =
+        remember(app) {
+            { urbUrl ->
+                val s = app.sessionStore.active()?.shipUrl
+                if (s == null) null
+                else io.nisfeb.talon.urbit.UrbUnfurlCache.await(app.ktorHttp, s, urbUrl)
+            }
+        }
     val citeResolver = remember(app) { io.nisfeb.talon.ui.TalonCiteResolver(app.db, app.repo) }
     val openCitation: (io.nisfeb.talon.urbit.StoryPart.Citation) -> Unit =
         remember(citeResolver) {
@@ -977,6 +985,7 @@ fun TalonApp(
         LocalCalendarLauncher provides calendarLauncher,
         LocalMapsLauncher provides mapsLauncher,
         io.nisfeb.talon.ui.LocalUrbLinkHandler provides urbLinkHandler,
+        io.nisfeb.talon.ui.LocalUrbFetcher provides urbFetcher,
         // Route urb:// opened via Compose link handling (statuses, bios)
         // to Lattice. Also avoids an ActivityNotFoundException crash for
         // users without Lattice — they get the install prompt instead.

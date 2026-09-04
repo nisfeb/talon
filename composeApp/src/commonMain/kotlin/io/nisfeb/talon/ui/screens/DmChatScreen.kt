@@ -1469,6 +1469,14 @@ private fun MessageRow(
                     modifier = Modifier.padding(top = 6.dp),
                 )
             }
+            val firstUrb = remember(parts) { io.nisfeb.talon.ui.firstUrbUrl(parts) }
+            if (firstUrb != null) {
+                io.nisfeb.talon.ui.UrbUnfurlCard(
+                    urbUrl = firstUrb,
+                    onOpen = onLinkTap,
+                    modifier = Modifier.padding(top = 6.dp),
+                )
+            }
             if (grouped.isNotEmpty()) {
                 FlowRow(
                     modifier = Modifier.padding(top = 4.dp),

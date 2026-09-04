@@ -123,7 +123,27 @@ fun firstLinkUrl(parts: List<io.nisfeb.talon.urbit.StoryPart>): String? {
                 end = p.text.length,
             )
             for (ann in anns) {
+                // urb:// links get their own unfurl card (firstUrbUrl);
+                // don't feed them to the OpenGraph previewer.
+                if (ann.item.startsWith(io.nisfeb.talon.urbit.UrbLink.SCHEME)) continue
                 if (ann.item.trimEnd('/') !in previewed) return ann.item
+            }
+        }
+    }
+    return null
+}
+
+/** The first urb:// link in [parts], for the [UrbUnfurlCard]. */
+fun firstUrbUrl(parts: List<io.nisfeb.talon.urbit.StoryPart>): String? {
+    for (p in parts) {
+        if (p is io.nisfeb.talon.urbit.StoryPart.Text) {
+            val anns = p.text.getStringAnnotations(
+                tag = io.nisfeb.talon.urbit.URL_TAG,
+                start = 0,
+                end = p.text.length,
+            )
+            for (ann in anns) {
+                if (ann.item.startsWith(io.nisfeb.talon.urbit.UrbLink.SCHEME)) return ann.item
             }
         }
     }

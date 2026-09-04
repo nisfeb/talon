@@ -13,7 +13,13 @@ import io.ktor.http.encodeURLParameter
  * inline, or a 303 to its /x explorer for a page/tree node).
  */
 object UrbHttp {
-    /** The lattice reader URL on [shipUrl] for the address [urbUrl]. */
+    /** The lattice reader URL on [shipUrl] for the address [urbUrl]
+     *  (returns HTML — for the webview / browser). */
     fun readerUrl(shipUrl: String, urbUrl: String): String =
         "${shipUrl.trimEnd('/')}/apps/lattice?url=${urbUrl.encodeURLParameter()}"
+
+    /** The lattice /fetch URL for [urbUrl] on [shipUrl] — returns the
+     *  referent's body as gemtext JSON, for the inline unfurl. */
+    fun fetchUrl(shipUrl: String, urbUrl: String): String =
+        "${shipUrl.trimEnd('/')}/apps/lattice/fetch?url=${urbUrl.encodeURLParameter()}"
 }

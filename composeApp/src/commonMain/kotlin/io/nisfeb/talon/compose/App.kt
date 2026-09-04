@@ -1031,6 +1031,17 @@ fun App(
           val urbAwareUriHandler = remember(platformUriHandler, urbLinkHandler) {
               io.nisfeb.talon.ui.UrbAwareUriHandler(platformUriHandler, urbLinkHandler)
           }
+          // Resolves a urb:// address to title+snippet for the inline
+          // unfurl card, against the active ship over the authenticated
+          // http client (which already carries the session cookie).
+          val urbFetcher: suspend (String) -> io.nisfeb.talon.urbit.UrbUnfurlCache.Unfurl? =
+              remember(http) {
+                  { urbUrl ->
+                      val s = sessionStore.active()?.shipUrl
+                      if (s == null) null
+                      else io.nisfeb.talon.urbit.UrbUnfurlCache.await(http, s, urbUrl)
+                  }
+              }
           val citeScope = rememberCoroutineScope()
           val citeResolver = remember(db, repo) {
               io.nisfeb.talon.ui.TalonCiteResolver(db, repo)
@@ -1093,6 +1104,7 @@ fun App(
               io.nisfeb.talon.ui.LocalChatDensity provides chatDensity,
               androidx.compose.ui.platform.LocalDensity provides scaledDensity,
               io.nisfeb.talon.ui.LocalUrbLinkHandler provides urbLinkHandler,
+              io.nisfeb.talon.ui.LocalUrbFetcher provides urbFetcher,
               androidx.compose.ui.platform.LocalUriHandler provides urbAwareUriHandler,
               io.nisfeb.talon.ui.LocalCiteResolver provides citeResolver,
               io.nisfeb.talon.ui.LocalCitationOpen provides openCitation,
