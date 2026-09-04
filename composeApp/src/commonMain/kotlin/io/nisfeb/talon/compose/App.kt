@@ -1010,26 +1010,21 @@ fun App(
                       chatDensity.fontScaleMultiplier * userFontScale,
               )
           }
-          // urb:// links resolve through the viewer's own ship's
-          // lattice reader. On mobile an in-app webview popover opens;
-          // on desktop (no embedded browser) the HTTP reader URL goes
-          // to the system browser, where the ship web session lives.
+          // urb:// links: check lattice is installed on our ship,
+          // offer to install it (from ~ricsul-bilwyt) if not, then
+          // resolve — webview popover on mobile, system browser on
+          // desktop. The host emits its own dialog/sheet overlays.
           val platformUriHandler = androidx.compose.ui.platform.LocalUriHandler.current
-          var urbViewUrl by remember { mutableStateOf<String?>(null) }
-          val urbLinkHandler: (String) -> Unit = remember(sessionStore, platformUriHandler) {
-              { url ->
-                  val shipUrl = sessionStore.active()?.shipUrl
-                  when {
-                      shipUrl == null -> Unit // not signed in; nothing to resolve against
-                      io.nisfeb.talon.ui.isUrbWebViewSupported -> urbViewUrl = url
-                      else -> runCatching {
-                          platformUriHandler.openUri(
-                              io.nisfeb.talon.urbit.UrbHttp.readerUrl(shipUrl, url),
-                          )
-                      }
-                  }
-              }
-          }
+          val urbLinkHandler = io.nisfeb.talon.ui.rememberUrbLinkHandler(
+              http = http,
+              shipUrl = { sessionStore.active()?.shipUrl },
+              cookie = {
+                  sessionStore.active()?.let { "${it.cookieName}=${it.cookieValue}" }
+              },
+              poke = { app, mark, body ->
+                  runCatching { repo.pokeRaw(app, mark, body) }.isSuccess
+              },
+          )
           // Wrap the platform URI handler so urb:// links opened via
           // Compose's built-in LinkAnnotation handling (statuses, bios)
           // also route here, not just the chat screens' onLinkTap.
@@ -1103,16 +1098,6 @@ fun App(
               io.nisfeb.talon.ui.LocalCitationOpen provides openCitation,
               io.nisfeb.talon.ui.LocalDisplayName provides citeDisplayName,
           ) {
-            urbViewUrl?.let { u ->
-                sessionStore.active()?.let { active ->
-                    io.nisfeb.talon.ui.UrbViewerSheet(
-                        urbUrl = u,
-                        shipUrl = active.shipUrl,
-                        cookie = "${active.cookieName}=${active.cookieValue}",
-                        onDismiss = { urbViewUrl = null },
-                    )
-                }
-            }
             val rootFocusRequester = remember { FocusRequester() }
             LaunchedEffect(Unit) { rootFocusRequester.requestFocus() }
             Surface(

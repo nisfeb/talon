@@ -46,30 +46,41 @@ class UrbAwareUriHandler(
 }
 
 /**
- * Prompt shown when a tapped urb:// link has no handler on the device.
- * Links to Lattice's releases via the platform URI handler.
+ * Offered when a tapped urb:// link can't resolve because lattice
+ * (the %grubbery desk) isn't installed on the user's own ship.
+ * Installing pulls %grubbery from ~ricsul-bilwyt via kiln.
  */
 @Composable
-fun InstallLatticeDialog(onDismiss: () -> Unit) {
-    val uriHandler = LocalUriHandler.current
+fun LatticeInstallDialog(
+    installing: Boolean,
+    error: String?,
+    onInstall: () -> Unit,
+    onDismiss: () -> Unit,
+) {
     AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Opens in Lattice") },
+        onDismissRequest = { if (!installing) onDismiss() },
+        title = { Text("Install Lattice?") },
         text = {
             Text(
-                "This is a urb:// link — an address on the Urbit network. " +
-                    "Lattice, a peer-to-peer gemtext browser, opens these. " +
-                    "Install it to follow the link.",
+                error
+                    ?: if (installing) {
+                        "Installing Lattice on your ship… this can take a " +
+                            "moment while the software arrives over the network."
+                    } else {
+                        "This is a urb:// link — an address on the Urbit " +
+                            "network. Opening it needs Lattice, which isn't " +
+                            "installed on your ship yet. Install it from " +
+                            "~ricsul-bilwyt?"
+                    },
             )
         },
         confirmButton = {
-            TextButton(onClick = {
-                onDismiss()
-                runCatching { uriHandler.openUri(UrbLinkLauncher.INSTALL_URL) }
-            }) { Text("Install Lattice") }
+            TextButton(onClick = onInstall, enabled = !installing) {
+                Text(if (installing) "Installing…" else "Install")
+            }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Not now") }
+            TextButton(onClick = onDismiss, enabled = !installing) { Text("Not now") }
         },
     )
 }

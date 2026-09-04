@@ -902,24 +902,20 @@ fun TalonApp(
             runCatching { context.startActivity(intent) }
         }
     }
-    // urb:// links resolve through the viewer's own ship's lattice
-    // reader, shown in an in-app webview popover.
+    // urb:// links: check lattice is installed on our ship, offer to
+    // install it (from ~ricsul-bilwyt) if not, then open the webview
+    // popover. The host emits its own dialog/sheet overlays.
     val platformUriHandler = androidx.compose.ui.platform.LocalUriHandler.current
-    var urbViewUrl by remember { mutableStateOf<String?>(null) }
-    val urbLinkHandler: (String) -> Unit = remember(app, platformUriHandler) {
-        { url ->
-            val shipUrl = app.sessionStore.active()?.shipUrl
-            when {
-                shipUrl == null -> Unit // not signed in; nothing to resolve against
-                io.nisfeb.talon.ui.isUrbWebViewSupported -> urbViewUrl = url
-                else -> runCatching {
-                    platformUriHandler.openUri(
-                        io.nisfeb.talon.urbit.UrbHttp.readerUrl(shipUrl, url),
-                    )
-                }
-            }
-        }
-    }
+    val urbLinkHandler = io.nisfeb.talon.ui.rememberUrbLinkHandler(
+        http = app.ktorHttp,
+        shipUrl = { app.sessionStore.active()?.shipUrl },
+        cookie = {
+            app.sessionStore.active()?.let { "${it.cookieName}=${it.cookieValue}" }
+        },
+        poke = { a, mark, body ->
+            runCatching { app.repo.pokeRaw(a, mark, body) }.isSuccess
+        },
+    )
     val urbAwareUriHandler = remember(platformUriHandler, urbLinkHandler) {
         io.nisfeb.talon.ui.UrbAwareUriHandler(platformUriHandler, urbLinkHandler)
     }
@@ -989,16 +985,6 @@ fun TalonApp(
         io.nisfeb.talon.ui.LocalCitationOpen provides openCitation,
         io.nisfeb.talon.ui.LocalDisplayName provides citeDisplayName,
     ) {
-    urbViewUrl?.let { u ->
-        app.sessionStore.active()?.let { active ->
-            io.nisfeb.talon.ui.UrbViewerSheet(
-                urbUrl = u,
-                shipUrl = active.shipUrl,
-                cookie = "${active.cookieName}=${active.cookieValue}",
-                onDismiss = { urbViewUrl = null },
-            )
-        }
-    }
     Scaffold(contentWindowInsets = WindowInsets(0, 0, 0, 0)) { _ ->
         val mod = Modifier.fillMaxSize()
 
