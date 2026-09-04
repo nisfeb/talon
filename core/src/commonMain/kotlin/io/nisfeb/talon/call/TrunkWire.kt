@@ -154,6 +154,14 @@ sealed interface TrunkUpdate {
         val expiresSecs: Long,
     ) : TrunkUpdate
 
+    /** The host's answer to %occupancy: how many are on a line right
+     *  now. Wire 6. */
+    data class Present(
+        override val from: String,
+        val name: String,
+        val n: Int,
+    ) : TrunkUpdate
+
     /** The host's answer to %access, %get-access or %moderate: the
      *  room's current role gates. Wire 5. */
     data class AccessState(
@@ -183,7 +191,7 @@ object TrunkWire {
     // a room's roster from a Tlon group on the host ship.
     // 5: role-gated party lines — join/speak role sets, moderation
     // mutes, and %access-state facts answering the three role actions.
-    const val WIRE_VERSION = 5
+    const val WIRE_VERSION = 6
 
     const val PUBLISHER = "~ricsul-bilwyt"
     const val DESK = "trunk"
@@ -444,6 +452,18 @@ object TrunkWire {
         putJsonObject("peek-room") { put("host", host); put("name", name) }
     }
 
+    fun enterRoomAction(host: String, name: String): JsonElement = buildJsonObject {
+        putJsonObject("enter-room") { put("host", host); put("name", name) }
+    }
+
+    fun leaveRoomAction(host: String, name: String): JsonElement = buildJsonObject {
+        putJsonObject("leave-room") { put("host", host); put("name", name) }
+    }
+
+    fun occupancyOfAction(host: String, name: String): JsonElement = buildJsonObject {
+        putJsonObject("occupancy-of") { put("host", host); put("name", name) }
+    }
+
     fun closeRoomAction(name: String): JsonElement = buildJsonObject {
         putJsonObject("close-room") { put("name", name) }
     }
@@ -535,6 +555,13 @@ object TrunkWire {
                 from = who(d) ?: return null,
                 name = d["name"]?.jsonPrimitive?.content ?: "",
                 why = d["why"]?.jsonPrimitive?.content ?: "",
+            )
+        }
+        (obj["present"] as? JsonObject)?.let { pr ->
+            return TrunkUpdate.Present(
+                from = who(pr) ?: return null,
+                name = pr["name"]?.jsonPrimitive?.content ?: return null,
+                n = pr["n"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0,
             )
         }
         (obj["access-state"] as? JsonObject)?.let { a ->

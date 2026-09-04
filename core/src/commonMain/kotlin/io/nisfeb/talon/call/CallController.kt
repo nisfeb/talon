@@ -411,6 +411,9 @@ class CallController(
                             is TrunkUpdate.AccessState ->
                                 _roomAccess.value = _roomAccess.value +
                                     ("${up.from}/${up.name}" to up.access)
+                            is TrunkUpdate.Present ->
+                                _presence.value = _presence.value +
+                                    ("${up.from}/${up.name}" to up.n)
                             is TrunkUpdate.Denied -> {
                                 Log.w(
                                     TAG,
@@ -648,6 +651,29 @@ class CallController(
     /** Set by the party-line surface: a host granted us a room ticket. */
     /** (host, ticket): the host is needed to find the room the
      *  ticket belongs to, which is where the topic lives. */
+    /** Ask the host how many are on [host]'s line [name] right now.
+     *  The answer lands in [presence]. Fire-and-forget; a wire-5 host
+     *  just nacks and presence stays absent. */
+    suspend fun occupancyOf(host: String, name: String) {
+        val ch = channel ?: return
+        runCatching { ch.poke(TrunkWire.AGENT, TrunkWire.ACTION_MARK, TrunkWire.occupancyOfAction(host, name)) }
+            .onFailure { Log.i(TAG, "occupancy-of declined (older host?): ${it.message}") }
+    }
+
+    /** Tell [host] we connected to / left its line [name]. enterRoom
+     *  doubles as a heartbeat; the host ages us out if we stop. */
+    suspend fun enterRoom(host: String, name: String) {
+        val ch = channel ?: return
+        runCatching { ch.poke(TrunkWire.AGENT, TrunkWire.ACTION_MARK, TrunkWire.enterRoomAction(host, name)) }
+            .onFailure { Log.i(TAG, "enter-room declined: ${it.message}") }
+    }
+
+    suspend fun leaveRoom(host: String, name: String) {
+        val ch = channel ?: return
+        runCatching { ch.poke(TrunkWire.AGENT, TrunkWire.ACTION_MARK, TrunkWire.leaveRoomAction(host, name)) }
+            .onFailure { Log.i(TAG, "leave-room declined: ${it.message}") }
+    }
+
     var onTicket: ((String, TrunkTicket) -> Unit)? = null
 
     /** A host refused us a line. Surfaced so tapping the button always
@@ -978,6 +1004,12 @@ class CallController(
      */
     private val _roomAccess = MutableStateFlow<Map<String, RoomAccess>>(emptyMap())
     val roomAccess: StateFlow<Map<String, RoomAccess>> = _roomAccess.asStateFlow()
+
+    /** Live occupancy per line, keyed "~host/name" — how many are on
+     *  the line right now, for the "N on the line" chip a non-joined
+     *  viewer sees. Fed by %present facts (wire 6). */
+    private val _presence = MutableStateFlow<Map<String, Int>>(emptyMap())
+    val presence: StateFlow<Map<String, Int>> = _presence.asStateFlow()
 
     /**
      * Why the last role action failed, or null. Only the wire-5 role
