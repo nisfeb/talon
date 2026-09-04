@@ -1010,25 +1010,29 @@ fun App(
                       chatDensity.fontScaleMultiplier * userFontScale,
               )
           }
-          // urb:// link handoff to Lattice. The handler resolves the
-          // scheme off-thread (desktop shells to xdg-mime/xdg-open) and
-          // raises the install prompt when no handler is present.
-          var urbPromptUrl by remember { mutableStateOf<String?>(null) }
-          val urbScope = rememberCoroutineScope()
-          val urbLinkHandler: (String) -> Unit = remember(urbLinkLauncher) {
+          // urb:// links resolve through the viewer's own ship's
+          // lattice reader. On mobile an in-app webview popover opens;
+          // on desktop (no embedded browser) the HTTP reader URL goes
+          // to the system browser, where the ship web session lives.
+          val platformUriHandler = androidx.compose.ui.platform.LocalUriHandler.current
+          var urbViewUrl by remember { mutableStateOf<String?>(null) }
+          val urbLinkHandler: (String) -> Unit = remember(sessionStore, platformUriHandler) {
               { url ->
-                  urbScope.launch {
-                      val r = kotlinx.coroutines.withContext(ioDispatcher) {
-                          urbLinkLauncher.open(url)
+                  val shipUrl = sessionStore.active()?.shipUrl
+                  when {
+                      shipUrl == null -> Unit // not signed in; nothing to resolve against
+                      io.nisfeb.talon.ui.isUrbWebViewSupported -> urbViewUrl = url
+                      else -> runCatching {
+                          platformUriHandler.openUri(
+                              io.nisfeb.talon.urbit.UrbHttp.readerUrl(shipUrl, url),
+                          )
                       }
-                      if (r != io.nisfeb.talon.urbit.UrbLaunchResult.Opened) urbPromptUrl = url
                   }
               }
           }
           // Wrap the platform URI handler so urb:// links opened via
           // Compose's built-in LinkAnnotation handling (statuses, bios)
-          // also route to Lattice, not just the chat screens' onLinkTap.
-          val platformUriHandler = androidx.compose.ui.platform.LocalUriHandler.current
+          // also route here, not just the chat screens' onLinkTap.
           val urbAwareUriHandler = remember(platformUriHandler, urbLinkHandler) {
               io.nisfeb.talon.ui.UrbAwareUriHandler(platformUriHandler, urbLinkHandler)
           }
@@ -1099,8 +1103,15 @@ fun App(
               io.nisfeb.talon.ui.LocalCitationOpen provides openCitation,
               io.nisfeb.talon.ui.LocalDisplayName provides citeDisplayName,
           ) {
-            urbPromptUrl?.let {
-                io.nisfeb.talon.ui.InstallLatticeDialog(onDismiss = { urbPromptUrl = null })
+            urbViewUrl?.let { u ->
+                sessionStore.active()?.let { active ->
+                    io.nisfeb.talon.ui.UrbViewerSheet(
+                        urbUrl = u,
+                        shipUrl = active.shipUrl,
+                        cookie = "${active.cookieName}=${active.cookieValue}",
+                        onDismiss = { urbViewUrl = null },
+                    )
+                }
             }
             val rootFocusRequester = remember { FocusRequester() }
             LaunchedEffect(Unit) { rootFocusRequester.requestFocus() }

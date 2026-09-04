@@ -31,3 +31,4 @@ actual val needsEmojiFontSpans: Boolean = false
 // Handled by the field's content receiver.
 actual val needsManualImagePaste: Boolean = false
 actual val isImmersiveCallSupported: Boolean = true
+actual val isUrbWebViewSupported: Boolean = true

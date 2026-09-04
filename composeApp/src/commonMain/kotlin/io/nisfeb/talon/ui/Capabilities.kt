@@ -172,3 +172,12 @@ expect val needsManualImagePaste: Boolean
  * pointer is precise). Android/iOS: true. Desktop: false.
  */
 expect val isImmersiveCallSupported: Boolean
+
+/**
+ * Whether a tapped `urb://` link opens in an in-app webview popover
+ * (Android/iOS) versus the system browser (desktop). Both load the
+ * same lattice reader URL on the viewer's ship; the phone keeps the
+ * user in the app, the desktop hands off to a real browser where the
+ * ship's web session already lives.
+ */
+expect val isUrbWebViewSupported: Boolean

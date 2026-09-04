@@ -902,22 +902,24 @@ fun TalonApp(
             runCatching { context.startActivity(intent) }
         }
     }
-    // urb:// link handoff to Lattice — resolve + open off the main
-    // thread, raise the install prompt when no handler is present.
-    var urbPromptUrl by remember { mutableStateOf<String?>(null) }
-    val urbScope = rememberCoroutineScope()
-    val urbLauncher = remember(app) { io.nisfeb.talon.urbit.AndroidUrbLinkLauncher(app) }
-    val urbLinkHandler: (String) -> Unit = remember(urbLauncher) {
+    // urb:// links resolve through the viewer's own ship's lattice
+    // reader, shown in an in-app webview popover.
+    val platformUriHandler = androidx.compose.ui.platform.LocalUriHandler.current
+    var urbViewUrl by remember { mutableStateOf<String?>(null) }
+    val urbLinkHandler: (String) -> Unit = remember(app, platformUriHandler) {
         { url ->
-            urbScope.launch {
-                val r = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                    urbLauncher.open(url)
+            val shipUrl = app.sessionStore.active()?.shipUrl
+            when {
+                shipUrl == null -> Unit // not signed in; nothing to resolve against
+                io.nisfeb.talon.ui.isUrbWebViewSupported -> urbViewUrl = url
+                else -> runCatching {
+                    platformUriHandler.openUri(
+                        io.nisfeb.talon.urbit.UrbHttp.readerUrl(shipUrl, url),
+                    )
                 }
-                if (r != io.nisfeb.talon.urbit.UrbLaunchResult.Opened) urbPromptUrl = url
             }
         }
     }
-    val platformUriHandler = androidx.compose.ui.platform.LocalUriHandler.current
     val urbAwareUriHandler = remember(platformUriHandler, urbLinkHandler) {
         io.nisfeb.talon.ui.UrbAwareUriHandler(platformUriHandler, urbLinkHandler)
     }
@@ -987,8 +989,15 @@ fun TalonApp(
         io.nisfeb.talon.ui.LocalCitationOpen provides openCitation,
         io.nisfeb.talon.ui.LocalDisplayName provides citeDisplayName,
     ) {
-    urbPromptUrl?.let {
-        io.nisfeb.talon.ui.InstallLatticeDialog(onDismiss = { urbPromptUrl = null })
+    urbViewUrl?.let { u ->
+        app.sessionStore.active()?.let { active ->
+            io.nisfeb.talon.ui.UrbViewerSheet(
+                urbUrl = u,
+                shipUrl = active.shipUrl,
+                cookie = "${active.cookieName}=${active.cookieValue}",
+                onDismiss = { urbViewUrl = null },
+            )
+        }
     }
     Scaffold(contentWindowInsets = WindowInsets(0, 0, 0, 0)) { _ ->
         val mod = Modifier.fillMaxSize()
