@@ -48,6 +48,15 @@ abstract class MessageDao {
     """)
     abstract fun streamReplies(whom: String, parentId: String): Flow<List<MessageEntity>>
 
+    @Query(
+        """
+        SELECT * FROM messages
+        WHERE whom = :whom AND parentId = :parentId AND isDeleted = 0
+        ORDER BY sentMs ASC
+        """,
+    )
+    abstract suspend fun repliesSnapshot(whom: String, parentId: String): List<MessageEntity>
+
     /** One specific message by key. Used to render the thread's parent row. */
     @Query("SELECT * FROM messages WHERE whom = :whom AND id = :id LIMIT 1")
     abstract fun streamOne(whom: String, id: String): Flow<MessageEntity?>

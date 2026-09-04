@@ -22,4 +22,20 @@ object UrbHttp {
      *  referent's body as gemtext JSON, for the inline unfurl. */
     fun fetchUrl(shipUrl: String, urbUrl: String): String =
         "${shipUrl.trimEnd('/')}/apps/lattice/fetch?url=${urbUrl.encodeURLParameter()}"
+
+    /** POST target that publishes a gemtext note at [slug] on [shipUrl]. */
+    fun saveUrl(shipUrl: String, slug: String): String =
+        "${shipUrl.trimEnd('/')}/apps/lattice/save?path=${slug.encodeURLParameter()}"
+
+    /**
+     * The canonical urb:// for a just-published note. Deterministic
+     * from (ship, slug) per lattice's en-urb: a single-char first
+     * segment needs the /n/ mount to disambiguate from p/k/t; "index"
+     * or empty is the ship's front door.
+     */
+    fun canonicalUrbUrl(ship: String, slug: String): String {
+        val s = slug.trim('/')
+        if (s.isEmpty() || s == "index") return "urb://$ship"
+        return if (s.substringBefore('/').length == 1) "urb://$ship/n/$s" else "urb://$ship/$s"
+    }
 }

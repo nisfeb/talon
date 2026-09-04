@@ -560,6 +560,7 @@ fun DmChatScreen(
     }
     var confirmingDelete by remember { mutableStateOf<MessageEntity?>(null) }
     var confirmingReport by remember { mutableStateOf<MessageEntity?>(null) }
+    var publishTarget by remember { mutableStateOf<MessageEntity?>(null) }
 
     val canSend = remember(whom) {
         whom.startsWith("~") || whom.startsWith("0v") || whom.startsWith("chat/")
@@ -929,6 +930,10 @@ fun DmChatScreen(
                     actionTarget = null
                     confirmingReport = target
                 },
+                onPublish = {
+                    actionTarget = null
+                    publishTarget = target
+                },
                 onTogglePin = {
                     val wasPinned = pinnedPostId == target.id
                     actionTarget = null
@@ -1228,6 +1233,101 @@ fun DmChatScreen(
             },
             dismissButton = {
                 TextButton(onClick = { confirmingReport = null }) { Text("Cancel") }
+            },
+        )
+    }
+
+    publishTarget?.let { target ->
+        val publishShipUrl = io.nisfeb.talon.ui.LocalShipUrl.current
+        var title by remember(target.id) {
+            mutableStateOf(
+                androidx.compose.ui.text.input.TextFieldValue(
+                    io.nisfeb.talon.urbit.StoryCache.textFor(target.id, target.contentJson)
+                        .lineSequence().firstOrNull { it.isNotBlank() }?.take(60) ?: "Note",
+                ),
+            )
+        }
+        var publishing by remember(target.id) { mutableStateOf(false) }
+        var resultUrb by remember(target.id) { mutableStateOf<String?>(null) }
+        var pubError by remember(target.id) { mutableStateOf<String?>(null) }
+        AlertDialog(
+            onDismissRequest = { if (!publishing) publishTarget = null },
+            title = { Text(if (resultUrb != null) "Published to Lattice" else "Publish to Lattice") },
+            text = {
+                val urb = resultUrb
+                if (urb != null) {
+                    Text("Published at\n\n$urb")
+                } else {
+                    androidx.compose.foundation.layout.Column(
+                        verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp),
+                    ) {
+                        Text(
+                            "Publishes this message and its thread replies as a " +
+                                "note on your own ship.",
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                        OutlinedTextField(
+                            value = title,
+                            onValueChange = { title = it },
+                            label = { Text("Title") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        pubError?.let {
+                            Text(it, color = MaterialTheme.colorScheme.error,
+                                style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                val urb = resultUrb
+                if (urb != null) {
+                    TextButton(onClick = {
+                        val cur = composerState.draft.text
+                        composerState.draft = androidx.compose.ui.text.input.TextFieldValue(
+                            if (cur.isBlank()) urb else "$cur $urb",
+                        )
+                        publishTarget = null
+                    }) { Text("Add link to message") }
+                } else {
+                    TextButton(
+                        enabled = !publishing && title.text.isNotBlank() && publishShipUrl != null,
+                        onClick = {
+                            publishing = true
+                            pubError = null
+                            val ttl = title.text.trim()
+                            scope.launch {
+                                runCatching {
+                                    val s = publishShipUrl!!
+                                    val replies = db.messages().repliesSnapshot(whom, target.id)
+                                    val entries = (listOf(target) + replies).map {
+                                        io.nisfeb.talon.urbit.StoryToGemtext.Entry(
+                                            byline = contactMap.displayName(it.author) +
+                                                " · " + io.nisfeb.talon.util.formatMonthDayTime(it.sentMs),
+                                            contentJson = it.contentJson,
+                                        )
+                                    }
+                                    val gemtext =
+                                        io.nisfeb.talon.urbit.StoryToGemtext.thread(ttl, entries)
+                                    val slug = io.nisfeb.talon.urbit.LatticePublish.slug(ttl, target.id)
+                                    io.nisfeb.talon.urbit.LatticePublish.publish(
+                                        http, s, ourPatp, slug, gemtext,
+                                    )
+                                }.onSuccess { resultUrb = it }
+                                    .onFailure {
+                                        pubError = "Publish failed: ${it.message ?: it::class.simpleName}"
+                                    }
+                                publishing = false
+                            }
+                        },
+                    ) { Text(if (publishing) "Publishing…" else "Publish") }
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { if (!publishing) publishTarget = null }) {
+                    Text(if (resultUrb != null) "Done" else "Cancel")
+                }
             },
         )
     }
@@ -1962,6 +2062,7 @@ private fun MessageActionMenu(
     onEdit: () -> Unit,
     onDelete: () -> Unit,
     onReport: () -> Unit,
+    onPublish: () -> Unit,
     onTogglePin: () -> Unit,
 ) {
     val isMine = message.author == ourPatp
@@ -2151,6 +2252,11 @@ private fun MessageActionMenu(
                     label = "Report",
                     color = MaterialTheme.colorScheme.error,
                 )
+            }
+            // Publish this message (and its thread replies) as a
+            // Lattice note on your own ship. Channel content only.
+            if (isChannel) {
+                ActionRow(onClick = onPublish, label = "Publish to Lattice")
             }
             if (isMine || (isChannel && canModerate)) {
                 ActionRow(

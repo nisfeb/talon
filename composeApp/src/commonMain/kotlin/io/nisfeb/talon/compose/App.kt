@@ -1105,6 +1105,7 @@ fun App(
               androidx.compose.ui.platform.LocalDensity provides scaledDensity,
               io.nisfeb.talon.ui.LocalUrbLinkHandler provides urbLinkHandler,
               io.nisfeb.talon.ui.LocalUrbFetcher provides urbFetcher,
+              io.nisfeb.talon.ui.LocalShipUrl provides sessionStore.active()?.shipUrl,
               androidx.compose.ui.platform.LocalUriHandler provides urbAwareUriHandler,
               io.nisfeb.talon.ui.LocalCiteResolver provides citeResolver,
               io.nisfeb.talon.ui.LocalCitationOpen provides openCitation,

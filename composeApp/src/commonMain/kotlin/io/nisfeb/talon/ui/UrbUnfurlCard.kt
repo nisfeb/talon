@@ -33,6 +33,10 @@ import io.nisfeb.talon.urbit.UrbUnfurlCache
 val LocalUrbFetcher =
     staticCompositionLocalOf<(suspend (String) -> UrbUnfurlCache.Unfurl?)?> { null }
 
+/** The active ship's HTTP base, for features that build ship URLs
+ *  (e.g. publishing to Lattice). Null when signed out. */
+val LocalShipUrl = staticCompositionLocalOf<String?> { null }
+
 /**
  * Inline preview for a urb:// link in a message — the lattice
  * referent's title and first line, like an OpenGraph card. Renders

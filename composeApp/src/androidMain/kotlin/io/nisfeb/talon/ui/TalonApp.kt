@@ -986,6 +986,7 @@ fun TalonApp(
         LocalMapsLauncher provides mapsLauncher,
         io.nisfeb.talon.ui.LocalUrbLinkHandler provides urbLinkHandler,
         io.nisfeb.talon.ui.LocalUrbFetcher provides urbFetcher,
+        io.nisfeb.talon.ui.LocalShipUrl provides app.sessionStore.active()?.shipUrl,
         // Route urb:// opened via Compose link handling (statuses, bios)
         // to Lattice. Also avoids an ActivityNotFoundException crash for
         // users without Lattice — they get the install prompt instead.
