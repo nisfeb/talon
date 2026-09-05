@@ -83,6 +83,12 @@ fun PartyLineBar(
      * the target rejoins. Wire 5.
      */
     onModerate: ((ship: String, mute: Boolean) -> Unit)? = null,
+    /** True while WE are recording; drives the full-screen control. */
+    recording: Boolean = false,
+    /** Ships recording the line right now (wire 7). */
+    recordedBy: Set<String> = emptySet(),
+    /** Toggle recording, or null to hide the control. */
+    onToggleRecord: (() -> Unit)? = null,
 ) {
     val state by party.state.collectAsState()
     PartyLineBarContent(
@@ -103,6 +109,9 @@ fun PartyLineBar(
             party.restoreSpeaking(ship)
             onModerate?.invoke(ship, false)
         },
+        recording = recording,
+        recordedBy = recordedBy,
+        onToggleRecord = onToggleRecord,
     )
 }
 
@@ -148,6 +157,12 @@ fun PartyLineBarContent(
     onRevokeSpeaking: ((String) -> Unit)? = null,
     /** Inverse of [onRevokeSpeaking]: let [ship] speak again. */
     onRestoreSpeaking: ((String) -> Unit)? = null,
+    /** True while WE are recording. */
+    recording: Boolean = false,
+    /** Ships recording the line right now (wire 7). */
+    recordedBy: Set<String> = emptySet(),
+    /** Toggle recording, or null to hide the control. */
+    onToggleRecord: (() -> Unit)? = null,
 ) {
     if (state is PartyState.Idle) return
     var expanded by remember { mutableStateOf(false) }
@@ -367,6 +382,9 @@ fun PartyLineBarContent(
                 audioDevices = audioDevices,
                 onRevokeSpeaking = onRevokeSpeaking,
                 onRestoreSpeaking = onRestoreSpeaking,
+                recording = recording,
+                recordedBy = recordedBy,
+                onToggleRecord = onToggleRecord,
             )
         }
     }

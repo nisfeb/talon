@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CallEnd
 import androidx.compose.material.icons.filled.ExpandMore
@@ -73,6 +74,14 @@ fun PartyLineFullScreen(
     audioDevices: AudioDevices = AudioDevices.Noop,
     onRevokeSpeaking: ((String) -> Unit)? = null,
     onRestoreSpeaking: ((String) -> Unit)? = null,
+    /** True while WE are recording. */
+    recording: Boolean = false,
+    /** Ships recording the line right now (wire 7), for the badge
+     *  everyone on the line sees. Includes us when [recording]. */
+    recordedBy: Set<String> = emptySet(),
+    /** Toggle recording, or null to hide the control (platform can't
+     *  record, or we can't speak / aren't on the line). */
+    onToggleRecord: (() -> Unit)? = null,
 ) {
     Surface(
         modifier = Modifier.fillMaxSize(),
@@ -117,6 +126,26 @@ fun PartyLineFullScreen(
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                    if (recordedBy.isNotEmpty()) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(top = 2.dp),
+                        ) {
+                            Box(
+                                Modifier.size(9.dp).clip(CircleShape)
+                                    .background(MaterialTheme.colorScheme.error),
+                            )
+                            Spacer(Modifier.width(6.dp))
+                            val who = recordedBy.joinToString(", ") { nameFor(it) }
+                            Text(
+                                if (recordedBy.size == 1) "Recording · $who" else "Recording · $who",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.error,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    }
                 }
             }
 
@@ -198,6 +227,37 @@ fun PartyLineFullScreen(
 
                 if (audioDevices.supported) {
                     SpeakerControl(audioDevices)
+                }
+
+                if (onToggleRecord != null) {
+                    ControlButton(
+                        label = if (recording) "Stop" else "Record",
+                        onClick = onToggleRecord,
+                        containerColor = if (recording) {
+                            MaterialTheme.colorScheme.errorContainer
+                        } else {
+                            MaterialTheme.colorScheme.surfaceVariant
+                        },
+                        contentColor = if (recording) {
+                            MaterialTheme.colorScheme.onErrorContainer
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                    ) {
+                        if (recording) {
+                            // A stop square.
+                            Box(
+                                Modifier.size(22.dp).clip(RoundedCornerShape(4.dp))
+                                    .background(MaterialTheme.colorScheme.error),
+                            )
+                        } else {
+                            // A record dot.
+                            Box(
+                                Modifier.size(26.dp).clip(CircleShape)
+                                    .background(MaterialTheme.colorScheme.error),
+                            )
+                        }
+                    }
                 }
 
                 ControlButton(
