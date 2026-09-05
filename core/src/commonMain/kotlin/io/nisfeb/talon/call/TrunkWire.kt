@@ -162,6 +162,14 @@ sealed interface TrunkUpdate {
         val n: Int,
     ) : TrunkUpdate
 
+    /** The host's answer to %recorders-of: which ships are recording a
+     *  line right now. Wire 7. */
+    data class Recorders(
+        override val from: String,
+        val name: String,
+        val who: Set<String>,
+    ) : TrunkUpdate
+
     /** The host's answer to %access, %get-access or %moderate: the
      *  room's current role gates. Wire 5. */
     data class AccessState(
@@ -191,7 +199,10 @@ object TrunkWire {
     // a room's roster from a Tlon group on the host ship.
     // 5: role-gated party lines — join/speak role sets, moderation
     // mutes, and %access-state facts answering the three role actions.
-    const val WIRE_VERSION = 6
+    // 6: live presence — enter/leave heartbeats and %present occupancy.
+    // 7: call-recording announcement — start/stop-recording heartbeats
+    // and %recorders, so the room shows a recording badge.
+    const val WIRE_VERSION = 7
 
     const val PUBLISHER = "~ricsul-bilwyt"
     const val DESK = "trunk"
@@ -464,6 +475,18 @@ object TrunkWire {
         putJsonObject("occupancy-of") { put("host", host); put("name", name) }
     }
 
+    fun startRecordingAction(host: String, name: String): JsonElement = buildJsonObject {
+        putJsonObject("start-recording") { put("host", host); put("name", name) }
+    }
+
+    fun stopRecordingAction(host: String, name: String): JsonElement = buildJsonObject {
+        putJsonObject("stop-recording") { put("host", host); put("name", name) }
+    }
+
+    fun recordersOfAction(host: String, name: String): JsonElement = buildJsonObject {
+        putJsonObject("recorders-of") { put("host", host); put("name", name) }
+    }
+
     fun closeRoomAction(name: String): JsonElement = buildJsonObject {
         putJsonObject("close-room") { put("name", name) }
     }
@@ -562,6 +585,13 @@ object TrunkWire {
                 from = who(pr) ?: return null,
                 name = pr["name"]?.jsonPrimitive?.content ?: return null,
                 n = pr["n"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0,
+            )
+        }
+        (obj["recorders"] as? JsonObject)?.let { rc ->
+            return TrunkUpdate.Recorders(
+                from = who(rc) ?: return null,
+                name = rc["name"]?.jsonPrimitive?.content ?: return null,
+                who = strings(rc, "who").toSet(),
             )
         }
         (obj["access-state"] as? JsonObject)?.let { a ->

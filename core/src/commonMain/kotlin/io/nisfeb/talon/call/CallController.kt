@@ -414,6 +414,9 @@ class CallController(
                             is TrunkUpdate.Present ->
                                 _presence.value = _presence.value +
                                     ("${up.from}/${up.name}" to up.n)
+                            is TrunkUpdate.Recorders ->
+                                _recording.value = _recording.value +
+                                    ("${up.from}/${up.name}" to up.who)
                             is TrunkUpdate.Denied -> {
                                 Log.w(
                                     TAG,
@@ -672,6 +675,30 @@ class CallController(
         val ch = channel ?: return
         runCatching { ch.poke(TrunkWire.AGENT, TrunkWire.ACTION_MARK, TrunkWire.leaveRoomAction(host, name)) }
             .onFailure { Log.i(TAG, "leave-room declined: ${it.message}") }
+    }
+
+    /** Tell [host] we started / stopped recording its line [name].
+     *  startRecording doubles as a heartbeat; the host ages us out of
+     *  the recorder set if we stop pinging. Fire-and-forget; a pre-
+     *  wire-7 host just nacks and no badge appears. */
+    suspend fun startRecording(host: String, name: String) {
+        val ch = channel ?: return
+        runCatching { ch.poke(TrunkWire.AGENT, TrunkWire.ACTION_MARK, TrunkWire.startRecordingAction(host, name)) }
+            .onFailure { Log.i(TAG, "start-recording declined (older host?): ${it.message}") }
+    }
+
+    suspend fun stopRecording(host: String, name: String) {
+        val ch = channel ?: return
+        runCatching { ch.poke(TrunkWire.AGENT, TrunkWire.ACTION_MARK, TrunkWire.stopRecordingAction(host, name)) }
+            .onFailure { Log.i(TAG, "stop-recording declined: ${it.message}") }
+    }
+
+    /** Ask the host who is recording [host]'s line [name] right now.
+     *  The answer lands in [recording]. */
+    suspend fun recordersOf(host: String, name: String) {
+        val ch = channel ?: return
+        runCatching { ch.poke(TrunkWire.AGENT, TrunkWire.ACTION_MARK, TrunkWire.recordersOfAction(host, name)) }
+            .onFailure { Log.i(TAG, "recorders-of declined (older host?): ${it.message}") }
     }
 
     var onTicket: ((String, TrunkTicket) -> Unit)? = null
@@ -1010,6 +1037,12 @@ class CallController(
      *  viewer sees. Fed by %present facts (wire 6). */
     private val _presence = MutableStateFlow<Map<String, Int>>(emptyMap())
     val presence: StateFlow<Map<String, Int>> = _presence.asStateFlow()
+
+    /** Per line ("~host/name"), the ships recording it right now, for
+     *  the recording badge every member on the line sees. Fed by
+     *  %recorders facts (wire 7). */
+    private val _recording = MutableStateFlow<Map<String, Set<String>>>(emptyMap())
+    val recording: StateFlow<Map<String, Set<String>>> = _recording.asStateFlow()
 
     /**
      * Why the last role action failed, or null. Only the wire-5 role
