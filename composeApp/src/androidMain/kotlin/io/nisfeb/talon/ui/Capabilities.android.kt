@@ -18,6 +18,7 @@ actual fun isOnDeviceAiFeatureSupported(
 
 // Trunkline calls: libwebrtc via getstream build (AndroidCallEngine).
 actual val isCallsSupported: Boolean = true
+actual val isCallRecordingSupported: Boolean = false
 
 // UnifiedPush wakes the process, so a ring lands with the app closed.
 actual val isBackgroundCallRingSupported: Boolean = true

@@ -29,6 +29,7 @@ actual fun isOnDeviceAiFeatureSupported(
 // capable; App() still gates the controller on the host actually
 // passing a factory, so a build without it shows no call UI.
 actual val isCallsSupported: Boolean = true
+actual val isCallRecordingSupported: Boolean = false
 
 // No CallKit/PushKit by design; UIBackgroundModes audio only sustains
 // a call already in progress. Backgrounded, the app can't hear a ring.

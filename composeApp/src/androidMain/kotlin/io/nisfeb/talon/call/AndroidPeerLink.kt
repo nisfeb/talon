@@ -23,7 +23,7 @@ import org.webrtc.SessionDescription
 class AndroidPeerLink(
     appContext: Context,
     iceServers: List<IceServer>,
-    sendAudio: Boolean,
+    private val sendAudio: Boolean,
 ) : PeerLink {
 
     private val _state = MutableStateFlow(MediaState.Idle)
@@ -32,10 +32,25 @@ class AndroidPeerLink(
     private var micTrack: AudioTrack? = null
     private var onCandidate: ((IceCandidate) -> Unit)? = null
 
+    // Call recording (wire 7). remoteTrack is captured on onAddTrack.
+    private var remoteTrack: AudioTrack? = null
+    private val pcmCb =
+        kotlinx.atomicfu.atomic<((ByteArray, Int) -> Unit)?>(null)
+    private var recSink: org.webrtc.AudioTrackSink? = null
+
     private val observer = object : PeerConnection.Observer {
         override fun onIceCandidate(candidate: WebRtcIceCandidate?) {
             val c = candidate ?: return
             onCandidate?.invoke(IceCandidate(c.sdp, c.sdpMid, c.sdpMLineIndex))
+        }
+
+        override fun onAddTrack(
+            receiver: org.webrtc.RtpReceiver?,
+            streams: Array<out MediaStream>?,
+        ) {
+            val t = receiver?.track() as? AudioTrack ?: return
+            remoteTrack = t
+            if (pcmCb.value != null) attachRec()
         }
 
         override fun onConnectionChange(newState: PeerConnection.PeerConnectionState?) {
@@ -145,6 +160,69 @@ class AndroidPeerLink(
 
     override fun setMuted(muted: Boolean) {
         micTrack?.setEnabled(!muted)
+    }
+
+    override fun onPcm(sink: ((pcm: ByteArray, sampleRate: Int) -> Unit)?) {
+        pcmCb.value = sink
+        if (sink == null) detachRec() else attachRec()
+    }
+
+    private fun attachRec() {
+        detachRec()
+        val cb = pcmCb.value ?: return
+        // Down links (remote speakers) tap cleanly. Self-mic capture on
+        // Android needs JavaAudioDeviceModule.setSamplesReadyCallback
+        // wired through WebRtcFactory — a follow-up; until then
+        // isCallRecordingSupported stays false on Android so this is
+        // staged, not a half-working feature.
+        if (sendAudio) return
+        val target = remoteTrack ?: return
+        val adapter = object : org.webrtc.AudioTrackSink {
+            override fun onData(
+                audioData: java.nio.ByteBuffer,
+                bitsPerSample: Int,
+                sampleRate: Int,
+                numberOfChannels: Int,
+                numberOfFrames: Int,
+                absoluteCaptureTimestampMs: Long,
+            ) {
+                if (bitsPerSample != 16) return
+                cb(toMonoLe(audioData, numberOfChannels, numberOfFrames), sampleRate)
+            }
+        }
+        recSink = adapter
+        runCatching { target.addSink(adapter) }
+            .onFailure { Log.w("PartyLine", "could not tap for recording", it) }
+    }
+
+    private fun detachRec() {
+        val s = recSink ?: return
+        runCatching { remoteTrack?.removeSink(s) }
+        recSink = null
+    }
+
+    /** WebRTC PCM frame -> 16-bit little-endian mono. Copies (the
+     *  buffer may be reused) and downmixes >1 channel. */
+    private fun toMonoLe(buf: java.nio.ByteBuffer, channels: Int, frames: Int): ByteArray {
+        val dup = buf.duplicate().order(java.nio.ByteOrder.LITTLE_ENDIAN)
+        if (channels <= 1) {
+            val out = ByteArray(frames * 2)
+            dup.get(out, 0, minOf(out.size, dup.remaining()))
+            return out
+        }
+        val shorts = dup.asShortBuffer()
+        val out = ByteArray(frames * 2)
+        for (f in 0 until frames) {
+            var acc = 0
+            for (c in 0 until channels) {
+                val i = f * channels + c
+                if (i < shorts.limit()) acc += shorts.get(i).toInt()
+            }
+            val v = acc / channels
+            out[f * 2] = (v and 0xFF).toByte()
+            out[f * 2 + 1] = ((v shr 8) and 0xFF).toByte()
+        }
+        return out
     }
 
     // Android's RtpReceiver has no getSynchronizationSources, so the

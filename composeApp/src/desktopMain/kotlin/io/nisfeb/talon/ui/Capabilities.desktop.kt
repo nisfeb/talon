@@ -55,6 +55,7 @@ actual fun isOnDeviceAiFeatureSupported(
 
 // Trunkline calls: webrtc-java engine (v0 spike surface).
 actual val isCallsSupported: Boolean = true
+actual val isCallRecordingSupported: Boolean = true
 
 // A long-running process: the channel stays open, so rings land even
 // with the window unfocused or minimised.

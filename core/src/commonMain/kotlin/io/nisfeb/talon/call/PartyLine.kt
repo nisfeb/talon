@@ -173,6 +173,17 @@ class PartyLine(
     private var levelPoll: Job? = null
     @Volatile private var muted = false
     private var upState: MediaState = MediaState.Idle
+
+    // Call recording (wire 7). recClips maps a speaker's patp to their
+    // PCM chunks. Structural writes (adding a speaker's buffer) happen
+    // on the app thread in +tap; the WebRTC audio thread only *appends*
+    // to an already-registered chunk list, and stop() reads only after
+    // onPcm(null) has removed every native sink — so no lock is needed.
+    @Volatile
+    private var recording = false
+    private var recStartMs = 0L
+    private var recRate = 48_000
+    private val recClips = mutableMapOf<String, MutableList<ByteArray>>()
     private var room = ""
     private var ourId = ""
     // Galène's client id must be unique per *connection*, not per
@@ -274,6 +285,60 @@ class PartyLine(
             if (p != null) p.cancel() else teardown()
         }
     }
+
+    /**
+     * Start capturing every speaker's audio, including our own mic.
+     *
+     * [ourShip] tags the up link. Down links that join mid-recording
+     * are tapped as their offers arrive (see [onRemoteOffer]). Yields
+     * audio only where the platform implements [PeerLink.onPcm]; the
+     * UI is gated on [io.nisfeb.talon.ui.isCallRecordingSupported].
+     */
+    fun startRecording(ourShip: String) {
+        if (recording) return
+        recStartMs = nowMs()
+        recClips.clear()
+        recording = true
+        tap(upLink, ourShip)
+        for ((id, link) in downLinks) tap(link, streamOwner[id] ?: id)
+    }
+
+    /** Register a per-speaker tap. Pre-creates the chunk list (with
+     *  leading silence to record-start, so all speakers share t=0) on
+     *  the app thread; the audio thread only appends to it. */
+    private fun tap(link: PeerLink?, ship: String) {
+        link ?: return
+        val leadMs = (nowMs() - recStartMs).coerceAtLeast(0)
+        val leadBytes = ((recRate.toLong() * leadMs / 1000L).toInt()) * 2
+        val chunks = mutableListOf(ByteArray(leadBytes.coerceAtLeast(0)))
+        // Last writer wins if a ship rejoins on a new stream; the
+        // earlier fragment is dropped. ponytail: acceptable for v1.
+        recClips[ship] = chunks
+        link.onPcm { pcm, rate ->
+            recRate = rate
+            chunks.add(pcm)
+        }
+    }
+
+    /** Stop capturing and return the per-speaker audio. Removes every
+     *  native sink first, so no callback races the read. */
+    fun stopRecording(): RecordedCall {
+        if (!recording) return RecordedCall(emptyMap(), recRate)
+        recording = false
+        upLink?.onPcm(null)
+        downLinks.values.forEach { runCatching { it.onPcm(null) } }
+        val clips = recClips.mapValues { (_, chunks) ->
+            val total = chunks.sumOf { it.size }
+            val out = ByteArray(total)
+            var at = 0
+            for (c in chunks) { c.copyInto(out, at); at += c.size }
+            out
+        }
+        recClips.clear()
+        return RecordedCall(clips, recRate)
+    }
+
+    fun isRecording(): Boolean = recording
 
     fun setMuted(value: Boolean) {
         muted = value
@@ -691,11 +756,14 @@ class PartyLine(
         msg["username"]?.jsonPrimitive?.content?.let { streamOwner[id] = it }
         // The same servers the up link got. A down link needs them just
         // as much: it is the side that has to traverse to the SFU.
+        val fresh = id !in downLinks
         val link = downLinks.getOrPut(id) {
             links.create(sfuIce, sendAudio = false).also { l ->
                 l.onLocalCandidate { c -> scope.launch { sendIce(id, c) } }
             }
         }
+        // A speaker who joins while we're recording gets tapped too.
+        if (recording && fresh) tap(link, streamOwner[id] ?: id)
         val answer = link.answerTo(sdp)
         send(buildJsonObject { put("type", "answer"); put("id", id); put("sdp", answer) })
     }

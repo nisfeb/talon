@@ -63,6 +63,18 @@ interface PeerLink {
      */
     fun localAudioLevel(): Float? = null
 
+    /**
+     * Tap this link's decoded PCM for call recording (wire 7), or null
+     * to stop. The callback gets 16-bit little-endian mono frames and
+     * the sample rate. On a down link it is the remote speaker's audio;
+     * on the up link it is our own microphone.
+     *
+     * Default no-op: a platform whose media stack can't be tapped does
+     * not record, and [io.nisfeb.talon.ui.isCallRecordingSupported]
+     * gates the UI so the feature is hidden rather than silently empty.
+     */
+    fun onPcm(sink: ((pcm: ByteArray, sampleRate: Int) -> Unit)?) {}
+
     fun close()
 }
 

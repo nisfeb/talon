@@ -120,6 +120,17 @@ expect fun isOnDeviceAiFeatureSupported(
 expect val isCallsSupported: Boolean
 
 /**
+ * Whether a party line can be recorded and transcribed to Lattice
+ * (wire 7). True only where PeerLink.onPcm captures BOTH remote
+ * speakers and our own mic end-to-end. Desktop: true (webrtc-java taps
+ * mic + remote tracks). Android: false — remote-speaker capture works,
+ * but self-mic needs JavaAudioDeviceModule samples wiring + a device
+ * test; flip to true once verified. iOS: false (calls are held). Gates
+ * the record control per CLAUDE.md #3 (gate, don't fake).
+ */
+expect val isCallRecordingSupported: Boolean
+
+/**
  * Whether an incoming call can ring this device while the app is in
  * the background. Android: true (UnifiedPush wakes the process).
  * Desktop: true (a long-running process hears the channel). iOS: false

@@ -51,6 +51,14 @@ class DesktopPeerLink(
     private var micTrack: AudioTrack? = null
     private var onCandidate: ((IceCandidate) -> Unit)? = null
 
+    // Call recording (wire 7). remoteTrack is captured on onTrack so a
+    // down link can be tapped; the callback + adapter sink are set by
+    // onPcm. atomic because onTrack fires on a native thread.
+    private var remoteTrack: AudioTrack? = null
+    private val pcmCb =
+        kotlinx.atomicfu.atomic<((ByteArray, Int) -> Unit)?>(null)
+    private var recSink: dev.onvoid.webrtc.media.audio.AudioTrackSink? = null
+
     private val config = RTCConfiguration().apply {
         for (s in iceServers) {
             val server = RTCIceServer()
@@ -74,10 +82,14 @@ class DesktopPeerLink(
             }
 
             override fun onTrack(transceiver: dev.onvoid.webrtc.RTCRtpTransceiver?) {
-                val sink = remotePcm ?: return
                 val track = transceiver?.receiver?.track as? AudioTrack ?: return
-                runCatching { track.addSink(sink) }
-                    .onFailure { Log.w("PartyLine", "could not tap the remote track", it) }
+                remoteTrack = track
+                remotePcm?.let { s ->
+                    runCatching { track.addSink(s) }
+                        .onFailure { Log.w("PartyLine", "could not tap the remote track", it) }
+                }
+                // Recording started before this speaker's track arrived.
+                if (pcmCb.value != null) attachRec()
             }
 
             override fun onConnectionChange(pcState: RTCPeerConnectionState?) {
@@ -182,6 +194,68 @@ class DesktopPeerLink(
      */
     override fun localAudioLevel(): Float? = statsAudioLevel(local = true)
 
+    override fun onPcm(sink: ((pcm: ByteArray, sampleRate: Int) -> Unit)?) {
+        pcmCb.value = sink
+        if (sink == null) detachRec() else attachRec()
+    }
+
+    private fun attachRec() {
+        detachRec()
+        val cb = pcmCb.value ?: return
+        // Up link taps the local mic; a down link taps the remote
+        // speaker (null until its track has arrived — onTrack retries).
+        val target = (if (sendAudio) micTrack else remoteTrack) ?: return
+        val adapter = object : dev.onvoid.webrtc.media.audio.AudioTrackSink {
+            override fun onData(
+                audioData: ByteArray,
+                bitsPerSample: Int,
+                sampleRate: Int,
+                numberOfChannels: Int,
+                numberOfFrames: Int,
+            ) {
+                if (bitsPerSample != 16) return
+                cb(toMonoLe(audioData, numberOfChannels, numberOfFrames), sampleRate)
+            }
+        }
+        recSink = adapter
+        runCatching { target.addSink(adapter) }
+            .onFailure { Log.w("PartyLine", "could not tap for recording", it) }
+    }
+
+    private fun detachRec() {
+        val s = recSink ?: return
+        val target = if (sendAudio) micTrack else remoteTrack
+        runCatching { target?.removeSink(s) }
+        recSink = null
+    }
+
+    /** WebRTC PCM frame -> 16-bit little-endian mono bytes. Copies,
+     *  because webrtc may reuse the delivered array across callbacks.
+     *  Downmixes >1 channel by averaging. */
+    private fun toMonoLe(
+        pcm: ByteArray,
+        channels: Int,
+        frames: Int,
+    ): ByteArray {
+        if (channels <= 1) return pcm.copyOf()
+        val out = ByteArray(frames * 2)
+        for (f in 0 until frames) {
+            var acc = 0
+            for (c in 0 until channels) {
+                val b = (f * channels + c) * 2
+                if (b + 1 < pcm.size) {
+                    val lo = pcm[b].toInt() and 0xFF
+                    val hi = pcm[b + 1].toInt()
+                    acc += (hi shl 8) or lo
+                }
+            }
+            val v = acc / channels
+            out[f * 2] = (v and 0xFF).toByte()
+            out[f * 2 + 1] = ((v shr 8) and 0xFF).toByte()
+        }
+        return out
+    }
+
     private val lastStatsLevel = kotlinx.atomicfu.atomic(-1f)
     private val lastLocalLevel = kotlinx.atomicfu.atomic(-1f)
     private val statsInFlight = kotlinx.atomicfu.atomic(false)
@@ -219,6 +293,7 @@ class DesktopPeerLink(
         // process-wide, and tearing it down while ICE gathering is
         // still running on a native thread is a use-after-free.
         if (!closed.compareAndSet(false, true)) return
+        detachRec()
         runCatching { micTrack?.isEnabled = false }
         runCatching { pc.close() }
         // Ours to free even when the source is a caller-owned
