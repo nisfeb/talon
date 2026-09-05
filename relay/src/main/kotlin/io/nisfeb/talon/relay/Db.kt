@@ -115,6 +115,25 @@ class Db(private val path: String) {
         }
     }
 
+    /** A device's push target and transport. `platform` selects how
+     *  [Push] delivers: "ios-voip" → an APNs VoIP push whose
+     *  `push_endpoint` is the PushKit token; anything else → a
+     *  UnifiedPush POST to `push_endpoint` as an opaque URL. */
+    data class DeviceRow(val pushEndpoint: String, val platform: String)
+
+    fun deviceFor(deviceId: String): DeviceRow? = connect().use { c ->
+        c.prepareStatement("SELECT push_endpoint, platform FROM devices WHERE id = ?").use { ps ->
+            ps.setString(1, deviceId)
+            ps.executeQuery().use { rs ->
+                if (rs.next()) {
+                    DeviceRow(rs.getString("push_endpoint"), rs.getString("platform"))
+                } else {
+                    null
+                }
+            }
+        }
+    }
+
     // ───────── ships ─────────
 
     data class ShipRow(

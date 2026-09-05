@@ -280,12 +280,18 @@ class ShipConnection(
             return
         }
 
-        val pushEndpoint = db.pushEndpointFor(deviceId) ?: run {
+        val dev = db.deviceFor(deviceId) ?: run {
             log.warn("device $deviceId has no push endpoint; skipping")
             return
         }
         log.info("push whom=$whom post=$postId")
-        push.send(endpoint = pushEndpoint, patp = patp, whom = whom, postId = postId)
+        push.send(
+            endpoint = dev.pushEndpoint,
+            patp = patp,
+            whom = whom,
+            postId = postId,
+            platform = dev.platform,
+        )
         db.setLastEventId(shipRowId, deviceId, postId)
     }
 
@@ -308,18 +314,19 @@ class ShipConnection(
     private fun handleRing(json: JsonObject) {
         when (val fact = parseCallFact(json)) {
             is CallFact.Ring -> {
-                val pushEndpoint = db.pushEndpointFor(deviceId) ?: run {
+                val dev = db.deviceFor(deviceId) ?: run {
                     log.warn("device $deviceId has no push endpoint; dropping ring")
                     return
                 }
                 log.info("push ring from=${fact.from} call=${fact.callId}")
                 push.sendRing(
-                    endpoint = pushEndpoint,
+                    endpoint = dev.pushEndpoint,
                     patp = patp,
                     from = fact.from,
                     callId = fact.callId,
+                    platform = dev.platform,
                 )
-                rungCalls.rang(fact.callId, pushEndpoint)
+                rungCalls.rang(fact.callId, dev.pushEndpoint, dev.platform)
             }
             // The ring's undoing — a hangup for the id, or a "handled"
             // fact (another of the user's clients answered). Only a
@@ -327,9 +334,14 @@ class ShipConnection(
             // only while the device could still be ringing; RungCalls
             // enforces both.
             is CallFact.Settled -> {
-                val endpoint = rungCalls.settle(fact.callId) ?: return
+                val rung = rungCalls.settle(fact.callId) ?: return
                 log.info("push ring-cancel call=${fact.callId}")
-                push.sendRingCancel(endpoint = endpoint, patp = patp, callId = fact.callId)
+                push.sendRingCancel(
+                    endpoint = rung.endpoint,
+                    patp = patp,
+                    callId = fact.callId,
+                    platform = rung.platform,
+                )
             }
             null -> Unit
         }
@@ -425,21 +437,29 @@ internal fun parseCallFact(json: JsonObject): CallFact? {
  */
 internal class RungCalls(private val maxAgeMs: Long = 60_000L) {
 
-    private data class Rung(val endpoint: String, val atMs: Long)
+    /** Where and how to cancel a ring we sent. */
+    data class Target(val endpoint: String, val platform: String)
+
+    private data class Rung(val endpoint: String, val platform: String, val atMs: Long)
     private val rung = ConcurrentHashMap<String, Rung>()
 
-    fun rang(callId: String, endpoint: String, nowMs: Long = System.currentTimeMillis()) {
-        rung[callId] = Rung(endpoint, nowMs)
+    fun rang(
+        callId: String,
+        endpoint: String,
+        platform: String,
+        nowMs: Long = System.currentTimeMillis(),
+    ) {
+        rung[callId] = Rung(endpoint, platform, nowMs)
         // Prune on write — the map only ever holds the handful of
         // rings from the last minute, so a scan here is nothing.
         rung.entries.removeIf { nowMs - it.value.atMs > maxAgeMs }
     }
 
-    /** The endpoint to cancel on, or null if this id wasn't recently
+    /** The target to cancel on, or null if this id wasn't recently
      *  rung. One-shot: a second settle for the same id is a no-op. */
-    fun settle(callId: String, nowMs: Long = System.currentTimeMillis()): String? {
+    fun settle(callId: String, nowMs: Long = System.currentTimeMillis()): Target? {
         val r = rung.remove(callId) ?: return null
-        return r.endpoint.takeIf { nowMs - r.atMs <= maxAgeMs }
+        return Target(r.endpoint, r.platform).takeIf { nowMs - r.atMs <= maxAgeMs }
     }
 }
 

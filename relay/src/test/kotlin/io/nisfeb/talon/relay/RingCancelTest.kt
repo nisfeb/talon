@@ -40,26 +40,26 @@ class RingCancelTest {
     @Test
     fun `settle only fires for a rung id, once`() {
         val rung = RungCalls()
-        rung.rang("c1", "https://push/e1", nowMs = now)
+        rung.rang("c1", "https://push/e1", platform = "unifiedpush", nowMs = now)
         assertNull(rung.settle("c2", nowMs = now)) // never rung
-        assertEquals("https://push/e1", rung.settle("c1", nowMs = now))
+        assertEquals("https://push/e1", rung.settle("c1", nowMs = now)?.endpoint)
         assertNull(rung.settle("c1", nowMs = now)) // one-shot
     }
 
     @Test
     fun `a settle past ring-timeout age is dropped`() {
         val rung = RungCalls(maxAgeMs = 60_000L)
-        rung.rang("c1", "https://push/e1", nowMs = now)
+        rung.rang("c1", "https://push/e1", platform = "unifiedpush", nowMs = now)
         assertNull(rung.settle("c1", nowMs = now + 61_000L))
     }
 
     @Test
     fun `stale rings are pruned on the next ring`() {
         val rung = RungCalls(maxAgeMs = 60_000L)
-        rung.rang("c1", "https://push/e1", nowMs = now)
-        rung.rang("c2", "https://push/e1", nowMs = now + 61_000L)
+        rung.rang("c1", "https://push/e1", platform = "unifiedpush", nowMs = now)
+        rung.rang("c2", "https://push/e1", platform = "unifiedpush", nowMs = now + 61_000L)
         // c1 aged out at the c2 write; c2 itself is live.
         assertNull(rung.settle("c1", nowMs = now + 61_000L))
-        assertEquals("https://push/e1", rung.settle("c2", nowMs = now + 61_000L))
+        assertEquals("https://push/e1", rung.settle("c2", nowMs = now + 61_000L)?.endpoint)
     }
 }

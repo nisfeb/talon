@@ -11,11 +11,14 @@
 	     echo cancellation; it grants no background execution on its
 	     own. This is the iOS half of the Android microphone foreground
 	     service: same user-visible bug, entirely different mechanism.
-	     `audio` rather than `voip` deliberately — voip is for CallKit
-	     apps waking on a push, which Talon is not. -->
+	     `voip` is added for PushKit: it lets a VoIP push wake the app
+	     (even killed) to report an incoming call to CallKit and ring
+	     like a normal phone call. `audio` sustains an in-progress
+	     call's audio session across backgrounding. -->
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>audio</string>
+		<string>voip</string>
 	</array>
 	<key>NSCameraUsageDescription</key>
 	<string>Talon uses your camera for video calls, and only while a call is on screen and you have turned your camera on.</string>
