@@ -181,6 +181,7 @@ private class NoopAiSettings : AiSettingsRepository {
     ) {}
     override fun setFeature(feature: AiSettings.Feature, enabled: Boolean) {}
     override fun setBraveApiKey(key: String) {}
+        override fun setSttApiKey(key: String) {}
     override fun setPrompt(kind: AiSettings.PromptKind, value: String) {}
     override fun setSyncEnabled(enabled: Boolean) {}
     override fun applyRemote(config: AiSettings.Config) { _state.value = config }

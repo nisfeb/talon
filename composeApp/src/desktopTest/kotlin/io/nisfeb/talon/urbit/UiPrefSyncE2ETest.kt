@@ -62,6 +62,7 @@ class UiPrefSyncE2ETest {
         override fun setFeature(feature: AiSettings.Feature, enabled: Boolean) {}
         override fun setSyncEnabled(enabled: Boolean) {}
         override fun setBraveApiKey(key: String) {}
+        override fun setSttApiKey(key: String) {}
         override fun setPrompt(kind: AiSettings.PromptKind, value: String) {}
         override fun applyRemote(config: AiSettings.Config) {}
         override fun clear() {}

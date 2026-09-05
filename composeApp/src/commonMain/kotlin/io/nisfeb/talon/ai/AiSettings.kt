@@ -52,6 +52,12 @@ object AiSettings {
         // Optional (the assistant can open URLs without it). Travels with
         // the same syncEnabled gate as the LLM key (see SettingsSyncImpl).
         val braveApiKey: String = "",
+        // Dedicated speech-to-text (Whisper) credential for call
+        // transcription. Independent of the chat provider so a user can
+        // run Claude for chat and OpenAI Whisper for transcripts. Blank
+        // falls back to the chat key (OpenAI / Custom only). Same sync
+        // gate as apiKey.
+        val sttApiKey: String = "",
         // Editable agent system-prompt parts. Each blank = use its built-in
         // default; the effective prompt for a role is the shared knowledge
         // followed by that role's specifics (see AgentPrompt/LoopPrompt).

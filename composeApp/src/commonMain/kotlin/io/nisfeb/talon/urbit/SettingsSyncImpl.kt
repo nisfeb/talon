@@ -725,6 +725,8 @@ class SettingsSyncImpl(
                     // Brave key rides the same opt-in gate as the LLM key —
                     // both are service credentials; same don't-ship-empty rule.
                     if (cfg.braveApiKey.isNotBlank()) put("braveApiKey", cfg.braveApiKey)
+                    // STT key rides the same opt-in gate; same don't-ship-empty rule.
+                    if (cfg.sttApiKey.isNotBlank()) put("sttApiKey", cfg.sttApiKey)
                 }
                 put("catchMeUpEnabled", cfg.catchMeUpEnabled)
                 put("dailyDigestEnabled", cfg.dailyDigestEnabled)
@@ -911,7 +913,7 @@ class SettingsSyncImpl(
         // store) isn't encrypted.
         val redacted = JsonObject(
             obj.mapValues { (k, v) ->
-                if (k == "apiKey" || k == "braveApiKey") JsonPrimitive("***") else v
+                if (k == "apiKey" || k == "braveApiKey" || k == "sttApiKey") JsonPrimitive("***") else v
             },
         )
         Log.i(TAG, "applyAiEntry schemaVersion=$schemaVersion obj=$redacted")
@@ -960,6 +962,7 @@ class SettingsSyncImpl(
                     baseUrl = obj["baseUrl"].asStr(),
                     // Same "only overwrite when present and non-empty" guard.
                     braveApiKey = obj["braveApiKey"].asStr()?.takeIf { it.isNotBlank() } ?: current.braveApiKey,
+                    sttApiKey = obj["sttApiKey"].asStr()?.takeIf { it.isNotBlank() } ?: current.sttApiKey,
                 )
             } else features
         } else features

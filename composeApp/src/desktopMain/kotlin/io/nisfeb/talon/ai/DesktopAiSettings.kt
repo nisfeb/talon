@@ -160,6 +160,12 @@ class DesktopAiSettings : AiSettingsRepository {
         onStateChange?.invoke(cfg, false)
     }
 
+    override fun setSttApiKey(key: String) {
+        val cfg = _state.value.copy(sttApiKey = key)
+        persist(cfg)
+        onStateChange?.invoke(cfg, false)
+    }
+
     override fun setPrompt(kind: AiSettings.PromptKind, value: String) {
         val cfg = _state.value.withPrompt(kind, value)
         persist(cfg)

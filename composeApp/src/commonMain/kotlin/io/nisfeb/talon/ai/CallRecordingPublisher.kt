@@ -24,7 +24,13 @@ object CallRecordingPublisher {
      * endpoint, so Anthropic/OpenRouter return null and the UI explains
      * that a Whisper-capable key is needed.
      */
-    fun sttFrom(cfg: AiSettings.Config): Stt? = when (cfg.provider) {
+    fun sttFrom(cfg: AiSettings.Config): Stt? {
+        // A dedicated Whisper key wins, whatever the chat provider is —
+        // this is how an Anthropic/OpenRouter user gets transcripts.
+        cfg.sttApiKey.takeIf { it.isNotBlank() }?.let {
+            return Stt("https://api.openai.com/v1/audio/transcriptions", it, "whisper-1")
+        }
+        return when (cfg.provider) {
         AiSettings.Provider.OpenAi ->
             cfg.apiKey.takeIf { it.isNotBlank() }?.let {
                 Stt("https://api.openai.com/v1/audio/transcriptions", it, "whisper-1")
@@ -34,6 +40,7 @@ object CallRecordingPublisher {
                 Stt("$it/audio/transcriptions", cfg.apiKey, cfg.model ?: "whisper-1")
             }
         else -> null
+        }
     }
 
     /**

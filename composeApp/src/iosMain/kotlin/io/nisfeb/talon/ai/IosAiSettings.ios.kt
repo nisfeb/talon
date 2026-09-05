@@ -81,6 +81,10 @@ class IosAiSettings : AiSettingsRepository {
         commit(_state.value.copy(braveApiKey = key), fireChange = true)
     }
 
+    override fun setSttApiKey(key: String) {
+        commit(_state.value.copy(sttApiKey = key), fireChange = true)
+    }
+
     override fun setPrompt(kind: AiSettings.PromptKind, value: String) {
         commit(_state.value.withPrompt(kind, value), fireChange = true)
     }

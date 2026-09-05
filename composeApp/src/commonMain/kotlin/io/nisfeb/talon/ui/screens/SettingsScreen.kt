@@ -6,6 +6,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.draw.clip
@@ -17,6 +18,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.windowInsetsPadding
@@ -37,6 +39,9 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
+import androidx.compose.material3.ScrollableTabRow
+import androidx.compose.material3.Tab
+import androidx.compose.material3.VerticalDivider
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
@@ -166,6 +171,8 @@ fun SettingsScreen(
     var providerMenuOpen by remember { mutableStateOf(false) }
     var braveKey by remember(aiState.braveApiKey) { mutableStateOf(aiState.braveApiKey) }
     var revealBrave by remember { mutableStateOf(false) }
+    var sttKey by remember(aiState.sttApiKey) { mutableStateOf(aiState.sttApiKey) }
+    var revealStt by remember { mutableStateOf(false) }
     var promptEditorKind by remember { mutableStateOf<AiSettings.PromptKind?>(null) }
 
     // Compare on the same normalization Save persists (trim + blank→null)
@@ -192,13 +199,31 @@ fun SettingsScreen(
         }
         HorizontalDivider()
 
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .verticalScroll(rememberScrollState())
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
+        val visibleTabs = buildList {
+            add(SettingsTab.Appearance)
+            add(SettingsTab.Chats)
+            if (notificationHealth != null || relayConfig != null ||
+                dailyDigestSettings != null) {
+                add(SettingsTab.Notifications)
+            }
+            add(SettingsTab.Ai)
+            if (isCallsSupported && callController != null) add(SettingsTab.Calls)
+            add(SettingsTab.Account)
+            add(SettingsTab.About)
+        }
+        var tab by remember { mutableStateOf(SettingsTab.Appearance) }
+        val safeTab = if (tab in visibleTabs) tab else visibleTabs.first()
+
+        @Composable
+        fun Body(bodyModifier: Modifier) {
+            Column(
+                modifier = bodyModifier
+                    .widthIn(max = 760.dp)
+                    .verticalScroll(rememberScrollState())
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+            if (safeTab == SettingsTab.Appearance) {
             Text(
                 "Appearance",
                 style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
@@ -409,6 +434,8 @@ fun SettingsScreen(
             }
             Spacer(Modifier.height(8.dp))
 
+            }
+            if (safeTab == SettingsTab.Chats) {
             // ── Sidebar visibility ─────────────────────────────────
             // Drills into SidebarSettingsScreen where the user toggles
             // which rail items show. Inline here so it sits next to
@@ -437,6 +464,8 @@ fun SettingsScreen(
             }
             Spacer(Modifier.height(4.dp))
 
+            }
+            if (safeTab == SettingsTab.Account) {
             // ── Login QR generator ─────────────────────────────────
             // Lets the user build a `talon://login?...` QR for someone
             // else (assisted onboarding flow). Generation works on
@@ -465,6 +494,8 @@ fun SettingsScreen(
             }
             Spacer(Modifier.height(4.dp))
 
+            }
+            if (safeTab == SettingsTab.Notifications) {
             if (notificationHealth != null) {
                 NotificationHealthPanel(
                     health = notificationHealth,
@@ -478,6 +509,8 @@ fun SettingsScreen(
                 Spacer(Modifier.height(8.dp))
             }
 
+            }
+            if (safeTab == SettingsTab.Chats) {
             Text(
                 "Composer",
                 style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
@@ -501,6 +534,8 @@ fun SettingsScreen(
             )
             Spacer(Modifier.height(4.dp))
 
+            }
+            if (safeTab == SettingsTab.Ai) {
             Text(
                 "AI",
                 style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
@@ -732,6 +767,53 @@ fun SettingsScreen(
                 }
             }
 
+            // ── Call transcription (Whisper) ───────────────────────
+            Spacer(Modifier.height(8.dp))
+            HorizontalDivider()
+            Spacer(Modifier.height(8.dp))
+            Text(
+                "Call transcription",
+                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
+            )
+            Text(
+                "Transcribing a recorded party line uses OpenAI Whisper. If your " +
+                    "chat provider above is OpenAI (or a compatible Custom endpoint) " +
+                    "that key is used automatically \u2014 otherwise paste a " +
+                    "Whisper-capable key here.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            OutlinedTextField(
+                value = sttKey,
+                onValueChange = { sttKey = it },
+                label = { Text("Whisper (OpenAI) API key") },
+                singleLine = true,
+                visualTransformation = if (revealStt) VisualTransformation.None
+                else PasswordVisualTransformation(),
+                trailingIcon = {
+                    IconButton(onClick = { revealStt = !revealStt }) {
+                        Icon(
+                            imageVector = if (revealStt) Icons.Filled.VisibilityOff
+                            else Icons.Filled.Visibility,
+                            contentDescription = if (revealStt) "Hide key" else "Show key",
+                        )
+                    }
+                },
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(
+                    onClick = { aiSettings.setSttApiKey(sttKey.trim()) },
+                    enabled = sttKey.trim() != aiState.sttApiKey,
+                ) { Text("Save key") }
+                if (aiState.sttApiKey.isNotBlank()) {
+                    TextButton(onClick = {
+                        aiSettings.setSttApiKey("")
+                        sttKey = ""
+                    }) { Text("Remove") }
+                }
+            }
+
             // On-device features — gated behind isOnDeviceAiSupported.
             // True on Android (ML Kit + on-device embedder available);
             // false on desktop until / unless an equivalent stack lands.
@@ -761,6 +843,8 @@ fun SettingsScreen(
                     }
             }
 
+            }
+            if (safeTab == SettingsTab.Notifications) {
             // Daily digest config — only when the platform supplied
             // a concrete settings impl (Android does today; desktop
             // gets null until a scheduler lands).
@@ -774,6 +858,8 @@ fun SettingsScreen(
                 )
             }
 
+            }
+            if (safeTab == SettingsTab.Calls) {
             // Who may ring this ship. The policy lives in %trunk, not
             // here — this is only its editor, and any other app on the
             // ship sees the same lists.
@@ -792,6 +878,8 @@ fun SettingsScreen(
                 }
             }
 
+            }
+            if (safeTab == SettingsTab.Ai) {
             // Loops — scheduled agent prompts. Needs a cloud key (it runs
             // the agent) and a platform that can fire it, so it's gated on
             // isLoopsSupported (Android via AlarmManager; desktop via the
@@ -824,10 +912,29 @@ fun SettingsScreen(
                 }
             }
 
+            }
+            if (safeTab == SettingsTab.About) {
             Spacer(Modifier.height(16.dp))
             HorizontalDivider()
             Spacer(Modifier.height(8.dp))
             AboutSection(callController)
+            }
+            }
+        }
+
+        BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+            if (maxWidth >= 720.dp) {
+                Row(modifier = Modifier.fillMaxSize()) {
+                    SettingsRail(visibleTabs, safeTab) { tab = it }
+                    VerticalDivider()
+                    Body(Modifier.weight(1f).fillMaxHeight())
+                }
+            } else {
+                Column(modifier = Modifier.fillMaxSize()) {
+                    SettingsTabRow(visibleTabs, safeTab) { tab = it }
+                    Body(Modifier.weight(1f).fillMaxWidth())
+                }
+            }
         }
     }
 }
@@ -1840,6 +1947,78 @@ private fun SystemPromptEditorDialog(
                     TextButton(onClick = onDismiss) { Text("Cancel") }
                 }
             }
+        }
+    }
+}
+
+/** Settings groups. Order here is the rail / tab-row order. */
+private enum class SettingsTab(val label: String) {
+    Appearance("Appearance"),
+    Chats("Chats"),
+    Notifications("Notifications"),
+    Ai("AI"),
+    Calls("Calls"),
+    Account("Account"),
+    About("About"),
+}
+
+/** Vertical tab rail — wide layouts (desktop, tablet, landscape). */
+@Composable
+private fun SettingsRail(
+    tabs: List<SettingsTab>,
+    selected: SettingsTab,
+    onSelect: (SettingsTab) -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .width(172.dp)
+            .fillMaxHeight()
+            .verticalScroll(rememberScrollState())
+            .padding(vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        tabs.forEach { t ->
+            val on = t == selected
+            Surface(
+                onClick = { onSelect(t) },
+                shape = RoundedCornerShape(10.dp),
+                color = if (on) MaterialTheme.colorScheme.secondaryContainer
+                else androidx.compose.ui.graphics.Color.Transparent,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 8.dp),
+            ) {
+                Text(
+                    t.label,
+                    style = MaterialTheme.typography.bodyMedium.copy(
+                        fontWeight = if (on) FontWeight.SemiBold else FontWeight.Normal,
+                    ),
+                    color = if (on) MaterialTheme.colorScheme.onSecondaryContainer
+                    else MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                )
+            }
+        }
+    }
+}
+
+/** Horizontal scrollable tabs — narrow layouts (phone portrait). */
+@Composable
+private fun SettingsTabRow(
+    tabs: List<SettingsTab>,
+    selected: SettingsTab,
+    onSelect: (SettingsTab) -> Unit,
+) {
+    ScrollableTabRow(
+        selectedTabIndex = tabs.indexOf(selected).coerceAtLeast(0),
+        edgePadding = 12.dp,
+    ) {
+        tabs.forEach { t ->
+            Tab(
+                selected = t == selected,
+                onClick = { onSelect(t) },
+                text = { Text(t.label) },
+            )
         }
     }
 }
