@@ -2,6 +2,7 @@ package io.nisfeb.talon.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -16,8 +17,17 @@ import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items as gridItems
+import androidx.compose.material.icons.filled.Videocam
+import androidx.compose.material.icons.filled.VideocamOff
+import androidx.compose.runtime.collectAsState
+import kotlinx.coroutines.flow.MutableStateFlow
+import io.nisfeb.talon.call.VideoState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -82,6 +92,21 @@ fun PartyLineFullScreen(
     /** Toggle recording, or null to hide the control (platform can't
      *  record, or we can't speak / aren't on the line). */
     onToggleRecord: (() -> Unit)? = null,
+    /** Video conference: render tiles instead of the roster list, and
+     *  show the camera control. Off for 1:1 and where unsupported. */
+    partyVideoSupported: Boolean = false,
+    /** Whether OUR camera is on. */
+    cameraOn: Boolean = false,
+    /** Toggle our camera, or null to hide the control. */
+    onToggleCamera: (() -> Unit)? = null,
+    /** Our up link, for the self-preview tile. */
+    localVideoLink: io.nisfeb.talon.call.PeerLink? = null,
+    /** The down link carrying a given speaker's camera. */
+    videoLinkFor: (String) -> io.nisfeb.talon.call.PeerLink? = { null },
+    /** The speaker pinned to full-resolution video, or null. */
+    focusedShip: String? = null,
+    /** Pin (or unpin) a speaker for full-res video. */
+    onFocusVideo: (String?) -> Unit = {},
 ) {
     Surface(
         modifier = Modifier.fillMaxSize(),
@@ -150,20 +175,48 @@ fun PartyLineFullScreen(
             }
 
             // ─── Participants ───
-            LazyColumn(
-                modifier = Modifier.weight(1f).fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(4.dp),
-            ) {
-                items(state.members, key = { it.ship }) { m ->
-                    ParticipantRow(
-                        member = m,
-                        nameFor = nameFor,
-                        isSelf = m.ship == selfShip,
-                        showOps = state.ops && m.ship != selfShip &&
-                            onRevokeSpeaking != null && onRestoreSpeaking != null,
-                        onRevokeSpeaking = onRevokeSpeaking,
-                        onRestoreSpeaking = onRestoreSpeaking,
-                    )
+            if (partyVideoSupported) {
+                // Conference grid: a tile per person, video where a
+                // camera is on, avatar otherwise.
+                LazyVerticalGrid(
+                    columns = GridCells.Adaptive(160.dp),
+                    modifier = Modifier.weight(1f).fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    gridItems(state.members, key = { it.ship }) { m ->
+                        val isSelf = m.ship == selfShip
+                        VideoTile(
+                            member = m,
+                            isSelf = isSelf,
+                            nameFor = nameFor,
+                            link = if (isSelf) localVideoLink else videoLinkFor(m.ship),
+                            focused = m.ship == focusedShip,
+                            // Tapping a remote tile pins it to full res;
+                            // tapping the pinned one unpins. Self never
+                            // pins (we send our own camera, not receive it).
+                            onTap = if (isSelf) null else {
+                                { onFocusVideo(if (m.ship == focusedShip) null else m.ship) }
+                            },
+                        )
+                    }
+                }
+            } else {
+                LazyColumn(
+                    modifier = Modifier.weight(1f).fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    items(state.members, key = { it.ship }) { m ->
+                        ParticipantRow(
+                            member = m,
+                            nameFor = nameFor,
+                            isSelf = m.ship == selfShip,
+                            showOps = state.ops && m.ship != selfShip &&
+                                onRevokeSpeaking != null && onRestoreSpeaking != null,
+                            onRevokeSpeaking = onRevokeSpeaking,
+                            onRestoreSpeaking = onRestoreSpeaking,
+                        )
+                    }
                 }
             }
 
@@ -227,6 +280,29 @@ fun PartyLineFullScreen(
 
                 if (audioDevices.supported) {
                     SpeakerControl(audioDevices)
+                }
+
+                if (onToggleCamera != null) {
+                    ControlButton(
+                        label = if (cameraOn) "Camera off" else "Camera",
+                        onClick = onToggleCamera,
+                        containerColor = if (cameraOn) {
+                            MaterialTheme.colorScheme.primaryContainer
+                        } else {
+                            MaterialTheme.colorScheme.surfaceVariant
+                        },
+                        contentColor = if (cameraOn) {
+                            MaterialTheme.colorScheme.onPrimaryContainer
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                    ) {
+                        Icon(
+                            if (cameraOn) Icons.Filled.Videocam else Icons.Filled.VideocamOff,
+                            contentDescription = null,
+                            modifier = Modifier.size(32.dp),
+                        )
+                    }
                 }
 
                 if (onToggleRecord != null) {
@@ -351,6 +427,74 @@ private fun SpeakerControl(audioDevices: AudioDevices) {
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
+    }
+}
+
+/** One conference tile: a speaker's camera when on, their avatar
+ *  otherwise, with a name label, a mic-off marker, and a ring while
+ *  they're speaking. */
+@Composable
+private fun VideoTile(
+    member: PartyMember,
+    isSelf: Boolean,
+    nameFor: (String) -> String,
+    link: io.nisfeb.talon.call.PeerLink?,
+    focused: Boolean = false,
+    onTap: (() -> Unit)? = null,
+) {
+    val videoFlow = remember(link) { link?.video ?: MutableStateFlow(VideoState()) }
+    val video by videoFlow.collectAsState()
+    val on = if (isSelf) video.localOn else video.remoteOn
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .aspectRatio(4f / 3f)
+            .clip(RoundedCornerShape(10.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .then(if (onTap != null) Modifier.clickable(onClick = onTap) else Modifier),
+        contentAlignment = Alignment.Center,
+    ) {
+        if (link != null && on) {
+            VideoSurface(link, local = isSelf, Modifier.fillMaxSize())
+        } else {
+            Avatar(label = nameFor(member.ship), url = null, size = 56.dp)
+        }
+        Row(
+            modifier = Modifier
+                .align(Alignment.BottomStart)
+                .padding(6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (member.muted || member.mutedByAdmin) {
+                Icon(
+                    Icons.Filled.MicOff,
+                    contentDescription = "Muted",
+                    tint = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.size(14.dp),
+                )
+                Spacer(Modifier.width(3.dp))
+            }
+            Text(
+                nameFor(member.ship) + if (isSelf) " (you)" else "",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        // A pinned tile gets a distinct ring; otherwise a speaking one.
+        val ring = when {
+            focused -> MaterialTheme.colorScheme.tertiary
+            member.speaking -> MaterialTheme.colorScheme.primary
+            else -> null
+        }
+        if (ring != null) {
+            Box(
+                Modifier
+                    .matchParentSize()
+                    .border(if (focused) 3.dp else 2.dp, ring, RoundedCornerShape(10.dp)),
+            )
+        }
     }
 }
 

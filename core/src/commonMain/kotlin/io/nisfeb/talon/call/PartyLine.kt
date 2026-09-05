@@ -191,9 +191,10 @@ class PartyLine(
     // videoLinkFor) and collects their PeerLink.video.
     private val _cameraOn = MutableStateFlow(false)
     val cameraOn: StateFlow<Boolean> = _cameraOn.asStateFlow()
-    // The speaker each down link's video should be attributed to; the
-    // focused (full-resolution) speaker, or null for all-low.
-    private var focused: String? = null
+    // The pinned speaker who gets full-resolution video; everyone else
+    // stays video-low so a big room's bandwidth and decode stay bounded.
+    private val _focusedVideo = MutableStateFlow<String?>(null)
+    val focusedVideo: StateFlow<String?> = _focusedVideo.asStateFlow()
     private var room = ""
     private var ourId = ""
     // Galène's client id must be unique per *connection*, not per
@@ -370,6 +371,38 @@ class PartyLine(
     fun videoLinkFor(ship: String): PeerLink? {
         val id = streamOwner.entries.firstOrNull { it.value == ship }?.key ?: return null
         return downLinks[id]
+    }
+
+    /**
+     * Pin one speaker to full-resolution video; everyone else stays
+     * video-low. Null unpins (all low). Re-sends the Galène request
+     * keyed by the pinned stream — an SFU that keys requests by label
+     * rather than id simply keeps everyone low, which is the safe
+     * fallback. This is the conference scale control: bounded decode
+     * and bandwidth regardless of room size.
+     */
+    suspend fun setFocusedVideo(ship: String?) {
+        _focusedVideo.value = ship
+        val focusedId = ship?.let { s ->
+            streamOwner.entries.firstOrNull { it.value == s }?.key
+        }
+        runCatching {
+            send(buildJsonObject {
+                put("type", "request")
+                putJsonObject("request") {
+                    putJsonArray("") {
+                        add(kotlinx.serialization.json.JsonPrimitive("audio"))
+                        add(kotlinx.serialization.json.JsonPrimitive("video-low"))
+                    }
+                    if (focusedId != null) {
+                        putJsonArray(focusedId) {
+                            add(kotlinx.serialization.json.JsonPrimitive("audio"))
+                            add(kotlinx.serialization.json.JsonPrimitive("video"))
+                        }
+                    }
+                }
+            })
+        }
     }
 
     fun setMuted(value: Boolean) {

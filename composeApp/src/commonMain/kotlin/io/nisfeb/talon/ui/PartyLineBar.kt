@@ -34,6 +34,8 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -93,12 +95,25 @@ fun PartyLineBar(
     onToggleRecord: (() -> Unit)? = null,
 ) {
     val state by party.state.collectAsState()
+    val cameraOn by party.cameraOn.collectAsState()
+    val videoScope = rememberCoroutineScope()
     PartyLineBarContent(
         state = state,
         admin = admin,
         modifier = modifier,
         onToggleMute = { party.setMuted(it) },
         onLeave = { party.leave() },
+        partyVideoSupported = isPartyVideoSupported,
+        cameraOn = cameraOn,
+        onToggleCamera = if (isPartyVideoSupported) {
+            { videoScope.launch { party.setCameraEnabled(!cameraOn) } }
+        } else {
+            null
+        },
+        localVideoLink = party.localVideoLink(),
+        videoLinkFor = { party.videoLinkFor(it) },
+        focusedShip = party.focusedVideo.collectAsState().value,
+        onFocusVideo = { videoScope.launch { party.setFocusedVideo(it) } },
         nameFor = nameFor,
         audioDevices = audioDevices,
         onDismiss = onDismiss,
@@ -174,6 +189,12 @@ fun PartyLineBarContent(
      */
     onToggleCamera: (() -> Unit)? = null,
     cameraOn: Boolean = false,
+    /** Video conference: render tiles in the full-screen view. */
+    partyVideoSupported: Boolean = false,
+    localVideoLink: io.nisfeb.talon.call.PeerLink? = null,
+    videoLinkFor: (String) -> io.nisfeb.talon.call.PeerLink? = { null },
+    focusedShip: String? = null,
+    onFocusVideo: (String?) -> Unit = {},
 ) {
     if (state is PartyState.Idle) return
     var expanded by remember { mutableStateOf(false) }
@@ -407,6 +428,13 @@ fun PartyLineBarContent(
                 recording = recording,
                 recordedBy = recordedBy,
                 onToggleRecord = onToggleRecord,
+                partyVideoSupported = partyVideoSupported,
+                cameraOn = cameraOn,
+                onToggleCamera = onToggleCamera,
+                localVideoLink = localVideoLink,
+                videoLinkFor = videoLinkFor,
+                focusedShip = focusedShip,
+                onFocusVideo = onFocusVideo,
             )
         }
     }
