@@ -11,6 +11,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CallEnd
@@ -390,6 +391,22 @@ fun PartyLineBarContent(
         }
     }
     if (state is PartyState.Live && expanded) {
+        // Video conference tiles (desktop, and any non-immersive
+        // client): the same grid the immersive full-screen shows, so a
+        // desktop user can both send and see camera video. A 1:1 call
+        // (headline != null) has its own picture-in-picture, not a grid.
+        if (partyVideoSupported && headline == null) {
+            PartyVideoGrid(
+                members = state.members,
+                selfShip = selfShip,
+                nameFor = nameFor,
+                localVideoLink = localVideoLink,
+                videoLinkFor = videoLinkFor,
+                focusedShip = focusedShip,
+                onFocusVideo = onFocusVideo,
+                modifier = Modifier.fillMaxWidth().heightIn(max = 360.dp),
+            )
+        }
         // No roster for a 1:1 call (headline != null): its single row
         // is fabricated and its speaking/muted flags never update.
         if (headline == null) {
