@@ -38,6 +38,7 @@ actual val isBackgroundCallRingSupported: Boolean = false
 // Supplied by MainViewController's edge strip -> IosBackDispatcher.
 actual val isVideoCallsSupported: Boolean = true
 actual val isPartyVideoSupported: Boolean = false
+actual val isCameraSwitchSupported: Boolean = false
 
 actual val isEdgeSwipeBackSupported: Boolean = true
 

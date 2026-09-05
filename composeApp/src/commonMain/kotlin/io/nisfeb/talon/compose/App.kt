@@ -553,7 +553,12 @@ fun App(
             }
         val partyLine = remember(callController, peerLinkFactory) {
             if (callController != null && peerLinkFactory != null) {
-                io.nisfeb.talon.call.PartyLine(http, peerLinkFactory, callSounds)
+                io.nisfeb.talon.call.PartyLine(
+                    http,
+                    peerLinkFactory,
+                    callSounds,
+                    videoSupported = io.nisfeb.talon.ui.isPartyVideoSupported,
+                )
                     .also { line ->
                         callController.onTicket = { host, ticket ->
                             // The topic lives on the host's room, not

@@ -66,11 +66,11 @@ class AndroidPeerLink(
             onCandidate?.invoke(IceCandidate(c.sdp, c.sdpMid, c.sdpMLineIndex))
         }
 
-        override fun onAddTrack(
-            receiver: org.webrtc.RtpReceiver?,
-            streams: Array<out MediaStream>?,
-        ) {
-            when (val t = receiver?.track()) {
+        // onTrack (not onAddTrack): the canonical unified-plan callback,
+        // matching AndroidCallEngine. onAddTrack is the legacy plan-b
+        // path and doesn't reliably fire for the video transceiver.
+        override fun onTrack(transceiver: RtpTransceiver?) {
+            when (val t = transceiver?.receiver?.track()) {
                 is AudioTrack -> {
                     remoteTrack = t
                     if (pcmCb.value != null) attachRec()
@@ -195,6 +195,10 @@ class AndroidPeerLink(
             releaseCamera()
             false
         }
+    }
+
+    override fun switchCamera() {
+        runCatching { capturer?.switchCamera(null) }
     }
 
     private fun releaseCamera() {

@@ -97,6 +97,11 @@ interface PeerLink {
      */
     suspend fun setCameraEnabled(enabled: Boolean): Boolean = false
 
+    /** Flip between front and back cameras. No-op where the camera isn't
+     *  switchable (desktop) or the camera is off. Gated in the UI by
+     *  [io.nisfeb.talon.ui.isCameraSwitchSupported]. */
+    fun switchCamera() {}
+
     fun close()
 }
 

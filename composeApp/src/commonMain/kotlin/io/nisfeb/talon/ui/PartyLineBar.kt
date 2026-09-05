@@ -97,7 +97,11 @@ fun PartyLineBar(
 ) {
     val state by party.state.collectAsState()
     val cameraOn by party.cameraOn.collectAsState()
+    val localLink by party.localVideoLink.collectAsState()
+    val videoOnShips by party.videoOn.collectAsState()
+    val focused by party.focusedVideo.collectAsState()
     val videoScope = rememberCoroutineScope()
+    val camera = rememberCameraPermission()
     PartyLineBarContent(
         state = state,
         admin = admin,
@@ -107,14 +111,26 @@ fun PartyLineBar(
         partyVideoSupported = isPartyVideoSupported,
         cameraOn = cameraOn,
         onToggleCamera = if (isPartyVideoSupported) {
-            { videoScope.launch { party.setCameraEnabled(!cameraOn) } }
+            {
+                // Ask the first time; the tap that grants isn't the tap
+                // that opens the camera — how every gated control behaves.
+                // Read the live value, so a fast double-tap can't desync.
+                if (!camera.granted) camera.request()
+                else videoScope.launch { party.setCameraEnabled(!party.cameraOn.value) }
+            }
         } else {
             null
         },
-        localVideoLink = party.localVideoLink(),
+        localVideoLink = localLink,
         videoLinkFor = { party.videoLinkFor(it) },
-        focusedShip = party.focusedVideo.collectAsState().value,
+        videoOnShips = videoOnShips,
+        focusedShip = focused,
         onFocusVideo = { videoScope.launch { party.setFocusedVideo(it) } },
+        onSwitchCamera = if (isCameraSwitchSupported) {
+            { party.switchCamera() }
+        } else {
+            null
+        },
         nameFor = nameFor,
         audioDevices = audioDevices,
         onDismiss = onDismiss,
@@ -194,8 +210,12 @@ fun PartyLineBarContent(
     partyVideoSupported: Boolean = false,
     localVideoLink: io.nisfeb.talon.call.PeerLink? = null,
     videoLinkFor: (String) -> io.nisfeb.talon.call.PeerLink? = { null },
+    /** Ships whose camera is on right now (authoritative on/off, from
+     *  explicit signalling — a down link's track is always present). */
+    videoOnShips: Set<String> = emptySet(),
     focusedShip: String? = null,
     onFocusVideo: (String?) -> Unit = {},
+    onSwitchCamera: (() -> Unit)? = null,
 ) {
     if (state is PartyState.Idle) return
     var expanded by remember { mutableStateOf(false) }
@@ -402,6 +422,7 @@ fun PartyLineBarContent(
                 nameFor = nameFor,
                 localVideoLink = localVideoLink,
                 videoLinkFor = videoLinkFor,
+                videoOnShips = videoOnShips,
                 focusedShip = focusedShip,
                 onFocusVideo = onFocusVideo,
                 modifier = Modifier.fillMaxWidth().heightIn(max = 360.dp),
@@ -450,8 +471,10 @@ fun PartyLineBarContent(
                 onToggleCamera = onToggleCamera,
                 localVideoLink = localVideoLink,
                 videoLinkFor = videoLinkFor,
+                videoOnShips = videoOnShips,
                 focusedShip = focusedShip,
                 onFocusVideo = onFocusVideo,
+                onSwitchCamera = onSwitchCamera,
             )
         }
     }

@@ -128,6 +128,10 @@ class PartyLine(
     /** Base backoff before republishing a failed up link. A knob only
      *  so tests can run the retry path in real milliseconds. */
     private val upRetryBaseMs: Long = 2_000L,
+    /** Whether this platform can capture and render party-line video
+     *  (isPartyVideoSupported). Off keeps the SFU request audio-only so
+     *  a client with no video path (iOS) never gets video m-lines. */
+    private val videoSupported: Boolean = false,
 ) {
     private val scope =
         CoroutineScope(SupervisorJob() + ioDispatcher + backgroundExceptionHandler)
@@ -195,6 +199,21 @@ class PartyLine(
     // stays video-low so a big room's bandwidth and decode stay bounded.
     private val _focusedVideo = MutableStateFlow<String?>(null)
     val focusedVideo: StateFlow<String?> = _focusedVideo.asStateFlow()
+    // Ships whose camera is ON right now, from explicit VIDEO_KIND
+    // broadcasts (plus ourself). A down link always has an empty video
+    // transceiver, so track presence can't tell camera-on from off —
+    // this signal is the truth the tiles render from.
+    private val videoOnBy = mutableSetOf<String>()
+    private val _videoOn = MutableStateFlow<Set<String>>(emptySet())
+    val videoOn: StateFlow<Set<String>> = _videoOn.asStateFlow()
+    // The up link, as a flow, so a self-preview tile re-binds when the
+    // link republishes even if PartyState didn't change.
+    private val _upLink = MutableStateFlow<PeerLink?>(null)
+    val localVideoLink: StateFlow<PeerLink?> = _upLink.asStateFlow()
+
+    private fun refreshVideoOn() {
+        _videoOn.value = videoOnBy + (if (_cameraOn.value) setOf(ourId) else emptySet())
+    }
     private var room = ""
     private var ourId = ""
     // Galène's client id must be unique per *connection*, not per
@@ -360,12 +379,37 @@ class PartyLine(
     suspend fun setCameraEnabled(enabled: Boolean): Boolean {
         val up = upLink ?: return false
         val ok = up.setCameraEnabled(enabled)
-        if (ok) _cameraOn.value = enabled
+        if (ok) {
+            _cameraOn.value = enabled
+            refreshVideoOn()
+            // Tell the room: a disabled track still sends (frozen) frames,
+            // so peers can't tell camera-off from a still scene without this.
+            broadcastVideo()
+        }
         return ok
     }
 
-    /** The up link, whose local camera a self-preview tile renders. */
-    fun localVideoLink(): PeerLink? = upLink
+    /** Broadcast our camera on/off so peers' tiles show video vs avatar.
+     *  Mirrors [broadcastMuted] — Galène has no notion of camera state. */
+    private suspend fun broadcastVideo() {
+        runCatching {
+            send(
+                buildJsonObject {
+                    put("type", "usermessage")
+                    put("source", connectionId)
+                    put("dest", "")
+                    put("username", ourId)
+                    put("kind", VIDEO_KIND)
+                    put("value", _cameraOn.value)
+                },
+            )
+        }
+    }
+
+    /** Flip our camera (front/back), where the platform can. */
+    fun switchCamera() {
+        upLink?.switchCamera()
+    }
 
     /** The down link carrying [ship]'s camera, for that speaker's tile. */
     fun videoLinkFor(ship: String): PeerLink? {
@@ -593,6 +637,9 @@ class PartyLine(
                         // making them show us wrong until we next touch
                         // the button.
                         if (id != connectionId) scope.launch { broadcastMuted() }
+                        // A newcomer also missed our camera state; say it
+                        // again so our tile shows video, not a stale avatar.
+                        if (id != connectionId) scope.launch { broadcastVideo() }
                         // Galène doesn't replay past broadcasts to a
                         // newcomer, so an op re-announces who is
                         // admin-muted — otherwise the mark is invisible
@@ -615,6 +662,10 @@ class PartyLine(
                         // gone; someone signed in twice is still here.
                         if (gone != null && roster.values.none { it.ship == gone }) {
                             mutedBy.remove(gone)
+                            if (videoOnBy.remove(gone)) refreshVideoOn()
+                            if (_focusedVideo.value == gone) {
+                                scope.launch { setFocusedVideo(null) }
+                            }
                         }
                     }
                     else -> {}
@@ -639,6 +690,13 @@ class PartyLine(
                     val off = msg["value"]?.jsonPrimitive?.content == "true"
                     if (off) mutedBy.add(who) else mutedBy.remove(who)
                     publishRoster()
+                    return
+                }
+                if (kind == VIDEO_KIND) {
+                    val who = msg["username"]?.jsonPrimitive?.content ?: return
+                    val on = msg["value"]?.jsonPrimitive?.content == "true"
+                    if (on) videoOnBy.add(who) else videoOnBy.remove(who)
+                    refreshVideoOn()
                     return
                 }
                 if (kind == "mute") {
@@ -686,16 +744,18 @@ class PartyLine(
             ops = "op" in it
         }
 
-        // Ask for everyone's audio and camera. The SFU forwards video
-        // only from speakers who actually publish it, so an audio-only
-        // line costs nothing here; video-low keeps non-focused tiles
-        // cheap (see setFocusedVideo).
+        // Ask for everyone's audio, and camera where we can render it.
+        // video-low keeps non-focused tiles cheap (see setFocusedVideo);
+        // a platform with no video path (iOS) requests audio only so the
+        // SFU never offers it video m-lines it can't answer.
         send(buildJsonObject {
             put("type", "request")
             putJsonObject("request") {
                 putJsonArray("") {
                     add(kotlinx.serialization.json.JsonPrimitive("audio"))
-                    add(kotlinx.serialization.json.JsonPrimitive("video-low"))
+                    if (videoSupported) {
+                        add(kotlinx.serialization.json.JsonPrimitive("video-low"))
+                    }
                 }
             }
         })
@@ -788,6 +848,7 @@ class PartyLine(
         val up = links.create(sfuIce, sendAudio = true)
         old?.close()
         upLink = up
+        _upLink.value = up
         startLevelPolling()
         up.setMuted(muted)
         // Republish (flaky network) rebuilds the up link with the camera
@@ -1013,10 +1074,18 @@ class PartyLine(
         session = null
         upLink?.close()
         upLink = null
+        _upLink.value = null
         downLinks.values.forEach { it.close() }
         downLinks.clear()
         roster.clear()
         adminMuted.clear()
+        // Video state is per-session: a fresh line starts camera-off,
+        // nobody pinned, no remembered camera flags — otherwise a rejoin
+        // would auto-open the camera (via publishUp) with no user intent.
+        _cameraOn.value = false
+        _focusedVideo.value = null
+        videoOnBy.clear()
+        _videoOn.value = emptySet()
         upState = MediaState.Idle
         if (_state.value !is PartyState.Failed) _state.value = PartyState.Idle
     }
@@ -1044,5 +1113,6 @@ class PartyLine(
          */
         internal const val MUTE_KIND = "talon-mute"
         internal const val ADMIN_MUTE_KIND = "talon-adminmute"
+        internal const val VIDEO_KIND = "talon-video"
     }
 }

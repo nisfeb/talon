@@ -26,6 +26,7 @@ actual val isBackgroundCallRingSupported: Boolean = true
 // The system back gesture already owns the left edge here.
 actual val isVideoCallsSupported: Boolean = true
 actual val isPartyVideoSupported: Boolean = true
+actual val isCameraSwitchSupported: Boolean = true
 
 actual val isEdgeSwipeBackSupported: Boolean = false
 

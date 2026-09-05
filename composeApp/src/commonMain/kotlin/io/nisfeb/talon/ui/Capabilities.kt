@@ -171,6 +171,14 @@ expect val isVideoCallsSupported: Boolean
  */
 expect val isPartyVideoSupported: Boolean
 
+/**
+ * Whether the camera can be flipped front/back. Android: true
+ * (CameraVideoCapturer.switchCamera). Desktop: false — a webcam has one
+ * lens and no switch. iOS: false (no video path yet). Gates the flip
+ * control (CLAUDE.md #3).
+ */
+expect val isCameraSwitchSupported: Boolean
+
 expect val isEdgeSwipeBackSupported: Boolean
 
 /**

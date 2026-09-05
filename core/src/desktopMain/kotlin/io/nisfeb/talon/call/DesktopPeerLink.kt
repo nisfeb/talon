@@ -70,7 +70,11 @@ class DesktopPeerLink(
     private val _video = MutableStateFlow(VideoState())
     override val video: StateFlow<VideoState> = _video
     private var cameraSource: VideoDeviceSource? = null
+    // Read from the UI thread via the getters below; written from the
+    // native onTrack thread (remote) and the camera coroutine (local).
+    @kotlin.concurrent.Volatile
     private var localVideo: VideoTrack? = null
+    @kotlin.concurrent.Volatile
     private var remoteVideo: VideoTrack? = null
 
     /** The camera / remote camera track for [io.nisfeb.talon.ui.VideoSurface]

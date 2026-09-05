@@ -192,6 +192,7 @@ fun TalonApp(
                     io.nisfeb.talon.call.AndroidPeerLink(app, ice, send)
                 },
                 callSounds,
+                videoSupported = io.nisfeb.talon.ui.isPartyVideoSupported,
             ).also { line ->
                 callController.onTicket = { host, ticket ->
                             // The topic lives on the host's room, not

@@ -36,6 +36,7 @@ import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
@@ -103,10 +104,14 @@ fun PartyLineFullScreen(
     localVideoLink: io.nisfeb.talon.call.PeerLink? = null,
     /** The down link carrying a given speaker's camera. */
     videoLinkFor: (String) -> io.nisfeb.talon.call.PeerLink? = { null },
+    /** Ships whose camera is on right now. */
+    videoOnShips: Set<String> = emptySet(),
     /** The speaker pinned to full-resolution video, or null. */
     focusedShip: String? = null,
     /** Pin (or unpin) a speaker for full-res video. */
     onFocusVideo: (String?) -> Unit = {},
+    /** Flip front/back camera, or null to hide the control. */
+    onSwitchCamera: (() -> Unit)? = null,
 ) {
     Surface(
         modifier = Modifier.fillMaxSize(),
@@ -185,6 +190,7 @@ fun PartyLineFullScreen(
                     nameFor = nameFor,
                     localVideoLink = localVideoLink,
                     videoLinkFor = videoLinkFor,
+                    videoOnShips = videoOnShips,
                     focusedShip = focusedShip,
                     onFocusVideo = onFocusVideo,
                     modifier = Modifier.weight(1f).fillMaxWidth(),
@@ -287,6 +293,21 @@ fun PartyLineFullScreen(
                     ) {
                         Icon(
                             if (cameraOn) Icons.Filled.Videocam else Icons.Filled.VideocamOff,
+                            contentDescription = null,
+                            modifier = Modifier.size(32.dp),
+                        )
+                    }
+                }
+
+                if (onSwitchCamera != null && cameraOn) {
+                    ControlButton(
+                        label = "Flip",
+                        onClick = onSwitchCamera,
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                        contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                    ) {
+                        Icon(
+                            Icons.Filled.Refresh,
                             contentDescription = null,
                             modifier = Modifier.size(32.dp),
                         )

@@ -11,6 +11,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.graphics.toComposeImageBitmap
 import dev.onvoid.webrtc.media.video.VideoFrame
 import dev.onvoid.webrtc.media.video.VideoTrackSink
@@ -38,6 +39,7 @@ actual fun VideoSurface(engine: CallEngine, local: Boolean, modifier: Modifier) 
     VideoTrackCanvas(
         track = if (local) desktop.localVideoTrack else desktop.remoteVideoTrack,
         on = if (local) video.localOn else video.remoteOn,
+        mirror = local,
         modifier = modifier,
     )
 }
@@ -53,6 +55,7 @@ actual fun VideoSurface(
     VideoTrackCanvas(
         track = if (local) d.localVideoTrack else d.remoteVideoTrack,
         on = if (local) video.localOn else video.remoteOn,
+        mirror = local,
         modifier = modifier,
     )
 }
@@ -62,6 +65,7 @@ actual fun VideoSurface(
 private fun VideoTrackCanvas(
     track: dev.onvoid.webrtc.media.video.VideoTrack?,
     on: Boolean,
+    mirror: Boolean,
     modifier: Modifier,
 ) {
     if (track == null || !on) return
@@ -82,15 +86,26 @@ private fun VideoTrackCanvas(
 
     Canvas(modifier) {
         val image = bitmap ?: return@Canvas
-        drawFitted(image)
+        drawFitted(image, mirror)
     }
 }
 
 /** Draw [image] centred and aspect-fitted into the canvas. */
-private fun DrawScope.drawFitted(image: ImageBitmap) {
+private fun DrawScope.drawFitted(image: ImageBitmap, mirror: Boolean) {
     val scale = minOf(size.width / image.width, size.height / image.height)
     val w = (image.width * scale).roundToInt()
     val h = (image.height * scale).roundToInt()
+    // Our own camera is a mirror, the way every video app behaves.
+    if (mirror) {
+        scale(scaleX = -1f, scaleY = 1f) {
+            drawFittedRaw(image, w, h)
+        }
+        return
+    }
+    drawFittedRaw(image, w, h)
+}
+
+private fun DrawScope.drawFittedRaw(image: ImageBitmap, w: Int, h: Int) {
     drawImage(
         image = image,
         dstOffset = androidx.compose.ui.unit.IntOffset(

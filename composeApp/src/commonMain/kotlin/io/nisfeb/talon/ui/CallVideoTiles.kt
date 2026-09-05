@@ -49,6 +49,7 @@ internal fun PartyVideoGrid(
     nameFor: (String) -> String,
     localVideoLink: PeerLink?,
     videoLinkFor: (String) -> PeerLink?,
+    videoOnShips: Set<String>,
     focusedShip: String?,
     onFocusVideo: (String?) -> Unit,
     modifier: Modifier = Modifier,
@@ -66,6 +67,7 @@ internal fun PartyVideoGrid(
                 isSelf = isSelf,
                 nameFor = nameFor,
                 link = if (isSelf) localVideoLink else videoLinkFor(m.ship),
+                videoOn = m.ship in videoOnShips,
                 focused = m.ship == focusedShip,
                 onTap = if (isSelf) null else {
                     { onFocusVideo(if (m.ship == focusedShip) null else m.ship) }
@@ -83,12 +85,14 @@ internal fun VideoTile(
     isSelf: Boolean,
     nameFor: (String) -> String,
     link: PeerLink?,
+    videoOn: Boolean = false,
     focused: Boolean = false,
     onTap: (() -> Unit)? = null,
 ) {
-    val videoFlow = remember(link) { link?.video ?: MutableStateFlow(VideoState()) }
-    val video by videoFlow.collectAsState()
-    val on = if (isSelf) video.localOn else video.remoteOn
+    // Camera on/off is signalled explicitly (videoOn), not inferred from
+    // the track: a down link always carries an empty video transceiver,
+    // so track presence would light every tile up as "on".
+    val on = videoOn
     Box(
         Modifier
             .fillMaxWidth()
