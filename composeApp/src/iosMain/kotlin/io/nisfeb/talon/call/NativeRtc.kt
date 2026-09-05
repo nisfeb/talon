@@ -94,6 +94,14 @@ interface NativeRtcPeer {
     fun setCameraEnabled(enabled: Boolean, done: (String?) -> Unit)
 
     /**
+     * Flip between front and back cameras. No-op when the camera is off.
+     * No-arg is safe here: the selector is unique to this interface and
+     * returns Unit everywhere, so it can't collide the way a same-named,
+     * different-return-type export would (see [micLevel]).
+     */
+    fun switchCamera()
+
+    /**
      * Who is showing a camera, whenever that changes.
      *
      * Passes [VideoState] rather than two Booleans: Kotlin/Native

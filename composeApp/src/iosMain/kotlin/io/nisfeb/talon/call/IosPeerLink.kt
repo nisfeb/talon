@@ -33,6 +33,10 @@ class IosPeerLink(private val native: NativeRtcPeer) : PeerLink {
             native.setCameraEnabled(enabled) { err -> cont.resume(err == null) }
         }
 
+    override fun switchCamera() {
+        native.switchCamera()
+    }
+
     /** The RTCMTLVideoView for our camera / this speaker's, for the
      *  party VideoSurface. Any? because UIKit types aren't in scope
      *  here — Compose's UIKitView takes a UIView anyway. */

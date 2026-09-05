@@ -223,7 +223,7 @@
 				INFOPLIST_FILE = iosApp/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks";
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 0.16.0;
 				CODE_SIGN_ENTITLEMENTS = iosApp/Talon.entitlements;
 				OTHER_LDFLAGS = (
 					"$(inherited)",
@@ -316,7 +316,7 @@
 				INFOPLIST_FILE = iosApp/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks";
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 0.16.0;
 				CODE_SIGN_ENTITLEMENTS = iosApp/Talon.entitlements;
 				OTHER_LDFLAGS = (
 					"$(inherited)",

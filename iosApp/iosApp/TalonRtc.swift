@@ -61,6 +61,9 @@ final class TalonRtcPeer: NSObject, NativeRtcPeer, RTCPeerConnectionDelegate {
     private var videoSender: RTCRtpSender?
     private var capturer: RTCCameraVideoCapturer?
     private var localVideoTrack: RTCVideoTrack?
+    /// Which camera is live, so switchCamera knows what to flip to.
+    /// Starts front — the default setCameraEnabled picks.
+    private var usingFront = true
     private var remoteVideoTrack: RTCVideoTrack?
     private var videoListener: ((VideoState) -> Void)?
     private var videoState = VideoState(localOn: false, remoteOn: false)
@@ -298,6 +301,32 @@ final class TalonRtcPeer: NSObject, NativeRtcPeer, RTCPeerConnectionDelegate {
 
     func setMuted(muted: Bool) {
         main { [weak self] in self?.micTrack?.isEnabled = !muted }
+    }
+
+    func switchCamera() {
+        main { [weak self] in
+            guard let self = self, let cap = self.capturer else { return }
+            let wantFront = !self.usingFront
+            let devices = RTCCameraVideoCapturer.captureDevices()
+            let pos: AVCaptureDevice.Position = wantFront ? .front : .back
+            guard let device = devices.first(where: { $0.position == pos })
+                ?? devices.first else { return }
+            let formats = RTCCameraVideoCapturer.supportedFormats(for: device)
+            guard let format = formats.min(by: { a, b in
+                let da = CMVideoFormatDescriptionGetDimensions(a.formatDescription)
+                let db = CMVideoFormatDescriptionGetDimensions(b.formatDescription)
+                return abs(Int(da.width) - 640) < abs(Int(db.width) - 640)
+            }) else { return }
+            let fps = min(
+                30,
+                Int(format.videoSupportedFrameRateRanges.map { $0.maxFrameRate }.max() ?? 30)
+            )
+            // Restart the same capturer on the other device; the track,
+            // sender and view stay put and keep receiving frames.
+            cap.startCapture(with: device, format: format, fps: fps) { [weak self] err in
+                self?.main { if err == nil { self?.usingFront = wantFront } }
+            }
+        }
     }
 
     func onVideoChange(listener: @escaping (VideoState) -> Void) {
