@@ -37,6 +37,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -243,6 +244,13 @@ private fun ControlButton(
 private fun SpeakerControl(audioDevices: AudioDevices) {
     var menuOpen by remember { mutableStateOf(false) }
     val outputs = remember(menuOpen) { audioDevices.outputs() }
+    // selectedOutput isn't observable, so the caption is driven by local
+    // state: seeded from the current route, updated on pick, and
+    // re-read each time the menu opens (the route can also change from
+    // outside — a headset plugged in, the bar's own picker).
+    var selected by remember { mutableStateOf(audioDevices.selectedOutput) }
+    LaunchedEffect(menuOpen) { if (menuOpen) selected = audioDevices.selectedOutput }
+    val routeLabel = outputs.firstOrNull { it.id == selected }?.label ?: "System default"
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Box {
             Surface(
@@ -268,13 +276,21 @@ private fun SpeakerControl(audioDevices: AudioDevices) {
                         onClick = {
                             menuOpen = false
                             audioDevices.selectOutput(out.id)
+                            // Reflect what actually took effect: the
+                            // platform can refuse a route.
+                            selected = audioDevices.selectedOutput
                         },
                     )
                 }
             }
         }
         Spacer(Modifier.height(8.dp))
-        Text("Speaker", style = MaterialTheme.typography.labelLarge)
+        Text(
+            routeLabel,
+            style = MaterialTheme.typography.labelLarge,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }
 
