@@ -5,6 +5,8 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -73,6 +75,7 @@ import io.nisfeb.talon.call.PartyState
  * Everything here is driven by the same [PartyState.Live] and callbacks
  * the compact bar uses; this is a presentation, not a second call.
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun PartyLineFullScreen(
     state: PartyState.Live,
@@ -215,10 +218,14 @@ fun PartyLineFullScreen(
             }
 
             // ─── Controls ───
-            Row(
+            // FlowRow, not Row: mute + audio + camera + flip + record +
+            // leave is too many for one phone row and squished them. This
+            // wraps to a second row when they don't fit, and stays one
+            // row where they do.
+            FlowRow(
                 modifier = Modifier.fillMaxWidth().padding(vertical = 20.dp),
                 horizontalArrangement = Arrangement.SpaceEvenly,
-                verticalAlignment = Alignment.Top,
+                verticalArrangement = Arrangement.spacedBy(16.dp),
             ) {
                 if (state.canSpeak) {
                     ControlButton(
