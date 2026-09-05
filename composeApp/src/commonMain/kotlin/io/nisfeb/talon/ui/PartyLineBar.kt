@@ -2,6 +2,8 @@ package io.nisfeb.talon.ui
 
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.size
@@ -437,6 +439,18 @@ fun PartyLineBarContent(
         // a thing you do once, not something worth a permanent row over
         // the conversation. Renders nothing where the OS owns routing.
         AudioDeviceControls(audioDevices)
+        // Recording control for non-immersive clients (desktop): the
+        // immersive full-screen has its own Record button, but desktop
+        // never opens it, so the control would otherwise be unreachable
+        // where recording is actually supported. Party lines only.
+        if (onToggleRecord != null && headline == null) {
+            RecordRow(
+                recording = recording,
+                recordedBy = recordedBy,
+                nameFor = nameFor,
+                onToggleRecord = onToggleRecord,
+            )
+        }
     }
     if (state is PartyState.Live && admin != null) {
         ListenControls(admin, state.listeners)
@@ -735,6 +749,64 @@ private fun ListenControls(admin: PartyLineAdmin, listeners: Int) {
                     )
                 }
             }
+        }
+    }
+}
+
+/** The desktop expanded-bar recording control: a Record/Stop pill and,
+ *  when anyone is recording, who. The immersive full-screen has its own
+ *  Record button; this makes recording reachable where the full-screen
+ *  never opens (desktop), gated the same way (onToggleRecord != null). */
+@Composable
+private fun RecordRow(
+    recording: Boolean,
+    recordedBy: Set<String>,
+    nameFor: (String) -> String,
+    onToggleRecord: () -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Surface(
+            onClick = onToggleRecord,
+            shape = RoundedCornerShape(8.dp),
+            color = if (recording) {
+                MaterialTheme.colorScheme.errorContainer
+            } else {
+                MaterialTheme.colorScheme.surfaceVariant
+            },
+            contentColor = if (recording) {
+                MaterialTheme.colorScheme.onErrorContainer
+            } else {
+                MaterialTheme.colorScheme.onSurfaceVariant
+            },
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(
+                    Modifier.size(12.dp)
+                        .clip(if (recording) RoundedCornerShape(2.dp) else CircleShape)
+                        .background(MaterialTheme.colorScheme.error),
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    if (recording) "Stop recording" else "Record",
+                    style = MaterialTheme.typography.labelLarge,
+                )
+            }
+        }
+        if (recordedBy.isNotEmpty()) {
+            Spacer(Modifier.width(10.dp))
+            Text(
+                "Recording · " + recordedBy.joinToString(", ") { nameFor(it) },
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.error,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
         }
     }
 }
