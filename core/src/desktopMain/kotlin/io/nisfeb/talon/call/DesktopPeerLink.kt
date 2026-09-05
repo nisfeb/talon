@@ -62,6 +62,7 @@ class DesktopPeerLink(
     private val pcmCb =
         kotlinx.atomicfu.atomic<((ByteArray, Int) -> Unit)?>(null)
     private var recSink: dev.onvoid.webrtc.media.audio.AudioTrackSink? = null
+    private val recFrames = kotlinx.atomicfu.atomic(0)
 
     // Party-line video (conference). The up link (sendAudio) carries a
     // pre-negotiated send video transceiver whose camera track is
@@ -278,7 +279,12 @@ class DesktopPeerLink(
         val cb = pcmCb.value ?: return
         // Up link taps the local mic; a down link taps the remote
         // speaker (null until its track has arrived — onTrack retries).
-        val target = (if (sendAudio) micTrack else remoteTrack) ?: return
+        val which = if (sendAudio) "mic" else "remote"
+        val target = (if (sendAudio) micTrack else remoteTrack) ?: run {
+            Log.w("PartyLine", "record tap: no $which track to attach to")
+            return
+        }
+        recFrames.value = 0
         val adapter = object : dev.onvoid.webrtc.media.audio.AudioTrackSink {
             override fun onData(
                 audioData: ByteArray,
@@ -288,18 +294,25 @@ class DesktopPeerLink(
                 numberOfFrames: Int,
             ) {
                 if (bitsPerSample != 16) return
+                if (recFrames.getAndIncrement() == 0) {
+                    Log.i("PartyLine", "record tap: $which first frame rate=$sampleRate ch=$numberOfChannels")
+                }
                 cb(toMonoLe(audioData, numberOfChannels, numberOfFrames), sampleRate)
             }
         }
         recSink = adapter
         runCatching { target.addSink(adapter) }
-            .onFailure { Log.w("PartyLine", "could not tap for recording", it) }
+            .onFailure { Log.w("PartyLine", "could not tap $which for recording", it) }
     }
 
     private fun detachRec() {
         val s = recSink ?: return
         val target = if (sendAudio) micTrack else remoteTrack
         runCatching { target?.removeSink(s) }
+        Log.i(
+            "PartyLine",
+            "record tap: ${if (sendAudio) "mic" else "remote"} detached after ${recFrames.value} frames",
+        )
         recSink = null
     }
 

@@ -329,6 +329,11 @@ class PartyLine(
         recStartMs = nowMs()
         recClips.clear()
         recording = true
+        Log.i(
+            TAG,
+            "recording start: upLink=${upLink != null} downLinks=${downLinks.size} " +
+                "ourShip=$ourShip canSpeak=$canSpeak",
+        )
         tap(upLink, ourShip)
         for ((id, link) in downLinks) tap(link, streamOwner[id] ?: id)
     }
@@ -365,6 +370,11 @@ class PartyLine(
             out
         }
         recClips.clear()
+        Log.i(
+            TAG,
+            "recording stop: rate=$recRate " +
+                clips.entries.joinToString(", ") { "${it.key}=${it.value.size}B" }.ifEmpty { "(no clips)" },
+        )
         return RecordedCall(clips, recRate)
     }
 
