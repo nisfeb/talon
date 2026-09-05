@@ -318,6 +318,37 @@ internal object WebRtcFactory {
     private var factory: PeerConnectionFactory? = null
 
     /**
+     * Self-mic capture for call recording (wire 7).
+     *
+     * The audio device module's record-samples callback is process-
+     * global (16-bit PCM as the mic hears it, before encode). The
+     * recording up link sets this while active and clears it after, so
+     * it is null — and free — the rest of the time. Only one up link
+     * captures a mic at once, so a single sink is enough.
+     */
+    @Volatile
+    var micSink: ((pcm: ByteArray, sampleRate: Int) -> Unit)? = null
+
+    /** Downmix N-channel 16-bit LE PCM to mono, copying (the callback
+     *  buffer is reused). Mic is normally mono, so the fast path copies. */
+    private fun toMono(data: ByteArray, channels: Int): ByteArray {
+        if (channels <= 1) return data.copyOf()
+        val frames = data.size / (channels * 2)
+        val out = ByteArray(frames * 2)
+        for (f in 0 until frames) {
+            var acc = 0
+            for (c in 0 until channels) {
+                val b = (f * channels + c) * 2
+                acc += (data[b + 1].toInt() shl 8) or (data[b].toInt() and 0xFF)
+            }
+            val v = acc / channels
+            out[f * 2] = (v and 0xFF).toByte()
+            out[f * 2 + 1] = ((v shr 8) and 0xFF).toByte()
+        }
+        return out
+    }
+
+    /**
      * One EGL context for the process.
      *
      * Hardware encode/decode and every SurfaceViewRenderer have to
@@ -337,7 +368,17 @@ internal object WebRtcFactory {
         )
         return PeerConnectionFactory.builder()
             .setAudioDeviceModule(
-                JavaAudioDeviceModule.builder(app).createAudioDeviceModule(),
+                JavaAudioDeviceModule.builder(app)
+                    // Tap the recorded mic for call recording. Fires
+                    // continuously while the mic is live; forwards only
+                    // when a recording has set [micSink].
+                    .setSamplesReadyCallback { samples ->
+                        val sink = micSink ?: return@setSamplesReadyCallback
+                        runCatching {
+                            sink(toMono(samples.data, samples.channelCount), samples.sampleRate)
+                        }
+                    }
+                    .createAudioDeviceModule(),
             )
             // Without these the factory has no video codecs at all and
             // a video m-line negotiates to nothing. Harmless for party

@@ -263,12 +263,13 @@ class AndroidPeerLink(
     private fun attachRec() {
         detachRec()
         val cb = pcmCb.value ?: return
-        // Down links (remote speakers) tap cleanly. Self-mic capture on
-        // Android needs JavaAudioDeviceModule.setSamplesReadyCallback
-        // wired through WebRtcFactory — a follow-up; until then
-        // isCallRecordingSupported stays false on Android so this is
-        // staged, not a half-working feature.
-        if (sendAudio) return
+        // Up link: capture our own mic through the audio device module's
+        // record-samples callback (WebRtcFactory.micSink). Down link:
+        // tap the remote speaker's track directly.
+        if (sendAudio) {
+            WebRtcFactory.micSink = { pcm, rate -> cb(pcm, rate) }
+            return
+        }
         val target = remoteTrack ?: return
         val adapter = object : org.webrtc.AudioTrackSink {
             override fun onData(
@@ -289,6 +290,11 @@ class AndroidPeerLink(
     }
 
     private fun detachRec() {
+        if (sendAudio) {
+            // Only the up link owns the global mic sink.
+            WebRtcFactory.micSink = null
+            return
+        }
         val s = recSink ?: return
         runCatching { remoteTrack?.removeSink(s) }
         recSink = null
@@ -370,6 +376,7 @@ class AndroidPeerLink(
 
     override fun close() {
         if (!closed.compareAndSet(false, true)) return
+        detachRec()
         runCatching { micTrack?.setEnabled(false) }
         runCatching { capturer?.stopCapture() }
         releaseCamera()

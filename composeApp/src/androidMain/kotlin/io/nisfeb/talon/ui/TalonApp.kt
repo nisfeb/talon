@@ -990,6 +990,8 @@ fun TalonApp(
         io.nisfeb.talon.ui.LocalUrbLinkHandler provides urbLinkHandler,
         io.nisfeb.talon.ui.LocalUrbFetcher provides urbFetcher,
         io.nisfeb.talon.ui.LocalShipUrl provides app.sessionStore.active()?.shipUrl,
+        io.nisfeb.talon.ui.LocalShipCookie provides
+            app.sessionStore.active()?.let { "${it.cookieName}=${it.cookieValue}" },
         // Route urb:// opened via Compose link handling (statuses, bios)
         // to Lattice. Also avoids an ActivityNotFoundException crash for
         // users without Lattice — they get the install prompt instead.
@@ -1749,6 +1751,18 @@ fun TalonApp(
                 val peekProblem = groupRoom?.let { (h, n) ->
                     peekProblems["$h/$n"]
                 }
+                // Call recording (wire 7) — shared with the desktop root.
+                val recordingControls = io.nisfeb.talon.ui.rememberPartyRecording(
+                    callController = callController,
+                    partyLine = partyLine,
+                    partyRoomHere = partyRoomHere,
+                    onThisLine = onThisLine,
+                    http = app.ktorHttp,
+                    aiConfig = app.aiSettings.state.value,
+                    ourShip = loggedInShip.orEmpty(),
+                    conversationTitle = contactMap.conversationLabel(openWhom.orEmpty()),
+                    nameFor = { contactMap.displayName(it) },
+                )
                 DmChatScreen(
                     db = app.db,
                     repo = app.repo,
@@ -1858,6 +1872,9 @@ fun TalonApp(
                                     } else {
                                         null
                                     },
+                                recording = recordingControls.recording,
+                                recordedBy = recordingControls.recordedBy,
+                                onToggleRecord = recordingControls.onToggleRecord,
                             )
                             // Between tapping the party icon and the
                             // host's grant the line is still Idle and

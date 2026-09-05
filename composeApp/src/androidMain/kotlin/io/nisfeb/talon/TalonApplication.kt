@@ -27,6 +27,10 @@ import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
 import java.util.concurrent.TimeUnit
 
+/** App context for module-internal leaf helpers with no Context of
+ *  their own. Set in [TalonApplication.onCreate]. */
+internal var talonAppContext: android.content.Context? = null
+
 class TalonApplication : Application() {
     // Always-on singletons — not ship-scoped.
     // OkHttp client for the Android-only leaf consumers (image
@@ -145,6 +149,9 @@ class TalonApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        // Module-visible app context for the few leaf helpers that have
+        // no Context of their own (e.g. saveWavFile's MediaStore write).
+        talonAppContext = applicationContext
         // Cookie-jar-bearing client used by UrbitSession + S3Uploader.
         // Coil does NOT use this — coil-network-okhttp registers its
         // own default OkHttpClient via ServiceLoader. That's fine

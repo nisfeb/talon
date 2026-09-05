@@ -1113,6 +1113,8 @@ fun App(
               io.nisfeb.talon.ui.LocalUrbLinkHandler provides urbLinkHandler,
               io.nisfeb.talon.ui.LocalUrbFetcher provides urbFetcher,
               io.nisfeb.talon.ui.LocalShipUrl provides sessionStore.active()?.shipUrl,
+              io.nisfeb.talon.ui.LocalShipCookie provides
+                  sessionStore.active()?.let { "${it.cookieName}=${it.cookieValue}" },
               androidx.compose.ui.platform.LocalUriHandler provides urbAwareUriHandler,
               io.nisfeb.talon.ui.LocalCiteResolver provides citeResolver,
               io.nisfeb.talon.ui.LocalCitationOpen provides openCitation,
@@ -1878,91 +1880,23 @@ fun App(
                                     peekProblems["$h/$n"]
                                 }
                                 // ─── Call recording (wire 7) ───
-                                // Who is recording, for the badge everyone
-                                // on the line sees; polled like presence.
-                                val recordingMapFlow = remember(callController) {
-                                    callController?.recording
-                                        ?: kotlinx.coroutines.flow.MutableStateFlow(emptyMap())
-                                }
-                                val recordingMap by recordingMapFlow.collectAsState()
-                                val recordedBy = partyRoomHere?.let { (h, n) ->
-                                    recordingMap["$h/$n"]
-                                } ?: emptySet()
-                                LaunchedEffect(partyRoomHere, onThisLine) {
-                                    val (h, n) = partyRoomHere ?: return@LaunchedEffect
-                                    val cc = callController ?: return@LaunchedEffect
-                                    if (!onThisLine) return@LaunchedEffect
-                                    while (true) {
-                                        cc.recordersOf(h, n)
-                                        kotlinx.coroutines.delay(15_000)
-                                    }
-                                }
-                                var recordingNow by remember(partyRoomHere) {
-                                    mutableStateOf(false)
-                                }
-                                var recordConsented by remember { mutableStateOf(false) }
-                                var showRecordConsent by remember { mutableStateOf(false) }
-                                var recordedResult by remember(partyRoomHere) {
-                                    mutableStateOf<io.nisfeb.talon.call.RecordedCall?>(null)
-                                }
-                                // Heartbeat our recording to the host while
-                                // active; tell it we stopped on the way out.
-                                LaunchedEffect(recordingNow, partyRoomHere) {
-                                    if (!recordingNow) return@LaunchedEffect
-                                    val (h, n) = partyRoomHere ?: return@LaunchedEffect
-                                    val cc = callController ?: return@LaunchedEffect
-                                    try {
-                                        while (true) {
-                                            cc.startRecording(h, n)
-                                            kotlinx.coroutines.delay(30_000)
-                                        }
-                                    } finally {
-                                        kotlinx.coroutines.withContext(
-                                            kotlinx.coroutines.NonCancellable,
-                                        ) { cc.stopRecording(h, n) }
-                                    }
-                                }
-                                val canRecord = io.nisfeb.talon.ui.isCallRecordingSupported &&
-                                    onThisLine && partyLine != null && !ship.isNullOrEmpty()
-                                val onToggleRecord: (() -> Unit)? = if (canRecord) {
-                                    {
-                                        val line = partyLine!!
-                                        if (recordingNow) {
-                                            recordingNow = false
-                                            recordedResult = line.stopRecording()
-                                        } else if (!recordConsented) {
-                                            showRecordConsent = true
-                                        } else {
-                                            recordingNow = true
-                                            line.startRecording(ship!!)
-                                        }
-                                    }
-                                } else {
-                                    null
-                                }
-                                io.nisfeb.talon.ui.RecordConsentDialog(
-                                    show = showRecordConsent,
-                                    onDismiss = { showRecordConsent = false },
-                                    onConfirm = {
-                                        recordConsented = true
-                                        showRecordConsent = false
-                                        recordingNow = true
-                                        partyLine?.startRecording(ship.orEmpty())
-                                    },
+                                // Shared with the Android root; see
+                                // rememberPartyRecording.
+                                val recordingControls = io.nisfeb.talon.ui.rememberPartyRecording(
+                                    callController = callController,
+                                    partyLine = partyLine,
+                                    partyRoomHere = partyRoomHere,
+                                    onThisLine = onThisLine,
+                                    http = http,
+                                    aiConfig = aiSettings.state.value,
+                                    ourShip = ship.orEmpty(),
+                                    conversationTitle =
+                                        partyContacts.conversationLabel(openChat.orEmpty()),
+                                    nameFor = { partyContacts.displayName(it) },
                                 )
-                                recordedResult?.let { rec ->
-                                    io.nisfeb.talon.ui.RecordingResultDialog(
-                                        rec = rec,
-                                        http = http,
-                                        sttConfig = aiSettings.state.value,
-                                        shipUrl = io.nisfeb.talon.ui.LocalShipUrl.current,
-                                        cookie = io.nisfeb.talon.ui.LocalShipCookie.current,
-                                        ourShip = ship.orEmpty(),
-                                        title = partyContacts.conversationLabel(openChat.orEmpty()),
-                                        nameFor = { partyContacts.displayName(it) },
-                                        onClose = { recordedResult = null },
-                                    )
-                                }
+                                val recordingNow = recordingControls.recording
+                                val recordedBy = recordingControls.recordedBy
+                                val onToggleRecord = recordingControls.onToggleRecord
                                 DmChatScreen(
                                     db = db,
                                     repo = repo,
