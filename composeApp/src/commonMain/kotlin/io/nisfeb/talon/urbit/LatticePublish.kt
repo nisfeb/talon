@@ -1,6 +1,7 @@
 package io.nisfeb.talon.urbit
 
 import io.ktor.client.HttpClient
+import io.ktor.client.request.header
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
 import io.ktor.client.statement.HttpResponse
@@ -18,10 +19,14 @@ object LatticePublish {
         http: HttpClient,
         shipUrl: String,
         ourShip: String,
+        cookie: String,
         slug: String,
         gemtext: String,
     ): String {
         val resp: HttpResponse = http.post(UrbHttp.saveUrl(shipUrl, slug)) {
+            // The shared http client has no cookie store; authenticate
+            // the save explicitly or eyre answers 403.
+            header("Cookie", cookie)
             contentType(ContentType.Text.Plain)
             setBody(gemtext)
         }

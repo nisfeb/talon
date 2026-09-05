@@ -922,9 +922,11 @@ fun TalonApp(
     val urbFetcher: suspend (String) -> io.nisfeb.talon.urbit.UrbUnfurlCache.Unfurl? =
         remember(app) {
             { urbUrl ->
-                val s = app.sessionStore.active()?.shipUrl
-                if (s == null) null
-                else io.nisfeb.talon.urbit.UrbUnfurlCache.await(app.ktorHttp, s, urbUrl)
+                val active = app.sessionStore.active()
+                val s = active?.shipUrl
+                val c = active?.let { "${it.cookieName}=${it.cookieValue}" }
+                if (s == null || c == null) null
+                else io.nisfeb.talon.urbit.UrbUnfurlCache.await(app.ktorHttp, s, c, urbUrl)
             }
         }
     val citeResolver = remember(app) { io.nisfeb.talon.ui.TalonCiteResolver(app.db, app.repo) }

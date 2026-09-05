@@ -1256,6 +1256,7 @@ fun DmChatScreen(
 
     publishTarget?.let { target ->
         val publishShipUrl = io.nisfeb.talon.ui.LocalShipUrl.current
+        val publishCookie = io.nisfeb.talon.ui.LocalShipCookie.current
         var title by remember(target.id) {
             mutableStateOf(
                 androidx.compose.ui.text.input.TextFieldValue(
@@ -1309,7 +1310,8 @@ fun DmChatScreen(
                     }) { Text("Add link to message") }
                 } else {
                     TextButton(
-                        enabled = !publishing && title.text.isNotBlank() && publishShipUrl != null,
+                        enabled = !publishing && title.text.isNotBlank() &&
+                            publishShipUrl != null && publishCookie != null,
                         onClick = {
                             publishing = true
                             pubError = null
@@ -1329,7 +1331,7 @@ fun DmChatScreen(
                                         io.nisfeb.talon.urbit.StoryToGemtext.thread(ttl, entries)
                                     val slug = io.nisfeb.talon.urbit.LatticePublish.slug(ttl, target.id)
                                     io.nisfeb.talon.urbit.LatticePublish.publish(
-                                        http, s, ourPatp, slug, gemtext,
+                                        http, s, ourPatp, publishCookie!!, slug, gemtext,
                                     )
                                 }.onSuccess { resultUrb = it }
                                     .onFailure {

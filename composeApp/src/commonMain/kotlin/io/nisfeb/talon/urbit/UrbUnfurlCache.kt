@@ -2,6 +2,7 @@ package io.nisfeb.talon.urbit
 
 import io.ktor.client.HttpClient
 import io.ktor.client.request.get
+import io.ktor.client.request.header
 import io.ktor.client.statement.bodyAsText
 import io.nisfeb.talon.util.ioDispatcher
 import kotlinx.coroutines.CoroutineScope
@@ -39,11 +40,16 @@ object UrbUnfurlCache {
     private val scope = CoroutineScope(SupervisorJob() + ioDispatcher)
     private val json = Json { ignoreUnknownKeys = true }
 
-    suspend fun await(http: HttpClient, shipUrl: String, urbUrl: String): Unfurl? {
+    suspend fun await(
+        http: HttpClient,
+        shipUrl: String,
+        cookie: String,
+        urbUrl: String,
+    ): Unfurl? {
         lock.withLock { (results[urbUrl] as? Entry.Some)?.let { return it.unfurl } }
         lock.withLock { if (results.containsKey(urbUrl)) return null } // cached "None"
         return withContext(ioDispatcher) {
-            val fetched = runCatching { fetch(http, shipUrl, urbUrl) }.getOrNull()
+            val fetched = runCatching { fetch(http, shipUrl, cookie, urbUrl) }.getOrNull()
             lock.withLock {
                 results[urbUrl] = if (fetched != null) Entry.Some(fetched) else Entry.None
             }
@@ -51,9 +57,16 @@ object UrbUnfurlCache {
         }
     }
 
-    private suspend fun fetch(http: HttpClient, shipUrl: String, urbUrl: String): Unfurl? {
+    private suspend fun fetch(
+        http: HttpClient,
+        shipUrl: String,
+        cookie: String,
+        urbUrl: String,
+    ): Unfurl? {
         val reader = UrbHttp.fetchUrl(shipUrl, urbUrl)
-        val text = http.get(reader).bodyAsText()
+        // The shared http client has no cookie store (that lives in
+        // UrbitSession), so authenticate this request explicitly.
+        val text = http.get(reader) { header("Cookie", cookie) }.bodyAsText()
         val body = json.parseToJsonElement(text).jsonObject["body"]
             ?.jsonPrimitive?.content ?: return null
         return unfurlOf(urbUrl, body)

@@ -1037,9 +1037,11 @@ fun App(
           val urbFetcher: suspend (String) -> io.nisfeb.talon.urbit.UrbUnfurlCache.Unfurl? =
               remember(http) {
                   { urbUrl ->
-                      val s = sessionStore.active()?.shipUrl
-                      if (s == null) null
-                      else io.nisfeb.talon.urbit.UrbUnfurlCache.await(http, s, urbUrl)
+                      val active = sessionStore.active()
+                      val s = active?.shipUrl
+                      val c = active?.let { "${it.cookieName}=${it.cookieValue}" }
+                      if (s == null || c == null) null
+                      else io.nisfeb.talon.urbit.UrbUnfurlCache.await(http, s, c, urbUrl)
                   }
               }
           val citeScope = rememberCoroutineScope()

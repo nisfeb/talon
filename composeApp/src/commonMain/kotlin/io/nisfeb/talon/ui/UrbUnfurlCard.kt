@@ -37,6 +37,11 @@ val LocalUrbFetcher =
  *  (e.g. publishing to Lattice). Null when signed out. */
 val LocalShipUrl = staticCompositionLocalOf<String?> { null }
 
+/** The active ship's session cookie ("name=value") — the shared http
+ *  client has no cookie store, so authenticated ship requests set it
+ *  by hand. Null when signed out. */
+val LocalShipCookie = staticCompositionLocalOf<String?> { null }
+
 /**
  * Inline preview for a urb:// link in a message — the lattice
  * referent's title and first line, like an OpenGraph card. Renders
