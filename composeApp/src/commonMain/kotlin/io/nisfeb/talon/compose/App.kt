@@ -1809,6 +1809,54 @@ fun App(
                                     hostedRooms.containsKey("$h/$n") ||
                                         knownInvites.containsKey("$h/$n")
                                 }
+                                // Live occupancy (wire 6). Ask the host on
+                                // open and refresh on a timer, so the party
+                                // affordance shows "N on the line" before
+                                // you join. Stale hosts nack and it stays 0.
+                                val presenceFlow = remember(callController) {
+                                    callController?.presence
+                                        ?: kotlinx.coroutines.flow.MutableStateFlow(emptyMap())
+                                }
+                                val presence by presenceFlow.collectAsState()
+                                val partyPresent = partyRoomHere?.let { (h, n) ->
+                                    presence["$h/$n"]
+                                } ?: 0
+                                LaunchedEffect(partyRoomHere) {
+                                    val (h, n) = partyRoomHere ?: return@LaunchedEffect
+                                    while (true) {
+                                        callController?.occupancyOf(h, n)
+                                        kotlinx.coroutines.delay(20_000)
+                                    }
+                                }
+                                // While we're actually on the line, heartbeat
+                                // our presence to the host; on leaving (state
+                                // flips, room changes, screen closes) tell it
+                                // we're gone. The finally runs on cancel, so
+                                // leaveRoom always fires.
+                                val partyStateFlow = remember(partyLine) {
+                                    partyLine?.state
+                                        ?: kotlinx.coroutines.flow.MutableStateFlow(
+                                            io.nisfeb.talon.call.PartyState.Idle,
+                                        )
+                                }
+                                val partyStateNow by partyStateFlow.collectAsState()
+                                val onThisLine =
+                                    partyStateNow is io.nisfeb.talon.call.PartyState.Live
+                                LaunchedEffect(partyRoomHere, onThisLine) {
+                                    val (h, n) = partyRoomHere ?: return@LaunchedEffect
+                                    val cc = callController ?: return@LaunchedEffect
+                                    if (!onThisLine) return@LaunchedEffect
+                                    try {
+                                        while (true) {
+                                            cc.enterRoom(h, n) // doubles as heartbeat
+                                            kotlinx.coroutines.delay(30_000)
+                                        }
+                                    } finally {
+                                        kotlinx.coroutines.withContext(
+                                            kotlinx.coroutines.NonCancellable,
+                                        ) { cc.leaveRoom(h, n) }
+                                    }
+                                }
                                 // Why we couldn't find out, when we
                                 // couldn't. Silence here is what turns
                                 // "no line in this group" and "your
@@ -1884,6 +1932,7 @@ fun App(
                                         } else {
                                             null
                                         },
+                                    partyPresent = partyPresent,
                                     // One slot under the channel header
                                     // for both: a 1:1 call and a party
                                     // line are the same kind of thing

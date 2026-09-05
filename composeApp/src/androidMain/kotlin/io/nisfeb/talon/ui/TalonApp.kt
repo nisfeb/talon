@@ -1697,6 +1697,43 @@ fun TalonApp(
                 val partyRoomHere = groupRoom?.takeIf { (h, n) ->
                     hostedRooms.containsKey("$h/$n") || knownInvites.containsKey("$h/$n")
                 }
+                // Live occupancy (wire 6) — see App.kt for the rationale.
+                val presenceFlow = remember(callController) {
+                    callController?.presence
+                        ?: kotlinx.coroutines.flow.MutableStateFlow(emptyMap())
+                }
+                val presence by presenceFlow.collectAsState()
+                val partyPresent = partyRoomHere?.let { (h, n) -> presence["$h/$n"] } ?: 0
+                LaunchedEffect(partyRoomHere) {
+                    val (h, n) = partyRoomHere ?: return@LaunchedEffect
+                    while (true) {
+                        callController?.occupancyOf(h, n)
+                        kotlinx.coroutines.delay(20_000)
+                    }
+                }
+                val partyStateFlow = remember(partyLine) {
+                    partyLine?.state
+                        ?: kotlinx.coroutines.flow.MutableStateFlow(
+                            io.nisfeb.talon.call.PartyState.Idle,
+                        )
+                }
+                val partyStateNow by partyStateFlow.collectAsState()
+                val onThisLine = partyStateNow is io.nisfeb.talon.call.PartyState.Live
+                LaunchedEffect(partyRoomHere, onThisLine) {
+                    val (h, n) = partyRoomHere ?: return@LaunchedEffect
+                    val cc = callController ?: return@LaunchedEffect
+                    if (!onThisLine) return@LaunchedEffect
+                    try {
+                        while (true) {
+                            cc.enterRoom(h, n)
+                            kotlinx.coroutines.delay(30_000)
+                        }
+                    } finally {
+                        kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
+                            cc.leaveRoom(h, n)
+                        }
+                    }
+                }
                 // Why we couldn't find out, when we couldn't. Silence
                 // here is what turns "no line in this group" and "your
                 // ship can't ask" into the same thing.
@@ -1763,6 +1800,7 @@ fun TalonApp(
                         } else {
                             null
                         },
+                    partyPresent = partyPresent,
                     partyLineBar = partyLine?.let { line ->
                         {
                             // Tell the app-level overlays the inline

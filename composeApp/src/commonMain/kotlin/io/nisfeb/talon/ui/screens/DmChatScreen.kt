@@ -217,6 +217,8 @@ fun DmChatScreen(
     /** Join (or open) this channel's party line. Null for DMs and on
      *  platforms without a call engine. */
     onPartyLine: (() -> Unit)? = null,
+    /** How many are on the line right now (wire 6). 0 hides the badge. */
+    partyPresent: Int = 0,
     /** Slot for the live party-line strip, rendered under the header. */
     partyLineBar: (@Composable () -> Unit)? = null,
     /**
@@ -685,8 +687,23 @@ fun DmChatScreen(
                 }
             }
             if (onPartyLine != null) {
-                IconButton(onClick = onPartyLine) {
-                    Icon(Icons.Filled.Groups, contentDescription = "Party line")
+                androidx.compose.material3.BadgedBox(
+                    badge = {
+                        if (partyPresent > 0) {
+                            androidx.compose.material3.Badge { Text("$partyPresent") }
+                        }
+                    },
+                ) {
+                    IconButton(onClick = onPartyLine) {
+                        Icon(
+                            Icons.Filled.Groups,
+                            contentDescription = if (partyPresent > 0) {
+                                "Party line — $partyPresent on the line"
+                            } else {
+                                "Party line"
+                            },
+                        )
+                    }
                 }
             }
             val hasInfoPane = onOpenGroupInfo != null && whom.startsWith("chat/")
