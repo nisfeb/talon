@@ -62,6 +62,7 @@ class DesktopPeerLink(
     private val pcmCb =
         kotlinx.atomicfu.atomic<((ByteArray, Int) -> Unit)?>(null)
     private var recSink: dev.onvoid.webrtc.media.audio.AudioTrackSink? = null
+    private var micRecorder: dev.onvoid.webrtc.media.audio.AudioRecorder? = null
     private val recFrames = kotlinx.atomicfu.atomic(0)
 
     // Party-line video (conference). The up link (sendAudio) carries a
@@ -277,14 +278,57 @@ class DesktopPeerLink(
     private fun attachRec() {
         detachRec()
         val cb = pcmCb.value ?: return
-        // Up link taps the local mic; a down link taps the remote
-        // speaker (null until its track has arrived — onTrack retries).
-        val which = if (sendAudio) "mic" else "remote"
-        val target = (if (sendAudio) micTrack else remoteTrack) ?: run {
-            Log.w("PartyLine", "record tap: no $which track to attach to")
+        recFrames.value = 0
+        if (sendAudio) {
+            // Self-mic: a LOCAL track's addSink never fires in webrtc-java
+            // (a solo recording captured only silence), so tap the mic
+            // with a standalone AudioRecorder. It's separate from the
+            // peer connection, so it cannot affect the outgoing call.
+            val device = runCatching {
+                DesktopWebRtcFactory.audioDeviceModule().recordingDevices.firstOrNull()
+            }.getOrNull() ?: runCatching {
+                dev.onvoid.webrtc.media.audio.AudioDeviceModule().recordingDevices.firstOrNull()
+            }.getOrNull()
+            if (device == null) {
+                Log.w("PartyLine", "record tap: no recording device; mic not captured")
+                return
+            }
+            runCatching {
+                val rec = dev.onvoid.webrtc.media.audio.AudioRecorder()
+                rec.setAudioDevice(device)
+                rec.setAudioSink(object : dev.onvoid.webrtc.media.audio.AudioSink {
+                    // Arg order verified against webrtc-java 0.14.0:
+                    // (data, nSamples, bytesPerSample, channels, sampleRate,
+                    //  captureDelayMs, clockDrift).
+                    override fun onRecordedData(
+                        data: ByteArray,
+                        nSamples: Int,
+                        bytesPerSample: Int,
+                        channels: Int,
+                        sampleRate: Int,
+                        captureDelayMs: Int,
+                        clockDrift: Int,
+                    ) {
+                        if (bytesPerSample != 2) return
+                        val ch = if (channels in 1..2) channels else 1
+                        val frames = data.size / (ch * 2)
+                        if (recFrames.getAndIncrement() == 0) {
+                            Log.i("PartyLine", "record tap: mic first frame rate=$sampleRate ch=$ch bytes=${data.size}")
+                        }
+                        cb(toMonoLe(data, ch, frames), sampleRate)
+                    }
+                })
+                rec.start()
+                micRecorder = rec
+                Log.i("PartyLine", "record tap: mic AudioRecorder started")
+            }.onFailure { Log.w("PartyLine", "record tap: mic recorder failed", it) }
             return
         }
-        recFrames.value = 0
+        // Down link: the remote speaker's decoded track sink DOES fire.
+        val target = remoteTrack ?: run {
+            Log.w("PartyLine", "record tap: no remote track yet")
+            return
+        }
         val adapter = object : dev.onvoid.webrtc.media.audio.AudioTrackSink {
             override fun onData(
                 audioData: ByteArray,
@@ -295,24 +339,25 @@ class DesktopPeerLink(
             ) {
                 if (bitsPerSample != 16) return
                 if (recFrames.getAndIncrement() == 0) {
-                    Log.i("PartyLine", "record tap: $which first frame rate=$sampleRate ch=$numberOfChannels")
+                    Log.i("PartyLine", "record tap: remote first frame rate=$sampleRate ch=$numberOfChannels")
                 }
                 cb(toMonoLe(audioData, numberOfChannels, numberOfFrames), sampleRate)
             }
         }
         recSink = adapter
         runCatching { target.addSink(adapter) }
-            .onFailure { Log.w("PartyLine", "could not tap $which for recording", it) }
+            .onFailure { Log.w("PartyLine", "could not tap remote for recording", it) }
     }
 
     private fun detachRec() {
+        micRecorder?.let {
+            runCatching { it.stop() }
+            Log.i("PartyLine", "record tap: mic recorder stopped after ${recFrames.value} frames")
+        }
+        micRecorder = null
         val s = recSink ?: return
-        val target = if (sendAudio) micTrack else remoteTrack
-        runCatching { target?.removeSink(s) }
-        Log.i(
-            "PartyLine",
-            "record tap: ${if (sendAudio) "mic" else "remote"} detached after ${recFrames.value} frames",
-        )
+        runCatching { remoteTrack?.removeSink(s) }
+        Log.i("PartyLine", "record tap: remote detached after ${recFrames.value} frames")
         recSink = null
     }
 
