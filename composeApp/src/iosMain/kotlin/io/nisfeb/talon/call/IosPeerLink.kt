@@ -20,9 +20,24 @@ class IosPeerLink(private val native: NativeRtcPeer) : PeerLink {
     private val _state = MutableStateFlow(MediaState.Idle)
     override val state: StateFlow<MediaState> = _state.asStateFlow()
 
+    private val _video = MutableStateFlow(VideoState())
+    override val video: StateFlow<VideoState> = _video.asStateFlow()
+
     init {
         native.onStateChange { _state.value = it }
+        native.onVideoChange { _video.value = it }
     }
+
+    override suspend fun setCameraEnabled(enabled: Boolean): Boolean =
+        suspendCancellableCoroutine { cont ->
+            native.setCameraEnabled(enabled) { err -> cont.resume(err == null) }
+        }
+
+    /** The RTCMTLVideoView for our camera / this speaker's, for the
+     *  party VideoSurface. Any? because UIKit types aren't in scope
+     *  here — Compose's UIKitView takes a UIView anyway. */
+    fun localVideoView(): Any? = native.localVideoView()
+    fun remoteVideoView(): Any? = native.remoteVideoView()
 
     override fun onLocalCandidate(callback: (IceCandidate) -> Unit) {
         native.onIceCandidate(callback)

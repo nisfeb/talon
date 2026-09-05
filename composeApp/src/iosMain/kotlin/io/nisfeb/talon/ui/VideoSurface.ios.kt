@@ -7,6 +7,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.interop.UIKitView
 import io.nisfeb.talon.call.CallEngine
 import io.nisfeb.talon.call.IosCallEngine
+import io.nisfeb.talon.call.IosPeerLink
+import io.nisfeb.talon.call.PeerLink
 import platform.UIKit.UIView
 
 /**
@@ -31,14 +33,23 @@ actual fun VideoSurface(engine: CallEngine, local: Boolean, modifier: Modifier) 
     UIKitView(factory = { view }, modifier = modifier)
 }
 
-/**
- * Party-line video on iOS is not wired yet (IosPeerLink has no camera
- * and isPartyVideoSupported is false), so this draws nothing.
- */
+/** A party-line tile's video: this speaker's camera (a down link) or
+ *  ours (the up link). Same RTCMTLVideoView interop as the 1:1 overload,
+ *  reading the views off [IosPeerLink]. */
+@OptIn(
+    androidx.compose.ui.ExperimentalComposeUiApi::class,
+    kotlinx.cinterop.ExperimentalForeignApi::class,
+)
 @Composable
 actual fun VideoSurface(
-    link: io.nisfeb.talon.call.PeerLink,
+    link: PeerLink,
     local: Boolean,
     modifier: Modifier,
 ) {
+    val ios = link as? IosPeerLink ?: return
+    val video by ios.video.collectAsState()
+    val on = if (local) video.localOn else video.remoteOn
+    if (!on) return
+    val view = (if (local) ios.localVideoView() else ios.remoteVideoView()) as? UIView ?: return
+    UIKitView(factory = { view }, modifier = modifier)
 }

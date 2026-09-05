@@ -112,13 +112,18 @@ final class TalonRtcPeer: NSObject, NativeRtcPeer, RTCPeerConnectionDelegate {
             pc?.addTransceiver(with: track, init: params)
         }
 
-        // Video on 1:1 calls only. A party line's links are
-        // one-directional by Galène's rules and carry audio; adding a
-        // video m-line to each of N down links would negotiate N
-        // streams nobody asked for.
+        // Video: a 1:1 call is sendRecv; a party-line UP link is
+        // send-only (Galène streams are one-directional). A party DOWN
+        // link adds no video transceiver — it receives the remote
+        // camera straight from the offer (see didStartReceivingOn). So
+        // only N cameras negotiate, never a video m-line per down link.
         if !trickle {
             let vparams = RTCRtpTransceiverInit()
             vparams.direction = .sendRecv
+            videoSender = pc?.addTransceiver(of: .video, init: vparams)?.sender
+        } else if sendAudio {
+            let vparams = RTCRtpTransceiverInit()
+            vparams.direction = .sendOnly
             videoSender = pc?.addTransceiver(of: .video, init: vparams)?.sender
         }
     }
