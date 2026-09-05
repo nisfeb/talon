@@ -33,7 +33,7 @@ actual val isCallRecordingSupported: Boolean = false
 
 // No CallKit/PushKit by design; UIBackgroundModes audio only sustains
 // a call already in progress. Backgrounded, the app can't hear a ring.
-actual val isBackgroundCallRingSupported: Boolean = false
+actual val isBackgroundCallRingSupported: Boolean = true
 
 // Supplied by MainViewController's edge strip -> IosBackDispatcher.
 actual val isVideoCallsSupported: Boolean = true
