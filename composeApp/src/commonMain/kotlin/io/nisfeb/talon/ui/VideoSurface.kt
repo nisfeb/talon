@@ -3,6 +3,7 @@ package io.nisfeb.talon.ui
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import io.nisfeb.talon.call.CallEngine
+import io.nisfeb.talon.call.PeerLink
 
 /**
  * Renders one side of a call's video.
@@ -22,6 +23,19 @@ import io.nisfeb.talon.call.CallEngine
 expect fun VideoSurface(
     engine: CallEngine,
     /** True for our own camera, false for the far end's. */
+    local: Boolean,
+    modifier: Modifier,
+)
+
+/**
+ * Renders one party-line tile's video: a speaker's camera (a down
+ * [link]) or our own (the up link, [local] = true). Same native
+ * surfaces as the 1:1 overload; draws nothing when [link] isn't the
+ * platform's own or has no picture. Gated by isPartyVideoSupported.
+ */
+@Composable
+expect fun VideoSurface(
+    link: PeerLink,
     local: Boolean,
     modifier: Modifier,
 )

@@ -30,3 +30,15 @@ actual fun VideoSurface(engine: CallEngine, local: Boolean, modifier: Modifier) 
     val view = (if (local) ios.localView() else ios.remoteView()) as? UIView ?: return
     UIKitView(factory = { view }, modifier = modifier)
 }
+
+/**
+ * Party-line video on iOS is not wired yet (IosPeerLink has no camera
+ * and isPartyVideoSupported is false), so this draws nothing.
+ */
+@Composable
+actual fun VideoSurface(
+    link: io.nisfeb.talon.call.PeerLink,
+    local: Boolean,
+    modifier: Modifier,
+) {
+}

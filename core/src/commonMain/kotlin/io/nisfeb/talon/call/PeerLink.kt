@@ -1,5 +1,6 @@
 package io.nisfeb.talon.call
 
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 
 /** One trickled ICE candidate, in the shape Galène's `ice` message wants. */
@@ -75,8 +76,32 @@ interface PeerLink {
      */
     fun onPcm(sink: ((pcm: ByteArray, sampleRate: Int) -> Unit)?) {}
 
+    /**
+     * Whether video is flowing on this link — [VideoState.localOn] on
+     * the up link (our camera), [VideoState.remoteOn] on a down link
+     * (that speaker's camera). The tile renderer watches this so a
+     * camera that starts mid-call makes its picture appear.
+     *
+     * Default is a constant "no video" so a platform without a video
+     * path, and the Noop, need no override; party-line video is gated
+     * on [io.nisfeb.talon.ui.isPartyVideoSupported].
+     */
+    val video: StateFlow<VideoState> get() = noPeerVideo
+
+    /**
+     * Open (or close) our camera on the up link and send it. No-op and
+     * false on a down link or a platform without capture. Renegotiation-
+     * free: the up link pre-negotiates a send video transceiver, so this
+     * only swaps a camera track onto the existing sender — the SFU and
+     * trunk learn nothing new. Returns false when the camera can't open.
+     */
+    suspend fun setCameraEnabled(enabled: Boolean): Boolean = false
+
     fun close()
 }
+
+/** Shared immutable "no video" state for links that never carry video. */
+internal val noPeerVideo: StateFlow<VideoState> = MutableStateFlow(VideoState())
 
 /** Per-link factory; the platform entry point injects the real one. */
 fun interface PeerLinkFactory {

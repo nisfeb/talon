@@ -161,6 +161,16 @@ expect val isBackgroundCallRingSupported: Boolean
  */
 expect val isVideoCallsSupported: Boolean
 
+/**
+ * Camera video on a party line (conference). True where a PeerLink can
+ * publish a camera and render remote cameras end-to-end: desktop
+ * (webrtc-java) and Android (libwebrtc). iOS: false — IosPeerLink has
+ * no video path yet, and iOS calls are held. Gates the party-line
+ * camera control and video tiles (CLAUDE.md #3). Party audio still
+ * works everywhere regardless.
+ */
+expect val isPartyVideoSupported: Boolean
+
 expect val isEdgeSwipeBackSupported: Boolean
 
 /**

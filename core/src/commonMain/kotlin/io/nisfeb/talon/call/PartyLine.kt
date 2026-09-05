@@ -184,6 +184,16 @@ class PartyLine(
     private var recStartMs = 0L
     private var recRate = 48_000
     private val recClips = mutableMapOf<String, MutableList<ByteArray>>()
+
+    // Party-line video (conference). Our own camera state; re-applied
+    // when the up link republishes so a flaky network doesn't silently
+    // drop our video. Rendering reads links directly (localVideoLink /
+    // videoLinkFor) and collects their PeerLink.video.
+    private val _cameraOn = MutableStateFlow(false)
+    val cameraOn: StateFlow<Boolean> = _cameraOn.asStateFlow()
+    // The speaker each down link's video should be attributed to; the
+    // focused (full-resolution) speaker, or null for all-low.
+    private var focused: String? = null
     private var room = ""
     private var ourId = ""
     // Galène's client id must be unique per *connection*, not per
@@ -339,6 +349,28 @@ class PartyLine(
     }
 
     fun isRecording(): Boolean = recording
+
+    /**
+     * Turn our camera on or off on the line. Returns false if it
+     * couldn't open (no device, permission, or we have no up link —
+     * a listener). The up link pre-negotiated the video sender, so
+     * this needs no renegotiation.
+     */
+    suspend fun setCameraEnabled(enabled: Boolean): Boolean {
+        val up = upLink ?: return false
+        val ok = up.setCameraEnabled(enabled)
+        if (ok) _cameraOn.value = enabled
+        return ok
+    }
+
+    /** The up link, whose local camera a self-preview tile renders. */
+    fun localVideoLink(): PeerLink? = upLink
+
+    /** The down link carrying [ship]'s camera, for that speaker's tile. */
+    fun videoLinkFor(ship: String): PeerLink? {
+        val id = streamOwner.entries.firstOrNull { it.value == ship }?.key ?: return null
+        return downLinks[id]
+    }
 
     fun setMuted(value: Boolean) {
         muted = value
@@ -621,10 +653,18 @@ class PartyLine(
             ops = "op" in it
         }
 
-        // Ask for everyone's audio.
+        // Ask for everyone's audio and camera. The SFU forwards video
+        // only from speakers who actually publish it, so an audio-only
+        // line costs nothing here; video-low keeps non-focused tiles
+        // cheap (see setFocusedVideo).
         send(buildJsonObject {
             put("type", "request")
-            putJsonObject("request") { putJsonArray("") { add(kotlinx.serialization.json.JsonPrimitive("audio")) } }
+            putJsonObject("request") {
+                putJsonArray("") {
+                    add(kotlinx.serialization.json.JsonPrimitive("audio"))
+                    add(kotlinx.serialization.json.JsonPrimitive("video-low"))
+                }
+            }
         })
 
         // Publish our mic as one up stream — unless we're a listener,
@@ -717,6 +757,9 @@ class PartyLine(
         upLink = up
         startLevelPolling()
         up.setMuted(muted)
+        // Republish (flaky network) rebuilds the up link with the camera
+        // closed; restore it so our video doesn't silently vanish.
+        if (_cameraOn.value) scope.launch { up.setCameraEnabled(true) }
         // Say our mute state before anyone renders us as live.
         broadcastMuted()
         upWatch?.cancel()

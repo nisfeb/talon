@@ -35,8 +35,35 @@ import kotlin.math.roundToInt
 actual fun VideoSurface(engine: CallEngine, local: Boolean, modifier: Modifier) {
     val desktop = engine as? DesktopCallEngine ?: return
     val video by desktop.video.collectAsState()
-    val track = if (local) desktop.localVideoTrack else desktop.remoteVideoTrack
-    val on = if (local) video.localOn else video.remoteOn
+    VideoTrackCanvas(
+        track = if (local) desktop.localVideoTrack else desktop.remoteVideoTrack,
+        on = if (local) video.localOn else video.remoteOn,
+        modifier = modifier,
+    )
+}
+
+@Composable
+actual fun VideoSurface(
+    link: io.nisfeb.talon.call.PeerLink,
+    local: Boolean,
+    modifier: Modifier,
+) {
+    val d = link as? io.nisfeb.talon.call.DesktopPeerLink ?: return
+    val video by d.video.collectAsState()
+    VideoTrackCanvas(
+        track = if (local) d.localVideoTrack else d.remoteVideoTrack,
+        on = if (local) video.localOn else video.remoteOn,
+        modifier = modifier,
+    )
+}
+
+/** Shared renderer: converts a track's I420 frames to a Canvas. */
+@Composable
+private fun VideoTrackCanvas(
+    track: dev.onvoid.webrtc.media.video.VideoTrack?,
+    on: Boolean,
+    modifier: Modifier,
+) {
     if (track == null || !on) return
 
     var bitmap by remember(track) { mutableStateOf<ImageBitmap?>(null) }

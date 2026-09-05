@@ -8,10 +8,13 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.viewinterop.AndroidView
 import io.nisfeb.talon.call.AndroidCallEngine
+import io.nisfeb.talon.call.AndroidPeerLink
 import io.nisfeb.talon.call.CallEngine
+import io.nisfeb.talon.call.PeerLink
 import io.nisfeb.talon.call.WebRtcFactory
 import org.webrtc.RendererCommon
 import org.webrtc.SurfaceViewRenderer
+import org.webrtc.VideoTrack
 
 /**
  * libwebrtc's own renderer, embedded through AndroidView.
@@ -24,12 +27,35 @@ import org.webrtc.SurfaceViewRenderer
 actual fun VideoSurface(engine: CallEngine, local: Boolean, modifier: Modifier) {
     val android = engine as? AndroidCallEngine ?: return
     val video by android.video.collectAsState()
-    val track = if (local) android.localVideoTrack else android.remoteVideoTrack
-    val on = if (local) video.localOn else video.remoteOn
+    TrackRenderer(
+        track = if (local) android.localVideoTrack else android.remoteVideoTrack,
+        on = if (local) video.localOn else video.remoteOn,
+        local = local,
+        modifier = modifier,
+    )
+}
+
+@Composable
+actual fun VideoSurface(link: PeerLink, local: Boolean, modifier: Modifier) {
+    val p = link as? AndroidPeerLink ?: return
+    val video by p.video.collectAsState()
+    TrackRenderer(
+        track = if (local) p.localVideoTrack else p.remoteVideoTrack,
+        on = if (local) video.localOn else video.remoteOn,
+        local = local,
+        modifier = modifier,
+    )
+}
+
+@Composable
+private fun TrackRenderer(
+    track: VideoTrack?,
+    on: Boolean,
+    local: Boolean,
+    modifier: Modifier,
+) {
     if (track == null || !on) return
-
     val renderer = remember(track) { mutableRendererFor() }
-
     AndroidView(
         modifier = modifier,
         factory = { ctx ->
@@ -45,7 +71,6 @@ actual fun VideoSurface(engine: CallEngine, local: Boolean, modifier: Modifier) 
             }
         },
     )
-
     DisposableEffect(track) {
         onDispose {
             renderer.value?.let {

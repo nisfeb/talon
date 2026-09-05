@@ -6,22 +6,29 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import org.webrtc.AudioTrack
+import org.webrtc.Camera2Enumerator
+import org.webrtc.CameraVideoCapturer
 import org.webrtc.DataChannel
 import org.webrtc.IceCandidate as WebRtcIceCandidate
 import org.webrtc.MediaConstraints
 import org.webrtc.MediaStream
+import org.webrtc.MediaStreamTrack
 import org.webrtc.PeerConnection
 import org.webrtc.PeerConnectionFactory
+import org.webrtc.RtpSender
 import org.webrtc.RtpTransceiver
 import org.webrtc.SdpObserver
 import org.webrtc.SessionDescription
+import org.webrtc.SurfaceTextureHelper
+import org.webrtc.VideoSource
+import org.webrtc.VideoTrack
 
 /**
  * Android [PeerLink] over libwebrtc: one SFU stream, trickling ICE.
  * Up links add the mic and send only; down links receive only.
  */
 class AndroidPeerLink(
-    appContext: Context,
+    private val appContext: Context,
     iceServers: List<IceServer>,
     private val sendAudio: Boolean,
 ) : PeerLink {
@@ -38,6 +45,21 @@ class AndroidPeerLink(
         kotlinx.atomicfu.atomic<((ByteArray, Int) -> Unit)?>(null)
     private var recSink: org.webrtc.AudioTrackSink? = null
 
+    // Party-line video (conference).
+    private val _video = MutableStateFlow(VideoState())
+    override val video: StateFlow<VideoState> = _video
+    private var videoSender: RtpSender? = null
+    private var capturer: CameraVideoCapturer? = null
+    private var surfaceHelper: SurfaceTextureHelper? = null
+    private var videoSource: VideoSource? = null
+    private var localVideo: VideoTrack? = null
+    private var remoteVideo: VideoTrack? = null
+
+    /** Camera / remote camera track for VideoSurface. Platform members:
+     *  a libwebrtc track can't cross into commonMain. */
+    val localVideoTrack: VideoTrack? get() = localVideo
+    val remoteVideoTrack: VideoTrack? get() = remoteVideo
+
     private val observer = object : PeerConnection.Observer {
         override fun onIceCandidate(candidate: WebRtcIceCandidate?) {
             val c = candidate ?: return
@@ -48,9 +70,16 @@ class AndroidPeerLink(
             receiver: org.webrtc.RtpReceiver?,
             streams: Array<out MediaStream>?,
         ) {
-            val t = receiver?.track() as? AudioTrack ?: return
-            remoteTrack = t
-            if (pcmCb.value != null) attachRec()
+            when (val t = receiver?.track()) {
+                is AudioTrack -> {
+                    remoteTrack = t
+                    if (pcmCb.value != null) attachRec()
+                }
+                is VideoTrack -> {
+                    remoteVideo = t
+                    _video.value = _video.value.copy(remoteOn = true)
+                }
+            }
         }
 
         override fun onConnectionChange(newState: PeerConnection.PeerConnectionState?) {
@@ -115,7 +144,67 @@ class AndroidPeerLink(
                 ),
             )
             micTrack = track
+            // Send-only video transceiver, camera closed. setCameraEnabled
+            // swaps a camera track onto the sender with no renegotiation.
+            videoSender = runCatching {
+                pc.addTransceiver(
+                    MediaStreamTrack.MediaType.MEDIA_TYPE_VIDEO,
+                    RtpTransceiver.RtpTransceiverInit(
+                        RtpTransceiver.RtpTransceiverDirection.SEND_ONLY,
+                    ),
+                ).sender
+            }.onFailure {
+                Log.w("PartyLine", "no video transceiver; line stays audio-only", it)
+            }.getOrNull()
         }
+    }
+
+    override suspend fun setCameraEnabled(enabled: Boolean): Boolean {
+        val sender = videoSender ?: return false
+        if (!enabled) {
+            runCatching { sender.setTrack(null, false) }
+            releaseCamera()
+            _video.value = _video.value.copy(localOn = false)
+            return true
+        }
+        if (localVideo != null) return true
+        return runCatching {
+            val enumerator = Camera2Enumerator(appContext)
+            val names = enumerator.deviceNames
+            val name = names.firstOrNull { enumerator.isFrontFacing(it) }
+                ?: names.firstOrNull()
+                ?: error("no camera on this device")
+            val cap = enumerator.createCapturer(name, null)
+                ?: error("could not open camera $name")
+            val helper = SurfaceTextureHelper.create(
+                "talon-capture", WebRtcFactory.eglBase.eglBaseContext,
+            )
+            val source = factory.createVideoSource(false)
+            cap.initialize(helper, appContext, source.capturerObserver)
+            cap.startCapture(640, 480, 30)
+            val track = factory.createVideoTrack("talon-cam", source)
+            sender.setTrack(track, false)
+            capturer = cap
+            surfaceHelper = helper
+            videoSource = source
+            localVideo = track
+            _video.value = _video.value.copy(localOn = true)
+            true
+        }.getOrElse {
+            Log.w("PartyLine", "could not start the camera", it)
+            releaseCamera()
+            false
+        }
+    }
+
+    private fun releaseCamera() {
+        runCatching { capturer?.dispose() }
+        runCatching { surfaceHelper?.dispose() }
+        runCatching { videoSource?.dispose() }
+        capturer = null
+        surfaceHelper = null
+        videoSource = null
+        localVideo = null
     }
 
     override fun onLocalCandidate(callback: (IceCandidate) -> Unit) {
@@ -278,6 +367,9 @@ class AndroidPeerLink(
     override fun close() {
         if (!closed.compareAndSet(false, true)) return
         runCatching { micTrack?.setEnabled(false) }
+        runCatching { capturer?.stopCapture() }
+        releaseCamera()
+        remoteVideo = null
         // The factory is process-wide; see WebRtcFactory.
         runCatching { pc.close() }
         // Every link acquired the session; every link releases it,

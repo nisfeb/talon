@@ -14,8 +14,12 @@ import dev.onvoid.webrtc.RTCRtpTransceiverDirection
 import dev.onvoid.webrtc.RTCSdpType
 import dev.onvoid.webrtc.RTCSessionDescription
 import dev.onvoid.webrtc.SetSessionDescriptionObserver
+import dev.onvoid.webrtc.media.MediaDevices
 import dev.onvoid.webrtc.media.MediaStreamTrack
 import dev.onvoid.webrtc.media.audio.AudioTrack
+import dev.onvoid.webrtc.media.video.VideoCaptureCapability
+import dev.onvoid.webrtc.media.video.VideoDeviceSource
+import dev.onvoid.webrtc.media.video.VideoTrack
 import io.nisfeb.talon.util.Log
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -59,6 +63,22 @@ class DesktopPeerLink(
         kotlinx.atomicfu.atomic<((ByteArray, Int) -> Unit)?>(null)
     private var recSink: dev.onvoid.webrtc.media.audio.AudioTrackSink? = null
 
+    // Party-line video (conference). The up link (sendAudio) carries a
+    // pre-negotiated send video transceiver whose camera track is
+    // swapped in by setCameraEnabled; a down link receives a remote
+    // camera track via onTrack. VideoState drives the tile renderer.
+    private val _video = MutableStateFlow(VideoState())
+    override val video: StateFlow<VideoState> = _video
+    private var cameraSource: VideoDeviceSource? = null
+    private var localVideo: VideoTrack? = null
+    private var remoteVideo: VideoTrack? = null
+
+    /** The camera / remote camera track for [io.nisfeb.talon.ui.VideoSurface]
+     *  to render. Platform members: a libwebrtc track can't cross into
+     *  commonMain. */
+    val localVideoTrack: VideoTrack? get() = localVideo
+    val remoteVideoTrack: VideoTrack? get() = remoteVideo
+
     private val config = RTCConfiguration().apply {
         for (s in iceServers) {
             val server = RTCIceServer()
@@ -82,14 +102,22 @@ class DesktopPeerLink(
             }
 
             override fun onTrack(transceiver: dev.onvoid.webrtc.RTCRtpTransceiver?) {
-                val track = transceiver?.receiver?.track as? AudioTrack ?: return
-                remoteTrack = track
-                remotePcm?.let { s ->
-                    runCatching { track.addSink(s) }
-                        .onFailure { Log.w("PartyLine", "could not tap the remote track", it) }
+                when (val track = transceiver?.receiver?.track) {
+                    is AudioTrack -> {
+                        remoteTrack = track
+                        remotePcm?.let { s ->
+                            runCatching { track.addSink(s) }
+                                .onFailure { Log.w("PartyLine", "could not tap the remote track", it) }
+                        }
+                        // Recording started before this speaker's track arrived.
+                        if (pcmCb.value != null) attachRec()
+                    }
+                    is VideoTrack -> {
+                        remoteVideo = track
+                        _video.value = _video.value.copy(remoteOn = true)
+                    }
+                    else -> {}
                 }
-                // Recording started before this speaker's track arrived.
-                if (pcmCb.value != null) attachRec()
             }
 
             override fun onConnectionChange(pcState: RTCPeerConnectionState?) {
@@ -114,6 +142,46 @@ class DesktopPeerLink(
                 direction = RTCRtpTransceiverDirection.SEND_ONLY
             })
             micTrack = track
+            // A send-only video transceiver on the up stream, camera
+            // closed. setCameraEnabled swaps the camera track onto it
+            // later with no renegotiation; the SFU forwards it to any
+            // subscriber that requested video. An audio-only room just
+            // never requests it.
+            runCatching {
+                val camSource = VideoDeviceSource()
+                val camTrack = factory.createVideoTrack("talon-cam", camSource)
+                camTrack.isEnabled = false
+                pc.addTransceiver(camTrack, dev.onvoid.webrtc.RTCRtpTransceiverInit().apply {
+                    direction = RTCRtpTransceiverDirection.SEND_ONLY
+                })
+                cameraSource = camSource
+                localVideo = camTrack
+            }.onFailure { Log.w("PartyLine", "no video transceiver; line stays audio-only", it) }
+        }
+    }
+
+    override suspend fun setCameraEnabled(enabled: Boolean): Boolean {
+        val source = cameraSource ?: return false
+        val track = localVideo ?: return false
+        if (!enabled) {
+            runCatching { track.isEnabled = false }
+            runCatching { source.stop() }
+            _video.value = _video.value.copy(localOn = false)
+            return true
+        }
+        return runCatching {
+            val device = MediaDevices.getVideoCaptureDevices().firstOrNull()
+                ?: error("no camera on this machine")
+            source.setVideoCaptureDevice(device)
+            source.setVideoCaptureCapability(VideoCaptureCapability(640, 480, 30))
+            source.start()
+            track.isEnabled = true
+            _video.value = _video.value.copy(localOn = true)
+            true
+        }.getOrElse {
+            Log.w("PartyLine", "could not start the camera", it)
+            runCatching { source.stop() }
+            false
         }
     }
 
@@ -294,6 +362,10 @@ class DesktopPeerLink(
         // still running on a native thread is a use-after-free.
         if (!closed.compareAndSet(false, true)) return
         detachRec()
+        runCatching { localVideo?.isEnabled = false }
+        runCatching { cameraSource?.stop() }
+        localVideo = null
+        remoteVideo = null
         runCatching { micTrack?.isEnabled = false }
         runCatching { pc.close() }
         // Ours to free even when the source is a caller-owned
