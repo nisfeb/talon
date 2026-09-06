@@ -64,3 +64,58 @@ class PartyLineHostileFrameTest {
         )
     }
 }
+
+/**
+ * Camera state is per connection, not per person.
+ *
+ * Every client re-broadcasts its camera flag whenever someone joins, so
+ * keying this by ship meant a second device's "camera off" erased the
+ * first device's live camera for the whole room.
+ */
+class PartyLineTwoDeviceVideoTest {
+
+    private class FakeLink : PeerLink {
+        override val state: StateFlow<MediaState> = MutableStateFlow(MediaState.Idle)
+        override fun onLocalCandidate(callback: (IceCandidate) -> Unit) = Unit
+        override suspend fun offer(): String = "v=0 fake-offer"
+        override suspend fun answerTo(remoteSdp: String): String = "v=0 fake-answer"
+        override suspend fun applyAnswer(remoteSdp: String) = Unit
+        override fun addRemoteCandidate(candidate: IceCandidate) = Unit
+        override fun setMuted(muted: Boolean) = Unit
+        override fun close() = Unit
+    }
+
+    private val json = Json { ignoreUnknownKeys = true }
+    private fun line() = PartyLine(HttpClient(), links = { _, _ -> FakeLink() })
+    private fun add(id: String, who: String): JsonObject = json.decodeFromString(
+        """{"type":"user","kind":"add","id":"$id","username":"$who"}""",
+    )
+    private fun del(id: String, who: String): JsonObject = json.decodeFromString(
+        """{"type":"user","kind":"delete","id":"$id","username":"$who"}""",
+    )
+    private fun video(source: String, who: String, on: Boolean): JsonObject =
+        json.decodeFromString(
+            """{"type":"usermessage","kind":"${PartyLine.VIDEO_KIND}","source":"$source",
+                "dest":"","username":"$who","value":$on}""",
+        )
+
+    @Test
+    fun aSecondDeviceDoesNotTurnOffTheFirstOnesCamera() = runTest {
+        val l = line()
+        l.handle(add("c1", "~hapnyl-fotlyx")) // desktop
+        l.handle(add("c2", "~hapnyl-fotlyx")) // phone, same person
+        l.handle(video("c1", "~hapnyl-fotlyx", true))
+        assertTrue("~hapnyl-fotlyx" in l.videoOn.value)
+
+        // The phone re-broadcasts camera-off on every roster change.
+        l.handle(video("c2", "~hapnyl-fotlyx", false))
+        assertTrue(
+            "~hapnyl-fotlyx" in l.videoOn.value,
+            "the desktop camera is still on; the phone must not clear it",
+        )
+
+        // Only when the camera-on connection goes does the tile drop.
+        l.handle(del("c1", "~hapnyl-fotlyx"))
+        assertFalse("~hapnyl-fotlyx" in l.videoOn.value)
+    }
+}

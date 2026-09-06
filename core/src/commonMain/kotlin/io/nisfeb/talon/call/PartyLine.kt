@@ -237,10 +237,16 @@ class PartyLine(
     // stays video-low so a big room's bandwidth and decode stay bounded.
     private val _focusedVideo = MutableStateFlow<String?>(null)
     val focusedVideo: StateFlow<String?> = _focusedVideo.asStateFlow()
-    // Ships whose camera is ON right now, from explicit VIDEO_KIND
-    // broadcasts (plus ourself). A down link always has an empty video
-    // transceiver, so track presence can't tell camera-on from off —
-    // this signal is the truth the tiles render from.
+    // CONNECTIONS whose camera is ON right now, from explicit VIDEO_KIND
+    // broadcasts. A down link always has an empty video transceiver, so
+    // track presence can't tell camera-on from off — this signal is the
+    // truth the tiles render from.
+    //
+    // Keyed by connection, not by ship (unlike MUTE_KIND, where one row
+    // per person is the point): every client re-broadcasts its camera
+    // flag on every roster add, so the same person signed in twice had
+    // their second device's "camera off" erase the first device's live
+    // camera for the whole room.
     private val videoOnBy = mutableSetOf<String>()
     private val _videoOn = MutableStateFlow<Set<String>>(emptySet())
     val videoOn: StateFlow<Set<String>> = _videoOn.asStateFlow()
@@ -250,7 +256,10 @@ class PartyLine(
     val localVideoLink: StateFlow<PeerLink?> = _upLink.asStateFlow()
 
     private fun refreshVideoOn() {
-        _videoOn.value = videoOnBy + (if (_cameraOn.value) setOf(ourId) else emptySet())
+        // Connections -> the ships they belong to. A person is
+        // camera-on if ANY of their connections is.
+        val ships = videoOnBy.mapNotNull { roster[it]?.ship }.toSet()
+        _videoOn.value = ships + (if (_cameraOn.value) setOf(ourId) else emptySet())
     }
     private var room = ""
     private var ourId = ""
@@ -774,11 +783,14 @@ class PartyLine(
                         // fallback id cleared nothing, and a rejoin came
                         // back still marked muted.
                         val gone = roster.remove(id)?.ship
+                        // The camera flag is per connection, so this one
+                        // goes even if the person is still here on
+                        // another device.
+                        if (videoOnBy.remove(id)) refreshVideoOn()
                         // Only forget them once their last connection is
                         // gone; someone signed in twice is still here.
                         if (gone != null && roster.values.none { it.ship == gone }) {
                             mutedBy.remove(gone)
-                            if (videoOnBy.remove(gone)) refreshVideoOn()
                             if (_focusedVideo.value == gone) {
                                 scope.launch { setFocusedVideo(null) }
                             }
@@ -813,7 +825,10 @@ class PartyLine(
                     return
                 }
                 if (kind == VIDEO_KIND) {
-                    val who = msg["username"]?.jsonPrimitive?.content ?: return
+                    // `source` is the connection; username would collapse
+                    // a person's two devices into one flag.
+                    val who = msg["source"]?.jsonPrimitive?.content
+                        ?: msg["username"]?.jsonPrimitive?.content ?: return
                     val on = msg["value"]?.jsonPrimitive?.content == "true"
                     if (on) videoOnBy.add(who) else videoOnBy.remove(who)
                     refreshVideoOn()

@@ -123,20 +123,21 @@ expect val isCallsSupported: Boolean
  * Whether a party line can be recorded and transcribed to Lattice
  * (wire 7). True only where PeerLink.onPcm captures BOTH remote
  * speakers and our own mic end-to-end. Desktop: true (webrtc-java taps
- * mic + remote tracks). Android: false — remote-speaker capture works,
- * but self-mic needs JavaAudioDeviceModule samples wiring + a device
- * test; flip to true once verified. iOS: false (calls are held). Gates
- * the record control per CLAUDE.md #3 (gate, don't fake).
+ * remote tracks, and the self-mic through a standalone AudioRecorder —
+ * a LOCAL track's addSink never fires). Android: true (remote via
+ * AudioTrack.addSink, self-mic via JavaAudioDeviceModule's
+ * samples-ready callback). iOS: false — the Swift bridge exposes no
+ * PCM tap. Gates the record control per CLAUDE.md #3 (gate, don't fake).
  */
 expect val isCallRecordingSupported: Boolean
 
 /**
  * Whether an incoming call can ring this device while the app is in
  * the background. Android: true (UnifiedPush wakes the process).
- * Desktop: true (a long-running process hears the channel). iOS: false
- * — no CallKit/PushKit by design, and UIBackgroundModes audio only
- * sustains a call already in progress. Gates only an informational
- * line in Settings' calls section; nothing is greyed out.
+ * Desktop: true (a long-running process hears the channel). iOS: true
+ * — PushKit wakes the app and CallKit rings it, over the relay's APNs
+ * VoIP leg. Gates only an informational line in Settings' calls
+ * section; nothing is greyed out.
  */
 expect val isBackgroundCallRingSupported: Boolean
 
@@ -163,9 +164,9 @@ expect val isVideoCallsSupported: Boolean
 
 /**
  * Camera video on a party line (conference). True where a PeerLink can
- * publish a camera and render remote cameras end-to-end: desktop
- * (webrtc-java) and Android (libwebrtc). iOS: false — IosPeerLink has
- * no video path yet, and iOS calls are held. Gates the party-line
+ * publish a camera and render remote cameras end-to-end: true on all
+ * three — desktop (webrtc-java), Android (libwebrtc) and iOS (the
+ * Swift bridge's capture + RTCMTLVideoView). Gates the party-line
  * camera control and video tiles (CLAUDE.md #3). Party audio still
  * works everywhere regardless.
  */
@@ -173,9 +174,9 @@ expect val isPartyVideoSupported: Boolean
 
 /**
  * Whether the camera can be flipped front/back. Android: true
- * (CameraVideoCapturer.switchCamera). Desktop: false — a webcam has one
- * lens and no switch. iOS: false (no video path yet). Gates the flip
- * control (CLAUDE.md #3).
+ * (CameraVideoCapturer.switchCamera). iOS: true (the capturer restarts
+ * on the other device). Desktop: false — a webcam has one lens and no
+ * switch. Gates the flip control (CLAUDE.md #3).
  */
 expect val isCameraSwitchSupported: Boolean
 
