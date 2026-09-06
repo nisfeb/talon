@@ -156,6 +156,11 @@ class DesktopCallEngine(configuredIce: List<IceServer> = emptyList()) : CallEngi
      * the transceiver is already negotiated, so this is local only.
      */
     override suspend fun setCameraEnabled(enabled: Boolean): Boolean {
+        // Same race as the party link: an enable queued before the
+        // hang-up would otherwise open the device with nothing left to
+        // close it. Doubles as the already-on guard the party twin has.
+        if (closed.value) return false
+        if (enabled && localVideo?.isEnabled == true) return true
         val source = cameraSource ?: return false
         val track = localVideo ?: return false
         if (!enabled) {
@@ -292,6 +297,7 @@ class DesktopCallEngine(configuredIce: List<IceServer> = emptyList()) : CallEngi
         // closed source is a native callback into freed memory.
         runCatching { localVideo?.isEnabled = false }
         runCatching { cameraSource?.stop() }
+        runCatching { localVideo?.dispose() }
         runCatching { cameraSource?.dispose() }
         cameraSource = null
         localVideo = null

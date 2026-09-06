@@ -1874,6 +1874,12 @@ fun TalonApp(
                                 nameFor = { contactMap.displayName(it) },
                                 audioDevices = androidAudioDevices,
                                 selfShip = loggedInShip.orEmpty(),
+                                // Leave the immersive full-screen when a
+                                // call rings: it is a Dialog, the ring is
+                                // a Popup, and the ring lost.
+                                incomingCall = callController
+                                    ?.state?.collectAsState()?.value
+                                    is io.nisfeb.talon.call.CallUiState.Incoming,
                                 // Persist ops mutes on the host ship, so
                                 // they outlive the target's connection.
                                 onModerate =

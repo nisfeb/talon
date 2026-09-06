@@ -39,6 +39,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.rememberCoroutineScope
 import kotlinx.coroutines.launch
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -95,6 +96,11 @@ fun PartyLineBar(
     recording: Boolean = false,
     /** Ships recording the line right now (wire 7). */
     recordedBy: Set<String> = emptySet(),
+    /** A 1:1 call is ringing. The immersive full-screen is a Dialog
+     *  (its own window) while the ring card is a Popup (a sub-window),
+     *  so the ring was drawn BEHIND it: the tone played with no Answer
+     *  or Decline anywhere, and the call timed out. */
+    incomingCall: Boolean = false,
     /** Toggle recording, or null to hide the control. */
     onToggleRecord: (() -> Unit)? = null,
 ) {
@@ -148,6 +154,7 @@ fun PartyLineBar(
         },
         recording = recording,
         recordedBy = recordedBy,
+        incomingCall = incomingCall,
         onToggleRecord = onToggleRecord,
     )
 }
@@ -198,6 +205,9 @@ fun PartyLineBarContent(
     recording: Boolean = false,
     /** Ships recording the line right now (wire 7). */
     recordedBy: Set<String> = emptySet(),
+    /** A 1:1 call is ringing; step out of the immersive full-screen so
+     *  the ring card is reachable. */
+    incomingCall: Boolean = false,
     /** Toggle recording, or null to hide the control. */
     onToggleRecord: (() -> Unit)? = null,
     /**
@@ -227,6 +237,7 @@ fun PartyLineBarContent(
     // "browse chats" stay one minimize-tap away. A 1:1 call (headline)
     // keeps the inline behaviour — its roster is fabricated.
     var fullScreen by remember { mutableStateOf(false) }
+    LaunchedEffect(incomingCall) { if (incomingCall) fullScreen = false }
     val immersive = isImmersiveCallSupported && headline == null
 
     // One node, not two siblings: the bar and the admin strip have to

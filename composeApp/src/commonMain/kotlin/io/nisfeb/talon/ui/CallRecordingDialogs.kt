@@ -68,6 +68,11 @@ fun RecordingResultDialog(
 ) {
     val scope = rememberCoroutineScope()
     var busy by remember { mutableStateOf(false) }
+    // The in-flight publish, so a long transcription can be abandoned.
+    // Without this the dialog sat on "Transcribing…" with every button
+    // disabled and no way out but killing the app — and the recording
+    // is only held here, so that lost it.
+    var job by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
     var message by remember { mutableStateOf<String?>(null) }
     val stt = remember(sttConfig) { CallRecordingPublisher.sttFrom(sttConfig) }
     val canPublish = !rec.isEmpty && stt != null && shipUrl != null && cookie != null
@@ -134,7 +139,7 @@ fun RecordingResultDialog(
                 onClick = {
                     busy = true
                     message = null
-                    scope.launch {
+                    job = scope.launch {
                         runCatching {
                             CallRecordingPublisher.publishTranscript(
                                 http, stt!!, shipUrl!!, ourShip, cookie!!,
@@ -179,6 +184,14 @@ fun RecordingResultDialog(
                         }
                     },
                 ) { Text("Save full recording") }
+                if (busy) {
+                    TextButton(onClick = {
+                        job?.cancel()
+                        job = null
+                        busy = false
+                        message = "Stopped."
+                    }) { Text("Stop") }
+                }
                 TextButton(
                     enabled = !busy,
                     onClick = {

@@ -167,6 +167,11 @@ class DesktopPeerLink(
     }
 
     override suspend fun setCameraEnabled(enabled: Boolean): Boolean {
+        // The toggle is a coroutine and close() is not, so an enable
+        // queued just before a hang-up used to start the capture device
+        // afterwards — with nothing left to stop it, the camera light
+        // stayed on until the process exited.
+        if (closed.value) return false
         val source = cameraSource ?: return false
         val track = localVideo ?: return false
         if (!enabled) {
@@ -443,6 +448,12 @@ class DesktopPeerLink(
         detachRec()
         runCatching { localVideo?.isEnabled = false }
         runCatching { cameraSource?.stop() }
+        // stop() releases the device; dispose() releases the object.
+        // Without it a link leaked its camera source and track — once
+        // per down link and once per republish, not once per call.
+        runCatching { cameraSource?.dispose() }
+        runCatching { localVideo?.dispose() }
+        cameraSource = null
         localVideo = null
         remoteVideo = null
         runCatching { micTrack?.isEnabled = false }
