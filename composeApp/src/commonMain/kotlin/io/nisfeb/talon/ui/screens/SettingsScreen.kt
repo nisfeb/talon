@@ -643,7 +643,11 @@ fun SettingsScreen(
                 ) { Text("Save") }
                 TextButton(
                     onClick = {
-                        aiSettings.clear()
+                        // The chat credential only. clear() also wiped
+                        // the Whisper key, the Brave key, every custom
+                        // system prompt and every feature toggle — none
+                        // of which this button names.
+                        aiSettings.update(AiSettings.Provider.Anthropic, "", null, null)
                         provider = AiSettings.Provider.Anthropic
                         apiKey = ""
                         model = ""

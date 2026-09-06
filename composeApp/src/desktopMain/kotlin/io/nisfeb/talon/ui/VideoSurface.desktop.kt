@@ -11,6 +11,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.graphics.toComposeImageBitmap
 import dev.onvoid.webrtc.media.video.VideoFrame
@@ -71,6 +72,7 @@ private fun VideoTrackCanvas(
     if (track == null || !on) return
 
     var bitmap by remember(track) { mutableStateOf<ImageBitmap?>(null) }
+    var rotation by remember(track) { mutableStateOf(0) }
 
     DisposableEffect(track) {
         val converter = FrameConverter()
@@ -78,7 +80,10 @@ private fun VideoTrackCanvas(
             // The frame is reference-counted and recycled the moment
             // this returns, so it must be converted here rather than
             // stashed for the composition to read later.
-            runCatching { bitmap = converter.toBitmap(frame) }
+            runCatching {
+                bitmap = converter.toBitmap(frame)
+                rotation = frame.rotation
+            }
         }
         track.addSink(sink)
         onDispose { runCatching { track.removeSink(sink) } }
@@ -86,23 +91,32 @@ private fun VideoTrackCanvas(
 
     Canvas(modifier) {
         val image = bitmap ?: return@Canvas
-        drawFitted(image, mirror)
+        drawFitted(image, mirror, rotation)
     }
 }
 
-/** Draw [image] centred and aspect-fitted into the canvas. */
-private fun DrawScope.drawFitted(image: ImageBitmap, mirror: Boolean) {
-    val scale = minOf(size.width / image.width, size.height / image.height)
+/** Draw [image] centred, aspect-fitted, and turned the right way up. */
+private fun DrawScope.drawFitted(image: ImageBitmap, mirror: Boolean, rotation: Int) {
+    // A phone held in portrait sends landscape frames plus a rotation
+    // of 90 or 270; ignoring it drew every mobile camera on its side.
+    // Fit against the post-rotation footprint, or a turned frame is
+    // scaled to the wrong axis and overflows the tile.
+    val turned = rotation == 90 || rotation == 270
+    val fitW = if (turned) image.height else image.width
+    val fitH = if (turned) image.width else image.height
+    val scale = minOf(size.width / fitW, size.height / fitH)
     val w = (image.width * scale).roundToInt()
     val h = (image.height * scale).roundToInt()
-    // Our own camera is a mirror, the way every video app behaves.
-    if (mirror) {
-        scale(scaleX = -1f, scaleY = 1f) {
+    rotate(degrees = rotation.toFloat()) {
+        // Our own camera is a mirror, the way every video app behaves.
+        if (mirror) {
+            scale(scaleX = -1f, scaleY = 1f) {
+                drawFittedRaw(image, w, h)
+            }
+        } else {
             drawFittedRaw(image, w, h)
         }
-        return
     }
-    drawFittedRaw(image, w, h)
 }
 
 private fun DrawScope.drawFittedRaw(image: ImageBitmap, w: Int, h: Int) {
@@ -127,8 +141,18 @@ private class FrameConverter {
     private var image: BufferedImage? = null
     private var pixels: IntArray = IntArray(0)
 
-    fun toBitmap(frame: VideoFrame): ImageBitmap {
-        val i420 = frame.buffer.toI420()
+    fun toBitmap(frame: VideoFrame): ImageBitmap = frame.buffer.toI420().let { i420 ->
+        try {
+            convert(i420)
+        } finally {
+            // toI420() hands back a NEW reference-counted buffer. Not
+            // releasing it leaked a native I420 copy every frame — at
+            // 30fps that is the whole video pane's memory, per call.
+            runCatching { i420.release() }
+        }
+    }
+
+    private fun convert(i420: dev.onvoid.webrtc.media.video.I420Buffer): ImageBitmap {
         val w = i420.width
         val h = i420.height
         val img = image?.takeIf { it.width == w && it.height == h }

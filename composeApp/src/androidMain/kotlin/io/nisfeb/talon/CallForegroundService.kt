@@ -40,10 +40,15 @@ class CallForegroundService : Service() {
         val notification = buildOngoing(with)
         runCatching {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                // Both types. Declaring only MICROPHONE meant the camera
+                // was killed the moment the app went to the background
+                // on Android 14+, and it never came back for the rest of
+                // the call — the tile just froze.
                 startForeground(
                     NOTIFICATION_ID,
                     notification,
-                    ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE,
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE or
+                        ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA,
                 )
             } else {
                 startForeground(NOTIFICATION_ID, notification)

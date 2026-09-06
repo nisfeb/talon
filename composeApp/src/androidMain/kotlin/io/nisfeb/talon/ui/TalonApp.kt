@@ -184,11 +184,20 @@ fun TalonApp(
             null
         }
     }
-    val partyLine = remember(callController) {
+    val micGate = rememberMicGate()
+    val partyLine = remember(callController, micGate) {
         if (callController != null) {
             io.nisfeb.talon.call.PartyLine(
                 app.ktorHttp,
                 io.nisfeb.talon.call.PeerLinkFactory { ice, send ->
+                    // Only the up link captures; a down link needs no
+                    // permission and must never sit on a dialog.
+                    if (send && !micGate()) {
+                        io.nisfeb.talon.util.Log.w(
+                            "PartyLine",
+                            "RECORD_AUDIO denied; joining without a working mic",
+                        )
+                    }
                     io.nisfeb.talon.call.AndroidPeerLink(app, ice, send)
                 },
                 callSounds,
@@ -2105,6 +2114,46 @@ fun TalonApp(
         } // key(loggedInShip)
     }
     } // CompositionLocalProvider(LocalInlineMediaPlayer)
+}
+
+/**
+ * Ask for RECORD_AUDIO and block until the user answers.
+ *
+ * The 1:1 path has had this since the first call; the party-line path
+ * had no gate at all, so joining without the permission built a
+ * sending link whose mic was dead — the bar said Live, the room heard
+ * silence, and nothing ever said why.
+ *
+ * Returns whether the mic is usable. Blocking, for the same reason
+ * [rememberCallEngineProvider] blocks: the caller is a non-suspending
+ * factory already running on an IO dispatcher.
+ */
+@Composable
+private fun rememberMicGate(): () -> Boolean {
+    val context = LocalContext.current
+    val pending = androidx.compose.runtime.remember {
+        java.util.concurrent.atomic.AtomicReference<
+            kotlinx.coroutines.CompletableDeferred<Boolean>?,
+            >(null)
+    }
+    val launcher = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.RequestPermission(),
+    ) { granted -> pending.getAndSet(null)?.complete(granted) }
+    return androidx.compose.runtime.remember {
+        {
+            val already = androidx.core.content.ContextCompat.checkSelfPermission(
+                context, android.Manifest.permission.RECORD_AUDIO,
+            ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+            already || run {
+                val wait = kotlinx.coroutines.CompletableDeferred<Boolean>()
+                pending.set(wait)
+                launcher.launch(android.Manifest.permission.RECORD_AUDIO)
+                kotlinx.coroutines.runBlocking {
+                    kotlinx.coroutines.withTimeoutOrNull(60_000L) { wait.await() } ?: false
+                }
+            }
+        }
+    }
 }
 
 /**
