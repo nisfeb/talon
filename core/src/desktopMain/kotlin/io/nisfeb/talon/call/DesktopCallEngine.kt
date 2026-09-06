@@ -299,6 +299,15 @@ object DesktopWebRtcFactory {
     private var adm: dev.onvoid.webrtc.media.audio.AudioDeviceModuleBase? = null
 
     /**
+     * The capture device the user picked, or null for the system
+     * default. Read by the recording tap, which opens a separate
+     * AudioRecorder and would otherwise record the first enumerated
+     * device rather than the mic the call is actually using.
+     */
+    @Volatile
+    var preferredRecordingDeviceId: String? = null
+
+    /**
      * What to build the factory's audio device from.
      *
      * The app wants the real one — a sound card, with devices to

@@ -284,10 +284,17 @@ class DesktopPeerLink(
             // (a solo recording captured only silence), so tap the mic
             // with a standalone AudioRecorder. It's separate from the
             // peer connection, so it cannot affect the outgoing call.
+            // Follow the mic the call is on. Taking the first enumerated
+            // device recorded the wrong input for anyone who had picked
+            // a non-default one — silence, if that device isn't live.
+            val wanted = DesktopWebRtcFactory.preferredRecordingDeviceId
+            fun pick(all: List<dev.onvoid.webrtc.media.audio.AudioDevice>?) =
+                all?.firstOrNull { wanted != null && it.descriptor == wanted }
+                    ?: all?.firstOrNull()
             val device = runCatching {
-                DesktopWebRtcFactory.audioDeviceModule().recordingDevices.firstOrNull()
+                pick(DesktopWebRtcFactory.audioDeviceModule().recordingDevices)
             }.getOrNull() ?: runCatching {
-                dev.onvoid.webrtc.media.audio.AudioDeviceModule().recordingDevices.firstOrNull()
+                pick(dev.onvoid.webrtc.media.audio.AudioDeviceModule().recordingDevices)
             }.getOrNull()
             if (device == null) {
                 Log.w("PartyLine", "record tap: no recording device; mic not captured")
@@ -309,9 +316,17 @@ class DesktopPeerLink(
                         captureDelayMs: Int,
                         clockDrift: Int,
                     ) {
-                        if (bytesPerSample != 2) return
+                        // Do not trust `bytesPerSample`: webrtc-java
+                        // reports it as bytes per FRAME here, so a
+                        // stereo capture device (the Windows default)
+                        // sends 4 and the old `!= 2` guard dropped every
+                        // frame — the mic recorded nothing at all.
+                        // data.size / nSamples is unambiguous.
                         val ch = if (channels in 1..2) channels else 1
-                        val frames = data.size / (ch * 2)
+                        val frames = if (nSamples > 0) nSamples else data.size / (ch * 2)
+                        if (frames <= 0) return
+                        // Still only 16-bit PCM: 2 bytes per channel.
+                        if (data.size / frames != ch * 2) return
                         if (recFrames.getAndIncrement() == 0) {
                             Log.i("PartyLine", "record tap: mic first frame rate=$sampleRate ch=$ch bytes=${data.size}")
                         }

@@ -22,24 +22,29 @@ object TranscriptGemtext {
      * @param whenLabel    a human date for the sub-heading, already formatted
      * @param participants patps on the line, for the sub-heading
      * @param utterances   all speakers' segments, any order
+     * @param note         optional caveat shown under the heading, e.g.
+     *                     which speakers failed to transcribe — better
+     *                     than a page that silently omits someone
      */
     fun build(
         title: String,
         whenLabel: String,
         participants: List<String>,
         utterances: List<Utterance>,
+        note: String = "",
     ): String {
         val sb = StringBuilder()
         sb.append("# ").append(title.ifBlank { "Party line" }).append("\n\n")
         val who = participants.filter { it.isNotBlank() }.distinct().joinToString(", ")
         val meta = listOf(whenLabel, who).filter { it.isNotBlank() }.joinToString(" · ")
         if (meta.isNotBlank()) sb.append(meta).append("\n\n")
+        if (note.isNotBlank()) sb.append(note).append("\n\n")
 
         val ordered = utterances
             .filter { it.text.isNotBlank() }
             .sortedBy { it.startMs }
         if (ordered.isEmpty()) {
-            sb.append("_No speech was transcribed._\n")
+            sb.append("No speech was transcribed.\n")
             return sb.toString()
         }
 

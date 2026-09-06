@@ -70,7 +70,14 @@ class DesktopAudioDevices : AudioDevices {
     }
 
     override fun selectInput(id: String?) {
-        if (apply(id, previous = input, capture = true)) input = id
+        if (apply(id, previous = input, capture = true)) {
+            input = id
+            // The recording tap opens its own AudioRecorder, so it can't
+            // see what we just told the shared module to use. Publish it
+            // or a recording captures whatever device happens to be
+            // enumerated first, not the mic the call is on.
+            DesktopWebRtcFactory.preferredRecordingDeviceId = id
+        }
     }
 
     override fun selectOutput(id: String?) {

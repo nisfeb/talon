@@ -3,6 +3,7 @@ package io.nisfeb.talon.ai
 import io.ktor.client.HttpClient
 import io.ktor.client.request.forms.MultiPartFormDataContent
 import io.ktor.client.request.forms.formData
+import io.ktor.client.plugins.timeout
 import io.ktor.client.request.header
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
@@ -44,6 +45,11 @@ object CallTranscribe {
 
     private val json = Json { ignoreUnknownKeys = true }
 
+    /** A 10-minute chunk of speech can legitimately take a while to
+     *  come back, but not forever. */
+    private const val REQUEST_TIMEOUT_MS = 180_000L
+    private const val SOCKET_TIMEOUT_MS = 60_000L
+
     /**
      * Transcribe one WAV clip. Returns time-ordered segments.
      *
@@ -60,6 +66,13 @@ object CallTranscribe {
     ): List<Segment> = withContext(ioDispatcher) {
         val res = http.post(endpoint) {
             header(HttpHeaders.Authorization, "Bearer $apiKey")
+            // The client leaves requests untimed by default, so a host
+            // that accepted the upload and then went quiet left the
+            // "Transcribing…" dialog spinning with no way out.
+            timeout {
+                requestTimeoutMillis = REQUEST_TIMEOUT_MS
+                socketTimeoutMillis = SOCKET_TIMEOUT_MS
+            }
             setBody(
                 MultiPartFormDataContent(
                     formData {
