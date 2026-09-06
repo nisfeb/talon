@@ -51,11 +51,13 @@ class PartyLineAbortTest {
             HttpClient(),
             links = { _, sendAudio -> ScriptedLink().also { if (sendAudio) ups += it } },
         )
-        line.upId = "up-test"
         line.handle(joined())
         assertEquals(1, ups.size, "expected one up link after join")
 
-        line.handle(abort("up-test"))
+        // The client mints the up stream's id each time it publishes
+        // (and names the one it replaces), so abort the id it actually
+        // offered rather than a fixed one.
+        line.handle(abort(line.upId))
         assertEquals(2, ups.size, "the aborted mic was not republished")
         assertTrue(ups[0].closed, "the dead up link was left open")
     }

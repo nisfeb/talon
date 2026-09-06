@@ -579,6 +579,17 @@ fun App(
                 null
             }
         }
+        LaunchedEffect(partyLine, callController) {
+            // A 1:1 call and a party line can be live at the same time,
+            // and every setMuted is per-track — CallController's mute
+            // physically cannot quiet the party mic. Answering a private
+            // call while unmuted on a group line broadcast the whole
+            // conversation to the room. Mute the line for the call.
+            val line = partyLine ?: return@LaunchedEffect
+            callController?.state?.collect { st ->
+                if (st is io.nisfeb.talon.call.CallUiState.Active) line.setMuted(true)
+            }
+        }
         DisposableEffect(callController) {
             onDispose {
                 partyLine?.leave()

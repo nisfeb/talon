@@ -674,6 +674,13 @@ class PartyLine(
             // OUR up link this is the server saying our mic stream is
             // gone, which nothing else reports; republish rather than
             // sit in a line nobody can hear us in.
+            // Galène asks for an ICE restart on a broken up conn. With
+            // no case here it was dropped, so recovery waited on
+            // libwebrtc's own ~30s failure timeout instead.
+            "renegotiate" -> {
+                val id = msg["id"]?.jsonPrimitive?.content
+                if (id == null || id == upId) scope.launch { publishUp() }
+            }
             "abort" -> {
                 val id = msg["id"]?.jsonPrimitive?.content ?: return
                 if (id == upId) {
@@ -923,6 +930,9 @@ class PartyLine(
      *  the new link was live, the exact lie the retry was built to
      *  kill. It also leaked one collector per republish. */
     private var upWatch: Job? = null
+    /** Whether we have offered an up stream yet this join, so the first
+     *  publish doesn't claim to replace an id the server never saw. */
+    private var upOffered = false
 
     /**
      * Stand up (or re-stand) the mic's up link and offer it.
@@ -945,6 +955,14 @@ class PartyLine(
         // session by live mic links, and a close-then-create republish
         // transited zero — Android's last-one-out cleanup reset the
         // user's speaker/Bluetooth route and audio mode mid-line.
+        // A fresh stream id per publish, naming the one it replaces.
+        // Re-offering a brand-new PeerConnection under the SAME id makes
+        // Galène hand the offer to the existing server-side conn, which
+        // keeps the dead connection's DTLS fingerprint — media never
+        // comes back, so every recovery left the mic dead while down
+        // links kept working: "I hear everyone, nobody hears me".
+        val previousUpId = if (upOffered) upId else ""
+        upId = "up-$connectionId-${Uuid.random()}"
         val old = upLink
         val up = links.create(sfuIce, sendAudio = true)
         old?.close()
@@ -983,9 +1001,12 @@ class PartyLine(
         }
         up.onLocalCandidate { c -> scope.launch { sendIce(upId, c) } }
         val sdp = up.offer()
+        upOffered = true
         send(buildJsonObject {
             put("type", "offer"); put("id", upId); put("label", "")
             put("username", ourId); put("sdp", sdp)
+            // Tells Galène to delUpConn the corpse rather than keep it.
+            if (previousUpId.isNotEmpty()) put("replace", previousUpId)
         })
     }
 
@@ -1207,6 +1228,7 @@ class PartyLine(
         recClips.clear()
         recSelfShip = null
         recStartMs = 0L
+        upOffered = false
         _cameraOn.value = false
         _focusedVideo.value = null
         videoOnBy.clear()

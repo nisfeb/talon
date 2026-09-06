@@ -198,6 +198,29 @@ fun PartyLineFullScreen(
                     onFocusVideo = onFocusVideo,
                     modifier = Modifier.weight(1f).fillMaxWidth(),
                 )
+                // The grid has no ops affordance, and it replaced the
+                // only roster a phone ever showed — so since party video
+                // landed, an admin on a phone could not mute anyone at
+                // all. Keep the roster under the grid for operators; the
+                // menu and both callbacks are already threaded here.
+                if (state.ops) {
+                    LazyColumn(
+                        modifier = Modifier.weight(0.6f).fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        items(state.members, key = { it.ship }) { m ->
+                            ParticipantRow(
+                                member = m,
+                                nameFor = nameFor,
+                                isSelf = m.ship == selfShip,
+                                showOps = m.ship != selfShip &&
+                                    onRevokeSpeaking != null && onRestoreSpeaking != null,
+                                onRevokeSpeaking = onRevokeSpeaking,
+                                onRestoreSpeaking = onRestoreSpeaking,
+                            )
+                        }
+                    }
+                }
             } else {
                 LazyColumn(
                     modifier = Modifier.weight(1f).fillMaxWidth(),
