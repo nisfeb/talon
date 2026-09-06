@@ -1,8 +1,10 @@
+import AVFoundation
 import CallKit
 import ComposeApp
 import Foundation
 import PushKit
 import UIKit
+import WebRTC
 
 /// Native incoming-call ringing on iOS: PushKit wakes the app (even
 /// killed) on a VoIP push, and CallKit shows the system full-screen
@@ -14,7 +16,16 @@ import UIKit
 /// The shared Kotlin call stack does the actual join; this file only
 /// registers the token, rings, and hands the user's answer/decline to
 /// `IosVoipBridge`.
-class AppDelegate: NSObject, UIApplicationDelegate, PKPushRegistryDelegate, CXProviderDelegate {
+/// As `IosCallKit` it also reports the calls Kotlin places, joins,
+/// connects, mutes and ends, so they are phone calls to iOS the same
+/// as the ones we receive.
+class AppDelegate: NSObject, UIApplicationDelegate, PKPushRegistryDelegate, CXProviderDelegate, IosCallKit {
+    // Requests we make of CallKit (start, answer, end, mute) go through
+    // this; CallKit then asks us to perform them via the delegate.
+    private let callController = CXCallController()
+    // Ends we asked for ourselves: the perform is bookkeeping, not a
+    // hang-up to forward — the Kotlin side already ended the call.
+    private var endingLocally: Set<UUID> = []
 
     private var provider: CXProvider!
     // Held, not local: PKPushRegistry.delegate is weak, so a registry
@@ -45,6 +56,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, PKPushRegistryDelegate, CXPr
         config.supportedHandleTypes = [.generic]
         provider = CXProvider(configuration: config)
         provider.setDelegate(self, queue: nil)
+        IosVoipBridge.shared.callKit = self
 
         pushRegistry = PKPushRegistry(queue: .main)
         pushRegistry.delegate = self
@@ -164,11 +176,95 @@ class AppDelegate: NSObject, UIApplicationDelegate, PKPushRegistryDelegate, CXPr
     }
 
     func provider(_ provider: CXProvider, perform action: CXEndCallAction) {
-        if let callId = uuidToCallId[action.callUUID] {
-            IosVoipBridge.shared.decline(callId: callId)
-            forget(action.callUUID)
+        let uuid = action.callUUID
+        if endingLocally.remove(uuid) != nil {
+            forget(uuid)
+            action.fulfill()
+            return
+        }
+        if let callId = uuidToCallId[uuid] {
+            IosVoipBridge.shared.end(callId: callId)
+            forget(uuid)
         }
         action.fulfill()
+    }
+
+    func provider(_ provider: CXProvider, perform action: CXStartCallAction) {
+        provider.reportOutgoingCall(with: action.callUUID, startedConnectingAt: nil)
+        action.fulfill()
+    }
+
+    func provider(_ provider: CXProvider, perform action: CXSetMutedCallAction) {
+        if let callId = uuidToCallId[action.callUUID] {
+            IosVoipBridge.shared.setMuted(callId: callId, muted: action.isMuted)
+        }
+        action.fulfill()
+    }
+
+    func provider(_ provider: CXProvider, perform action: CXSetHeldCallAction) {
+        if let callId = uuidToCallId[action.callUUID] {
+            IosVoipBridge.shared.setHeld(callId: callId, held: action.isOnHold)
+        }
+        action.fulfill()
+    }
+
+    // CallKit owns the audio session for a reported call; libwebrtc
+    // needs to hear about activation to start its audio unit under it.
+    func provider(_ provider: CXProvider, didActivate audioSession: AVAudioSession) {
+        RTCAudioSession.sharedInstance().audioSessionDidActivate(audioSession)
+    }
+
+    func provider(_ provider: CXProvider, didDeactivate audioSession: AVAudioSession) {
+        RTCAudioSession.sharedInstance().audioSessionDidDeactivate(audioSession)
+    }
+
+    // MARK: - IosCallKit (reports from the Kotlin call stack)
+
+    func reportOutgoing(id: String, handle: String) {
+        if callIdToUuid[id] != nil { return }
+        let uuid = UUID()
+        uuidToCallId[uuid] = id
+        callIdToUuid[id] = uuid
+        let start = CXStartCallAction(call: uuid, handle: CXHandle(type: .generic, value: handle))
+        callController.request(CXTransaction(action: start)) { error in
+            if let error = error {
+                // A cellular call up, or Do Not Disturb: the call goes
+                // on app-managed, exactly as before this existed.
+                NSLog("talon: CallKit refused the outgoing call: \(error)")
+                self.forget(uuid)
+            }
+        }
+    }
+
+    func reportAnswered(id: String) {
+        guard let uuid = callIdToUuid[id], !answered.contains(uuid) else { return }
+        callController.request(CXTransaction(action: CXAnswerCallAction(call: uuid))) { _ in }
+    }
+
+    func reportConnected(id: String) {
+        guard let uuid = callIdToUuid[id] else { return }
+        provider.reportOutgoingCall(with: uuid, connectedAt: nil)
+    }
+
+    func reportEnded(id: String, remote: Bool) {
+        guard let uuid = callIdToUuid[id] else { return }
+        if remote {
+            provider.reportCall(with: uuid, endedAt: nil, reason: .remoteEnded)
+            forget(uuid)
+        } else {
+            endingLocally.insert(uuid)
+            callController.request(CXTransaction(action: CXEndCallAction(call: uuid))) { error in
+                if error != nil {
+                    self.endingLocally.remove(uuid)
+                    self.forget(uuid)
+                }
+            }
+        }
+    }
+
+    func reportMuted(id: String, muted: Bool) {
+        guard let uuid = callIdToUuid[id] else { return }
+        callController.request(CXTransaction(action: CXSetMutedCallAction(call: uuid, muted: muted))) { _ in }
     }
 
     private func forget(_ uuid: UUID) {

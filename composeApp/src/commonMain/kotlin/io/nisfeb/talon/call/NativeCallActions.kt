@@ -1,11 +1,17 @@
 package io.nisfeb.talon.call
 
 /**
- * Connect a platform's native call UI (iOS CallKit) to the shared
- * [CallController]. Called once when the controller is created.
+ * Connect a platform's native call UI to the shared call stack.
+ * Called once per controller, after the party line exists.
  *
- * Only iOS implements it — it routes the CallKit answer/decline the
- * user taps on the system call screen into accept()/reject(). Android
- * and desktop have no native call screen, so their actual is a no-op.
+ * Only iOS implements it: CallKit answer/end/mute/hold come in as
+ * actions on the [CallController] and [PartyLine], and every call and
+ * line is reported out so the system treats them as phone calls.
+ * Android has telecom for the same job (TelecomCalls, bound by its
+ * host); desktop has no native call UI. Both actuals are no-ops.
  */
-expect fun bindNativeCallActions(controller: CallController)
+expect fun bindNativeCallActions(
+    controller: CallController,
+    partyLine: PartyLine?,
+    nameFor: (String) -> String,
+)

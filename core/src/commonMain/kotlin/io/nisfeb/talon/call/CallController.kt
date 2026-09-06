@@ -220,6 +220,9 @@ class CallController(
 
     private val iceServers: List<IceServer> get() = _ice.value
     private var callId: String? = null
+    /** The id of the call in progress, for a platform that keys its own
+     *  call UI by it (iOS CallKit). Null between calls. */
+    val currentCallId: String? get() = callId
     private var peer: String? = null
     private var engine: CallEngine? = null
     // Completed when the peer's offer lands. A user can answer while

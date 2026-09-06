@@ -1,4 +1,8 @@
 package io.nisfeb.talon.call
 
-/** No native call screen on desktop — incoming calls render in-app. */
-actual fun bindNativeCallActions(controller: CallController) = Unit
+/** No native call UI on desktop. */
+actual fun bindNativeCallActions(
+    controller: CallController,
+    partyLine: PartyLine?,
+    nameFor: (String) -> String,
+) = Unit

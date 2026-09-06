@@ -5,57 +5,68 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withTimeoutOrNull
 
 /**
- * The seam between the iOS native VoIP/CallKit layer (AppDelegate +
- * CallPush.swift) and shared Kotlin.
+ * The seam between CallPush.swift and the Kotlin call stack.
  *
- * Swift → Kotlin: the PushKit VoIP token (so the relay can address
- * this device), and the answer / decline the user tapped on the
- * native CallKit screen. Kotlin → app: [actions], which an app-layer
- * wiring sets to drive the shared CallController.
- *
- * Exposed to Swift as `IosVoipBridge.shared`.
+ * Swift owns CallKit and PushKit and calls in with the token and the
+ * user's actions on the system call UI; Kotlin owns the calls and
+ * reports their lifecycle out through [callKit], so a call we place or
+ * a line we join is a phone call to iOS — car, watch, headset button,
+ * hold for a cellular call — the same as one we receive.
  */
 object IosVoipBridge {
-    /** The PushKit VoIP token as lowercase hex, or null until PushKit
-     *  delivers it (shortly after launch). */
     val voipToken = MutableStateFlow<String?>(null)
 
-    /** Called by Swift in `didUpdate pushCredentials`. */
     fun setVoipToken(hex: String) {
         voipToken.value = hex
     }
 
-    /** Set by the app layer to connect the native call screen's
-     *  buttons to the call stack. Null before it is wired, and on a
-     *  cold VoIP launch before the app graph is up — Swift still
-     *  reports the call to CallKit either way, so the phone rings;
-     *  this only gates joining once the user answers. */
+    /** Set by the Kotlin side (NativeCallActions.ios.kt). */
     var actions: IosCallActions? = null
 
-    /** Called by Swift on CXAnswerCallAction. */
+    /** Set by CallPush.swift at launch. */
+    var callKit: IosCallKit? = null
+
     fun answer(callId: String) {
         actions?.onAnswer(callId)
     }
 
-    /** Called by Swift on CXEndCallAction (decline or hang up). */
-    fun decline(callId: String) {
-        actions?.onDecline(callId)
+    fun end(callId: String) {
+        actions?.onEnd(callId)
+    }
+
+    fun setMuted(callId: String, muted: Boolean) {
+        actions?.onSetMuted(callId, muted)
+    }
+
+    fun setHeld(callId: String, held: Boolean) {
+        actions?.onSetHeld(callId, held)
     }
 }
 
-/** What the app layer implements to join or drop a call the user
- *  acted on from the CallKit UI. */
+/** What the system call UI asks of us. Ids are %trunk call ids, or
+ *  [IosCallKit.PARTY] for the party line. */
 interface IosCallActions {
     fun onAnswer(callId: String)
-    fun onDecline(callId: String)
+    fun onEnd(callId: String)
+    fun onSetMuted(callId: String, muted: Boolean)
+    fun onSetHeld(callId: String, held: Boolean)
 }
 
-/**
- * iOS push transport: PushKit VoIP. The "token" is the hex PushKit
- * token and [platform] is "ios-voip", which the relay routes to APNs
- * VoIP. [token] waits briefly for PushKit to deliver on a cold start
- * rather than registering a null endpoint.
- */
+/** What we tell the system call UI. Implemented in Swift. */
+interface IosCallKit {
+    /** A call we placed, or a line we are joining. */
+    fun reportOutgoing(id: String, handle: String)
+    /** An incoming call answered in our own UI rather than CallKit's. */
+    fun reportAnswered(id: String)
+    fun reportConnected(id: String)
+    fun reportEnded(id: String, remote: Boolean)
+    fun reportMuted(id: String, muted: Boolean)
+
+    companion object {
+        const val PARTY = "party"
+    }
+}
+
 class IosPushTokenProvider : PushTokenProvider {
     override val platform: String = "ios-voip"
 

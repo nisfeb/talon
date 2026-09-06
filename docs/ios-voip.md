@@ -29,6 +29,16 @@ added the relay APNs leg and the iOS native front half.
   (`aps-environment`), `voip` background mode, `IosVoipBridge` +
   `IosPushTokenProvider`, and the `bindNativeCallActions` seam into
   `CallController`.
+- **CallKit both ways** (2026-09-06): incoming calls were already
+  reported from the push; now every outgoing call and party line is
+  reported too (`IosCallKitCalls` in `NativeCallActions.ios.kt` →
+  `IosVoipBridge.callKit` → `CallPush.swift` as `IosCallKit`), an
+  in-app answer or hang-up updates CallKit, and the system's
+  mute/hold actions land on the call or line (hold ⇄ mute, since
+  `%trunk` has no hold). The iOS half of Android's `TelecomCalls`.
+  Device checks: outgoing 1:1 shows in the system UI and on a watch;
+  a party line does; a cellular call arriving mid-call mutes us and
+  resume unmutes; the CallKit mute button and ours stay in step.
 
 ## What remains — in order
 

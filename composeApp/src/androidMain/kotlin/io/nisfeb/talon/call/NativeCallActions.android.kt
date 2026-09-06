@@ -1,4 +1,8 @@
 package io.nisfeb.talon.call
 
-/** No native call screen on Android — incoming calls render in-app. */
-actual fun bindNativeCallActions(controller: CallController) = Unit
+/** Android's native call integration is TelecomCalls, bound by TalonApp. */
+actual fun bindNativeCallActions(
+    controller: CallController,
+    partyLine: PartyLine?,
+    nameFor: (String) -> String,
+) = Unit

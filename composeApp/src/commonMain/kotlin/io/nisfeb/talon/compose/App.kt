@@ -579,12 +579,7 @@ fun App(
             ) {
                 remember {
                     io.nisfeb.talon.call.CallController(session, callEngineProvider, sounds = callSounds, defaults = io.nisfeb.talon.call.buildCallDefaults)
-                        .also {
-                            it.start()
-                            // iOS wires CallKit answer/decline here;
-                            // no-op on Android/desktop.
-                            io.nisfeb.talon.call.bindNativeCallActions(it)
-                        }
+                        .also { it.start() }
                 }
             } else {
                 null
@@ -669,6 +664,17 @@ fun App(
                 db.groups().streamChannelGroups(),
             )
         }.collectAsState(initial = io.nisfeb.talon.ui.ContactMap.EMPTY)
+        // iOS wires CallKit here — answer/end/mute/hold in, every call
+        // and line reported out; no-op on Android and desktop. After
+        // the party line, which it reports too, and reading names
+        // through the state so a late nickname still shows.
+        remember(callController, partyLine) {
+            callController?.let { c ->
+                io.nisfeb.talon.call.bindNativeCallActions(c, partyLine) { ship ->
+                    callContacts.displayName(ship)
+                }
+            }
+        }
         // True exactly while the chat pane's partyLineBar slot is
         // composing the inline call/party surfaces (a DisposableEffect
         // in that slot flips it). Tracking actual composition instead
