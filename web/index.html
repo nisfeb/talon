@@ -3,13 +3,13 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Talon — chat for Urbit</title>
+    <title>Talon — chat and calls for Urbit</title>
     <meta name="description" content="Fast native chat client for Urbit. Android, Linux, macOS, Windows. DMs, group channels, reactions, threads, semantic search. Bring your own ship.">
     <meta property="og:title" content="Talon — chat for Urbit">
     <meta property="og:description" content="Fast native chat client for Urbit. Android, Linux, macOS, Windows. DMs, group channels, reactions, threads, semantic search. Bring your own ship.">
     <meta property="og:image" content="../branding/play_store_icon_512.png">
     <meta name="theme-color" content="#0F0D1A">
-    <link rel="icon" href="../branding/play_store_icon_512.png" type="image/png">
+    <link rel="icon" href="play_store_icon_512.png" type="image/png">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -381,7 +381,7 @@
 <header class="hero">
     <div class="wrap hero-inner">
         <div class="icon-wordmark">
-            <img src="../branding/play_store_icon_512.png" alt="Talon icon">
+            <img src="play_store_icon_512.png" alt="Talon icon">
             <span class="wordmark">Talon</span>
         </div>
 
@@ -389,8 +389,9 @@
 
         <p class="lede">
             Fast chat client for the parts of Urbit you actually use day-to-day —
-            DMs, group channels, reactions, threads. Native on Android, Linux, macOS,
-            and Windows. <a href="https://urbit.org/overview/running-urbit">Bring your own ship</a>.
+            DMs, group channels, reactions, threads — and now voice and video calls
+            between ships. Native on Android, iOS, Linux, macOS, and Windows.
+            <a href="https://urbit.org/overview/running-urbit">Bring your own ship</a>.
         </p>
 
         <div class="ctas">
@@ -403,7 +404,7 @@
         </div>
 
         <div class="meta-row">
-            <span><strong>Android 8+</strong></span>
+            <span><strong>Android 8+</strong> · <strong>iOS</strong> (TestFlight)</span>
             <span><strong>Linux · macOS · Windows</strong></span>
             <span><strong>Open source</strong> · PolyForm Noncommercial</span>
             <span><strong>No analytics</strong></span>
@@ -415,6 +416,22 @@
     <div class="wrap">
         <h2>What it does</h2>
         <ul class="features">
+            <li>
+                <span class="name">Voice &amp; video calls</span>
+                <span class="desc">Call any ship 1:1. Signalling rides Urbit; media is WebRTC, peer to peer where it can be. Rings in the background on Android and iOS, camera on or off, front or back.</span>
+            </li>
+            <li>
+                <span class="name">Party lines</span>
+                <span class="desc">A standing voice room for a group, its guest list mirrored from the group's own roster and roles. See who's on the line before you join, turn cameras on for a small conference, and message anyone from the roster.</span>
+            </li>
+            <li>
+                <span class="name">Recording &amp; transcripts</span>
+                <span class="desc">Record a party line per speaker — everyone on it sees the badge. Transcribe with your own Whisper-compatible key and publish the transcript to Lattice as a <span class="mono">urb://</span> link.</span>
+            </li>
+            <li>
+                <span class="name"><span class="mono">urb://</span> links</span>
+                <span class="desc">Inline preview cards for Urbit links, opened in-app through the Lattice reader. Publish a whole thread to Lattice from its menu.</span>
+            </li>
             <li>
                 <span class="name">Direct messages</span>
                 <span class="desc">1:1 messages with anyone on the network. Same wire as the rest of Urbit — your existing chats appear immediately.</span>
@@ -473,7 +490,7 @@
         <ul class="disclaimers">
             <li>Not a host. <a href="https://urbit.org/overview/running-urbit">Bring your own ship</a> — yours, or one a friend hosts for you, or one of the hosting services.</li>
             <li>Not Tlon. Talon talks to the same agents but is an independent client. If you already use a Tlon-hosted ship, Talon sees your full history immediately.</li>
-            <li>Not on the Play Store today. Sideload from GitHub Releases; the in-app updater handles future versions on Android.</li>
+            <li>Not on the Play Store today. Sideload from GitHub Releases; the in-app updater handles future versions on Android. The iOS build is in TestFlight — ask <span class="patp">~nisfeb</span> for an invite.</li>
             <li>Desktop builds are unsigned for now — Gatekeeper / SmartScreen will warn on first launch and you have to bypass it.</li>
         </ul>
     </div>
@@ -483,15 +500,24 @@
     <div class="wrap">
         <h2>Privacy</h2>
         <div class="privacy-card">
-            <h3>The only servers Talon talks to are yours.</h3>
+            <h3>The only servers Talon talks to are yours — or ones you chose.</h3>
             <p>
-                There's no analytics, no third-party SDKs, no telemetry. The app speaks to the
-                Urbit ship you point it at, and — if you turn on AI features — the AI provider
-                whose key you've entered. That's the entire network surface.
+                There's no analytics, no third-party SDKs, no telemetry. Chat speaks only to
+                the Urbit ship you point it at. If you turn on AI features or transcription,
+                add the provider whose key you've entered. That's the whole surface for messaging.
             </p>
             <p>
-                API keys are stored encrypted on-device via AndroidX Security and only
-                transmitted to the provider you select. They never reach the Talon developer.
+                Calls need a little more. Signalling stays ship-to-ship over Urbit. Media goes
+                peer to peer when it can, and otherwise through a TURN relay; party lines mix
+                audio on an SFU that the hosting ship picks. Both are a small
+                self-hostable sidecar (Galène + coturn), with a hosted default so calls work
+                out of the box. Background ringing on iOS goes through a small push relay
+                that sees a device token and which ship is calling — never any content — and
+                is self-hostable too.
+            </p>
+            <p>
+                API keys are stored encrypted on-device and only sent to the provider you
+                select. They never reach the Talon developer.
             </p>
         </div>
     </div>
@@ -501,15 +527,17 @@
     <div class="wrap">
         <h2>Under the hood</h2>
         <p>
-            Kotlin + Compose Multiplatform. ~26k lines of shared code across Android +
+            Kotlin + Compose Multiplatform. One shared codebase across Android, iOS and
             JVM Desktop; per-platform leaves only where they have to be (file pickers,
-            on-device AI backends, daily-digest scheduling, native notifications). Room
+            WebRTC bindings, CallKit, on-device AI backends, native notifications). Room
             for local storage, OkHttp for the SSE channel, kotlinx.serialization for
-            everything on the wire. Mutation-tested at ~97% on the parsers and wire
-            helpers; ~558 unit tests across the JVM test suite.
+            everything on the wire. Calls are a small Hoon agent, <span class="mono">%trunk</span>,
+            plus WebRTC; party lines run on Galène. Mutation-tested on the parsers and
+            wire helpers, with a JVM test suite behind every release.
         </p>
         <div class="tech-grid">
             <div class="cell"><div class="k">android</div><div class="v">8.0+ (API 26-35)</div></div>
+            <div class="cell"><div class="k">ios</div><div class="v">TestFlight · calls, party lines, video</div></div>
             <div class="cell"><div class="k">desktop</div><div class="v">Linux · macOS · Windows · JRE bundled</div></div>
             <div class="cell"><div class="k">backend</div><div class="v">Your Urbit ship</div></div>
             <div class="cell"><div class="k">license</div><div class="v">PolyForm Noncommercial 1.0.0</div></div>
@@ -527,6 +555,8 @@
             for older versions, signature checksums, and release notes.
         </p>
 
+        <h3 style="margin-top:32px;">iOS</h3>
+        <p>In TestFlight, invite-only while it settles. Ask <span class="patp">~nisfeb</span> and you're on the list.</p>
         <h3 style="margin-top:32px;">Android</h3>
         <p style="font-size:14px;color:var(--on-surf-var);">
             On install: tap the APK; you may need to allow "Install unknown apps" for
