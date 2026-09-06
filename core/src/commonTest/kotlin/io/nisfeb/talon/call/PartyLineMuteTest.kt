@@ -113,8 +113,11 @@ class PartyLineMuteTest {
 
         l.handle(
             json.decodeFromString(
+                // `privileged` is what Galène stamps from the sender's
+                // op permission; without it this is an ordinary member
+                // asking, which is ignored (PartyLineHostileFrameTest).
                 """{"type":"usermessage","kind":"mute","source":"op",
-                    "dest":"","username":"~hapnyl-fotlyx"}""",
+                    "dest":"","username":"~hapnyl-fotlyx","privileged":true}""",
             ),
         )
         assertTrue(

@@ -27,6 +27,8 @@ import kotlin.uuid.ExperimentalUuidApi
 import kotlin.uuid.Uuid
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.int
 import kotlinx.serialization.json.jsonArray
@@ -467,6 +469,10 @@ class PartyLine(
 
     fun isRecording(): Boolean = _recording.value
 
+    /** Our own mic state. internal: the UI reads it off [state], but a
+     *  test with no join has no Live state to read. */
+    internal fun isSelfMuted(): Boolean = muted
+
     /**
      * Turn our camera on or off on the line. Returns false if it
      * couldn't open (no device, permission, or we have no up link —
@@ -617,7 +623,13 @@ class PartyLine(
                 val text = (frame as? Frame.Text)?.readText() ?: continue
                 val msg = runCatching { json.parseToJsonElement(text).jsonObject }.getOrNull()
                     ?: continue
-                handle(msg)
+                // One bad frame must not end the line. handle() reaches
+                // a lot of parsing, and an unexpected shape (a Galène
+                // clearchat carries an object where a string is assumed)
+                // used to propagate out of the pump and land the session
+                // in Failed with a serialization class name as the reason.
+                runCatching { handle(msg) }
+                    .onFailure { Log.w(TAG, "ignoring an unhandled sfu frame", it) }
             }
             Log.i(TAG, "party line stream ended")
             // A clean close we didn't ask for — server restart, an
@@ -812,11 +824,27 @@ class PartyLine(
                     // mute. Every other client honours it; being the
                     // one that keeps broadcasting makes /mute useless
                     // against a Talon participant.
+                    //
+                    // `privileged` is stamped by the server from the
+                    // sender's op permission. Without checking it, ANY
+                    // member could mute the whole room on a loop —
+                    // trunk grants every speaker the `message` right
+                    // that lets them send this.
+                    val privileged =
+                        msg["privileged"]?.jsonPrimitive?.content == "true"
+                    if (!privileged) {
+                        Log.w(TAG, "ignoring a mute request from a non-operator")
+                        return
+                    }
                     Log.i(TAG, "sfu requested mute")
                     setMuted(true)
                     return
                 }
-                val notice = msg["value"]?.jsonPrimitive?.content
+                // Not every usermessage carries a string here: a
+                // clearchat sends null and a filetransfer an object, and
+                // .jsonPrimitive throws on both.
+                val notice = (msg["value"] as? JsonPrimitive)
+                    ?.takeUnless { it is JsonNull }?.content
                 if (!notice.isNullOrBlank()) {
                     lastNotice = notice
                     lastNoticeAtMs = nowMs()

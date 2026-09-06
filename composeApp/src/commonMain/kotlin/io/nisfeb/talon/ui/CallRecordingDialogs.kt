@@ -21,6 +21,7 @@ import io.nisfeb.talon.ai.CallRecordingPublisher
 import io.nisfeb.talon.call.RecordedCall
 import io.nisfeb.talon.call.saveWavFile
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * First-time opt-in before recording a party line. Recording captures
@@ -72,8 +73,16 @@ fun RecordingResultDialog(
     val canPublish = !rec.isEmpty && stt != null && shipUrl != null && cookie != null
     val whenLabel = remember { io.nisfeb.talon.util.formatMonthDayTime(io.nisfeb.talon.util.nowMs()) }
 
+    // Track whether anything has been done with the audio, so "Done"
+    // can warn before it becomes the thing that threw it away.
+    var kept by remember { mutableStateOf(false) }
+    var confirmDiscard by remember { mutableStateOf(false) }
     AlertDialog(
-        onDismissRequest = { if (!busy) onClose() },
+        // Deliberately inert: this dialog holds the ONLY copy of the
+        // recording — it is never written anywhere until one of these
+        // buttons runs — so an accidental tap outside used to destroy
+        // it with no undo and no warning.
+        onDismissRequest = {},
         title = { Text("Recording finished") },
         text = {
             Column {
@@ -94,6 +103,25 @@ fun RecordingResultDialog(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
+                if (canPublish) {
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "Publishing sends each speaker's audio to your " +
+                            "transcription provider and puts the transcript on " +
+                            "your ship, where anyone who can read your Lattice " +
+                            "namespace can see it.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                if (confirmDiscard) {
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "This is the only copy. Tap Discard again to delete it.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
                 message?.let {
                     Spacer(Modifier.height(8.dp))
                     Text(it, style = MaterialTheme.typography.bodySmall)
@@ -112,7 +140,7 @@ fun RecordingResultDialog(
                                 http, stt!!, shipUrl!!, ourShip, cookie!!,
                                 title, whenLabel, rec, nameFor,
                             )
-                        }.onSuccess { message = "Published to $it" }
+                        }.onSuccess { message = "Published to $it"; kept = true }
                             .onFailure { message = "Publish failed: ${it.message ?: "error"}" }
                         busy = false
                     }
@@ -127,12 +155,21 @@ fun RecordingResultDialog(
                         busy = true
                         message = null
                         scope.launch {
-                            val wav = CallRecordingPublisher.fullRecordingWav(rec)
+                            // rememberCoroutineScope launches on Main, and
+                            // mixing + WAV-encoding a long recording is
+                            // hundreds of megabytes of array work — it froze
+                            // the UI and tripped the ANR watchdog.
+                            val wav = withContext(io.nisfeb.talon.util.ioDispatcher) {
+                                CallRecordingPublisher.fullRecordingWav(rec)
+                            }
                             val saved = if (wav != null) {
-                                saveWavFile(wav, "party-line-${io.nisfeb.talon.util.nowMs()}")
+                                withContext(io.nisfeb.talon.util.ioDispatcher) {
+                                    saveWavFile(wav, "party-line-${io.nisfeb.talon.util.nowMs()}")
+                                }
                             } else {
                                 null
                             }
+                            if (saved != null) kept = true
                             message = if (saved != null) {
                                 "Saved audio to $saved"
                             } else {
@@ -142,7 +179,15 @@ fun RecordingResultDialog(
                         }
                     },
                 ) { Text("Save full recording") }
-                TextButton(enabled = !busy, onClick = onClose) { Text("Done") }
+                TextButton(
+                    enabled = !busy,
+                    onClick = {
+                        // Nothing has been saved or published, so this
+                        // button IS the delete. Ask once.
+                        if (kept || rec.isEmpty || confirmDiscard) onClose()
+                        else confirmDiscard = true
+                    },
+                ) { Text(if (kept || rec.isEmpty) "Done" else "Discard") }
             }
         },
     )
