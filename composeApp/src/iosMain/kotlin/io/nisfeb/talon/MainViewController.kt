@@ -18,7 +18,7 @@ import io.nisfeb.talon.call.NativeRtcFactory
 import io.nisfeb.talon.compose.App
 import io.nisfeb.talon.data.createAppDatabase
 import io.nisfeb.talon.ai.NoopDailyDigestSettings
-import io.nisfeb.talon.ui.InMemoryDraftStore
+import io.nisfeb.talon.ui.IosDraftStore
 import io.nisfeb.talon.ui.createUiSettings
 import io.nisfeb.talon.ui.theme.IosThemePreference
 import io.nisfeb.talon.update.UpdateInstallerHook
@@ -98,6 +98,9 @@ fun MainViewController(rtc: NativeRtcFactory?): UIViewController {
     // and an echo. Desktop never had this: its factory is an object.
     val callEngineProvider = rtc?.let { IosCallEngineProvider(it) }
     val peerLinkFactory = rtc?.let { IosPeerLinkFactory(it) }
+    // Built once, like the factories above: anything constructed inside
+    // the composable lambda is rebuilt on recomposition.
+    val drafts = IosDraftStore()
     return ComposeUIViewController {
         Box(Modifier.fillMaxSize()) {
         App(
@@ -105,7 +108,7 @@ fun MainViewController(rtc: NativeRtcFactory?): UIViewController {
             sessionStore = sessionStore,
             aiSettings = aiSettings,
             createDb = { shipKey -> createAppDatabase(shipKey) },
-            drafts = InMemoryDraftStore(),
+            drafts = drafts,
             updateState = updateState,
             themePreference = themePreference,
             // Without these two iOS fell back to in-memory defaults:
