@@ -66,10 +66,10 @@ fun CallOverlay(
      * True when [CallStrip] is already being rendered somewhere in the
      * layout — under a chat's header, where the party-line bar lives.
      *
-     * The strip only floats when there is nowhere to put it. A window-
-     * wide Popup spans the sidebar and everything else, which is what
-     * made an ended call read as a banner across the whole app rather
-     * than the same strip the call was using.
+     * Otherwise the strip renders right here, and App composes this
+     * overlay in a slot above every screen so it takes its own space.
+     * It was a Popup once, which spanned the sidebar and everything
+     * else and drew over each screen's header and back button.
      */
     stripShownInline: Boolean = false,
 ) {
@@ -115,11 +115,11 @@ fun CallOverlay(
         }
 
         is CallUiState.Active, is CallUiState.Ended -> {
-            if (!stripShownInline) {
-                Popup(alignment = Alignment.TopCenter) {
-                    CallStrip(controller, modifier, nameFor, audioDevices)
-                }
-            }
+            // Not a Popup: as one, this drew over whatever screen was
+            // underneath, header and back button included. App composes
+            // CallOverlay in a slot above the screens, so the strip
+            // just takes its space there.
+            if (!stripShownInline) CallStrip(controller, modifier, nameFor, audioDevices)
         }
 
         CallUiState.None -> {}

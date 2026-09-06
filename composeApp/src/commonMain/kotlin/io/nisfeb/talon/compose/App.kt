@@ -9,7 +9,12 @@ import androidx.compose.foundation.focusable
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material3.Surface
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
@@ -644,47 +649,6 @@ fun App(
         // thread, compact group info, notes/ channels, full-screen
         // overlays — and a live call must float its strip there.
         val inlineCallUiShown = remember { mutableStateOf(false) }
-        callController?.let {
-            io.nisfeb.talon.ui.CallOverlay(
-                it,
-                nameFor = { ship -> callContacts.displayName(ship) },
-                audioDevices = audioDevices,
-                // With the chat slot on screen the strip renders under
-                // its header, beside the party-line bar. Floating it as
-                // well would put the same call in two places.
-                stripShownInline = inlineCallUiShown.value,
-            )
-        }
-        // A live party line whose chat slot is gone (back on the list,
-        // a compact thread, settings…) still needs a surface — the mic
-        // can be live and unmuted. Same floating container CallOverlay
-        // uses for its own strip, same bar the chat renders inline.
-        partyLine?.let { line ->
-            val partyState by line.state.collectAsState()
-            if (partyState !is io.nisfeb.talon.call.PartyState.Idle &&
-                !inlineCallUiShown.value
-            ) {
-                androidx.compose.ui.window.Popup(
-                    alignment = androidx.compose.ui.Alignment.TopCenter,
-                ) {
-                    io.nisfeb.talon.ui.PartyLineBar(
-                        line,
-                        nameFor = { ship -> callContacts.displayName(ship) },
-                        audioDevices = audioDevices,
-                        // Failed is sticky; floated with no chat slot
-                        // to return to, this is its only way off the
-                        // screen.
-                        onDismiss = { line.dismissFailure() },
-                        selfShip = shipKey,
-                        // No onModerate here: this floating fallback
-                        // doesn't know which room the line belongs to
-                        // (that lives with the chat slot). SFU-side
-                        // moderation still works; it just isn't
-                        // persisted on the host ship from here.
-                    )
-                }
-            }
-        }
         // Curated contact book (from %contacts /v1/book) — gates the
         // "Add to contacts" affordances and backs the Contacts screen.
         val bookContacts by repo.bookContacts.collectAsState()
@@ -1151,6 +1115,77 @@ fun App(
               io.nisfeb.talon.ui.LocalCitationOpen provides openCitation,
               io.nisfeb.talon.ui.LocalDisplayName provides citeDisplayName,
           ) {
+            // A live call or party line whose chat slot is gone (the
+            // list, settings, a compact thread…) still needs a surface:
+            // the mic can be live and unmuted. This used to float as a
+            // Popup, which drew over whatever screen was underneath —
+            // header and back button included — and stranded you
+            // there. It is a slot above the screens now, so they
+            // shrink beneath it. It takes the status-bar inset itself
+            // and consumes it: every screen pads for safeDrawing on its
+            // own, and would otherwise pad a second time.
+            val callUiFlow = remember(callController) {
+                callController?.state
+                    ?: kotlinx.coroutines.flow.MutableStateFlow(io.nisfeb.talon.call.CallUiState.None)
+            }
+            val callUi by callUiFlow.collectAsState()
+            val partyUiFlow = remember(partyLine) {
+                partyLine?.state
+                    ?: kotlinx.coroutines.flow.MutableStateFlow(io.nisfeb.talon.call.PartyState.Idle)
+            }
+            val partyUi by partyUiFlow.collectAsState()
+            val callFloats = !inlineCallUiShown.value &&
+                (callUi is io.nisfeb.talon.call.CallUiState.Active ||
+                    callUi is io.nisfeb.talon.call.CallUiState.Ended)
+            val partyFloats = !inlineCallUiShown.value &&
+                partyUi !is io.nisfeb.talon.call.PartyState.Idle
+            val floats = callFloats || partyFloats
+            androidx.compose.foundation.layout.Column(Modifier.fillMaxSize()) {
+                androidx.compose.foundation.layout.Column(
+                    Modifier.fillMaxWidth().then(
+                        if (floats) Modifier.windowInsetsPadding(WindowInsets.statusBars) else Modifier,
+                    ),
+                ) {
+                    // Always composed: the ring for an incoming or
+                    // outgoing call is its own full-screen popup.
+                    callController?.let {
+                        io.nisfeb.talon.ui.CallOverlay(
+                            it,
+                            nameFor = { ship -> callContacts.displayName(ship) },
+                            audioDevices = audioDevices,
+                            // With the chat slot on screen the strip
+                            // renders under its header, beside the
+                            // party-line bar. Showing it here as well
+                            // would put the same call in two places.
+                            stripShownInline = inlineCallUiShown.value,
+                        )
+                    }
+                    if (partyFloats) {
+                        partyLine?.let { line ->
+                            io.nisfeb.talon.ui.PartyLineBar(
+                                line,
+                                nameFor = { ship -> callContacts.displayName(ship) },
+                                audioDevices = audioDevices,
+                                // Failed is sticky; with no chat slot to
+                                // return to, this is its only way off
+                                // the screen.
+                                onDismiss = { line.dismissFailure() },
+                                selfShip = shipKey,
+                                // No onModerate here: this fallback
+                                // doesn't know which room the line
+                                // belongs to (that lives with the chat
+                                // slot). SFU-side moderation still
+                                // works; it just isn't persisted on the
+                                // host ship from here.
+                            )
+                        }
+                    }
+                }
+                androidx.compose.foundation.layout.Box(
+                    Modifier.weight(1f).fillMaxWidth().then(
+                        if (floats) Modifier.consumeWindowInsets(WindowInsets.statusBars) else Modifier,
+                    ),
+                ) {
             val rootFocusRequester = remember { FocusRequester() }
             LaunchedEffect(Unit) { rootFocusRequester.requestFocus() }
             Surface(
@@ -2520,6 +2555,8 @@ fun App(
                 }
             }
                 } // ModalNavigationDrawer body
+                }
+            }
           }
         }
     }
