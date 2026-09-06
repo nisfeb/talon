@@ -16,6 +16,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
@@ -751,6 +752,41 @@ class CallController(
         recAnnounce = null
     }
 
+    /**
+     * Tell the host we're on its line (host, name), keep saying so
+     * until [line] ends, then tell it we left.
+     *
+     * Same lesson as [beginRecordingAnnounce]: this used to be an
+     * effect in the chat slot keyed on the open group, so walking to
+     * another group while still talking cancelled it, its `finally`
+     * sent %left, and everyone's "N on the line" badge dropped by one
+     * for someone who was still there. The line's own state is the
+     * only thing that says whether we're on it. The occupancy ask
+     * after each enter and the final leave is what lets our own badge
+     * catch up within a second instead of at the next 20s poll.
+     */
+    fun beginPresenceAnnounce(host: String, name: String, line: StateFlow<PartyState>) {
+        presenceAnnounce?.cancel()
+        presenceAnnounce = scope.launch {
+            try {
+                val beat = launch {
+                    while (true) {
+                        enterRoom(host, name) // doubles as heartbeat
+                        occupancyOf(host, name)
+                        delay(PRESENCE_HEARTBEAT_MS)
+                    }
+                }
+                line.first { it is PartyState.Idle || it is PartyState.Failed }
+                beat.cancel()
+            } finally {
+                withContext(NonCancellable) {
+                    leaveRoom(host, name)
+                    occupancyOf(host, name)
+                }
+            }
+        }
+    }
+
     suspend fun stopRecording(host: String, name: String) {
         val ch = channel ?: return
         runCatching { ch.poke(TrunkWire.AGENT, TrunkWire.ACTION_MARK, TrunkWire.stopRecordingAction(host, name)) }
@@ -1107,6 +1143,8 @@ class CallController(
      *  %recorders facts (wire 7). */
     /** The live recording-announce heartbeat, if we are recording. */
     private var recAnnounce: Job? = null
+    /** The live presence heartbeat, while we are on a line. */
+    private var presenceAnnounce: Job? = null
 
     private val _recording = MutableStateFlow<Map<String, Set<String>>>(emptyMap())
     val recording: StateFlow<Map<String, Set<String>>> = _recording.asStateFlow()
@@ -1540,5 +1578,6 @@ class CallController(
         /** How often we re-announce an active recording. The host ages a
          *  recorder out after 90s, so this has to stay well under it. */
         private const val RECORD_HEARTBEAT_MS = 30_000L
+        private const val PRESENCE_HEARTBEAT_MS = 30_000L
     }
 }

@@ -572,6 +572,13 @@ fun App(
                                 callController.lineFor(host, ticket.name)?.title.orEmpty(),
                             )
                             line.join(ticket, shipKey)
+                            // join() refuses silently while another
+                            // line is up; only announce the one we
+                            // actually started connecting to.
+                            val st = line.state.value
+                            if (st is io.nisfeb.talon.call.PartyState.Connecting && st.room == ticket.name) {
+                                callController.beginPresenceAnnounce(host, ticket.name, line.state)
+                            }
                         }
                         callController.onDenied = { name, why -> line.showRefused(name, why) }
                     }
@@ -1861,11 +1868,10 @@ fun App(
                                         kotlinx.coroutines.delay(20_000)
                                     }
                                 }
-                                // While we're actually on the line, heartbeat
-                                // our presence to the host; on leaving (state
-                                // flips, room changes, screen closes) tell it
-                                // we're gone. The finally runs on cancel, so
-                                // leaveRoom always fires.
+                                // Presence itself is announced by the
+                                // controller from the moment we join —
+                                // not here, where the open chat changing
+                                // used to read as leaving the line.
                                 val partyStateFlow = remember(partyLine) {
                                     partyLine?.state
                                         ?: kotlinx.coroutines.flow.MutableStateFlow(
@@ -1875,21 +1881,6 @@ fun App(
                                 val partyStateNow by partyStateFlow.collectAsState()
                                 val onThisLine =
                                     partyStateNow is io.nisfeb.talon.call.PartyState.Live
-                                LaunchedEffect(partyRoomHere, onThisLine) {
-                                    val (h, n) = partyRoomHere ?: return@LaunchedEffect
-                                    val cc = callController ?: return@LaunchedEffect
-                                    if (!onThisLine) return@LaunchedEffect
-                                    try {
-                                        while (true) {
-                                            cc.enterRoom(h, n) // doubles as heartbeat
-                                            kotlinx.coroutines.delay(30_000)
-                                        }
-                                    } finally {
-                                        kotlinx.coroutines.withContext(
-                                            kotlinx.coroutines.NonCancellable,
-                                        ) { cc.leaveRoom(h, n) }
-                                    }
-                                }
                                 // Why we couldn't find out, when we
                                 // couldn't. Silence here is what turns
                                 // "no line in this group" and "your
