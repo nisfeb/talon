@@ -190,9 +190,18 @@ object Notifications {
         // SSE channel is mid-backoff still reads as "will ring" — the
         // user gets a visible-but-silent notification in that window;
         // publish real ring state from the controller if it ever bites.
+        // inAppRinging is the real thing rather than a proxy for it: a
+        // home-pressed app still has a live controller and still rings
+        // through the SSE path, but is not STARTED — so both ringers
+        // sounded for up to 45s. Visibility stays as the optimistic
+        // case (we are about to ring), because silence is the worse
+        // failure the STARTED clause was avoiding.
         val inAppRingExpected = callControllerLive &&
-            ProcessLifecycleOwner.get()
-                .lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)
+            (
+                inAppRinging ||
+                    ProcessLifecycleOwner.get()
+                        .lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)
+                )
 
         val answerIntent = Intent(context, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
@@ -285,6 +294,11 @@ object Notifications {
      *  up or be the only ring this call gets. */
     @Volatile
     var callControllerLive: Boolean = false
+
+    /** True while the in-app ringer is actually sounding. Set by
+     *  AndroidCallSoundPlayer, not inferred from window state. */
+    @Volatile
+    var inAppRinging: Boolean = false
 
     /** Stop ringing — answered, declined, or the caller gave up. */
     fun cancelIncomingCall(context: Context) {

@@ -55,6 +55,13 @@ private fun TrackRenderer(
     modifier: Modifier,
 ) {
     if (track == null || !on) return
+    // key(track): AndroidView's factory runs once per node, so when a
+    // speaker republishes and we are handed a NEW track, the node kept
+    // the old renderer with its sink already removed — the tile froze
+    // on the last frame while their audio carried on. Keying rebuilds
+    // the view for the new track. Desktop never had this because it
+    // renders through DisposableEffect(track).
+    androidx.compose.runtime.key(track) {
     val renderer = remember(track) { mutableRendererFor() }
     AndroidView(
         modifier = modifier,
@@ -79,6 +86,7 @@ private fun TrackRenderer(
             }
             renderer.value = null
         }
+    }
     }
 }
 

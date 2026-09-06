@@ -30,7 +30,12 @@ actual fun VideoSurface(engine: CallEngine, local: Boolean, modifier: Modifier) 
     val on = if (local) video.localOn else video.remoteOn
     if (!on) return
     val view = (if (local) ios.localView() else ios.remoteView()) as? UIView ?: return
-    UIKitView(factory = { view }, modifier = modifier)
+    // key(view): UIKitView's factory runs once per node, so a replaced
+    // peer handed us a new RTCMTLVideoView that never reached the tree —
+    // the tile froze on the old one's last frame.
+    androidx.compose.runtime.key(view) {
+        UIKitView(factory = { view }, modifier = modifier)
+    }
 }
 
 /** A party-line tile's video: this speaker's camera (a down link) or
@@ -51,5 +56,7 @@ actual fun VideoSurface(
     val on = if (local) video.localOn else video.remoteOn
     if (!on) return
     val view = (if (local) ios.localVideoView() else ios.remoteVideoView()) as? UIView ?: return
-    UIKitView(factory = { view }, modifier = modifier)
+    androidx.compose.runtime.key(view) {
+        UIKitView(factory = { view }, modifier = modifier)
+    }
 }

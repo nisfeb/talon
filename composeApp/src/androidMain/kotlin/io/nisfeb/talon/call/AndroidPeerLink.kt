@@ -174,7 +174,13 @@ class AndroidPeerLink(
             val name = names.firstOrNull { enumerator.isFrontFacing(it) }
                 ?: names.firstOrNull()
                 ?: error("no camera on this device")
-            val cap = enumerator.createCapturer(name, null)
+            // Not null: libwebrtc substitutes a no-op handler, and
+            // onCameraDisconnected internally stops capture — so an
+            // eviction (an incoming cellular call, another app) killed
+            // the camera while localOn stayed true and we kept telling
+            // the room our camera was on. The already-on guard then made
+            // one tap a no-op, so recovery needed off-then-on.
+            val cap = enumerator.createCapturer(name, cameraEvents())
                 ?: error("could not open camera $name")
             val helper = SurfaceTextureHelper.create(
                 "talon-capture", WebRtcFactory.eglBase.eglBaseContext,
@@ -201,7 +207,24 @@ class AndroidPeerLink(
         runCatching { capturer?.switchCamera(null) }
     }
 
+    /** Clears our camera state when the OS takes the camera away. */
+    private fun cameraEvents() = object : org.webrtc.CameraVideoCapturer.CameraEventsHandler {
+        private fun lost(why: String) {
+            Log.w("PartyLine", "camera lost: $why")
+            runCatching { videoSender?.setTrack(null, false) }
+            releaseCamera()
+            _video.value = _video.value.copy(localOn = false)
+        }
+        override fun onCameraError(err: String?) = lost(err ?: "error")
+        override fun onCameraDisconnected() = lost("disconnected")
+        override fun onCameraFreezed(msg: String?) = Unit
+        override fun onCameraOpening(name: String?) = Unit
+        override fun onFirstFrameAvailable() = Unit
+        override fun onCameraClosed() = Unit
+    }
+
     private fun releaseCamera() {
+        runCatching { localVideo?.dispose() }
         runCatching { capturer?.dispose() }
         runCatching { surfaceHelper?.dispose() }
         runCatching { videoSource?.dispose() }
@@ -383,6 +406,15 @@ class AndroidPeerLink(
         remoteVideo = null
         // The factory is process-wide; see WebRtcFactory.
         runCatching { pc.close() }
+        // close() frees nothing on its own — dispose() is what releases
+        // the senders, receivers, transceivers and the observer's JNI
+        // global ref, which otherwise pins the whole link graph. This
+        // leaks per LINK: one per remote speaker, plus one per
+        // republish, not once per call. (The documented don't-dispose
+        // is the process-wide factory, which is a different object.)
+        runCatching { pc.dispose() }
+        runCatching { micTrack?.dispose() }
+        micTrack = null
         // Every link acquired the session; every link releases it,
         // inside the closed-guard so a double close can't double-
         // decrement. The last one out (up OR down) runs the teardown.

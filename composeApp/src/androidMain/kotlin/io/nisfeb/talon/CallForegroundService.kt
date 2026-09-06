@@ -40,15 +40,27 @@ class CallForegroundService : Service() {
         val notification = buildOngoing(with)
         runCatching {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                // Both types. Declaring only MICROPHONE meant the camera
-                // was killed the moment the app went to the background
-                // on Android 14+, and it never came back for the rest of
-                // the call — the tile just froze.
+                // Declaring only MICROPHONE let Android 14+ kill the
+                // camera the moment the app went to the background, and
+                // it never came back — the tile just froze.
+                //
+                // The permission check is load-bearing, not caution:
+                // claiming the CAMERA type without the permission throws
+                // on Android 14+, and the onFailure below stops the
+                // service — which would have dropped the mic hold on
+                // every audio-only call.
+                val camera = androidx.core.content.ContextCompat.checkSelfPermission(
+                    this, android.Manifest.permission.CAMERA,
+                ) == android.content.pm.PackageManager.PERMISSION_GRANTED
                 startForeground(
                     NOTIFICATION_ID,
                     notification,
-                    ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE or
-                        ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA,
+                    if (camera) {
+                        ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE or
+                            ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA
+                    } else {
+                        ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+                    },
                 )
             } else {
                 startForeground(NOTIFICATION_ID, notification)

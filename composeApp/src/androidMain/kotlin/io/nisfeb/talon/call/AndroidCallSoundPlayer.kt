@@ -39,6 +39,16 @@ class AndroidCallSoundPlayer : CallSoundPlayer {
     override fun loop(pcm: ByteArray, gapMs: Int, stream: ToneStream) {
         stopLoop()
         looping = true
+        // Publish the fact that WE are ringing. The push path used to
+        // infer it from window visibility, which is false for a merely
+        // backgrounded app whose controller is still running — so both
+        // ringers sounded at once, neither taking audio focus.
+        if (stream == ToneStream.Ringer) {
+            io.nisfeb.talon.Notifications.inAppRinging = true
+            // Push-first ordering: if the system ringtone already
+            // started, stop it now that we are ringing in-app.
+            runCatching { io.nisfeb.talon.notify.Ringer.stop() }
+        }
         loopThread = thread(isDaemon = true, name = "talon-ring") {
             while (looping) {
                 writeOnce(pcm, stream) { looping }
@@ -52,6 +62,7 @@ class AndroidCallSoundPlayer : CallSoundPlayer {
     }
 
     override fun stopLoop() {
+        io.nisfeb.talon.Notifications.inAppRinging = false
         looping = false
         loopThread?.let { runCatching { it.join(300) } }
         loopThread = null

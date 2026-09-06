@@ -321,6 +321,11 @@ class AndroidCallEngine(
         // native thread crashes the app seconds later, once a callback
         // fires into freed memory.
         runCatching { pc.close() }
+        // See AndroidPeerLink.close: close() releases nothing; dispose()
+        // frees the PC's senders/receivers and the observer's JNI ref.
+        runCatching { pc.dispose() }
+        runCatching { micTrack?.dispose() }
+        micTrack = null
         // Inside the closed-guard, so a double close can't double-
         // decrement the session refcount.
         CallAudioSession.release()
