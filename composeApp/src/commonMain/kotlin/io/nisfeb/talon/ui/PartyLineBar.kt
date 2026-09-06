@@ -211,6 +211,8 @@ fun PartyLineBarContent(
     /** A 1:1 call is ringing; step out of the immersive full-screen so
      *  the ring card is reachable. */
     incomingCall: Boolean = false,
+    /** A 1:1 call's video pane, for the full-screen view. */
+    videoPane: (@Composable () -> Unit)? = null,
     /** Toggle recording, or null to hide the control. */
     onToggleRecord: (() -> Unit)? = null,
     /**
@@ -245,7 +247,10 @@ fun PartyLineBarContent(
     // keeps the inline behaviour — its roster is fabricated.
     var fullScreen by remember { mutableStateOf(false) }
     LaunchedEffect(incomingCall) { if (incomingCall) fullScreen = false }
-    val immersive = isImmersiveCallSupported && headline == null
+    // 1:1 calls included: on a phone the chevron should open the big
+    // controls, not an inline roster of one fabricated row. The 1:1
+    // picture rides in through [videoPane].
+    val immersive = isImmersiveCallSupported
 
     // One node, not two siblings: the bar and the admin strip have to
     // stack vertically, and emitting them loose leaves that to whatever
@@ -343,7 +348,7 @@ fun PartyLineBarContent(
                     // muted never update, which read as "peer is silent
                     // and never muted". The expander survives only where
                     // it still has a job: picking audio devices.
-                    val expandable = headline == null || audioDevices.supported
+                    val expandable = immersive || headline == null || audioDevices.supported
                     Column(
                         Modifier.weight(1f).then(
                             if (expandable) {
@@ -516,7 +521,7 @@ fun PartyLineBarContent(
         ) {
             PartyLineFullScreen(
                 state = state,
-                roomName = state.room,
+                roomName = headline ?: state.room,
                 nameFor = nameFor,
                 selfShip = selfShip,
                 onToggleMute = onToggleMute,
@@ -537,6 +542,7 @@ fun PartyLineBarContent(
                 focusedShip = focusedShip,
                 onFocusVideo = onFocusVideo,
                 onSwitchCamera = onSwitchCamera,
+                videoPane = videoPane,
             )
         }
     }

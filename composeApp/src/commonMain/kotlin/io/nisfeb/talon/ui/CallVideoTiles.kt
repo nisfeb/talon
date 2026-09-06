@@ -56,7 +56,10 @@ internal fun PartyVideoGrid(
         horizontalArrangement = Arrangement.spacedBy(6.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        items(members, key = { it.ship }) { m ->
+        // Only people sharing video get a tile. An avatar box per
+        // non-video member said nothing the roster doesn't, and on a
+        // phone it crowded the one or two cameras that matter.
+        items(members.filter { it.ship in videoOnShips }, key = { it.ship }) { m ->
             val isSelf = m.ship == selfShip
             VideoTile(
                 member = m,

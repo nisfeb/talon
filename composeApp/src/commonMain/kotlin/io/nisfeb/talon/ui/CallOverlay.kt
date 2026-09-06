@@ -180,6 +180,9 @@ fun CallStrip(
                     else controller.setCamera(!video.localOn)
                 }
             } else null,
+            videoPane = if (isVideoCallsSupported && engine != null && video.anyOn) {
+                { CallVideoPane(engine, video, Modifier.fillMaxWidth()) }
+            } else null,
         )
         }
 

@@ -590,6 +590,14 @@ fun App(
                 if (st is io.nisfeb.talon.call.CallUiState.Active) line.setMuted(true)
             }
         }
+        // Keyed on the line itself, not the controller: if the line is
+        // ever replaced (a factory that isn't stable across
+        // recomposition did exactly this on iOS), the old one must be
+        // left — or it stays connected with no UI and the next join
+        // opens a second audio line.
+        DisposableEffect(partyLine) {
+            onDispose { partyLine?.leave() }
+        }
         DisposableEffect(callController) {
             onDispose {
                 partyLine?.leave()

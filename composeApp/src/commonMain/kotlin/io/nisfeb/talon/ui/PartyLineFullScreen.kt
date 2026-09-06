@@ -119,6 +119,10 @@ fun PartyLineFullScreen(
     onFocusVideo: (String?) -> Unit = {},
     /** Flip front/back camera, or null to hide the control. */
     onSwitchCamera: (() -> Unit)? = null,
+    /** A 1:1 call's picture, rendered above the roster. The party grid
+     *  can't show it — 1:1 video lives on the CallEngine, not on a
+     *  PeerLink — so the caller supplies the pane instead. */
+    videoPane: (@Composable () -> Unit)? = null,
 ) {
     Surface(
         modifier = Modifier.fillMaxSize(),
@@ -187,10 +191,12 @@ fun PartyLineFullScreen(
             }
 
             // ─── Participants ───
-            if (partyVideoSupported) {
-                // Conference grid: a tile per person, video where a
-                // camera is on, avatar otherwise. Shared with the
-                // desktop expanded bar (see PartyVideoGrid).
+            videoPane?.invoke()
+            // Tiles only for people sharing video; everyone is in the
+            // roster below regardless. A box per non-video member said
+            // nothing the list doesn't, and crowded the cameras out.
+            val anyVideo = state.members.any { it.ship in videoOnShips }
+            if (partyVideoSupported && anyVideo) {
                 PartyVideoGrid(
                     members = state.members,
                     selfShip = selfShip,
@@ -202,27 +208,23 @@ fun PartyLineFullScreen(
                     onFocusVideo = onFocusVideo,
                     modifier = Modifier.weight(1f).fillMaxWidth(),
                 )
-                // The grid has no ops affordance, and it replaced the
-                // only roster a phone ever showed — so since party video
-                // landed, an admin on a phone could not mute anyone at
-                // all. Keep the roster under the grid for operators; the
-                // menu and both callbacks are already threaded here.
-                if (state.ops) {
-                    LazyColumn(
-                        modifier = Modifier.weight(0.6f).fillMaxWidth(),
-                        verticalArrangement = Arrangement.spacedBy(4.dp),
-                    ) {
-                        items(state.members, key = { it.ship }) { m ->
-                            ParticipantRow(
-                                member = m,
-                                nameFor = nameFor,
-                                isSelf = m.ship == selfShip,
-                                showOps = m.ship != selfShip &&
-                                    onRevokeSpeaking != null && onRestoreSpeaking != null,
-                                onRevokeSpeaking = onRevokeSpeaking,
-                                onRestoreSpeaking = onRestoreSpeaking,
-                            )
-                        }
+                // The roster is always present under the grid: it is the
+                // only place ops can moderate, and the only listing of
+                // people who aren't on camera.
+                LazyColumn(
+                    modifier = Modifier.weight(0.6f).fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    items(state.members, key = { it.ship }) { m ->
+                        ParticipantRow(
+                            member = m,
+                            nameFor = nameFor,
+                            isSelf = m.ship == selfShip,
+                            showOps = state.ops && m.ship != selfShip &&
+                                onRevokeSpeaking != null && onRestoreSpeaking != null,
+                            onRevokeSpeaking = onRevokeSpeaking,
+                            onRestoreSpeaking = onRestoreSpeaking,
+                        )
                     }
                 }
             } else {

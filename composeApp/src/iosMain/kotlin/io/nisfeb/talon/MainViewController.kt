@@ -90,6 +90,14 @@ fun MainViewController(rtc: NativeRtcFactory?): UIViewController {
         },
     )
 
+    // Built ONCE, outside the composable. Constructed inline in the
+    // App(...) call these were re-created on every recomposition, and
+    // App keys its PartyLine on the factory — so a recomposition minted
+    // a NEW PartyLine while the old one stayed connected with no UI,
+    // and re-entering the group joined a second time: two audio lines
+    // and an echo. Desktop never had this: its factory is an object.
+    val callEngineProvider = rtc?.let { IosCallEngineProvider(it) }
+    val peerLinkFactory = rtc?.let { IosPeerLinkFactory(it) }
     return ComposeUIViewController {
         Box(Modifier.fillMaxSize()) {
         App(
@@ -116,8 +124,8 @@ fun MainViewController(rtc: NativeRtcFactory?): UIViewController {
             // a Swift Package. Null keeps calls dark — App() gates the
             // controller on it, so a host that hasn't wired the engine
             // shows no call button rather than a broken one.
-            callEngineProvider = rtc?.let { IosCallEngineProvider(it) },
-            peerLinkFactory = rtc?.let { IosPeerLinkFactory(it) },
+            callEngineProvider = callEngineProvider,
+            peerLinkFactory = peerLinkFactory,
             dailyDigestSettings = dailyDigestSettings,
             audioDevices = io.nisfeb.talon.call.IosAudioDevices(),
             callSounds = io.nisfeb.talon.call.IosCallSoundPlayer(),
