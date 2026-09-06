@@ -54,16 +54,15 @@ class CallForegroundService : Service() {
                 val camera = androidx.core.content.ContextCompat.checkSelfPermission(
                     this, android.Manifest.permission.CAMERA,
                 ) == android.content.pm.PackageManager.PERMISSION_GRANTED
-                startForeground(
-                    NOTIFICATION_ID,
-                    notification,
-                    if (camera) {
-                        ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE or
-                            ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA
-                    } else {
-                        ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
-                    },
-                )
+                // phoneCall is what telecom expects of the service behind
+                // a self-managed call (and on 34+ lets it start from the
+                // background while one is ringing). It needs
+                // MANAGE_OWN_CALLS, a normal permission, so it is always
+                // available; camera is not.
+                val types = ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE or
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_PHONE_CALL or
+                    (if (camera) ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA else 0)
+                startForeground(NOTIFICATION_ID, notification, types)
             } else {
                 startForeground(NOTIFICATION_ID, notification)
             }

@@ -38,6 +38,13 @@
     <!-- Android 14+ feeds silence to the mic once the app is not
          visible unless a microphone-typed FGS is running. -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <!-- Tier 1 telecom: our calls are self-managed telecom calls, so the
+         system routes audio (Bluetooth, car), arbitrates focus, and holds
+         us for a cellular call. MANAGE_OWN_CALLS is what lets an app
+         register them; phoneCall is the FGS type telecom expects for the
+         call's own service on 34+. Both are normal (install-time). -->
+    <uses-permission android:name="android.permission.MANAGE_OWN_CALLS" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_PHONE_CALL" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <!-- setMode(MODE_IN_COMMUNICATION) is refused without this, so the
@@ -128,7 +135,7 @@
         <service
             android:name="io.nisfeb.talon.CallForegroundService"
             android:exported="false"
-            android:foregroundServiceType="microphone|camera" />
+            android:foregroundServiceType="microphone|camera|phoneCall" />
 
         <receiver
             android:name="io.nisfeb.talon.DigestAlarmReceiver"
