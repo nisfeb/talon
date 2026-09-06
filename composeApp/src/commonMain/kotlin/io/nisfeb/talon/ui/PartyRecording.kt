@@ -52,10 +52,14 @@ fun rememberPartyRecording(
     }
     val recordingMap by recordingMapFlow.collectAsState()
     val recordedBy = partyRoomHere?.let { (h, n) -> recordingMap["$h/$n"] } ?: emptySet()
-    LaunchedEffect(partyRoomHere, onThisLine) {
+    // Polled whenever the chat HAS a line, not only once we are on it.
+    // Gating this on onThisLine meant the pre-join affordance said
+    // "N on the line" with no hint it was being recorded — while a
+    // joiner's up link is tapped the moment its offer reaches the
+    // recorder. Trunk only answers an ask, so nothing else would tell.
+    LaunchedEffect(partyRoomHere) {
         val (h, n) = partyRoomHere ?: return@LaunchedEffect
         val cc = callController ?: return@LaunchedEffect
-        if (!onThisLine) return@LaunchedEffect
         while (true) {
             cc.recordersOf(h, n)
             delay(15_000)
@@ -76,6 +80,15 @@ fun rememberPartyRecording(
     }
     val recordedResult by lastRecordingFlow.collectAsState()
 
+    // Our own ship must speak wire 7 to relay the recording
+    // announcement. Without it nobody on the line ever sees a badge,
+    // which makes the consent dialog's one promise false — so don't
+    // offer to record at all rather than record in secret.
+    val wireFlow = remember(callController) {
+        callController?.wire ?: MutableStateFlow(0)
+    }
+    val wire by wireFlow.collectAsState()
+
     var recordConsented by remember { mutableStateOf(false) }
     var showRecordConsent by remember { mutableStateOf(false) }
 
@@ -89,7 +102,8 @@ fun rememberPartyRecording(
     }
 
     val canRecord = isCallRecordingSupported &&
-        onThisLine && partyLine != null && ourShip.isNotEmpty()
+        onThisLine && partyLine != null && ourShip.isNotEmpty() &&
+        wire >= io.nisfeb.talon.call.TrunkWire.WIRE_VERSION_RECORDING
     val onToggleRecord: (() -> Unit)? = if (canRecord) {
         {
             val line = partyLine!!

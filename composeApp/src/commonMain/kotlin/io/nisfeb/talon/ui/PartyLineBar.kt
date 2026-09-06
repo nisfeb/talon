@@ -75,10 +75,11 @@ fun PartyLineBar(
      *  owns routing rather than shown empty. */
     audioDevices: io.nisfeb.talon.call.AudioDevices =
         io.nisfeb.talon.call.AudioDevices.Noop,
-    /** Clears a Failed banner. Defaulted so existing call sites keep
-     *  compiling; the floating fallback MUST pass one — Failed is
-     *  sticky, and a floated banner without it overlays every screen
-     *  with no way out. */
+    /** Clears a Failed banner. Null falls back to the line's own
+     *  dismissFailure — Failed is sticky by design, and no inline call
+     *  site passed one, so a refused join left a permanent red strip
+     *  under the chat header whose only escape was to leave the chat,
+     *  dismiss the floating copy, and come back. */
     onDismiss: (() -> Unit)? = null,
     /** Our own @p — the moderation menu is for OTHER people, so our
      *  own roster row never grows one. Empty means "unknown". */
@@ -135,7 +136,7 @@ fun PartyLineBar(
         },
         nameFor = nameFor,
         audioDevices = audioDevices,
-        onDismiss = onDismiss,
+        onDismiss = onDismiss ?: { party.dismissFailure() },
         selfShip = selfShip,
         onRevokeSpeaking = { ship ->
             party.revokeSpeaking(ship)
@@ -302,10 +303,17 @@ fun PartyLineBarContent(
                         1 -> " · 1 listening"
                         else -> " · ${s.listeners} listening"
                     }
+                    // The recording mark belongs on the compact strip,
+                    // which is the ONLY thing a desktop user normally
+                    // sees: it used to live solely in the expanded
+                    // RecordRow (unreachable on mobile) and the
+                    // full-screen header, so the bar contradicted the
+                    // consent dialog's promise that everyone is told.
+                    val rec = if (recordedBy.isEmpty()) "" else " · ● Recording"
                     val label = headline ?: when {
                         s.canSpeak && s.media != MediaState.Live -> "Connecting audio…"
-                        n == 0 -> "On the line — waiting for others$listening"
-                        else -> "$n on the line$listening: $who"
+                        n == 0 -> "On the line — waiting for others$listening$rec"
+                        else -> "$n on the line$listening$rec: $who"
                     }
                     // One line, not two: on a phone this bar sits on
                     // top of the conversation, and a second row costs

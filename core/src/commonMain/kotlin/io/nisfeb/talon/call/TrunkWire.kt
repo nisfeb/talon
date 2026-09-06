@@ -204,6 +204,11 @@ object TrunkWire {
     // and %recorders, so the room shows a recording badge.
     const val WIRE_VERSION = 7
 
+    /** The wire that added the call-recording announcement. A ship
+     *  below this relays no %recording-on, so nobody on the line would
+     *  ever see the badge the consent dialog promises. */
+    const val WIRE_VERSION_RECORDING = 7
+
     const val PUBLISHER = "~ricsul-bilwyt"
     const val DESK = "trunk"
     private const val KILN_AGENT = "hood"

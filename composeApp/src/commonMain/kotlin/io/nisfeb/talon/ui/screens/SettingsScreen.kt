@@ -656,21 +656,29 @@ fun SettingsScreen(
                     enabled = aiState.hasKey(),
                 ) { Text("Remove key") }
             }
-            if (aiState.hasKey()) {
-                Text(
-                    "✓ AI is enabled",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.primary,
-                )
-
+            // Any stored credential is enough to want this switch: it
+            // used to live under hasKey(), so someone who set only a
+            // Whisper key had it pushed to %settings (syncEnabled
+            // defaults on) with no way to opt out short of pasting a
+            // chat key first.
+            if (aiState.hasKey() || aiState.sttApiKey.isNotBlank() ||
+                aiState.braveApiKey.isNotBlank()
+            ) {
                 Spacer(Modifier.height(8.dp))
                 HorizontalDivider()
                 Spacer(Modifier.height(8.dp))
                 FeatureToggleRow(
                     label = "Sync AI settings across devices",
-                    description = "Stores your provider, model, API key, and toggles in %settings on the ship. The API key will be on the ship — only enable if you trust the ship.",
+                    description = "Stores your provider, model, API keys, and toggles in %settings on the ship. The keys will be on the ship — only enable if you trust the ship.",
                     enabled = aiState.syncEnabled,
                     onChange = { aiSettings.setSyncEnabled(it) },
+                )
+            }
+            if (aiState.hasKey()) {
+                Text(
+                    "✓ AI is enabled",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary,
                 )
                 Spacer(Modifier.height(8.dp))
                 HorizontalDivider()

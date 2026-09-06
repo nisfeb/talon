@@ -31,6 +31,7 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.int
+import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -176,6 +177,14 @@ class PartyLine(
     // roster as a run of user-add messages, and chiming once per
     // person already on the line is not an arrival.
     private var joined = false
+    // How many replayed roster rows are still to come.
+    //
+    // `joined` alone is not enough: Galène queues its `joined` frame
+    // BEFORE the roster replay, so by the time those rows arrive the
+    // flag is already true and a busy room chimed once per person
+    // sitting in it. The join frame carries the client count, so count
+    // the replay down instead.
+    private var replayLeft = 0
     private var levelPoll: Job? = null
     @Volatile private var muted = false
     private var upState: MediaState = MediaState.Idle
@@ -437,7 +446,7 @@ class PartyLine(
         if (!_recording.value) return RecordedCall(emptyMap(), recRate)
         _recording.value = false
         upLink?.onPcm(null)
-        downLinks.values.forEach { runCatching { it.onPcm(null) } }
+        downLinks.values.toList().forEach { runCatching { it.onPcm(null) } }
         // Close every clip before reading. Dropping the sinks is not
         // quite enough on its own: a frame already inside the callback
         // would otherwise append while we concatenate.
@@ -753,7 +762,9 @@ class PartyLine(
                         // burst of chimes for a room that was quietly
                         // full before we walked in.
                         val firstSeen = !roster.containsKey(id)
-                        if (firstSeen && joined && name != ourId) {
+                        val replaying = replayLeft > 0
+                        if (replaying) replayLeft -= 1
+                        if (firstSeen && joined && !replaying && name != ourId) {
                             sounds.play(CallSounds.joined())
                         }
                         roster[id] = PartyMember(id, name)
@@ -885,7 +896,11 @@ class PartyLine(
                 )
             }
         sfuIce = ice
-        // Anyone reported from here on is genuinely arriving.
+        // Anyone reported from here on is genuinely arriving — once the
+        // replayed roster has gone past. clientCount includes us, and a
+        // missing/!0 count simply means nothing to skip.
+        replayLeft = msg["status"]?.jsonObject
+            ?.get("clientCount")?.jsonPrimitive?.intOrNull ?: 0
         joined = true
 
         // The server's own word on what we may do beats the JWT's —
@@ -943,7 +958,20 @@ class PartyLine(
                 upWatch = null
                 upLink?.close()
                 upLink = null
+                // The self-preview binds to this flow; leaving it on a
+                // closed link renders a dead tile.
+                _upLink.value = null
                 upState = MediaState.Idle
+                // Drop the camera with the link. Leaving it set meant
+                // the room kept us marked camera-on with nothing being
+                // sent, and a later restore had publishUp reopen the
+                // camera with no user tap — exactly the auto-open the
+                // teardown path documents as forbidden.
+                if (_cameraOn.value) {
+                    _cameraOn.value = false
+                    refreshVideoOn()
+                    broadcastVideo()
+                }
                 // Re-arm the join-muted rule: if speaking is later
                 // restored, the mic comes back muted, never live. A
                 // restore hours after a revoke must not broadcast
@@ -1092,7 +1120,9 @@ class PartyLine(
         // helps nobody. Anonymous listeners are not ships — they all
         // authenticate as the same subject — so they are counted by
         // connection instead, or they would collapse into one row.
-        val (ships, anon) = roster.values.partition { it.ship.startsWith("~") }
+        // Snapshot: publishRoster is reached from the UI thread via
+        // setMuted / revokeSpeaking while the pump mutates the roster.
+        val (ships, anon) = roster.values.toList().partition { it.ship.startsWith("~") }
         _state.value = PartyState.Live(
             room = room,
             topic = topic,
@@ -1166,7 +1196,7 @@ class PartyLine(
 
     private fun sendUserAction(ship: String, kind: String) {
         // Snapshot before launching: the roster mutates on the pump.
-        val targets = roster.values.filter { it.ship == ship }.map { it.id }
+        val targets = roster.values.toList().filter { it.ship == ship }.map { it.id }
         scope.launch {
             for (dest in targets) {
                 send(
@@ -1195,7 +1225,12 @@ class PartyLine(
         levelPoll = scope.launch {
             while (true) {
                 delay(SPEAKING_POLL_MS)
-                val loud = downLinks.entries.mapNotNull { (id, link) ->
+                // Snapshot first. These maps are owned by the pump on
+                // another IO worker, so iterating them live raced every
+                // join and left the speaking dots frozen for the rest
+                // of the line (the poll dies, and its restart is
+                // blocked by the `levelPoll != null` guard).
+                val loud = downLinks.entries.toList().mapNotNull { (id, link) ->
                     val ship = streamOwner[id] ?: return@mapNotNull null
                     val level = link.audioLevel() ?: return@mapNotNull null
                     ship.takeIf { level > SPEAKING_THRESHOLD }

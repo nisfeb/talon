@@ -52,8 +52,10 @@ class PartyLineTonesTest {
     private fun del(id: String) = json.decodeFromString<kotlinx.serialization.json.JsonObject>(
         """{"type":"user","kind":"delete","id":"$id"}""",
     )
-    private fun joined() = json.decodeFromString<kotlinx.serialization.json.JsonObject>(
-        """{"type":"joined","rtcConfiguration":{"iceServers":[]}}""",
+    private fun joined(clientCount: Int = 0) =
+        json.decodeFromString<kotlinx.serialization.json.JsonObject>(
+        """{"type":"joined","rtcConfiguration":{"iceServers":[]},
+            "status":{"clientCount":$clientCount}}""",
     )
 
     private fun line(rec: Recorder) =
@@ -63,7 +65,10 @@ class PartyLineTonesTest {
     fun walkingIntoAFullRoomIsSilent() = runTest {
         val rec = Recorder()
         val l = line(rec)
-        // The roster arrives before we have finished joining.
+        // Galène queues `joined` FIRST and then replays the roster —
+        // the order this test used to have backwards, which is why the
+        // chime storm never showed up here.
+        l.onJoined(joined(clientCount = 2))
         l.handle(add("a", "~ricsul-bilwyt"))
         l.handle(add("b", "~hapnyl-fotlyx"))
         assertEquals(0, rec.joins, "an existing roster is not a series of arrivals")
@@ -73,9 +78,9 @@ class PartyLineTonesTest {
     fun someoneArrivingAfterUsChimes() = runTest {
         val rec = Recorder()
         val l = line(rec)
-        l.handle(add("a", "~ricsul-bilwyt"))
-        l.onJoined(joined())
-        l.handle(add("b", "~hapnyl-fotlyx"))
+        l.onJoined(joined(clientCount = 1))
+        l.handle(add("a", "~ricsul-bilwyt")) // replayed: already here
+        l.handle(add("b", "~hapnyl-fotlyx")) // a real arrival
         assertEquals(1, rec.joins)
     }
 

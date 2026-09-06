@@ -60,6 +60,10 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import io.nisfeb.talon.call.AudioDevices
 import io.nisfeb.talon.call.MediaState
@@ -406,7 +410,16 @@ private fun ControlButton(
             shape = CircleShape,
             color = containerColor,
             contentColor = contentColor,
-            modifier = Modifier.size(72.dp),
+            // The icon carries no contentDescription and the label sits
+            // OUTSIDE the clickable, so every one of these announced as
+            // an unnamed button on explore-by-touch. Naming the Surface
+            // covers Mute, Camera, Flip, Record and Leave at once.
+            modifier = Modifier
+                .size(72.dp)
+                .semantics {
+                    contentDescription = label
+                    role = Role.Button
+                },
         ) {
             Box(contentAlignment = Alignment.Center) { icon() }
         }
