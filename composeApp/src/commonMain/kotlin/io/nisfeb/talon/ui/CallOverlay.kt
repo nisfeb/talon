@@ -72,6 +72,8 @@ fun CallOverlay(
      * else and drew over each screen's header and back button.
      */
     stripShownInline: Boolean = false,
+    /** Open a DM with the person on the other end. */
+    onMessage: ((String) -> Unit)? = null,
 ) {
     TrunkInstallPrompt(controller)
 
@@ -119,7 +121,7 @@ fun CallOverlay(
             // underneath, header and back button included. App composes
             // CallOverlay in a slot above the screens, so the strip
             // just takes its space there.
-            if (!stripShownInline) CallStrip(controller, modifier, nameFor, audioDevices)
+            if (!stripShownInline) CallStrip(controller, modifier, nameFor, audioDevices, onMessage)
         }
 
         CallUiState.None -> {}
@@ -141,6 +143,8 @@ fun CallStrip(
     nameFor: (String) -> String = { it },
     audioDevices: io.nisfeb.talon.call.AudioDevices =
         io.nisfeb.talon.call.AudioDevices.Noop,
+    /** Open a DM with the person on the other end. */
+    onMessage: ((String) -> Unit)? = null,
 ) {
     val state by controller.state.collectAsState()
     val engine = controller.mediaEngine
@@ -183,6 +187,7 @@ fun CallStrip(
             videoPane = if (isVideoCallsSupported && engine != null && video.anyOn) {
                 { CallVideoPane(engine, video, Modifier.fillMaxWidth()) }
             } else null,
+            onMessage = onMessage,
         )
         }
 

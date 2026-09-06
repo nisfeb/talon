@@ -92,6 +92,8 @@ fun PartyLineFullScreen(
     audioDevices: AudioDevices = AudioDevices.Noop,
     onRevokeSpeaking: ((String) -> Unit)? = null,
     onRestoreSpeaking: ((String) -> Unit)? = null,
+    /** Open a DM with a member. Anyone on the line can, op or not. */
+    onMessage: ((String) -> Unit)? = null,
     /** True while WE are recording. */
     recording: Boolean = false,
     /** Ships recording the line right now (wire 7), for the badge
@@ -224,6 +226,7 @@ fun PartyLineFullScreen(
                                 onRevokeSpeaking != null && onRestoreSpeaking != null,
                             onRevokeSpeaking = onRevokeSpeaking,
                             onRestoreSpeaking = onRestoreSpeaking,
+                            onMessage = onMessage,
                         )
                     }
                 }
@@ -241,6 +244,7 @@ fun PartyLineFullScreen(
                                 onRevokeSpeaking != null && onRestoreSpeaking != null,
                             onRevokeSpeaking = onRevokeSpeaking,
                             onRestoreSpeaking = onRestoreSpeaking,
+                            onMessage = onMessage,
                         )
                     }
                 }
@@ -492,6 +496,7 @@ private fun ParticipantRow(
     showOps: Boolean,
     onRevokeSpeaking: ((String) -> Unit)?,
     onRestoreSpeaking: ((String) -> Unit)?,
+    onMessage: ((String) -> Unit)?,
 ) {
     val speakingRing = if (member.speaking) {
         Modifier.border(3.dp, MaterialTheme.colorScheme.primary, CircleShape)
@@ -543,18 +548,28 @@ private fun ParticipantRow(
                 modifier = Modifier.size(20.dp),
             )
         }
-        if (showOps) {
+        // The menu is for everyone, not just ops: messaging someone
+        // you're on a line with is the most ordinary thing to want,
+        // and it used to be reachable only by leaving the call UI.
+        if (!isSelf && (onMessage != null || showOps)) {
             var menuOpen by remember(member.id) { mutableStateOf(false) }
             Box {
                 IconButton(onClick = { menuOpen = true }, modifier = Modifier.size(48.dp)) {
                     Icon(
                         Icons.Filled.MoreVert,
-                        contentDescription = "Moderate ${nameFor(member.ship)}",
+                        contentDescription = "Options for ${nameFor(member.ship)}",
                         modifier = Modifier.size(24.dp),
                     )
                 }
                 DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                    if (member.mutedByAdmin) {
+                    if (onMessage != null) {
+                        DropdownMenuItem(
+                            text = { Text("Message") },
+                            onClick = { menuOpen = false; onMessage(member.ship) },
+                        )
+                    }
+                    if (!showOps) {
+                    } else if (member.mutedByAdmin) {
                         DropdownMenuItem(
                             text = { Text("Allow speaking") },
                             onClick = { menuOpen = false; onRestoreSpeaking?.invoke(member.ship) },

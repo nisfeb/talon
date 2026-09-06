@@ -87,6 +87,8 @@ fun PartyLineBar(
      * the target rejoins. Wire 5.
      */
     onModerate: ((ship: String, mute: Boolean) -> Unit)? = null,
+    /** Open a DM with a member. For everyone on the line, op or not. */
+    onMessage: ((String) -> Unit)? = null,
     /** True while WE are recording; drives the full-screen control. */
     recording: Boolean = false,
     /** Ships recording the line right now (wire 7). */
@@ -156,6 +158,7 @@ fun PartyLineBar(
             party.restoreSpeaking(ship)
             onModerate?.invoke(ship, false)
         },
+        onMessage = onMessage,
         recording = recording,
         recordedBy = recordedBy,
         incomingCall = incomingCall,
@@ -204,6 +207,8 @@ fun PartyLineBarContent(
     onRevokeSpeaking: ((String) -> Unit)? = null,
     /** Inverse of [onRevokeSpeaking]: let [ship] speak again. */
     onRestoreSpeaking: ((String) -> Unit)? = null,
+    /** Open a DM with a member. For everyone on the line, op or not. */
+    onMessage: ((String) -> Unit)? = null,
     /** True while WE are recording. */
     recording: Boolean = false,
     /** Ships recording the line right now (wire 7). */
@@ -489,7 +494,7 @@ fun PartyLineBarContent(
         // No roster for a 1:1 call (headline != null): its single row
         // is fabricated and its speaking/muted flags never update.
         if (headline == null) {
-            Roster(state, nameFor, selfShip, onRevokeSpeaking, onRestoreSpeaking)
+            Roster(state, nameFor, selfShip, onRevokeSpeaking, onRestoreSpeaking, onMessage)
         }
         // Behind the same expander as the roster: picking a headset is
         // a thing you do once, not something worth a permanent row over
@@ -530,6 +535,9 @@ fun PartyLineBarContent(
                 audioDevices = audioDevices,
                 onRevokeSpeaking = onRevokeSpeaking,
                 onRestoreSpeaking = onRestoreSpeaking,
+                // The DM opens behind this dialog; close it so the
+                // chat is what you land on.
+                onMessage = onMessage?.let { open -> { ship -> fullScreen = false; open(ship) } },
                 recording = recording,
                 recordedBy = recordedBy,
                 onToggleRecord = onToggleRecord,
@@ -596,6 +604,7 @@ private fun Roster(
     selfShip: String = "",
     onRevokeSpeaking: ((String) -> Unit)? = null,
     onRestoreSpeaking: ((String) -> Unit)? = null,
+    onMessage: ((String) -> Unit)? = null,
 ) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
@@ -652,9 +661,10 @@ private fun Roster(
                     // mute state (learned over ADMIN_MUTE_KIND), so a
                     // muted person offers only "Allow speaking" and an
                     // unmuted one only "Mute for everyone".
-                    if (s.ops && m.ship != selfShip &&
-                        onRevokeSpeaking != null && onRestoreSpeaking != null
-                    ) {
+                    val ops = s.ops && onRevokeSpeaking != null && onRestoreSpeaking != null
+                    // Everyone gets the menu, for Message; ops get
+                    // their mute items in the same one.
+                    if (m.ship != selfShip && (onMessage != null || ops)) {
                         Box {
                             var menuOpen by remember(m.id) { mutableStateOf(false) }
                             IconButton(
@@ -663,7 +673,7 @@ private fun Roster(
                             ) {
                                 Icon(
                                     Icons.Filled.MoreVert,
-                                    contentDescription = "Moderate ${nameFor(m.ship)}",
+                                    contentDescription = "Options for ${nameFor(m.ship)}",
                                     modifier = Modifier.size(16.dp),
                                 )
                             }
@@ -671,12 +681,22 @@ private fun Roster(
                                 expanded = menuOpen,
                                 onDismissRequest = { menuOpen = false },
                             ) {
-                                if (m.mutedByAdmin) {
+                                if (onMessage != null) {
+                                    DropdownMenuItem(
+                                        text = { Text("Message") },
+                                        onClick = {
+                                            menuOpen = false
+                                            onMessage(m.ship)
+                                        },
+                                    )
+                                }
+                                if (!ops) {
+                                } else if (m.mutedByAdmin) {
                                     DropdownMenuItem(
                                         text = { Text("Allow speaking") },
                                         onClick = {
                                             menuOpen = false
-                                            onRestoreSpeaking(m.ship)
+                                            onRestoreSpeaking?.invoke(m.ship)
                                         },
                                     )
                                 } else {
@@ -684,7 +704,7 @@ private fun Roster(
                                         text = { Text("Mute for everyone") },
                                         onClick = {
                                             menuOpen = false
-                                            onRevokeSpeaking(m.ship)
+                                            onRevokeSpeaking?.invoke(m.ship)
                                         },
                                     )
                                 }

@@ -349,6 +349,34 @@ fun App(
     // exist here — an endless spinner on a freshly opened notebook.
     var openNoteId by remember(openChat) { mutableStateOf<Long?>(null) }
     var profileSheetShip by remember { mutableStateOf<String?>(null) }
+    // Land on a chat from anywhere — a call's "Message" can be tapped
+    // from settings, the admin screens, the image viewer… every one of
+    // which outranks openChat in the right-pane `when`. Close them all
+    // first, or the tap sets openChat and shows nothing.
+    val jumpToChat: (String) -> Unit = { who ->
+        showSettings = false
+        showSelfProfile = false
+        showStatusFeed = false
+        showInvites = false
+        showBookmarks = false
+        showActivity = false
+        showSearch = false
+        showAssistant = false
+        showNewDm = false
+        showContacts = false
+        showWatchwords = false
+        showDailyDigest = false
+        showGroupAdminList = false
+        openGroupAdminFlag = null
+        openGroupHomeFlag = null
+        profileSheetShip = null
+        viewerImageUrl = null
+        viewerImageList = null
+        groupInfoDrilldown = null
+        openThreadParent = null
+        openThreadReplyAnchor = null
+        openChat = who
+    }
     // Watchwords-sync flag. Backed by [watchwordsSync] (caller-supplied)
     // so desktop's JSON-file impl can persist across restarts and
     // production Android can wire its SharedPreferences variant in
@@ -1158,6 +1186,7 @@ fun App(
                             // party-line bar. Showing it here as well
                             // would put the same call in two places.
                             stripShownInline = inlineCallUiShown.value,
+                            onMessage = jumpToChat,
                         )
                     }
                     if (partyFloats) {
@@ -1171,6 +1200,7 @@ fun App(
                                 // the screen.
                                 onDismiss = { line.dismissFailure() },
                                 selfShip = shipKey,
+                                onMessage = jumpToChat,
                                 // No onModerate here: this fallback
                                 // doesn't know which room the line
                                 // belongs to (that lives with the chat
@@ -2059,6 +2089,7 @@ fun App(
                                                 nameFor = { partyContacts.displayName(it) },
                                                 audioDevices = audioDevices,
                                                 selfShip = ship.orEmpty(),
+                                                onMessage = jumpToChat,
                                                 // Persist ops mutes on the
                                                 // host ship, so they outlive
                                                 // the target's connection.
@@ -2111,6 +2142,7 @@ fun App(
                                                 c,
                                                 nameFor = { partyContacts.displayName(it) },
                                                 audioDevices = audioDevices,
+                                                onMessage = jumpToChat,
                                             )
                                         }
                                         // Only while the line is actually
