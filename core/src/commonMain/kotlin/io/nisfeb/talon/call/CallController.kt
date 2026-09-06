@@ -199,6 +199,8 @@ class CallController(
 
     /** No %trunk (or one too old to answer /x/policy) — see [_policy]. */
     private val trunkMissing: Boolean get() = _policy.value == null
+    private var installJob: Job? = null
+    private var autoInstallTried = false
 
     private var channel: UrbitChannel? = null
     private var loop: Job? = null
@@ -275,7 +277,13 @@ class CallController(
                 // No %trunk (or a desk predating policy) leaves this
                 // null, and the settings editor stays hidden.
                 runCatching { _policy.value = TrunkWire.parsePolicy(ch.scry(TrunkWire.AGENT, "/policy")) }
-                    .onFailure { Log.w(TAG, "policy scry failed; hiding the editor", it) }
+                    .onFailure {
+                        Log.w(TAG, "policy scry failed; hiding the editor", it)
+                        // eyre answers 404 for an agent that isn't there.
+                        // Anything else is a hiccup this loop retries on
+                        // its own, and must not trigger an install.
+                        if (it.message?.contains("HTTP 404") == true) autoInstallTrunk()
+                    }
                 // A ship with no sidecar of its own gets the one this
                 // build ships with, so party lines work without any
                 // setup. Group admins can point their group elsewhere;
@@ -980,64 +988,86 @@ class CallController(
     fun dismissInstall() { _install.value = TrunkInstall.Hidden }
 
     /**
-     * Install %trunk from the publisher. The poke returns as soon as
-     * %kiln accepts it, but the desk arrives over ames afterwards, so
-     * success means "the agent answers a scry", not "the poke acked".
+     * Install %trunk from the publisher on the user's say-so. The
+     * dialog shows progress and the reason if it fails. The poke
+     * returns as soon as %kiln accepts it, but the desk arrives over
+     * ames afterwards, so success means "the agent answers a scry",
+     * not "the poke acked".
      */
     fun installTrunk(publisher: String = TrunkWire.PUBLISHER) {
-        if (_install.value == TrunkInstall.Installing) return
         _install.value = TrunkInstall.Installing
-        scope.launch {
-            val ch = channel
-            if (ch == null) {
-                _install.value = TrunkInstall.Failed("not connected to your ship")
-                return@launch
+        startInstall(publisher)
+    }
+
+    /**
+     * Install %trunk without asking, once per login, when the ship
+     * plainly hasn't got it. Calls used to wait for the first tap on a
+     * call button and then stop to ask; a ship that has never had the
+     * desk gets it on the way in instead. Quiet on failure: the first
+     * call or join then raises the usual offer, with the reason.
+     */
+    private fun autoInstallTrunk() {
+        if (autoInstallTried) return
+        autoInstallTried = true
+        Log.i(TAG, "no %trunk on this ship; installing from " + TrunkWire.PUBLISHER)
+        startInstall(TrunkWire.PUBLISHER)
+    }
+
+    /** One install at a time. A tap on Install while the quiet one is
+     *  running just makes it visible rather than starting a second. */
+    private fun startInstall(publisher: String) {
+        if (installJob?.isActive == true) return
+        installJob = scope.launch {
+            val why = runInstall(publisher)
+            when {
+                why == null -> _install.value = TrunkInstall.Hidden
+                _install.value is TrunkInstall.Installing -> _install.value = TrunkInstall.Failed(why)
+                else -> Log.w(TAG, "quiet %trunk install did not complete: $why")
             }
-            val (app, mark, body) = TrunkWire.installTrunkPoke(publisher)
-            val poked = runCatching { ch.poke(app, mark, body) }
-                .onFailure { Log.e(TAG, "kiln-install poke failed", it) }
-                .isSuccess
-            if (!poked) {
-                _install.value = TrunkInstall.Failed("your ship refused the install")
-                return@launch
-            }
-            // Poll rather than guess a duration: a desk can take a
-            // while to come over ames, and there is no fact to await.
-            val started = nowMs()
-            val deadline = started + INSTALL_TIMEOUT_MS
-            var revived = false
-            while (nowMs() < deadline) {
-                delay(3_000)
-                // A ship that previously removed %trunk keeps the desk
-                // suspended, and installing re-syncs it without
-                // starting it. Nudge it once, halfway in, rather than
-                // waiting out the whole timeout for nothing.
-                if (!revived && nowMs() - started > INSTALL_REVIVE_AFTER_MS) {
-                    revived = true
-                    val (rApp, rMark, rBody) = TrunkWire.reviveTrunkPoke()
-                    runCatching { ch.poke(rApp, rMark, rBody) }
-                        .onFailure { Log.i(TAG, "revive poke declined (usually fine): " + it.message) }
-                }
-                val got = runCatching {
-                    TrunkWire.parsePolicy(ch.scry(TrunkWire.AGENT, "/policy"))
-                }.getOrNull()
-                if (got != null) {
-                    _policy.value = got
-                    _install.value = TrunkInstall.Hidden
-                    Log.i(TAG, "%trunk installed from " + publisher)
-                    return@launch
-                }
-            }
-            // Deliberately not "check your ship can reach X". A poke is
-            // fire-and-forget over the channel — we never see its ack —
-            // so this branch cannot distinguish a refused install from
-            // a slow one, and it used to assert the one diagnosis we
-            // have no evidence for.
-            _install.value = TrunkInstall.Failed(
-                "%trunk hasn't arrived from $publisher yet. It may still be " +
-                    "on its way — check with |vats %trunk in the dojo.",
-            )
         }
+    }
+
+    /** The install itself. Null on success, otherwise why not. */
+    private suspend fun runInstall(publisher: String): String? {
+        val ch = channel ?: return "not connected to your ship"
+        val (app, mark, body) = TrunkWire.installTrunkPoke(publisher)
+        val poked = runCatching { ch.poke(app, mark, body) }
+            .onFailure { Log.e(TAG, "kiln-install poke failed", it) }
+            .isSuccess
+        if (!poked) return "your ship refused the install"
+        // Poll rather than guess a duration: a desk can take a
+        // while to come over ames, and there is no fact to await.
+        val started = nowMs()
+        val deadline = started + INSTALL_TIMEOUT_MS
+        var revived = false
+        while (nowMs() < deadline) {
+            delay(3_000)
+            // A ship that previously removed %trunk keeps the desk
+            // suspended, and installing re-syncs it without
+            // starting it. Nudge it once, halfway in, rather than
+            // waiting out the whole timeout for nothing.
+            if (!revived && nowMs() - started > INSTALL_REVIVE_AFTER_MS) {
+                revived = true
+                val (rApp, rMark, rBody) = TrunkWire.reviveTrunkPoke()
+                runCatching { ch.poke(rApp, rMark, rBody) }
+                    .onFailure { Log.i(TAG, "revive poke declined (usually fine): " + it.message) }
+            }
+            val got = runCatching {
+                TrunkWire.parsePolicy(ch.scry(TrunkWire.AGENT, "/policy"))
+            }.getOrNull()
+            if (got != null) {
+                _policy.value = got
+                Log.i(TAG, "%trunk installed from " + publisher)
+                return null
+            }
+        }
+        // Deliberately not "check your ship can reach X". A poke is
+        // fire-and-forget over the channel — we never see its ack —
+        // so this branch cannot distinguish a refused install from
+        // a slow one, and it used to assert the one diagnosis we
+        // have no evidence for.
+        return "%trunk hasn't arrived from $publisher yet. It may still be " +
+            "on its way — check with |vats %trunk in the dojo."
     }
 
     /**
