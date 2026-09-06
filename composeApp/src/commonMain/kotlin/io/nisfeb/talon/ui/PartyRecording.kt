@@ -12,10 +12,8 @@ import io.nisfeb.talon.ai.AiSettings
 import io.nisfeb.talon.call.CallController
 import io.nisfeb.talon.call.PartyLine
 import io.nisfeb.talon.call.RecordedCall
-import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.withContext
 
 /** The recording controls a party bar needs: our state, who's recording
  *  (the room-wide badge), and the toggle (null when unsupported). */
@@ -64,25 +62,30 @@ fun rememberPartyRecording(
         }
     }
 
-    var recordingNow by remember(partyRoomHere) { mutableStateOf(false) }
+    // Both of these are read from the engine, not held here. This
+    // composable lives in the chat slot, so it is disposed by opening a
+    // DM, a thread, Group Info or Settings — when it owned the state,
+    // that cleared the room-wide badge while the taps kept running, and
+    // leaving the line stranded the capture with no reachable Stop.
+    val recordingFlow = remember(partyLine) {
+        partyLine?.recording ?: MutableStateFlow(false)
+    }
+    val recordingNow by recordingFlow.collectAsState()
+    val lastRecordingFlow = remember(partyLine) {
+        partyLine?.lastRecording ?: MutableStateFlow<RecordedCall?>(null)
+    }
+    val recordedResult by lastRecordingFlow.collectAsState()
+
     var recordConsented by remember { mutableStateOf(false) }
     var showRecordConsent by remember { mutableStateOf(false) }
-    var recordedResult by remember(partyRoomHere) { mutableStateOf<RecordedCall?>(null) }
 
-    // Heartbeat our recording to the host while active; say we stopped
-    // on the way out.
-    LaunchedEffect(recordingNow, partyRoomHere) {
-        if (!recordingNow) return@LaunchedEffect
-        val (h, n) = partyRoomHere ?: return@LaunchedEffect
-        val cc = callController ?: return@LaunchedEffect
-        try {
-            while (true) {
-                cc.startRecording(h, n)
-                delay(30_000)
-            }
-        } finally {
-            withContext(NonCancellable) { cc.stopRecording(h, n) }
-        }
+    fun beginRecording() {
+        val line = partyLine ?: return
+        line.startRecording(ourShip)
+        // Announce to the line we are actually on, captured now. The
+        // heartbeat runs on the controller's scope so navigating away
+        // no longer retracts it.
+        partyRoomHere?.let { (h, n) -> callController?.beginRecordingAnnounce(h, n) }
     }
 
     val canRecord = isCallRecordingSupported &&
@@ -91,13 +94,12 @@ fun rememberPartyRecording(
         {
             val line = partyLine!!
             if (recordingNow) {
-                recordingNow = false
-                recordedResult = line.stopRecording()
+                line.stopRecording() // publishes to lastRecording
+                callController?.endRecordingAnnounce()
             } else if (!recordConsented) {
                 showRecordConsent = true
             } else {
-                recordingNow = true
-                line.startRecording(ourShip)
+                beginRecording()
             }
         }
     } else {
@@ -110,8 +112,7 @@ fun rememberPartyRecording(
         onConfirm = {
             recordConsented = true
             showRecordConsent = false
-            recordingNow = true
-            partyLine?.startRecording(ourShip)
+            beginRecording()
         },
     )
     recordedResult?.let { rec ->
@@ -124,7 +125,12 @@ fun rememberPartyRecording(
             ourShip = ourShip,
             title = conversationTitle,
             nameFor = nameFor,
-            onClose = { recordedResult = null },
+            onClose = {
+                partyLine?.clearLastRecording()
+                // A recording finalized by teardown (leaving the line)
+                // never went through the toggle, so retract the badge here.
+                callController?.endRecordingAnnounce()
+            },
         )
     }
 

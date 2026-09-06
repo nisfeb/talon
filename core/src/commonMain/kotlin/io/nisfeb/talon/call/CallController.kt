@@ -11,6 +11,7 @@ import kotlin.concurrent.Volatile
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -19,6 +20,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlin.uuid.ExperimentalUuidApi
 import kotlin.uuid.Uuid
 import kotlinx.serialization.json.JsonObject
@@ -712,6 +714,38 @@ class CallController(
             .onFailure { Log.i(TAG, "start-recording declined (older host?): ${it.message}") }
     }
 
+    /**
+     * Announce that we are recording (host, name) and keep saying so
+     * until [endRecordingAnnounce].
+     *
+     * The heartbeat lives here, on the controller's own scope, rather
+     * than in the screen that started it. Two bugs came from having it
+     * in the chat slot: opening a DM disposed the effect, whose `finally`
+     * told the room recording had stopped while the taps kept running,
+     * and the room it announced to was whichever chat happened to be
+     * open rather than the line being recorded. Both are captured here
+     * once, at the moment recording starts.
+     */
+    fun beginRecordingAnnounce(host: String, name: String) {
+        recAnnounce?.cancel()
+        recAnnounce = scope.launch {
+            try {
+                while (true) {
+                    startRecording(host, name)
+                    delay(RECORD_HEARTBEAT_MS)
+                }
+            } finally {
+                withContext(NonCancellable) { stopRecording(host, name) }
+            }
+        }
+    }
+
+    /** Stop announcing, and tell the room we stopped. */
+    fun endRecordingAnnounce() {
+        recAnnounce?.cancel()
+        recAnnounce = null
+    }
+
     suspend fun stopRecording(host: String, name: String) {
         val ch = channel ?: return
         runCatching { ch.poke(TrunkWire.AGENT, TrunkWire.ACTION_MARK, TrunkWire.stopRecordingAction(host, name)) }
@@ -1066,6 +1100,9 @@ class CallController(
     /** Per line ("~host/name"), the ships recording it right now, for
      *  the recording badge every member on the line sees. Fed by
      *  %recorders facts (wire 7). */
+    /** The live recording-announce heartbeat, if we are recording. */
+    private var recAnnounce: Job? = null
+
     private val _recording = MutableStateFlow<Map<String, Set<String>>>(emptyMap())
     val recording: StateFlow<Map<String, Set<String>>> = _recording.asStateFlow()
 
@@ -1494,5 +1531,9 @@ class CallController(
          *  goes quiet. Cleared here, not in the UI, so a backgrounded
          *  app still frees itself to take the next call. */
         private const val ENDED_NOTICE_MS = 5_000L
+
+        /** How often we re-announce an active recording. The host ages a
+         *  recorder out after 90s, so this has to stay well under it. */
+        private const val RECORD_HEARTBEAT_MS = 30_000L
     }
 }
