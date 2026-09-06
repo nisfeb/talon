@@ -19,5 +19,14 @@
          me, and Talon never appears in the mic permission list." -->
     <key>com.apple.security.device.audio-input</key>
     <true/>
+    <!-- Same shape as the microphone entitlement above: desktop
+         advertises video calls and both engines open the camera through
+         AVFoundation, but under hardened runtime capture is denied
+         before any prompt without this — the camera button just does
+         nothing and Talon never appears in System Settings > Camera.
+         Pairs with NSCameraUsageDescription in build.gradle.kts; the
+         entitlement alone would turn the silent denial into a TCC kill. -->
+    <key>com.apple.security.device.camera</key>
+    <true/>
 </dict>
 </plist>

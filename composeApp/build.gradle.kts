@@ -481,6 +481,8 @@ compose.desktop {
                     extraKeysRawXml = """
                         <key>NSMicrophoneUsageDescription</key>
                         <string>Talon uses the microphone for voice calls.</string>
+                        <key>NSCameraUsageDescription</key>
+                        <string>Talon uses the camera for video calls.</string>
                     """
                 }
             }

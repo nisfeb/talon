@@ -17,6 +17,12 @@ import UIKit
 class AppDelegate: NSObject, UIApplicationDelegate, PKPushRegistryDelegate, CXProviderDelegate {
 
     private var provider: CXProvider!
+    // Held, not local: PKPushRegistry.delegate is weak, so a registry
+    // that only lived inside didFinishLaunching deallocated at the end
+    // of launch and deregistered .voIP with it — neither the token
+    // callback nor an incoming push could ever fire, and a backgrounded
+    // iPhone never rang.
+    private var pushRegistry: PKPushRegistry!
     // CallKit works in UUIDs; %trunk works in string call ids. Keep
     // both directions so an answer/end action maps back to the id the
     // Kotlin side knows.
@@ -35,9 +41,9 @@ class AppDelegate: NSObject, UIApplicationDelegate, PKPushRegistryDelegate, CXPr
         provider = CXProvider(configuration: config)
         provider.setDelegate(self, queue: nil)
 
-        let registry = PKPushRegistry(queue: .main)
-        registry.delegate = self
-        registry.desiredPushTypes = [.voIP]
+        pushRegistry = PKPushRegistry(queue: .main)
+        pushRegistry.delegate = self
+        pushRegistry.desiredPushTypes = [.voIP]
         return true
     }
 

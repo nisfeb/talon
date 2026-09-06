@@ -773,7 +773,11 @@ class PartyLine(
             "usermessage" -> {
                 val kind = msg["kind"]?.jsonPrimitive?.content
                 if (kind == ADMIN_MUTE_KIND) {
-                    val who = msg["username"]?.jsonPrimitive?.content ?: return
+                    // `target` is where the subject belongs; fall back to
+                    // `username` so a peer on an older build still marks
+                    // the right person.
+                    val who = msg["target"]?.jsonPrimitive?.content
+                        ?: msg["username"]?.jsonPrimitive?.content ?: return
                     val on = msg["value"]?.jsonPrimitive?.content == "true"
                     if (on) adminMuted.add(who) else adminMuted.remove(who)
                     publishRoster()
@@ -1082,7 +1086,14 @@ class PartyLine(
                 put("type", "usermessage")
                 put("source", connectionId)
                 put("dest", "")
-                put("username", ship)
+                // `username` is who is SENDING, everywhere else in this
+                // protocol and to the SFU. This one broadcast put the
+                // target there instead, which is a claim to be someone
+                // else — a server that validates it drops the operator's
+                // socket, and one that rewrites it silently retargets the
+                // mute at the operator. The target rides its own field.
+                put("username", ourId)
+                put("target", ship)
                 put("kind", ADMIN_MUTE_KIND)
                 put("value", muted)
             },

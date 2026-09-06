@@ -40,6 +40,10 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <!-- setMode(MODE_IN_COMMUNICATION) is refused without this, so the
+         volume keys target ring/media while the call plays on
+         STREAM_VOICE_CALL. protectionLevel=normal, install-granted. -->
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
     <!-- Video calls. Optional hardware: a device without a camera can
          still take audio calls, and the store listing should not
          exclude it. -->

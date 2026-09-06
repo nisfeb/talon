@@ -224,8 +224,18 @@ class PartyLineRolesTest {
             val o = json.parseToJsonElement(raw).jsonObject
             if (o["type"]?.jsonPrimitive?.content != "usermessage") return@mapNotNull null
             if (o["kind"]?.jsonPrimitive?.content != PartyLine.ADMIN_MUTE_KIND) return@mapNotNull null
-            (o["username"]?.jsonPrimitive?.content ?: "") to
+            // The subject rides `target`; `username` is the sender, as
+            // it is in every other broadcast.
+            (o["target"]?.jsonPrimitive?.content ?: "") to
                 (o["value"]?.jsonPrimitive?.content == "true")
+        }
+
+    /** The `username` field of every admin-mute frame sent. */
+    private fun adminMuteSenders(ws: RecordingWs): List<String> =
+        synchronized(ws.sent) { ws.sent.toList() }.mapNotNull { raw ->
+            val o = json.parseToJsonElement(raw).jsonObject
+            if (o["kind"]?.jsonPrimitive?.content != PartyLine.ADMIN_MUTE_KIND) return@mapNotNull null
+            o["username"]?.jsonPrimitive?.content
         }
 
     @Test
@@ -245,6 +255,13 @@ class PartyLineRolesTest {
         assertTrue(live(line).members.first { it.ship == "~bus" }.mutedByAdmin.not())
 
         withTimeout(5_000) { while (adminMutes(ws).none { it == "~zod" to true }) delay(10) }
+        // Never claim to be the person being muted: an SFU that
+        // validates `username` drops the operator's socket, and one that
+        // rewrites it retargets the mute at the operator.
+        assertTrue(
+            adminMuteSenders(ws).none { it == "~zod" },
+            "the broadcast must not send the target as the sender",
+        )
 
         line.restoreSpeaking("~zod")
         assertTrue(live(line).members.first { it.ship == "~zod" }.mutedByAdmin.not())

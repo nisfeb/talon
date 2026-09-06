@@ -595,6 +595,11 @@ class CallController(
                 return@launch
             }
             engine = eng
+            // A mute tapped while "Connecting…" hit a null engine and
+            // only flipped the UI flag, so the strip showed MicOff with
+            // a live mic. The strip is interactive for the whole offer
+            // wait, so re-apply whatever it is showing.
+            (_state.value as? CallUiState.Active)?.let { eng.setMuted(it.muted) }
             watchMedia(eng, from)
             runCatching { eng.acceptOffer(offer) }
                 .onSuccess { answer ->

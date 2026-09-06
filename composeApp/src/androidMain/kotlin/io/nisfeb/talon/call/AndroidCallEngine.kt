@@ -3,6 +3,13 @@ package io.nisfeb.talon.call
 import android.content.Context
 import io.nisfeb.talon.util.Log
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.withTimeout
@@ -57,6 +64,10 @@ class AndroidCallEngine(
 
     /** The sendrecv video sender, created up-front with no track. */
     private var videoSender: RtpSender? = null
+    private val engineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val lastRemoteFrameMs = java.util.concurrent.atomic.AtomicLong(0)
+    private var remoteWatch: Job? = null
+    private var remoteSink: org.webrtc.VideoSink? = null
     private var capturer: CameraVideoCapturer? = null
     private var videoSource: VideoSource? = null
     private var surfaceHelper: SurfaceTextureHelper? = null
@@ -75,7 +86,11 @@ class AndroidCallEngine(
             // start). Unified Plan fires this once per transceiver.
             val track = transceiver?.receiver?.track() as? VideoTrack ?: return
             remoteVideoTrack = track
-            _video.value = _video.value.copy(remoteOn = true)
+            // Not remoteOn = true: the video m-line is pre-negotiated on
+            // every call, so this fires for audio-only ones too — a black
+            // pane that never went away when the peer closed their camera.
+            // Frames are the only honest signal.
+            watchRemoteVideo(track)
             Log.i(TAG, "remote video track ${track.id()}")
         }
 
@@ -162,6 +177,7 @@ class AndroidCallEngine(
         _state.value = MediaState.Gathering
         val desc = SessionDescription(SessionDescription.Type.OFFER, remote.sdp)
         suspendSet { pc.setRemoteDescription(it, desc) }
+        adoptVideoTransceiver()
         val answer = suspendSdp { pc.createAnswer(it, MediaConstraints()) }
         suspendSet { pc.setLocalDescription(it, answer) }
         awaitGathering()
@@ -239,6 +255,49 @@ class AndroidCallEngine(
         micTrack?.setEnabled(!muted)
     }
 
+    /**
+     * Re-point [videoSender] at the transceiver the offer negotiated.
+     *
+     * The constructor's addTransceiver only associates on the offering
+     * side, so when answering our sender belonged to a second,
+     * unassociated transceiver no m-line pointed at — the callee could
+     * never send video, only receive it.
+     */
+    private fun adoptVideoTransceiver() {
+        runCatching {
+            val videos = pc.transceivers.orEmpty().filter {
+                it.mediaType == MediaStreamTrack.MediaType.MEDIA_TYPE_VIDEO
+            }
+            // The one with a mid is the one bound to the offer's m-line
+            // and the only one the answer is generated from.
+            val target = videos.firstOrNull { !it.mid.isNullOrEmpty() }
+                ?: videos.firstOrNull()
+                ?: return@runCatching
+            target.direction = RtpTransceiver.RtpTransceiverDirection.SEND_RECV
+            videoSender = target.sender
+            // Carry over a camera that is already running.
+            localVideo?.let { cam -> runCatching { target.sender.setTrack(cam, false) } }
+        }.onFailure { Log.w(TAG, "could not adopt the video transceiver", it) }
+    }
+
+    /** Drive remoteOn from arriving frames: a disabled sender stops
+     *  sending, so "frames recently" is exactly "their camera is on". */
+    private fun watchRemoteVideo(track: VideoTrack) {
+        val sink = org.webrtc.VideoSink { lastRemoteFrameMs.set(System.currentTimeMillis()) }
+        remoteSink = sink
+        runCatching { track.addSink(sink) }
+        remoteWatch?.cancel()
+        remoteWatch = engineScope.launch {
+            while (true) {
+                val on = System.currentTimeMillis() - lastRemoteFrameMs.get() < REMOTE_VIDEO_IDLE_MS
+                if (_video.value.remoteOn != on) {
+                    _video.value = _video.value.copy(remoteOn = on)
+                }
+                delay(REMOTE_VIDEO_POLL_MS)
+            }
+        }
+    }
+
     override fun close() {
         // Idempotent: a call can end down several paths at once (remote
         // hangup racing a local failure) and closing twice used to mean
@@ -250,6 +309,11 @@ class AndroidCallEngine(
         // same hazard as disposing the factory mid-gather.
         runCatching { capturer?.stopCapture() }
         releaseCamera()
+        remoteWatch?.cancel()
+        remoteWatch = null
+        remoteSink?.let { s -> runCatching { remoteVideoTrack?.removeSink(s) } }
+        remoteSink = null
+        engineScope.cancel()
         remoteVideoTrack = null
         _video.value = VideoState()
         // Close, don't dispose the factory: it is process-wide, and
@@ -301,6 +365,10 @@ class AndroidCallEngine(
 
     private companion object {
         private const val TAG = "AndroidCallEngine"
+
+        /** No frame for this long means their camera is off. */
+        private const val REMOTE_VIDEO_IDLE_MS = 1_500L
+        private const val REMOTE_VIDEO_POLL_MS = 400L
     }
 }
 

@@ -20,6 +20,17 @@ import dev.onvoid.webrtc.media.video.VideoCaptureCapability
 import dev.onvoid.webrtc.media.video.VideoDeviceSource
 import dev.onvoid.webrtc.media.video.VideoTrack
 import io.nisfeb.talon.util.Log
+import io.nisfeb.talon.util.backgroundExceptionHandler
+import dev.onvoid.webrtc.RTCRtpTransceiverDirection
+import dev.onvoid.webrtc.media.MediaStreamTrack
+import io.nisfeb.talon.util.ioDispatcher
+import io.nisfeb.talon.util.nowMs
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -85,7 +96,12 @@ class DesktopCallEngine(configuredIce: List<IceServer> = emptyList()) : CallEngi
             override fun onTrack(transceiver: dev.onvoid.webrtc.RTCRtpTransceiver?) {
                 val track = transceiver?.receiver?.track as? VideoTrack ?: return
                 remoteVideoTrack = track
-                _video.value = _video.value.copy(remoteOn = true)
+                // Deliberately NOT remoteOn = true. The video m-line is
+                // pre-negotiated on every call, so this fires even for an
+                // audio-only one — which put a black pane on every call
+                // and never took it away when the peer closed their
+                // camera. Frames are the only honest signal.
+                watchRemoteVideo(track)
                 Log.i("Trunk", "remote video track ${track.id}")
             }
 
@@ -180,6 +196,7 @@ class DesktopCallEngine(configuredIce: List<IceServer> = emptyList()) : CallEngi
         _state.value = MediaState.Gathering
         val desc = RTCSessionDescription(RTCSdpType.OFFER, remote.sdp)
         suspendSet { pc.setRemoteDescription(desc, it) }
+        adoptVideoTransceiver()
         val answer = suspendSdp { pc.createAnswer(RTCAnswerOptions(), it) }
         suspendSet { pc.setLocalDescription(answer, it) }
         awaitGathering()
@@ -189,6 +206,56 @@ class DesktopCallEngine(configuredIce: List<IceServer> = emptyList()) : CallEngi
         // fast connect can land CONNECTED before this returns, and a
         // blind Connecting here would stomp Live (loopback bisect bug).
         return SessionDesc(sdp, sdpFingerprint(sdp))
+    }
+
+    /**
+     * Put our camera on the video transceiver the offer negotiated.
+     *
+     * The constructor's addTransceiver only associates on the offering
+     * side. Answering left our camera on a second, unassociated
+     * transceiver that no m-line ever pointed at, so the callee could
+     * never send video at all — video worked caller-to-callee only.
+     */
+    private fun adoptVideoTransceiver() {
+        val cam = localVideo ?: return
+        runCatching {
+            val videos = pc.transceivers.orEmpty().filter { t ->
+                t.receiver?.track?.kind == MediaStreamTrack.VIDEO_TRACK_KIND ||
+                    t.sender?.track?.kind == MediaStreamTrack.VIDEO_TRACK_KIND
+            }
+            // The one carrying a mid is the one setRemoteDescription
+            // bound to the offer's m-line, and the only one the answer
+            // is generated from. Ours from the constructor sorts first
+            // and is unassociated, so taking it left the answer recvonly.
+            val video = videos.firstOrNull { !it.mid.isNullOrEmpty() }
+                ?: videos.firstOrNull()
+                ?: return@runCatching
+            if (video.sender?.track !== cam) video.sender?.replaceTrack(cam)
+            video.direction = RTCRtpTransceiverDirection.SEND_RECV
+        }.onFailure { Log.w("Trunk", "could not adopt the video transceiver", it) }
+    }
+
+    /**
+     * Drive [VideoState.remoteOn] from arriving frames.
+     *
+     * A disabled sender stops sending, so "frames recently" is exactly
+     * "their camera is on" — and unlike track presence it goes false
+     * again when they close it.
+     */
+    private fun watchRemoteVideo(track: VideoTrack) {
+        val sink = dev.onvoid.webrtc.media.video.VideoTrackSink { lastRemoteFrameMs.value = nowMs() }
+        remoteSink = sink
+        runCatching { track.addSink(sink) }
+        remoteWatch?.cancel()
+        remoteWatch = engineScope.launch {
+            while (true) {
+                val on = nowMs() - lastRemoteFrameMs.value < REMOTE_VIDEO_IDLE_MS
+                if (_video.value.remoteOn != on) {
+                    _video.value = _video.value.copy(remoteOn = on)
+                }
+                delay(REMOTE_VIDEO_POLL_MS)
+            }
+        }
     }
 
     override suspend fun setAnswer(remote: SessionDesc) {
@@ -204,6 +271,11 @@ class DesktopCallEngine(configuredIce: List<IceServer> = emptyList()) : CallEngi
     }
 
     private val closed = kotlinx.atomicfu.atomic(false)
+    private val engineScope =
+        CoroutineScope(SupervisorJob() + ioDispatcher + backgroundExceptionHandler)
+    private val lastRemoteFrameMs = kotlinx.atomicfu.atomic(0L)
+    private var remoteWatch: Job? = null
+    private var remoteSink: dev.onvoid.webrtc.media.video.VideoTrackSink? = null
 
     override fun close() {
         // Idempotent, and never disposes the factory: it is
@@ -211,6 +283,11 @@ class DesktopCallEngine(configuredIce: List<IceServer> = emptyList()) : CallEngi
         // still running on a native thread is a use-after-free.
         if (!closed.compareAndSet(false, true)) return
         runCatching { micTrack?.isEnabled = false }
+        remoteWatch?.cancel()
+        remoteWatch = null
+        remoteSink?.let { s -> runCatching { remoteVideoTrack?.removeSink(s) } }
+        remoteSink = null
+        engineScope.cancel()
         // Stop capture before the pc goes: a running device feeding a
         // closed source is a native callback into freed memory.
         runCatching { localVideo?.isEnabled = false }
@@ -260,6 +337,13 @@ class DesktopCallEngine(configuredIce: List<IceServer> = emptyList()) : CallEngi
             }
         })
         d.await()
+    }
+
+    private companion object {
+        /** No frame for this long means their camera is off. Comfortably
+         *  more than two poll intervals, so a hiccup doesn't blink it. */
+        const val REMOTE_VIDEO_IDLE_MS = 1_500L
+        const val REMOTE_VIDEO_POLL_MS = 400L
     }
 }
 
