@@ -3,9 +3,9 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Talon — chat and calls for Urbit</title>
+    <title>Talon: chat and calls for Urbit</title>
     <meta name="description" content="Fast native chat client for Urbit. Android, Linux, macOS, Windows. DMs, group channels, reactions, threads, semantic search. Bring your own ship.">
-    <meta property="og:title" content="Talon — chat for Urbit">
+    <meta property="og:title" content="Talon: chat and calls for Urbit">
     <meta property="og:description" content="Fast native chat client for Urbit. Android, Linux, macOS, Windows. DMs, group channels, reactions, threads, semantic search. Bring your own ship.">
     <meta property="og:image" content="../branding/play_store_icon_512.png">
     <meta name="theme-color" content="#0F0D1A">
@@ -15,7 +15,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
     <style>
         :root {
-            /* Dark-mode brand palette — same hexes as Theme.kt darkColorScheme. */
+            /* Dark-mode brand palette, same hexes as Theme.kt darkColorScheme. */
             --amber-400: #FBBF24;
             --amber-500: #F59E0B;
             --indigo-700: #4338CA;
@@ -203,7 +203,7 @@
         p { margin: 0 0 16px; }
         p:last-child { margin-bottom: 0; }
 
-        /* Feature list — sharp, brutalist, one-line-per-feature */
+        /* Feature list: sharp, brutalist, one line per feature */
         ul.features {
             list-style: none;
             padding: 0;
@@ -233,7 +233,7 @@
             }
         }
 
-        /* "What it isn't" — same shape, dimmer accent */
+        /* "What it isn't": same shape, dimmer accent */
         ul.disclaimers {
             list-style: none;
             padding: 0;
@@ -245,7 +245,7 @@
             position: relative;
         }
         ul.disclaimers li::before {
-            content: "—";
+            content: "–";
             position: absolute;
             left: 0;
             color: var(--outline);
@@ -359,7 +359,7 @@
             color: var(--on-surf-var);
         }
 
-        /* Subtle scan-line accent on hero — pure decoration, slightly brutalist */
+        /* Subtle scan-line accent on the hero. Pure decoration, slightly brutalist. */
         header.hero::after {
             content: "";
             position: absolute;
@@ -388,8 +388,8 @@
         <h1>Native chat <br>for <span class="accent">Urbit</span>.</h1>
 
         <p class="lede">
-            Fast chat client for the parts of Urbit you actually use day-to-day —
-            DMs, group channels, reactions, threads — and now voice and video calls
+            Fast chat client for the parts of Urbit you actually use day-to-day.
+            DMs, group channels, reactions, threads, and now voice and video calls
             between ships. Native on Android, iOS, Linux, macOS, and Windows.
             <a href="https://urbit.org/overview/running-urbit">Bring your own ship</a>.
         </p>
@@ -418,15 +418,15 @@
         <ul class="features">
             <li>
                 <span class="name">Voice &amp; video calls</span>
-                <span class="desc">Call any ship 1:1. Signalling rides Urbit; media is WebRTC, peer to peer where it can be. Rings in the background on Android and iOS, camera on or off, front or back.</span>
+                <span class="desc">Call any ship 1:1. Signalling rides Urbit. Media is WebRTC, peer to peer where it can be. Rings in the background on Android and iOS. Camera on or off, front or back.</span>
             </li>
             <li>
                 <span class="name">Party lines</span>
-                <span class="desc">A standing voice room for a group, its guest list mirrored from the group's own roster and roles. See who's on the line before you join, turn cameras on for a small conference, and message anyone from the roster.</span>
+                <span class="desc">A standing voice room for a group. Its guest list mirrors the group's own roster and roles. See who's on the line before you join, turn cameras on for a small conference, and message anyone from the roster.</span>
             </li>
             <li>
                 <span class="name">Recording &amp; transcripts</span>
-                <span class="desc">Record a party line per speaker — everyone on it sees the badge. Transcribe with your own Whisper-compatible key and publish the transcript to Lattice as a <span class="mono">urb://</span> link.</span>
+                <span class="desc">Record a party line per speaker. Everyone on it sees the badge. Transcribe with your own Whisper-compatible key, then publish the transcript to Lattice as a <span class="mono">urb://</span> link.</span>
             </li>
             <li>
                 <span class="name"><span class="mono">urb://</span> links</span>
@@ -434,7 +434,7 @@
             </li>
             <li>
                 <span class="name">Direct messages</span>
-                <span class="desc">1:1 messages with anyone on the network. Same wire as the rest of Urbit — your existing chats appear immediately.</span>
+                <span class="desc">1:1 messages with anyone on the network. Same wire as the rest of Urbit, so your existing chats appear immediately.</span>
             </li>
             <li>
                 <span class="name">Group channels</span>
@@ -450,15 +450,15 @@
             </li>
             <li>
                 <span class="name">Polls</span>
-                <span class="desc"><span class="mono">/poll question | a | b | c</span> — votes ride on the existing reactions wire, no new agent state.</span>
+                <span class="desc"><span class="mono">/poll question | a | b | c</span>. Votes ride on the existing reactions wire, with no new agent state.</span>
             </li>
             <li>
                 <span class="name">Semantic search</span>
-                <span class="desc">Find that chat you half-remember. On-device embedder — MediaPipe on Android, ONNX MiniLM-L6 on desktop. Private; nothing leaves your machine.</span>
+                <span class="desc">Find that chat you half-remember. The embedder runs on-device, MediaPipe on Android and ONNX MiniLM-L6 on desktop. Private. Nothing leaves your machine.</span>
             </li>
             <li>
                 <span class="name">Daily digest</span>
-                <span class="desc">Optional morning brief: who pinged you, what watchwords matched, the chats you missed. Local AI summary, plus today's weather. (Android only — depends on AlarmManager.)</span>
+                <span class="desc">Optional morning brief. Who pinged you, what watchwords matched, the chats you missed. Local AI summary, plus today's weather. Android only, since it depends on AlarmManager.</span>
             </li>
             <li>
                 <span class="name">Watchwords</span>
@@ -474,11 +474,11 @@
             </li>
             <li>
                 <span class="name">Native notifications</span>
-                <span class="desc">libnotify on Linux, Notification Center on macOS, system toasts on Windows + Android — no AWT-balloon ugliness.</span>
+                <span class="desc">libnotify on Linux, Notification Center on macOS, system toasts on Windows and Android. No AWT-balloon ugliness.</span>
             </li>
             <li>
                 <span class="name">Multi-ship at once</span>
-                <span class="desc">Sign in to as many ships as you like; switch from the top-left. The active ship's color tints the send button, so you don't accidentally post as the wrong identity in shared groups.</span>
+                <span class="desc">Sign in to as many ships as you like and switch from the top-left. The active ship's color tints the send button, so you don't accidentally post as the wrong identity in shared groups.</span>
             </li>
         </ul>
     </div>
@@ -488,10 +488,10 @@
     <div class="wrap">
         <h2>What it isn't</h2>
         <ul class="disclaimers">
-            <li>Not a host. <a href="https://urbit.org/overview/running-urbit">Bring your own ship</a> — yours, or one a friend hosts for you, or one of the hosting services.</li>
+            <li>Not a host. <a href="https://urbit.org/overview/running-urbit">Bring your own ship</a>. Yours, or one a friend hosts for you, or one of the hosting services.</li>
             <li>Not Tlon. Talon talks to the same agents but is an independent client. If you already use a Tlon-hosted ship, Talon sees your full history immediately.</li>
-            <li>Not on the Play Store today. Sideload from GitHub Releases; the in-app updater handles future versions on Android. The iOS build is in TestFlight — ask <span class="patp">~nisfeb</span> for an invite.</li>
-            <li>Desktop builds are unsigned for now — Gatekeeper / SmartScreen will warn on first launch and you have to bypass it.</li>
+            <li>Not on the Play Store today. Sideload from GitHub Releases. The in-app updater handles future versions on Android. The iOS build is in TestFlight. Ask <span class="patp">~nisfeb</span> for an invite.</li>
+            <li>Desktop builds are unsigned for now. Gatekeeper and SmartScreen will warn on first launch, and you have to bypass it.</li>
         </ul>
     </div>
 </section>
@@ -500,7 +500,7 @@
     <div class="wrap">
         <h2>Privacy</h2>
         <div class="privacy-card">
-            <h3>The only servers Talon talks to are yours — or ones you chose.</h3>
+            <h3>The only servers Talon talks to are yours, or ones you chose.</h3>
             <p>
                 There's no analytics, no third-party SDKs, no telemetry. Chat speaks only to
                 the Urbit ship you point it at. If you turn on AI features or transcription,
@@ -508,12 +508,12 @@
             </p>
             <p>
                 Calls need a little more. Signalling stays ship-to-ship over Urbit. Media goes
-                peer to peer when it can, and otherwise through a TURN relay; party lines mix
-                audio on an SFU that the hosting ship picks. Both are a small
-                self-hostable sidecar (Galène + coturn), with a hosted default so calls work
-                out of the box. Background ringing on iOS goes through a small push relay
-                that sees a device token and which ship is calling — never any content — and
-                is self-hostable too.
+                peer to peer when it can, and otherwise through a TURN relay. Party lines mix
+                audio on an SFU that the hosting ship picks. Both run in a small self-hostable
+                sidecar built on Galène and coturn, with a hosted default so calls work out of
+                the box. Background ringing on iOS goes through a small push relay. It sees a
+                device token and which ship is calling, never any content, and it is
+                self-hostable too.
             </p>
             <p>
                 API keys are stored encrypted on-device and only sent to the provider you
@@ -528,12 +528,13 @@
         <h2>Under the hood</h2>
         <p>
             Kotlin + Compose Multiplatform. One shared codebase across Android, iOS and
-            JVM Desktop; per-platform leaves only where they have to be (file pickers,
-            WebRTC bindings, CallKit, on-device AI backends, native notifications). Room
-            for local storage, OkHttp for the SSE channel, kotlinx.serialization for
-            everything on the wire. Calls are a small Hoon agent, <span class="mono">%trunk</span>,
-            plus WebRTC; party lines run on Galène. Mutation-tested on the parsers and
-            wire helpers, with a JVM test suite behind every release.
+            JVM Desktop. Per-platform leaves exist only where they have to, for file
+            pickers, WebRTC bindings, CallKit, on-device AI backends and native
+            notifications. Room for local storage, OkHttp for the SSE channel,
+            kotlinx.serialization for everything on the wire. Calls are a small Hoon
+            agent, <span class="mono">%trunk</span>, plus WebRTC. Party lines run on
+            Galène. Mutation-tested on the parsers and wire helpers, with a JVM test
+            suite behind every release.
         </p>
         <div class="tech-grid">
             <div class="cell"><div class="k">android</div><div class="v">8.0+ (API 26-35)</div></div>
@@ -550,7 +551,7 @@
         <h2>Download</h2>
         <p>
             Pick your platform. Direct download links resolve to the latest tagged
-            release; fall back to the
+            release. Fall back to the
             <a href="https://github.com/nisfeb/talon/releases/latest">releases page</a>
             for older versions, signature checksums, and release notes.
         </p>
@@ -559,7 +560,7 @@
         <p>In TestFlight, invite-only while it settles. Ask <span class="patp">~nisfeb</span> and you're on the list.</p>
         <h3 style="margin-top:32px;">Android</h3>
         <p style="font-size:14px;color:var(--on-surf-var);">
-            On install: tap the APK; you may need to allow "Install unknown apps" for
+            On install, tap the APK. You may need to allow "Install unknown apps" for
             your browser or file manager. Future updates land via the in-app banner.
         </p>
         <div class="dl-grid">
@@ -583,7 +584,7 @@
             </div>
             <div class="dl-row">
                 <span class="platform">universal</span>
-                <span class="desc">Larger fallback (~54 MB) — works on every supported ABI.</span>
+                <span class="desc">Larger fallback (~54 MB). Works on every supported ABI.</span>
                 <a class="dl-link" data-asset-pattern="^talon-[0-9.]+\.apk$"
                    href="https://github.com/nisfeb/talon/releases/latest">Download</a>
             </div>
@@ -591,9 +592,9 @@
 
         <h3 style="margin-top:32px;">Linux</h3>
         <p style="font-size:14px;color:var(--on-surf-var);">
-            <code>chmod +x</code> the AppImage and run it; needs FUSE 2 (default on
-            most desktops). The .deb installs system-wide on Debian / Ubuntu and
-            derivatives.
+            <code>chmod +x</code> the AppImage and run it. It needs FUSE 2, which most
+            desktops have by default. The .deb installs system-wide on Debian, Ubuntu
+            and derivatives.
         </p>
         <div class="dl-grid">
             <div class="dl-row">
@@ -627,8 +628,8 @@
 
         <h3 style="margin-top:32px;">Windows</h3>
         <p style="font-size:14px;color:var(--on-surf-var);">
-            Double-click the MSI to install. SmartScreen may warn — click "More info"
-            → "Run anyway".
+            Double-click the MSI to install. SmartScreen may warn. Click "More info",
+            then "Run anyway".
         </p>
         <div class="dl-grid">
             <div class="dl-row">
@@ -680,7 +681,7 @@
 
 <footer>
     <div class="wrap footer-row">
-        <span>© Talon — built by <span class="patp">~nisfeb</span>. PolyForm Noncommercial 1.0.0 licensed.</span>
+        <span>© Talon, built by <span class="patp">~nisfeb</span>. PolyForm Noncommercial 1.0.0 licensed.</span>
         <span><a href="https://github.com/nisfeb/talon">github.com/nisfeb/talon</a></span>
     </div>
 </footer>
