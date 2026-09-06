@@ -150,6 +150,18 @@ final class TalonRtcPeer: NSObject, NativeRtcPeer, RTCPeerConnectionDelegate {
         // rest just hold a ref so the last one out restores it.
         guard TalonRtcPeer.audioPeers == 1 else { return }
 
+        // libwebrtc's ADM applies RTCAudioSessionConfiguration.webRTC()
+        // when it starts playout, and that default carries no
+        // .defaultToSpeaker — so a party line configured for speaker
+        // came out of the earpiece, and the user had to pick Speaker by
+        // hand on every line. Set the class default before the ADM
+        // reads it.
+        let webrtcConfig = RTCAudioSessionConfiguration.webRTC()
+        webrtcConfig.categoryOptions = trickle
+            ? [.allowBluetooth, .defaultToSpeaker]
+            : [.allowBluetooth]
+        RTCAudioSessionConfiguration.setWebRTC(webrtcConfig)
+
         let session = RTCAudioSession.sharedInstance()
         session.lockForConfiguration()
         do {
@@ -369,6 +381,26 @@ final class TalonRtcPeer: NSObject, NativeRtcPeer, RTCPeerConnectionDelegate {
         }
         if localVideoTrack != nil { return done(nil) }
 
+        // startCapture only forwards a lockForConfiguration failure —
+        // a denied camera merely logs — so without this the enable path
+        // called done(nil), localOn went true and we broadcast
+        // VIDEO_KIND on while every tile showed black.
+        switch AVCaptureDevice.authorizationStatus(for: .video) {
+        case .denied, .restricted:
+            return done("camera access is off — enable it in Settings")
+        case .notDetermined:
+            AVCaptureDevice.requestAccess(for: .video) { [weak self] granted in
+                self?.main {
+                    guard let self = self else { return }
+                    if granted { self.setCameraEnabled(enabled: true, done: done) }
+                    else { done("camera access is off — enable it in Settings") }
+                }
+            }
+            return
+        default:
+            break
+        }
+
         let devices = RTCCameraVideoCapturer.captureDevices()
         guard let device = devices.first(where: { $0.position == .front }) ?? devices.first else {
             return done("no camera on this device")
@@ -436,6 +468,14 @@ final class TalonRtcPeer: NSObject, NativeRtcPeer, RTCPeerConnectionDelegate {
                 self.pendingGather = nil
                 done(nil, "peer connection closed")
             }
+            // Drop the Kotlin lambdas. They capture the Kotlin adapter,
+            // which holds this peer — the documented Kotlin/Native
+            // cross-heap cycle the GC cannot collect. Left set, every
+            // 1:1 call leaked a peer and its Metal views, and a party
+            // line leaked one per remote speaker and per republish.
+            self.stateListener = nil
+            self.candidateListener = nil
+            self.videoListener = nil
             self.releaseAudioSession()
         }
     }
