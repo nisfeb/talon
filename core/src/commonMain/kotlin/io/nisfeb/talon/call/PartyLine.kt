@@ -150,7 +150,11 @@ class PartyLine(
 
     // Stream id -> link. "up" is our mic; the rest are the server's.
     private val downLinks = mutableMapOf<String, PeerLink>()
-    private var upLink: PeerLink? = null
+    // Volatile: assigned under [upLock] on an IO worker, but cleared
+    // OFF-lock by the revoke path and by teardown, so this is not a
+    // serialization guarantee. Read from the pump, the level poll and
+    // the UI thread (setCameraEnabled).
+    @Volatile private var upLink: PeerLink? = null
     // internal so tests can drive handle() with an abort for our own
     // up stream without going through a real join.
     internal var upId: String = ""
@@ -242,8 +246,9 @@ class PartyLine(
     // videoLinkFor) and collects their PeerLink.video.
     private val _cameraOn = MutableStateFlow(false)
     val cameraOn: StateFlow<Boolean> = _cameraOn.asStateFlow()
-    // The pinned speaker who gets full-resolution video; everyone else
-    // stays video-low so a big room's bandwidth and decode stay bounded.
+    // The pinned speaker who gets the focused tile. Local only today:
+    // see [setFocusedVideo] — no up link is labelled and none publishes
+    // simulcast, so "video-low" bounds nothing yet.
     private val _focusedVideo = MutableStateFlow<String?>(null)
     val focusedVideo: StateFlow<String?> = _focusedVideo.asStateFlow()
     // CONNECTIONS whose camera is ON right now, from explicit VIDEO_KIND
@@ -397,7 +402,7 @@ class PartyLine(
 
     /**
      * Register a per-speaker tap, padding the clip with silence up to
-     * now so every speaker shares t=0.
+     * where their audio starts so every speaker shares t=0.
      *
      * Re-entrant on purpose: an up-link republish or a ship rejoining on
      * a new stream re-taps a speaker we already hold audio for, so the
@@ -409,10 +414,19 @@ class PartyLine(
         link ?: return
         val clip = recClips.getOrPut(ship) { Clip() }
         clip.open = true
-        val rate = if (clip.rate > 0) clip.rate else recRate
-        val elapsedMs = (nowMs() - recStartMs).coerceAtLeast(0)
-        val wantBytes = ((rate.toLong() * elapsedMs / 1000L).toInt()) * 2
-        pad(clip.chunks, wantBytes - clip.chunks.sumOf { it.size })
+        // Only a clip that already holds audio is padded here: it is
+        // anchored to the timeline, so the gap since its last frame is
+        // real. A speaker we have nothing from yet is padded on their
+        // first frame instead (below) — tap() runs from onRemoteOffer,
+        // before answerTo and long before ICE connects, so measuring
+        // the lead here placed a mid-line joiner 0.5-3s early in both
+        // the mixdown and the transcript.
+        if (clip.chunks.isNotEmpty()) {
+            val rate = if (clip.rate > 0) clip.rate else recRate
+            val elapsedMs = (nowMs() - recStartMs).coerceAtLeast(0)
+            val wantBytes = ((rate.toLong() * elapsedMs / 1000L).toInt()) * 2
+            pad(clip.chunks, wantBytes - clip.chunks.sumOf { it.size })
+        }
         link.onPcm { pcm, r ->
             // Mute is the app's one hard privacy control, and both
             // platforms tap outside the send path — Android's sink sits
@@ -424,7 +438,21 @@ class PartyLine(
             clip.rate = r
             clip.frames++
             if (r > recRate) recRate = r
+            if (clip.chunks.isEmpty()) {
+                // The lead silence, measured where the speaker's audio
+                // actually starts and at this link's own rate.
+                val elapsedMs = (nowMs() - recStartMs).coerceAtLeast(0)
+                pad(clip.chunks, ((r.toLong() * elapsedMs / 1000L).toInt()) * 2)
+            }
             clip.chunks.add(pcm)
+        }
+        // stopRecording can land between our caller's check and this
+        // registration: it drops every sink and closes every clip
+        // before it reads, so the sink installed just above would
+        // append into an orphaned clip for the rest of the line.
+        if (!_recording.value) {
+            clip.open = false
+            link.onPcm(null)
         }
     }
 
@@ -539,12 +567,16 @@ class PartyLine(
     }
 
     /**
-     * Pin one speaker to full-resolution video; everyone else stays
-     * video-low. Null unpins (all low). Re-sends the Galène request
-     * keyed by the pinned stream — an SFU that keys requests by label
-     * rather than id simply keeps everyone low, which is the safe
-     * fallback. This is the conference scale control: bounded decode
-     * and bandwidth regardless of room size.
+     * Pin one speaker as the focused tile; null unpins.
+     *
+     * Local only today, despite the request this sends: Galène keys
+     * requests by stream *label*, every up offer Talon sends carries
+     * label "" (see [publishUp]), and no link publishes simulcast
+     * encodings — so "video" and "video-low" name the same track and
+     * the pin changes nothing on the wire. The request is still sent
+     * because an SFU that keys by id honours it, but do not read this
+     * as a bandwidth control: a big room decodes every stream at full
+     * size until up links are labelled and publish simulcast.
      */
     suspend fun setFocusedVideo(ship: String?) {
         _focusedVideo.value = ship
@@ -911,9 +943,11 @@ class PartyLine(
         }
 
         // Ask for everyone's audio, and camera where we can render it.
-        // video-low keeps non-focused tiles cheap (see setFocusedVideo);
-        // a platform with no video path (iOS) requests audio only so the
-        // SFU never offers it video m-lines it can't answer.
+        // video-low is the intent, not yet a saving: nobody publishes
+        // simulcast, so it resolves to whatever single encoding a peer
+        // sends (see setFocusedVideo). A platform with no video path
+        // requests audio only so the SFU never offers it video m-lines
+        // it can't answer.
         send(buildJsonObject {
             put("type", "request")
             putJsonObject("request") {
@@ -929,6 +963,11 @@ class PartyLine(
         // Publish our mic as one up stream — unless we're a listener,
         // whose whole contract is that no mic is ever captured.
         if (canSpeak) publishUp()
+        // Not left to publishUp: a listener stands up no up link, and
+        // the poll is the only thing that ever fills the speaking set,
+        // so their roster showed nobody talking for the whole line.
+        // Idempotent, and teardown cancels it.
+        startLevelPolling()
         publishRoster()
     }
 
@@ -1005,6 +1044,14 @@ class PartyLine(
      *  publish doesn't claim to replace an id the server never saw. */
     private var upOffered = false
 
+    /** Serializes [publishUp]. Create/close/assign is three steps, and
+     *  the retry runs from scope.launch on multi-threaded IO: two
+     *  republishes overlapping left the loser's link assigned to
+     *  nobody and never closed, so Android's audio session never
+     *  refcounted down and the process stayed in
+     *  MODE_IN_COMMUNICATION for the rest of its life. */
+    private val upLock = Mutex()
+
     /**
      * Stand up (or re-stand) the mic's up link and offer it.
      *
@@ -1017,68 +1064,81 @@ class PartyLine(
      * is at least telling the truth.
      */
     private suspend fun publishUp() {
-        // The one guard that matters lives here, not at the call
-        // sites: a retry coroutine queued just before a revoke
-        // landed would otherwise stand up a capturing mic link
-        // while the bar says "Listening".
-        if (!canSpeak) return
-        // Create before close: the platforms refcount the shared audio
-        // session by live mic links, and a close-then-create republish
-        // transited zero — Android's last-one-out cleanup reset the
-        // user's speaker/Bluetooth route and audio mode mid-line.
-        // A fresh stream id per publish, naming the one it replaces.
-        // Re-offering a brand-new PeerConnection under the SAME id makes
-        // Galène hand the offer to the existing server-side conn, which
-        // keeps the dead connection's DTLS fingerprint — media never
-        // comes back, so every recovery left the mic dead while down
-        // links kept working: "I hear everyone, nobody hears me".
-        val previousUpId = if (upOffered) upId else ""
-        upId = "up-$connectionId-${Uuid.random()}"
-        val old = upLink
-        val up = links.create(sfuIce, sendAudio = true)
-        old?.close()
-        upLink = up
-        _upLink.value = up
-        startLevelPolling()
-        up.setMuted(muted)
-        // Carry an in-flight recording across the republish. The old
-        // link's tap died with it, so without this our own voice simply
-        // stops partway through the file while everyone else continues.
-        recSelfShip?.let { if (_recording.value) tap(up, it, isSelf = true) }
-        // Republish (flaky network) rebuilds the up link with the camera
-        // closed; restore it so our video doesn't silently vanish.
-        if (_cameraOn.value) scope.launch { up.setCameraEnabled(true) }
-        // Say our mute state before anyone renders us as live.
-        broadcastMuted()
-        upWatch?.cancel()
-        upWatch = scope.launch {
-            up.state.collect { st ->
-                if (upLink !== up) return@collect
-                upState = st
-                publishRoster()
-                if (st == MediaState.Live) upRetries = 3
-                if (st == MediaState.Failed && joined && upRetries > 0) {
-                    upRetries -= 1
-                    val wait = upRetryBaseMs * (3 - upRetries)
-                    Log.w(TAG, "up link failed; republishing in ${wait}ms ($upRetries left)")
-                    delay(wait)
-                    // A fresh coroutine: publishUp cancels this
-                    // collector, and a coroutine must not saw off the
-                    // branch it is sitting on. canSpeak re-checked:
-                    // a revoke during the backoff must win.
-                    if (upLink === up && joined && canSpeak) scope.launch { publishUp() }
+        upLock.withLock {
+            // The one guard that matters lives here, not at the call
+            // sites: a retry coroutine queued just before a revoke
+            // landed would otherwise stand up a capturing mic link
+            // while the bar says "Listening".
+            if (!canSpeak) return
+            // Create before close: the platforms refcount the shared audio
+            // session by live mic links, and a close-then-create republish
+            // transited zero — Android's last-one-out cleanup reset the
+            // user's speaker/Bluetooth route and audio mode mid-line.
+            // A fresh stream id per publish, naming the one it replaces.
+            // Re-offering a brand-new PeerConnection under the SAME id makes
+            // Galène hand the offer to the existing server-side conn, which
+            // keeps the dead connection's DTLS fingerprint — media never
+            // comes back, so every recovery left the mic dead while down
+            // links kept working: "I hear everyone, nobody hears me".
+            val previousUpId = if (upOffered) upId else ""
+            upId = "up-$connectionId-${Uuid.random()}"
+            val old = upLink
+            val up = links.create(sfuIce, sendAudio = true)
+            old?.close()
+            upLink = up
+            _upLink.value = up
+            startLevelPolling()
+            up.setMuted(muted)
+            // Carry an in-flight recording across the republish. The old
+            // link's tap died with it, so without this our own voice simply
+            // stops partway through the file while everyone else continues.
+            recSelfShip?.let { if (_recording.value) tap(up, it, isSelf = true) }
+            // Republish (flaky network) rebuilds the up link with the camera
+            // closed; restore it so our video doesn't silently vanish.
+            if (_cameraOn.value) scope.launch {
+                // A camera that won't reopen on the new link — held by
+                // another app, permission withdrawn since — would leave
+                // us flagged camera-on with nothing being sent: peers
+                // render a frameless tile and our own button is one tap
+                // out of phase.
+                if (!up.setCameraEnabled(true)) {
+                    _cameraOn.value = false
+                    refreshVideoOn()
+                    broadcastVideo()
                 }
             }
+            // Say our mute state before anyone renders us as live.
+            broadcastMuted()
+            upWatch?.cancel()
+            upWatch = scope.launch {
+                up.state.collect { st ->
+                    if (upLink !== up) return@collect
+                    upState = st
+                    publishRoster()
+                    if (st == MediaState.Live) upRetries = 3
+                    if (st == MediaState.Failed && joined && upRetries > 0) {
+                        upRetries -= 1
+                        val wait = upRetryBaseMs * (3 - upRetries)
+                        Log.w(TAG, "up link failed; republishing in ${wait}ms ($upRetries left)")
+                        delay(wait)
+                        // A fresh coroutine: publishUp cancels this
+                        // collector, and a coroutine must not saw off the
+                        // branch it is sitting on. canSpeak re-checked:
+                        // a revoke during the backoff must win.
+                        if (upLink === up && joined && canSpeak) scope.launch { publishUp() }
+                    }
+                }
+            }
+            up.onLocalCandidate { c -> scope.launch { sendIce(upId, c) } }
+            val sdp = up.offer()
+            upOffered = true
+            send(buildJsonObject {
+                put("type", "offer"); put("id", upId); put("label", "")
+                put("username", ourId); put("sdp", sdp)
+                // Tells Galène to delUpConn the corpse rather than keep it.
+                if (previousUpId.isNotEmpty()) put("replace", previousUpId)
+            })
         }
-        up.onLocalCandidate { c -> scope.launch { sendIce(upId, c) } }
-        val sdp = up.offer()
-        upOffered = true
-        send(buildJsonObject {
-            put("type", "offer"); put("id", upId); put("label", "")
-            put("username", ourId); put("sdp", sdp)
-            // Tells Galène to delUpConn the corpse rather than keep it.
-            if (previousUpId.isNotEmpty()) put("replace", previousUpId)
-        })
     }
 
     internal suspend fun onRemoteOffer(msg: JsonObject) {

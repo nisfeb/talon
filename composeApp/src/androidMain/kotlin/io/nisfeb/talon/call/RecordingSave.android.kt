@@ -25,12 +25,24 @@ actual suspend fun saveWavFile(bytes: ByteArray, name: String): String? =
                     put(MediaStore.Downloads.DISPLAY_NAME, "$safe.wav")
                     put(MediaStore.Downloads.MIME_TYPE, "audio/wav")
                     put(MediaStore.Downloads.RELATIVE_PATH, "${Environment.DIRECTORY_DOWNLOADS}/Talon")
+                    put(MediaStore.Downloads.IS_PENDING, 1)
                 }
                 val resolver = ctx.contentResolver
                 val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
                     ?: error("MediaStore insert returned null")
-                resolver.openOutputStream(uri).use { out ->
-                    out?.write(bytes) ?: error("no output stream")
+                try {
+                    resolver.openOutputStream(uri).use { out ->
+                        out?.write(bytes) ?: error("no output stream")
+                    }
+                    values.clear()
+                    values.put(MediaStore.Downloads.IS_PENDING, 0)
+                    resolver.update(uri, values, null, null)
+                } catch (t: Throwable) {
+                    // A write that dies partway (ENOSPC, volume yanked) would
+                    // otherwise leave a 0-byte WAV sitting in Downloads/Talon
+                    // while the dialog tells the user nothing was saved.
+                    runCatching { resolver.delete(uri, null, null) }
+                    throw t
                 }
                 "Downloads/Talon/$safe.wav"
             } else {

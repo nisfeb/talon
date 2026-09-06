@@ -2,6 +2,7 @@ package io.nisfeb.talon.ui
 
 import android.Manifest
 import android.content.pm.PackageManager
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.Composable
@@ -24,7 +25,19 @@ actual fun rememberCameraPermission(): CameraPermission {
     }
     val launcher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
-    ) { granted = it }
+    ) { result ->
+        granted = result
+        // After "Don't ask again" Android suppresses the dialog and
+        // answers false straight away, so without this the camera
+        // button is a silent no-op on every tap.
+        if (!result) {
+            Toast.makeText(
+                context,
+                "Camera permission denied — enable it in Settings",
+                Toast.LENGTH_SHORT,
+            ).show()
+        }
+    }
     return remember(granted) {
         object : CameraPermission {
             override val granted = granted

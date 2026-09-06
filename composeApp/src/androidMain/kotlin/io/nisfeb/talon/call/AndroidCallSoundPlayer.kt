@@ -49,23 +49,36 @@ class AndroidCallSoundPlayer : CallSoundPlayer {
             // started, stop it now that we are ringing in-app.
             runCatching { io.nisfeb.talon.notify.Ringer.stop() }
         }
-        loopThread = thread(isDaemon = true, name = "talon-ring") {
-            while (looping) {
-                writeOnce(pcm, stream) { looping }
+        // The loop condition is ownership, not just the flag: a thread
+        // stuck in AudioTrack.write outlives its 300ms join, and a
+        // shared flag would resurrect it when the next loop() sets
+        // `looping` back — two rings at once, which the glare path
+        // (Outgoing then Incoming in one step) reaches. start=false so
+        // loopThread is assigned before the body's first check.
+        val t = thread(isDaemon = true, name = "talon-ring", start = false) {
+            val self = Thread.currentThread()
+            while (looping && loopThread === self) {
+                writeOnce(pcm, stream) { looping && loopThread === self }
                 var slept = 0
-                while (looping && slept < gapMs) {
+                while (looping && loopThread === self && slept < gapMs) {
                     Thread.sleep(50)
                     slept += 50
                 }
             }
         }
+        loopThread = t
+        t.start()
     }
 
     override fun stopLoop() {
         io.nisfeb.talon.Notifications.inAppRinging = false
-        looping = false
-        loopThread?.let { runCatching { it.join(300) } }
+        // Null the thread before the flag: an orphan checks ownership,
+        // so it dies at its next check even if a new loop() has already
+        // set `looping` true again.
+        val t = loopThread
         loopThread = null
+        looping = false
+        t?.let { runCatching { it.join(300) } }
     }
 
     private fun writeOnce(

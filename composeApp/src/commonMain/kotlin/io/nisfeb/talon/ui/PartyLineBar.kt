@@ -53,7 +53,6 @@ import androidx.compose.ui.platform.LocalClipboardManager
 import io.nisfeb.talon.call.MediaState
 import io.nisfeb.talon.call.PartyLine
 import io.nisfeb.talon.call.PartyState
-import io.nisfeb.talon.call.ListenLink
 
 /**
  * The "who's on the line" strip, shown under a channel header while a
@@ -65,10 +64,6 @@ import io.nisfeb.talon.call.ListenLink
 fun PartyLineBar(
     party: PartyLine,
     modifier: Modifier = Modifier,
-    /** Non-null when this user may administer the line — the host, or
-     *  an admin of the group it belongs to. Null hides the listening
-     *  controls entirely rather than showing a disabled switch. */
-    admin: PartyLineAdmin? = null,
     /** Resolve a @p to whatever this reader calls that person. */
     nameFor: (String) -> String = { it },
     /** Microphone and speaker selection. Defaults to the no-op, which
@@ -111,21 +106,30 @@ fun PartyLineBar(
     val focused by party.focusedVideo.collectAsState()
     val videoScope = rememberCoroutineScope()
     val camera = rememberCameraPermission()
+    // setCameraEnabled's false is the only report that the camera never
+    // opened — no device, a refused permission, or no up link. Dropped,
+    // the button was inert: the tap did nothing and said nothing.
+    var cameraError by remember { mutableStateOf(false) }
     PartyLineBarContent(
         state = state,
-        admin = admin,
         modifier = modifier,
         onToggleMute = { party.setMuted(it) },
         onLeave = { party.leave() },
         partyVideoSupported = isPartyVideoSupported,
         cameraOn = cameraOn,
+        cameraError = cameraError,
         onToggleCamera = if (isPartyVideoSupported) {
             {
                 // Ask the first time; the tap that grants isn't the tap
                 // that opens the camera — how every gated control behaves.
                 // Read the live value, so a fast double-tap can't desync.
                 if (!camera.granted) camera.request()
-                else videoScope.launch { party.setCameraEnabled(!party.cameraOn.value) }
+                else videoScope.launch {
+                    val on = !party.cameraOn.value
+                    // A failed turn-off leaves nothing to warn about, and
+                    // a success clears the last failure's notice.
+                    cameraError = !party.setCameraEnabled(on) && on
+                }
             }
         } else {
             null
@@ -167,7 +171,6 @@ fun PartyLineBar(
 @Composable
 fun PartyLineBarContent(
     state: PartyState,
-    admin: PartyLineAdmin?,
     modifier: Modifier = Modifier,
     onToggleMute: (Boolean) -> Unit = {},
     onLeave: () -> Unit = {},
@@ -219,6 +222,10 @@ fun PartyLineBarContent(
      */
     onToggleCamera: (() -> Unit)? = null,
     cameraOn: Boolean = false,
+    /** The last attempt to open the camera failed. Worth a line of its
+     *  own: the toggle looks identical whether the camera opened or the
+     *  machine has no webcam at all. */
+    cameraError: Boolean = false,
     /** Video conference: render tiles in the full-screen view. */
     partyVideoSupported: Boolean = false,
     localVideoLink: io.nisfeb.talon.call.PeerLink? = null,
@@ -390,8 +397,23 @@ fun PartyLineBarContent(
                                 modifier = Modifier.padding(horizontal = 8.dp),
                             )
                         }
-                        if (onToggleCamera != null) {
-                            IconButton(onClick = onToggleCamera) {
+                        // A listener has no up link, so the camera never
+                        // opens — setCameraEnabled returns false before
+                        // it reaches a device.
+                        if (onToggleCamera != null && s.canSpeak) {
+                            IconButton(onClick = {
+                                // Turning the camera on blind broadcasts a
+                                // framing nobody here can see: the self
+                                // tile lives only in PartyVideoGrid, and
+                                // neither surface opens on its own.
+                                if (!cameraOn) {
+                                    if (immersive) fullScreen = true
+                                    else if (partyVideoSupported && headline == null) {
+                                        expanded = true
+                                    }
+                                }
+                                onToggleCamera()
+                            }) {
                                 Icon(
                                     if (cameraOn) Icons.Filled.Videocam
                                     else Icons.Filled.VideocamOff,
@@ -430,6 +452,16 @@ fun PartyLineBarContent(
                 PartyState.Idle -> {}
             }
         }
+    }
+    if (cameraError) {
+        Text(
+            "The camera wouldn't start — no camera, or permission refused.",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.error,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 2.dp),
+        )
     }
     if (state is PartyState.Live && expanded) {
         // Video conference tiles (desktop, and any non-immersive
@@ -471,9 +503,6 @@ fun PartyLineBarContent(
             )
         }
     }
-    if (state is PartyState.Live && admin != null) {
-        ListenControls(admin, state.listeners)
-    }
     }
     // Full-screen over everything, so it covers the chat regardless of
     // where the strip is mounted. onDismissRequest is the Android back
@@ -512,19 +541,6 @@ fun PartyLineBarContent(
         }
     }
 }
-
-/**
- * What an administrator can change about a live line. Kept as a small
- * bundle rather than plumbing a CallController down here, so the bar
- * stays a view over PartyLine.
- */
-data class PartyLineAdmin(
-    val listening: Boolean,
-    val link: ListenLink?,
-    val onSetListening: (Boolean) -> Unit,
-    val onShare: () -> Unit,
-    val onDismissLink: () -> Unit,
-)
 
 /**
  * The moment between tapping the party icon and the host's answer:
@@ -679,94 +695,6 @@ private fun Roster(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 4.dp),
                 )
-            }
-        }
-    }
-}
-
-@Composable
-private fun ListenControls(admin: PartyLineAdmin, listeners: Int) {
-    val clipboard = LocalClipboardManager.current
-    // Collapsed by default. This sits above the conversation on a
-    // phone, and a permanently-open panel with a switch, a URL and a
-    // caveat paragraph is most of the screen. Collapsed it is one row;
-    // the state that must never hide — the line being open — is
-    // already on the bar above.
-    var expanded by remember { mutableStateOf(false) }
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        color = MaterialTheme.colorScheme.surfaceVariant,
-    ) {
-        Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth().clickable { expanded = !expanded },
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    when {
-                        admin.listening && listeners > 0 -> "Open to listeners · $listeners"
-                        admin.listening -> "Open to listeners"
-                        else -> "Listen links off"
-                    },
-                    style = MaterialTheme.typography.bodySmall,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f),
-                )
-                Icon(
-                    if (expanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
-                    contentDescription = if (expanded) "Hide listen settings" else "Listen settings",
-                )
-            }
-            if (!expanded) return@Column
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    if (admin.listening) {
-                        "Anyone with the link can listen."
-                    } else {
-                        "Only group members can join."
-                    },
-                    style = MaterialTheme.typography.bodySmall,
-                    modifier = Modifier.weight(1f),
-                )
-                Switch(checked = admin.listening, onCheckedChange = admin.onSetListening)
-            }
-            if (admin.listening) {
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    val link = admin.link
-                    if (link == null) {
-                        TextButton(onClick = admin.onShare) { Text("Create listen link") }
-                    } else {
-                        Text(
-                            // The token is the credential; showing the
-                            // whole thing invites shoulder-surfing.
-                            link.url.substringBefore("?token="),
-                            style = MaterialTheme.typography.bodySmall,
-                            maxLines = 1,
-                            modifier = Modifier.weight(1f),
-                        )
-                        TextButton(onClick = {
-                            clipboard.setText(AnnotatedString(link.url))
-                        }) { Text("Copy") }
-                        TextButton(onClick = admin.onDismissLink) { Text("Done") }
-                    }
-                }
-                if (admin.link != null) {
-                    Text(
-                        "Expires on its own; it can't be revoked early.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
             }
         }
     }

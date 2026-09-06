@@ -74,6 +74,11 @@ fun RecordingResultDialog(
     // is only held here, so that lost it.
     var job by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
     var message by remember { mutableStateOf<String?>(null) }
+    // Where the transcript landed, which doubles as "already done".
+    // Publishing stayed enabled after it succeeded, so a second tap
+    // re-transcribed every clip through the paid provider and wrote
+    // the same Lattice slug again.
+    var publishedUrl by remember { mutableStateOf<String?>(null) }
     val stt = remember(sttConfig) { CallRecordingPublisher.sttFrom(sttConfig) }
     val canPublish = !rec.isEmpty && stt != null && shipUrl != null && cookie != null
     val whenLabel = remember { io.nisfeb.talon.util.formatMonthDayTime(io.nisfeb.talon.util.nowMs()) }
@@ -135,7 +140,7 @@ fun RecordingResultDialog(
         },
         confirmButton = {
             TextButton(
-                enabled = !busy && canPublish,
+                enabled = !busy && canPublish && publishedUrl == null,
                 onClick = {
                     busy = true
                     message = null
@@ -145,8 +150,11 @@ fun RecordingResultDialog(
                                 http, stt!!, shipUrl!!, ourShip, cookie!!,
                                 title, whenLabel, rec, nameFor,
                             )
-                        }.onSuccess { message = "Published to $it"; kept = true }
-                            .onFailure { message = "Publish failed: ${it.message ?: "error"}" }
+                        }.onSuccess {
+                            publishedUrl = it
+                            message = "Published to $it"
+                            kept = true
+                        }.onFailure { message = "Publish failed: ${it.message ?: "error"}" }
                         busy = false
                     }
                 },

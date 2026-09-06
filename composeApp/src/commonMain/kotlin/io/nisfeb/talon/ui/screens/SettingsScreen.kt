@@ -669,7 +669,10 @@ fun SettingsScreen(
                 Spacer(Modifier.height(8.dp))
                 FeatureToggleRow(
                     label = "Sync AI settings across devices",
-                    description = "Stores your provider, model, API keys, and toggles in %settings on the ship. The keys will be on the ship — only enable if you trust the ship.",
+                    description = "Stores your provider, model, toggles, and all three " +
+                        "API keys — chat, Whisper transcription, and Brave Search — in " +
+                        "%settings on the ship. The keys will be on the ship — only " +
+                        "enable if you trust the ship.",
                     enabled = aiState.syncEnabled,
                     onChange = { aiSettings.setSyncEnabled(it) },
                 )

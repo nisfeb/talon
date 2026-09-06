@@ -161,7 +161,6 @@ fun CallStrip(
                 muted = s.muted,
                 media = s.media,
             ),
-            admin = null,
             onToggleMute = { controller.setMuted(it) },
             onLeave = { controller.hangup() },
             nameFor = nameFor,
@@ -187,8 +186,7 @@ fun CallStrip(
         is CallUiState.Ended -> {
             PartyLineBarContent(
                 state = PartyState.Failed(s.peer, s.reason),
-                admin = null,
-                modifier = modifier,
+                    modifier = modifier,
                 nameFor = nameFor,
                 headline = "${nameFor(s.peer)} — ${s.reason}",
                 onDismiss = { controller.dismissEnded() },

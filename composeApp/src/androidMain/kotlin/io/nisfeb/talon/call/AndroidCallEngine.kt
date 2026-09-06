@@ -62,7 +62,11 @@ class AndroidCallEngine(
     private val _video = MutableStateFlow(VideoState())
     override val video: StateFlow<VideoState> = _video
 
-    /** The sendrecv video sender, created up-front with no track. */
+    /** The sendrecv video transceiver, created up-front with no track,
+     *  and the sender it carries. The transceiver is kept as well
+     *  because only it knows whether the m-line ended up negotiated in
+     *  a direction that sends — an open camera is not a send path. */
+    private var videoTransceiver: RtpTransceiver? = null
     private var videoSender: RtpSender? = null
     private val engineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val lastRemoteFrameMs = java.util.concurrent.atomic.AtomicLong(0)
@@ -153,15 +157,16 @@ class AndroidCallEngine(
         // setTrack, which needs no renegotiation — so trunk never
         // learns what video is. The cost is one extra m-line on every
         // call, which an audio-only peer simply rejects.
-        videoSender = runCatching {
+        videoTransceiver = runCatching {
             pc.addTransceiver(
                 MediaStreamTrack.MediaType.MEDIA_TYPE_VIDEO,
                 RtpTransceiver.RtpTransceiverInit(
                     RtpTransceiver.RtpTransceiverDirection.SEND_RECV,
                 ),
-            ).sender
+            )
         }.onFailure { Log.w(TAG, "no video transceiver; call stays audio-only", it) }
             .getOrNull()
+        videoSender = videoTransceiver?.sender
     }
 
     override suspend fun createOffer(): SessionDesc {
@@ -204,6 +209,12 @@ class AndroidCallEngine(
             return true
         }
         if (localVideo != null) return true
+        if (!canSendVideo()) {
+            // Opening it anyway would light the indicator, show a
+            // preview and set localOn while the far end saw nothing.
+            Log.w(TAG, "the peer negotiated no video send path")
+            return false
+        }
         return runCatching {
             val enumerator = Camera2Enumerator(appContext)
             val names = enumerator.deviceNames
@@ -236,6 +247,25 @@ class AndroidCallEngine(
         }
     }
 
+    /**
+     * Whether the negotiated video m-line actually carries our frames.
+     *
+     * A peer can answer recvonly, or reject the m-line outright and
+     * leave the transceiver with no mid at all; the sender then sends
+     * nowhere. Every read is caught because a closed call disposes the
+     * transceiver, and a disposed one throws rather than answering —
+     * which is the same answer anyway.
+     */
+    private fun canSendVideo(): Boolean = runCatching {
+        val tx = videoTransceiver ?: return@runCatching false
+        if (tx.mid.isNullOrEmpty()) return@runCatching false
+        // Null until the answer lands, and our own direction is
+        // sendrecv, so an offer still in flight is not a refusal.
+        val dir = tx.currentDirection ?: return@runCatching true
+        dir == RtpTransceiver.RtpTransceiverDirection.SEND_RECV ||
+            dir == RtpTransceiver.RtpTransceiverDirection.SEND_ONLY
+    }.getOrDefault(false)
+
     private fun releaseCamera() {
         runCatching { capturer?.dispose() }
         runCatching { surfaceHelper?.dispose() }
@@ -256,7 +286,8 @@ class AndroidCallEngine(
     }
 
     /**
-     * Re-point [videoSender] at the transceiver the offer negotiated.
+     * Re-point [videoTransceiver] and [videoSender] at the transceiver
+     * the offer negotiated.
      *
      * The constructor's addTransceiver only associates on the offering
      * side, so when answering our sender belonged to a second,
@@ -274,6 +305,7 @@ class AndroidCallEngine(
                 ?: videos.firstOrNull()
                 ?: return@runCatching
             target.direction = RtpTransceiver.RtpTransceiverDirection.SEND_RECV
+            videoTransceiver = target
             videoSender = target.sender
             // Carry over a camera that is already running.
             localVideo?.let { cam -> runCatching { target.sender.setTrack(cam, false) } }
@@ -398,14 +430,23 @@ internal object WebRtcFactory {
      * recording up link sets this while active and clears it after, so
      * it is null — and free — the rest of the time. Only one up link
      * captures a mic at once, so a single sink is enough.
+     *
+     * The tap is pre-APM: these are the AudioRecord buffers as they
+     * arrive, before the native echo canceller, noise suppressor and
+     * gain control touch them. So in a recording our own voice sits
+     * well below the remote clips, and another speaker in the room
+     * bleeds into our leg of it. libwebrtc's Android API offers no
+     * post-APM capture point, so this is the only mic tap there is.
      */
     @Volatile
     var micSink: ((pcm: ByteArray, sampleRate: Int) -> Unit)? = null
 
-    /** Downmix N-channel 16-bit LE PCM to mono, copying (the callback
-     *  buffer is reused). Mic is normally mono, so the fast path copies. */
+    /** Downmix N-channel 16-bit LE PCM to mono. WebRtcAudioRecord builds
+     *  a fresh array per 10ms frame, so unlike the down link's reused
+     *  ByteBuffer there is nothing to defend against: the mic is normally
+     *  mono and that path hands the buffer straight on. */
     private fun toMono(data: ByteArray, channels: Int): ByteArray {
-        if (channels <= 1) return data.copyOf()
+        if (channels <= 1) return data
         val frames = data.size / (channels * 2)
         val out = ByteArray(frames * 2)
         for (f in 0 until frames) {

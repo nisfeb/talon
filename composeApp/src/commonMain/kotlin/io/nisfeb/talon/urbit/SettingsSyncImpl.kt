@@ -725,8 +725,13 @@ class SettingsSyncImpl(
                     // Brave key rides the same opt-in gate as the LLM key —
                     // both are service credentials; same don't-ship-empty rule.
                     if (cfg.braveApiKey.isNotBlank()) put("braveApiKey", cfg.braveApiKey)
-                    // STT key rides the same opt-in gate; same don't-ship-empty rule.
-                    if (cfg.sttApiKey.isNotBlank()) put("sttApiKey", cfg.sttApiKey)
+                    // STT key rides the same opt-in gate, but ships even when
+                    // blank: it landed with the not-blank guard on both sides
+                    // in one release, so no ship entry was ever seeded with
+                    // sttApiKey:"" the way apiKey was. Omitting it would make
+                    // removing the key device-local — the peer keeps its copy
+                    // and re-delivers it on its next push of any AI setting.
+                    put("sttApiKey", cfg.sttApiKey)
                 }
                 put("catchMeUpEnabled", cfg.catchMeUpEnabled)
                 put("dailyDigestEnabled", cfg.dailyDigestEnabled)
@@ -962,7 +967,12 @@ class SettingsSyncImpl(
                     baseUrl = obj["baseUrl"].asStr(),
                     // Same "only overwrite when present and non-empty" guard.
                     braveApiKey = obj["braveApiKey"].asStr()?.takeIf { it.isNotBlank() } ?: current.braveApiKey,
-                    sttApiKey = obj["sttApiKey"].asStr()?.takeIf { it.isNotBlank() } ?: current.sttApiKey,
+                    // Unlike apiKey, present-but-empty here means the user
+                    // cleared the key on a peer — nothing ever seeded
+                    // sttApiKey:"" — so adopt "" and let the removal
+                    // propagate. Absent still means a syncEnabled=false push
+                    // and keeps the local key.
+                    sttApiKey = obj["sttApiKey"].asStr() ?: current.sttApiKey,
                 )
             } else features
         } else features

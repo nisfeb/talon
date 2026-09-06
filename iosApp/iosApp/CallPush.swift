@@ -104,18 +104,38 @@ class AppDelegate: NSObject, UIApplicationDelegate, PKPushRegistryDelegate, CXPr
             return
         }
 
-        let uuid = UUID()
-        uuidToCallId[uuid] = callId
-        callIdToUuid[callId] = uuid
-
         let update = CXCallUpdate()
         update.remoteHandle = CXHandle(type: .generic, value: from)
         update.hasVideo = false
         update.localizedCallerName = from
 
+        // A duplicate delivery of the same ring must reuse the UUID we
+        // already rang with. Minting a fresh one overwrites the mapping,
+        // and the first CallKit call is then un-endable — no action on
+        // it maps back to a call id, so it rings on after the caller
+        // hangs up. Re-reporting the SAME UUID still satisfies the
+        // every-push contract; CallKit rejects it as already-existing
+        // and the live ring is left alone.
+        if let existing = callIdToUuid[callId] {
+            provider.reportNewIncomingCall(with: existing, update: update) { _ in
+                completion()
+            }
+            return
+        }
+
+        let uuid = UUID()
+        uuidToCallId[uuid] = callId
+        callIdToUuid[callId] = uuid
+
         // MUST happen before completion() — this is the report Apple
-        // requires for every VoIP push.
-        provider.reportNewIncomingCall(with: uuid, update: update) { _ in
+        // requires for every VoIP push. A report CallKit refuses (Do Not
+        // Disturb, a call already up elsewhere) rings nothing, so drop
+        // the mapping too rather than leave an entry no answer or end
+        // action will ever clear.
+        provider.reportNewIncomingCall(with: uuid, update: update) { error in
+            if error != nil {
+                self.forget(uuid)
+            }
             completion()
         }
     }

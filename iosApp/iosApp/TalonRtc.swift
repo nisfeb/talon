@@ -62,7 +62,10 @@ final class TalonRtcPeer: NSObject, NativeRtcPeer, RTCPeerConnectionDelegate {
     private var capturer: RTCCameraVideoCapturer?
     private var localVideoTrack: RTCVideoTrack?
     /// Which camera is live, so switchCamera knows what to flip to.
-    /// Starts front — the default setCameraEnabled picks.
+    /// Both open paths derive it from the device they actually got: a
+    /// front lookup falls back to whatever camera exists, and leaving
+    /// it stale meant that after back, off, on, the first flip
+    /// restarted capture on the camera already running.
     private var usingFront = true
     private var remoteVideoTrack: RTCVideoTrack?
     private var videoListener: ((VideoState) -> Void)?
@@ -336,7 +339,7 @@ final class TalonRtcPeer: NSObject, NativeRtcPeer, RTCPeerConnectionDelegate {
             // Restart the same capturer on the other device; the track,
             // sender and view stay put and keep receiving frames.
             cap.startCapture(with: device, format: format, fps: fps) { [weak self] err in
-                self?.main { if err == nil { self?.usingFront = wantFront } }
+                self?.main { if err == nil { self?.usingFront = device.position == .front } }
             }
         }
     }
@@ -433,6 +436,7 @@ final class TalonRtcPeer: NSObject, NativeRtcPeer, RTCPeerConnectionDelegate {
                 sender.track = track
                 self.capturer = cap
                 self.localVideoTrack = track
+                self.usingFront = device.position == .front
                 self.publishVideo(local: true, remote: self.videoState.remoteOn)
                 done(nil)
             }

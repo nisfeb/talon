@@ -89,10 +89,16 @@ internal fun VideoTile(
     // the track: a down link always carries an empty video transceiver,
     // so track presence would light every tile up as "on".
     val on = videoOn
+    // Square rather than 4:3, because the mobile renderers aspect-FILL:
+    // a landscape tile showed only the middle 56% of a phone's portrait
+    // frame, a band across the speaker's face. A square costs a landscape
+    // camera a modest side crop and gives portrait video most of its
+    // height back. The other half of the fix — per-platform scaling — has
+    // to happen in the VideoSurface actuals.
     Box(
         Modifier
             .fillMaxWidth()
-            .aspectRatio(4f / 3f)
+            .aspectRatio(1f)
             .clip(RoundedCornerShape(10.dp))
             .background(MaterialTheme.colorScheme.surfaceVariant)
             .then(if (onTap != null) Modifier.clickable(onClick = onTap) else Modifier),

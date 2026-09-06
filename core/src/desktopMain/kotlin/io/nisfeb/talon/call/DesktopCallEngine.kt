@@ -90,7 +90,12 @@ class DesktopCallEngine(configuredIce: List<IceServer> = emptyList()) : CallEngi
         object : PeerConnectionObserver {
             override fun onIceCandidate(candidate: RTCIceCandidate?) {
                 // Non-trickle: candidates accumulate into the local SDP.
-                Log.i("Trunk", "ice candidate: ${candidate?.sdp}")
+                // Type only, like the offer/answer candidate counts: the
+                // full candidate carries LAN and public IP:port, and
+                // talon.log is the file trunkline.md asks users to attach
+                // when they report a call problem.
+                val typ = candidate?.sdp?.substringAfter(" typ ", "?")?.substringBefore(' ')
+                Log.i("Trunk", "ice candidate: $typ")
             }
 
             override fun onTrack(transceiver: dev.onvoid.webrtc.RTCRtpTransceiver?) {

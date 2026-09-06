@@ -33,7 +33,6 @@ class PartyLineBarSizeTest {
     /** Render the bar at phone width and return its height in dp. */
     private fun barHeightDp(
         state: PartyState,
-        admin: PartyLineAdmin?,
     ): Int {
         val widthPx = (phoneWidthDp * density.density).toInt()
         val scene = ImageComposeScene(
@@ -49,7 +48,7 @@ class PartyLineBarSizeTest {
                         heightPx = it.size.height
                     },
                 ) {
-                    PartyLineBarContent(state = state, admin = admin)
+                    PartyLineBarContent(state = state)
                 }
             }
             scene.render()
@@ -73,34 +72,10 @@ class PartyLineBarSizeTest {
             media = MediaState.Live,
             listeners = 7,
         )
-        val height = barHeightDp(state, null)
-        println("bar height, 4 members + 7 listeners, no admin: ${height}dp")
+        val height = barHeightDp(state)
+        println("bar height, 4 members + 7 listeners: ${height}dp")
         // One row of controls plus padding. Two rows of text would push
         // this past ~80dp, which is what the second line used to cost.
         assertTrue(height in 1..80, "bar grew to ${height}dp at 360dp wide")
-    }
-
-    @Test
-    fun theAdminPanelIsCollapsedUntilAsked() {
-        val state = PartyState.Live(
-            room = "lounge",
-            members = listOf(PartyMember("a", "~sampel-palnet")),
-            muted = false,
-            media = MediaState.Live,
-            listeners = 3,
-        )
-        val admin = PartyLineAdmin(
-            listening = true,
-            link = ListenLink("lounge", "https://example.com/group/talon/x/?token=abc", 0L),
-            onSetListening = {},
-            onShare = {},
-            onDismissLink = {},
-        )
-        val height = barHeightDp(state, admin)
-        println("bar height with admin controls collapsed: ${height}dp")
-        // Collapsed, the admin row is one small line on top of the bar.
-        // Expanded it carries a switch, a URL row and a caveat — which
-        // is why it does not start expanded.
-        assertTrue(height in 1..120, "admin bar grew to ${height}dp at 360dp wide")
     }
 }

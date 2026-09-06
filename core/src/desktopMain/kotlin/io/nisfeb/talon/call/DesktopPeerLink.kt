@@ -57,7 +57,12 @@ class DesktopPeerLink(
 
     // Call recording (wire 7). remoteTrack is captured on onTrack so a
     // down link can be tapped; the callback + adapter sink are set by
-    // onPcm. atomic because onTrack fires on a native thread.
+    // onPcm. Volatile, and attachRec/detachRec are synchronized,
+    // because onTrack fires on a native thread while a Record press
+    // arrives on the app thread: unsynchronised the two could add two
+    // sinks to one track — that clip got every chunk twice and the
+    // orphan kept appending after stop — or miss the speaker entirely.
+    @kotlin.concurrent.Volatile
     private var remoteTrack: AudioTrack? = null
     private val pcmCb =
         kotlinx.atomicfu.atomic<((ByteArray, Int) -> Unit)?>(null)
@@ -280,7 +285,13 @@ class DesktopPeerLink(
         if (sink == null) detachRec() else attachRec()
     }
 
+    @Synchronized
     private fun attachRec() {
+        // A tap that lands after the hang-up would start a recorder
+        // close()'s detachRec has already run past: the mic stays open
+        // (OS indicator lit after leaving the line) with nothing left
+        // to stop it.
+        if (closed.value) return
         detachRec()
         val cb = pcmCb.value ?: return
         recFrames.value = 0
@@ -289,6 +300,14 @@ class DesktopPeerLink(
             // (a solo recording captured only silence), so tap the mic
             // with a standalone AudioRecorder. It's separate from the
             // peer connection, so it cannot affect the outgoing call.
+            //
+            // That also means the self clip is the raw capture device:
+            // no AEC, NS or AGC, unlike the outgoing track, which the
+            // peer connection processes. On laptop speakers the clip
+            // therefore carries every remote speaker's echo. webrtc-java
+            // 0.14.0 exposes no processed local tap, so there is nothing
+            // to switch to — known and accepted, not an oversight.
+            //
             // Follow the mic the call is on. Taking the first enumerated
             // device recorded the wrong input for anyone who had picked
             // a non-default one — silence, if that device isn't live.
@@ -299,14 +318,26 @@ class DesktopPeerLink(
             val device = runCatching {
                 pick(DesktopWebRtcFactory.audioDeviceModule().recordingDevices)
             }.getOrNull() ?: runCatching {
-                pick(dev.onvoid.webrtc.media.audio.AudioDeviceModule().recordingDevices)
+                // Built only to enumerate, so dispose it again: this
+                // fallback runs whenever the shared module is missing,
+                // and each leaked module is a live native object.
+                val adm = dev.onvoid.webrtc.media.audio.AudioDeviceModule()
+                try {
+                    pick(adm.recordingDevices)
+                } finally {
+                    runCatching { adm.dispose() }
+                }
             }.getOrNull()
             if (device == null) {
-                Log.w("PartyLine", "record tap: no recording device; mic not captured")
+                Log.w("PartyLine", "record tap: no recording device; self clip will be silent")
                 return
             }
-            runCatching {
-                val rec = dev.onvoid.webrtc.media.audio.AudioRecorder()
+            // Held outside the runCatching so a throw part-way through
+            // start() can still be stopped: start() builds and
+            // initialises the native module before it can fail, and
+            // stop() is the only thing that disposes it.
+            val rec = dev.onvoid.webrtc.media.audio.AudioRecorder()
+            val started = runCatching {
                 rec.setAudioDevice(device)
                 rec.setAudioSink(object : dev.onvoid.webrtc.media.audio.AudioSink {
                     // Arg order verified against webrtc-java 0.14.0:
@@ -339,14 +370,25 @@ class DesktopPeerLink(
                     }
                 })
                 rec.start()
-                micRecorder = rec
-                Log.i("PartyLine", "record tap: mic AudioRecorder started")
-            }.onFailure { Log.w("PartyLine", "record tap: mic recorder failed", it) }
+            }.onFailure {
+                runCatching { rec.stop() }
+                Log.w("PartyLine", "record tap: mic recorder failed; self clip will be silent", it)
+            }.isSuccess
+            if (!started) return
+            // The device opens slowly, so a hang-up can land inside
+            // start(): close() already ran detachRec, and assigning
+            // micRecorder now would leave the mic open for good.
+            if (closed.value) {
+                runCatching { rec.stop() }
+                return
+            }
+            micRecorder = rec
+            Log.i("PartyLine", "record tap: mic AudioRecorder started")
             return
         }
         // Down link: the remote speaker's decoded track sink DOES fire.
         val target = remoteTrack ?: run {
-            Log.w("PartyLine", "record tap: no remote track yet")
+            Log.w("PartyLine", "record tap: no remote track yet; nothing recorded for this speaker")
             return
         }
         val adapter = object : dev.onvoid.webrtc.media.audio.AudioTrackSink {
@@ -369,6 +411,7 @@ class DesktopPeerLink(
             .onFailure { Log.w("PartyLine", "could not tap remote for recording", it) }
     }
 
+    @Synchronized
     private fun detachRec() {
         micRecorder?.let {
             runCatching { it.stop() }
@@ -445,6 +488,10 @@ class DesktopPeerLink(
         // process-wide, and tearing it down while ICE gathering is
         // still running on a native thread is a use-after-free.
         if (!closed.compareAndSet(false, true)) return
+        // Drop the callback before the tap goes: a speaker's track can
+        // still arrive on a native thread after the hang-up, and
+        // onTrack starts a recorder whenever one is set.
+        pcmCb.value = null
         detachRec()
         runCatching { localVideo?.isEnabled = false }
         runCatching { cameraSource?.stop() }
@@ -456,6 +503,10 @@ class DesktopPeerLink(
         cameraSource = null
         localVideo = null
         remoteVideo = null
+        // A tile bound to this link has nothing else to recompose on:
+        // leaving remoteOn = true holds the last frame and its sink on
+        // screen until some unrelated state change moves it.
+        _video.value = VideoState()
         runCatching { micTrack?.isEnabled = false }
         runCatching { pc.close() }
         // Ours to free even when the source is a caller-owned
