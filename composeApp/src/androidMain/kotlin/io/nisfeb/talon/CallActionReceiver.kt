@@ -25,6 +25,12 @@ import kotlinx.coroutines.launch
 class CallActionReceiver : BroadcastReceiver() {
 
     override fun onReceive(context: Context, intent: Intent) {
+        // Mute and hang-up act on media the running app holds; the
+        // service's hook is the only way to it from here.
+        when (intent.action) {
+            ACTION_TOGGLE_MUTE -> { CallForegroundService.controls?.toggleMute?.invoke(); return }
+            ACTION_HANG_UP -> { CallForegroundService.controls?.hangUp?.invoke(); return }
+        }
         if (intent.action != ACTION_DECLINE) return
         val from = intent.getStringExtra(Notifications.EXTRA_ANSWER_FROM) ?: return
         val callId = intent.getStringExtra(Notifications.EXTRA_ANSWER_CALL_ID) ?: return
@@ -56,6 +62,8 @@ class CallActionReceiver : BroadcastReceiver() {
 
     companion object {
         const val ACTION_DECLINE = "io.nisfeb.talon.CALL_DECLINE"
+        const val ACTION_TOGGLE_MUTE = "io.nisfeb.talon.CALL_TOGGLE_MUTE"
+        const val ACTION_HANG_UP = "io.nisfeb.talon.CALL_HANG_UP"
         private const val TAG = "CallActionReceiver"
     }
 }

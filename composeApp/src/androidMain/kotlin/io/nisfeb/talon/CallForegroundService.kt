@@ -9,6 +9,7 @@ import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
+import androidx.core.app.Person
 import io.nisfeb.talon.util.Log
 
 /**
@@ -37,7 +38,8 @@ class CallForegroundService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val with = intent?.getStringExtra(EXTRA_WITH).orEmpty()
-        val notification = buildOngoing(with)
+        val muted = intent?.getBooleanExtra(EXTRA_MUTED, false) ?: false
+        val notification = buildOngoing(with, muted)
         runCatching {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 // Declaring only MICROPHONE let Android 14+ kill the
@@ -77,7 +79,16 @@ class CallForegroundService : Service() {
         return START_NOT_STICKY
     }
 
-    private fun buildOngoing(with: String): Notification {
+    /**
+     * The notification is also the call's controls outside the app —
+     * the shade and the lock screen — so it carries Mute and Hang up.
+     * On 12+ it is a CallStyle card, which the lock screen shows in
+     * full; below that, plain actions. Both go through
+     * [CallActionReceiver] to [controls], since only the running app
+     * holds the media. The label reflects [muted] as the host last
+     * told us; a toggle re-posts through [start] with the new truth.
+     */
+    private fun buildOngoing(with: String, muted: Boolean): Notification {
         val tapIntent = Intent(this, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
         }
@@ -85,27 +96,66 @@ class CallForegroundService : Service() {
             this, 0, tapIntent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
-        return NotificationCompat.Builder(this, Notifications.CHANNEL_CALL_ONGOING)
+        fun action(name: String, code: Int) = PendingIntent.getBroadcast(
+            this, code,
+            Intent(this, CallActionReceiver::class.java).apply { action = name },
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+        val toggleMute = action(CallActionReceiver.ACTION_TOGGLE_MUTE, 1)
+        val hangUp = action(CallActionReceiver.ACTION_HANG_UP, 2)
+        val muteLabel = if (muted) "Unmute" else "Mute"
+        val muteIcon = if (muted) {
+            android.R.drawable.ic_lock_silent_mode
+        } else {
+            android.R.drawable.ic_btn_speak_now
+        }
+        val title = if (with.isEmpty()) "On a party line" else "On a call with $with"
+        val builder = NotificationCompat.Builder(this, Notifications.CHANNEL_CALL_ONGOING)
             .setSmallIcon(android.R.drawable.stat_sys_speakerphone)
-            .setContentTitle(if (with.isEmpty()) "On a party line" else "On a call with $with")
-            .setContentText("Tap to return to Talon")
+            .setContentTitle(title)
+            .setContentText(if (muted) "Muted · tap to return to Talon" else "Tap to return to Talon")
             .setContentIntent(pending)
             .setOngoing(true)
             .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
             .setCategory(NotificationCompat.CATEGORY_CALL)
             .setPriority(NotificationCompat.PRIORITY_LOW)
-            .build()
+            // The whole point is reaching Mute from a locked phone.
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .addAction(muteIcon, muteLabel, toggleMute)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            builder.setStyle(
+                NotificationCompat.CallStyle.forOngoingCall(
+                    Person.Builder().setName(with.ifEmpty { "Party line" }).setImportant(true).build(),
+                    hangUp,
+                ),
+            )
+        } else {
+            builder.addAction(android.R.drawable.ic_menu_close_clear_cancel, "Hang up", hangUp)
+        }
+        return builder.build()
     }
+
+    /** What the notification's buttons do, set by the host while a
+     *  call or line is live. A receiver can't reach composition
+     *  state, so the host hands it these instead. */
+    class Controls(val toggleMute: () -> Unit, val hangUp: () -> Unit)
 
     companion object {
         private const val NOTIFICATION_ID = 101
         private const val EXTRA_WITH = "with"
+        private const val EXTRA_MUTED = "muted"
         private const val TAG = "CallForegroundService"
 
-        /** [with] is the peer for a 1:1 call, or empty for a line. */
-        fun start(context: Context, with: String) {
+        @Volatile
+        var controls: Controls? = null
+
+        /** [with] is the peer for a 1:1 call, or empty for a line.
+         *  Idempotent: calling again re-posts the notification, which
+         *  is how a title or mute change reaches the shade. */
+        fun start(context: Context, with: String, muted: Boolean = false) {
             val intent = Intent(context, CallForegroundService::class.java)
                 .putExtra(EXTRA_WITH, with)
+                .putExtra(EXTRA_MUTED, muted)
             runCatching {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                     context.startForegroundService(intent)

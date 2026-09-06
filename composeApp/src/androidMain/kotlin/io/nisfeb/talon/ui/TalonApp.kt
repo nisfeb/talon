@@ -312,13 +312,44 @@ fun TalonApp(
         // line's room is a Galène identifier, not something to put on
         // a lock screen.
         val onAirWith = (callState as? io.nisfeb.talon.call.CallUiState.Active)?.peer.orEmpty()
+        val onAirMuted = (callState as? io.nisfeb.talon.call.CallUiState.Active)?.muted
+            ?: (partyState as? io.nisfeb.talon.call.PartyState.Live)?.muted
+            ?: false
+        // The notification's Mute and Hang up need the live call or
+        // line, which only this composition holds. Hand the service a
+        // pair of closures for as long as we're on air.
+        androidx.compose.runtime.DisposableEffect(onAir, callController, partyLine) {
+            if (onAir) {
+                io.nisfeb.talon.CallForegroundService.controls =
+                    io.nisfeb.talon.CallForegroundService.Controls(
+                        toggleMute = {
+                            val cs = callController.state.value
+                            val ps = partyLine?.state?.value
+                            when {
+                                cs is io.nisfeb.talon.call.CallUiState.Active ->
+                                    callController.setMuted(!cs.muted)
+                                ps is io.nisfeb.talon.call.PartyState.Live ->
+                                    partyLine.setMuted(!ps.muted)
+                            }
+                        },
+                        hangUp = {
+                            if (callController.state.value is io.nisfeb.talon.call.CallUiState.None) {
+                                partyLine?.leave()
+                            } else {
+                                callController.hangup()
+                            }
+                        },
+                    )
+            }
+            onDispose { io.nisfeb.talon.CallForegroundService.controls = null }
+        }
         // Starting is keyed on the title too, so an outgoing call that
         // connects re-posts as "On a call with ~ship" instead of
         // keeping the placeholder for the length of the call. Stopping
         // is keyed only on onAir, so a title change updates the
         // notification without dropping the mic hold in between.
-        androidx.compose.runtime.LaunchedEffect(onAir, onAirWith) {
-            if (onAir) io.nisfeb.talon.CallForegroundService.start(context, onAirWith)
+        androidx.compose.runtime.LaunchedEffect(onAir, onAirWith, onAirMuted) {
+            if (onAir) io.nisfeb.talon.CallForegroundService.start(context, onAirWith, onAirMuted)
         }
         androidx.compose.runtime.DisposableEffect(onAir) {
             onDispose { if (onAir) io.nisfeb.talon.CallForegroundService.stop(context) }
