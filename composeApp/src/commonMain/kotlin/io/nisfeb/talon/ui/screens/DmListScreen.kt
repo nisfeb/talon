@@ -538,12 +538,18 @@ fun DmListScreen(
     // Reuse a singleton LazyListState so the user's scroll position in
     // the home list survives navigating into a chat and back out.
     val listState = snap.listState
-    val homeListState =
-        if (selectedFolderId == null && selectedSpecial == SpecialTab.All && selectedHomeTab == HomeTab.Dms) {
-            snap.dmListState
-        } else {
-            listState
+    // Leaving a tab remembers where it was; arriving restores it.
+    val switchHomeTab: (HomeTab) -> Unit = { tab ->
+        if (tab != selectedHomeTab) {
+            val here = listState.firstVisibleItemIndex to listState.firstVisibleItemScrollOffset
+            if (selectedHomeTab == HomeTab.Groups) snap.groupsScroll = here else snap.dmsScroll = here
+            selectedHomeTab = tab
         }
+    }
+    LaunchedEffect(selectedHomeTab) {
+        val (index, offset) = if (selectedHomeTab == HomeTab.Groups) snap.groupsScroll else snap.dmsScroll
+        runCatching { listState.scrollToItem(index, offset) }
+    }
 
     // Reveal-a-group from search. Re-keyed on homeRows so it settles
     // across the recompositions caused by switching to the All view
@@ -995,12 +1001,12 @@ fun DmListScreen(
             ) {
                 androidx.compose.material3.Tab(
                     selected = selectedHomeTab == HomeTab.Groups,
-                    onClick = { selectedHomeTab = HomeTab.Groups },
+                    onClick = { switchHomeTab(HomeTab.Groups) },
                     text = { Text(if (groupsUnread > 0) "Groups · $groupsUnread" else "Groups") },
                 )
                 androidx.compose.material3.Tab(
                     selected = selectedHomeTab == HomeTab.Dms,
-                    onClick = { selectedHomeTab = HomeTab.Dms },
+                    onClick = { switchHomeTab(HomeTab.Dms) },
                     text = { Text(if (dmsUnread > 0) "DMs · $dmsUnread" else "DMs") },
                 )
             }
@@ -1040,7 +1046,7 @@ fun DmListScreen(
                 .map { u -> u to rowsByWhom[u.whom] }
         }
         LazyColumn(
-            state = homeListState,
+            state = listState,
             contentPadding = PaddingValues(vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(0.dp),
         ) {
@@ -1479,9 +1485,9 @@ fun DmListScreen(
         if (selectedFolderId == null && selectedSpecial == SpecialTab.All) {
             UnreadOffscreenIndicators(
                 homeRows = visibleHomeRows,
-                listState = homeListState,
+                listState = listState,
                 onScrollTo = { idx ->
-                    scope.launch { homeListState.animateScrollToItem(idx) }
+                    scope.launch { listState.animateScrollToItem(idx) }
                 },
             )
         }
@@ -2652,10 +2658,13 @@ internal class ShipSnapshot {
     @Volatile var selectedSpecial: SpecialTab = SpecialTab.All
     @Volatile var initialTabApplied: Boolean = false
     @Volatile var selectedHomeTab: HomeTab = HomeTab.Groups
-    /** The DMs tab keeps its own place; groups keep [listState], which
-     *  the drag-reorder is bound to. */
-    val dmListState: androidx.compose.foundation.lazy.LazyListState =
-        androidx.compose.foundation.lazy.LazyListState()
+    /** Each tab's scroll position (first visible index, offset), saved
+     *  when leaving it and restored on return. One [listState] serves
+     *  both tabs: swapping list states under a live lazy list left its
+     *  placement animations stranded — groups drawn over each other —
+     *  and the reorder is bound to this one state anyway. */
+    @Volatile var groupsScroll: Pair<Int, Int> = 0 to 0
+    @Volatile var dmsScroll: Pair<Int, Int> = 0 to 0
     val listState: androidx.compose.foundation.lazy.LazyListState =
         androidx.compose.foundation.lazy.LazyListState()
 }
