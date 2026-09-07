@@ -39,23 +39,29 @@ object Bridge {
         )
 
         runBlocking {
-            runner.start(config, this)
+            runner.connect(config, this)
+            var asked = false
             runner.status
                 .map { s ->
                     when (s) {
                         is BridgeRunner.Status.Live -> "on the line with ${s.members.size}"
                         is BridgeRunner.Status.Failed -> "failed: ${s.why}"
+                        is BridgeRunner.Status.Connected -> s.error?.let { "failed: $it" } ?: "connected as ${s.ship}"
                         is BridgeRunner.Status.Busy -> s.what
                         BridgeRunner.Status.Idle -> "idle"
-                    } to (s as? BridgeRunner.Status.Failed)
+                    }
                 }
                 .distinctUntilChanged()
-                .collect { (text, failed) ->
-                    if (failed != null) {
-                        System.err.println("talon-bridge: ${failed.why}")
+                .collect { text ->
+                    if (text.startsWith("failed: ")) {
+                        System.err.println("talon-bridge: ${text.removePrefix("failed: ")}")
                         exitProcess(1)
                     }
                     Log.i(TAG, text)
+                    if (!asked && runner.status.value is BridgeRunner.Status.Connected) {
+                        asked = true
+                        runner.join(config.host, config.room)
+                    }
                 }
         }
     }

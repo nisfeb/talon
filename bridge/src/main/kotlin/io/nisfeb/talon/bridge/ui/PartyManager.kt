@@ -13,9 +13,14 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.MenuAnchorType
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
@@ -75,8 +80,8 @@ object PartyManager {
 }
 
 private data class Draft(val url: String, val code: String, val host: String, val room: String) {
-    val complete get() = url.isNotBlank() && code.isNotBlank() && host.isNotBlank() && room.isNotBlank()
-    val line get() = "${host.trim().ifBlank { "?" }}/${room.trim().ifBlank { "?" }}"
+    val canConnect get() = url.isNotBlank() && code.isNotBlank()
+    val savedLine get() = "${host.trim()}/${room.trim()}"
 
     fun toConfig() = Config(
         shipUrl = url.trim(),
@@ -136,6 +141,8 @@ private fun ManagerScreen(runner: BridgeRunner, configFile: File) {
     val scope = rememberCoroutineScope()
     var draft by remember { mutableStateOf(Draft.load(configFile)) }
     val status by runner.status.collectAsState()
+    val lines by runner.lines.collectAsState()
+    var pick by remember { mutableStateOf<BridgeRunner.LineInfo?>(null) }
     var board by remember { mutableStateOf(Board()) }
     var pulseError by remember { mutableStateOf<String?>(null) }
     var sounds by remember { mutableStateOf(clips()) }
@@ -174,9 +181,18 @@ private fun ManagerScreen(runner: BridgeRunner, configFile: File) {
     }
 
     LaunchedEffect(Unit) {
+        if (draft.canConnect) {
+            pulse { Pulse.ensureDevices() }
+            runner.connect(draft.toConfig(), scope)
+        }
         while (true) {
             refresh()
             delay(1_000)
+        }
+    }
+    LaunchedEffect(lines) {
+        if (pick == null || lines.none { it.key == pick?.key }) {
+            pick = lines.firstOrNull { it.key == draft.savedLine } ?: lines.firstOrNull()
         }
     }
 
@@ -184,19 +200,30 @@ private fun ManagerScreen(runner: BridgeRunner, configFile: File) {
         Modifier.fillMaxSize().padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        Header(status, draft, board)
+        Header(status, pick, board)
         Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
             Column(Modifier.width(360.dp).verticalScroll(rememberScrollState())) {
                 BridgeCard(
                     draft = draft,
                     status = status,
+                    lines = lines,
+                    pick = pick,
                     onDraft = { draft = it },
-                    onSave = { draft.save(configFile) },
-                    onStart = {
+                    onPick = { pick = it },
+                    onConnect = {
+                        draft.save(configFile)
                         pulse { Pulse.ensureDevices() }
-                        runner.start(draft.toConfig(), scope)
+                        runner.connect(draft.toConfig(), scope)
                     },
-                    onStop = { runner.stop() },
+                    onJoin = {
+                        pick?.let { l ->
+                            draft = draft.copy(host = l.host, room = l.name)
+                            draft.save(configFile)
+                            runner.join(l.host, l.name)
+                        }
+                    },
+                    onLeave = { runner.leave() },
+                    onDisconnect = { runner.stop() },
                     onMute = { runner.setMuted(it) },
                 )
             }
@@ -249,7 +276,7 @@ private fun Pill(text: String, color: Color) {
 }
 
 @Composable
-private fun Header(status: BridgeRunner.Status, draft: Draft, board: Board) {
+private fun Header(status: BridgeRunner.Status, pick: BridgeRunner.LineInfo?, board: Board) {
     val cs = MaterialTheme.colorScheme
     val live = status as? BridgeRunner.Status.Live
     Card {
@@ -260,16 +287,20 @@ private fun Header(status: BridgeRunner.Status, draft: Draft, board: Board) {
         ) {
             Column(Modifier.weight(1f)) {
                 Text("Party line", style = MaterialTheme.typography.labelMedium)
-                Text(live?.title?.ifBlank { null } ?: draft.line, style = MaterialTheme.typography.titleLarge)
-                if (live != null && live.title.isNotBlank()) {
-                    Text("${live.host}/${live.room}", style = MaterialTheme.typography.bodySmall)
+                Text(
+                    live?.title?.ifBlank { null } ?: live?.let { "${it.host}/${it.room}" } ?: pick?.label ?: "none picked",
+                    style = MaterialTheme.typography.titleLarge,
+                )
+                (live?.let { "${it.host}/${it.room}" } ?: pick?.key)?.let {
+                    Text(it, style = MaterialTheme.typography.bodySmall)
                 }
             }
             when (status) {
                 is BridgeRunner.Status.Live -> Pill("Live · ${status.members.size} on the line", cs.primaryContainer)
                 is BridgeRunner.Status.Busy -> Pill(status.what, cs.tertiaryContainer)
+                is BridgeRunner.Status.Connected -> Pill("Off the line", cs.surfaceVariant)
                 is BridgeRunner.Status.Failed -> Pill("Failed", cs.errorContainer)
-                BridgeRunner.Status.Idle -> Pill("Off the line", cs.surfaceVariant)
+                BridgeRunner.Status.Idle -> Pill("Not connected", cs.surfaceVariant)
             }
             Column(Modifier.weight(1f)) {
                 Text("X Space", style = MaterialTheme.typography.labelMedium)
@@ -296,14 +327,48 @@ private fun Header(status: BridgeRunner.Status, draft: Draft, board: Board) {
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun LinePicker(lines: List<BridgeRunner.LineInfo>, pick: BridgeRunner.LineInfo?, onPick: (BridgeRunner.LineInfo) -> Unit) {
+    var open by remember { mutableStateOf(false) }
+    ExposedDropdownMenuBox(expanded = open, onExpandedChange = { open = it }) {
+        OutlinedTextField(
+            value = pick?.label ?: "",
+            onValueChange = {},
+            readOnly = true,
+            singleLine = true,
+            label = { Text("Party line") },
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = open) },
+            modifier = Modifier.fillMaxWidth().menuAnchor(MenuAnchorType.PrimaryNotEditable),
+        )
+        ExposedDropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            lines.forEach { l ->
+                DropdownMenuItem(
+                    text = {
+                        Column {
+                            Text(l.label)
+                            Text(l.key, style = MaterialTheme.typography.bodySmall)
+                        }
+                    },
+                    onClick = { onPick(l); open = false },
+                )
+            }
+        }
+    }
+}
+
 @Composable
 private fun BridgeCard(
     draft: Draft,
     status: BridgeRunner.Status,
+    lines: List<BridgeRunner.LineInfo>,
+    pick: BridgeRunner.LineInfo?,
     onDraft: (Draft) -> Unit,
-    onSave: () -> Unit,
-    onStart: () -> Unit,
-    onStop: () -> Unit,
+    onPick: (BridgeRunner.LineInfo) -> Unit,
+    onConnect: () -> Unit,
+    onJoin: () -> Unit,
+    onLeave: () -> Unit,
+    onDisconnect: () -> Unit,
     onMute: (Boolean) -> Unit,
 ) {
     val idle = status is BridgeRunner.Status.Idle || status is BridgeRunner.Status.Failed
@@ -311,7 +376,7 @@ private fun BridgeCard(
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("Bridge", style = MaterialTheme.typography.titleMedium)
             Text(
-                "The bridge joins the party line as your ship and carries audio between the line and this computer.",
+                "The bridge logs in as your ship, joins a party line you can reach, and carries audio between the line and this computer.",
                 style = MaterialTheme.typography.bodySmall,
             )
             OutlinedTextField(
@@ -323,26 +388,32 @@ private fun BridgeCard(
                 label = { Text("+code") }, singleLine = true, enabled = idle, modifier = Modifier.fillMaxWidth(),
                 visualTransformation = PasswordVisualTransformation(),
             )
-            OutlinedTextField(
-                draft.host, { onDraft(draft.copy(host = it)) },
-                label = { Text("Line host (~ship)") }, singleLine = true, enabled = idle, modifier = Modifier.fillMaxWidth(),
-            )
-            OutlinedTextField(
-                draft.room, { onDraft(draft.copy(room = it)) },
-                label = { Text("Room") }, singleLine = true, enabled = idle, modifier = Modifier.fillMaxWidth(),
-            )
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(onClick = onSave, enabled = idle) { Text("Save") }
-                if (idle) {
-                    Button(onClick = onStart, enabled = draft.complete) { Text("Join the line") }
-                } else {
-                    Button(onClick = onStop) { Text("Leave") }
-                }
-            }
             when (status) {
-                BridgeRunner.Status.Idle -> Text("Not on a line.", style = MaterialTheme.typography.bodyMedium)
-                is BridgeRunner.Status.Busy -> Text(status.what, style = MaterialTheme.typography.bodyMedium)
-                is BridgeRunner.Status.Failed -> Text(status.why, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium)
+                BridgeRunner.Status.Idle, is BridgeRunner.Status.Failed -> {
+                    Button(onClick = onConnect, enabled = draft.canConnect) { Text("Connect") }
+                    (status as? BridgeRunner.Status.Failed)?.let {
+                        Text(it.why, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium)
+                    }
+                }
+                is BridgeRunner.Status.Busy -> {
+                    Text(status.what, style = MaterialTheme.typography.bodyMedium)
+                    OutlinedButton(onClick = onDisconnect) { Text("Disconnect") }
+                }
+                is BridgeRunner.Status.Connected -> {
+                    Text("Connected as ${status.ship}", style = MaterialTheme.typography.bodyMedium)
+                    if (lines.isEmpty()) {
+                        Text("No party lines yet. Host one in Talon or get invited to one, and it shows up here.", style = MaterialTheme.typography.bodySmall)
+                    } else {
+                        LinePicker(lines, pick, onPick)
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(onClick = onJoin, enabled = pick != null) { Text("Join the line") }
+                        OutlinedButton(onClick = onDisconnect) { Text("Disconnect") }
+                    }
+                    status.error?.let {
+                        Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium)
+                    }
+                }
                 is BridgeRunner.Status.Live -> {
                     Text("On the line as ${status.ship}", style = MaterialTheme.typography.bodyMedium)
                     FilterChip(
@@ -350,6 +421,10 @@ private fun BridgeCard(
                         onClick = { onMute(!status.muted) },
                         label = { Text(if (status.muted) "Muted, tap to send audio" else "Sending audio to the line") },
                     )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(onClick = onLeave) { Text("Leave the line") }
+                        OutlinedButton(onClick = onDisconnect) { Text("Disconnect") }
+                    }
                     Text("${status.members.size} on the line", style = MaterialTheme.typography.labelLarge)
                     status.members.forEach { m ->
                         Text(

@@ -20,6 +20,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
@@ -33,6 +34,8 @@ class BridgeRunner {
     sealed interface Status {
         data object Idle : Status
         data class Busy(val what: String) : Status
+        /** Logged in with the lines loaded; [error] is the last failed join, if any. */
+        data class Connected(val ship: String, val error: String? = null) : Status
         data class Live(
             val ship: String,
             val host: String,
@@ -47,16 +50,32 @@ class BridgeRunner {
     private val _status = MutableStateFlow<Status>(Status.Idle)
     val status: StateFlow<Status> = _status.asStateFlow()
 
+    /** A party line we could ask for: hosted by us or invited to. */
+    data class LineInfo(val host: String, val name: String, val title: String) {
+        val key get() = "$host/$name"
+        val label get() = title.ifBlank { key }
+    }
+
+    private val _lines = MutableStateFlow<List<LineInfo>>(emptyList())
+    val lines: StateFlow<List<LineInfo>> = _lines.asStateFlow()
+
     private var line: PartyLine? = null
     private var controller: CallController? = null
     private var audio: BridgeAudio? = null
     private var job: Job? = null
 
-    fun start(config: Config, scope: CoroutineScope) {
+    private var scope: CoroutineScope? = null
+    private var ship: String = ""
+    private var deviceMode = false
+    private var playsFile = false
+
+    /** Logs in and loads the lines; [status] becomes [Status.Connected]. */
+    fun connect(config: Config, scope: CoroutineScope) {
         if (job?.isActive == true) return
+        this.scope = scope
         job = scope.launch {
             try {
-                run(config)
+                doConnect(config)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -66,10 +85,37 @@ class BridgeRunner {
         }
     }
 
+    /** Asks [host] for [room]; needs [Status.Connected]. */
+    fun join(host: String, room: String) {
+        val scope = scope ?: return
+        if (_status.value !is Status.Connected) return
+        job = scope.launch {
+            try {
+                doJoin(host, room)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _status.value = Status.Connected(ship, e.message ?: e.toString())
+            }
+        }
+    }
+
+    /** Leaves the line but stays logged in. */
+    fun leave() {
+        job?.cancel()
+        job = null
+        runCatching { line?.leave() }
+        if (ship.isNotEmpty()) _status.value = Status.Connected(ship)
+    }
+
     fun stop() {
         job?.cancel()
         job = null
+        linesJob?.cancel()
+        linesJob = null
         teardown()
+        ship = ""
+        _lines.value = emptyList()
         _status.value = Status.Idle
     }
 
@@ -77,9 +123,12 @@ class BridgeRunner {
         line?.setMuted(muted)
     }
 
-    private suspend fun run(config: Config) {
+    private var linesJob: Job? = null
+
+    private suspend fun doConnect(config: Config) {
         _status.value = Status.Busy("starting")
-        val deviceMode = config.audioIn != null || config.audioOut != null
+        deviceMode = config.audioIn != null || config.audioOut != null
+        playsFile = config.play != null
         val audio = if (deviceMode) {
             null
         } else {
@@ -105,6 +154,7 @@ class BridgeRunner {
             teardown()
             return
         }
+        this.ship = ship
         Log.i(TAG, "logged in as $ship")
 
         controller.onTicket = { host, ticket ->
@@ -112,49 +162,60 @@ class BridgeRunner {
             line.setTopic(controller.lineFor(host, ticket.name)?.title.orEmpty())
             line.join(ticket, ship)
         }
-        controller.onDenied = { name, why -> fail("$name refused us a line: $why") }
+        controller.onDenied = { name, why -> _status.value = Status.Connected(ship, "$name refused us a line: $why") }
         controller.start()
+
+        linesJob = scope?.launch {
+            combine(controller.rooms, controller.invites) { rooms, invites ->
+                (rooms.map { (key, r) -> LineInfo(key.substringBefore('/'), r.name, r.title) } +
+                    invites.values.map { LineInfo(it.host, it.name, it.title) })
+                    .distinctBy { it.key }
+                    .sortedBy { it.label.lowercase() }
+            }.collect { _lines.value = it }
+        }
 
         // Ask only once the calls subscription is live: as our own host
         // the grant comes back within a millisecond, and a fact with no
         // subscriber yet is simply dropped.
         withTimeoutOrNull(30_000) {
             controller.connected.first { it }
-        } ?: Log.w(TAG, "the calls subscription never came up; asking anyway")
+        } ?: Log.w(TAG, "the calls subscription never came up")
+        _status.value = Status.Connected(ship)
+    }
 
-        _status.value = Status.Busy("asking ${config.host} for ${config.room}")
-        Log.i(TAG, "asking ${config.host} for ${config.room}")
-        controller.joinRoom(config.host, config.room)
+    private suspend fun doJoin(host: String, room: String) {
+        val controller = controller ?: return
+        val line = line ?: return
+        _status.value = Status.Busy("asking $host for $room")
+        Log.i(TAG, "asking $host for $room")
+        controller.joinRoom(host, room)
 
         val live = withTimeoutOrNull(JOIN_TIMEOUT_MS) {
             while (line.state.value !is PartyState.Live) {
                 (line.state.value as? PartyState.Failed)?.let {
-                    fail("could not join: ${it.why}")
+                    _status.value = Status.Connected(ship, "could not join: ${it.why}")
                     return@withTimeoutOrNull false
                 }
-                if (_status.value is Status.Failed) return@withTimeoutOrNull false
+                if (_status.value !is Status.Busy) return@withTimeoutOrNull false
                 delay(200)
             }
             true
         }
         if (live == null) {
-            fail("no answer from ${config.host} within ${JOIN_TIMEOUT_MS / 1000}s — is our ship in the group?")
+            _status.value = Status.Connected(ship, "no answer from $host within ${JOIN_TIMEOUT_MS / 1000}s — is our ship in the group?")
         }
-        if (live != true) {
-            teardown()
-            return
-        }
-        if (deviceMode || config.play != null) line.setMuted(false)
+        if (live != true) return
+        if (deviceMode || playsFile) line.setMuted(false)
         Log.i(TAG, "on the line")
 
         line.state.collect { s ->
             _status.value = when (s) {
                 is PartyState.Live -> Status.Live(
-                    ship, config.host, config.room,
-                    controller.lineFor(config.host, config.room)?.title.orEmpty(),
+                    ship, host, room,
+                    controller.lineFor(host, room)?.title.orEmpty(),
                     s.members, s.muted,
                 )
-                is PartyState.Failed -> Status.Failed(s.why)
+                is PartyState.Failed -> Status.Connected(ship, s.why)
                 else -> Status.Busy("reconnecting")
             }
         }
