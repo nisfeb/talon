@@ -102,13 +102,16 @@ abstract class MessageDao {
     """)
     abstract suspend fun latestAnyFor(whom: String, count: Int): List<MessageEntity>
 
-    /** Wall-clock of the newest non-deleted message across a set of
-     *  conversations — drives the "active Nm ago" liveness line on a
-     *  group's home-list row (its channels as [whoms]). Null when none
+    /** Wall-clock of the newest non-deleted top-level message across a
+     *  set of conversations — drives the "active Nm ago" liveness line
+     *  on a group's home-list row (its channels as [whoms]). Top-level
+     *  only so it agrees with the "Most recent" ordering, which sorts
+     *  by [conversationLatest]; counting replies here put a group
+     *  labelled "1h ago" below one labelled "12h ago". Null when none
      *  have any message. */
     @Query("""
         SELECT MAX(sentMs) FROM messages
-        WHERE whom IN (:whoms) AND isDeleted = 0
+        WHERE whom IN (:whoms) AND isDeleted = 0 AND parentId IS NULL
     """)
     abstract fun streamLatestSentMsAcross(whoms: List<String>): Flow<Long?>
 
