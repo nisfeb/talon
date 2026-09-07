@@ -51,6 +51,7 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -387,7 +388,7 @@ fun DmChatScreen(
     // for the chat they're already in (hasAnchored is already true from
     // the initial bottom-snap). Keyed on whom so a chat switch resets.
     var lastAppliedAnchor by remember(whom) { mutableStateOf<String?>(null) }
-    LaunchedEffect(displayRows.size, initialScrollMessageId) {
+    LaunchedEffect(displayRows.size, initialScrollMessageId, dividerResolved) {
         if (displayRows.isEmpty()) return@LaunchedEffect
         if (initialScrollMessageId != null && initialScrollMessageId != lastAppliedAnchor) {
             val originalIdx = displayRows.indexOfFirst { item ->
@@ -403,7 +404,27 @@ fun DmChatScreen(
             }
         }
         if (!hasAnchored) {
-            listState.scrollToItem(0)
+            // Wait for the first-unread lookup so the "New" divider, if
+            // there is one, is already in displayRows. A fresh list sits
+            // at the bottom in the meantime, which is also where a
+            // caught-up chat belongs.
+            if (!dividerResolved) return@LaunchedEffect
+            val dividerIdx = displayRows.indexOfFirst { it is ChatListItem.UnreadDivider }
+            if (dividerIdx >= 0) {
+                // Land with the divider at the top of the viewport and
+                // the new messages reading down from it. Under
+                // reverseLayout scrollToItem puts the item at the bottom
+                // edge, so back off by the rest of the viewport (toward
+                // index 0, the newest).
+                listState.scrollToItem(displayRows.lastIndex - dividerIdx)
+                val info = listState.layoutInfo
+                val viewport = info.viewportEndOffset - info.viewportStartOffset
+                val dividerSize = info.visibleItemsInfo
+                    .firstOrNull { it.key == ChatListItem.UnreadDivider.key }?.size ?: 0
+                listState.scrollBy(-(viewport - dividerSize).toFloat())
+            } else {
+                listState.scrollToItem(0)
+            }
         }
         hasAnchored = true
     }
