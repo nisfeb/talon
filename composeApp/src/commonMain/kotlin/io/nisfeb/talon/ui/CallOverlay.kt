@@ -22,6 +22,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -323,6 +326,41 @@ private fun FullScreenRing(
     // white app — and since every device on a ship receives every ring,
     // that is a thing people see without having placed a call.
     Popup(alignment = Alignment.Center) {
+        // Phones ring the way a phone does: the whole screen. The
+        // card stays for desktop, where a window-filling ring would
+        // be absurd.
+        if (isImmersiveCallSupported) {
+            Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.surface) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .windowInsetsPadding(WindowInsets.safeDrawing),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    androidx.compose.foundation.layout.Spacer(Modifier.weight(1f))
+                    Icon(
+                        Icons.Filled.Call,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(56.dp),
+                    )
+                    Text(
+                        subtitle,
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 20.dp),
+                    )
+                    Text(
+                        title,
+                        style = MaterialTheme.typography.headlineLarge,
+                        modifier = Modifier.padding(top = 8.dp, start = 24.dp, end = 24.dp),
+                    )
+                    androidx.compose.foundation.layout.Spacer(Modifier.weight(1f))
+                    Box(Modifier.padding(bottom = 64.dp)) { actions() }
+                }
+            }
+            return@Popup
+        }
         Box(
             modifier = Modifier
                 .fillMaxSize()
