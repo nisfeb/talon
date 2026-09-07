@@ -5,6 +5,10 @@ import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Scaffold
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.layout.consumeWindowInsets
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -444,17 +448,6 @@ fun TalonApp(
     // full-screen overlays — and a live call must float its strip
     // there. Mirrors App.kt.
     val inlineCallUiShown = remember { mutableStateOf(false) }
-    callController?.let {
-        io.nisfeb.talon.ui.CallOverlay(
-            it,
-            nameFor = { ship -> contactMap.displayName(ship) },
-            audioDevices = androidAudioDevices,
-            // With the chat slot on screen the strip renders under its
-            // header, beside the party-line bar. Floating it as well
-            // would put the same call in two places.
-            stripShownInline = inlineCallUiShown.value,
-        )
-    }
     // A live party line whose chat slot is gone (back on the list, a
     // thread, settings…) still needs a surface — the mic can be live
     // and unmuted. Same floating container CallOverlay uses for its
@@ -1106,6 +1099,37 @@ fun TalonApp(
         io.nisfeb.talon.ui.LocalCiteResolver provides citeResolver,
         io.nisfeb.talon.ui.LocalCitationOpen provides openCitation,
         io.nisfeb.talon.ui.LocalDisplayName provides citeDisplayName,
+    ) {
+    // The floating 1:1 strip sits ABOVE the screen content, in a column,
+    // the way App.kt lays out its root slot. Emitted beside the Scaffold
+    // it was drawn first and covered, so a live call showed no bar until
+    // the chat slot rendered its inline one.
+    val rootCallUi = callController?.state?.collectAsState()?.value
+    val rootCallFloats = !inlineCallUiShown.value &&
+        (rootCallUi is io.nisfeb.talon.call.CallUiState.Active ||
+            rootCallUi is io.nisfeb.talon.call.CallUiState.Ended)
+    androidx.compose.foundation.layout.Column(Modifier.fillMaxSize()) {
+    androidx.compose.foundation.layout.Column(
+        Modifier.fillMaxWidth().then(
+            if (rootCallFloats) Modifier.windowInsetsPadding(WindowInsets.statusBars) else Modifier,
+        ),
+    ) {
+    callController?.let {
+        io.nisfeb.talon.ui.CallOverlay(
+            it,
+            nameFor = { ship -> contactMap.displayName(ship) },
+            audioDevices = androidAudioDevices,
+            // With the chat slot on screen the strip renders under its
+            // header, beside the party-line bar. Floating it as well
+            // would put the same call in two places.
+            stripShownInline = inlineCallUiShown.value,
+        )
+    }
+    }
+    androidx.compose.foundation.layout.Box(
+        Modifier.weight(1f).fillMaxWidth().then(
+            if (rootCallFloats) Modifier.consumeWindowInsets(WindowInsets.statusBars) else Modifier,
+        ),
     ) {
     Scaffold(contentWindowInsets = WindowInsets(0, 0, 0, 0)) { _ ->
         val mod = Modifier.fillMaxSize()
@@ -2216,6 +2240,8 @@ fun TalonApp(
             )
         }
         } // key(loggedInShip)
+    }
+    }
     }
     } // CompositionLocalProvider(LocalInlineMediaPlayer)
 }

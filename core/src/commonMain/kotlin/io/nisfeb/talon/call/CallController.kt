@@ -58,7 +58,15 @@ sealed interface CallUiState {
     data object None : CallUiState
     data class Outgoing(val peer: String) : CallUiState
     data class Incoming(val peer: String) : CallUiState
-    data class Active(val peer: String, val media: MediaState, val muted: Boolean) : CallUiState
+    data class Active(
+        val peer: String,
+        val media: MediaState,
+        val muted: Boolean,
+        /** When media first went live; 0 until then. The UI's timer
+         *  counts from here, not from whenever a strip happened to
+         *  compose. */
+        val connectedAtMs: Long = 0L,
+    ) : CallUiState
     data class Ended(val peer: String, val reason: String) : CallUiState
 }
 
@@ -1469,7 +1477,12 @@ class CallController(
                             Log.i(TAG, "Trunk metric: place→live ${nowMs() - tPlaced}ms")
                         }
                         val cur = _state.value
-                        if (cur is CallUiState.Active) _state.value = cur.copy(media = media)
+                        if (cur is CallUiState.Active) {
+                            _state.value = cur.copy(
+                                media = media,
+                                connectedAtMs = if (cur.connectedAtMs == 0L) nowMs() else cur.connectedAtMs,
+                            )
+                        }
                     }
                     MediaState.Failed -> {
                         // Before the call is Active, the offer/answer

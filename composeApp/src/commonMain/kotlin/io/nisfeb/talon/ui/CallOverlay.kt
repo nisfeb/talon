@@ -158,7 +158,15 @@ fun CallStrip(
             if (isVideoCallsSupported && engine != null && video.anyOn) {
                 CallVideoPane(engine, video, Modifier.fillMaxWidth())
             }
+            // Open the full screen once per call, from whichever strip
+            // composes first; a strip that recomposes elsewhere after a
+            // navigation must not reopen it.
+            val callId = controller.currentCallId
+            val autoOpen = remember(callId) {
+                callId?.takeIf { it != AutoOpenedCall.last }?.also { AutoOpenedCall.last = it }
+            }
             PartyLineBarContent(
+            autoOpenKey = autoOpen,
             state = PartyState.Live(
                 room = s.peer,
                 members = listOf(PartyMember(id = s.peer, ship = s.peer)),
@@ -171,7 +179,7 @@ fun CallStrip(
             audioDevices = audioDevices,
             // "1 on the line" is the wrong sentence for a phone call.
             headline = when (s.media) {
-                MediaState.Live -> "${nameFor(s.peer)} · ${liveDuration(s.media)}"
+                MediaState.Live -> "${nameFor(s.peer)} · ${liveDuration(s.connectedAtMs)}"
                 else -> "Connecting to ${nameFor(s.peer)}…"
             },
             cameraOn = video.localOn,
@@ -377,13 +385,15 @@ private fun RoundAction(
     }
 }
 
-/** Ticking mm:ss since this composable first saw Live. */
+/** The last call whose full screen was auto-opened. Process-wide on
+ *  purpose: strips come and go with navigation, the call does not. */
+private object AutoOpenedCall { var last: String? = null }
+
+/** Ticking mm:ss since the call's media went live. */
 @Composable
-private fun liveDuration(media: MediaState): String {
-    var startMs by remember { mutableLongStateOf(0L) }
+private fun liveDuration(startMs: Long): String {
     var now by remember { mutableLongStateOf(nowMs()) }
-    LaunchedEffect(media) {
-        if (media == MediaState.Live && startMs == 0L) startMs = nowMs()
+    LaunchedEffect(startMs) {
         while (true) {
             delay(1_000)
             now = nowMs()

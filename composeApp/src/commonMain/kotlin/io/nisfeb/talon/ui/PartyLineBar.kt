@@ -243,6 +243,9 @@ fun PartyLineBarContent(
     focusedShip: String? = null,
     onFocusVideo: (String?) -> Unit = {},
     onSwitchCamera: (() -> Unit)? = null,
+    /** A fresh non-null value opens the immersive full screen once:
+     *  a call that just connected lands there, not on a strip. */
+    autoOpenKey: Any? = null,
 ) {
     if (state is PartyState.Idle) return
     var expanded by remember { mutableStateOf(false) }
@@ -256,6 +259,7 @@ fun PartyLineBarContent(
     // controls, not an inline roster of one fabricated row. The 1:1
     // picture rides in through [videoPane].
     val immersive = isImmersiveCallSupported
+    LaunchedEffect(autoOpenKey) { if (autoOpenKey != null && immersive) fullScreen = true }
 
     // One node, not two siblings: the bar and the admin strip have to
     // stack vertically, and emitting them loose leaves that to whatever
