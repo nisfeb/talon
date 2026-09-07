@@ -23,6 +23,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.MenuAnchorType
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.darkColorScheme
@@ -120,6 +121,10 @@ private class Board(
     val capture: List<Pulse.Stream> = emptyList(),
     val hasDevices: Boolean = false,
     val ownWired: Boolean = false,
+    /** The bridge's playout: what the Space hears. */
+    val ownPlayback: Pulse.Stream? = null,
+    /** The bridge's capture: what the party hears from the Space. */
+    val ownCapture: Pulse.Stream? = null,
 ) {
     /** Capture streams whose microphone is the party: the Space apps. */
     val spaceStreams: List<Pulse.Stream> get() = capture.filter { it.target == Pulse.MIC_MONITOR }
@@ -165,11 +170,15 @@ private fun ManagerScreen(runner: BridgeRunner, configFile: File) {
                 val helpers = setOf("parec", "paplay")
                 fun Pulse.Stream.isApp() =
                     pid != ownPid && app !in helpers && !app.startsWith("Simultaneous output")
+                val playback = Pulse.playback()
+                val capture = Pulse.capture()
                 Board(
-                    playback = Pulse.playback().filter { it.isApp() },
-                    capture = Pulse.capture().filter { it.isApp() },
+                    playback = playback.filter { it.isApp() },
+                    capture = capture.filter { it.isApp() },
                     hasDevices = has,
                     ownWired = wired,
+                    ownPlayback = playback.firstOrNull { it.pid == ownPid },
+                    ownCapture = capture.firstOrNull { it.pid == ownPid },
                 )
             }
         }.onSuccess { board = it; pulseError = null }.onFailure { pulseError = it.message }
@@ -256,16 +265,19 @@ private fun ManagerScreen(runner: BridgeRunner, configFile: File) {
                                 .forEach { Pulse.movePlayback(it.index, Pulse.DEFAULT_SINK) }
                         }
                     },
+                    onToSpaceVolume = { v -> board.ownPlayback?.let { s -> pulse { Pulse.setPlaybackVolume(s.index, v) } } },
+                    onToPartyVolume = { v -> board.ownCapture?.let { s -> pulse { Pulse.setCaptureVolume(s.index, v) } } },
                 )
                 AppsCard(
                     board = board,
                     onMovePlayback = { s, sink -> pulse { Pulse.movePlayback(s.index, sink) } },
+                    onVolume = { s, v -> pulse { Pulse.setPlaybackVolume(s.index, v) } },
                 )
                 SoundboardCard(
                     sounds = sounds,
                     hasDevices = board.hasDevices,
                     playing = playing.size,
-                    onPlay = { f, sink -> playing += Pulse.play(f, sink) },
+                    onPlay = { f, sink, v -> playing += Pulse.play(f, sink, v) },
                     onStop = { playing.forEach { it.destroy() }; playing.clear() },
                 )
             }
@@ -443,6 +455,23 @@ private fun BridgeCard(
     }
 }
 
+/** 0–150 %: Pulse boosts above 100. Applies when the drag ends. */
+@Composable
+private fun VolumeSlider(percent: Int, enabled: Boolean = true, onSet: (Int) -> Unit) {
+    var v by remember(percent) { mutableStateOf(percent.toFloat()) }
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+        Slider(
+            value = v,
+            onValueChange = { v = it },
+            onValueChangeFinished = { onSet(v.toInt()) },
+            valueRange = 0f..150f,
+            enabled = enabled,
+            modifier = Modifier.width(180.dp),
+        )
+        Text("${v.toInt()}%", style = MaterialTheme.typography.labelMedium, modifier = Modifier.width(44.dp))
+    }
+}
+
 @Composable
 private fun Meter(meter: LevelMeter?, tick: Int) {
     val level by (meter?.level?.collectAsState() ?: remember { mutableStateOf(0f) })
@@ -472,6 +501,8 @@ private fun SpaceCard(
     onCreateDevices: () -> Unit,
     onSpaceApp: (Pulse.Stream) -> Unit,
     onUnwire: (Pulse.Stream) -> Unit,
+    onToSpaceVolume: (Int) -> Unit,
+    onToPartyVolume: (Int) -> Unit,
 ) {
     var toSpace by remember { mutableStateOf<LevelMeter?>(null) }
     var toParty by remember { mutableStateOf<LevelMeter?>(null) }
@@ -528,11 +559,14 @@ private fun SpaceCard(
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("Party → Space", Modifier.width(120.dp), style = MaterialTheme.typography.bodyMedium)
                 Column(Modifier.weight(1f)) { Meter(toSpace, tick) }
+                VolumeSlider(board.ownPlayback?.volume ?: 100, enabled = board.ownPlayback != null, onSet = onToSpaceVolume)
             }
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("Space → Party", Modifier.width(120.dp), style = MaterialTheme.typography.bodyMedium)
                 Column(Modifier.weight(1f)) { Meter(toParty, tick) }
+                VolumeSlider(board.ownCapture?.volume ?: 100, enabled = board.ownCapture != null, onSet = onToPartyVolume)
             }
+            Text("The sliders set how loud each direction is; they are the bridge's own stream levels.", style = MaterialTheme.typography.bodySmall)
             Text(
                 when {
                     !live -> "The bridge is off the line, so nothing flows yet. Join the line on the left."
@@ -556,12 +590,13 @@ private fun hears(target: String) = when (target) {
 private fun AppsCard(
     board: Board,
     onMovePlayback: (Pulse.Stream, String) -> Unit,
+    onVolume: (Pulse.Stream, Int) -> Unit,
 ) {
     Card {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("Apps playing audio", style = MaterialTheme.typography.titleMedium)
             Text(
-                "Send Spotify, a video, or anything else to the party, the Space, or both. Normal puts it back on your speakers.",
+                "Send Spotify, a video, or anything else to the party, the Space, or both. Normal puts it back on your speakers. The slider is that app's volume.",
                 style = MaterialTheme.typography.bodySmall,
             )
             if (board.playback.isEmpty()) Text("Nothing is playing audio.", style = MaterialTheme.typography.bodySmall)
@@ -571,6 +606,7 @@ private fun AppsCard(
                         Text(s.appName + if (s.corked) " (paused)" else "")
                         Text(hears(s.target), style = MaterialTheme.typography.bodySmall)
                     }
+                    VolumeSlider(s.volume) { onVolume(s, it) }
                     FilterChip(s.target == Pulse.SPACE, { onMovePlayback(s, Pulse.SPACE) }, { Text("Party") })
                     FilterChip(s.target == Pulse.MIC, { onMovePlayback(s, Pulse.MIC) }, { Text("Space") })
                     FilterChip(s.target == Pulse.BOTH, { onMovePlayback(s, Pulse.BOTH) }, { Text("Both") })
@@ -586,13 +622,16 @@ private fun SoundboardCard(
     sounds: List<File>,
     hasDevices: Boolean,
     playing: Int,
-    onPlay: (File, String) -> Unit,
+    onPlay: (File, String, Int) -> Unit,
     onStop: () -> Unit,
 ) {
+    var level by remember { mutableStateOf(100) }
     Card {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("Soundboard", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+                Text("Clip level", style = MaterialTheme.typography.labelMedium)
+                VolumeSlider(level) { level = it }
                 OutlinedButton(onClick = onStop, enabled = playing > 0) { Text("Stop all") }
             }
             Text(
@@ -604,9 +643,9 @@ private fun SoundboardCard(
             sounds.forEach { f ->
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text(f.nameWithoutExtension, modifier = Modifier.weight(1f))
-                    Button({ onPlay(f, Pulse.SPACE) }, enabled = hasDevices) { Text("Party") }
-                    Button({ onPlay(f, Pulse.MIC) }, enabled = hasDevices) { Text("Space") }
-                    Button({ onPlay(f, Pulse.BOTH) }, enabled = hasDevices) { Text("Both") }
+                    Button({ onPlay(f, Pulse.SPACE, level) }, enabled = hasDevices) { Text("Party") }
+                    Button({ onPlay(f, Pulse.MIC, level) }, enabled = hasDevices) { Text("Space") }
+                    Button({ onPlay(f, Pulse.BOTH, level) }, enabled = hasDevices) { Text("Both") }
                 }
             }
         }

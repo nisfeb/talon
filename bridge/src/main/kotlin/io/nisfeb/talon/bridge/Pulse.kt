@@ -35,7 +35,15 @@ object Pulse {
     data class Device(val index: Int, val name: String, val description: String)
 
     /** One playing (sink-input) or recording (source-output) stream. */
-    data class Stream(val index: Int, val app: String, val pid: Long?, val target: String, val corked: Boolean = false) {
+    data class Stream(
+        val index: Int,
+        val app: String,
+        val pid: Long?,
+        val target: String,
+        val corked: Boolean = false,
+        /** Stream volume in percent; Pulse allows above 100. */
+        val volume: Int = 100,
+    ) {
         /** Chromium names its capture "Brave input"; the app is Brave. */
         val appName: String get() = app.removeSuffix(" input")
 
@@ -73,6 +81,8 @@ object Pulse {
 
     fun movePlayback(index: Int, sink: String) { pactl("move-sink-input", "$index", sink) }
     fun moveCapture(index: Int, source: String) { pactl("move-source-output", "$index", source) }
+    fun setPlaybackVolume(index: Int, percent: Int) { pactl("set-sink-input-volume", "$index", "$percent%") }
+    fun setCaptureVolume(index: Int, percent: Int) { pactl("set-source-output-volume", "$index", "$percent%") }
 
     /**
      * Puts this process's own WebRTC streams where the bridge needs
@@ -87,9 +97,9 @@ object Pulse {
         return mine.isNotEmpty() && ours.isNotEmpty()
     }
 
-    /** Plays a wav/ogg/flac clip into [sink]; the process ends with the clip. */
-    fun play(file: File, sink: String): Process =
-        ProcessBuilder("paplay", "--device=$sink", file.path)
+    /** Plays a wav/ogg/flac clip into [sink] at [percent] volume; the process ends with the clip. */
+    fun play(file: File, sink: String, percent: Int = 100): Process =
+        ProcessBuilder("paplay", "--device=$sink", "--volume=${percent * 65536 / 100}", file.path)
             .redirectErrorStream(true)
             .redirectOutput(ProcessBuilder.Redirect.DISCARD)
             .start()
@@ -117,6 +127,9 @@ object Pulse {
                 pid = prop("application.process.id")?.toLongOrNull(),
                 target = names[dev] ?: dev?.toString() ?: "?",
                 corked = o["corked"]?.jsonPrimitive?.booleanOrNull ?: false,
+                volume = o["volume"]?.jsonObject?.values?.firstOrNull()?.jsonObject
+                    ?.get("value_percent")?.jsonPrimitive?.contentOrNull
+                    ?.removeSuffix("%")?.trim()?.toIntOrNull() ?: 100,
             )
         }
     }
