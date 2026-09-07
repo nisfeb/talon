@@ -1180,8 +1180,7 @@ private fun CallPolicySection(controller: io.nisfeb.talon.call.CallController) {
     val scope = rememberCoroutineScope()
     val allowOnly = current.mode == io.nisfeb.talon.call.CallPolicy.Mode.Allow
 
-    Spacer(Modifier.height(16.dp))
-    HorizontalDivider()
+    // First section of the Calls tab: no leading divider.
     Spacer(Modifier.height(8.dp))
     Column {
         Text("Who can call you", style = MaterialTheme.typography.titleMedium)
@@ -1624,11 +1623,15 @@ private fun HealthRow(
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.weight(1f),
         )
+        // Weighted too: an unweighted value measures first and a
+        // long one squeezed the label to one letter per line.
         Text(
             value,
             style = MaterialTheme.typography.bodySmall,
             color = if (highlight) MaterialTheme.colorScheme.error
                 else MaterialTheme.colorScheme.onSurface,
+            textAlign = androidx.compose.ui.text.style.TextAlign.End,
+            modifier = Modifier.weight(1f),
         )
     }
 }
