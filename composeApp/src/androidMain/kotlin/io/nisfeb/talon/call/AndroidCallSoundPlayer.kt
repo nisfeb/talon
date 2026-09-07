@@ -131,6 +131,21 @@ class AndroidCallSoundPlayer : CallSoundPlayer {
                 if (wrote <= 0) break
                 off += wrote
             }
+            // write() returns once the bytes are queued, not played.
+            // release() right after stop() tears the track down with
+            // whatever is still buffered unplayed — on a headset, whose
+            // output buffer is large, that was the whole second half of
+            // the incoming ring. Wait for the playback head to reach
+            // the end (or the caller to stop us) before letting go.
+            val totalFrames = off / 2
+            val deadline = System.currentTimeMillis() +
+                totalFrames * 1000L / CallSounds.SAMPLE_RATE + 500
+            while (keepGoing() &&
+                track!!.playbackHeadPosition < totalFrames &&
+                System.currentTimeMillis() < deadline
+            ) {
+                Thread.sleep(20)
+            }
         }.onFailure {
             Log.i(TAG, "could not play a tone: ${it.message}")
         }
