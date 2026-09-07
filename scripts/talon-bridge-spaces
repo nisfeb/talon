@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+# Run talon-bridge as the microphone and speaker of an X (Twitter)
+# Spaces client on this machine. See bridge/README.md, "Spaces".
+#
+# Creates two dedicated null sinks:
+#   TalonBridgeMic    — the bridge plays the party line here; in X, pick
+#                       "Monitor of TalonBridgeMic" as the microphone.
+#   TalonBridgeSpace  — X plays the Space here; the bridge captures its
+#                       monitor. In X (a browser tab), pick it as output.
+# Then steers the bridge's Java audio, which only sees the ALSA default
+# device, at them through PULSE_SINK / PULSE_SOURCE, and removes both
+# sinks on exit.
+#
+# Usage: scripts/talon-bridge-spaces [bridge.properties]
+set -euo pipefail
+
+cfg="${1:-$HOME/.config/talon/bridge.properties}"
+bin="$(dirname "$0")/../bridge/build/install/talon-bridge/bin/talon-bridge"
+[ -x "$bin" ] || { echo "build the bridge first: ./gradlew :bridge:installDist" >&2; exit 1; }
+command -v pactl >/dev/null || { echo "pactl not found; this script needs PulseAudio or PipeWire-Pulse" >&2; exit 1; }
+
+mods=()
+cleanup() { for m in "${mods[@]:-}"; do [ -n "$m" ] && pactl unload-module "$m" 2>/dev/null || true; done; }
+trap cleanup EXIT
+
+# Idempotent: reuse sinks a previous run left behind.
+sink_exists() { pactl list short sinks | awk '{print $2}' | grep -qx "$1"; }
+if ! sink_exists TalonBridgeMic; then
+  mods+=("$(pactl load-module module-null-sink sink_name=TalonBridgeMic sink_properties=device.description=TalonBridgeMic rate=48000 channels=1)")
+fi
+if ! sink_exists TalonBridgeSpace; then
+  mods+=("$(pactl load-module module-null-sink sink_name=TalonBridgeSpace sink_properties=device.description=TalonBridgeSpace rate=48000 channels=1)")
+fi
+
+echo "In X: microphone = 'Monitor of TalonBridgeMic', output = 'TalonBridgeSpace'."
+export PULSE_SINK=TalonBridgeMic
+export PULSE_SOURCE=TalonBridgeSpace.monitor
+export TALON_BRIDGE_AUDIO_IN="${TALON_BRIDGE_AUDIO_IN:-default}"
+export TALON_BRIDGE_AUDIO_OUT="${TALON_BRIDGE_AUDIO_OUT:-default}"
+exec "$bin" "$cfg"
