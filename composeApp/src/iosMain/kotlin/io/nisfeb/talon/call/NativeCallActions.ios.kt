@@ -86,8 +86,12 @@ internal object IosCallKitCalls {
             val kit = IosVoipBridge.callKit ?: return@collect
             when (s) {
                 is CallUiState.Outgoing -> {
-                    val id = controller.currentCallId ?: s.peer
-                    if (reported != id) {
+                    // Report once. The call id may not be set the instant
+                    // the state flips; reporting again when it arrives put
+                    // a second bar on the phone. Once reported, the same
+                    // call keeps its id even if currentCallId fills in.
+                    if (reported == null) {
+                        val id = controller.currentCallId ?: s.peer
                         kit.reportOutgoing(id, s.peer, nameFor(s.peer))
                         reported = id; outgoing = true; connected = false; lastMuted = null
                     }

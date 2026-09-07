@@ -1,11 +1,9 @@
-import AVFoundation
 import CallKit
 import ComposeApp
 import Foundation
 import Intents
 import PushKit
 import UIKit
-import WebRTC
 
 /// Native incoming-call ringing on iOS: PushKit wakes the app (even
 /// killed) on a VoIP push, and CallKit shows the system full-screen
@@ -219,15 +217,11 @@ class AppDelegate: NSObject, UIApplicationDelegate, PKPushRegistryDelegate, CXPr
         action.fulfill()
     }
 
-    // CallKit owns the audio session for a reported call; libwebrtc
-    // needs to hear about activation to start its audio unit under it.
-    func provider(_ provider: CXProvider, didActivate audioSession: AVAudioSession) {
-        RTCAudioSession.sharedInstance().audioSessionDidActivate(audioSession)
-    }
-
-    func provider(_ provider: CXProvider, didDeactivate audioSession: AVAudioSession) {
-        RTCAudioSession.sharedInstance().audioSessionDidDeactivate(audioSession)
-    }
+    // No didActivate/didDeactivate handoff on purpose: libwebrtc runs
+    // its own RTCAudioSession (not manual-audio), the way every
+    // working build has. Reporting the call to CallKit and letting
+    // WebRTC own the session is what worked; the handoff without
+    // useManualAudio left playout dead on a reported call.
 
     // MARK: - IosCallKit (reports from the Kotlin call stack)
 
