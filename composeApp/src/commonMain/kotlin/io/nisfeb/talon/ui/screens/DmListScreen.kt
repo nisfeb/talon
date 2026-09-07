@@ -346,6 +346,9 @@ fun DmListScreen(
     var initialTabApplied by remember {
         mutableStateOf(snap.initialTabApplied)
     }
+    var selectedHomeTab by remember {
+        mutableStateOf(snap.selectedHomeTab)
+    }
     LaunchedEffect(folders) {
         if (!initialTabApplied) {
             if (folders.isNotEmpty()) {
@@ -356,10 +359,11 @@ fun DmListScreen(
     }
     // Mirror every selection change back into the snapshot so the
     // next mount picks up where this one left off.
-    LaunchedEffect(selectedFolderId, selectedSpecial, initialTabApplied) {
+    LaunchedEffect(selectedFolderId, selectedSpecial, initialTabApplied, selectedHomeTab) {
         snap.selectedFolderId = selectedFolderId
         snap.selectedSpecial = selectedSpecial
         snap.initialTabApplied = initialTabApplied
+        snap.selectedHomeTab = selectedHomeTab
     }
     var folderSheetWhom by remember { mutableStateOf<String?>(null) }
     // Separate state for group-kind folder assignment — different write path.
@@ -489,6 +493,21 @@ fun DmListScreen(
     val effectiveGroupOrder = remember(homeRows) {
         homeRows.filterIsInstance<HomeRow.GroupHead>().map { it.flag }
     }
+    // The All view is two tabs, not two stacked sections. The tabs are
+    // the headers, so the rows lose theirs; everything else about the
+    // home list — ordering, expansion, reorder — is unchanged.
+    val visibleHomeRows = remember(homeRows, selectedHomeTab) {
+        when (selectedHomeTab) {
+            HomeTab.Groups -> homeRows.filter { it is HomeRow.GroupHead || it is HomeRow.GroupChild }
+            HomeTab.Dms -> homeRows.filterIsInstance<HomeRow.Flat>()
+        }
+    }
+    val groupsUnread = remember(homeRows) {
+        homeRows.filterIsInstance<HomeRow.GroupHead>().sumOf { it.totalUnread }
+    }
+    val dmsUnread = remember(homeRows) {
+        homeRows.filterIsInstance<HomeRow.Flat>().sumOf { it.unread }
+    }
 
     // Unread view rows — flat list of whoms with unread > 0, most recent
     // first. Derived from the same `rows` snapshot; empty when caught up.
@@ -519,6 +538,12 @@ fun DmListScreen(
     // Reuse a singleton LazyListState so the user's scroll position in
     // the home list survives navigating into a chat and back out.
     val listState = snap.listState
+    val homeListState =
+        if (selectedFolderId == null && selectedSpecial == SpecialTab.All && selectedHomeTab == HomeTab.Dms) {
+            snap.dmListState
+        } else {
+            listState
+        }
 
     // Reveal-a-group from search. Re-keyed on homeRows so it settles
     // across the recompositions caused by switching to the All view
@@ -528,9 +553,12 @@ fun DmListScreen(
     // default equality, so there's no re-run loop.
     androidx.compose.runtime.LaunchedEffect(revealGroupFlag, homeRows) {
         val flag = revealGroupFlag ?: return@LaunchedEffect
-        if (selectedFolderId != null || selectedSpecial != SpecialTab.All) {
+        if (selectedFolderId != null || selectedSpecial != SpecialTab.All ||
+            selectedHomeTab != HomeTab.Groups
+        ) {
             selectedFolderId = null
             selectedSpecial = SpecialTab.All
+            selectedHomeTab = HomeTab.Groups
             return@LaunchedEffect
         }
         expandedGroups = expandedGroups + flag
@@ -540,7 +568,7 @@ fun DmListScreen(
         // the list (not a member / not synced) — clear and give up.
         var idx = -1
         var count = 0
-        for (r in homeRows) {
+        for (r in visibleHomeRows) {
             when (r) {
                 is HomeRow.GroupHead -> {
                     if (r.flag == flag) { idx = count; break }
@@ -961,6 +989,22 @@ fun DmListScreen(
             onSpecialLongPress = { confirmMarkAllRead = true },
             onCreateNew = { creatingFolder = true },
         )
+        if (selectedFolderId == null && selectedSpecial == SpecialTab.All) {
+            androidx.compose.material3.TabRow(
+                selectedTabIndex = if (selectedHomeTab == HomeTab.Groups) 0 else 1,
+            ) {
+                androidx.compose.material3.Tab(
+                    selected = selectedHomeTab == HomeTab.Groups,
+                    onClick = { selectedHomeTab = HomeTab.Groups },
+                    text = { Text(if (groupsUnread > 0) "Groups · $groupsUnread" else "Groups") },
+                )
+                androidx.compose.material3.Tab(
+                    selected = selectedHomeTab == HomeTab.Dms,
+                    onClick = { selectedHomeTab = HomeTab.Dms },
+                    text = { Text(if (dmsUnread > 0) "DMs · $dmsUnread" else "DMs") },
+                )
+            }
+        }
         HorizontalDivider()
         UpdateBanner(
             status = updateStatus,
@@ -996,7 +1040,7 @@ fun DmListScreen(
                 .map { u -> u to rowsByWhom[u.whom] }
         }
         LazyColumn(
-            state = listState,
+            state = homeListState,
             contentPadding = PaddingValues(vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(0.dp),
         ) {
@@ -1266,7 +1310,7 @@ fun DmListScreen(
                 // All view — structured home list. See folder-view
                 // branch above for why GroupHead bundles its children
                 // into a single lazy item with AnimatedVisibility.
-                if (homeRows.isEmpty()) {
+                if (visibleHomeRows.isEmpty()) {
                     // First-launch limbo: scries haven't returned any
                     // rows yet. The top-of-screen sync caption is
                     // visible, but users were missing it on tall
@@ -1276,14 +1320,17 @@ fun DmListScreen(
                     // point at the FAB instead of a blank list.
                     item(key = "__home_loading") {
                         SpecialEmpty(
-                            if (bootstrapping) "Loading your chats and groups…"
-                            else "No chats yet. Tap + to start a conversation."
+                            when {
+                                bootstrapping && homeRows.isEmpty() -> "Loading your chats and groups…"
+                                selectedHomeTab == HomeTab.Groups -> "No groups yet."
+                                else -> "No direct messages yet. Tap + to start one."
+                            }
                         )
                     }
                 }
                 var i = 0
-                while (i < homeRows.size) {
-                    val row = homeRows[i]
+                while (i < visibleHomeRows.size) {
+                    val row = visibleHomeRows[i]
                     when (row) {
                         is HomeRow.Header -> {
                             item(key = row.key, contentType = "Header") {
@@ -1294,8 +1341,8 @@ fun DmListScreen(
                         is HomeRow.GroupHead -> {
                             val children = mutableListOf<HomeRow.GroupChild>()
                             var j = i + 1
-                            while (j < homeRows.size) {
-                                val next = homeRows[j]
+                            while (j < visibleHomeRows.size) {
+                                val next = visibleHomeRows[j]
                                 if (next is HomeRow.GroupChild && next.groupFlag == row.flag) {
                                     children += next
                                     j++
@@ -1431,10 +1478,10 @@ fun DmListScreen(
         // list. Folder views are short enough not to need the hint.
         if (selectedFolderId == null && selectedSpecial == SpecialTab.All) {
             UnreadOffscreenIndicators(
-                homeRows = homeRows,
-                listState = listState,
+                homeRows = visibleHomeRows,
+                listState = homeListState,
                 onScrollTo = { idx ->
-                    scope.launch { listState.animateScrollToItem(idx) }
+                    scope.launch { homeListState.animateScrollToItem(idx) }
                 },
             )
         }
@@ -2180,6 +2227,9 @@ private fun formatRelative(ms: Long): String {
 /** Derived "special" tabs that aren't user-created folders. */
 internal enum class SpecialTab { All, Unread, Mentions }
 
+/** The All view's two peers. The tabs are the section headers now. */
+internal enum class HomeTab { Groups, Dms }
+
 @Composable
 private fun SpecialEmpty(text: String) {
     Box(
@@ -2601,6 +2651,11 @@ internal class ShipSnapshot {
     @Volatile var selectedFolderId: Long? = null
     @Volatile var selectedSpecial: SpecialTab = SpecialTab.All
     @Volatile var initialTabApplied: Boolean = false
+    @Volatile var selectedHomeTab: HomeTab = HomeTab.Groups
+    /** The DMs tab keeps its own place; groups keep [listState], which
+     *  the drag-reorder is bound to. */
+    val dmListState: androidx.compose.foundation.lazy.LazyListState =
+        androidx.compose.foundation.lazy.LazyListState()
     val listState: androidx.compose.foundation.lazy.LazyListState =
         androidx.compose.foundation.lazy.LazyListState()
 }
