@@ -18,6 +18,8 @@ import kotlinx.serialization.json.boolean
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import okhttp3.MediaType.Companion.toMediaType
+import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.contentOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -46,6 +48,8 @@ import java.util.concurrent.TimeUnit
  * that cursor instead of "now," which prevents losing events the
  * relay was holding when it crashed.
  */
+private const val NOTIFY_PREFS_TTL_MS = 5 * 60_000L
+
 class ShipConnection(
     private val shipRowId: Long,
     private val shipUrl: String,
@@ -280,6 +284,13 @@ class ShipConnection(
             return
         }
 
+        val level = notifyLevelFor(whom)
+        if (!NotifyPolicy.allows(whom, level, isMention(event))) {
+            log.info("muted ($level) whom=$whom post=$postId")
+            db.setLastEventId(shipRowId, deviceId, postId)
+            return
+        }
+
         val dev = db.deviceFor(deviceId) ?: run {
             log.warn("device $deviceId has no push endpoint; skipping")
             return
@@ -353,6 +364,48 @@ class ShipConnection(
     /** Pull the globally-unique post id out of an %activity event.
      *  The Tlon agent wraps it in dm-post / chan-post / club-post
      *  depending on the source kind; all three share `.key.id`. */
+    /** The app's per-chat levels, scried from %settings and cached;
+     *  a scry that fails leaves the last known map in place. */
+    @Volatile private var notifyPrefs: Map<String, String> = emptyMap()
+    @Volatile private var notifyPrefsAtMs = 0L
+
+    private fun notifyLevelFor(whom: String): String? {
+        val now = System.currentTimeMillis()
+        if (now - notifyPrefsAtMs > NOTIFY_PREFS_TTL_MS) {
+            notifyPrefsAtMs = now
+            runCatching { fetchNotifyPrefs() }
+                .onSuccess { notifyPrefs = it }
+                .onFailure { log.warn("notify-prefs scry failed: ${it.message}") }
+        }
+        return notifyPrefs[whom]
+    }
+
+    private fun fetchNotifyPrefs(): Map<String, String> {
+        val req = Request.Builder()
+            .url("${shipUrl.trimEnd('/')}/~/scry/settings/desk/talon.json")
+            .header("Cookie", cookie)
+            .get()
+            .build()
+        http.newCall(req).execute().use { resp ->
+            if (!resp.isSuccessful) error("HTTP ${resp.code}")
+            val body = Json.parseToJsonElement(resp.body.string()).jsonObject
+            val desk = body["desk"]?.jsonObject ?: body
+            val bucket = desk["notify-prefs"]?.jsonObject ?: return emptyMap()
+            return bucket.entries.mapNotNull { (whom, v) ->
+                (v as? JsonObject)?.get("level")?.jsonPrimitive?.contentOrNull?.let { whom to it }
+            }.toMap()
+        }
+    }
+
+    private fun isMention(event: JsonObject): Boolean {
+        for ((kind, v) in event) {
+            if (kind.contains("mention")) return true
+            val m = (v as? JsonObject)?.get("mention") as? JsonPrimitive
+            if (m?.booleanOrNull == true) return true
+        }
+        return false
+    }
+
     private fun extractPostId(event: JsonObject): String? {
         for (kind in arrayOf("dm-post", "chan-post", "club-post")) {
             event[kind]?.jsonObject?.get("key")
