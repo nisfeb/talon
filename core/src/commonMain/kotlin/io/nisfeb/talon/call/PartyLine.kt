@@ -604,6 +604,13 @@ class PartyLine(
 
     fun setMuted(value: Boolean) {
         muted = value
+        // Not on a line: remember the flag for the next join and stop.
+        // Publishing a roster here minted a phantom Live state with no
+        // room and no members — the mute-for-call effect does exactly
+        // this on every 1:1 call, and iOS reported that phantom to
+        // CallKit as a second call, which held the real one.
+        val st = _state.value
+        if (st !is PartyState.Live && st !is PartyState.Connecting) return
         upLink?.setMuted(value)
         // publishRoster, not a copy(muted = ...). The top-level flag
         // drives the mic button; our own roster row is rebuilt from
@@ -1174,7 +1181,10 @@ class PartyLine(
     }
 
     private fun publishRoster() {
-        if (_state.value is PartyState.Failed) return
+        // Only a line that is connecting or live has a roster to show;
+        // never manufacture Live from Idle or Failed.
+        val st = _state.value
+        if (st !is PartyState.Live && st !is PartyState.Connecting) return
         // Members are ships and dedupe by ship: the SFU can still be
         // holding a dead socket from a dropped join, and "~zod, ~zod"
         // helps nobody. Anonymous listeners are not ships — they all
