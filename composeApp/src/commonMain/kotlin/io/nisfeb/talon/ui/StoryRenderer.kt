@@ -78,6 +78,10 @@ val LocalCiteResolver = compositionLocalOf<CiteResolver?> { null }
  */
 val LocalCitationOpen = compositionLocalOf<(StoryPart.Citation) -> Unit> { {} }
 
+/** Names a channel nest the way the lists do ("Group · Channel"). Null
+ *  keeps the parser's raw "#nest" label. */
+val LocalPlaceName = compositionLocalOf<(String) -> String?> { { null } }
+
 /**
  * Resolve a ship to the name to show for it. The default applies the
  * mnemonym fallback (`.hollow.mint.gecko` for a ship with no nick), so
@@ -561,8 +565,15 @@ private fun InlineCitation(cite: StoryPart.Citation) {
             .padding(horizontal = 10.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {
+        // The parser only knows the nest ("Post in #ve8843l"); name the
+        // channel once the contact map can.
+        val placeName = LocalPlaceName.current
+        val label = cite.openTarget?.takeIf { it.contains('/') }
+            ?.let { placeName(it) }
+            ?.let { "Post in $it" }
+            ?: cite.label
         Text(
-            cite.label,
+            label,
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )

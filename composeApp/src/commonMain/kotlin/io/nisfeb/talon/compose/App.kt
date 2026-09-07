@@ -1127,6 +1127,9 @@ fun App(
           val citeDisplayName: (String) -> String = remember(citeContacts) {
               { ship -> citeContacts.displayName(ship) }
           }
+          val citePlaceName: (String) -> String? = remember(citeContacts) {
+              { whom -> citeContacts.conversationLabel(whom) }
+          }
           // Story parsing runs outside composition (StoryCache, ingest),
           // so the naming policy is published to it here rather than
           // threaded through every call site.
@@ -1148,6 +1151,7 @@ fun App(
               io.nisfeb.talon.ui.LocalCiteResolver provides citeResolver,
               io.nisfeb.talon.ui.LocalCitationOpen provides openCitation,
               io.nisfeb.talon.ui.LocalDisplayName provides citeDisplayName,
+              io.nisfeb.talon.ui.LocalPlaceName provides citePlaceName,
           ) {
             // A live call or party line whose chat slot is gone (the
             // list, settings, a compact thread…) still needs a surface:
