@@ -113,10 +113,14 @@ class AppDelegate: NSObject, UIApplicationDelegate, PKPushRegistryDelegate, CXPr
             let update = CXCallUpdate()
             update.remoteHandle = CXHandle(type: .generic, value: from)
             update.localizedCallerName = from
+            // Why it was cancelled decides how Recents files it: the
+            // caller gave up (missed), or another of the user's
+            // devices answered (not missed). Older relays say nothing,
+            // which reads as the caller giving up.
+            let reason: CXCallEndedReason =
+                (dict["reason"] as? String) == "answered" ? .answeredElsewhere : .unanswered
             provider.reportNewIncomingCall(with: uuid, update: update) { _ in
-                // The caller gave up on a ring we never answered: a
-                // missed call, and that is how Recents should file it.
-                self.provider.reportCall(with: uuid, endedAt: nil, reason: .unanswered)
+                self.provider.reportCall(with: uuid, endedAt: nil, reason: reason)
                 self.forget(uuid)
                 completion()
             }

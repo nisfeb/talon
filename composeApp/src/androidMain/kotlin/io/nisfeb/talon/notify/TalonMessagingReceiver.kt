@@ -95,7 +95,8 @@ class TalonMessagingReceiver : MessagingReceiver() {
         // cancel for a previous call leaves a newer ring alone.
         if (event == "ring-cancel") {
             if (!eventId.isNullOrBlank()) {
-                io.nisfeb.talon.Notifications.cancelIncomingCall(context, eventId)
+                val reason = parsed?.get("reason")?.jsonPrimitive?.content
+                io.nisfeb.talon.Notifications.ringCancelled(context, eventId, reason)
             }
             return
         }

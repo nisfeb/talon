@@ -341,6 +341,7 @@ class ShipConnection(
                     patp = patp,
                     callId = fact.callId,
                     platform = rung.platform,
+                    reason = if (fact.answered) "answered" else "hangup",
                 )
             }
             null -> Unit
@@ -406,7 +407,10 @@ class ShipConnection(
  */
 internal sealed interface CallFact {
     data class Ring(val from: String, val callId: String) : CallFact
-    data class Settled(val callId: String) : CallFact
+    /** [answered]: another of the user's clients took the call, as
+     *  opposed to the caller giving up. A phone files the two
+     *  differently — one is a missed call, the other is not. */
+    data class Settled(val callId: String, val answered: Boolean) : CallFact
 }
 
 /** Classify a /calls fact. Wire shapes (see core's TrunkWire):
@@ -423,8 +427,8 @@ internal fun parseCallFact(json: JsonObject): CallFact? {
         val from = recv?.get("from").str() ?: return null
         return CallFact.Ring(from, id)
     }
-    (sig?.get("hangup") as? JsonObject)?.get("id").str()?.let { return CallFact.Settled(it) }
-    json["handled"].str()?.let { return CallFact.Settled(it) }
+    (sig?.get("hangup") as? JsonObject)?.get("id").str()?.let { return CallFact.Settled(it, answered = false) }
+    json["handled"].str()?.let { return CallFact.Settled(it, answered = true) }
     return null
 }
 

@@ -19,12 +19,12 @@ class RingCancelTest {
     @Test
     fun `hangup sig parses to Settled`() {
         val fact = parseCallFact(fact("""{"recv":{"from":"~zod","sig":{"hangup":{"id":"c1"}}}}"""))
-        assertEquals(CallFact.Settled("c1"), fact)
+        assertEquals(CallFact.Settled("c1", answered = false), fact)
     }
 
     @Test
     fun `handled fact parses to Settled`() {
-        assertEquals(CallFact.Settled("c1"), parseCallFact(fact("""{"handled":"c1"}""")))
+        assertEquals(CallFact.Settled("c1", answered = true), parseCallFact(fact("""{"handled":"c1"}""")))
     }
 
     @Test

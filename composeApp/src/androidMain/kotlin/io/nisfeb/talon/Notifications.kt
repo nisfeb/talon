@@ -264,6 +264,7 @@ object Notifications {
         }
         mgr.notify(CALL_NOTIFICATION_ID, builder.build())
         shownCallId = callId
+        shownCallFrom = from
         when {
             inAppRingExpected -> Unit // the in-app ring is already sounding
             // Notifications denied means notify() above was dropped on
@@ -290,6 +291,9 @@ object Notifications {
      *  cancel for caller A would silence caller B's ring. */
     @Volatile
     private var shownCallId: String? = null
+    /** Who rang, for the missed-call notice a cancel may become. */
+    @Volatile
+    private var shownCallFrom: String? = null
 
     /** True while TalonApp has a live CallController composed — the
      *  thing that actually plays the in-app ring. Set by TalonApp; the
@@ -359,6 +363,21 @@ object Notifications {
      *  the relay's ring-cancel push races the next incoming ring. */
     fun cancelIncomingCall(context: Context, callId: String) {
         if (shownCallId == callId) cancelIncomingCall(context)
+    }
+
+    /**
+     * The relay's ring-cancel. A ring still showing when it lands is
+     * a missed call — unless [reason] says another of the user's
+     * devices answered, or the app is alive, in which case the call
+     * controller sees the end itself and TalonApp posts the notice.
+     * This is the dead-process path: pushes woke us, nothing else.
+     */
+    fun ringCancelled(context: Context, callId: String, reason: String?) {
+        if (shownCallId != callId) return
+        val from = shownCallFrom
+        cancelIncomingCall(context)
+        if (reason == "answered" || callControllerLive || from == null) return
+        showMissedCall(context, from, from)
     }
 
     fun showMessage(

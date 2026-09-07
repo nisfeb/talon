@@ -69,6 +69,21 @@ docker run -d \
 
 That's the whole deploy for UnifiedPush. iOS VoIP adds an APNs key — see below.
 
+Upgrading a running relay is the same build followed by a recreate
+with the same environment, mounts and port. Keep the container's env
+on the host (`docker inspect` can write it to an `--env-file`) rather
+than retyping secrets, and give the new container a restart policy so
+a host reboot brings it back:
+
+```sh
+git pull && docker build -t talon-relay -f relay/Dockerfile .
+docker rm -f talon-relay
+docker run -d --name talon-relay --restart unless-stopped \
+  --env-file relay.env -v /var/lib/talon-relay/data:/data \
+  -p 127.0.0.1:8090:8080 talon-relay
+curl -s http://127.0.0.1:8090/    # the root route answers when it's up
+```
+
 ## Required env
 
 | Var | Purpose |

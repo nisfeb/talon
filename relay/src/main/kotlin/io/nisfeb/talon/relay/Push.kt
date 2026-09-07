@@ -93,12 +93,17 @@ class Push(
         patp: String,
         callId: String,
         platform: String = "",
+        /** "hangup": the caller gave up — a missed call. "answered":
+         *  another of the user's clients took it — not one. */
+        reason: String = "hangup",
     ) {
         val body = buildString {
             append("""{"event":"ring-cancel","patp":"""")
             append(escape(patp))
             append("""","id":"""")
             append(escape(callId))
+            append("""","reason":"""")
+            append(escape(reason))
             append("\"}")
         }
         if (platform == IOS_VOIP) {
