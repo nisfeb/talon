@@ -161,6 +161,11 @@ class BridgeRunner {
     }
 
     private fun devicePeerLinks(config: Config): PeerLinkFactory {
+        // We relay a clean virtual device, often music: no speech
+        // processing (it eats music and cancels what plays out the
+        // other way), and a music bitrate instead of the 32 kbps default.
+        DesktopWebRtcFactory.audioProcessing = false
+        DesktopWebRtcFactory.opusMaxAverageBitrate = MUSIC_BITRATE_BPS
         // The factory is built once per process; a second run keeps the first ADM.
         runCatching {
             DesktopWebRtcFactory.useAudioDeviceModule {
@@ -203,6 +208,7 @@ class BridgeRunner {
 
     private companion object {
         const val JOIN_TIMEOUT_MS = 60_000L
+        const val MUSIC_BITRATE_BPS = 128_000
         const val TAG = "Bridge"
     }
 }

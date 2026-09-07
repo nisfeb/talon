@@ -215,7 +215,7 @@ class DesktopPeerLink(
     }
 
     override suspend fun answerTo(remoteSdp: String): String {
-        suspendSet { pc.setRemoteDescription(RTCSessionDescription(RTCSdpType.OFFER, remoteSdp), it) }
+        suspendSet { pc.setRemoteDescription(RTCSessionDescription(RTCSdpType.OFFER, tuned(remoteSdp)), it) }
         val answer = suspendSdp { pc.createAnswer(RTCAnswerOptions(), it) }
         suspendSet { pc.setLocalDescription(answer, it) }
         _state.value = MediaState.Connecting
@@ -224,9 +224,13 @@ class DesktopPeerLink(
 
     override suspend fun applyAnswer(remoteSdp: String) {
         suspendSet {
-            pc.setRemoteDescription(RTCSessionDescription(RTCSdpType.ANSWER, remoteSdp), it)
+            pc.setRemoteDescription(RTCSessionDescription(RTCSdpType.ANSWER, tuned(remoteSdp)), it)
         }
     }
+
+    /** The remote description decides our Opus bitrate; see [DesktopWebRtcFactory.opusMaxAverageBitrate]. */
+    private fun tuned(remoteSdp: String): String =
+        DesktopWebRtcFactory.opusMaxAverageBitrate?.let { withOpusBitrate(remoteSdp, it) } ?: remoteSdp
 
     override fun addRemoteCandidate(candidate: IceCandidate) {
         runCatching {

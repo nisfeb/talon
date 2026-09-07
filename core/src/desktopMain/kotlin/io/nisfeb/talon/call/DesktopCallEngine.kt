@@ -373,10 +373,11 @@ val DesktopCallEngineProvider: CallEngineProvider =
  * and party-line paths can't drift apart; MicAudioOptionsTest pins it.
  */
 internal fun micAudioOptions(): AudioOptions = AudioOptions().apply {
-    echoCancellation = true
-    autoGainControl = true
-    noiseSuppression = true
-    highpassFilter = true
+    val on = DesktopWebRtcFactory.audioProcessing
+    echoCancellation = on
+    autoGainControl = on
+    noiseSuppression = on
+    highpassFilter = on
 }
 
 /**
@@ -390,6 +391,24 @@ internal fun micAudioOptions(): AudioOptions = AudioOptions().apply {
  */
 object DesktopWebRtcFactory {
     private val lock = Any()
+
+    /**
+     * Whether published audio goes through the speech pipeline (echo
+     * cancellation, gain control, noise suppression, high-pass). Right
+     * for a microphone; wrong for the bridge, which captures a clean
+     * virtual device and relays music: noise suppression eats it, gain
+     * control pumps it, and echo cancellation removes whatever also
+     * plays out the other way. Read when an audio source is created.
+     */
+    @Volatile var audioProcessing: Boolean = true
+
+    /**
+     * Opus target bitrate in bits per second forced into every remote
+     * description the party link accepts, or null for libwebrtc's
+     * speech default (about 32 kbps mono). The bridge sets this so
+     * relayed music is not squeezed to voice quality.
+     */
+    @Volatile var opusMaxAverageBitrate: Int? = null
     private var factory: PeerConnectionFactory? = null
     private var adm: dev.onvoid.webrtc.media.audio.AudioDeviceModuleBase? = null
 
