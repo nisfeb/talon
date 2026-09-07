@@ -68,6 +68,12 @@ final class TalonRtcPeer: NSObject, NativeRtcPeer, RTCPeerConnectionDelegate {
     /// restarted capture on the camera already running.
     private var usingFront = true
     private var remoteVideoTrack: RTCVideoTrack?
+    // Remote video is "on" while frames arrive, the way the Android
+    // engine decides it. The video m-line is pre-negotiated on every
+    // call, so didStartReceivingOn fires with the camera off and used
+    // to reserve half the screen for a pane that showed nothing.
+    private var remoteFrameSink: RemoteFrameSink?
+    private var remoteWatch: Timer?
     private var videoListener: ((VideoState) -> Void)?
     private var videoState = VideoState(localOn: false, remoteOn: false)
     private lazy var localView: RTCMTLVideoView = RTCMTLVideoView(frame: .zero)
@@ -460,6 +466,10 @@ final class TalonRtcPeer: NSObject, NativeRtcPeer, RTCPeerConnectionDelegate {
             self.capturer?.stopCapture()
             self.capturer = nil
             self.localVideoTrack = nil
+            self.remoteWatch?.invalidate()
+            self.remoteWatch = nil
+            if let sink = self.remoteFrameSink { self.remoteVideoTrack?.remove(sink) }
+            self.remoteFrameSink = nil
             self.remoteVideoTrack = nil
             self.videoSender = nil
             self.pc?.close()
@@ -606,7 +616,17 @@ final class TalonRtcPeer: NSObject, NativeRtcPeer, RTCPeerConnectionDelegate {
             guard let self = self else { return }
             self.remoteVideoTrack = track
             track.add(self.remoteView)
-            self.publishVideo(local: self.videoState.localOn, remote: true)
+            let sink = RemoteFrameSink()
+            self.remoteFrameSink = sink
+            track.add(sink)
+            self.remoteWatch?.invalidate()
+            self.remoteWatch = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
+                guard let self = self else { return }
+                let on = Date().timeIntervalSince1970 - sink.lastFrameAt < 1.5
+                if on != self.videoState.remoteOn {
+                    self.publishVideo(local: self.videoState.localOn, remote: on)
+                }
+            }
         }
     }
 
@@ -627,5 +647,15 @@ final class TalonRtcFactory: NSObject, NativeRtcFactory {
         trickle: Bool
     ) -> NativeRtcPeer {
         TalonRtcPeer(iceServers: iceServers, sendAudio: sendAudio, trickle: trickle)
+    }
+}
+
+/// Records when the last remote frame arrived; the engine's timer turns
+/// that into remoteOn.
+final class RemoteFrameSink: NSObject, RTCVideoRenderer {
+    private(set) var lastFrameAt: TimeInterval = 0
+    func setSize(_ size: CGSize) {}
+    func renderFrame(_ frame: RTCVideoFrame?) {
+        if frame != nil { lastFrameAt = Date().timeIntervalSince1970 }
     }
 }
