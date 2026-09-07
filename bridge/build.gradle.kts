@@ -14,6 +14,8 @@
 
 plugins {
     alias(libs.plugins.kotlin.jvm)
+    alias(libs.plugins.kotlin.compose)
+    alias(libs.plugins.compose.multiplatform)
     application
 }
 
@@ -37,6 +39,10 @@ dependencies {
     // libwebrtc via JNI. :core exposes the API; the natives are
     // per-platform and only the host's are bundled, matching how the
     // desktop app is packaged.
+    implementation(libs.kotlinx.serialization.json)
+    implementation(compose.desktop.currentOs)
+    implementation(compose.material3)
+
     implementation(libs.webrtc.java)
     val webrtcNatives = run {
         val os = System.getProperty("os.name").lowercase()

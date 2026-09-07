@@ -195,6 +195,15 @@ class CallController(
 
     /** The wire the ship speaks, once known. */
     private val _wire = MutableStateFlow(0)
+
+    private val _connected = MutableStateFlow(false)
+
+    /**
+     * True while the calls subscription is live. A poke sent before
+     * this is answered into the void: gall drops a fact nobody watches,
+     * so a fast host (our own ship) answers before we can hear it.
+     */
+    val connected: StateFlow<Boolean> = _connected.asStateFlow()
     val wire: StateFlow<Int> = _wire.asStateFlow()
 
     private val _listenLink = MutableStateFlow<ListenLink?>(null)
@@ -270,6 +279,7 @@ class CallController(
         var backoff = 2_000L
         while (scope.isActive) {
             runCatching {
+                _connected.value = false
                 val ch = session.openChannel()
                 channel = ch
                 // The ship's advertised ICE servers (its sidecar / its
@@ -334,6 +344,7 @@ class CallController(
                 ch.events().let { events ->
                     ch.subscribe(TrunkWire.AGENT, TrunkWire.CALLS_PATH)
                     backoff = 2_000L
+                    _connected.value = true
                     events.collect { ev ->
                         ev.id?.let { runCatching { ch.ack(it) } }
                         val body = ev.body as? JsonObject ?: return@collect
@@ -355,7 +366,9 @@ class CallController(
                         when (body["response"]?.jsonPrimitive?.contentOrNull) {
                             "quit" -> {
                                 Log.w(TAG, "calls subscription was kicked; resubscribing")
+                                _connected.value = false
                                 runCatching { ch.subscribe(TrunkWire.AGENT, TrunkWire.CALLS_PATH) }
+                                    .onSuccess { _connected.value = true }
                                     .onFailure { Log.e(TAG, "resubscribe failed", it) }
                                 return@collect
                             }

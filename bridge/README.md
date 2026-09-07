@@ -121,6 +121,30 @@ non-issue — it adapts against what is being played, and the party line
 is uncorrelated with the Space — but automatic gain control is worth a
 listen before trusting it live.
 
+## The Party Manager window
+
+`scripts/talon-party-manager` (or `talon-bridge --ui [config]`) opens a
+window that does what the Spaces script and a terminal full of `pactl`
+did by hand:
+
+- **Bridge**: ship URL, +code, line host and room. Save writes them to
+  `~/.config/talon/bridge.properties`; Join logs in and sits on the
+  line, with a mute toggle and the member list.
+- **Routing**: every app playing or recording audio, and who hears it.
+  *Party* sends an app (Spotify, a browser tab) to the line, *Space*
+  to the X Space, *Both* to everyone. Marking a recording app as the
+  *Space app* gives it the party as its microphone and sends its
+  playback to the party, which is the whole Spaces wiring in one
+  click. The bridge's own streams are moved onto the virtual devices
+  automatically once it is on the line.
+- **Soundboard**: wav, ogg or flac clips in `~/.config/talon/soundboard`,
+  each with Party, Space and Both buttons.
+
+It needs `pactl` and `paplay` (PulseAudio or PipeWire-Pulse) and the
+same JDK 21 as the CLI. Effects on the voice path are not there: the
+device mode hands audio straight to WebRTC, so an effects stage would
+have to be a PulseAudio filter module in front of `TalonBridgeSpace`.
+
 ## Audio
 
 Input WAVs may be any rate and channel count as long as they are

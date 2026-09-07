@@ -39,6 +39,25 @@ data class Config(
 ) {
     companion object {
         /**
+         * Rewrites [values] (full property keys) in [file], keeping
+         * comments, order and every other key. Values are never logged.
+         */
+        fun save(file: File, values: Map<String, String>) {
+            val lines = if (file.isFile) file.readLines().toMutableList() else mutableListOf()
+            val done = mutableSetOf<String>()
+            for (i in lines.indices) {
+                val key = lines[i].substringBefore('=').trim()
+                if (key in values && !lines[i].trimStart().startsWith("#")) {
+                    lines[i] = "$key=${values.getValue(key)}"
+                    done += key
+                }
+            }
+            (values.keys - done).forEach { lines += "$it=${values.getValue(it)}" }
+            file.parentFile?.mkdirs()
+            file.writeText(lines.joinToString("\n") + "\n")
+        }
+
+        /**
          * Sources, in order of precedence: the environment, then
          * [file] if it exists.
          *
