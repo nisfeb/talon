@@ -1191,13 +1191,21 @@ fun DmListScreen(
                             val childrenSnapshot = children.toList()
                             item(key = row.key, contentType = "GroupHead") {
                                 // enabled = editMode: outside reorder mode the
-                                // item is inert — no drag, and crucially no
-                                // placement animation. The placement animation
-                                // running during normal activity-driven reorders
-                                // (esp. "Most recent" group ordering) fought the
-                                // expand/collapse AnimatedVisibility height
-                                // change and rendered groups overlapped/compacted.
-                                ReorderableItem(reorderState, key = row.key, enabled = editMode && canReorder) { _ ->
+                                // item is inert (no drag). `enabled` does NOT
+                                // switch off the library's item animation, so
+                                // that is passed explicitly below.
+                                ReorderableItem(
+                                    reorderState,
+                                    key = row.key,
+                                    enabled = editMode && canReorder,
+                                    // The library animates placement AND fades
+                                    // removed items out even when disabled; a
+                                    // fade-out that never finishes leaves ghost
+                                    // rows drawn over the new list (seen when
+                                    // switching the Groups/DMs tabs). Only edit
+                                    // mode wants the animation.
+                                    animateItemModifier = if (editMode) Modifier.animateItem() else Modifier,
+                                ) { _ ->
                                     Column {
                                         val lastActive by remember(row.flag) {
                                             repo.groupLastActive(row.flag)
@@ -1283,13 +1291,21 @@ fun DmListScreen(
                         is HomeRow.Flat -> {
                             item(key = row.key, contentType = "Flat") {
                                 // enabled = editMode: outside reorder mode the
-                                // item is inert — no drag, and crucially no
-                                // placement animation. The placement animation
-                                // running during normal activity-driven reorders
-                                // (esp. "Most recent" group ordering) fought the
-                                // expand/collapse AnimatedVisibility height
-                                // change and rendered groups overlapped/compacted.
-                                ReorderableItem(reorderState, key = row.key, enabled = editMode && canReorder) { _ ->
+                                // item is inert (no drag). `enabled` does NOT
+                                // switch off the library's item animation, so
+                                // that is passed explicitly below.
+                                ReorderableItem(
+                                    reorderState,
+                                    key = row.key,
+                                    enabled = editMode && canReorder,
+                                    // The library animates placement AND fades
+                                    // removed items out even when disabled; a
+                                    // fade-out that never finishes leaves ghost
+                                    // rows drawn over the new list (seen when
+                                    // switching the Groups/DMs tabs). Only edit
+                                    // mode wants the animation.
+                                    animateItemModifier = if (editMode) Modifier.animateItem() else Modifier,
+                                ) { _ ->
                                     ConversationRow(
                                         m = row.m,
                                         unread = row.unread,
@@ -1357,13 +1373,21 @@ fun DmListScreen(
                             val childrenSnapshot = children.toList()
                             item(key = row.key, contentType = "GroupHead") {
                                 // enabled = editMode: outside reorder mode the
-                                // item is inert — no drag, and crucially no
-                                // placement animation. The placement animation
-                                // running during normal activity-driven reorders
-                                // (esp. "Most recent" group ordering) fought the
-                                // expand/collapse AnimatedVisibility height
-                                // change and rendered groups overlapped/compacted.
-                                ReorderableItem(reorderState, key = row.key, enabled = editMode && canReorder) { _ ->
+                                // item is inert (no drag). `enabled` does NOT
+                                // switch off the library's item animation, so
+                                // that is passed explicitly below.
+                                ReorderableItem(
+                                    reorderState,
+                                    key = row.key,
+                                    enabled = editMode && canReorder,
+                                    // The library animates placement AND fades
+                                    // removed items out even when disabled; a
+                                    // fade-out that never finishes leaves ghost
+                                    // rows drawn over the new list (seen when
+                                    // switching the Groups/DMs tabs). Only edit
+                                    // mode wants the animation.
+                                    animateItemModifier = if (editMode) Modifier.animateItem() else Modifier,
+                                ) { _ ->
                                     Column {
                                         val lastActive by remember(row.flag) {
                                             repo.groupLastActive(row.flag)
