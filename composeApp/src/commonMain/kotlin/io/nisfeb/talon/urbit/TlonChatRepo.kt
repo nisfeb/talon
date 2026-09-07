@@ -1056,7 +1056,12 @@ class TlonChatRepo(
                     _adminGroups.value = it
                     adminGroupsFetchedMs = nowMs()
                 }
-                .onFailure { Log.w(TAG, "refreshAdminGroups failed", it) }
+                .onFailure {
+                    // Leaving the Administration screen cancels this;
+                    // that is not a failure worth a stack in the log.
+                    if (it is kotlinx.coroutines.CancellationException) throw it
+                    Log.w(TAG, "refreshAdminGroups failed", it)
+                }
         }
     }
 
