@@ -40,8 +40,9 @@ class TelecomCalls(
     private var jobs: List<Job> = emptyList()
 
     /** Audio routing for whichever call is registered, for the device
-     *  picker. Empty while no call is. */
-    val route = TelecomRoute()
+     *  picker. Empty while no call is. Which backend depends on the
+     *  Android version: see [ModernTelecom]. */
+    val route: CallRoute = if (ModernTelecom.active) ModernTelecomRoute() else TelecomRoute()
 
     // Hold has no wire in %trunk, so being put on hold mutes us and
     // being taken off it unmutes — only if the hold is what muted.
@@ -77,9 +78,10 @@ class TelecomCalls(
     }
 
     fun start() {
-        if (!TalonTelecom.register(app)) return
+        val registered = if (ModernTelecom.active) ModernTelecom.register(app) else TalonTelecom.register(app)
+        if (!registered) return
         TalonTelecom.hooks = object : TalonTelecom.Hooks {
-            override val route: TelecomRoute get() = this@TelecomCalls.route
+            override val route: CallRoute get() = this@TelecomCalls.route
             override fun controls(id: String): TalonTelecom.Controls =
                 if (id == PARTY) partyControls else callControls
             override fun callBack(ship: String) = controller.placeCall(ship)
@@ -111,6 +113,7 @@ class TelecomCalls(
     }
 
     private suspend fun registerCall(id: String, peer: String, incoming: Boolean) {
+        if (ModernTelecom.active) return registerCallModern(id, peer, incoming)
         val started = if (incoming) {
             TalonTelecom.startIncoming(app, id, peer, nameFor(peer))
         } else {
@@ -127,17 +130,39 @@ class TelecomCalls(
             .collect { s ->
                 if (s is CallUiState.Active && !answered) { answered = true; conn.setActive() }
             }
-        // Which the call log files it as: missed if a ring nobody
-        // answered, rejected if we declined it, otherwise who hung up.
+        conn.setDisconnected(DisconnectCause(endCause(incoming, answered)))
+        conn.destroy()
+    }
+
+    /** Which the call log files it as: missed if a ring nobody
+     *  answered, rejected if we declined it, otherwise who hung up. */
+    private fun endCause(incoming: Boolean, answered: Boolean): Int {
         val end = controller.state.value
-        val cause = when {
+        return when {
             incoming && !answered && end is CallUiState.Ended && end.reason != "declined" -> DisconnectCause.MISSED
             incoming && !answered -> DisconnectCause.REJECTED
             end is CallUiState.Ended -> DisconnectCause.REMOTE
             else -> DisconnectCause.LOCAL
         }
-        conn.setDisconnected(DisconnectCause(cause))
-        conn.destroy()
+    }
+
+    /** 16.1+: the same lifecycle on a core-telecom call. */
+    private suspend fun registerCallModern(id: String, peer: String, incoming: Boolean) {
+        if (!ModernTelecom.start(app, id, peer, nameFor(peer), incoming)) {
+            Log.w(TAG, "telecom would not take the call with $peer; app-managed")
+            return
+        }
+        val call = ModernTelecom.await(id) ?: return
+        var answered = false
+        controller.state
+            .takeWhile { it !is CallUiState.None && it !is CallUiState.Ended }
+            .collect { s ->
+                if (s is CallUiState.Active && !answered) {
+                    answered = true
+                    if (incoming) call.answer() else call.setActive()
+                }
+            }
+        call.disconnect(endCause(incoming, answered))
     }
 
     private suspend fun trackParty() {
@@ -154,6 +179,16 @@ class TelecomCalls(
         // The room is a Galène id, not a name for a car's screen; the
         // topic is, when an admin set one.
         val title = (party.state.value as? PartyState.Live)?.topic?.takeIf { it.isNotBlank() } ?: "Party line"
+        if (ModernTelecom.active) {
+            if (!ModernTelecom.start(app, PARTY, PARTY, title, incoming = false)) return
+            val call = ModernTelecom.await(PARTY) ?: return
+            var live = false
+            party.state
+                .takeWhile { it !is PartyState.Idle && it !is PartyState.Failed }
+                .collect { s -> if (s is PartyState.Live && !live) { live = true; call.setActive() } }
+            call.disconnect(DisconnectCause.LOCAL)
+            return
+        }
         if (!TalonTelecom.startOutgoing(app, PARTY, PARTY, title)) {
             Log.w(TAG, "telecom would not take the party line; app-managed")
             return

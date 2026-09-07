@@ -253,6 +253,17 @@ class MainActivity : ComponentActivity() {
             intent.removeExtra(Notifications.EXTRA_CALL_BACK)
             consumedDeepLink = true
         }
+        // The Phone app's integrated call log (16.1+) calling one of our
+        // calls back: a UUID we mapped to a ship when the call was added.
+        if (intent.action == android.telecom.TelecomManager.ACTION_CALL_BACK) {
+            val key = android.telecom.TelecomManager.EXTRA_UUID
+            val uuid = intent.getStringExtra(key)
+                ?: androidx.core.content.IntentCompat
+                    .getParcelableExtra(intent, key, android.os.ParcelUuid::class.java)?.uuid?.toString()
+            val target = io.nisfeb.talon.call.CallBackTargets.lookup(this, uuid)
+            if (target != null && target.startsWith("~")) pendingCallBack.value = target
+            consumedDeepLink = true
+        }
         // Strip the deep-link extras now that we've read them, then write
         // the cleaned intent back as the activity's intent. The task
         // retains its current intent across a process kill; without this,

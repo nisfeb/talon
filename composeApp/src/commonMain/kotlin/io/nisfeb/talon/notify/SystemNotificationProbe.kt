@@ -36,6 +36,9 @@ data class SystemNotificationState(
     val callAccountRegistered: Boolean? = null,
     /** The last few things telecom did or refused, oldest first. */
     val telecomEvents: List<String> = emptyList(),
+    /** Android 16.1+: calls are logged as VoIP rows the dialer shows only
+     *  once the user (17) or the dialer (16.1) opts in. */
+    val callLogIsVoip: Boolean = false,
 )
 
 /**
@@ -56,6 +59,8 @@ interface SystemNotificationProbe {
      *  modern Android). Returns true if the intent dispatched. */
     fun openAppDetailsSettings(): Boolean = false
     fun openFullScreenIntentSettings(): Boolean = false
+    /** 17+: the per-app "Integrated call logs" screen. */
+    fun openCallLogIntegrationSettings(): Boolean = false
 }
 
 object NoopSystemNotificationProbe : SystemNotificationProbe {

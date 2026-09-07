@@ -1551,7 +1551,11 @@ private fun NotificationHealthPanel(
         systemState.callAccountRegistered?.let { registered ->
             HealthRow(
                 label = "Phone-app call log",
-                value = if (registered) "account registered" else "no account — calls aren't logged",
+                value = when {
+                    !registered -> "no account — calls aren't logged"
+                    systemState.callLogIsVoip -> "logged as VoIP calls — turn Talon on under Calling accounts › Integrated call logs"
+                    else -> "account registered"
+                },
                 highlight = !registered,
             )
         }
@@ -1574,7 +1578,7 @@ private fun NotificationHealthPanel(
     val needsBatteryFix = systemState.batteryOptimizationsExempt == false
     val needsAppDetails = systemState.notificationsAllowed == false ||
         systemState.backgroundRestricted == true
-    if (needsBatteryFix || needsAppDetails || needsFullScreenFix) {
+    if (needsBatteryFix || needsAppDetails || needsFullScreenFix || systemState.callLogIsVoip) {
         Row(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             modifier = Modifier.padding(top = 4.dp),
@@ -1582,6 +1586,11 @@ private fun NotificationHealthPanel(
             if (needsFullScreenFix) {
                 TextButton(onClick = { probe.openFullScreenIntentSettings() }) {
                     Text("Fix ring")
+                }
+            }
+            if (systemState.callLogIsVoip) {
+                TextButton(onClick = { probe.openCallLogIntegrationSettings() }) {
+                    Text("Call log")
                 }
             }
             if (needsBatteryFix) {

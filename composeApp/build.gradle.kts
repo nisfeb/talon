@@ -156,6 +156,10 @@ kotlin {
             implementation(libs.coil.network.okhttp)
             implementation(libs.androidx.activity.compose)
             implementation(libs.androidx.core.ktx)
+            // Android 16.1+ call log: the system only logs VoIP calls made
+            // through TelecomManager.addCall, which this wraps; below 16.1
+            // our own self-managed account (TalonConnectionService) logs.
+            implementation(libs.androidx.core.telecom)
             implementation(libs.androidx.lifecycle.runtime.ktx)
             implementation(libs.androidx.lifecycle.process)
             implementation(libs.kotlinx.coroutines.android)

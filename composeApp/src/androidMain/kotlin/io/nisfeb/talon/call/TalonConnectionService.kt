@@ -178,14 +178,14 @@ class TalonConnection(val talonId: String) : Connection() {
 
     @Deprecated("Deprecated in API 34 but still delivered; see TelecomRoute")
     override fun onCallAudioStateChanged(state: CallAudioState) {
-        TalonTelecom.hooks?.route?.update(this, state)
+        (TalonTelecom.hooks?.route as? TelecomRoute)?.update(this, state)
     }
 
     override fun onStateChanged(state: Int) {
         TalonTelecom.trace(talonId, stateToString(state), if (state == STATE_DISCONNECTED) disconnectCause?.toString() else null)
         if (state == STATE_DISCONNECTED) {
             TalonTelecom.forget(this)
-            TalonTelecom.hooks?.route?.unbind(this)
+            (TalonTelecom.hooks?.route as? TelecomRoute)?.unbind(this)
         }
     }
 }
@@ -206,7 +206,7 @@ object TalonTelecom {
     }
 
     interface Hooks {
-        val route: TelecomRoute
+        val route: CallRoute
         fun controls(id: String): Controls?
         /** The Phone app called back one of our logged calls. */
         fun callBack(ship: String)
@@ -220,7 +220,7 @@ object TalonTelecom {
 
     fun recentEvents(): List<String> = synchronized(events) { events.toList() }
 
-    private fun note(msg: String) {
+    internal fun note(msg: String) {
         val stamp = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.US).format(java.util.Date())
         synchronized(events) {
             events.addLast("$stamp $msg")
@@ -343,7 +343,7 @@ object TalonTelecom {
         pending.remove(id)
         connections[id] = conn
         waiters.remove(id)?.complete(conn)
-        hooks?.route?.bind(conn)
+        (hooks?.route as? TelecomRoute)?.bind(conn)
     }
 
     internal fun refuse(id: String) = synchronized(this) {
@@ -357,7 +357,7 @@ object TalonTelecom {
             old.setDisconnected(DisconnectCause(DisconnectCause.CANCELED))
             old.destroy()
         }
-        hooks?.route?.bind(conn)
+        (hooks?.route as? TelecomRoute)?.bind(conn)
     }
 
     internal fun trace(id: String, state: String, cause: String?) =
@@ -371,24 +371,33 @@ object TalonTelecom {
     private const val SCHEME = "urbit"
 }
 
+/** What the audio picker needs from whichever telecom backend holds
+ *  the call: [TelecomRoute] below 16.1, [ModernTelecomRoute] above. */
+interface CallRoute {
+    val active: Boolean
+    val selected: String?
+    fun devices(): List<AudioDevice>
+    fun select(id: String?)
+}
+
 /**
  * The registered call's audio routes, as [AndroidAudioDevices] shows
  * them. While a call is registered telecom owns routing, and setting
  * a communication device behind its back is at best ignored; the
  * picker asks the connection instead.
  */
-class TelecomRoute {
+class TelecomRoute : CallRoute {
     @Volatile private var conn: TalonConnection? = null
     @Volatile private var state: CallAudioState? = null
 
-    val active: Boolean get() = conn != null
+    override val active: Boolean get() = conn != null
 
-    val selected: String? get() = state?.let { s ->
+    override val selected: String? get() = state?.let { s ->
         val bt = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) s.activeBluetoothDevice else null
         if (s.route == CallAudioState.ROUTE_BLUETOOTH && bt != null) "bt:" + bt.address else "route:" + s.route
     }
 
-    fun devices(): List<AudioDevice> {
+    override fun devices(): List<AudioDevice> {
         val s = state ?: return emptyList()
         val out = ArrayList<AudioDevice>()
         val mask = s.supportedRouteMask
@@ -406,7 +415,7 @@ class TelecomRoute {
         return out
     }
 
-    fun select(id: String?) {
+    override fun select(id: String?) {
         val c = conn ?: return
         runCatching {
             when {

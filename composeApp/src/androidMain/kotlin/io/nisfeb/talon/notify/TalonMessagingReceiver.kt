@@ -89,7 +89,11 @@ class TalonMessagingReceiver : MessagingReceiver() {
             // app: this is the path a phone in a pocket takes, and a
             // call telecom never saw is not in the call log. If the
             // app answers, it adopts this connection by id.
-            io.nisfeb.talon.call.TalonTelecom.startIncoming(context, eventId, from, from)
+            if (io.nisfeb.talon.call.ModernTelecom.active) {
+                io.nisfeb.talon.call.ModernTelecom.start(context, eventId, from, from, incoming = true)
+            } else {
+                io.nisfeb.talon.call.TalonTelecom.startIncoming(context, eventId, from, from)
+            }
             return
         }
 
@@ -103,6 +107,8 @@ class TalonMessagingReceiver : MessagingReceiver() {
                 val reason = parsed?.get("reason")?.jsonPrimitive?.content
                 io.nisfeb.talon.Notifications.ringCancelled(context, eventId, reason)
                 io.nisfeb.talon.call.TalonTelecom.connection(eventId)
+                    ?.endRing(answeredElsewhere = reason == "answered")
+                io.nisfeb.talon.call.ModernTelecom.call(eventId)
                     ?.endRing(answeredElsewhere = reason == "answered")
             }
             return

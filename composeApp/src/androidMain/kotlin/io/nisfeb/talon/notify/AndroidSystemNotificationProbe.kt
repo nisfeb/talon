@@ -28,7 +28,20 @@ class AndroidSystemNotificationProbe(private val context: Context) : SystemNotif
         fullScreenIntentAllowed = readFullScreenIntentAllowed(),
         callAccountRegistered = readCallAccountRegistered(),
         telecomEvents = io.nisfeb.talon.call.TalonTelecom.recentEvents(),
+        callLogIsVoip = io.nisfeb.talon.call.ModernTelecom.active,
     )
+
+    override fun openCallLogIntegrationSettings(): Boolean {
+        if (Build.VERSION.SDK_INT < 37) return false
+        return runCatching {
+            context.startActivity(
+                Intent(android.telecom.TelecomManager.ACTION_CONFIGURE_CALL_LOG_INTEGRATION).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                },
+            )
+            true
+        }.getOrDefault(false)
+    }
 
     /** 34+ gates full-screen intents per app; before that they just
      *  work. False is the usual reason a ring doesn't take over a

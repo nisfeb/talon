@@ -30,8 +30,8 @@ class AndroidAudioDevices(context: Context) : AudioDevices {
     /** Set while a call is registered with telecom, which then owns
      *  routing; the list and the choice come from it. See [TelecomRoute]. */
     @Volatile
-    var telecom: TelecomRoute? = null
-    private val viaTelecom: TelecomRoute? get() = telecom?.takeIf { it.active }
+    var telecom: CallRoute? = null
+    private val viaTelecom: CallRoute? get() = telecom?.takeIf { it.active }
 
     override val supported: Boolean
         get() = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S || viaTelecom != null
