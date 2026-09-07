@@ -26,7 +26,7 @@ out=${1:-android-call-diag.txt}
   echo; echo "== system call log: VoIP-only uri (17) =="
   adb shell 'content query --user '"$U"' --uri content://call_log/calls/voip --sort "date DESC"' 2>&1 | tr -d '\r' | head -6 | cut -c1-300
   echo; echo "== full-screen intent permission =="
-  adb shell appops get io.nisfeb.talon USE_FULL_SCREEN_INTENT 2>&1 | tr -d '\r'
+  adb shell appops get --user "$U" io.nisfeb.talon USE_FULL_SCREEN_INTENT 2>&1 | tr -d '\r'
   echo; echo "== app + telecom logcat (recent buffer) =="
   adb logcat -d -s TalonTelecom:* ModernTelecom:* TelecomCalls:* TalonConnectionService:* CallForegroundService:* Notifications:* TalonMessagingReceiver:* Telecom:* 2>/dev/null | tr -d '\r' | tail -80
   echo; echo "== full dumpsys telecom (attached for the maintainer) =="

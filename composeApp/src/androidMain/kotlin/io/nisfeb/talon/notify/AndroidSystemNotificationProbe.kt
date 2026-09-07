@@ -57,7 +57,13 @@ class AndroidSystemNotificationProbe(private val context: Context) : SystemNotif
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return null
         val tm = context.getSystemService(Context.TELECOM_SERVICE) as? android.telecom.TelecomManager
             ?: return null
-        return runCatching { tm.ownSelfManagedPhoneAccounts.any { it.id == "talon" } }.getOrNull()
+        return runCatching {
+            val own = tm.ownSelfManagedPhoneAccounts
+            // 16.1+ registers through core-telecom, whose handle id is
+            // its own; "talon" is only the legacy ConnectionService id.
+            if (io.nisfeb.talon.call.ModernTelecom.active) own.isNotEmpty()
+            else own.any { it.id == "talon" }
+        }.getOrNull()
     }
 
     override fun openFullScreenIntentSettings(): Boolean {
