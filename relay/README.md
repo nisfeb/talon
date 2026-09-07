@@ -189,3 +189,21 @@ hosting users get exactly what we run, just on their own host.
 
 The Talon client lets users point at any relay URL — see Settings →
 Notification Health → Endpoint.
+
+## iOS message alerts and per-chat levels
+
+An iOS device registers with `"platform": "ios"` and a `pushEndpoint`
+of `"<pushkit-token>|<apns-token>"`. Rings go out as VoIP pushes on the
+PushKit token; a message becomes an ordinary alert push on the app
+topic (`apns-push-type: alert`) with the author as title and a one-line
+preview of the story as body, plus the same `patp` / `whom` / `id`
+fields the Android data push carries, so a tap opens the chat. The
+alert half may be empty when the user refused notification permission;
+calls still ring then. The older `ios-voip` platform keeps ringing but
+never gets message alerts.
+
+Before any message push, on every platform, the relay applies the
+chat's notification level from the ship's `%settings` (desk `talon`,
+bucket `notify-prefs`, cached five minutes): `none` drops it, `mentions`
+requires a mention except in DMs and clubs, unset or `all` defers to
+the ship's own notify flag.
