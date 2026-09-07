@@ -68,14 +68,15 @@ class Push(
             append(escape(callId))
             append("\"}")
         }
-        if (platform == IOS_VOIP) {
-            // iOS: a VoIP push (endpoint is the PushKit token) that
-            // wakes the killed app to report the call to CallKit.
+        if (platform == IOS_VOIP || platform == IOS) {
+            // iOS: a VoIP push (the PushKit token) that wakes the
+            // killed app to report the call to CallKit.
             val a = apns ?: run {
-                log.warn("ios-voip ring but APNs not configured; dropping")
+                log.warn("ios ring but APNs not configured; dropping")
                 return
             }
-            a.sendVoip(endpoint, body, expirationSecs = RING_TTL_SECS)
+            val voip = iosVoipToken(endpoint) ?: return
+            a.sendVoip(voip, body, expirationSecs = RING_TTL_SECS)
             return
         }
         // A ring is worthless once the caller has given up, so it is
@@ -106,18 +107,43 @@ class Push(
             append(escape(reason))
             append("\"}")
         }
-        if (platform == IOS_VOIP) {
-            apns?.sendVoip(endpoint, body, expirationSecs = RING_TTL_SECS)
+        if (platform == IOS_VOIP || platform == IOS) {
+            val voip = iosVoipToken(endpoint) ?: return
+            apns?.sendVoip(voip, body, expirationSecs = RING_TTL_SECS)
             return
         }
         post(endpoint, body, urgency = "high", ttlSecs = RING_TTL_SECS)
     }
 
-    fun send(endpoint: String, patp: String, whom: String, postId: String, platform: String = "") {
+    fun send(
+        endpoint: String,
+        patp: String,
+        whom: String,
+        postId: String,
+        platform: String = "",
+        /** Who wrote it and what they wrote, for a system-rendered
+         *  alert. The Android data push renders its own and ignores
+         *  them. */
+        author: String? = null,
+        preview: String? = null,
+    ) {
         if (platform == IOS_VOIP) {
             // A VoIP push must trigger a call; Apple forbids using it
-            // for a message. iOS message alerts are a separate token
-            // and path, out of scope here.
+            // for a message. A device registered before alerts existed
+            // has no alert token; it re-registers to get them.
+            return
+        }
+        if (platform == IOS) {
+            val alert = iosAlertToken(endpoint) ?: return
+            val a = apns ?: return
+            a.sendAlert(
+                token = alert,
+                title = author ?: patp,
+                body = preview?.takeIf { it.isNotBlank() } ?: "New message",
+                patp = patp,
+                whom = whom,
+                postId = postId,
+            )
             return
         }
         // Hand-rolled JSON to avoid pulling kotlinx-serialization
@@ -196,5 +222,16 @@ class Push(
         /** [platform] value marking a device that takes APNs VoIP
          *  pushes (its push_endpoint is the PushKit token). */
         const val IOS_VOIP = "ios-voip"
+
+        /** One registration, two APNs tokens: "<voip>|<alert>". The
+         *  alert half is empty when notification permission was
+         *  refused, so calls still ring. */
+        const val IOS = "ios"
+
+        fun iosVoipToken(endpoint: String): String? =
+            endpoint.substringBefore('|').takeIf { it.isNotBlank() }
+
+        fun iosAlertToken(endpoint: String): String? =
+            endpoint.substringAfter('|', "").takeIf { it.isNotBlank() }
     }
 }

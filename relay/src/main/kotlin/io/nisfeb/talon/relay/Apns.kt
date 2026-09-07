@@ -102,6 +102,65 @@ class Apns(
         }
     }
 
+    /**
+     * A user-visible alert (apns-push-type: alert, on the app's own
+     * topic). Unlike a VoIP push it needs no app code to display, so a
+     * killed app still shows it; the payload carries the same fields
+     * the Android data push does so a tap can open the chat.
+     */
+    fun sendAlert(
+        token: String,
+        title: String,
+        body: String,
+        patp: String,
+        whom: String,
+        postId: String,
+        expirationSecs: Int = 24 * 3600,
+    ) {
+        val payload = "{\"aps\":{\"alert\":{\"title\":\"" + jsonEscape(title) +
+            "\",\"body\":\"" + jsonEscape(body) +
+            "\"},\"sound\":\"default\",\"thread-id\":\"" + jsonEscape(whom) +
+            "\"},\"event\":\"new-message\",\"patp\":\"" + jsonEscape(patp) +
+            "\",\"whom\":\"" + jsonEscape(whom) +
+            "\",\"id\":\"" + jsonEscape(postId) + "\"}"
+        val req = Request.Builder()
+            .url("$host/3/device/$token")
+            .header("authorization", "bearer ${jwt()}")
+            .header("apns-topic", bundleId)
+            .header("apns-push-type", "alert")
+            .header("apns-priority", "10")
+            .header("apns-collapse-id", whom.take(64))
+            .header(
+                "apns-expiration",
+                (System.currentTimeMillis() / 1000 + expirationSecs).toString(),
+            )
+            .post(payload.toRequestBody(JSON_MEDIA))
+            .build()
+        try {
+            http.newCall(req).execute().use { resp ->
+                if (!resp.isSuccessful) {
+                    val reason = resp.body.string().take(200)
+                    log.warn("apns alert HTTP ${resp.code} → ${token.take(12)}… $reason")
+                }
+            }
+        } catch (e: Throwable) {
+            log.warn("apns alert failed → ${token.take(12)}…: ${e.message}")
+        }
+    }
+
+    private fun jsonEscape(s: String): String = buildString {
+        for (c in s) {
+            when (c) {
+                '"' -> append("\\\"")
+                '\\' -> append("\\\\")
+                '\n' -> append("\\n")
+                '\r' -> append("\\r")
+                '\t' -> append("\\t")
+                else -> if (c < ' ') append("\\u%04x".format(c.code)) else append(c)
+            }
+        }
+    }
+
     /** A cached bearer JWT, refreshed every [JWT_REFRESH_MS]. */
     private fun jwt(): String {
         val now = System.currentTimeMillis()

@@ -291,6 +291,8 @@ class ShipConnection(
             whom = whom,
             postId = postId,
             platform = dev.platform,
+            author = postId.substringBefore('/').takeIf { it.startsWith("~") },
+            preview = ActivityPreview.of(event),
         )
         db.setLastEventId(shipRowId, deviceId, postId)
     }
@@ -334,7 +336,7 @@ class ShipConnection(
             // only while the device could still be ringing; RungCalls
             // enforces both.
             is CallFact.Settled -> {
-                val rung = rungCalls.settle(fact.callId) ?: return
+                val rung = rungCalls.settle(fact.callId, answered = fact.answered) ?: return
                 log.info("push ring-cancel call=${fact.callId}")
                 push.sendRingCancel(
                     endpoint = rung.endpoint,
@@ -439,13 +441,27 @@ internal fun parseCallFact(json: JsonObject): CallFact? {
  * client's own 45s ring watchdog has already gone quiet and a cancel
  * is noise the push server may bill us battery for.
  */
-internal class RungCalls(private val maxAgeMs: Long = 60_000L) {
+internal class RungCalls(
+    private val maxAgeMs: Long = 60_000L,
+    /** An answered call can run for hours; its hangup must still find
+     *  the device to push to, or the far end's screen outlives the
+     *  call whenever its event stream is asleep. */
+    private val answeredMaxAgeMs: Long = 4 * 60 * 60_000L,
+) {
 
     /** Where and how to cancel a ring we sent. */
     data class Target(val endpoint: String, val platform: String)
 
-    private data class Rung(val endpoint: String, val platform: String, val atMs: Long)
+    private data class Rung(
+        val endpoint: String,
+        val platform: String,
+        val atMs: Long,
+        val answered: Boolean = false,
+    )
     private val rung = ConcurrentHashMap<String, Rung>()
+
+    private fun Rung.fresh(nowMs: Long) =
+        nowMs - atMs <= if (answered) answeredMaxAgeMs else maxAgeMs
 
     fun rang(
         callId: String,
@@ -455,15 +471,24 @@ internal class RungCalls(private val maxAgeMs: Long = 60_000L) {
     ) {
         rung[callId] = Rung(endpoint, platform, nowMs)
         // Prune on write — the map only ever holds the handful of
-        // rings from the last minute, so a scan here is nothing.
-        rung.entries.removeIf { nowMs - it.value.atMs > maxAgeMs }
+        // rings from the last minute, plus the calls still up.
+        rung.entries.removeIf { !it.value.fresh(nowMs) }
     }
 
-    /** The target to cancel on, or null if this id wasn't recently
-     *  rung. One-shot: a second settle for the same id is a no-op. */
-    fun settle(callId: String, nowMs: Long = System.currentTimeMillis()): Target? {
-        val r = rung.remove(callId) ?: return null
-        return Target(r.endpoint, r.platform).takeIf { nowMs - r.atMs <= maxAgeMs }
+    /** The target for this id, or null if it wasn't recently rung. An
+     *  answer keeps the entry (marked, clock restarted) so the eventual
+     *  hangup can still be pushed; a hangup removes it. */
+    fun settle(
+        callId: String,
+        answered: Boolean = false,
+        nowMs: Long = System.currentTimeMillis(),
+    ): Target? {
+        val r = if (answered) {
+            rung[callId]?.also { rung[callId] = it.copy(atMs = nowMs, answered = true) }
+        } else {
+            rung.remove(callId)
+        } ?: return null
+        return Target(r.endpoint, r.platform).takeIf { r.fresh(nowMs) }
     }
 }
 
