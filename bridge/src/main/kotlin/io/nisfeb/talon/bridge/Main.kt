@@ -1,5 +1,8 @@
 package io.nisfeb.talon.bridge
 
+import io.nisfeb.talon.call.DesktopWebRtcFactory
+import io.nisfeb.talon.call.DesktopPeerLink
+import io.nisfeb.talon.call.PeerLinkFactory
 import io.nisfeb.talon.call.CallController
 import io.nisfeb.talon.call.DesktopCallEngineProvider
 import io.nisfeb.talon.call.PartyLine
@@ -42,29 +45,50 @@ object Bridge {
         }
         Log.i(TAG, "starting: $config")
 
-        val audio = BridgeAudio(
-            source = when {
-                config.audioIn != null -> LineInPcmSource(config.audioIn)
-                config.play != null -> WavPcmSource(config.play, config.loop)
-                else -> PcmSource.Silent
-            },
-            // Both, when both are asked for: relaying a line somewhere
-            // and recording it are not alternatives.
-            sink = listOfNotNull(
-                config.audioOut?.let(::LineOutPcmSink),
-                config.record?.let(::WavPcmSink),
-            ).let { sinks ->
-                when (sinks.size) {
-                    0 -> PcmSink.Discard
-                    1 -> sinks.single()
-                    else -> TeePcmSink(*sinks.toTypedArray())
+        // Device mode (Spaces) rides WebRTC's own audio device module,
+        // exactly as the desktop app does: capture and playout are the
+        // module's devices, nothing is pushed by hand. Pushing PCM into a
+        // send stream while a module also feeds it is a libwebrtc race,
+        // and a module that never pulls playout never decodes what the
+        // line says — the two failure modes of the file path, neither
+        // of which a device user should meet.
+        val deviceMode = config.audioIn != null || config.audioOut != null
+        val audio: BridgeAudio? = if (deviceMode) {
+            null
+        } else {
+            BridgeAudio(
+                source = when {
+                    config.play != null -> WavPcmSource(config.play, config.loop)
+                    else -> PcmSource.Silent
+                },
+                sink = config.record?.let(::WavPcmSink) ?: PcmSink.Discard,
+            ).also { it.start() }
+        }
+        val peerLinks = if (deviceMode) {
+            DesktopWebRtcFactory.useAudioDeviceModule {
+                dev.onvoid.webrtc.media.audio.AudioDeviceModule()
+            }
+            var picked = false
+            PeerLinkFactory { ice, send ->
+                if (!picked) {
+                    picked = true
+                    val adm = DesktopWebRtcFactory.audioDeviceModule()
+                    fun pick(want: String?, devices: List<dev.onvoid.webrtc.media.audio.AudioDevice>) =
+                        want?.takeIf { it != DEFAULT_DEVICE }?.let { w ->
+                            devices.firstOrNull { it.name.contains(w, ignoreCase = true) }
+                        }
+                    pick(config.audioOut, adm.playoutDevices)
+                        ?.let { adm.setPlayoutDevice(it); Log.i(TAG, "playout: ${it.name}") }
+                        ?: Log.i(TAG, "playout: system default")
+                    pick(config.audioIn, adm.recordingDevices)
+                        ?.let { adm.setRecordingDevice(it); Log.i(TAG, "capture: ${it.name}") }
+                        ?: Log.i(TAG, "capture: system default")
                 }
-            },
-        )
-        // Before anything else touches WebRTC: the factory captures
-        // the audio device it was built with, and a later one has no
-        // effect on tracks already sourced from the first.
-        audio.start()
+                DesktopPeerLink(ice, send)
+            }
+        } else {
+            audio!!.peerLinks
+        }
 
         val http = createAppHttpClient()
         val session = UrbitSession(http, MemoryStore())
@@ -72,7 +96,7 @@ object Bridge {
             session,
             DesktopCallEngineProvider,
         )
-        val line = PartyLine(http, audio.peerLinks)
+        val line = PartyLine(http, peerLinks)
 
         // The recording is only correct once its header has been
         // patched with the final length, so Ctrl-C has to run close.
@@ -81,7 +105,7 @@ object Bridge {
                 Log.i(TAG, "leaving the line")
                 runCatching { line.leave() }
                 runCatching { controller.stop() }
-                runCatching { audio.close() }
+                runCatching { audio?.close() }
             },
         )
 
@@ -122,6 +146,9 @@ object Bridge {
                 }
                 true
             }
+            // A line is joined muted, like any client; a bridge with
+            // something to say has to open its own mic.
+            if (live != null && (deviceMode || config.play != null)) line.setMuted(false)
             if (live == null) {
                 System.err.println(
                     "talon-bridge: no answer from ${config.host} within " +

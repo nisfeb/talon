@@ -4,6 +4,7 @@ import dev.onvoid.webrtc.media.audio.AudioTrackSink
 import dev.onvoid.webrtc.media.audio.CustomAudioSource
 import dev.onvoid.webrtc.media.audio.AudioDeviceModule
 import dev.onvoid.webrtc.media.audio.AudioLayer
+import dev.onvoid.webrtc.media.audio.HeadlessAudioDeviceModule
 import io.nisfeb.talon.call.DesktopPeerLink
 import io.nisfeb.talon.call.DesktopWebRtcFactory
 import io.nisfeb.talon.call.PeerLinkFactory
@@ -91,7 +92,11 @@ class BridgeAudio(
         // the same send stream our pushAudio feeds — two producers, and
         // libwebrtc aborts on the race the moment the line comes up.
         // The dummy layer records into nothing.
-        val module = AudioDeviceModule(AudioLayer.kDummyAudio)
+        // …but the dummy layer never pulls playout either, so nothing
+        // the line says gets decoded. A record-only bridge has no send
+        // stream to race, so it keeps the headless module and hears.
+        val module = if (source === PcmSource.Silent) HeadlessAudioDeviceModule()
+        else AudioDeviceModule(AudioLayer.kDummyAudio)
         DesktopWebRtcFactory.useAudioDeviceModule { module }
         mic = CustomAudioSource()
         pump = Thread({ run() }, "bridge-audio").apply {
