@@ -156,10 +156,6 @@ kotlin {
             implementation(libs.coil.network.okhttp)
             implementation(libs.androidx.activity.compose)
             implementation(libs.androidx.core.ktx)
-            // Tier 1 telecom: every Urbit call is a self-managed telecom
-            // call, so Bluetooth/car routing, audio focus and interruption
-            // by a cellular call are the system's job, not ours.
-            implementation(libs.androidx.core.telecom)
             implementation(libs.androidx.lifecycle.runtime.ktx)
             implementation(libs.androidx.lifecycle.process)
             implementation(libs.kotlinx.coroutines.android)

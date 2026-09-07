@@ -137,6 +137,18 @@
             android:exported="false"
             android:foregroundServiceType="microphone|camera|phoneCall" />
 
+        <!-- Telecom binds this for every call we register (and to call
+             one back from the Phone app). Exported because telecom is
+             another process; the permission keeps everyone else out. -->
+        <service
+            android:name="io.nisfeb.talon.call.TalonConnectionService"
+            android:exported="true"
+            android:permission="android.permission.BIND_TELECOM_CONNECTION_SERVICE">
+            <intent-filter>
+                <action android:name="android.telecom.ConnectionService" />
+            </intent-filter>
+        </service>
+
         <receiver
             android:name="io.nisfeb.talon.DigestAlarmReceiver"
             android:exported="false" />
