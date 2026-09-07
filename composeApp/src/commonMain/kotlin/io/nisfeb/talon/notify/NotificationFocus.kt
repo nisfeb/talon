@@ -9,7 +9,7 @@ import kotlinx.coroutines.flow.SharedFlow
  * the repo writes [openWhom] as chats open and close.
  */
 object NotificationFocus {
-    @Volatile var openWhom: String? = null
+    @kotlin.concurrent.Volatile var openWhom: String? = null
 }
 
 /**
