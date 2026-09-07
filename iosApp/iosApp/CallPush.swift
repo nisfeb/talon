@@ -186,8 +186,12 @@ class AppDelegate: NSObject, UIApplicationDelegate, PKPushRegistryDelegate, CXPr
     }
 
     func provider(_ provider: CXProvider, perform action: CXAnswerCallAction) {
-        CallTrace.log("callkit: answer \(uuidToCallId[action.callUUID] ?? "?")")
-        if let callId = uuidToCallId[action.callUUID] {
+        // `answered` already holds the uuid when the answer is the echo
+        // of our own reportAnswered (the user tapped Answer in the app);
+        // handing that back to Kotlin accepted the call twice.
+        let ours = answered.contains(action.callUUID)
+        CallTrace.log("callkit: answer \(uuidToCallId[action.callUUID] ?? "?")\(ours ? " (ours)" : "")")
+        if !ours, let callId = uuidToCallId[action.callUUID] {
             answered.insert(action.callUUID)
             IosVoipBridge.shared.answer(callId: callId)
         }
@@ -277,6 +281,9 @@ class AppDelegate: NSObject, UIApplicationDelegate, PKPushRegistryDelegate, CXPr
     func reportAnswered(id: String) {
         CallTrace.log("app: answered \(id)\(callIdToUuid[id] == nil ? " (unknown to CallKit)" : "")")
         guard let uuid = callIdToUuid[id], !answered.contains(uuid) else { return }
+        // Before the request: the provider answer callback checks this
+        // to tell our own report from a user's tap.
+        answered.insert(uuid)
         callController.request(CXTransaction(action: CXAnswerCallAction(call: uuid))) { _ in }
     }
 
