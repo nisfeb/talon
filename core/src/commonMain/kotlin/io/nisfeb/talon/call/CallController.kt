@@ -393,6 +393,7 @@ class CallController(
                                 // streams the listener has to pick
                                 // between.
                                 val key = "${up.from}/${up.ticket.name}"
+                                trace?.invoke("ticket $key pending=${_pendingJoin.value}")
                                 if (_pendingJoin.value == key) {
                                     _pendingJoin.value = null
                                     onTicket?.invoke(up.from, up.ticket)
@@ -597,6 +598,7 @@ class CallController(
                 Log.i(TAG, "accept ignored: call $id is already active")
                 return@launch
             }
+            trace?.invoke("accept $id")
             ringToken++ // answered: stop the give-up timer
             val from = peer ?: return@launch
             _state.value = CallUiState.Active(from, MediaState.Connecting, muted = false)
@@ -827,6 +829,11 @@ class CallController(
     }
 
     var onTicket: ((String, TrunkTicket) -> Unit)? = null
+
+    /** Diagnostic sink: iOS points it at the on-device call trace
+     *  (Documents/call-trace.txt) so a user can hand back the Kotlin
+     *  side of a call, not just CallKit's. */
+    var trace: ((String) -> Unit)? = null
 
     /** A host refused us a line. Surfaced so tapping the button always
      *  says something — silence reads as a broken button. */
@@ -1275,6 +1282,7 @@ class CallController(
         // fact every device of this ship can see.
         val key = "$host/$name"
         val token = ++joinToken
+        trace?.invoke("joinRoom $key (call=${_state.value::class.simpleName})")
         _pendingJoin.value = key
         runCatching {
             ch.poke(

@@ -311,6 +311,10 @@ class AppDelegate: NSObject, UIApplicationDelegate, PKPushRegistryDelegate, CXPr
         }
     }
 
+    func note(msg: String) {
+        CallTrace.log("app: \(msg)")
+    }
+
     func reportMuted(id: String, muted: Bool) {
         guard let uuid = callIdToUuid[id] else { return }
         callController.request(CXTransaction(action: CXSetMutedCallAction(call: uuid, muted: muted))) { _ in }

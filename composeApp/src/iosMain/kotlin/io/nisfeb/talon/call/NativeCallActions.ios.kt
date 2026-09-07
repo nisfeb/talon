@@ -73,8 +73,9 @@ internal object IosCallKitCalls {
                 }
             }
         }
+        controller.trace = { IosVoipBridge.callKit?.note(it) }
         s.launch { trackCalls(controller, nameFor) }
-        party?.let { s.launch { trackParty(it) } }
+        party?.let { s.launch { trackParty(it, controller) } }
     }
 
     private suspend fun trackCalls(controller: CallController, nameFor: (String) -> String) {
@@ -120,21 +121,30 @@ internal object IosCallKitCalls {
         }
     }
 
-    private suspend fun trackParty(party: PartyLine) {
+    private suspend fun trackParty(party: PartyLine, controller: CallController) {
         var reported = false
         var connected = false
         var lastMuted: Boolean? = null
+        // A line reported to CallKit while a 1:1 call is up is a second
+        // call, and CallKit answers that by holding the first: the peer
+        // kept hearing us through the held call's mic while we heard
+        // nothing. The line still runs, it just is not a phone call.
+        fun callUp(): Boolean = controller.state.value.let {
+            it is CallUiState.Active || it is CallUiState.Outgoing || it is CallUiState.Incoming
+        }
         party.state.collect { s ->
             val kit = IosVoipBridge.callKit ?: return@collect
             when (s) {
                 is PartyState.Connecting -> if (!reported) {
                     // The room is a Galène id, not a name for a car's
                     // screen; the topic is, once one is known.
+                    if (callUp()) { kit.note("party not reported: call up"); return@collect }
                     kit.reportOutgoing(IosCallKit.PARTY, IosCallKit.PARTY, "Party line")
                     reported = true; connected = false; lastMuted = null
                 }
                 is PartyState.Live -> {
                     if (!reported) {
+                        if (callUp()) { kit.note("party not reported: call up"); return@collect }
                         kit.reportOutgoing(IosCallKit.PARTY, IosCallKit.PARTY, s.topic.ifBlank { "Party line" })
                         reported = true
                     }

@@ -68,6 +68,8 @@ interface IosCallKit {
     fun reportConnected(id: String)
     fun reportEnded(id: String, remote: Boolean)
     fun reportMuted(id: String, muted: Boolean)
+    /** A line for the call trace from the Kotlin side. */
+    fun note(msg: String)
 
     companion object {
         const val PARTY = "party"
