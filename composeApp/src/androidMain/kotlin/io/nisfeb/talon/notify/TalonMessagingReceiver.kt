@@ -85,6 +85,11 @@ class TalonMessagingReceiver : MessagingReceiver() {
             val from = parsed?.get("from")?.jsonPrimitive?.content
             if (from.isNullOrBlank() || eventId.isNullOrBlank()) return
             io.nisfeb.talon.Notifications.showIncomingCall(context, from, eventId)
+            // Telecom hears about the ring from here, not only from the
+            // app: this is the path a phone in a pocket takes, and a
+            // call telecom never saw is not in the call log. If the
+            // app answers, it adopts this connection by id.
+            io.nisfeb.talon.call.TalonTelecom.startIncoming(context, eventId, from, from)
             return
         }
 
@@ -97,6 +102,8 @@ class TalonMessagingReceiver : MessagingReceiver() {
             if (!eventId.isNullOrBlank()) {
                 val reason = parsed?.get("reason")?.jsonPrimitive?.content
                 io.nisfeb.talon.Notifications.ringCancelled(context, eventId, reason)
+                io.nisfeb.talon.call.TalonTelecom.connection(eventId)
+                    ?.endRing(answeredElsewhere = reason == "answered")
             }
             return
         }

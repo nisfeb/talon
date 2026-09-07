@@ -7,6 +7,8 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.telecom.CallAudioState
 import android.telecom.Connection
 import android.telecom.ConnectionRequest
@@ -48,6 +50,10 @@ class TalonConnectionService : ConnectionService() {
             setAddress(request.address, TelecomManager.PRESENTATION_ALLOWED)
             setCallerDisplayName(extras?.getString(EXTRA_NAME), TelecomManager.PRESENTATION_ALLOWED)
             setRinging()
+            // A ring nobody answers, and no cancel reaches, would ring
+            // in telecom forever. The same watchdog the controller
+            // runs, filed the same way: missed.
+            armRingTimeout(CallController.DEFAULT_RING_TIMEOUT_MS)
         }
         TalonTelecom.adopt(id, conn)
         return conn
@@ -130,6 +136,26 @@ class TalonConnection(val talonId: String) : Connection() {
     }
 
     private val controls: TalonTelecom.Controls? get() = TalonTelecom.hooks?.controls(talonId)
+    private val main = Handler(Looper.getMainLooper())
+
+    fun armRingTimeout(ms: Long) {
+        main.postDelayed({
+            if (state == STATE_RINGING) {
+                setDisconnected(DisconnectCause(DisconnectCause.MISSED))
+                destroy()
+            }
+        }, ms)
+    }
+
+    /** End a ring from outside the call stack — the push path, when
+     *  the relay says the caller gave up or another device answered. */
+    fun endRing(answeredElsewhere: Boolean) {
+        if (state != STATE_RINGING) return
+        setDisconnected(
+            DisconnectCause(if (answeredElsewhere) DisconnectCause.ANSWERED_ELSEWHERE else DisconnectCause.MISSED),
+        )
+        destroy()
+    }
 
     override fun onAnswer() { controls?.onAnswer() }
     override fun onAnswer(videoState: Int) { controls?.onAnswer() }
@@ -190,15 +216,25 @@ object TalonTelecom {
     private val connections = HashMap<String, TalonConnection>()
     private val waiters = HashMap<String, CompletableDeferred<TalonConnection?>>()
     private val redials = HashMap<String, TalonConnection>()
+    /** Ids asked of telecom whose connection hasn't been created yet:
+     *  the push path and the app can both ask for the same ring. */
+    private val pending = HashSet<String>()
     private var handle: PhoneAccountHandle? = null
+
+    private fun handleFor(context: Context) =
+        PhoneAccountHandle(ComponentName(context.applicationContext, TalonConnectionService::class.java), "talon")
 
     private const val LOG_SELF_MANAGED_CALLS = "android.telecom.extra.LOG_SELF_MANAGED_CALLS"
     private const val TAG = "TalonTelecom"
 
+    /** Idempotent, and cheap enough to call from a push receiver in a
+     *  process that has never seen the app: the account persists in
+     *  telecom across processes, but our handle to it does not. */
     fun register(context: Context): Boolean {
         val app = context.applicationContext
+        if (handle != null) return true
         val tm = app.getSystemService(Context.TELECOM_SERVICE) as? TelecomManager ?: return false
-        val h = PhoneAccountHandle(ComponentName(app, TalonConnectionService::class.java), "talon")
+        val h = handleFor(app)
         return runCatching {
             val account = PhoneAccount.builder(h, "Talon")
                 .setCapabilities(PhoneAccount.CAPABILITY_SELF_MANAGED)
@@ -217,6 +253,9 @@ object TalonTelecom {
     /** Start a call we placed, or adopt the Phone app's call-back for
      *  [ship] if one is waiting. False if telecom would not take it. */
     fun startOutgoing(context: Context, id: String, ship: String, name: String): Boolean {
+        // Already registered — by the push path, say, before the app
+        // came up and answered it.
+        synchronized(this) { if (id in connections || id in pending) return true }
         synchronized(this) { redials.remove(ship) }?.let { conn ->
             connections[id] = conn
             conn.setCallerDisplayName(name, TelecomManager.PRESENTATION_ALLOWED)
@@ -243,17 +282,25 @@ object TalonTelecom {
     }
 
     fun startIncoming(context: Context, id: String, ship: String, name: String): Boolean {
+        synchronized(this) {
+            if (id in connections || id in pending) return true
+        }
+        if (!register(context)) return false
         val tm = context.applicationContext.getSystemService(Context.TELECOM_SERVICE) as? TelecomManager
             ?: return false
         val h = handle ?: return false
         if (!tm.isIncomingCallPermitted(h)) return false
+        synchronized(this) { pending.add(id) }
         val extras = Bundle().apply {
             putParcelable(TelecomManager.EXTRA_INCOMING_CALL_ADDRESS, Uri.fromParts(SCHEME, ship, null))
             putString(TalonConnectionService.EXTRA_TALON_ID, id)
             putString(TalonConnectionService.EXTRA_NAME, name)
         }
         return runCatching { tm.addNewIncomingCall(h, extras); true }
-            .onFailure { Log.w(TAG, "addNewIncomingCall refused", it) }
+            .onFailure {
+                Log.w(TAG, "addNewIncomingCall refused", it)
+                synchronized(this) { pending.remove(id) }
+            }
             .getOrDefault(false)
     }
 
@@ -270,12 +317,14 @@ object TalonTelecom {
     fun connection(id: String): TalonConnection? = synchronized(this) { connections[id] }
 
     internal fun adopt(id: String, conn: TalonConnection) = synchronized(this) {
+        pending.remove(id)
         connections[id] = conn
         waiters.remove(id)?.complete(conn)
         hooks?.route?.bind(conn)
     }
 
     internal fun refuse(id: String) = synchronized(this) {
+        pending.remove(id)
         waiters.remove(id)?.complete(null)
     }
 
