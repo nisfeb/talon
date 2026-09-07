@@ -761,46 +761,50 @@ fun ChatComposer(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(2.dp),
         ) {
-            if (!hideComposerButtons) {
-                // Paste-image action for platforms whose text field
-                // can't receive one (iOS). Only shown when the
-                // clipboard actually holds an image, so it doesn't sit
-                // there as a dead button — and the check is the cheap,
-                // notification-free kind.
-                if (needsManualImagePaste && canSend && !state.uploading) {
-                    // Polled, not read straight into composition. The
-                    // pasteboard is not snapshot state, so a plain read
-                    // is sampled once and never re-evaluated: you copy
-                    // an image in another app, come back, and the
-                    // button is still absent because nothing told
-                    // Compose to look again. Nothing else in the frame
-                    // changes when the clipboard does.
-                    //
-                    // hasImages inspects declared types only, so this
-                    // costs nothing and never trips the iOS "pasted
-                    // from" banner.
-                    var hasImage by remember { mutableStateOf(false) }
-                    LaunchedEffect(Unit) {
-                        while (true) {
-                            hasImage = clipboardHasImage()
-                            kotlinx.coroutines.delay(600)
-                        }
-                    }
-                    if (hasImage) {
-                        IconButton(
-                            onClick = {
-                                readClipboardImageOrNull()?.let(stageDropped)
-                            },
-                            modifier = Modifier.size(36.dp),
-                        ) {
-                            Icon(
-                                Icons.Filled.ContentPaste,
-                                contentDescription = "Paste image",
-                                modifier = Modifier.size(22.dp),
-                            )
-                        }
+            // Shown even with the composer buttons hidden: it only
+            // exists while the clipboard holds an image, so it is never
+            // a dead button, and hidden buttons are how iOS users lose
+            // their only way to paste one.
+            // Paste-image action for platforms whose text field
+            // can't receive one (iOS; desktop too, beside Ctrl+V). Only shown when the
+            // clipboard actually holds an image, so it doesn't sit
+            // there as a dead button — and the check is the cheap,
+            // notification-free kind.
+            if (needsManualImagePaste && canSend && !state.uploading) {
+                // Polled, not read straight into composition. The
+                // pasteboard is not snapshot state, so a plain read
+                // is sampled once and never re-evaluated: you copy
+                // an image in another app, come back, and the
+                // button is still absent because nothing told
+                // Compose to look again. Nothing else in the frame
+                // changes when the clipboard does.
+                //
+                // hasImages inspects declared types only, so this
+                // costs nothing and never trips the iOS "pasted
+                // from" banner.
+                var hasImage by remember { mutableStateOf(false) }
+                LaunchedEffect(Unit) {
+                    while (true) {
+                        hasImage = clipboardHasImage()
+                        kotlinx.coroutines.delay(600)
                     }
                 }
+                if (hasImage) {
+                    IconButton(
+                        onClick = {
+                            readClipboardImageOrNull()?.let(stageDropped)
+                        },
+                        modifier = Modifier.size(36.dp),
+                    ) {
+                        Icon(
+                            Icons.Filled.ContentPaste,
+                            contentDescription = "Paste image",
+                            modifier = Modifier.size(22.dp),
+                        )
+                    }
+                }
+            }
+            if (!hideComposerButtons) {
                 IconButton(
                     onClick = onPickImage,
                     enabled = canSend && !state.uploading,

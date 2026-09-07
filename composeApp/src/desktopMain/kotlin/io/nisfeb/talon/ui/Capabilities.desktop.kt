@@ -72,6 +72,6 @@ actual val isEdgeSwipeBackSupported: Boolean = false
 actual val needsEmojiFontSpans: Boolean = true
 
 // Handled by the composer's Ctrl+V intercept.
-actual val needsManualImagePaste: Boolean = false
+actual val needsManualImagePaste: Boolean = true
 actual val isImmersiveCallSupported: Boolean = false
 actual val isUrbWebViewSupported: Boolean = false
