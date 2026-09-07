@@ -501,7 +501,12 @@ class CallController(
                         }
                     }
                 }
-            }.onFailure { Log.w(TAG, "signal loop ended", it) }
+            }.onFailure {
+                // Cancellation is the normal stop(); only a real failure
+                // deserves a warning with a stack.
+                if (it is kotlin.coroutines.cancellation.CancellationException) throw it
+                Log.w(TAG, "signal loop ended", it)
+            }
             if (!scope.isActive) break
             delay(backoff)
             backoff = (backoff * 2).coerceAtMost(60_000L)
