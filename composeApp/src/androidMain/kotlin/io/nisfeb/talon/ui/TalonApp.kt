@@ -369,6 +369,27 @@ fun TalonApp(
 
     var addingAnotherShip by remember { mutableStateOf(false) }
     // Locally-owned navigation state. Initial values from the
+    // Register every call and party line with telecom for as long as
+    // it lasts, and let the audio picker route through it meanwhile.
+    val telecomCalls = remember(callController, partyLine) {
+        if (callController != null && partyLine != null) {
+            io.nisfeb.talon.call.TelecomCalls(
+                app, callController, partyLine,
+                nameFor = { ship -> contactMap.displayName(ship) },
+                scope = appScope,
+            )
+        } else {
+            null
+        }
+    }
+    DisposableEffect(telecomCalls) {
+        telecomCalls?.start()
+        androidAudioDevices.telecom = telecomCalls?.route
+        onDispose {
+            androidAudioDevices.telecom = null
+            telecomCalls?.stop()
+        }
+    }
     // notification-tap intent (or null on a normal cold launch). The
     // LaunchedEffect below routes any LATER param updates from
     // MainActivity (onNewIntent re-fires consumeIntent), which a

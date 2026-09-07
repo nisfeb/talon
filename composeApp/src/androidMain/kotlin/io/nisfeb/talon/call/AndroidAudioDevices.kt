@@ -27,13 +27,19 @@ class AndroidAudioDevices(context: Context) : AudioDevices {
     private val audioManager =
         appContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager
 
-    override val supported: Boolean =
-        Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
+    /** Set while a call is registered with telecom, which then owns
+     *  routing; the list and the choice come from it. See [TelecomRoute]. */
+    @Volatile
+    var telecom: TelecomRoute? = null
+    private val viaTelecom: TelecomRoute? get() = telecom?.takeIf { it.active }
+
+    override val supported: Boolean
+        get() = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S || viaTelecom != null
 
     override val unifiedRoute: Boolean = true
 
-    override val selectedInput: String? get() = chosen
-    override val selectedOutput: String? get() = chosen
+    override val selectedInput: String? get() = viaTelecom?.selected ?: chosen
+    override val selectedOutput: String? get() = viaTelecom?.selected ?: chosen
 
     /**
      * Available call routes.
@@ -44,6 +50,7 @@ class AndroidAudioDevices(context: Context) : AudioDevices {
      * away should stop being offered.
      */
     override fun inputs(): List<AudioDevice> {
+        viaTelecom?.let { return it.devices() }
         if (!supported) return emptyList()
         return runCatching {
             audioManager.availableCommunicationDevices.map { d ->
@@ -63,6 +70,7 @@ class AndroidAudioDevices(context: Context) : AudioDevices {
     override fun selectOutput(id: String?) = select(id)
 
     private fun select(id: String?) {
+        viaTelecom?.let { it.select(id); return }
         if (!supported) return
         runCatching {
             if (id == null) {
