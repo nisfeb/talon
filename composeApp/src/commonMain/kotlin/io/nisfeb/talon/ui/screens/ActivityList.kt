@@ -228,12 +228,17 @@ private fun ActivityRow(
             modifier = Modifier.weight(1f),
             verticalArrangement = Arrangement.spacedBy(2.dp),
         ) {
+            // The stored title is the raw nest ("#ve8843l") captured
+            // at ingest; name the place the way the rest of the app
+            // does once the group sync can resolve it.
+            val place = item.whom?.takeIf { it.contains('/') }
+                ?.let { contactMap.conversationLabel(it) } ?: item.title
             val header = buildString {
                 append(authorLabel ?: item.author ?: "someone")
                 append(" · ")
                 append(item.kind)
                 append(" · ")
-                append(item.title)
+                append(place)
             }
             Text(
                 header,
