@@ -670,9 +670,12 @@ fun App(
         // through the state so a late nickname still shows.
         remember(callController, partyLine) {
             callController?.let { c ->
-                io.nisfeb.talon.call.bindNativeCallActions(c, partyLine) { ship ->
-                    callContacts.displayName(ship)
-                }
+                io.nisfeb.talon.call.bindNativeCallActions(
+                    c,
+                    partyLine,
+                    nameFor = { ship -> callContacts.displayName(ship) },
+                    shipFor = { name -> callContacts.shipForDisplayName(name) },
+                )
             }
         }
         // True exactly while the chat pane's partyLineBar slot is

@@ -63,6 +63,14 @@ data class ContactMap(
     }
 
     fun nickname(ship: String): String? = byShip[ship]?.nickname
+
+    /** The ship behind a name we showed somewhere outside the app —
+     *  a Recents entry hands back whatever it was given. */
+    fun shipForDisplayName(name: String): String? {
+        if (name.startsWith("~")) return name
+        val n = name.trim()
+        return byShip.keys.firstOrNull { displayName(it).equals(n, ignoreCase = true) }
+    }
     fun avatar(ship: String): String? = byShip[ship]?.avatarUrl
     fun displayName(ship: String): String =
         if (alwaysPatp) {

@@ -27,12 +27,20 @@ actual fun bindNativeCallActions(
     controller: CallController,
     partyLine: PartyLine?,
     nameFor: (String) -> String,
-) = IosCallKitCalls.bind(controller, partyLine, nameFor)
+    /** Resolves a handle the system handed back (a Recents entry may
+     *  carry the display name we reported) to a ship, or null. */
+    shipFor: (String) -> String?,
+) = IosCallKitCalls.bind(controller, partyLine, nameFor, shipFor)
 
 internal object IosCallKitCalls {
     private var scope: CoroutineScope? = null
 
-    fun bind(controller: CallController, party: PartyLine?, nameFor: (String) -> String) {
+    fun bind(
+        controller: CallController,
+        party: PartyLine?,
+        nameFor: (String) -> String,
+        shipFor: (String) -> String?,
+    ) {
         scope?.cancel()
         val s = CoroutineScope(SupervisorJob() + Dispatchers.Main)
         scope = s
@@ -57,7 +65,10 @@ internal object IosCallKitCalls {
             override fun onCallBack(handle: String) {
                 // Recents hands back the handle we reported: a ship for
                 // a call, "party" for a line — nothing to dial there.
-                if (handle.startsWith("~")) controller.placeCall(handle)
+                // A name instead of a ship is resolved through contacts.
+                val ship = if (handle.startsWith("~")) handle else shipFor(handle)
+                IosVoipBridge.callKit?.note("call back $handle -> ${ship ?: "unresolved"}")
+                if (ship != null) controller.placeCall(ship)
             }
 
             override fun onSetHeld(callId: String, held: Boolean) {
