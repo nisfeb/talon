@@ -2,7 +2,8 @@ package io.nisfeb.talon.bridge
 
 import dev.onvoid.webrtc.media.audio.AudioTrackSink
 import dev.onvoid.webrtc.media.audio.CustomAudioSource
-import dev.onvoid.webrtc.media.audio.HeadlessAudioDeviceModule
+import dev.onvoid.webrtc.media.audio.AudioDeviceModule
+import dev.onvoid.webrtc.media.audio.AudioLayer
 import io.nisfeb.talon.call.DesktopPeerLink
 import io.nisfeb.talon.call.DesktopWebRtcFactory
 import io.nisfeb.talon.call.PeerLinkFactory
@@ -30,8 +31,9 @@ import java.util.concurrent.atomic.AtomicBoolean
  *     CustomAudioSource.pushAudio  → what we say into the line
  *     AudioTrack.addSink → onData  ← what the line says
  *
- * HeadlessAudioDeviceModule still earns its place: it keeps WebRTC
- * from opening a sound card on a machine that may not have one.
+ * The dummy audio layer keeps WebRTC from opening a sound card on a
+ * machine that may not have one, and — unlike the headless module —
+ * from feeding the send stream itself (see start()).
  */
 class BridgeAudio(
     private val source: PcmSource,
@@ -83,7 +85,13 @@ class BridgeAudio(
      */
     fun start() {
         if (!running.compareAndSet(false, true)) return
-        val module = HeadlessAudioDeviceModule()
+        // The dummy audio layer, not HeadlessAudioDeviceModule: once a
+        // send stream exists the factory starts the module's recording,
+        // and the headless module then delivers frames of its own into
+        // the same send stream our pushAudio feeds — two producers, and
+        // libwebrtc aborts on the race the moment the line comes up.
+        // The dummy layer records into nothing.
+        val module = AudioDeviceModule(AudioLayer.kDummyAudio)
         DesktopWebRtcFactory.useAudioDeviceModule { module }
         mic = CustomAudioSource()
         pump = Thread({ run() }, "bridge-audio").apply {
