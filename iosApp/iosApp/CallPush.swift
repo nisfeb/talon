@@ -2,6 +2,7 @@ import AVFoundation
 import CallKit
 import ComposeApp
 import Foundation
+import Intents
 import PushKit
 import UIKit
 import WebRTC
@@ -26,6 +27,10 @@ class AppDelegate: NSObject, UIApplicationDelegate, PKPushRegistryDelegate, CXPr
     // Ends we asked for ourselves: the perform is bookkeeping, not a
     // hang-up to forward — the Kotlin side already ended the call.
     private var endingLocally: Set<UUID> = []
+    // Calls we placed: ended by the far side, they are "remote ended";
+    // an incoming one nobody answered is "unanswered", which is what
+    // Recents shows as Missed.
+    private var outgoing: Set<UUID> = []
 
     private var provider: CXProvider!
     // Held, not local: PKPushRegistry.delegate is weak, so a registry
@@ -109,7 +114,9 @@ class AppDelegate: NSObject, UIApplicationDelegate, PKPushRegistryDelegate, CXPr
             update.remoteHandle = CXHandle(type: .generic, value: from)
             update.localizedCallerName = from
             provider.reportNewIncomingCall(with: uuid, update: update) { _ in
-                self.provider.reportCall(with: uuid, endedAt: nil, reason: .remoteEnded)
+                // The caller gave up on a ring we never answered: a
+                // missed call, and that is how Recents should file it.
+                self.provider.reportCall(with: uuid, endedAt: nil, reason: .unanswered)
                 self.forget(uuid)
                 completion()
             }
@@ -220,11 +227,14 @@ class AppDelegate: NSObject, UIApplicationDelegate, PKPushRegistryDelegate, CXPr
 
     // MARK: - IosCallKit (reports from the Kotlin call stack)
 
-    func reportOutgoing(id: String, handle: String) {
+    func reportOutgoing(id: String, handle: String, name: String) {
         if callIdToUuid[id] != nil { return }
         let uuid = UUID()
         uuidToCallId[uuid] = id
         callIdToUuid[id] = uuid
+        outgoing.insert(uuid)
+        // The handle is the ship, so a Recents tap can dial it; the
+        // name is what Recents shows.
         let start = CXStartCallAction(call: uuid, handle: CXHandle(type: .generic, value: handle))
         callController.request(CXTransaction(action: start)) { error in
             if let error = error {
@@ -232,8 +242,26 @@ class AppDelegate: NSObject, UIApplicationDelegate, PKPushRegistryDelegate, CXPr
                 // on app-managed, exactly as before this existed.
                 NSLog("talon: CallKit refused the outgoing call: \(error)")
                 self.forget(uuid)
+                return
             }
+            let update = CXCallUpdate()
+            update.localizedCallerName = name
+            self.provider.reportCall(with: uuid, updated: update)
         }
+    }
+
+    /// A tap on a Recents entry. iOS hands it over as a start-call
+    /// intent whose handle is the one we reported: the ship.
+    static func callBack(from activity: NSUserActivity) {
+        let handle: String?
+        if let intent = activity.interaction?.intent as? INStartCallIntent {
+            handle = intent.contacts?.first?.personHandle?.value
+        } else if let intent = activity.interaction?.intent as? INStartAudioCallIntent {
+            handle = intent.contacts?.first?.personHandle?.value
+        } else {
+            handle = nil
+        }
+        if let handle = handle { IosVoipBridge.shared.callBack(handle: handle) }
     }
 
     func reportAnswered(id: String) {
@@ -249,7 +277,9 @@ class AppDelegate: NSObject, UIApplicationDelegate, PKPushRegistryDelegate, CXPr
     func reportEnded(id: String, remote: Bool) {
         guard let uuid = callIdToUuid[id] else { return }
         if remote {
-            provider.reportCall(with: uuid, endedAt: nil, reason: .remoteEnded)
+            let reason: CXCallEndedReason =
+                (outgoing.contains(uuid) || answered.contains(uuid)) ? .remoteEnded : .unanswered
+            provider.reportCall(with: uuid, endedAt: nil, reason: reason)
             forget(uuid)
         } else {
             endingLocally.insert(uuid)
@@ -269,6 +299,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, PKPushRegistryDelegate, CXPr
 
     private func forget(_ uuid: UUID) {
         answered.remove(uuid)
+        outgoing.remove(uuid)
         if let callId = uuidToCallId.removeValue(forKey: uuid) {
             callIdToUuid.removeValue(forKey: callId)
         }

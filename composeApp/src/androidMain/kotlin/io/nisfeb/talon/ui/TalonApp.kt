@@ -151,6 +151,9 @@ fun TalonApp(
      *  so a stale notification can't answer a different caller. */
     initialAnswerCallId: String? = null,
     onAnswerConsumed: () -> Unit = {},
+    /** A ship to call, from a missed-call notification's Call back. */
+    initialCallBack: String? = null,
+    onCallBackConsumed: () -> Unit = {},
 ) {
     val app = LocalContext.current.applicationContext as TalonApplication
     val context = LocalContext.current
@@ -366,9 +369,6 @@ fun TalonApp(
             app.db.groups().streamChannelGroups(),
         )
     }.let { flow -> flow.collectAsState(initial = ContactMap.EMPTY) }
-
-    var addingAnotherShip by remember { mutableStateOf(false) }
-    // Locally-owned navigation state. Initial values from the
     // Register every call and party line with telecom for as long as
     // it lasts, and let the audio picker route through it meanwhile.
     val telecomCalls = remember(callController, partyLine) {
@@ -390,6 +390,37 @@ fun TalonApp(
             telecomCalls?.stop()
         }
     }
+    // A ring that ends unanswered on our side — timed out, or the
+    // caller gave up — becomes a missed-call notice with Call back.
+    // Not one we declined: that was an answer.
+    if (callController != null) {
+        var ringingFrom by remember { mutableStateOf<String?>(null) }
+        val missedState by callController.state.collectAsState()
+        androidx.compose.runtime.LaunchedEffect(missedState) {
+            when (val s = missedState) {
+                is io.nisfeb.talon.call.CallUiState.Incoming -> ringingFrom = s.peer
+                is io.nisfeb.talon.call.CallUiState.Active -> ringingFrom = null
+                is io.nisfeb.talon.call.CallUiState.Ended -> {
+                    val who = ringingFrom
+                    ringingFrom = null
+                    if (who != null && s.reason != "declined") {
+                        io.nisfeb.talon.Notifications.showMissedCall(app, who, contactMap.displayName(who))
+                    }
+                }
+                is io.nisfeb.talon.call.CallUiState.None -> ringingFrom = null
+                else -> {}
+            }
+        }
+        if (initialCallBack != null) {
+            androidx.compose.runtime.LaunchedEffect(initialCallBack) {
+                callController.placeCall(initialCallBack)
+                onCallBackConsumed()
+            }
+        }
+    }
+
+    var addingAnotherShip by remember { mutableStateOf(false) }
+    // Locally-owned navigation state. Initial values from the
     // notification-tap intent (or null on a normal cold launch). The
     // LaunchedEffect below routes any LATER param updates from
     // MainActivity (onNewIntent re-fires consumeIntent), which a

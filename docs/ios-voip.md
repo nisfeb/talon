@@ -39,6 +39,12 @@ added the relay APNs leg and the iOS native front half.
   Device checks: outgoing 1:1 shows in the system UI and on a watch;
   a party line does; a cellular call arriving mid-call mutes us and
   resume unmutes; the CallKit mute button and ours stay in step.
+- **Recents**: every call is in the Phone app's Recents (CallKit's
+  default). A ring nobody answered ends as `.unanswered`, which
+  Recents files as Missed. The reported handle is the ship and the
+  shown name the nickname, so a tap on an entry comes back as an
+  `INStartCallIntent` (declared in Info.plist, handled in
+  `iOSApp.swift` → `AppDelegate.callBack`) and places the call.
 
 ## What remains — in order
 

@@ -45,6 +45,8 @@ class MainActivity : ComponentActivity() {
      *  can outlive its ring, and accepting whatever rings *now* would
      *  answer a different caller — the id pins the accept. */
     private val pendingAnswerCallId = mutableStateOf<String?>(null)
+    /** A ship to call back, from a missed-call notification's tap. */
+    private val pendingCallBack = mutableStateOf<String?>(null)
     private val pendingShare = mutableStateOf<ShareIntent?>(null)
     /** When the system share sheet routes through a published Sharing
      *  Shortcut (one of the per-channel shortcuts ShortcutsPublisher
@@ -96,6 +98,7 @@ class MainActivity : ComponentActivity() {
             val shareTarget by pendingShareTarget
             val answerFrom by pendingAnswerFrom
             val answerCallId by pendingAnswerCallId
+            val callBack by pendingCallBack
             val themeMode by app.themePreference.mode.collectAsState()
             val systemDark = isSystemInDarkTheme()
             val darkTheme = when (themeMode) {
@@ -181,6 +184,8 @@ class MainActivity : ComponentActivity() {
                             pendingAnswerFrom.value = null
                             pendingAnswerCallId.value = null
                         },
+                        initialCallBack = callBack,
+                        onCallBackConsumed = { pendingCallBack.value = null },
                     )
                 }
             }
@@ -224,6 +229,11 @@ class MainActivity : ComponentActivity() {
             // answer extra would re-accept on the next cold launch.
             intent.removeExtra(Notifications.EXTRA_ANSWER_FROM)
             intent.removeExtra(Notifications.EXTRA_ANSWER_CALL_ID)
+            consumedDeepLink = true
+        }
+        intent.getStringExtra(Notifications.EXTRA_CALL_BACK)?.let {
+            pendingCallBack.value = it
+            intent.removeExtra(Notifications.EXTRA_CALL_BACK)
             consumedDeepLink = true
         }
         // Strip the deep-link extras now that we've read them, then write

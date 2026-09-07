@@ -45,9 +45,12 @@ object Notifications {
 
     const val EXTRA_ANSWER_FROM = "answer_from"
     const val EXTRA_ANSWER_CALL_ID = "answer_call_id"
+    /** A ship to call back, from a missed-call notification. */
+    const val EXTRA_CALL_BACK = "call_back"
 
     /** One notification id for calls: only one can ring at a time. */
     private const val CALL_NOTIFICATION_ID = 0x0CA11
+    private const val MISSED_CALL_NOTIFICATION_ID = 0x0CA12
     const val EXTRA_OPEN_WHOM = "open_whom"
     const val EXTRA_SCROLL_TO_MESSAGE = "scroll_to_message"
     /** When the notification is for a reply, the parent post id —
@@ -301,6 +304,48 @@ object Notifications {
     var inAppRinging: Boolean = false
 
     /** Stop ringing — answered, declined, or the caller gave up. */
+    /**
+     * A ring that ended unanswered on our side. A self-managed telecom
+     * call never reaches the system call log (that needs the dialer
+     * role), so this is where a missed call lives on Android: a notice
+     * with Call back and Message, which is how every non-dialer app
+     * behaves. Silent: the ring already made its noise.
+     */
+    fun showMissedCall(context: Context, from: String, name: String) {
+        ensureChannel(context)
+        val mgr = ContextCompat.getSystemService(context, NotificationManager::class.java)
+            ?: return
+        val callBack = PendingIntent.getActivity(
+            context, from.hashCode(),
+            Intent(context, MainActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                putExtra(EXTRA_CALL_BACK, from)
+            },
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+        val message = PendingIntent.getActivity(
+            context, from.hashCode() + 1,
+            Intent(context, MainActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                putExtra(EXTRA_OPEN_WHOM, from)
+            },
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+        val n = NotificationCompat.Builder(context, CHANNEL_CALLS)
+            .setSmallIcon(android.R.drawable.sym_call_missed)
+            .setContentTitle("Missed call")
+            .setContentText(name)
+            .setCategory(NotificationCompat.CATEGORY_MISSED_CALL)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setSilent(true)
+            .setAutoCancel(true)
+            .setContentIntent(callBack)
+            .addAction(android.R.drawable.sym_action_call, "Call back", callBack)
+            .addAction(android.R.drawable.sym_action_chat, "Message", message)
+            .build()
+        mgr.notify(MISSED_CALL_NOTIFICATION_ID, n)
+    }
+
     fun cancelIncomingCall(context: Context) {
         // Stop the noise first: the notification going away while the
         // phone keeps buzzing is worse than either alone.

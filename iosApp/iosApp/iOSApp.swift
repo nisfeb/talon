@@ -10,6 +10,9 @@ struct iOSApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
+                // A tap on one of our calls in the Phone app's Recents.
+                .onContinueUserActivity("INStartCallIntent") { AppDelegate.callBack(from: $0) }
+                .onContinueUserActivity("INStartAudioCallIntent") { AppDelegate.callBack(from: $0) }
         }
     }
 }

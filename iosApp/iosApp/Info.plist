@@ -86,5 +86,11 @@
 	<true/>
 	<key>LSSupportsOpeningDocumentsInPlace</key>
 	<true/>
+	<!-- Recents in the Phone app calls us back through these. -->
+	<key>NSUserActivityTypes</key>
+	<array>
+		<string>INStartCallIntent</string>
+		<string>INStartAudioCallIntent</string>
+	</array>
 </dict>
 </plist>

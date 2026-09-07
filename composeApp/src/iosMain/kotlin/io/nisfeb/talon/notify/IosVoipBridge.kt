@@ -41,6 +41,11 @@ object IosVoipBridge {
     fun setHeld(callId: String, held: Boolean) {
         actions?.onSetHeld(callId, held)
     }
+
+    /** A tap on a Recents entry: the handle we reported, a ship. */
+    fun callBack(handle: String) {
+        actions?.onCallBack(handle)
+    }
 }
 
 /** What the system call UI asks of us. Ids are %trunk call ids, or
@@ -50,12 +55,14 @@ interface IosCallActions {
     fun onEnd(callId: String)
     fun onSetMuted(callId: String, muted: Boolean)
     fun onSetHeld(callId: String, held: Boolean)
+    fun onCallBack(handle: String)
 }
 
 /** What we tell the system call UI. Implemented in Swift. */
 interface IosCallKit {
-    /** A call we placed, or a line we are joining. */
-    fun reportOutgoing(id: String, handle: String)
+    /** A call we placed, or a line we are joining. [handle] is what a
+     *  Recents tap hands back — the ship — and [name] what it shows. */
+    fun reportOutgoing(id: String, handle: String, name: String)
     /** An incoming call answered in our own UI rather than CallKit's. */
     fun reportAnswered(id: String)
     fun reportConnected(id: String)

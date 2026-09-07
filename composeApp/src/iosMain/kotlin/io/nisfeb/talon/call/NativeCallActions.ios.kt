@@ -54,6 +54,12 @@ internal object IosCallKitCalls {
                 if (callId == IosCallKit.PARTY) party?.setMuted(muted) else controller.setMuted(muted)
             }
 
+            override fun onCallBack(handle: String) {
+                // Recents hands back the handle we reported: a ship for
+                // a call, "party" for a line — nothing to dial there.
+                if (handle.startsWith("~")) controller.placeCall(handle)
+            }
+
             override fun onSetHeld(callId: String, held: Boolean) {
                 val muted = if (callId == IosCallKit.PARTY) {
                     (party?.state?.value as? PartyState.Live)?.muted
@@ -82,7 +88,7 @@ internal object IosCallKitCalls {
                 is CallUiState.Outgoing -> {
                     val id = controller.currentCallId ?: s.peer
                     if (reported != id) {
-                        kit.reportOutgoing(id, nameFor(s.peer))
+                        kit.reportOutgoing(id, s.peer, nameFor(s.peer))
                         reported = id; outgoing = true; connected = false; lastMuted = null
                     }
                 }
@@ -120,12 +126,12 @@ internal object IosCallKitCalls {
                 is PartyState.Connecting -> if (!reported) {
                     // The room is a Galène id, not a name for a car's
                     // screen; the topic is, once one is known.
-                    kit.reportOutgoing(IosCallKit.PARTY, "Party line")
+                    kit.reportOutgoing(IosCallKit.PARTY, IosCallKit.PARTY, "Party line")
                     reported = true; connected = false; lastMuted = null
                 }
                 is PartyState.Live -> {
                     if (!reported) {
-                        kit.reportOutgoing(IosCallKit.PARTY, s.topic.ifBlank { "Party line" })
+                        kit.reportOutgoing(IosCallKit.PARTY, IosCallKit.PARTY, s.topic.ifBlank { "Party line" })
                         reported = true
                     }
                     if (!connected) { kit.reportConnected(IosCallKit.PARTY); connected = true }
