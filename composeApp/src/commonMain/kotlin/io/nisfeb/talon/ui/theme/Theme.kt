@@ -84,6 +84,7 @@ fun TalonTheme(
     accentOverride: Color? = null,
     content: @Composable () -> Unit,
 ) {
+    SystemBarsAppearance(darkTheme)
     val base = if (darkTheme) DarkColors else LightColors
     val effective = if (accentOverride == null) base else base.copy(
         primary = accentOverride,
