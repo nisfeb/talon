@@ -89,16 +89,23 @@ class AppDelegate: NSObject, UIApplicationDelegate, PKPushRegistryDelegate, CXPr
         let dict = payload.dictionaryPayload
         let from = (dict["from"] as? String) ?? "Unknown"
         let callId = (dict["id"] as? String) ?? UUID().uuidString
+        CallTrace.log("push \((dict["event"] as? String) ?? "ring") id=\(callId) from=\(from) reason=\((dict["reason"] as? String) ?? "-")")
 
         // A ring-cancel un-rings a call we're showing.
         if (dict["event"] as? String) == "ring-cancel" {
             if let uuid = callIdToUuid[callId], answered.contains(uuid) {
                 // Our own accept produced this cancel. Satisfy the
-                // PushKit contract without touching the live call.
+                // PushKit contract by re-reporting the SAME uuid: CallKit
+                // rejects it as already existing, and the live call — and
+                // the audio session it owns — are untouched. Reporting a
+                // fresh uuid here left a second call ringing forever
+                // beside the live one: two bars, and CallKit's audio
+                // going to the phantom while the real call went silent.
+                CallTrace.log("ring-cancel \(callId): our own accept, re-reporting live uuid")
                 let update = CXCallUpdate()
                 update.remoteHandle = CXHandle(type: .generic, value: from)
                 update.localizedCallerName = from
-                provider.reportNewIncomingCall(with: UUID(), update: update) { _ in
+                provider.reportNewIncomingCall(with: uuid, update: update) { _ in
                     completion()
                 }
                 return
@@ -117,6 +124,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, PKPushRegistryDelegate, CXPr
             // which reads as the caller giving up.
             let reason: CXCallEndedReason =
                 (dict["reason"] as? String) == "answered" ? .answeredElsewhere : .unanswered
+            CallTrace.log("ring-cancel \(callId): ending as \(reason == .answeredElsewhere ? "answered elsewhere" : "unanswered")")
             provider.reportNewIncomingCall(with: uuid, update: update) { _ in
                 self.provider.reportCall(with: uuid, endedAt: nil, reason: reason)
                 self.forget(uuid)
@@ -154,6 +162,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, PKPushRegistryDelegate, CXPr
         // the mapping too rather than leave an entry no answer or end
         // action will ever clear.
         provider.reportNewIncomingCall(with: uuid, update: update) { error in
+            CallTrace.log("ring \(callId): reported \(error == nil ? "ok" : "REFUSED \(error!)")")
             if error != nil {
                 self.forget(uuid)
             }
@@ -177,6 +186,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, PKPushRegistryDelegate, CXPr
     }
 
     func provider(_ provider: CXProvider, perform action: CXAnswerCallAction) {
+        CallTrace.log("callkit: answer \(uuidToCallId[action.callUUID] ?? "?")")
         if let callId = uuidToCallId[action.callUUID] {
             answered.insert(action.callUUID)
             IosVoipBridge.shared.answer(callId: callId)
@@ -186,6 +196,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, PKPushRegistryDelegate, CXPr
 
     func provider(_ provider: CXProvider, perform action: CXEndCallAction) {
         let uuid = action.callUUID
+        CallTrace.log("callkit: end \(uuidToCallId[uuid] ?? "?")\(endingLocally.contains(uuid) ? " (ours)" : "")")
         if endingLocally.remove(uuid) != nil {
             forget(uuid)
             action.fulfill()
@@ -226,6 +237,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, PKPushRegistryDelegate, CXPr
     // MARK: - IosCallKit (reports from the Kotlin call stack)
 
     func reportOutgoing(id: String, handle: String, name: String) {
+        CallTrace.log("app: outgoing \(id) to \(handle)\(callIdToUuid[id] != nil ? " (already reported)" : "")")
         if callIdToUuid[id] != nil { return }
         let uuid = UUID()
         uuidToCallId[uuid] = id
@@ -263,6 +275,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, PKPushRegistryDelegate, CXPr
     }
 
     func reportAnswered(id: String) {
+        CallTrace.log("app: answered \(id)\(callIdToUuid[id] == nil ? " (unknown to CallKit)" : "")")
         guard let uuid = callIdToUuid[id], !answered.contains(uuid) else { return }
         callController.request(CXTransaction(action: CXAnswerCallAction(call: uuid))) { _ in }
     }
@@ -273,6 +286,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, PKPushRegistryDelegate, CXPr
     }
 
     func reportEnded(id: String, remote: Bool) {
+        CallTrace.log("app: ended \(id) remote=\(remote)\(callIdToUuid[id] == nil ? " (unknown to CallKit)" : "")")
         guard let uuid = callIdToUuid[id] else { return }
         if remote {
             let reason: CXCallEndedReason =
@@ -300,6 +314,36 @@ class AppDelegate: NSObject, UIApplicationDelegate, PKPushRegistryDelegate, CXPr
         outgoing.remove(uuid)
         if let callId = uuidToCallId.removeValue(forKey: uuid) {
             callIdToUuid.removeValue(forKey: callId)
+        }
+    }
+}
+
+/// A call trace the user can read in the Files app (Documents is
+/// exposed there for last-crash.txt already). Every push, every
+/// CallKit action and every report from the app, timestamped — the
+/// iOS side of what adb gives us on Android. Bounded.
+enum CallTrace {
+    private static let url: URL? = FileManager.default
+        .urls(for: .documentDirectory, in: .userDomainMask).first?
+        .appendingPathComponent("call-trace.txt")
+    private static let stamp: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "MM-dd HH:mm:ss.SSS"
+        return f
+    }()
+
+    static func log(_ line: String) {
+        NSLog("talon call: %@", line)
+        guard let url = url else { return }
+        let entry = "\(stamp.string(from: Date())) \(line)\n"
+        if let h = try? FileHandle(forWritingTo: url) {
+            defer { try? h.close() }
+            if let size = try? h.seekToEnd(), size > 200_000 {
+                try? h.truncate(atOffset: 0)
+            }
+            h.write(Data(entry.utf8))
+        } else {
+            try? entry.write(to: url, atomically: true, encoding: .utf8)
         }
     }
 }
