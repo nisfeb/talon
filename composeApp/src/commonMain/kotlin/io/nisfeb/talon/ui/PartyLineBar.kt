@@ -527,6 +527,7 @@ fun PartyLineBarContent(
             PartyLineFullScreen(
                 state = state,
                 roomName = headline ?: state.room,
+                directCall = headline != null,
                 nameFor = nameFor,
                 selfShip = selfShip,
                 onToggleMute = onToggleMute,

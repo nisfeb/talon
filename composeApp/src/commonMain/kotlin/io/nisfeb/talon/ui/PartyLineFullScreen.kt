@@ -84,6 +84,10 @@ import io.nisfeb.talon.call.PartyState
 fun PartyLineFullScreen(
     state: PartyState.Live,
     roomName: String,
+    /** A 1:1 call, not a party line: its single fabricated member is
+     *  not a roster, so "N people on the line" is the wrong sentence.
+     *  The name and duration in [roomName] already say who and how long. */
+    directCall: Boolean = false,
     nameFor: (String) -> String,
     selfShip: String,
     onToggleMute: (Boolean) -> Unit,
@@ -158,17 +162,19 @@ fun PartyLineFullScreen(
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
-                    val n = state.members.size
-                    val listening = when (state.listeners) {
-                        0 -> ""
-                        1 -> " · 1 listening"
-                        else -> " · ${state.listeners} listening"
+                    if (!directCall) {
+                        val n = state.members.size
+                        val listening = when (state.listeners) {
+                            0 -> ""
+                            1 -> " · 1 listening"
+                            else -> " · ${state.listeners} listening"
+                        }
+                        Text(
+                            "${if (n == 1) "1 person" else "$n people"} on the line$listening",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
                     }
-                    Text(
-                        "${if (n == 1) "1 person" else "$n people"} on the line$listening",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
                     if (recordedBy.isNotEmpty()) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
