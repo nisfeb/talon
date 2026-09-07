@@ -377,6 +377,14 @@ fun App(
         openThreadReplyAnchor = null
         openChat = who
     }
+    // A tapped system notification (iOS) asks for a chat from outside
+    // the composition; land there the way the call strip's Message does.
+    LaunchedEffect(Unit) {
+        io.nisfeb.talon.notify.OpenChatRequests.requests.collect { r ->
+            jumpToChat(r.whom)
+            openChatFocusMessageId = r.postId
+        }
+    }
     // Watchwords-sync flag. Backed by [watchwordsSync] (caller-supplied)
     // so desktop's JSON-file impl can persist across restarts and
     // production Android can wire its SharedPreferences variant in

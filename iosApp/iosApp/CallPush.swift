@@ -3,6 +3,7 @@ import ComposeApp
 import Foundation
 import Intents
 import PushKit
+import UserNotifications
 import UIKit
 
 /// Native incoming-call ringing on iOS: PushKit wakes the app (even
@@ -18,7 +19,7 @@ import UIKit
 /// As `IosCallKit` it also reports the calls Kotlin places, joins,
 /// connects, mutes and ends, so they are phone calls to iOS the same
 /// as the ones we receive.
-class AppDelegate: NSObject, UIApplicationDelegate, PKPushRegistryDelegate, CXProviderDelegate, IosCallKit {
+class AppDelegate: NSObject, UIApplicationDelegate, PKPushRegistryDelegate, CXProviderDelegate, IosCallKit, UNUserNotificationCenterDelegate {
     // Requests we make of CallKit (start, answer, end, mute) go through
     // this; CallKit then asks us to perform them via the delegate.
     private let callController = CXCallController()
@@ -64,7 +65,59 @@ class AppDelegate: NSObject, UIApplicationDelegate, PKPushRegistryDelegate, CXPr
         pushRegistry = PKPushRegistry(queue: .main)
         pushRegistry.delegate = self
         pushRegistry.desiredPushTypes = [.voIP]
+
+        // Message alerts ride ordinary APNs, separate from PushKit.
+        // The token goes to the relay next to the VoIP one.
+        let center = UNUserNotificationCenter.current()
+        center.delegate = self
+        center.requestAuthorization(options: [.alert, .sound, .badge]) { granted, _ in
+            CallTrace.log("notifications \(granted ? "allowed" : "refused")")
+            guard granted else { return }
+            DispatchQueue.main.async { UIApplication.shared.registerForRemoteNotifications() }
+        }
         return true
+    }
+
+    func application(
+        _ application: UIApplication,
+        didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data
+    ) {
+        let hex = deviceToken.map { String(format: "%02x", $0) }.joined()
+        IosVoipBridge.shared.setAlertToken(hex: hex)
+    }
+
+    func application(
+        _ application: UIApplication,
+        didFailToRegisterForRemoteNotificationsWithError error: Error
+    ) {
+        CallTrace.log("apns alert token failed: \(error.localizedDescription)")
+    }
+
+    // MARK: - UNUserNotificationCenterDelegate
+
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        willPresent notification: UNNotification,
+        withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
+    ) {
+        let whom = notification.request.content.userInfo["whom"] as? String ?? ""
+        if IosVoipBridge.shared.shouldPresentAlert(whom: whom) {
+            completionHandler([.banner, .list, .sound])
+        } else {
+            completionHandler([])
+        }
+    }
+
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        didReceive response: UNNotificationResponse,
+        withCompletionHandler completionHandler: @escaping () -> Void
+    ) {
+        let info = response.notification.request.content.userInfo
+        if let whom = info["whom"] as? String, !whom.isEmpty {
+            IosVoipBridge.shared.openChat(whom: whom, postId: info["id"] as? String)
+        }
+        completionHandler()
     }
 
     // MARK: - PushKit

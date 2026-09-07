@@ -20,6 +20,21 @@ object IosVoipBridge {
         voipToken.value = hex
     }
 
+    /** The APNs device token for user-visible alerts; null until iOS
+     *  hands one over, empty forever if notifications were refused. */
+    val alertToken = MutableStateFlow<String?>(null)
+
+    fun setAlertToken(hex: String) {
+        alertToken.value = hex
+    }
+
+    /** iOS asks before showing a foreground alert: not for the chat
+     *  the user is already reading. */
+    fun shouldPresentAlert(whom: String): Boolean = NotificationFocus.openWhom != whom
+
+    /** A tapped alert: open its chat. */
+    fun openChat(whom: String, postId: String?) = OpenChatRequests.request(whom, postId)
+
     /** Set by the Kotlin side (NativeCallActions.ios.kt). */
     var actions: IosCallActions? = null
 
@@ -77,12 +92,21 @@ interface IosCallKit {
 }
 
 class IosPushTokenProvider : PushTokenProvider {
-    override val platform: String = "ios-voip"
+    // One registration carries both APNs tokens as "<voip>|<alert>":
+    // the relay rings through PushKit and alerts through the app
+    // topic. The alert half may be empty (permission refused); calls
+    // still ring then.
+    override val platform: String = "ios"
 
-    override suspend fun token(): String? =
-        withTimeoutOrNull(TOKEN_WAIT_MS) {
+    override suspend fun token(): String? {
+        val voip = withTimeoutOrNull(TOKEN_WAIT_MS) {
             IosVoipBridge.voipToken.first { it != null }
-        }
+        } ?: return null
+        val alert = withTimeoutOrNull(TOKEN_WAIT_MS) {
+            IosVoipBridge.alertToken.first { it != null }
+        }.orEmpty()
+        return "$voip|$alert"
+    }
 
     private companion object {
         private const val TOKEN_WAIT_MS = 5_000L

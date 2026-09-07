@@ -228,6 +228,7 @@ class TlonChatRepo(
     fun setOpenChat(whom: String?) {
         val prev = openWhom
         openWhom = whom
+        io.nisfeb.talon.notify.NotificationFocus.openWhom = whom
         if (prev != null && prev != whom) {
             // Exiting: final mark-read to catch anything that arrived
             // between the last activity event and now.
