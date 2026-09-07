@@ -121,13 +121,15 @@ private class Board(
     val hasDevices: Boolean = false,
     val ownWired: Boolean = false,
 ) {
-    /** Apps whose microphone is the party: the Space apps. */
-    val spaceApps: List<String> get() = capture.filter { it.target == Pulse.MIC_MONITOR }.map { it.app }.distinct()
+    /** Capture streams whose microphone is the party: the Space apps. */
+    val spaceStreams: List<Pulse.Stream> get() = capture.filter { it.target == Pulse.MIC_MONITOR }
+    val spaceApps: List<String> get() = spaceStreams.map { it.appName }.distinct()
 
     /** Space apps whose playback also reaches the party. */
-    val twoWayApps: List<String> get() = spaceApps.filter { app ->
-        playback.any { it.app == app && it.target in setOf(Pulse.SPACE, Pulse.BOTH) }
-    }
+    val twoWayApps: List<String> get() = spaceStreams.filter { s -> playsToParty(s) }.map { it.appName }.distinct()
+
+    fun playsToParty(s: Pulse.Stream): Boolean =
+        playback.any { it.sameApp(s) && it.target in setOf(Pulse.SPACE, Pulse.BOTH) }
 }
 
 private val soundboardDir = File(System.getProperty("user.home"), ".config/talon/soundboard")
@@ -158,11 +160,14 @@ private fun ManagerScreen(runner: BridgeRunner, configFile: File) {
                 val sinks = Pulse.sinks()
                 val has = Pulse.hasDevices(sinks)
                 val wired = has && live && Pulse.routeOwn(ownPid)
-                // Our own streams (the bridge) and helpers (meters, clips) are not "apps".
+                // Our own streams (the bridge), helpers (meters, clips) and the
+                // combine sink's internal feeds are not "apps".
                 val helpers = setOf("parec", "paplay")
+                fun Pulse.Stream.isApp() =
+                    pid != ownPid && app !in helpers && !app.startsWith("Simultaneous output")
                 Board(
-                    playback = Pulse.playback().filter { it.pid != ownPid && it.app !in helpers },
-                    capture = Pulse.capture().filter { it.pid != ownPid && it.app !in helpers },
+                    playback = Pulse.playback().filter { it.isApp() },
+                    capture = Pulse.capture().filter { it.isApp() },
                     hasDevices = has,
                     ownWired = wired,
                 )
@@ -240,14 +245,14 @@ private fun ManagerScreen(runner: BridgeRunner, configFile: File) {
                     onSpaceApp = { s ->
                         pulse {
                             Pulse.moveCapture(s.index, Pulse.MIC_MONITOR)
-                            board.playback.filter { it.app == s.app && it.target != Pulse.SPACE }
+                            board.playback.filter { it.sameApp(s) && it.target != Pulse.SPACE }
                                 .forEach { Pulse.movePlayback(it.index, Pulse.SPACE) }
                         }
                     },
                     onUnwire = { s ->
                         pulse {
                             Pulse.moveCapture(s.index, Pulse.DEFAULT_SOURCE)
-                            board.playback.filter { it.app == s.app }
+                            board.playback.filter { it.sameApp(s) }
                                 .forEach { Pulse.movePlayback(it.index, Pulse.DEFAULT_SINK) }
                         }
                     },
@@ -501,10 +506,10 @@ private fun SpaceCard(
             }
             board.capture.forEach { s ->
                 val wired = s.target == Pulse.MIC_MONITOR
-                val playsToParty = board.playback.any { it.app == s.app && it.target in setOf(Pulse.SPACE, Pulse.BOTH) }
+                val playsToParty = board.playsToParty(s)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
-                        Text(s.app, style = MaterialTheme.typography.bodyLarge)
+                        Text(s.appName, style = MaterialTheme.typography.bodyLarge)
                         Text(
                             when {
                                 wired && playsToParty -> "Space app: hears the party, and the party hears it"
@@ -563,7 +568,7 @@ private fun AppsCard(
             board.playback.forEach { s ->
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
-                        Text(s.app + if (s.corked) " (paused)" else "")
+                        Text(s.appName + if (s.corked) " (paused)" else "")
                         Text(hears(s.target), style = MaterialTheme.typography.bodySmall)
                     }
                     FilterChip(s.target == Pulse.SPACE, { onMovePlayback(s, Pulse.SPACE) }, { Text("Party") })

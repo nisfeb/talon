@@ -35,7 +35,14 @@ object Pulse {
     data class Device(val index: Int, val name: String, val description: String)
 
     /** One playing (sink-input) or recording (source-output) stream. */
-    data class Stream(val index: Int, val app: String, val pid: Long?, val target: String, val corked: Boolean = false)
+    data class Stream(val index: Int, val app: String, val pid: Long?, val target: String, val corked: Boolean = false) {
+        /** Chromium names its capture "Brave input"; the app is Brave. */
+        val appName: String get() = app.removeSuffix(" input")
+
+        /** Same program: by process when Pulse knows it, else by name. */
+        fun sameApp(other: Stream): Boolean =
+            if (pid != null && other.pid != null) pid == other.pid else appName == other.appName
+    }
 
     val available: Boolean by lazy { runCatching { pactl("--version") }.isSuccess }
 
