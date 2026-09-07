@@ -439,8 +439,13 @@ fun SettingsScreen(
             // ── Sidebar visibility ─────────────────────────────────
             // Drills into SidebarSettingsScreen where the user toggles
             // which rail items show. Inline here so it sits next to
-            // the other home/rail personalisation rows.
-            Row(
+            // the other home/rail personalisation rows. The rail only
+            // exists at expanded widths (desktop, tablet landscape);
+            // a phone has nothing this would change, so hide it there.
+            val wide = with(androidx.compose.ui.platform.LocalDensity.current) {
+                androidx.compose.ui.platform.LocalWindowInfo.current.containerSize.width.toDp()
+            } >= io.nisfeb.talon.ui.ExpandedThreshold
+            if (wide) Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clickable(onClick = onOpenSidebarSettings)
@@ -462,7 +467,7 @@ fun SettingsScreen(
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            Spacer(Modifier.height(4.dp))
+            if (wide) Spacer(Modifier.height(4.dp))
 
             }
             if (safeTab == SettingsTab.Account) {
@@ -929,8 +934,7 @@ fun SettingsScreen(
 
             }
             if (safeTab == SettingsTab.About) {
-            Spacer(Modifier.height(16.dp))
-            HorizontalDivider()
+            // First section of its tab: no leading divider.
             Spacer(Modifier.height(8.dp))
             AboutSection(callController)
             }
