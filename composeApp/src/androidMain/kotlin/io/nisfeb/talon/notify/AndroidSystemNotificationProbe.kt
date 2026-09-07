@@ -24,7 +24,43 @@ import androidx.core.app.NotificationManagerCompat
  */
 class AndroidSystemNotificationProbe(private val context: Context) : SystemNotificationProbe {
 
-    override fun snapshot(): SystemNotificationState =
+    override fun snapshot(): SystemNotificationState = base().copy(
+        fullScreenIntentAllowed = readFullScreenIntentAllowed(),
+        callAccountRegistered = readCallAccountRegistered(),
+        telecomEvents = io.nisfeb.talon.call.TalonTelecom.recentEvents(),
+    )
+
+    /** 34+ gates full-screen intents per app; before that they just
+     *  work. False is the usual reason a ring doesn't take over a
+     *  locked screen. */
+    private fun readFullScreenIntentAllowed(): Boolean? {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.UPSIDE_DOWN_CAKE) return true
+        val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as? android.app.NotificationManager
+            ?: return null
+        return runCatching { nm.canUseFullScreenIntent() }.getOrNull()
+    }
+
+    private fun readCallAccountRegistered(): Boolean? {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return null
+        val tm = context.getSystemService(Context.TELECOM_SERVICE) as? android.telecom.TelecomManager
+            ?: return null
+        return runCatching { tm.ownSelfManagedPhoneAccounts.any { it.id == "talon" } }.getOrNull()
+    }
+
+    override fun openFullScreenIntentSettings(): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.UPSIDE_DOWN_CAKE) return false
+        return runCatching {
+            context.startActivity(
+                Intent(Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT).apply {
+                    data = Uri.parse("package:${context.packageName}")
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                },
+            )
+            true
+        }.getOrDefault(false)
+    }
+
+    private fun base(): SystemNotificationState =
         SystemNotificationState(
             notificationsAllowed = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU)
                 NotificationManagerCompat.from(context).areNotificationsEnabled()

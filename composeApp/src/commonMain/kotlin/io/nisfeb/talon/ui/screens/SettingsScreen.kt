@@ -1541,17 +1541,49 @@ private fun NotificationHealthPanel(
                 highlight = restricted,
             )
         }
+        systemState.fullScreenIntentAllowed?.let { allowed ->
+            HealthRow(
+                label = "Ring over lock screen",
+                value = if (allowed) "allowed" else "blocked — fix in Settings",
+                highlight = !allowed,
+            )
+        }
+        systemState.callAccountRegistered?.let { registered ->
+            HealthRow(
+                label = "Phone-app call log",
+                value = if (registered) "account registered" else "no account — calls aren't logged",
+                highlight = !registered,
+            )
+        }
+        if (systemState.telecomEvents.isNotEmpty()) {
+            Text(
+                "Telecom, latest first:",
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.padding(top = 4.dp),
+            )
+            Text(
+                systemState.telecomEvents.asReversed().joinToString("\n"),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
     }
+    val needsFullScreenFix = systemState.fullScreenIntentAllowed == false
     // Fix-it buttons. Render only when there's something to fix
     // AND the probe knows how to deeplink there.
     val needsBatteryFix = systemState.batteryOptimizationsExempt == false
     val needsAppDetails = systemState.notificationsAllowed == false ||
         systemState.backgroundRestricted == true
-    if (needsBatteryFix || needsAppDetails) {
+    if (needsBatteryFix || needsAppDetails || needsFullScreenFix) {
         Row(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             modifier = Modifier.padding(top = 4.dp),
         ) {
+            if (needsFullScreenFix) {
+                TextButton(onClick = { probe.openFullScreenIntentSettings() }) {
+                    Text("Fix ring")
+                }
+            }
             if (needsBatteryFix) {
                 TextButton(onClick = { probe.openBatteryOptimizationSettings() }) {
                     Text("Fix battery")

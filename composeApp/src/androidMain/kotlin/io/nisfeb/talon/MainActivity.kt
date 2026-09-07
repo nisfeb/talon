@@ -66,6 +66,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        showOverLockScreenIfRinging(intent)
         // Only consume the launch intent's deep-link extras on a genuine
         // fresh start. A notification tap routes through onNewIntent and
         // setIntent(), so the notification intent (with EXTRA_OPEN_WHOM /
@@ -195,7 +196,23 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
+        showOverLockScreenIfRinging(intent)
         consumeIntent(intent)
+    }
+
+    /**
+     * The incoming-call notification's full-screen intent launches us
+     * on a locked phone. Without these the activity comes up behind
+     * the keyguard and all the user sees is the heads-up — no
+     * takeover. TalonApp clears them when the call ends, so the app
+     * doesn't stay visible over the lock screen afterwards.
+     */
+    private fun showOverLockScreenIfRinging(intent: Intent?) {
+        if (intent?.hasExtra(Notifications.EXTRA_ANSWER_FROM) != true) return
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+            setShowWhenLocked(true)
+            setTurnScreenOn(true)
+        }
     }
 
     private fun consumeIntent(intent: Intent?) {

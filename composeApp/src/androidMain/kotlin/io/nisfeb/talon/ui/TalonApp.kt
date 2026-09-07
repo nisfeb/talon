@@ -406,8 +406,12 @@ fun TalonApp(
                     if (who != null && s.reason != "declined") {
                         io.nisfeb.talon.Notifications.showMissedCall(app, who, contactMap.displayName(who))
                     }
+                    stopShowingOverLockScreen(context)
                 }
-                is io.nisfeb.talon.call.CallUiState.None -> ringingFrom = null
+                is io.nisfeb.talon.call.CallUiState.None -> {
+                    ringingFrom = null
+                    stopShowingOverLockScreen(context)
+                }
                 else -> {}
             }
         }
@@ -2304,5 +2308,14 @@ private fun rememberCallEngineProvider(): io.nisfeb.talon.call.CallEngineProvide
                 )
             }
         }
+    }
+}
+
+/** Undo MainActivity's show-over-lock-screen once the call is over. */
+private fun stopShowingOverLockScreen(context: android.content.Context) {
+    val activity = context as? android.app.Activity ?: return
+    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O_MR1) {
+        activity.setShowWhenLocked(false)
+        activity.setTurnScreenOn(false)
     }
 }

@@ -28,6 +28,14 @@ data class SystemNotificationState(
      *  EVERY background mechanism is disabled including FCM —
      *  this is the loudest red flag a user can hit. */
     val backgroundRestricted: Boolean? = null,
+    /** Whether an incoming call may take over a locked screen (the
+     *  full-screen-intent permission, 34+). Null where unknowable. */
+    val fullScreenIntentAllowed: Boolean? = null,
+    /** Whether our self-managed phone account is registered, which
+     *  is what puts calls in the system call log (Android 11+). */
+    val callAccountRegistered: Boolean? = null,
+    /** The last few things telecom did or refused, oldest first. */
+    val telecomEvents: List<String> = emptyList(),
 )
 
 /**
@@ -47,6 +55,7 @@ interface SystemNotificationProbe {
      *  (notifications + background restriction live there on
      *  modern Android). Returns true if the intent dispatched. */
     fun openAppDetailsSettings(): Boolean = false
+    fun openFullScreenIntentSettings(): Boolean = false
 }
 
 object NoopSystemNotificationProbe : SystemNotificationProbe {

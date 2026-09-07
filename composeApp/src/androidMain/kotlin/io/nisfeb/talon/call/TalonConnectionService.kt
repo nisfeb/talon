@@ -182,6 +182,7 @@ class TalonConnection(val talonId: String) : Connection() {
     }
 
     override fun onStateChanged(state: Int) {
+        TalonTelecom.trace(talonId, stateToString(state), if (state == STATE_DISCONNECTED) disconnectCause?.toString() else null)
         if (state == STATE_DISCONNECTED) {
             TalonTelecom.forget(this)
             TalonTelecom.hooks?.route?.unbind(this)
@@ -212,6 +213,21 @@ object TalonTelecom {
     }
 
     @Volatile var hooks: Hooks? = null
+
+    /** The last few things telecom did or refused, for the diagnostics
+     *  panel — the only view of this a phone without adb has. */
+    private val events = ArrayDeque<String>()
+
+    fun recentEvents(): List<String> = synchronized(events) { events.toList() }
+
+    private fun note(msg: String) {
+        val stamp = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.US).format(java.util.Date())
+        synchronized(events) {
+            events.addLast("$stamp $msg")
+            while (events.size > 12) events.removeFirst()
+        }
+        Log.i(TAG, msg)
+    }
 
     private val connections = HashMap<String, TalonConnection>()
     private val waiters = HashMap<String, CompletableDeferred<TalonConnection?>>()
@@ -245,9 +261,12 @@ object TalonTelecom {
                 .build()
             tm.registerPhoneAccount(account)
             handle = h
+            note("account registered")
             true
-        }.onFailure { Log.w(TAG, "phone account registration failed; calls stay app-managed", it) }
-            .getOrDefault(false)
+        }.onFailure {
+            Log.w(TAG, "phone account registration failed; calls stay app-managed", it)
+            note("account registration failed: ${it.message}")
+        }.getOrDefault(false)
     }
 
     /** Start a call we placed, or adopt the Phone app's call-back for
@@ -264,8 +283,9 @@ object TalonTelecom {
         }
         val tm = context.applicationContext.getSystemService(Context.TELECOM_SERVICE) as? TelecomManager
             ?: return false
-        val h = handle ?: return false
-        if (!tm.isOutgoingCallPermitted(h)) return false
+        val h = handle ?: run { note("outgoing $id: no account"); return false }
+        if (!tm.isOutgoingCallPermitted(h)) { note("outgoing $id: not permitted now"); return false }
+        note("outgoing $id: asked")
         val extras = Bundle().apply {
             putParcelable(TelecomManager.EXTRA_PHONE_ACCOUNT_HANDLE, h)
             putBundle(
@@ -277,7 +297,7 @@ object TalonTelecom {
             )
         }
         return runCatching { tm.placeCall(Uri.fromParts(SCHEME, ship, null), extras); true }
-            .onFailure { Log.w(TAG, "placeCall refused", it) }
+            .onFailure { Log.w(TAG, "placeCall refused", it); note("outgoing $id: placeCall threw ${it.message}") }
             .getOrDefault(false)
     }
 
@@ -288,9 +308,10 @@ object TalonTelecom {
         if (!register(context)) return false
         val tm = context.applicationContext.getSystemService(Context.TELECOM_SERVICE) as? TelecomManager
             ?: return false
-        val h = handle ?: return false
-        if (!tm.isIncomingCallPermitted(h)) return false
+        val h = handle ?: run { note("incoming $id: no account"); return false }
+        if (!tm.isIncomingCallPermitted(h)) { note("incoming $id: not permitted now"); return false }
         synchronized(this) { pending.add(id) }
+        note("incoming $id from $ship: asked")
         val extras = Bundle().apply {
             putParcelable(TelecomManager.EXTRA_INCOMING_CALL_ADDRESS, Uri.fromParts(SCHEME, ship, null))
             putString(TalonConnectionService.EXTRA_TALON_ID, id)
@@ -299,6 +320,7 @@ object TalonTelecom {
         return runCatching { tm.addNewIncomingCall(h, extras); true }
             .onFailure {
                 Log.w(TAG, "addNewIncomingCall refused", it)
+                note("incoming $id: addNewIncomingCall threw ${it.message}")
                 synchronized(this) { pending.remove(id) }
             }
             .getOrDefault(false)
@@ -317,6 +339,7 @@ object TalonTelecom {
     fun connection(id: String): TalonConnection? = synchronized(this) { connections[id] }
 
     internal fun adopt(id: String, conn: TalonConnection) = synchronized(this) {
+        note("$id: connection created (${Connection.stateToString(conn.state)})")
         pending.remove(id)
         connections[id] = conn
         waiters.remove(id)?.complete(conn)
@@ -324,6 +347,7 @@ object TalonTelecom {
     }
 
     internal fun refuse(id: String) = synchronized(this) {
+        note("$id: telecom refused it")
         pending.remove(id)
         waiters.remove(id)?.complete(null)
     }
@@ -335,6 +359,9 @@ object TalonTelecom {
         }
         hooks?.route?.bind(conn)
     }
+
+    internal fun trace(id: String, state: String, cause: String?) =
+        note(if (cause == null) "$id: $state" else "$id: $state ($cause)")
 
     internal fun forget(conn: TalonConnection) = synchronized(this) {
         connections.entries.removeAll { it.value === conn }
