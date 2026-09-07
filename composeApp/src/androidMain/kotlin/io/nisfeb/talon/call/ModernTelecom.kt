@@ -176,8 +176,14 @@ class ModernCall(
         }
     }
 
-    fun endRing(answeredElsewhere: Boolean) =
+    /** The push path's end-of-ring. A no-op once answered: the relay
+     *  also sends "answered" for our OWN accept, and ending the telecom
+     *  call for that dropped the phone-app side of a call we were on
+     *  while the media kept running. */
+    fun endRing(answeredElsewhere: Boolean) {
+        if (answered) return
         disconnect(if (answeredElsewhere) DisconnectCause.ANSWERED_ELSEWHERE else DisconnectCause.MISSED)
+    }
 
     fun armRingTimeout(ms: Long) {
         control.launch {
