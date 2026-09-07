@@ -37,6 +37,7 @@ class BridgeRunner {
             val ship: String,
             val host: String,
             val room: String,
+            val title: String,
             val members: List<PartyMember>,
             val muted: Boolean,
         ) : Status
@@ -148,7 +149,11 @@ class BridgeRunner {
 
         line.state.collect { s ->
             _status.value = when (s) {
-                is PartyState.Live -> Status.Live(ship, config.host, config.room, s.members, s.muted)
+                is PartyState.Live -> Status.Live(
+                    ship, config.host, config.room,
+                    controller.lineFor(config.host, config.room)?.title.orEmpty(),
+                    s.members, s.muted,
+                )
                 is PartyState.Failed -> Status.Failed(s.why)
                 else -> Status.Busy("reconnecting")
             }

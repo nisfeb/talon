@@ -1,6 +1,7 @@
 package io.nisfeb.talon.bridge
 
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.int
 import kotlinx.serialization.json.intOrNull
@@ -34,7 +35,7 @@ object Pulse {
     data class Device(val index: Int, val name: String, val description: String)
 
     /** One playing (sink-input) or recording (source-output) stream. */
-    data class Stream(val index: Int, val app: String, val pid: Long?, val target: String)
+    data class Stream(val index: Int, val app: String, val pid: Long?, val target: String, val corked: Boolean = false)
 
     val available: Boolean by lazy { runCatching { pactl("--version") }.isSuccess }
 
@@ -108,6 +109,7 @@ object Pulse {
                 app = prop("application.name") ?: prop("media.name") ?: "?",
                 pid = prop("application.process.id")?.toLongOrNull(),
                 target = names[dev] ?: dev?.toString() ?: "?",
+                corked = o["corked"]?.jsonPrimitive?.booleanOrNull ?: false,
             )
         }
     }

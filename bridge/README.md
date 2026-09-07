@@ -138,7 +138,14 @@ did by hand:
   click. The bridge's own streams are moved onto the virtual devices
   automatically once it is on the line.
 - **Soundboard**: wav, ogg or flac clips in `~/.config/talon/soundboard`,
-  each with Party, Space and Both buttons.
+  each with Party, Space and Both buttons. Seven synthesized starter
+  clips (airhorn, applause, ding, drumroll, laser, rimshot, sad
+  trombone) are written there on first run while the folder is empty.
+
+The X Space panel carries two live meters read with `parec` from the
+virtual devices' monitors: Party → Space is what the Space app's
+microphone receives, Space → Party is what the bridge sends up. If a
+bar moves when someone talks, that direction works.
 
 It needs `pactl` and `paplay` (PulseAudio or PipeWire-Pulse) and the
 same JDK 21 as the CLI. Effects on the voice path are not there: the
