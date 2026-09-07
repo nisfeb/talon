@@ -73,13 +73,22 @@ private fun monogramFor(label: String): String {
     // the leading dot.
     val cleaned = label.removePrefix("~").removePrefix("#").trimStart('.').trim()
     if (cleaned.isEmpty()) return "?"
-    val parts = cleaned.split('-', ' ', '_', '.').filter { it.isNotEmpty() }
+    // "Bob (~fidzod-fidfes)" read as "B(" and an emoji nickname split
+    // its surrogate pair into tofu: drop leading punctuation from each
+    // word and take whole glyphs.
+    val parts = cleaned.split('-', ' ', '_', '.')
+        .map { it.trimStart { c -> !c.isLetterOrDigit() && c.code < 0x2000 } }
+        .filter { it.isNotEmpty() }
     return when (parts.size) {
-        0 -> cleaned.take(1).uppercase()
-        1 -> parts[0].take(2).uppercase()
-        else -> (parts[0].take(1) + parts[1].take(1)).uppercase()
+        0 -> firstGlyph(cleaned).uppercase()
+        1 -> parts[0].let { firstGlyph(it) + firstGlyph(it.drop(firstGlyph(it).length)) }.uppercase()
+        else -> (firstGlyph(parts[0]) + firstGlyph(parts[1])).uppercase()
     }
 }
+
+/** First user-visible character, keeping a surrogate pair together. */
+private fun firstGlyph(s: String): String =
+    if (s.length >= 2 && s[0].isHighSurrogate()) s.take(2) else s.take(1)
 
 private val AVATAR_PALETTE = listOf(
     Color(0xFF6B4AE0), Color(0xFF3D7AED), Color(0xFF1AA2C6),
