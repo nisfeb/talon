@@ -87,7 +87,14 @@ same machine, and a whole-system capture would push the party line's
 own playback straight back into the Space.
 
 On Linux, `scripts/talon-bridge-spaces` creates both devices, points
-the bridge at them, and removes them on exit. Then in your X client set
+the bridge at them, and removes them on exit. Run it with a JDK 17 or
+newer on `JAVA_HOME` (the launcher falls back to whatever `java` is on
+the path, which may be older). Device mode goes through WebRTC's own
+audio device module rather than the PCM file path, and the bridge
+unmutes itself once on the line. Give the bridge a ship of its own
+that is a member of the group: a bridge on the same ship as the person
+testing it can neither hear nor be heard by that person, since a
+line's down links skip your own ship. Then in your X client set
 the microphone to *Monitor of TalonBridgeMic* and the output to
 *TalonBridgeSpace* — a browser does output per tab,
 which is what you want, since the native app follows the system default
