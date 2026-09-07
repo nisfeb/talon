@@ -110,6 +110,12 @@ class TalonMessagingReceiver : MessagingReceiver() {
                     ?.endRing(answeredElsewhere = reason == "answered")
                 io.nisfeb.talon.call.ModernTelecom.call(eventId)
                     ?.endRing(answeredElsewhere = reason == "answered")
+                // The far end hung up an answered call. The event stream
+                // normally carries that, but it is asleep exactly when
+                // the app is backgrounded; the push is the reliable copy.
+                if (reason == "hangup") {
+                    io.nisfeb.talon.call.TalonTelecom.hooks?.controls(eventId)?.onDisconnect()
+                }
             }
             return
         }

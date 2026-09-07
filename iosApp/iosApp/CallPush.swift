@@ -93,6 +93,18 @@ class AppDelegate: NSObject, UIApplicationDelegate, PKPushRegistryDelegate, CXPr
 
         // A ring-cancel un-rings a call we're showing.
         if (dict["event"] as? String) == "ring-cancel" {
+            // The far end hung up a call we had answered. The event
+            // stream carries this too, but it sleeps in the background;
+            // the push is what ends the call reliably.
+            if (dict["reason"] as? String) == "hangup",
+               let uuid = callIdToUuid[callId], answered.contains(uuid) {
+                CallTrace.log("ring-cancel \(callId): remote hangup of an answered call")
+                IosVoipBridge.shared.end(callId: callId)
+                provider.reportCall(with: uuid, endedAt: nil, reason: .remoteEnded)
+                forget(uuid)
+                completion()
+                return
+            }
             if let uuid = callIdToUuid[callId], answered.contains(uuid) {
                 // Our own accept produced this cancel. Satisfy the
                 // PushKit contract by re-reporting the SAME uuid: CallKit
