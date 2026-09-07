@@ -29,7 +29,10 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -195,6 +198,10 @@ fun SearchScreen(
             IconButton(onClick = onBack) {
                 Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
             }
+            // Focus the box on open so the keyboard is up and typing
+            // starts the search without a second tap.
+            val focus = remember { FocusRequester() }
+            LaunchedEffect(Unit) { focus.requestFocus() }
             OutlinedTextField(
                 value = query,
                 onValueChange = { query = it },
@@ -205,7 +212,7 @@ fun SearchScreen(
                     )
                 },
                 singleLine = true,
-                modifier = Modifier.fillMaxWidth().padding(start = 4.dp),
+                modifier = Modifier.fillMaxWidth().padding(start = 4.dp).focusRequester(focus),
             )
         }
         // Chip strip showing the parsed operators. Surfaces what the
