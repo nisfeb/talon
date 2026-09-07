@@ -19,6 +19,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.BrokenImage
+import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -185,9 +187,13 @@ private fun GalleryTile(
                         primary.width > 0 && primary.height > 0
                     ) primary.width.toFloat() / primary.height.toFloat()
                     else 1f
+                    // A dead image used to leave a blank card the height
+                    // of its aspect ratio; show the same broken glyph
+                    // the post view does.
                     AsyncImage(
                         model = primary.src,
                         contentDescription = primary.alt,
+                        error = rememberVectorPainter(Icons.Filled.BrokenImage),
                         modifier = Modifier
                             .fillMaxWidth()
                             .aspectRatio(ratio.coerceIn(0.4f, 2.5f))
@@ -199,6 +205,7 @@ private fun GalleryTile(
                         AsyncImage(
                             model = url,
                             contentDescription = null,
+                            error = rememberVectorPainter(Icons.Filled.BrokenImage),
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .aspectRatio(16f / 9f)
