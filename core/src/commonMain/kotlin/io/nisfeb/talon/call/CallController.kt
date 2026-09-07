@@ -588,6 +588,15 @@ class CallController(
                 Log.i(TAG, "stale accept for $forCallId; ringing call is $id")
                 return@launch
             }
+            // Answering in-app reports "answered" to CallKit, which echoes
+            // it back through the system answer handler. A second accept
+            // built a second engine and sent a second SDP answer: the
+            // first engine's mic kept sending while the second never
+            // connected, so the peer heard us and we heard nothing.
+            if (_state.value is CallUiState.Active) {
+                Log.i(TAG, "accept ignored: call $id is already active")
+                return@launch
+            }
             ringToken++ // answered: stop the give-up timer
             val from = peer ?: return@launch
             _state.value = CallUiState.Active(from, MediaState.Connecting, muted = false)
