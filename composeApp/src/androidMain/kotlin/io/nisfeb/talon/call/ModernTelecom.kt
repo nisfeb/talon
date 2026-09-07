@@ -50,8 +50,22 @@ object ModernTelecom {
     private const val TAG = "ModernTelecom"
     private const val SCHEME = "urbit"
 
+    /**
+     * The address telecom logs. Its call-log number comes from the
+     * handle: a SIP-style `user@host` is kept verbatim, anything else
+     * goes through PhoneNumberUtils.stripSeparators, which keeps only
+     * dialable characters — and a ship name has none, so the number
+     * came out empty and the row was dropped. Seen in `dumpsys telecom`
+     * as `LOG_CALL (number=,…)` on every call. The `@urbit` is what
+     * makes it a URI number; the display name carries the nickname.
+     */
+    internal fun address(target: String): Uri = Uri.fromParts(SCHEME, "$target@urbit", null)
+
     fun register(context: Context): Boolean {
         manager?.let { return true }
+        // An older build registered the raw account on this phone;
+        // telecom would list two Talon accounts forever otherwise.
+        TalonTelecom.unregister(context)
         return runCatching {
             CallsManager(context.applicationContext).also {
                 it.registerAppWithTelecom(CallsManager.CAPABILITY_BASELINE)
@@ -74,7 +88,7 @@ object ModernTelecom {
         TalonTelecom.note("${if (incoming) "incoming" else "outgoing"} $id: asked (16.1+)")
         val attrs = CallAttributesCompat(
             name,
-            Uri.fromParts(SCHEME, target, null),
+            address(target),
             if (incoming) CallAttributesCompat.DIRECTION_INCOMING else CallAttributesCompat.DIRECTION_OUTGOING,
             CallAttributesCompat.CALL_TYPE_AUDIO_CALL,
             CallAttributesCompat.SUPPORTS_SET_INACTIVE,

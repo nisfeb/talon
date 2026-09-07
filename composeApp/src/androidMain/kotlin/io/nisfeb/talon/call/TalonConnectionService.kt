@@ -66,7 +66,8 @@ class TalonConnectionService : ConnectionService() {
         val extras = request.extras
         val id = extras?.getString(EXTRA_TALON_ID)
         val name = extras?.getString(EXTRA_NAME)
-        val ship = request.address?.schemeSpecificPart.orEmpty()
+        // The address is `urbit:~ship@urbit` (see ModernTelecom.address).
+        val ship = request.address?.schemeSpecificPart.orEmpty().substringBefore('@')
         if (id != null) {
             // Our own placeCall, carrying the id we will drive it by.
             val conn = TalonConnection(id).apply {
@@ -269,6 +270,16 @@ object TalonTelecom {
         }.getOrDefault(false)
     }
 
+    /** Drop the raw account: on 16.1+ core-telecom's is the one that
+     *  logs, and telecom kept listing this one from older builds. */
+    fun unregister(context: Context) {
+        val app = context.applicationContext
+        val tm = app.getSystemService(Context.TELECOM_SERVICE) as? TelecomManager ?: return
+        runCatching { tm.unregisterPhoneAccount(handleFor(app)) }
+            .onSuccess { note("legacy account unregistered") }
+        handle = null
+    }
+
     /** Start a call we placed, or adopt the Phone app's call-back for
      *  [ship] if one is waiting. False if telecom would not take it. */
     fun startOutgoing(context: Context, id: String, ship: String, name: String): Boolean {
@@ -296,7 +307,7 @@ object TalonTelecom {
                 },
             )
         }
-        return runCatching { tm.placeCall(Uri.fromParts(SCHEME, ship, null), extras); true }
+        return runCatching { tm.placeCall(ModernTelecom.address(ship), extras); true }
             .onFailure { Log.w(TAG, "placeCall refused", it); note("outgoing $id: placeCall threw ${it.message}") }
             .getOrDefault(false)
     }
@@ -313,7 +324,7 @@ object TalonTelecom {
         synchronized(this) { pending.add(id) }
         note("incoming $id from $ship: asked")
         val extras = Bundle().apply {
-            putParcelable(TelecomManager.EXTRA_INCOMING_CALL_ADDRESS, Uri.fromParts(SCHEME, ship, null))
+            putParcelable(TelecomManager.EXTRA_INCOMING_CALL_ADDRESS, ModernTelecom.address(ship))
             putString(TalonConnectionService.EXTRA_TALON_ID, id)
             putString(TalonConnectionService.EXTRA_NAME, name)
         }

@@ -17,9 +17,11 @@ out=${1:-android-call-diag.txt}
   echo; echo "== telecom: recent calls it handled (last 40 lines of the CallsManager/analytics section) =="
   adb shell dumpsys telecom 2>/dev/null | tr -d '\r' | grep -nE "CallsManager|Analytics|CallLog|CallLogManager" | head -20
   echo; echo "== system call log: plain query (what a dialer sees without asking for VoIP rows) =="
-  adb shell content query --uri content://call_log/calls --projection number:type:date:phone_account_component_name --sort "date DESC" 2>&1 | tr -d '\r' | head -8
+  adb shell 'content query --uri content://call_log/calls --projection number:type:date:subscription_component_name --sort "date DESC"' 2>&1 | tr -d '\r' | head -8
   echo; echo "== system call log: with include_voip_calls=true (16.1+ hides these by default) =="
-  adb shell content query --uri "content://call_log/calls?include_voip_calls=true" --projection number:type:date:phone_account_component_name --sort "date DESC" 2>&1 | tr -d '\r' | head -8
+  adb shell 'content query --uri "content://call_log/calls?include_voip_calls=true" --projection number:type:date:subscription_component_name --sort "date DESC"' 2>&1 | tr -d '\r' | head -8
+  echo; echo "== system call log: VoIP-only uri (17) =="
+  adb shell 'content query --uri content://call_log/calls/voip --sort "date DESC"' 2>&1 | tr -d '\r' | head -6 | cut -c1-300
   echo; echo "== full-screen intent permission =="
   adb shell appops get io.nisfeb.talon USE_FULL_SCREEN_INTENT 2>&1 | tr -d '\r'
   echo; echo "== app + telecom logcat (recent buffer) =="
