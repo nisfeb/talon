@@ -55,6 +55,7 @@ import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.foundation.layout.IntrinsicSize
@@ -378,7 +379,6 @@ fun DmChatScreen(
                 listState.firstVisibleItemScrollOffset == 0
         }
     }
-    @Suppress("UNUSED_EXPRESSION") isPinnedToBottom
 
     val fallbackAnchored = remember(whom) { mutableStateOf(false) }
     var hasAnchored by (scrollAnchored ?: fallbackAnchored)
@@ -1053,6 +1053,22 @@ fun DmChatScreen(
                         )
                     }
                 }
+            }
+        }
+
+        // Jump to the newest message. Only while the user is away from
+        // the bottom; a snap, not an animated scroll.
+        if (!isPinnedToBottom) {
+            androidx.compose.material3.SmallFloatingActionButton(
+                onClick = { scope.launch { listState.scrollToItem(0) } },
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(end = 16.dp, bottom = 12.dp),
+            ) {
+                Icon(
+                    Icons.Filled.KeyboardArrowDown,
+                    contentDescription = "Jump to latest",
+                )
             }
         }
         } // close empty-state Box
