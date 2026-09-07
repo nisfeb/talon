@@ -191,11 +191,8 @@ private fun WeatherCard(w: WeatherToday) {
 @Composable
 private fun SummaryCard(text: String) {
     Card(modifier = Modifier.fillMaxWidth()) {
-        Text(
-            text,
-            modifier = Modifier.padding(16.dp),
-            style = MaterialTheme.typography.bodyLarge,
-        )
+        // The model answers in markdown; plain Text showed the asterisks.
+        io.nisfeb.talon.ui.MarkdownText(text, modifier = Modifier.padding(16.dp))
     }
 }
 
