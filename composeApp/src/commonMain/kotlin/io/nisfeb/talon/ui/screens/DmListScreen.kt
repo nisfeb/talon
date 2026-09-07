@@ -2457,9 +2457,12 @@ private fun GroupChannelRow(
                     color = MaterialTheme.colorScheme.primary,
                     maxLines = 1,
                 )
-            } else if (!preview.isNullOrEmpty() && timestamp != null) {
+            } else if (timestamp != null) {
+                // Blank preview (image-only post) drops its slot rather
+                // than leaving a dangling separator.
                 Text(
-                    "${authorLabel ?: ""} · $timestamp · $preview".applyEmojiSpans(),
+                    listOfNotNull(authorLabel, timestamp, preview?.takeIf { it.isNotBlank() })
+                        .joinToString(" · ").applyEmojiSpans(),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
