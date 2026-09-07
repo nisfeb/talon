@@ -373,7 +373,11 @@ fun DmChatScreen(
     val fallbackScrollState = rememberLazyListState()
     val listState = scrollState ?: fallbackScrollState
 
-    val isPinnedToBottom by remember {
+    // Keyed on listState: the desktop pane keeps this screen composed
+    // across chat switches while the host hands in a fresh LazyListState
+    // per chat, so an unkeyed remember kept watching the first chat's
+    // state (always "at bottom") and the jump button never appeared.
+    val isPinnedToBottom by remember(listState) {
         derivedStateOf {
             listState.firstVisibleItemIndex == 0 &&
                 listState.firstVisibleItemScrollOffset == 0
