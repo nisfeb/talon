@@ -87,6 +87,7 @@ object PartyManager {
         Window(
             onCloseRequest = { runner.stop(); hostMic.disarm(); exitApplication() },
             title = "Talon Party Manager",
+            icon = androidx.compose.ui.res.painterResource("party-manager.png"),
             state = rememberWindowState(width = 1240.dp, height = 900.dp),
             onKeyEvent = { e ->
                 // Push to talk on the host mic: hold F8 while this window is focused.

@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1C2352"/>
+      <stop offset="1" stop-color="#111737"/>
+    </linearGradient>
+    <linearGradient id="amber" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FBBF24"/>
+      <stop offset="1" stop-color="#F59E0B"/>
+    </linearGradient>
+  </defs>
+  <rect width="256" height="256" rx="56" fill="url(#bg)"/>
+  <!-- the talon's crescent, open at the top right like the app icon -->
+  <path d="M 178 62 A 84 84 0 1 0 212 150" fill="none" stroke="url(#amber)" stroke-width="22" stroke-linecap="round"/>
+  <!-- three faders: the party manager is a mixer -->
+  <g stroke="#2B3470" stroke-width="10" stroke-linecap="round">
+    <line x1="100" y1="92" x2="100" y2="172"/>
+    <line x1="128" y1="92" x2="128" y2="172"/>
+    <line x1="156" y1="92" x2="156" y2="172"/>
+  </g>
+  <g fill="url(#amber)">
+    <rect x="87" y="126" width="26" height="14" rx="6"/>
+    <rect x="115" y="100" width="26" height="14" rx="6"/>
+    <rect x="143" y="144" width="26" height="14" rx="6"/>
+  </g>
+</svg>
