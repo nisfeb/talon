@@ -284,7 +284,7 @@ fun PartyLineFullScreen(
                         Icon(
                             if (state.muted) Icons.Filled.MicOff else Icons.Filled.Mic,
                             contentDescription = null,
-                            modifier = Modifier.size(32.dp),
+                            modifier = Modifier.size(26.dp),
                         )
                     }
                 } else {
@@ -293,7 +293,7 @@ fun PartyLineFullScreen(
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Box(
                             modifier = Modifier
-                                .size(72.dp)
+                                .size(58.dp)
                                 .clip(CircleShape)
                                 .background(MaterialTheme.colorScheme.surfaceVariant),
                             contentAlignment = Alignment.Center,
@@ -306,7 +306,7 @@ fun PartyLineFullScreen(
                                 } else {
                                     MaterialTheme.colorScheme.onSurfaceVariant
                                 },
-                                modifier = Modifier.size(32.dp),
+                                modifier = Modifier.size(26.dp),
                             )
                         }
                         Spacer(Modifier.height(8.dp))
@@ -340,7 +340,7 @@ fun PartyLineFullScreen(
                         Icon(
                             if (cameraOn) Icons.Filled.Videocam else Icons.Filled.VideocamOff,
                             contentDescription = null,
-                            modifier = Modifier.size(32.dp),
+                            modifier = Modifier.size(26.dp),
                         )
                     }
                 }
@@ -355,7 +355,7 @@ fun PartyLineFullScreen(
                         Icon(
                             Icons.Filled.Refresh,
                             contentDescription = null,
-                            modifier = Modifier.size(32.dp),
+                            modifier = Modifier.size(26.dp),
                         )
                     }
                 }
@@ -400,7 +400,7 @@ fun PartyLineFullScreen(
                     Icon(
                         Icons.Filled.CallEnd,
                         contentDescription = null,
-                        modifier = Modifier.size(32.dp),
+                        modifier = Modifier.size(26.dp),
                     )
                 }
             }
@@ -427,7 +427,7 @@ private fun ControlButton(
             // an unnamed button on explore-by-touch. Naming the Surface
             // covers Mute, Camera, Flip, Record and Leave at once.
             modifier = Modifier
-                .size(72.dp)
+                .size(58.dp)
                 .semantics {
                     contentDescription = label
                     role = Role.Button
@@ -458,7 +458,7 @@ private fun SpeakerControl(audioDevices: AudioDevices) {
                 shape = CircleShape,
                 color = MaterialTheme.colorScheme.surfaceVariant,
                 contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.size(72.dp),
+                modifier = Modifier.size(58.dp),
             ) {
                 Box(contentAlignment = Alignment.Center) {
                     Text(
@@ -505,22 +505,22 @@ private fun ParticipantRow(
     onMessage: ((String) -> Unit)?,
 ) {
     val speakingRing = if (member.speaking) {
-        Modifier.border(3.dp, MaterialTheme.colorScheme.primary, CircleShape)
+        Modifier.border(2.dp, MaterialTheme.colorScheme.primary, CircleShape)
     } else {
         Modifier
     }
     Row(
-        modifier = Modifier.fillMaxWidth().height(64.dp),
+        modifier = Modifier.fillMaxWidth().height(36.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(speakingRing.padding(2.dp)) {
-            Avatar(label = nameFor(member.ship), url = null, size = 52.dp)
+            Avatar(label = nameFor(member.ship), url = null, size = 26.dp)
         }
-        Spacer(Modifier.width(16.dp))
+        Spacer(Modifier.width(10.dp))
         Column(Modifier.weight(1f)) {
             Text(
                 nameFor(member.ship) + if (isSelf) " (you)" else "",
-                style = MaterialTheme.typography.titleMedium,
+                style = MaterialTheme.typography.bodySmall,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -533,7 +533,7 @@ private fun ParticipantRow(
             if (status.isNotEmpty()) {
                 Text(
                     status,
-                    style = MaterialTheme.typography.bodyMedium,
+                    style = MaterialTheme.typography.labelSmall,
                     color = if (member.mutedByAdmin) {
                         MaterialTheme.colorScheme.error
                     } else {
@@ -551,7 +551,7 @@ private fun ParticipantRow(
                 } else {
                     MaterialTheme.colorScheme.onSurfaceVariant
                 },
-                modifier = Modifier.size(20.dp),
+                modifier = Modifier.size(14.dp),
             )
         }
         // The menu is for everyone, not just ops: messaging someone
@@ -560,11 +560,11 @@ private fun ParticipantRow(
         if (!isSelf && (onMessage != null || showOps)) {
             var menuOpen by remember(member.id) { mutableStateOf(false) }
             Box {
-                IconButton(onClick = { menuOpen = true }, modifier = Modifier.size(48.dp)) {
+                IconButton(onClick = { menuOpen = true }, modifier = Modifier.size(32.dp)) {
                     Icon(
                         Icons.Filled.MoreVert,
                         contentDescription = "Options for ${nameFor(member.ship)}",
-                        modifier = Modifier.size(24.dp),
+                        modifier = Modifier.size(18.dp),
                     )
                 }
                 DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
