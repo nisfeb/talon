@@ -6,7 +6,6 @@ set -euo pipefail
 # the same as the Talon desktop app's. PulseAudio restores devices per
 # application name, so routing the bridge onto the virtual devices silently
 # routed Talon there too. A name of our own keeps the two apart.
-export PULSE_PROP_OVERRIDE_application.name=TalonBridge
 bin="$(dirname "$0")/../bridge/build/install/talon-bridge/bin/talon-bridge"
 [ -x "$bin" ] || { echo "build the bridge first: ./gradlew :bridge:installDist" >&2; exit 1; }
-exec "$bin" --ui "${1:-$HOME/.config/talon/bridge.properties}"
+exec env PULSE_PROP_OVERRIDE_application.name=TalonBridge "$bin" --ui "${1:-$HOME/.config/talon/bridge.properties}"
