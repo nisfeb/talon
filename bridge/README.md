@@ -123,6 +123,8 @@ listen before trusting it live.
 
 ## The Party Manager window
 
+Full guide: `docs/party-manager.md`. Agent notes: `CLAUDE.md` here.
+
 `scripts/talon-party-manager` (or `talon-bridge --ui [config]`) opens a
 window that does what the Spaces script and a terminal full of `pactl`
 did by hand:

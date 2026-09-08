@@ -133,3 +133,11 @@ Windows (already native there) and as final fallback. The inline
 `trayState.sendNotification(...)` lambda was replaced because AWT
 balloons on Linux don't go through libnotify and look out of place.
 Manual smoke: `./gradlew :composeApp:notifierSmoke`.
+
+## Party Manager (bridge/)
+
+The `bridge/` module is a JVM-only, Linux-audio-only headless party
+line member with a desktop window. It has its own guidance in
+`bridge/CLAUDE.md` (read it before touching `bridge/`) and a user
+guide in `docs/party-manager.md`. The cross-platform rules above do
+not apply there: it is deliberately desktop.
