@@ -101,9 +101,29 @@ fun rememberPartyRecording(
         partyRoomHere?.let { (h, n) -> callController?.beginRecordingAnnounce(h, n) }
     }
 
-    val canRecord = isCallRecordingSupported &&
-        onThisLine && partyLine != null && ourShip.isNotEmpty() &&
-        wire >= io.nisfeb.talon.call.TrunkWire.WIRE_VERSION_RECORDING
+    // Only admins record: the SFU grants operator rights to the host
+    // and the room's admins, and nobody else. A member who loses them
+    // mid-recording has the recording stopped for them.
+    val partyStateFlow = remember(partyLine) {
+        partyLine?.state ?: MutableStateFlow<io.nisfeb.talon.call.PartyState>(io.nisfeb.talon.call.PartyState.Idle)
+    }
+    val partyState by partyStateFlow.collectAsState()
+    val isAdmin = (partyState as? io.nisfeb.talon.call.PartyState.Live)?.ops == true
+    LaunchedEffect(isAdmin, recordingNow) {
+        if (recordingNow && !isAdmin) {
+            partyLine?.stopRecording()
+            callController?.endRecordingAnnounce()
+        }
+    }
+
+    val canRecord = recordingAllowed(
+        supported = isCallRecordingSupported,
+        onThisLine = onThisLine,
+        hasLine = partyLine != null,
+        ourShip = ourShip,
+        wire = wire,
+        isAdmin = isAdmin,
+    )
     val onToggleRecord: (() -> Unit)? = if (canRecord) {
         {
             val line = partyLine!!
@@ -150,3 +170,14 @@ fun rememberPartyRecording(
 
     return PartyRecordingControls(recordingNow, recordedBy, onToggleRecord)
 }
+
+/** The record button shows only for an admin on a line that supports it. */
+fun recordingAllowed(
+    supported: Boolean,
+    onThisLine: Boolean,
+    hasLine: Boolean,
+    ourShip: String,
+    wire: Int,
+    isAdmin: Boolean,
+): Boolean = supported && onThisLine && hasLine && ourShip.isNotEmpty() &&
+    wire >= io.nisfeb.talon.call.TrunkWire.WIRE_VERSION_RECORDING && isAdmin
