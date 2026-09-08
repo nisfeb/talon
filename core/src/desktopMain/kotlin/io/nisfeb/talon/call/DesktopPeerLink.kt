@@ -193,6 +193,7 @@ class DesktopPeerLink(
             source.setVideoCaptureDevice(device)
             source.setVideoCaptureCapability(VideoCaptureCapability(640, 480, 30))
             source.start()
+            Log.i("PartyLine", "camera on: ${device.name} at 640x480/30")
             track.isEnabled = true
             _video.value = _video.value.copy(localOn = true)
             true
@@ -226,6 +227,11 @@ class DesktopPeerLink(
         suspendSet {
             pc.setRemoteDescription(RTCSessionDescription(RTCSdpType.ANSWER, tuned(remoteSdp)), it)
         }
+        // Which video codec the far side settled on: the first thing
+        // to know when a camera works for seconds and then freezes.
+        val video = remoteSdp.substringAfter("m=video", "")
+        val codecs = Regex("""a=rtpmap:\d+ ([A-Za-z0-9]+)/90000""").findAll(video).map { it.groupValues[1] }.distinct().toList()
+        if (codecs.isNotEmpty()) Log.i("PartyLine", "video codecs offered by the far side: $codecs")
     }
 
     /** The remote description decides our Opus bitrate; see [DesktopWebRtcFactory.opusMaxAverageBitrate]. */

@@ -3,6 +3,7 @@ package io.nisfeb.talon.ui
 import androidx.compose.foundation.Canvas
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -74,6 +75,9 @@ private fun VideoTrackCanvas(
     var bitmap by remember(track) { mutableStateOf<ImageBitmap?>(null) }
     var rotation by remember(track) { mutableStateOf(0) }
 
+    val frames = remember(track) { java.util.concurrent.atomic.AtomicLong(0) }
+    val lastFrameMs = remember(track) { java.util.concurrent.atomic.AtomicLong(0) }
+    val failures = remember(track) { java.util.concurrent.atomic.AtomicLong(0) }
     DisposableEffect(track) {
         val converter = FrameConverter()
         val sink = VideoTrackSink { frame: VideoFrame ->
@@ -83,10 +87,43 @@ private fun VideoTrackCanvas(
             runCatching {
                 bitmap = converter.toBitmap(frame)
                 rotation = frame.rotation
+                lastFrameMs.set(System.currentTimeMillis())
+                if (frames.getAndIncrement() == 0L) {
+                    io.nisfeb.talon.util.Log.i(
+                        "VideoSurface",
+                        "first frame ${frame.buffer.width}x${frame.buffer.height} rot=${frame.rotation} " +
+                            "buffer=${frame.buffer::class.simpleName} mirror=$mirror",
+                    )
+                }
+            }.onFailure {
+                // Every failure used to vanish here, which is what a
+                // "video freezes after a few seconds" report looks like
+                // from the inside: the last good frame stays on screen.
+                if (failures.getAndIncrement() < 3) {
+                    io.nisfeb.talon.util.Log.w("VideoSurface", "frame ${frames.get()} could not be drawn", it)
+                }
             }
         }
         track.addSink(sink)
         onDispose { runCatching { track.removeSink(sink) } }
+    }
+    // Say so when frames stop while the pane is still meant to be live.
+    LaunchedEffect(track) {
+        var stalled = false
+        while (true) {
+            kotlinx.coroutines.delay(1_000)
+            val last = lastFrameMs.get()
+            val quiet = last != 0L && System.currentTimeMillis() - last > 3_000
+            if (quiet && !stalled) {
+                io.nisfeb.talon.util.Log.w(
+                    "VideoSurface",
+                    "no frames for 3s after ${frames.get()} frames (${failures.get()} failed to draw)",
+                )
+            } else if (!quiet && stalled) {
+                io.nisfeb.talon.util.Log.i("VideoSurface", "frames resumed at ${frames.get()}")
+            }
+            stalled = quiet
+        }
     }
 
     Canvas(modifier) {
