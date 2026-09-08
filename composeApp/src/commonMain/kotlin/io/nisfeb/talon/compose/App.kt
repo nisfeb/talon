@@ -1036,7 +1036,8 @@ fun App(
                 io.nisfeb.talon.ui.AccentMode.Profile -> profileAccent
             }
         }
-        TalonTheme(darkTheme = darkTheme, accentOverride = accentOverride) {
+        val themeSettings by uiSettings.themeSettings.collectAsState()
+        TalonTheme(darkTheme = darkTheme, accentOverride = accentOverride, customTheme = themeSettings.active) {
           // Scale the whole app's `sp`-based sizes by the active
           // density's font multiplier. Compose computes pixel sizes
           // for sp values as `sp * density * fontScale`, so

@@ -63,6 +63,8 @@ class FileUiSettings(
         val fontScale: Float = 1.0f,
         val mnemonymNames: Boolean = true,
         val alwaysPatp: Boolean = false,
+        /** [io.nisfeb.talon.ui.theme.ThemeSettings] as JSON text. */
+        val customThemes: String = "",
     )
 
     private val initial = loadInitial()
@@ -90,6 +92,17 @@ class FileUiSettings(
     )
     override val accentSettings: StateFlow<AccentSettings> =
         _accentSettings.asStateFlow()
+    private val _themeSettings = MutableStateFlow(
+        io.nisfeb.talon.ui.theme.ThemeSettings.fromJson(initial.customThemes)
+            ?: io.nisfeb.talon.ui.theme.ThemeSettings(),
+    )
+    override val themeSettings: StateFlow<io.nisfeb.talon.ui.theme.ThemeSettings> =
+        _themeSettings.asStateFlow()
+    override fun setThemeSettings(settings: io.nisfeb.talon.ui.theme.ThemeSettings) {
+        if (_themeSettings.value == settings) return
+        _themeSettings.value = settings
+        persistCurrent()
+    }
 
     private val _groupChannelOrder = MutableStateFlow(
         runCatching { GroupChannelOrder.valueOf(initial.groupChannelOrder) }
@@ -238,6 +251,7 @@ class FileUiSettings(
                 fontScale = _fontScale.value,
                 mnemonymNames = MnemonymNames.enabled.value,
                 alwaysPatp = ShipNames.alwaysPatp.value,
+                customThemes = _themeSettings.value.toJson(),
             ),
         )
     }

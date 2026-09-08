@@ -153,7 +153,8 @@ class MainActivity : ComponentActivity() {
                     AccentMode.Profile -> profileAccent
                 }
             }
-            TalonTheme(darkTheme = darkTheme, accentOverride = accentOverride) {
+            val themeSettings by app.uiSettings.themeSettings.collectAsState()
+            TalonTheme(darkTheme = darkTheme, accentOverride = accentOverride, customTheme = themeSettings.active) {
                 CompositionLocalProvider(LocalImageDownloader provides imageDownloader) {
                     TalonApp(
                         initialOpenWhom = whom,

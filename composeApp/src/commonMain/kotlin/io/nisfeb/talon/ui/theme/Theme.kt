@@ -117,10 +117,13 @@ fun TalonTheme(
      *  that lean on `primary` get the override; chip backgrounds and
      *  larger primaryContainer fills stay brand-stable. */
     accentOverride: Color? = null,
+    /** A user-made theme; it brings its own light or dark mode. */
+    customTheme: CustomTheme? = null,
     content: @Composable () -> Unit,
 ) {
-    val base = talonColors(darkTheme)
-    SystemBarsAppearance(darkTheme, base.background)
+    val dark = customTheme?.dark ?: darkTheme
+    val base = customTheme?.let(::customScheme) ?: talonColors(dark)
+    SystemBarsAppearance(dark, base.background)
     val effective = if (accentOverride == null) base else base.copy(
         primary = accentOverride,
         onPrimary = if (accentOverride.luminance() > 0.5f) Color(0xFF1C1917)

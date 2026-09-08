@@ -115,6 +115,7 @@ class SettingsSyncImpl(
         const val ENTRY_POWER_FEATURES = "power-features"
         const val ENTRY_HIDE_COMPOSER_BUTTONS = "hide-composer-buttons"
         const val ENTRY_ACCENT = "accent"
+        const val ENTRY_THEMES = "themes"
         // Assistant history (Stage 2). Conversation metadata + append-only
         // turns, keyed by global id; embeddings stay device-local.
         const val BUCKET_ASSISTANT_CONVERSATIONS = "assistant-conversations"
@@ -241,6 +242,7 @@ class SettingsSyncImpl(
                 a.customHex?.let { put("customHex", it) }
             }
         }
+        watch(settings.themeSettings, ENTRY_THEMES) { t -> Json.parseToJsonElement(t.toJson()) }
     }
 
     private fun bool(v: Boolean): JsonElement = buildJsonObject { put("enabled", v) }
@@ -296,6 +298,8 @@ class SettingsSyncImpl(
                         customHex = obj["customHex"].asStr(),
                     ),
                 )
+                ENTRY_THEMES -> io.nisfeb.talon.ui.theme.ThemeSettings.fromJson(obj.toString())
+                    ?.let { settings.setThemeSettings(it) }
             }
         }
     }

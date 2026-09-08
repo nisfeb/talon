@@ -64,6 +64,17 @@ class AndroidUiSettings(
     private val _accentSettings = MutableStateFlow(loadAccent())
     override val accentSettings: StateFlow<AccentSettings> =
         _accentSettings.asStateFlow()
+    private val _themeSettings = MutableStateFlow(
+        io.nisfeb.talon.ui.theme.ThemeSettings.fromJson(prefs.getString(KEY_THEMES, null))
+            ?: io.nisfeb.talon.ui.theme.ThemeSettings(),
+    )
+    override val themeSettings: StateFlow<io.nisfeb.talon.ui.theme.ThemeSettings> =
+        _themeSettings.asStateFlow()
+    override fun setThemeSettings(settings: io.nisfeb.talon.ui.theme.ThemeSettings) {
+        if (_themeSettings.value == settings) return
+        prefs.edit().putString(KEY_THEMES, settings.toJson()).apply()
+        _themeSettings.value = settings
+    }
 
     private val _groupChannelOrder = MutableStateFlow(loadGroupOrder())
     override val groupChannelOrder: StateFlow<GroupChannelOrder> =
@@ -265,6 +276,7 @@ class AndroidUiSettings(
         private const val KEY_ACCENT_ENABLED = "accent_enabled"
         private const val KEY_ACCENT_MODE = "accent_mode"
         private const val KEY_ACCENT_HEX = "accent_hex"
+        private const val KEY_THEMES = "custom_themes"
         private const val KEY_GROUP_CHANNEL_ORDER = "group_channel_order"
         private const val KEY_FOLDER_ITEM_ORDER = "folder_item_order"
         private const val KEY_CHAT_PANE_LIST_FRACTION = "chat_pane_list_fraction"

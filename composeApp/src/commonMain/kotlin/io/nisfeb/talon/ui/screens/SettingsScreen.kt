@@ -52,6 +52,8 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.rememberCoroutineScope
 import kotlinx.coroutines.launch
+import androidx.compose.ui.graphics.luminance
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -240,6 +242,68 @@ fun SettingsScreen(
             Spacer(Modifier.height(8.dp))
 
             // ── Density ─────────────────────────────────────────────
+            // ── Custom themes ───────────────────────────────────────
+            Spacer(Modifier.height(8.dp))
+            val themeSettings by uiSettings.themeSettings.collectAsState()
+            var themeDraft by remember {
+                mutableStateOf<io.nisfeb.talon.ui.theme.CustomTheme?>(null)
+            }
+            val darkNow = MaterialTheme.colorScheme.background.luminance() < 0.5f
+            Text("Custom themes", style = MaterialTheme.typography.bodyMedium)
+            Text(
+                "Pick your own colors. Saved themes sync to your ship with " +
+                    "your other settings, so they follow you to every device.",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.horizontalScroll(rememberScrollState()),
+            ) {
+                FilterChip(
+                    selected = themeSettings.activeId == null,
+                    onClick = { uiSettings.setThemeSettings(themeSettings.copy(activeId = null)) },
+                    label = { Text("Built-in") },
+                )
+                themeSettings.themes.forEach { t ->
+                    FilterChip(
+                        selected = themeSettings.activeId == t.id,
+                        onClick = { uiSettings.setThemeSettings(themeSettings.copy(activeId = t.id)) },
+                        label = { Text(t.name) },
+                    )
+                }
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                androidx.compose.material3.OutlinedButton(onClick = {
+                    themeDraft = io.nisfeb.talon.ui.theme.CustomTheme.blank(
+                        dark = darkNow,
+                        id = kotlin.random.Random.nextLong().toString(36).trimStart('-'),
+                    )
+                }) { Text("New theme") }
+                themeSettings.active?.let { t ->
+                    androidx.compose.material3.OutlinedButton(onClick = { themeDraft = t }) { Text("Edit") }
+                    TextButton(onClick = {
+                        uiSettings.setThemeSettings(
+                            themeSettings.copy(
+                                themes = themeSettings.themes.filter { it.id != t.id },
+                                activeId = null,
+                            ),
+                        )
+                    }) { Text("Delete") }
+                }
+            }
+            themeDraft?.let { d ->
+                CustomThemeEditor(
+                    draft = d,
+                    onDraft = { themeDraft = it },
+                    onCancel = { themeDraft = null },
+                    onSave = {
+                        val others = themeSettings.themes.filter { it.id != d.id }
+                        uiSettings.setThemeSettings(themeSettings.copy(themes = others + d, activeId = d.id))
+                        themeDraft = null
+                    },
+                )
+            }
             Text("Density", style = MaterialTheme.typography.bodyMedium)
             Text(
                 "Tightens or loosens chat-list rows, message spacing, and " +
@@ -2082,6 +2146,92 @@ private fun SettingsTabRow(
                 onClick = { onSelect(t) },
                 text = { Text(t.label) },
             )
+        }
+    }
+}
+
+@Composable
+private fun ColorRow(label: String, value: String, onValue: (String) -> Unit) {
+    val parsed = io.nisfeb.talon.ui.parseHexColor(value)
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text(label, Modifier.width(88.dp), style = MaterialTheme.typography.bodyMedium)
+        OutlinedTextField(
+            value = value,
+            onValueChange = onValue,
+            placeholder = { Text("#RRGGBB") },
+            singleLine = true,
+            isError = parsed == null,
+            modifier = Modifier.weight(1f),
+        )
+        Box(
+            Modifier
+                .size(36.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .background(parsed ?: MaterialTheme.colorScheme.surfaceVariant),
+        )
+    }
+}
+
+/** Name, light or dark, five colors, and a live preview of the derived scheme. */
+@Composable
+private fun CustomThemeEditor(
+    draft: io.nisfeb.talon.ui.theme.CustomTheme,
+    onDraft: (io.nisfeb.talon.ui.theme.CustomTheme) -> Unit,
+    onCancel: () -> Unit,
+    onSave: () -> Unit,
+) {
+    androidx.compose.material3.Card(modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedTextField(
+                value = draft.name,
+                onValueChange = { onDraft(draft.copy(name = it)) },
+                label = { Text("Theme name") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilterChip(!draft.dark, { onDraft(draft.copy(dark = false)) }, { Text("Light") })
+                FilterChip(draft.dark, { onDraft(draft.copy(dark = true)) }, { Text("Dark") })
+            }
+            ColorRow("Primary", draft.primary) { onDraft(draft.copy(primary = it)) }
+            ColorRow("Secondary", draft.secondary) { onDraft(draft.copy(secondary = it)) }
+            ColorRow("Tertiary", draft.tertiary) { onDraft(draft.copy(tertiary = it)) }
+            ColorRow("Background", draft.background) { onDraft(draft.copy(background = it)) }
+            ColorRow("Surface", draft.surface) { onDraft(draft.copy(surface = it)) }
+            MaterialTheme(colorScheme = io.nisfeb.talon.ui.theme.customScheme(draft)) {
+                androidx.compose.material3.Surface(
+                    color = MaterialTheme.colorScheme.background,
+                    contentColor = MaterialTheme.colorScheme.onBackground,
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("Preview", style = MaterialTheme.typography.titleSmall)
+                        androidx.compose.material3.Surface(
+                            color = MaterialTheme.colorScheme.surface,
+                            contentColor = MaterialTheme.colorScheme.onSurface,
+                            shape = RoundedCornerShape(8.dp),
+                        ) {
+                            Text("A message on a surface.", Modifier.padding(8.dp))
+                        }
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            androidx.compose.material3.Button(onClick = {}) { Text("Primary") }
+                            FilterChip(true, {}, { Text("Selected") })
+                            Text("Tertiary", color = MaterialTheme.colorScheme.tertiary)
+                        }
+                    }
+                }
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                androidx.compose.material3.Button(onClick = onSave, enabled = draft.valid) { Text("Save and use") }
+                TextButton(onClick = onCancel) { Text("Cancel") }
+            }
         }
     }
 }

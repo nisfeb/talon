@@ -28,6 +28,10 @@ interface UiSettings {
     val accentSettings: StateFlow<AccentSettings>
     fun setAccentSettings(settings: AccentSettings)
 
+    /** User-made themes and the active one; synced with the other ui-prefs. */
+    val themeSettings: StateFlow<io.nisfeb.talon.ui.theme.ThemeSettings>
+    fun setThemeSettings(settings: io.nisfeb.talon.ui.theme.ThemeSettings)
+
     /**
      * How channels nested under a group head sort in the home list.
      * Default [GroupChannelOrder.Recent] keeps the historical
@@ -221,6 +225,11 @@ class InMemoryUiSettings(
         _accentSettings.asStateFlow()
     override fun setAccentSettings(settings: AccentSettings) {
         _accentSettings.value = settings
+    }
+    private val _themeSettings = MutableStateFlow(io.nisfeb.talon.ui.theme.ThemeSettings())
+    override val themeSettings: StateFlow<io.nisfeb.talon.ui.theme.ThemeSettings> = _themeSettings.asStateFlow()
+    override fun setThemeSettings(settings: io.nisfeb.talon.ui.theme.ThemeSettings) {
+        _themeSettings.value = settings
     }
 
     private val _groupChannelOrder = MutableStateFlow(initialGroupOrder)
