@@ -34,6 +34,7 @@ class PartyLineMuteTest {
 
     private val json = Json { ignoreUnknownKeys = true }
     private fun line() = PartyLine(HttpClient(), links = { _, _ -> FakeLink() })
+        .also { it.markConnectingForTests("room") }
 
     private fun userAdd(id: String, who: String): JsonObject = json.decodeFromString(
         """{"type":"user","kind":"add","id":"$id","username":"$who"}""",

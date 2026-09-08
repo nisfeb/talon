@@ -86,7 +86,7 @@ class PartyLineRolesTest {
     private fun lineWith(ups: MutableList<ScriptedLink>) = PartyLine(
         HttpClient(),
         links = { _, sendAudio -> ScriptedLink().also { if (sendAudio) ups += it } },
-    )
+    ).also { it.markConnectingForTests("room") }
 
     /** (dest, kind) of every useraction frame recorded so far. */
     private fun userActions(ws: RecordingWs): List<Pair<String, String>> =
@@ -224,10 +224,12 @@ class PartyLineRolesTest {
             val o = json.parseToJsonElement(raw).jsonObject
             if (o["type"]?.jsonPrimitive?.content != "usermessage") return@mapNotNull null
             if (o["kind"]?.jsonPrimitive?.content != PartyLine.ADMIN_MUTE_KIND) return@mapNotNull null
-            // The subject rides `target`; `username` is the sender, as
-            // it is in every other broadcast.
-            (o["target"]?.jsonPrimitive?.content ?: "") to
-                (o["value"]?.jsonPrimitive?.content == "true")
+            // The subject rides inside `value` ("true:~ship"); `username`
+            // is the sender, as it is in every other broadcast.
+            PartyLine.parseAdminMute(
+                o["value"]?.jsonPrimitive?.content,
+                o["target"]?.jsonPrimitive?.content,
+            )?.let { (on, who) -> who to on }
         }
 
     /** The `username` field of every admin-mute frame sent. */
@@ -281,7 +283,7 @@ class PartyLineRolesTest {
         line.handle(
             json.decodeFromString(
                 """{"type":"usermessage","kind":"${PartyLine.ADMIN_MUTE_KIND}",""" +
-                    """"username":"~zod","value":"true"}""",
+                    """"username":"~admin","value":"true:~zod"}""",
             ),
         )
         assertTrue(live(line).members.first { it.ship == "~zod" }.mutedByAdmin)
@@ -289,7 +291,7 @@ class PartyLineRolesTest {
         line.handle(
             json.decodeFromString(
                 """{"type":"usermessage","kind":"${PartyLine.ADMIN_MUTE_KIND}",""" +
-                    """"username":"~zod","value":"false"}""",
+                    """"username":"~admin","value":"false:~zod"}""",
             ),
         )
         assertTrue(live(line).members.first { it.ship == "~zod" }.mutedByAdmin.not())

@@ -293,6 +293,16 @@ class PartyLine(
     /** Join the room named by [ticket]. Idempotent while connected. */
     /** Set the line's topic for display. Comes from the host's room,
      *  not from Galène, which knows nothing about it. */
+    /**
+     * Tests only: put the line in the state a real join reaches, so
+     * the roster publishes. publishRoster refuses to manufacture a
+     * Live line from Idle, which is what keeps a stray setMuted from
+     * minting a phantom party during a 1:1 call.
+     */
+    internal fun markConnectingForTests(room: String) {
+        _state.value = PartyState.Connecting(room)
+    }
+
     fun setTopic(value: String) {
         topic = value
         val cur = _state.value
@@ -854,12 +864,18 @@ class PartyLine(
             "usermessage" -> {
                 val kind = msg["kind"]?.jsonPrimitive?.content
                 if (kind == ADMIN_MUTE_KIND) {
-                    // `target` is where the subject belongs; fall back to
-                    // `username` so a peer on an older build still marks
-                    // the right person.
-                    val who = msg["target"]?.jsonPrimitive?.content
-                        ?: msg["username"]?.jsonPrimitive?.content ?: return
-                    val on = msg["value"]?.jsonPrimitive?.content == "true"
+                    // Galène relays only the fields it knows on a
+                    // usermessage, so a `target` field never arrives
+                    // and `username` is the ADMIN who sent it. Falling
+                    // back to it marked the admin as muted on every
+                    // client, their own included. The subject rides in
+                    // `value` as "true:~ship" / "false:~ship" instead;
+                    // a bare "true"/"false" (older sender) names nobody
+                    // we can trust, so it is ignored.
+                    val (on, who) = parseAdminMute(
+                        msg["value"]?.jsonPrimitive?.content,
+                        msg["target"]?.jsonPrimitive?.content,
+                    ) ?: return
                     if (on) adminMuted.add(who) else adminMuted.remove(who)
                     publishRoster()
                     return
@@ -1257,9 +1273,10 @@ class PartyLine(
                 // socket, and one that rewrites it silently retargets the
                 // mute at the operator. The target rides its own field.
                 put("username", ourId)
-                put("target", ship)
                 put("kind", ADMIN_MUTE_KIND)
-                put("value", muted)
+                // See the handler: the subject has to travel inside
+                // `value`, the one free-form field the SFU relays.
+                put("value", "${if (muted) "true" else "false"}:$ship")
             },
         )
     }
@@ -1412,6 +1429,18 @@ class PartyLine(
          * Galène client on the same line is unaffected.
          */
         internal const val MUTE_KIND = "talon-mute"
+
+        /**
+         * The admin-mute payload: "true:~ship" or "false:~ship" in
+         * `value`, or a `target` field from a relay that keeps it. Null
+         * when the message names nobody.
+         */
+        internal fun parseAdminMute(value: String?, target: String?): Pair<Boolean, String>? {
+            val parts = value?.split(':', limit = 2)
+            val on = parts?.firstOrNull() == "true"
+            val who = target ?: parts?.getOrNull(1)?.takeIf { it.isNotBlank() } ?: return null
+            return on to who
+        }
         internal const val ADMIN_MUTE_KIND = "talon-adminmute"
         internal const val VIDEO_KIND = "talon-video"
     }
