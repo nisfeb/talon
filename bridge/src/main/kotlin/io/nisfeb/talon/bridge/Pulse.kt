@@ -27,8 +27,18 @@ object Pulse {
     const val MIC = "TalonBridgeMic"
     const val SPACE = "TalonBridgeSpace"
     const val BOTH = "TalonBridgeBoth"
+    /** The Space app plays here; a loopback feeds it into [SPACE], so its monitor is pure Space voice. */
+    const val SPACE_IN = "TalonBridgeSpaceIn"
     const val MIC_MONITOR = "$MIC.monitor"
     const val SPACE_MONITOR = "$SPACE.monitor"
+    const val SPACE_IN_MONITOR = "$SPACE_IN.monitor"
+    const val LOOP_APP = "TalonBridgeLoop"
+    const val HOST_MIC_APP = "TalonBridgeHostMic"
+
+    /** Playback targets the party hears. */
+    val partyTargets = setOf(SPACE, SPACE_IN, BOTH)
+    /** Every virtual playback target. */
+    val virtualTargets = partyTargets + MIC
     const val DEFAULT_SINK = "@DEFAULT_SINK@"
     const val DEFAULT_SOURCE = "@DEFAULT_SOURCE@"
 
@@ -43,6 +53,9 @@ object Pulse {
         val corked: Boolean = false,
         /** Stream volume in percent; Pulse allows above 100. */
         val volume: Int = 100,
+        val muted: Boolean = false,
+        /** The module that owns the stream (loopbacks, combine feeds), if any. */
+        val ownerModule: Int? = null,
     ) {
         /** Chromium names its capture "Brave input"; the app is Brave. */
         val appName: String get() = app.removeSuffix(" input")
@@ -59,8 +72,15 @@ object Pulse {
     fun playback(): List<Stream> = parseStreams(pactl("-f", "json", "list", "sink-inputs"), "sink", sinks())
     fun capture(): List<Stream> = parseStreams(pactl("-f", "json", "list", "source-outputs"), "source", sources())
 
+    data class Module(val index: Int, val name: String, val args: String)
+
+    fun modules(): List<Module> = pactl("list", "short", "modules").lines().filter { it.isNotBlank() }.map {
+        val p = it.split('\t')
+        Module(p[0].trim().toInt(), p.getOrElse(1) { "" }, p.getOrElse(2) { "" })
+    }
+
     fun hasDevices(sinks: List<Device> = sinks()): Boolean =
-        sinks.map { it.name }.containsAll(listOf(MIC, SPACE, BOTH))
+        sinks.map { it.name }.containsAll(listOf(MIC, SPACE, BOTH, SPACE_IN))
 
     /** Loads the null sinks and the combine sink that are missing. Idempotent. */
     fun ensureDevices() {
@@ -71,13 +91,26 @@ object Pulse {
         )
         if (MIC !in have) nullSink(MIC)
         if (SPACE !in have) nullSink(SPACE)
+        if (SPACE_IN !in have) nullSink(SPACE_IN)
         if (BOTH !in have) {
             pactl(
                 "load-module", "module-combine-sink", "sink_name=$BOTH",
                 "slaves=$MIC,$SPACE", "sink_properties=device.description=$BOTH",
             )
         }
+        if (modules().none { it.name == "module-loopback" && "source=$SPACE_IN_MONITOR" in it.args }) {
+            loadLoopback(SPACE_IN_MONITOR, SPACE, LOOP_APP)
+        }
     }
+
+    /** Feeds [source] into [sink] with a short latency; returns the module id. */
+    fun loadLoopback(source: String, sink: String, app: String): Int = pactl(
+        "load-module", "module-loopback", "source=$source", "sink=$sink", "latency_msec=30",
+        "sink_input_properties=application.name=$app", "source_output_properties=application.name=$app",
+    ).trim().toInt()
+
+    fun unloadModule(id: Int) { pactl("unload-module", "$id") }
+    fun setPlaybackMute(index: Int, muted: Boolean) { pactl("set-sink-input-mute", "$index", if (muted) "1" else "0") }
 
     fun movePlayback(index: Int, sink: String) { pactl("move-sink-input", "$index", sink) }
     fun moveCapture(index: Int, source: String) { pactl("move-source-output", "$index", source) }
@@ -130,6 +163,8 @@ object Pulse {
                 volume = o["volume"]?.jsonObject?.values?.firstOrNull()?.jsonObject
                     ?.get("value_percent")?.jsonPrimitive?.contentOrNull
                     ?.removeSuffix("%")?.trim()?.toIntOrNull() ?: 100,
+                muted = o["mute"]?.jsonPrimitive?.booleanOrNull ?: false,
+                ownerModule = o["owner_module"]?.jsonPrimitive?.intOrNull,
             )
         }
     }

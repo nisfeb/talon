@@ -142,10 +142,35 @@ did by hand:
   clips (airhorn, applause, ding, drumroll, laser, rimshot, sad
   trombone) are written there on first run while the folder is empty.
 
-The X Space panel carries two live meters read with `parec` from the
-virtual devices' monitors: Party → Space is what the Space app's
-microphone receives, Space → Party is what the bridge sends up. If a
-bar moves when someone talks, that direction works.
+The X Space panel carries two live meters read with `parec`: Party →
+Space is everything the Space app's microphone receives, Space → Party
+is the Space's own voice (the Space app plays into `TalonBridgeSpaceIn`,
+which a loopback feeds into `TalonBridgeSpace`, so its monitor is clean).
+If a bar moves when someone talks, that direction works.
+
+Also in the window:
+
+- **Ducking**: music on the party or the Space dips to a set level
+  while anyone on the party speaks (from the line's speaking flags)
+  or the Space's voice is above the meter threshold, and comes back
+  after a short hold.
+- **Presets**: the whole routing (Space app, per-app target and
+  volume, direction levels, ducking) saved by name in
+  `~/.config/talon/party-presets.json`. The active preset is re-applied
+  to an app that comes back with new streams, like a restarted browser.
+- **Now playing**: the current track from any MPRIS player (Spotify,
+  Firefox, Brave) read over `gdbus`.
+- **Host controls**: mute and unmute members on the line (live, and
+  persisted on the host), and an anonymous listen link when the line
+  allows listeners.
+- **Record the show**: a stereo WAV in `~/.config/talon/recordings`,
+  left what the Space hears, right what the party hears from here.
+- **Watchdog**: a banner and a desktop notification when no Space app
+  is wired, the Space app's audio pauses, the bridge's streams are off
+  the virtual devices, or nothing has been heard for five minutes.
+- **Host mic**: your real microphone straight into the Space, the
+  party or both through a muted loopback; hold F8 in the window or
+  switch Talk on.
 
 It needs `pactl` and `paplay` (PulseAudio or PipeWire-Pulse) and the
 same JDK 21 as the CLI. Effects on the voice path are not there: the

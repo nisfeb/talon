@@ -123,6 +123,22 @@ class BridgeRunner {
         line?.setMuted(muted)
     }
 
+    /** Host moderation: silence [ship] on the line now, and on the host so it sticks across rejoins. */
+    fun setMemberMuted(ship: String, muted: Boolean) {
+        val l = line ?: return
+        if (muted) l.revokeSpeaking(ship) else l.restoreSpeaking(ship)
+        val live = _status.value as? Status.Live ?: return
+        scope?.launch { controller?.moderateMember(live.host, live.room, ship, muted) }
+    }
+
+    /** Asks the host for an anonymous listen link; it lands in [listenLink] if listening is on. */
+    fun requestListenLink() {
+        val live = _status.value as? Status.Live ?: return
+        scope?.launch { controller?.shareRoom(live.host, live.room) }
+    }
+
+    val listenLink: StateFlow<io.nisfeb.talon.call.ListenLink?>? get() = controller?.listenLink
+
     private var linesJob: Job? = null
 
     private suspend fun doConnect(config: Config) {
