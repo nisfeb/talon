@@ -28,6 +28,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.windowInsetsPadding
@@ -427,6 +429,10 @@ fun DmListScreen(
     // Persist expanded-group set across navigations so groups stay open
     // when the user returns from a chat.
     var expandedGroups by remember { mutableStateOf(snap.expandedGroups) }
+    // The channel a group expand just landed in, with a nonce so landing
+    // in the same channel again replays the glow. Read by GroupChannelRow.
+    var jumpedWhom by remember { mutableStateOf<String?>(null) }
+    var jumpNonce by remember { mutableStateOf(0) }
     // Mirror every change back into the snapshot so the next mount
     // starts from the user's latest expansion state.
     androidx.compose.runtime.LaunchedEffect(expandedGroups) {
@@ -1228,7 +1234,11 @@ fun DmListScreen(
                                                 if (autoOpenOnExpand && expanding && !editMode) {
                                                     childrenSnapshot
                                                         .maxByOrNull { it.m?.sentMs ?: 0L }
-                                                        ?.let { onRowOpen(it.whom) }
+                                                        ?.let {
+                                                            jumpedWhom = it.whom
+                                                            jumpNonce++
+                                                            onRowOpen(it.whom)
+                                                        }
                                                 }
                                             },
                                             onLongClick = if (editMode) null else onGroupHeadLongPress,
@@ -1274,6 +1284,7 @@ fun DmListScreen(
                                                         draft = drafts[child.whom],
                                                         onClick = onRowOpen,
                                                         onLongClick = onRowLongPress,
+                                                        flashKey = if (jumpedWhom == child.whom) jumpNonce else null,
                                                     )
                                                     HorizontalDivider(modifier = Modifier.padding(start = 56.dp))
                                                 }
@@ -1410,7 +1421,11 @@ fun DmListScreen(
                                                 if (autoOpenOnExpand && expanding && !editMode) {
                                                     childrenSnapshot
                                                         .maxByOrNull { it.m?.sentMs ?: 0L }
-                                                        ?.let { onRowOpen(it.whom) }
+                                                        ?.let {
+                                                            jumpedWhom = it.whom
+                                                            jumpNonce++
+                                                            onRowOpen(it.whom)
+                                                        }
                                                 }
                                             },
                                             onLongClick = if (editMode) null else onGroupHeadLongPress,
@@ -1460,6 +1475,7 @@ fun DmListScreen(
                                                         draft = drafts[child.whom],
                                                         onClick = onRowOpen,
                                                         onLongClick = onRowLongPress,
+                                                        flashKey = if (jumpedWhom == child.whom) jumpNonce else null,
                                                     )
                                                     HorizontalDivider(modifier = Modifier.padding(start = 56.dp))
                                                 }
@@ -2417,8 +2433,18 @@ private fun GroupChannelRow(
     draft: String?,
     onClick: (String) -> Unit,
     onLongClick: (String) -> Unit,
+    /** Non-null when a group expand just landed here: the row glows in the accent and fades. */
+    flashKey: Any? = null,
 ) {
     val shortName = remember(whom) { contactMap.channelShortName(whom) }
+    val flash = remember(whom) { Animatable(0f) }
+    LaunchedEffect(flashKey) {
+        if (flashKey != null) {
+            flash.snapTo(1f)
+            flash.animateTo(0f, tween(1_800, easing = LinearEasing))
+        }
+    }
+    val glow = MaterialTheme.colorScheme.primary.copy(alpha = 0.22f * flash.value)
     val preview = m?.let {
         remember(it.id, it.contentJson) {
             StoryCache.textFor(it.id, it.contentJson).take(200).replace('\n', ' ')
@@ -2434,6 +2460,7 @@ private fun GroupChannelRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .background(glow)
             .combinedClickableWithSecondary(
                 onClick = { onClick(whom) },
                 onLongClick = { onLongClick(whom) },
