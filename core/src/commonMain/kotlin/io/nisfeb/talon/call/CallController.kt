@@ -510,12 +510,18 @@ class CallController(
                                     // client's automatic background
                                     // question.
                                     peeked.isNotEmpty() -> {}
-                                    up.name.isNotEmpty() -> onDenied?.invoke(up.name, why)
-                                    // Nameless, and nothing here asked:
-                                    // a host-side relay reflection (one
-                                    // unreachable member nacks an
-                                    // announce). Not this user's failure
-                                    // — no banner.
+                                    // Anything else this device did not
+                                    // ask for gets no banner: a second
+                                    // deny for a peek already settled
+                                    // (pendingPeeks is a set, so two
+                                    // chat mounts peeking the same room
+                                    // collapse into one entry and the
+                                    // second answer found nothing), a
+                                    // fact fanned out from another of
+                                    // our devices, or a nameless relay
+                                    // reflection. Every one of those
+                                    // painted "Party line: no such room"
+                                    // over a healthy line-less group.
                                     else -> {}
                                 }
                             }

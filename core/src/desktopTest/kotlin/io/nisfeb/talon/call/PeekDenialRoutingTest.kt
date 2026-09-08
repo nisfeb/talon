@@ -70,4 +70,49 @@ class PeekDenialRoutingTest {
             c.stop()
         }
     }
+
+    /** Two chat mounts peek the same room; the set holds one key, so the
+     *  second answer finds nothing pending. It must still be silence. */
+    @Test
+    fun aSecondDenialForTheSamePeekIsSilence() = runBlocking<Unit> {
+        val h = TrunkHarness()
+        val c = controller(h)
+        var denied: String? = null
+        c.onDenied = { name, why -> denied = "$name: $why" }
+        try {
+            c.start()
+            h.awaitConnected()
+            c.peekRoom("~zod", "ghostline")
+            h.awaitPut { it.contains("peek-room") }
+            repeat(3) {
+                h.emitFact(
+                    """{"denied":{"from":"~zod","name":"ghostline","why":"no such room"}}""",
+                )
+            }
+            delay(500)
+            assertNull(denied, "a repeated peek denial must never reach the join-refusal bar")
+        } finally {
+            c.stop()
+        }
+    }
+
+    /** A deny nothing on this device asked for: another device's peek fanned out by our ship. */
+    @Test
+    fun anUnaskedDenialIsSilence() = runBlocking<Unit> {
+        val h = TrunkHarness()
+        val c = controller(h)
+        var denied: String? = null
+        c.onDenied = { name, why -> denied = "$name: $why" }
+        try {
+            c.start()
+            h.awaitConnected()
+            h.emitFact(
+                """{"denied":{"from":"~zod","name":"ghostline","why":"no such room"}}""",
+            )
+            delay(500)
+            assertNull(denied, "an unasked denial must never reach the join-refusal bar")
+        } finally {
+            c.stop()
+        }
+    }
 }
