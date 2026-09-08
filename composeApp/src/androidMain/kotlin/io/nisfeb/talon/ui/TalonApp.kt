@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Scaffold
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -1091,7 +1092,11 @@ fun TalonApp(
             (rootCallUi is io.nisfeb.talon.call.CallUiState.Active ||
                 rootCallUi is io.nisfeb.talon.call.CallUiState.Ended)
         )
-    androidx.compose.foundation.layout.Column(Modifier.fillMaxSize()) {
+    // Painted so the status-bar band above a floating call bar shows the
+    // theme's background, not the window's.
+    androidx.compose.foundation.layout.Column(
+        Modifier.fillMaxSize().background(androidx.compose.material3.MaterialTheme.colorScheme.background),
+    ) {
     androidx.compose.foundation.layout.Column(
         Modifier.fillMaxWidth().then(
             if (rootCallFloats) Modifier.windowInsetsPadding(WindowInsets.statusBars) else Modifier,

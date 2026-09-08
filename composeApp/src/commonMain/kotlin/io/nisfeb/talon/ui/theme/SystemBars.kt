@@ -10,4 +10,4 @@ import androidx.compose.runtime.Composable
  * bar; iOS follows the view controller and is unaffected today).
  */
 @Composable
-expect fun SystemBarsAppearance(darkTheme: Boolean)
+expect fun SystemBarsAppearance(darkTheme: Boolean, background: androidx.compose.ui.graphics.Color)

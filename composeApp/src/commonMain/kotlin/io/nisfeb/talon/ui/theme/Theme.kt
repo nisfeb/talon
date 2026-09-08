@@ -38,6 +38,24 @@ private val LightColors = lightColorScheme(
     outlineVariant       = Color(0xFFE7E5E4),
     error                = Color(0xFFDC2626),
     onError              = Color(0xFFFFFFFF),
+    errorContainer       = Color(0xFFFEE2E2),
+    onErrorContainer     = Color(0xFF7F1D1D),
+    // Material 3's newer surface roles. Unset, they fall back to the
+    // baseline lavender-tinted greys and an amber surfaceTint, which
+    // put purple top bars, cards, menus and dialogs, and amber-washed
+    // elevated surfaces, on top of this warm stone palette in light mode.
+    surfaceTint          = Color(0xFF57534E),
+    surfaceDim           = Color(0xFFE7E5E4),
+    surfaceBright        = Color(0xFFFFFFFF),
+    surfaceContainerLowest  = Color(0xFFFFFFFF),
+    surfaceContainerLow     = Color(0xFFFAFAF9),
+    surfaceContainer        = Color(0xFFF5F5F4),
+    surfaceContainerHigh    = Color(0xFFEEEDEC),
+    surfaceContainerHighest = Color(0xFFE7E5E4),
+    inverseSurface       = Color(0xFF1C1917),
+    inverseOnSurface     = Color(0xFFFAFAF9),
+    inversePrimary       = Color(0xFFFBBF24),
+    scrim                = Color(0xFF000000),
 )
 
 private val DarkColors = darkColorScheme(
@@ -67,7 +85,24 @@ private val DarkColors = darkColorScheme(
     outlineVariant       = Color(0xFF292524),
     error                = Color(0xFFF87171),
     onError              = Color(0xFF7F1D1D),
+    errorContainer       = Color(0xFF7F1D1D),
+    onErrorContainer     = Color(0xFFFECACA),
+    surfaceTint          = Color(0xFFA8A29E),
+    surfaceDim           = Color(0xFF0F0D1A),
+    surfaceBright        = Color(0xFF352F42),
+    surfaceContainerLowest  = Color(0xFF0A0812),
+    surfaceContainerLow     = Color(0xFF161221),
+    surfaceContainer        = Color(0xFF1F1A2B),
+    surfaceContainerHigh    = Color(0xFF272231),
+    surfaceContainerHighest = Color(0xFF302A3B),
+    inverseSurface       = Color(0xFFF5F5F4),
+    inverseOnSurface     = Color(0xFF1C1917),
+    inversePrimary       = Color(0xFFB45309),
+    scrim                = Color(0xFF000000),
 )
+
+/** The palette for a mode, before any accent override. */
+internal fun talonColors(darkTheme: Boolean) = if (darkTheme) DarkColors else LightColors
 
 @Composable
 fun TalonTheme(
@@ -84,8 +119,8 @@ fun TalonTheme(
     accentOverride: Color? = null,
     content: @Composable () -> Unit,
 ) {
-    SystemBarsAppearance(darkTheme)
-    val base = if (darkTheme) DarkColors else LightColors
+    val base = talonColors(darkTheme)
+    SystemBarsAppearance(darkTheme, base.background)
     val effective = if (accentOverride == null) base else base.copy(
         primary = accentOverride,
         onPrimary = if (accentOverride.luminance() > 0.5f) Color(0xFF1C1917)

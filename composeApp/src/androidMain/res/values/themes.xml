@@ -1,8 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="Theme.Talon" parent="android:Theme.Material.NoActionBar">
+    <!-- Light by default, dark in values-night: the platform theme
+         decides the window background behind Compose, the text
+         selection toolbar and other system chrome, so it has to
+         follow the system like the app does. Compose then repaints
+         the window background live from the app's own theme, which
+         also covers a forced light or dark preference. -->
+    <style name="Theme.Talon" parent="android:Theme.Material.Light.NoActionBar">
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:navigationBarColor">@android:color/transparent</item>
-        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:windowBackground">#FAFAF9</item>
     </style>
 </resources>
