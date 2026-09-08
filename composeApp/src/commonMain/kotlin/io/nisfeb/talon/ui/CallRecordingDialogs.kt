@@ -19,6 +19,7 @@ import io.ktor.client.HttpClient
 import io.nisfeb.talon.ai.AiSettings
 import io.nisfeb.talon.ai.CallRecordingPublisher
 import io.nisfeb.talon.call.RecordedCall
+import io.nisfeb.talon.call.saveFile
 import io.nisfeb.talon.call.saveWavFile
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -191,7 +192,90 @@ fun RecordingResultDialog(
                             busy = false
                         }
                     },
-                ) { Text("Save full recording") }
+                ) { Text("Save mixed recording") }
+                // Per-speaker files: what a transcription model needs to
+                // attribute words to people. Each file starts at the same
+                // instant, so transcripts merge on one timeline.
+                TextButton(
+                    enabled = !busy && !rec.isEmpty,
+                    onClick = {
+                        busy = true
+                        message = null
+                        scope.launch {
+                            val stamp = io.nisfeb.talon.util.nowMs()
+                            val saved = withContext(io.nisfeb.talon.util.ioDispatcher) {
+                                val files = CallRecordingPublisher.perSpeakerWavs(rec)
+                                val paths = files.mapNotNull { (ship, wav) ->
+                                    saveWavFile(wav, "party-line-$stamp-${ship.trimStart('~')}")
+                                }
+                                if (paths.isNotEmpty()) {
+                                    val manifest = buildString {
+                                        append("Talon party line recording, one file per speaker.\n")
+                                        append("Every file starts at the same instant, so transcribe each and merge by timestamp.\n\n")
+                                        files.keys.forEach { ship ->
+                                            append("party-line-$stamp-${ship.trimStart('~')}.wav  ")
+                                            append(nameFor(ship)).append(" (").append(ship).append(")\n")
+                                        }
+                                    }
+                                    saveFile(manifest.encodeToByteArray(), "party-line-$stamp-speakers", "txt", "text/plain")
+                                }
+                                paths
+                            }
+                            if (saved.isNotEmpty()) kept = true
+                            message = if (saved.isNotEmpty()) {
+                                "Saved ${saved.size} speaker file(s) next to ${saved.first()}"
+                            } else {
+                                "Couldn't save audio on this platform."
+                            }
+                            busy = false
+                        }
+                    },
+                ) { Text("Save one file per speaker") }
+                TextButton(
+                    enabled = !busy && !rec.isEmpty,
+                    onClick = {
+                        busy = true
+                        message = null
+                        scope.launch {
+                            val order = CallRecordingPublisher.speakerOrder(rec)
+                            val saved = withContext(io.nisfeb.talon.util.ioDispatcher) {
+                                CallRecordingPublisher.multitrackWav(rec)?.let {
+                                    saveWavFile(it, "party-line-${io.nisfeb.talon.util.nowMs()}-multitrack")
+                                }
+                            }
+                            if (saved != null) kept = true
+                            message = if (saved != null) {
+                                "Saved multitrack audio to $saved. Channels: " +
+                                    order.mapIndexed { i, s -> "${i + 1} ${nameFor(s)}" }.joinToString(", ")
+                            } else {
+                                "Couldn't save audio on this platform."
+                            }
+                            busy = false
+                        }
+                    },
+                ) { Text("Save multitrack (one channel per speaker)") }
+                TextButton(
+                    enabled = !busy && !rec.isEmpty && stt != null,
+                    onClick = {
+                        busy = true
+                        message = null
+                        job = scope.launch {
+                            runCatching {
+                                val t = CallRecordingPublisher.transcribeAll(http, stt!!, rec, nameFor)
+                                val text = CallRecordingPublisher.transcriptText(
+                                    title, whenLabel, rec.clips.keys.map(nameFor), t,
+                                )
+                                withContext(io.nisfeb.talon.util.ioDispatcher) {
+                                    saveFile(text.encodeToByteArray(), "party-line-${io.nisfeb.talon.util.nowMs()}-transcript", "txt", "text/plain")
+                                }
+                            }.onSuccess { path ->
+                                if (path != null) kept = true
+                                message = if (path != null) "Saved transcript to $path" else "Couldn't save on this platform."
+                            }.onFailure { message = "Transcription failed: ${it.message ?: "error"}" }
+                            busy = false
+                        }
+                    },
+                ) { Text("Save transcript as text") }
                 if (busy) {
                     TextButton(onClick = {
                         job?.cancel()

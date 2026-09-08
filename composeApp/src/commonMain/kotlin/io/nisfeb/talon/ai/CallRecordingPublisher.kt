@@ -66,6 +66,48 @@ object CallRecordingPublisher {
      * Sequential per speaker — a call has few speakers and this keeps
      * the code and the rate-limit behaviour simple.
      */
+    /** The transcript of every speaker, merged on one timeline, plus who could not be transcribed. */
+    data class Transcript(
+        val utterances: List<TranscriptGemtext.Utterance>,
+        val failed: List<String>,
+    )
+
+    /**
+     * Transcribe every speaker's own track. Attribution is exact
+     * because each request carries one voice; the segments then merge
+     * by their start time. Sequential per speaker — a call has few
+     * speakers and this keeps the rate-limit behaviour simple.
+     */
+    suspend fun transcribeAll(
+        http: HttpClient,
+        stt: Stt,
+        call: RecordedCall,
+        nameFor: (String) -> String,
+    ): Transcript {
+        val utterances = mutableListOf<TranscriptGemtext.Utterance>()
+        val failed = mutableListOf<String>()
+        for ((ship, pcm) in call.clips) {
+            if (pcm.isEmpty()) continue
+            val label = nameFor(ship)
+            runCatching { transcribeClip(http, stt, pcm, call.rateOf(ship)) }
+                .onSuccess { segs ->
+                    segs.forEach { utterances += TranscriptGemtext.Utterance(label, it.startMs, it.text) }
+                }
+                .onFailure {
+                    failed += label
+                    Log.w(TAG, "could not transcribe $label", it)
+                }
+        }
+        if (failed.isNotEmpty() && utterances.isEmpty()) {
+            error("transcription failed for every speaker (${failed.joinToString(", ")})")
+        }
+        return Transcript(utterances.sortedBy { it.startMs }, failed)
+    }
+
+    /**
+     * Transcribe every speaker and publish the merged transcript to
+     * Lattice. Returns the canonical urb:// address of the new page.
+     */
     suspend fun publishTranscript(
         http: HttpClient,
         stt: Stt,
@@ -77,43 +119,38 @@ object CallRecordingPublisher {
         call: RecordedCall,
         nameFor: (String) -> String,
     ): String {
-        val utterances = mutableListOf<TranscriptGemtext.Utterance>()
-        val failed = mutableListOf<String>()
-        for ((ship, pcm) in call.clips) {
-            if (pcm.isEmpty()) continue
-            val label = nameFor(ship)
-            // Per speaker, so one bad clip doesn't discard the speakers
-            // already transcribed (and paid for) before it.
-            runCatching { transcribeClip(http, stt, pcm, call.rateOf(ship)) }
-                .onSuccess { segs ->
-                    segs.forEach { utterances += TranscriptGemtext.Utterance(label, it.startMs, it.text) }
-                }
-                .onFailure {
-                    failed += label
-                    Log.w(TAG, "could not transcribe $label", it)
-                }
-        }
-        if (failed.isNotEmpty() && utterances.isEmpty()) {
-            // Nothing survived — a page saying only "no speech" would be
-            // a lie, and it would overwrite nothing useful anyway.
-            error("transcription failed for every speaker (${failed.joinToString(", ")})")
-        }
+        val t = transcribeAll(http, stt, call, nameFor)
         val gemtext = TranscriptGemtext.build(
             title = title.ifBlank { "Party line" },
             whenLabel = whenLabel,
             participants = call.clips.keys.map(nameFor),
-            utterances = utterances,
-            note = if (failed.isEmpty()) "" else
-                "Could not transcribe: ${failed.joinToString(", ")}.",
+            utterances = t.utterances,
+            note = if (t.failed.isEmpty()) "" else
+                "Could not transcribe: ${t.failed.joinToString(", ")}.",
         )
-        // Seeded with the clock as well as the label: two recordings
-        // finished in the same minute produced the same slug, and the
-        // second silently overwrote the first.
         val slug = LatticePublish.slug(
             title.ifBlank { "party-line" },
             "$ourShip-$whenLabel-${nowMs()}",
         )
         return LatticePublish.publish(http, shipUrl, ourShip, cookie, slug, gemtext)
+    }
+
+    /**
+     * The transcript as a plain text file: one line per utterance,
+     * "[mm:ss] Speaker: words", which is what a summarising model or
+     * a person wants to read. Speaker labels come from our own tracks,
+     * never from guessing voices apart.
+     */
+    fun transcriptText(title: String, whenLabel: String, participants: List<String>, t: Transcript): String {
+        val sb = StringBuilder()
+        sb.append(title.ifBlank { "Party line" }).append(" · ").append(whenLabel).append('\n')
+        sb.append("Speakers: ").append(participants.joinToString(", ")).append('\n')
+        if (t.failed.isNotEmpty()) sb.append("Could not transcribe: ").append(t.failed.joinToString(", ")).append('\n')
+        sb.append('\n')
+        for (u in t.utterances) {
+            sb.append('[').append(TranscriptGemtext.clock(u.startMs)).append("] ").append(u.speaker).append(": ").append(u.text.trim()).append('\n')
+        }
+        return sb.toString()
     }
 
     /**
@@ -147,6 +184,30 @@ object CallRecordingPublisher {
         }
         return out
     }
+
+    /** Speakers in the order the multitrack file's channels use, and the per-speaker files are named. */
+    fun speakerOrder(call: RecordedCall): List<String> = call.clips.keys.sorted()
+
+    /**
+     * One WAV with a channel per speaker, in [speakerOrder], all on the
+     * same clock. Transcription services with a multichannel mode
+     * (Deepgram, AssemblyAI, Rev) attribute by channel; anything else
+     * plays it as a mix. Null if nothing was captured.
+     */
+    fun multitrackWav(call: RecordedCall): ByteArray? {
+        if (call.isEmpty) return null
+        val tracks = speakerOrder(call).map { ship ->
+            PcmResample.to(call.clips.getValue(ship), call.rateOf(ship), call.sampleRate)
+        }
+        val frames = io.nisfeb.talon.call.PcmTracks.interleave(tracks)
+        if (frames.isEmpty()) return null
+        return WavFile.encode(frames, call.sampleRate, channels = tracks.size)
+    }
+
+    /** One mono WAV per speaker, keyed by ship, each starting at the recording's t=0. */
+    fun perSpeakerWavs(call: RecordedCall): Map<String, ByteArray> =
+        speakerOrder(call).filter { call.clips.getValue(it).isNotEmpty() }
+            .associateWith { ship -> WavFile.encode(call.clips.getValue(ship), call.rateOf(ship)) }
 
     /** Mix every speaker into one WAV for the "keep the full recording"
      *  option. Empty if nothing was captured. */

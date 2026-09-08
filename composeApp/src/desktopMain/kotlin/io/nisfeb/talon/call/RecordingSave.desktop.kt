@@ -5,6 +5,9 @@ import io.nisfeb.talon.util.ioDispatcher
 import kotlinx.coroutines.withContext
 
 actual suspend fun saveWavFile(bytes: ByteArray, name: String): String? =
+    saveFile(bytes, name, "wav", "audio/wav")
+
+actual suspend fun saveFile(bytes: ByteArray, name: String, extension: String, mime: String): String? =
     withContext(ioDispatcher) {
         runCatching {
             val dir = java.io.File(System.getProperty("user.home"), "Downloads/Talon")
@@ -12,7 +15,7 @@ actual suspend fun saveWavFile(bytes: ByteArray, name: String): String? =
             val safe = name.map { if (it.isLetterOrDigit() || it == '-' || it == '_') it else '-' }
                 .joinToString("")
                 .ifBlank { "recording" }
-            val f = java.io.File(dir, "$safe.wav")
+            val f = java.io.File(dir, "$safe.$extension")
             f.writeBytes(bytes)
             f.absolutePath
         }.onFailure {

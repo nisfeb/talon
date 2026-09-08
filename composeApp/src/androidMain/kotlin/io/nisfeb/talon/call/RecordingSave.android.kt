@@ -15,6 +15,9 @@ import kotlinx.coroutines.withContext
  * needed). Best-effort — returns null on any failure.
  */
 actual suspend fun saveWavFile(bytes: ByteArray, name: String): String? =
+    saveFile(bytes, name, "wav", "audio/wav")
+
+actual suspend fun saveFile(bytes: ByteArray, name: String, extension: String, mime: String): String? =
     withContext(ioDispatcher) {
         val ctx = talonAppContext ?: return@withContext null
         val safe = name.map { if (it.isLetterOrDigit() || it == '-' || it == '_') it else '-' }
@@ -22,8 +25,8 @@ actual suspend fun saveWavFile(bytes: ByteArray, name: String): String? =
         runCatching {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 val values = ContentValues().apply {
-                    put(MediaStore.Downloads.DISPLAY_NAME, "$safe.wav")
-                    put(MediaStore.Downloads.MIME_TYPE, "audio/wav")
+                    put(MediaStore.Downloads.DISPLAY_NAME, "$safe.$extension")
+                    put(MediaStore.Downloads.MIME_TYPE, mime)
                     put(MediaStore.Downloads.RELATIVE_PATH, "${Environment.DIRECTORY_DOWNLOADS}/Talon")
                     put(MediaStore.Downloads.IS_PENDING, 1)
                 }
@@ -44,11 +47,11 @@ actual suspend fun saveWavFile(bytes: ByteArray, name: String): String? =
                     runCatching { resolver.delete(uri, null, null) }
                     throw t
                 }
-                "Downloads/Talon/$safe.wav"
+                "Downloads/Talon/$safe.$extension"
             } else {
                 val dir = ctx.getExternalFilesDir(Environment.DIRECTORY_MUSIC)
                     ?: error("no external files dir")
-                val f = java.io.File(dir, "$safe.wav")
+                val f = java.io.File(dir, "$safe.$extension")
                 f.writeBytes(bytes)
                 f.absolutePath
             }
