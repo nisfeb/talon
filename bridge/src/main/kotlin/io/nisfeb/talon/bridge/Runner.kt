@@ -177,6 +177,8 @@ class BridgeRunner {
             Log.i(TAG, "granted a line on $host/${ticket.name}")
             line.setTopic(controller.lineFor(host, ticket.name)?.title.orEmpty())
             line.join(ticket, ship)
+            // Heartbeat the host so the bridge counts in "N on the line".
+            controller.beginPresenceAnnounce(host, ticket.name, line.state)
         }
         controller.onDenied = { name, why -> _status.value = Status.Connected(ship, "$name refused us a line: $why") }
         controller.start()

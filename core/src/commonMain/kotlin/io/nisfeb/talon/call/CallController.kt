@@ -17,6 +17,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
@@ -822,6 +823,18 @@ class CallController(
     fun beginPresenceAnnounce(host: String, name: String, line: StateFlow<PartyState>) {
         presenceAnnounce?.cancel()
         presenceAnnounce = scope.launch {
+            // A rejoin waits for the old session to wind down before the
+            // line reads Connecting, so callers that checked the state
+            // once at ticket time never started this for anyone who had
+            // left and come back, and the badge undercounted them. Wait
+            // for the line to be on this room instead; give up if it
+            // never is (the join was refused or superseded).
+            val onThisRoom = withTimeoutOrNull(60_000) {
+                line.first { st ->
+                    (st is PartyState.Connecting && st.room == name) ||
+                        (st is PartyState.Live && st.room == name)
+                }
+            } ?: return@launch
             try {
                 val beat = launch {
                     while (true) {

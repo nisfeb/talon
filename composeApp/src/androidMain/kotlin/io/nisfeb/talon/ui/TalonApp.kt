@@ -218,6 +218,11 @@ fun TalonApp(
                                 callController.lineFor(host, ticket.name)?.title.orEmpty(),
                             )
                             line.join(ticket, loggedInShip ?: "")
+                            // Heartbeat the host so its "N on the line"
+                            // count includes us. Mirrors App.kt; without
+                            // it every Android member was missing from
+                            // everyone's badge.
+                            callController.beginPresenceAnnounce(host, ticket.name, line.state)
                         }
                 callController.onDenied = { name, why -> line.showRefused(name, why) }
             }
@@ -1846,6 +1851,11 @@ fun TalonApp(
                 }
                 val presence by presenceFlow.collectAsState()
                 val partyPresent = partyRoomHere?.let { (h, n) -> presence["$h/$n"] } ?: 0
+                // While we are on this line the roster we can see is the floor:
+                // a member on a build that does not heartbeat is still there.
+                val partyLiveHere = (partyLine?.state?.collectAsState()?.value as? io.nisfeb.talon.call.PartyState.Live)
+                    ?.takeIf { it.room == partyRoomHere?.second }?.members?.size ?: 0
+                val partyShown = maxOf(partyPresent, partyLiveHere)
                 LaunchedEffect(partyRoomHere) {
                     val (h, n) = partyRoomHere ?: return@LaunchedEffect
                     while (true) {
@@ -1954,7 +1964,7 @@ fun TalonApp(
                         } else {
                             null
                         },
-                    partyPresent = partyPresent,
+                    partyPresent = partyShown,
                     partyLineBar = partyLine?.let { line ->
                         {
                             // Tell the app-level overlays the inline

@@ -608,13 +608,10 @@ fun App(
                                 callController.lineFor(host, ticket.name)?.title.orEmpty(),
                             )
                             line.join(ticket, shipKey)
-                            // join() refuses silently while another
-                            // line is up; only announce the one we
-                            // actually started connecting to.
-                            val st = line.state.value
-                            if (st is io.nisfeb.talon.call.PartyState.Connecting && st.room == ticket.name) {
-                                callController.beginPresenceAnnounce(host, ticket.name, line.state)
-                            }
+                            // The announce waits for the line to be on
+                            // this room, so a rejoin (which winds the
+                            // old session down first) counts too.
+                            callController.beginPresenceAnnounce(host, ticket.name, line.state)
                         }
                         callController.onDenied = { name, why -> line.showRefused(name, why) }
                     }
@@ -1948,6 +1945,11 @@ fun App(
                                 val partyPresent = partyRoomHere?.let { (h, n) ->
                                     presence["$h/$n"]
                                 } ?: 0
+                                // While we are on this line the roster we can see is the floor:
+                                // a member on a build that does not heartbeat is still there.
+                                val partyLiveHere = (partyLine?.state?.collectAsState()?.value as? io.nisfeb.talon.call.PartyState.Live)
+                                    ?.takeIf { it.room == partyRoomHere?.second }?.members?.size ?: 0
+                                val partyShown = maxOf(partyPresent, partyLiveHere)
                                 LaunchedEffect(partyRoomHere) {
                                     val (h, n) = partyRoomHere ?: return@LaunchedEffect
                                     while (true) {
@@ -2061,7 +2063,7 @@ fun App(
                                         } else {
                                             null
                                         },
-                                    partyPresent = partyPresent,
+                                    partyPresent = partyShown,
                                     // One slot under the channel header
                                     // for both: a 1:1 call and a party
                                     // line are the same kind of thing
