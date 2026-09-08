@@ -341,6 +341,66 @@ class SettingsSyncApplyBucketTest {
         }
 
     @Test
+    fun `applyBucket AI_SETTINGS keeps the local transcription key when the entry has none`() =
+        runBlocking {
+            aiSettings.applyRemote(
+                AiSettings.Config(
+                    provider = AiSettings.Provider.OpenAi,
+                    apiKey = "sk-local",
+                    model = null,
+                    syncEnabled = true,
+                    sttApiKey = "whisper-local",
+                ),
+            )
+            // A peer that never had the key pushes its whole config.
+            val bucket = buildJsonObject {
+                put("config", buildJsonObject {
+                    put("schemaVersion", 2)
+                    put("provider", "OpenAi")
+                    put("apiKey", "sk-local")
+                })
+            }
+            sync.applyBucket(SettingsSyncImpl.BUCKET_AI_SETTINGS, bucket)
+            assertEquals("whisper-local", aiSettings.state.value.sttApiKey)
+        }
+
+    @Test
+    fun `applyBucket AI_SETTINGS adopts a transcription key and a newer removal`() =
+        runBlocking {
+            aiSettings.applyRemote(
+                AiSettings.Config(
+                    provider = AiSettings.Provider.OpenAi,
+                    apiKey = "sk-local",
+                    model = null,
+                    syncEnabled = true,
+                ),
+            )
+            sync.applyBucket(
+                SettingsSyncImpl.BUCKET_AI_SETTINGS,
+                buildJsonObject {
+                    put("config", buildJsonObject {
+                        put("schemaVersion", 2)
+                        put("provider", "OpenAi")
+                        put("sttApiKey", "whisper-remote")
+                    })
+                },
+            )
+            assertEquals("whisper-remote", aiSettings.state.value.sttApiKey)
+            sync.applyBucket(
+                SettingsSyncImpl.BUCKET_AI_SETTINGS,
+                buildJsonObject {
+                    put("config", buildJsonObject {
+                        put("schemaVersion", 2)
+                        put("provider", "OpenAi")
+                        put("sttApiKeyRemovedAtMs", 5_000L)
+                    })
+                },
+            )
+            assertEquals("", aiSettings.state.value.sttApiKey, "an explicit removal clears the key")
+            assertEquals(5_000L, aiSettings.state.value.sttApiKeyRemovedAtMs)
+        }
+
+    @Test
     fun `applyBucket AI_SETTINGS applies the assistant toggles from a v2 entry`() =
         runBlocking {
             aiSettings.applyRemote(

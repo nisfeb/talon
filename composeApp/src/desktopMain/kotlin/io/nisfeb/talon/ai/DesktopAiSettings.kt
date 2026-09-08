@@ -161,7 +161,10 @@ class DesktopAiSettings : AiSettingsRepository {
     }
 
     override fun setSttApiKey(key: String) {
-        val cfg = _state.value.copy(sttApiKey = key)
+        val cfg = _state.value.copy(
+            sttApiKey = key,
+            sttApiKeyRemovedAtMs = if (key.isBlank()) io.nisfeb.talon.util.nowMs() else 0L,
+        )
         persist(cfg)
         onStateChange?.invoke(cfg, false)
     }

@@ -58,6 +58,14 @@ object AiSettings {
         // falls back to the chat key (OpenAI / Custom only). Same sync
         // gate as apiKey.
         val sttApiKey: String = "",
+        /**
+         * When the user last removed the transcription key on some
+         * device, as a wall-clock stamp; 0 when it was never removed or
+         * a key has been set since. Synced so a removal reaches other
+         * devices, while a device that simply never had the key cannot
+         * blank everyone's by pushing.
+         */
+        val sttApiKeyRemovedAtMs: Long = 0L,
         // Editable agent system-prompt parts. Each blank = use its built-in
         // default; the effective prompt for a role is the shared knowledge
         // followed by that role's specifics (see AgentPrompt/LoopPrompt).

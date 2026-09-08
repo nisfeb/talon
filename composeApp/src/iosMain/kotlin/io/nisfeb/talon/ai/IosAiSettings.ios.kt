@@ -82,7 +82,13 @@ class IosAiSettings : AiSettingsRepository {
     }
 
     override fun setSttApiKey(key: String) {
-        commit(_state.value.copy(sttApiKey = key), fireChange = true)
+        commit(
+            _state.value.copy(
+                sttApiKey = key,
+                sttApiKeyRemovedAtMs = if (key.isBlank()) io.nisfeb.talon.util.nowMs() else 0L,
+            ),
+            fireChange = true,
+        )
     }
 
     override fun setPrompt(kind: AiSettings.PromptKind, value: String) {

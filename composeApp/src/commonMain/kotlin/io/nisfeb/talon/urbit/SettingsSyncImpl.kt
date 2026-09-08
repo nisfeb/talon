@@ -729,13 +729,17 @@ class SettingsSyncImpl(
                     // Brave key rides the same opt-in gate as the LLM key —
                     // both are service credentials; same don't-ship-empty rule.
                     if (cfg.braveApiKey.isNotBlank()) put("braveApiKey", cfg.braveApiKey)
-                    // STT key rides the same opt-in gate, but ships even when
-                    // blank: it landed with the not-blank guard on both sides
-                    // in one release, so no ship entry was ever seeded with
-                    // sttApiKey:"" the way apiKey was. Omitting it would make
-                    // removing the key device-local — the peer keeps its copy
-                    // and re-delivers it on its next push of any AI setting.
-                    put("sttApiKey", cfg.sttApiKey)
+                    // STT key: same don't-ship-empty rule as the other
+                    // credentials. Shipping "" whenever it was blank let a
+                    // device that never had the key blank everyone's on its
+                    // next push of any AI setting. A removal travels as an
+                    // explicit stamp instead, so peers can tell "removed"
+                    // from "this device just doesn't have it".
+                    if (cfg.sttApiKey.isNotBlank()) {
+                        put("sttApiKey", cfg.sttApiKey)
+                    } else if (cfg.sttApiKeyRemovedAtMs > 0L) {
+                        put("sttApiKeyRemovedAtMs", cfg.sttApiKeyRemovedAtMs)
+                    }
                 }
                 put("catchMeUpEnabled", cfg.catchMeUpEnabled)
                 put("dailyDigestEnabled", cfg.dailyDigestEnabled)
@@ -950,6 +954,11 @@ class SettingsSyncImpl(
         // syncEnabled itself stays at the local value so the user's
         // explicit consent on this device is the gate, not whatever
         // a peer device wrote into the bucket.
+        // The transcription key: a real one wins; an absent one keeps ours;
+        // a removal stamp newer than our own last removal clears ours.
+        val remoteRemovedAt = obj["sttApiKeyRemovedAtMs"].asLong() ?: 0L
+        val remoteStt: String? = obj["sttApiKey"].asStr()?.takeIf { it.isNotBlank() }
+            ?: if (remoteRemovedAt > current.sttApiKeyRemovedAtMs) "" else null
         val merged = if (current.syncEnabled) {
             val providerStr = obj["provider"].asStr()
             val provider = providerStr?.let {
@@ -976,7 +985,8 @@ class SettingsSyncImpl(
                     // sttApiKey:"" — so adopt "" and let the removal
                     // propagate. Absent still means a syncEnabled=false push
                     // and keeps the local key.
-                    sttApiKey = obj["sttApiKey"].asStr() ?: current.sttApiKey,
+                    sttApiKey = remoteStt ?: current.sttApiKey,
+                    sttApiKeyRemovedAtMs = if (remoteStt == "") remoteRemovedAt else if (remoteStt != null) 0L else current.sttApiKeyRemovedAtMs,
                 )
             } else features
         } else features

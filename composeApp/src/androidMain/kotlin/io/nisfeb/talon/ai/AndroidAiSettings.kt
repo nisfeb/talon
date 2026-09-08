@@ -83,8 +83,9 @@ class AndroidAiSettings(context: Context) : AiSettingsRepository {
     }
 
     override fun setSttApiKey(key: String) {
-        prefs.edit().putString(KEY_STT_API_KEY, key).apply()
-        _state.value = _state.value.copy(sttApiKey = key)
+        val removedAt = if (key.isBlank()) io.nisfeb.talon.util.nowMs() else 0L
+        prefs.edit().putString(KEY_STT_API_KEY, key).putLong(KEY_STT_REMOVED_AT, removedAt).apply()
+        _state.value = _state.value.copy(sttApiKey = key, sttApiKeyRemovedAtMs = removedAt)
         onStateChange?.invoke(_state.value, false)
     }
 
@@ -119,6 +120,7 @@ class AndroidAiSettings(context: Context) : AiSettingsRepository {
             .putBoolean(LEGACY_ASK_URBIT_KEY, config.agentEnabled || config.askUrbitEnabled)
             .putString(KEY_BRAVE_API_KEY, config.braveApiKey)
             .putString(KEY_STT_API_KEY, config.sttApiKey)
+            .putLong(KEY_STT_REMOVED_AT, config.sttApiKeyRemovedAtMs)
             .putString(KEY_URBIT_KNOWLEDGE_PROMPT, config.urbitKnowledgePrompt)
             .putString(KEY_ASSISTANT_PROMPT, config.assistantPrompt)
             .putString(KEY_LOOP_PROMPT, config.loopPrompt)
@@ -185,6 +187,7 @@ class AndroidAiSettings(context: Context) : AiSettingsRepository {
             syncEnabled = prefs.getBoolean(KEY_SYNC, true),
             braveApiKey = prefs.getString(KEY_BRAVE_API_KEY, "").orEmpty(),
             sttApiKey = prefs.getString(KEY_STT_API_KEY, "").orEmpty(),
+            sttApiKeyRemovedAtMs = prefs.getLong(KEY_STT_REMOVED_AT, 0L),
             urbitKnowledgePrompt = prefs.getString(KEY_URBIT_KNOWLEDGE_PROMPT, "").orEmpty(),
             assistantPrompt = prefs.getString(KEY_ASSISTANT_PROMPT, "").orEmpty(),
             loopPrompt = prefs.getString(KEY_LOOP_PROMPT, "").orEmpty(),
@@ -234,6 +237,7 @@ class AndroidAiSettings(context: Context) : AiSettingsRepository {
         private const val KEY_BASE_URL = "base_url"
         private const val KEY_BRAVE_API_KEY = "brave_api_key"
         private const val KEY_STT_API_KEY = "stt_api_key"
+        private const val KEY_STT_REMOVED_AT = "stt_api_key_removed_at"
         private const val KEY_URBIT_KNOWLEDGE_PROMPT = "urbit_knowledge_prompt"
         private const val KEY_ASSISTANT_PROMPT = "assistant_prompt"
         private const val KEY_LOOP_PROMPT = "loop_prompt"
