@@ -63,6 +63,12 @@ only. User guide: `docs/party-manager.md`. Headless details:
 - **Do not restart the manager under a live Space unless asked.**
   Restarting drops the bridge off the line and the Space goes silent
   until someone clicks Join again.
+- **The bridge must not share Talon's Pulse application name.** libwebrtc
+  names its streams "WEBRTC VoiceEngine" in every app; Pulse restores
+  devices per application name, so routing the bridge onto the virtual
+  devices once routed the Talon desktop app there too (silent party
+  line). The launcher scripts set `PULSE_PROP_OVERRIDE_application.name=TalonBridge`;
+  keep it, and keep "TalonBridge" in the helper filter.
 - **Pulse remembers the last device per app.** After testing, move
   the browser's streams back to `@DEFAULT_SINK@` / `@DEFAULT_SOURCE@`
   (the Normal chips) so the user's browser is not left on the party
