@@ -2,6 +2,7 @@ package io.nisfeb.talon.ui.theme
 
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
+import io.nisfeb.talon.ui.toHsv
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -39,5 +40,22 @@ class CustomThemeTest {
         assertFalse(ocean.copy(name = " ").valid)
         assertTrue(CustomTheme.blank(dark = false, id = "x").copy(name = "Paper").valid)
         assertEquals("#38BDF8", Color(0xFF38BDF8).hex())
+    }
+}
+
+class ColorWheelTest {
+    @Test
+    fun hsvRoundTrips() {
+        for (c in listOf(Color(0xFF38BDF8), Color(0xFFF59E0B), Color(0xFF1C1917), Color.White, Color(0xFF7F1D1D))) {
+            val back = c.toHsv().toColor()
+            assertTrue(
+                kotlin.math.abs(back.red - c.red) < 0.01f &&
+                    kotlin.math.abs(back.green - c.green) < 0.01f &&
+                    kotlin.math.abs(back.blue - c.blue) < 0.01f,
+                "round trip $c",
+            )
+        }
+        assertEquals(0f, Color.White.toHsv().s)
+        assertTrue(kotlin.math.abs(Color(0xFFFF0000).toHsv().h) < 0.01f)
     }
 }

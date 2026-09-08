@@ -54,6 +54,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import kotlinx.coroutines.launch
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.foundation.horizontalScroll
+import io.nisfeb.talon.ui.theme.hex
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -2150,28 +2151,40 @@ private fun SettingsTabRow(
     }
 }
 
+/** A hex field with a swatch; tapping the swatch opens a colour wheel under the row. */
 @Composable
 private fun ColorRow(label: String, value: String, onValue: (String) -> Unit) {
     val parsed = io.nisfeb.talon.ui.parseHexColor(value)
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        Text(label, Modifier.width(88.dp), style = MaterialTheme.typography.bodyMedium)
-        OutlinedTextField(
-            value = value,
-            onValueChange = onValue,
-            placeholder = { Text("#RRGGBB") },
-            singleLine = true,
-            isError = parsed == null,
-            modifier = Modifier.weight(1f),
-        )
-        Box(
-            Modifier
-                .size(36.dp)
-                .clip(RoundedCornerShape(8.dp))
-                .background(parsed ?: MaterialTheme.colorScheme.surfaceVariant),
-        )
+    var wheelOpen by remember { mutableStateOf(false) }
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(label, Modifier.width(88.dp), style = MaterialTheme.typography.bodyMedium)
+            OutlinedTextField(
+                value = value,
+                onValueChange = onValue,
+                placeholder = { Text("#RRGGBB") },
+                singleLine = true,
+                isError = parsed == null,
+                modifier = Modifier.weight(1f),
+            )
+            Box(
+                Modifier
+                    .size(36.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(parsed ?: MaterialTheme.colorScheme.surfaceVariant)
+                    .clickable { wheelOpen = !wheelOpen },
+            )
+        }
+        if (wheelOpen) {
+            io.nisfeb.talon.ui.ColorWheel(
+                color = parsed ?: MaterialTheme.colorScheme.primary,
+                onColor = { onValue(it.hex()) },
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
     }
 }
 
