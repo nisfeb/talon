@@ -450,33 +450,14 @@ fun TalonApp(
     val inlineCallUiShown = remember { mutableStateOf(false) }
     // A live party line whose chat slot is gone (back on the list, a
     // thread, settings…) still needs a surface — the mic can be live
-    // and unmuted. Same floating container CallOverlay uses for its
-    // own strip, same bar the chat renders inline. Mirrors App.kt.
-    partyLine?.let { line ->
-        val floatingPartyState by line.state.collectAsState()
-        if (floatingPartyState !is io.nisfeb.talon.call.PartyState.Idle &&
-            !inlineCallUiShown.value
-        ) {
-            androidx.compose.ui.window.Popup(
-                alignment = androidx.compose.ui.Alignment.TopCenter,
-            ) {
-                io.nisfeb.talon.ui.PartyLineBar(
-                    line,
-                    nameFor = { ship -> contactMap.displayName(ship) },
-                    audioDevices = androidAudioDevices,
-                    // Failed is sticky; floated with no chat slot to
-                    // return to, this is its only way off the screen.
-                    onDismiss = { line.dismissFailure() },
-                    selfShip = loggedInShip.orEmpty(),
-                    // No onModerate here: this floating fallback doesn't
-                    // know which room the line belongs to (that lives
-                    // with the chat slot). SFU-side moderation still
-                    // works; it just isn't persisted on the host ship
-                    // from here.
-                )
-            }
-        }
-    }
+    // and unmuted. It goes in the root column above the screen, like
+    // the 1:1 strip, so the screen moves down under it. It used to be
+    // a top-aligned Popup, which covered the top bar and its menu.
+    // Mirrors App.kt.
+    val floatingPartyState = partyLine?.state?.collectAsState()?.value
+    val partyFloats = partyLine != null &&
+        floatingPartyState !is io.nisfeb.talon.call.PartyState.Idle &&
+        !inlineCallUiShown.value
 
     var openGroupFlag by remember {
         mutableStateOf(initialOpenWhom?.takeIf { it.startsWith("group:") }?.removePrefix("group:"))
@@ -1105,9 +1086,11 @@ fun TalonApp(
     // it was drawn first and covered, so a live call showed no bar until
     // the chat slot rendered its inline one.
     val rootCallUi = callController?.state?.collectAsState()?.value
-    val rootCallFloats = !inlineCallUiShown.value &&
-        (rootCallUi is io.nisfeb.talon.call.CallUiState.Active ||
-            rootCallUi is io.nisfeb.talon.call.CallUiState.Ended)
+    val rootCallFloats = partyFloats || (
+        !inlineCallUiShown.value &&
+            (rootCallUi is io.nisfeb.talon.call.CallUiState.Active ||
+                rootCallUi is io.nisfeb.talon.call.CallUiState.Ended)
+        )
     androidx.compose.foundation.layout.Column(Modifier.fillMaxSize()) {
     androidx.compose.foundation.layout.Column(
         Modifier.fillMaxWidth().then(
@@ -1124,6 +1107,24 @@ fun TalonApp(
             // would put the same call in two places.
             stripShownInline = inlineCallUiShown.value,
         )
+    }
+    if (partyFloats) {
+        partyLine?.let { line ->
+            io.nisfeb.talon.ui.PartyLineBar(
+                line,
+                nameFor = { ship -> contactMap.displayName(ship) },
+                audioDevices = androidAudioDevices,
+                // Failed is sticky; floated with no chat slot to
+                // return to, this is its only way off the screen.
+                onDismiss = { line.dismissFailure() },
+                selfShip = loggedInShip.orEmpty(),
+                // No onModerate here: this floating fallback doesn't
+                // know which room the line belongs to (that lives
+                // with the chat slot). SFU-side moderation still
+                // works; it just isn't persisted on the host ship
+                // from here.
+            )
+        }
     }
     }
     androidx.compose.foundation.layout.Box(
