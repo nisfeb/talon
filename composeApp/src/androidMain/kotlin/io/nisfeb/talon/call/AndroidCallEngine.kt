@@ -169,6 +169,17 @@ class AndroidCallEngine(
         videoSender = videoTransceiver?.sender
     }
 
+    override suspend fun restartIce(): SessionDesc? {
+        val constraints = MediaConstraints().apply {
+            mandatory.add(MediaConstraints.KeyValuePair("IceRestart", "true"))
+        }
+        val offer = suspendSdp { pc.createOffer(it, constraints) }
+        suspendSet { pc.setLocalDescription(it, offer) }
+        awaitGathering()
+        val sdp = pc.localDescription?.description ?: return null
+        return SessionDesc(sdp, sdpFingerprint(sdp))
+    }
+
     override suspend fun createOffer(): SessionDesc {
         _state.value = MediaState.Gathering
         val offer = suspendSdp { pc.createOffer(it, MediaConstraints()) }

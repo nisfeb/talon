@@ -192,6 +192,15 @@ class DesktopCallEngine(configuredIce: List<IceServer> = emptyList()) : CallEngi
         }
     }
 
+    override suspend fun restartIce(): SessionDesc? {
+        val offer = suspendSdp { pc.createOffer(RTCOfferOptions().apply { iceRestart = true }, it) }
+        suspendSet { pc.setLocalDescription(offer, it) }
+        awaitGathering()
+        val sdp = pc.localDescription?.sdp ?: return null
+        Log.i("Trunk", "ice restart offer: " + sdp.lines().count { it.startsWith("a=candidate") } + " candidates")
+        return SessionDesc(sdp, sdpFingerprint(sdp))
+    }
+
     override suspend fun createOffer(): SessionDesc {
         _state.value = MediaState.Gathering
         val offer = suspendSdp { pc.createOffer(RTCOfferOptions(), it) }

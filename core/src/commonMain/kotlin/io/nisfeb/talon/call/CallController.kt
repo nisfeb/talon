@@ -243,6 +243,10 @@ class CallController(
     val currentCallId: String? get() = callId
     private var peer: String? = null
     private var engine: CallEngine? = null
+    /** True when we placed the call. Only the caller restarts ICE, so both sides never race offers. */
+    private var isCaller = false
+    private var restarting = false
+    private var restartToken = 0
     // Completed when the peer's offer lands. A user can answer while
     // the ring is still going and the offer still in flight (slow
     // gather on the caller's side) — accept() awaits this instead of
@@ -268,6 +272,11 @@ class CallController(
     fun start() {
         if (loop != null) return
         loop = scope.launch { runLoop() }
+        scope.launch {
+            io.nisfeb.talon.util.NetworkChanges.events.collect {
+                if (_state.value is CallUiState.Active && isCaller) tryIceRestart("network changed")
+            }
+        }
     }
 
     fun stop() {
@@ -551,6 +560,7 @@ class CallController(
             val id = Uuid.random().toString()
             callId = id
             peer = target
+            isCaller = true
             tPlaced = nowMs()
             _state.value = CallUiState.Outgoing(target)
             armRingWatchdog()
@@ -1409,12 +1419,29 @@ class CallController(
                 }
                 callId = sig.id
                 peer = recv.from
+                isCaller = false
                 pendingOffer = CompletableDeferred()
                 _state.value = CallUiState.Incoming(recv.from)
                 armRingWatchdog()
             }
             is TrunkSig.Offer -> {
                 if (sig.id != callId) return
+                if (_state.value is CallUiState.Active) {
+                    // The caller restarted ICE after a network change:
+                    // answer in place on the live engine.
+                    if (sdpFingerprint(sig.sdp) != sig.fpr) {
+                        Log.e(TAG, "fingerprint mismatch on ice restart from ${recv.from}")
+                        endCall("security error")
+                        return
+                    }
+                    val eng = engine ?: return
+                    scope.launch {
+                        runCatching { eng.acceptOffer(SessionDesc(sig.sdp, sig.fpr)) }
+                            .onSuccess { ans -> poke(recv.from, TrunkSig.Accept(sig.id, ans.sdp, ans.fingerprint)) }
+                            .onFailure { Log.e(TAG, "ice restart answer failed", it) }
+                    }
+                    return
+                }
                 // Cross-check the signaled fingerprint against the SDP's own
                 // a=fingerprint line — catches a tampered relay.
                 // ponytail: v0 verifies signaling consistency; pinning the
@@ -1429,6 +1456,19 @@ class CallController(
             }
             is TrunkSig.Accept -> {
                 if (sig.id != callId) return
+                if (_state.value is CallUiState.Active && restarting) {
+                    // The answer to our ICE restart offer.
+                    if (sdpFingerprint(sig.sdp) != sig.fpr) {
+                        endCall("security error")
+                        return
+                    }
+                    val eng = engine ?: return
+                    scope.launch {
+                        runCatching { eng.setAnswer(SessionDesc(sig.sdp, sig.fpr)) }
+                            .onFailure { Log.e(TAG, "ice restart setAnswer failed", it) }
+                    }
+                    return
+                }
                 // Only the first accept transitions the call. Every
                 // callee device rings and the handled-elsewhere
                 // suppression is asynchronous, so two of them answering
@@ -1505,6 +1545,7 @@ class CallController(
                 when (media) {
                     MediaState.Live -> {
                         connectToken++ // connected: stop the give-up timer
+                        restarting = false
                         if (tPlaced != 0L) {
                             Log.i(TAG, "Trunk metric: place→live ${nowMs() - tPlaced}ms")
                         }
@@ -1523,13 +1564,48 @@ class CallController(
                         // (the unavailable-engine says how to fix the
                         // mic). Ending here first replaced it with a
                         // generic "connection failed".
-                        if (_state.value is CallUiState.Active) endCall("connection failed")
+                        if (_state.value is CallUiState.Active) tryIceRestart("media failed")
                     }
                     else -> {
                         val cur = _state.value
                         if (cur is CallUiState.Active) _state.value = cur.copy(media = media)
                     }
                 }
+            }
+        }
+    }
+
+    /**
+     * A live call lost its path (wifi to cellular, most often). The
+     * caller sends a fresh offer with ICE restart over the same
+     * signaling; the callee answers in place. Either side gives up and
+     * hangs up if media is not back within [RESTART_GIVE_UP_MS].
+     */
+    private fun tryIceRestart(why: String) {
+        val eng = engine ?: return
+        val id = callId ?: return
+        val p = peer ?: return
+        if (_state.value !is CallUiState.Active) return
+        val token = ++restartToken
+        scope.launch {
+            if (isCaller) {
+                if (!restarting) {
+                    restarting = true
+                    Log.w(TAG, "ice restart: $why")
+                    val offer = runCatching { eng.restartIce() }.getOrNull()
+                    if (offer == null) {
+                        endCall("connection failed")
+                        return@launch
+                    }
+                    poke(p, TrunkSig.Offer(id, offer.sdp, offer.fingerprint))
+                }
+            } else {
+                Log.w(TAG, "waiting for the caller to restart ice: $why")
+            }
+            delay(RESTART_GIVE_UP_MS)
+            val cur = _state.value
+            if (restartToken == token && cur is CallUiState.Active && cur.media != MediaState.Live) {
+                endCall("connection failed")
             }
         }
     }
@@ -1678,6 +1754,7 @@ class CallController(
         /** How often we re-announce an active recording. The host ages a
          *  recorder out after 90s, so this has to stay well under it. */
         private const val RECORD_HEARTBEAT_MS = 30_000L
+        private const val RESTART_GIVE_UP_MS = 25_000L
         private const val PRESENCE_HEARTBEAT_MS = 30_000L
     }
 }

@@ -37,6 +37,11 @@ object IosVoipBridge {
         )
     }
 
+    /** Called by the AppDelegate's NWPathMonitor when the default network changes. */
+    fun networkChanged() {
+        io.nisfeb.talon.util.NetworkChanges.bump()
+    }
+
     fun setAlertToken(hex: String) {
         alertToken.value = hex
     }

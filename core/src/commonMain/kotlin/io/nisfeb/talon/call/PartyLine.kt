@@ -325,6 +325,8 @@ class PartyLine(
         // every caller sets it (possibly to "") right before join, and
         // wiping it after that call erased every topic ever set.
         lastNotice = null
+        everJoined = false
+        lastError = null
         connectionId = "$ourShip-${Uuid.random()}"
         upRetries = 3
         upId = "up-$connectionId"
@@ -347,7 +349,40 @@ class PartyLine(
                 it.join()
                 _state.value = PartyState.Connecting(ticket.name)
             }
-            run(ticket, ourShip)
+            // A network change (wifi to cellular) closes the socket
+            // ourselves rather than waiting for a dead TCP stream to
+            // time out; the loop below then rejoins.
+            val net = launch {
+                io.nisfeb.talon.util.NetworkChanges.events.collect { reconnect("the network changed") }
+            }
+            try {
+                var attempt = 0
+                while (true) {
+                    reconnectRequested = false
+                    val startedAt = nowMs()
+                    val retry = run(ticket, ourShip)
+                    if (!retry || leaving) break
+                    // A session that held for a while earns a fresh budget.
+                    if (nowMs() - startedAt > RECONNECT_STABLE_MS) attempt = 0
+                    if (attempt >= RECONNECT_MAX) {
+                        val fresh = lastNotice?.takeIf { nowMs() - lastNoticeAtMs < NOTICE_FRESH_MS }
+                        _state.value = PartyState.Failed(room, fresh ?: lastError ?: "connection to the line was lost")
+                        break
+                    }
+                    val wait = RECONNECT_BASE_MS shl attempt
+                    attempt++
+                    Log.w(TAG, "line dropped; rejoining in ${wait}ms (attempt $attempt of $RECONNECT_MAX)")
+                    _state.value = PartyState.Connecting(room)
+                    delay(wait)
+                    // Galène still holds the old connection for a while;
+                    // a new id keeps it from refusing us as a duplicate.
+                    connectionId = "$ourShip-${Uuid.random()}"
+                    upId = "up-$connectionId"
+                    upRetries = 3
+                }
+            } finally {
+                net.cancel()
+            }
         }
     }
 
@@ -665,7 +700,8 @@ class PartyLine(
     private var lastNotice: String? = null
     private var lastNoticeAtMs = 0L
 
-    private suspend fun run(ticket: TrunkTicket, ourShip: String) {
+    /** One session on the SFU. Returns true when it ended in a way worth retrying. */
+    private suspend fun run(ticket: TrunkTicket, ourShip: String): Boolean {
         try {
             // .status carries the group's canonical name + ws endpoint,
             // so the ship only has to hand us the location URL.
@@ -699,37 +735,46 @@ class PartyLine(
                     .onFailure { Log.w(TAG, "ignoring an unhandled sfu frame", it) }
             }
             Log.i(TAG, "party line stream ended")
-            // A clean close we didn't ask for — server restart, an
-            // operator kick, an idle reap — used to fall through to
-            // Idle, which is exactly the state after a voluntary
-            // leave: the strip vanished mid-conversation with zero
-            // explanation while everyone else stayed on the line.
-            if (joined && !leaving) {
-                val fresh = lastNotice?.takeIf {
-                    nowMs() - lastNoticeAtMs < NOTICE_FRESH_MS
-                }
-                _state.value = PartyState.Failed(
-                    room,
-                    fresh ?: "connection to the line was lost",
-                )
-            }
+            // Worth another try when we were on the line and did not
+            // leave, or when we closed the socket ourselves to rejoin.
+            return !leaving && (joined || reconnectRequested)
         } catch (t: kotlinx.coroutines.CancellationException) {
-            // Being cancelled is not a failure — it is leave(), a ship
-            // switch closing the shared client, or our owner going
-            // away. Recording it as Failed put a sticky red bar at the
-            // top of chats reading "Party line: The coroutine scope
-            // left the composition" — internal machinery text shown as
-            // if the line had broken. Rethrow so cancellation completes
-            // properly; teardown() in finally resets the state to Idle.
             Log.i(TAG, "party line cancelled: ${t.message}")
             throw t
         } catch (t: Throwable) {
             Log.e(TAG, "party line failed", t)
-            _state.value = PartyState.Failed(room, t.message ?: "connection failed")
+            lastError = t.message
+            // Retry only a drop: we had been on the line, or we closed the
+            // socket ourselves for a network change. A first join that
+            // fails outright says why at once, as it always did.
+            val retry = !leaving && _state.value !is PartyState.Failed && (everJoined || reconnectRequested)
+            if (!retry && _state.value !is PartyState.Failed) {
+                _state.value = PartyState.Failed(room, t.message ?: "connection failed")
+            }
+            return retry
         } finally {
             teardown()
         }
     }
+
+    /**
+     * Drops the SFU session so the join loop rejoins at once. Used on a
+     * network change and when the up link keeps failing; a dead TCP
+     * stream can otherwise take a minute to notice.
+     */
+    fun reconnect(why: String) {
+        if (leaving || _state.value is PartyState.Idle) return
+        val s = session ?: return
+        reconnectRequested = true
+        Log.w(TAG, "reconnecting: $why")
+        scope.launch {
+            runCatching { s.close(CloseReason(CloseReason.Codes.GOING_AWAY, why)) }
+        }
+    }
+
+    @kotlin.concurrent.Volatile private var reconnectRequested = false
+    private var everJoined = false
+    private var lastError: String? = null
 
     internal suspend fun handle(msg: JsonObject) {
         when (msg["type"]?.jsonPrimitive?.content) {
@@ -957,6 +1002,7 @@ class PartyLine(
         replayLeft = msg["status"]?.jsonObject
             ?.get("clientCount")?.jsonPrimitive?.intOrNull ?: 0
         joined = true
+        everJoined = true
 
         // The server's own word on what we may do beats the JWT's —
         // the host can have edited roles after minting our token.
@@ -1139,6 +1185,10 @@ class PartyLine(
                     upState = st
                     publishRoster()
                     if (st == MediaState.Live) upRetries = 3
+                    if (st == MediaState.Failed && joined && upRetries == 0) {
+                        reconnect("the up link kept failing")
+                        return@collect
+                    }
                     if (st == MediaState.Failed && joined && upRetries > 0) {
                         upRetries -= 1
                         val wait = upRetryBaseMs * (3 - upRetries)
@@ -1429,6 +1479,9 @@ class PartyLine(
          * Galène client on the same line is unaffected.
          */
         internal const val MUTE_KIND = "talon-mute"
+        private const val RECONNECT_MAX = 6
+        private const val RECONNECT_BASE_MS = 1_000L
+        private const val RECONNECT_STABLE_MS = 30_000L
 
         /**
          * The admin-mute payload: "true:~ship" or "false:~ship" in

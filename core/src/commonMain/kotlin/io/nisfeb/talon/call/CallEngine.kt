@@ -51,6 +51,13 @@ interface CallEngine {
     /** Caller side: apply the remote answer; media starts connecting. */
     suspend fun setAnswer(remote: SessionDesc)
 
+    /**
+     * A fresh offer with ICE restart for the same session, after the
+     * network changed under a live call. Null where the engine cannot,
+     * in which case the call ends as it always did.
+     */
+    suspend fun restartIce(): SessionDesc? = null
+
     fun setMuted(muted: Boolean)
 
     /**

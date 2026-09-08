@@ -5,6 +5,7 @@ import Intents
 import PushKit
 import UserNotifications
 import UIKit
+import Network
 
 /// Native incoming-call ringing on iOS: PushKit wakes the app (even
 /// killed) on a VoIP push, and CallKit shows the system full-screen
@@ -20,6 +21,7 @@ import UIKit
 /// connects, mutes and ends, so they are phone calls to iOS the same
 /// as the ones we receive.
 class AppDelegate: NSObject, UIApplicationDelegate, PKPushRegistryDelegate, CXProviderDelegate, IosCallKit, UNUserNotificationCenterDelegate {
+    private var pathMonitor: NWPathMonitor?
     // Requests we make of CallKit (start, answer, end, mute) go through
     // this; CallKit then asks us to perform them via the delegate.
     private let callController = CXCallController()
@@ -53,6 +55,20 @@ class AppDelegate: NSObject, UIApplicationDelegate, PKPushRegistryDelegate, CXPr
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
+        // Live calls rejoin the moment the path changes (wifi to
+        // cellular) instead of waiting for ICE to time out.
+        let monitor = NWPathMonitor()
+        var lastInterfaces: [NWInterface.InterfaceType]? = nil
+        monitor.pathUpdateHandler = { path in
+            let now = path.availableInterfaces.map { $0.type }
+            if let last = lastInterfaces, last != now, path.status == .satisfied {
+                IosVoipBridge.shared.networkChanged()
+            }
+            lastInterfaces = now
+        }
+        monitor.start(queue: DispatchQueue.global(qos: .utility))
+        self.pathMonitor = monitor
+
         let config = CXProviderConfiguration()
         config.supportsVideo = false
         config.maximumCallGroups = 1

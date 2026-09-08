@@ -152,6 +152,19 @@ class TalonApplication : Application() {
         // Module-visible app context for the few leaf helpers that have
         // no Context of their own (e.g. saveWavFile's MediaStore write).
         talonAppContext = applicationContext
+        // Live calls and party lines rejoin the moment the default
+        // network changes (wifi to cellular), rather than when ICE
+        // gives up half a minute later.
+        runCatching {
+            val cm = getSystemService(android.content.Context.CONNECTIVITY_SERVICE) as android.net.ConnectivityManager
+            var last: android.net.Network? = null
+            cm.registerDefaultNetworkCallback(object : android.net.ConnectivityManager.NetworkCallback() {
+                override fun onAvailable(network: android.net.Network) {
+                    if (last != null && last != network) io.nisfeb.talon.util.NetworkChanges.bump()
+                    last = network
+                }
+            })
+        }
         // Cookie-jar-bearing client used by UrbitSession + S3Uploader.
         // Coil does NOT use this — coil-network-okhttp registers its
         // own default OkHttpClient via ServiceLoader. That's fine
