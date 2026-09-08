@@ -24,6 +24,19 @@ object IosVoipBridge {
      *  hands one over, empty forever if notifications were refused. */
     val alertToken = MutableStateFlow<String?>(null)
 
+    /**
+     * The user's microphone processing choice as libwebrtc audio-source
+     * constraints, read by TalonRtc.swift when it creates the mic.
+     */
+    fun micConstraints(): Map<String, String> {
+        val mine = io.nisfeb.talon.call.MicProcessingSettings.current
+        return mapOf(
+            "googNoiseSuppression" to mine.noiseSuppression.toString(),
+            "googEchoCancellation" to mine.echoCancellation.toString(),
+            "googAutoGainControl" to mine.autoGainControl.toString(),
+        )
+    }
+
     fun setAlertToken(hex: String) {
         alertToken.value = hex
     }

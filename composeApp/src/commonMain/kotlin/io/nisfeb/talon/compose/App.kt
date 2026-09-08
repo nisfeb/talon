@@ -542,6 +542,10 @@ fun App(
         // JSON file / SharedPreferences regardless of which db is
         // passed; the impls just don't read those fields from db.
         val uiSettings = remember { createUiSettings(db) }
+        // The mic processing choice is read by every audio source at creation.
+        LaunchedEffect(uiSettings) {
+            uiSettings.micProcessing.collect { io.nisfeb.talon.call.MicProcessingSettings.current = it }
+        }
 
         // tryRestore() pulls the saved ship's cookie + baseUrl into
         // this fresh UrbitSession on first composition. After login,

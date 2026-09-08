@@ -75,6 +75,23 @@ class AndroidUiSettings(
         prefs.edit().putString(KEY_THEMES, settings.toJson()).apply()
         _themeSettings.value = settings
     }
+    private val _micProcessing = MutableStateFlow(
+        io.nisfeb.talon.call.MicProcessing(
+            noiseSuppression = prefs.getBoolean(KEY_MIC_NS, true),
+            echoCancellation = prefs.getBoolean(KEY_MIC_AEC, true),
+            autoGainControl = prefs.getBoolean(KEY_MIC_AGC, true),
+        ),
+    )
+    override val micProcessing: StateFlow<io.nisfeb.talon.call.MicProcessing> = _micProcessing.asStateFlow()
+    override fun setMicProcessing(value: io.nisfeb.talon.call.MicProcessing) {
+        if (_micProcessing.value == value) return
+        prefs.edit()
+            .putBoolean(KEY_MIC_NS, value.noiseSuppression)
+            .putBoolean(KEY_MIC_AEC, value.echoCancellation)
+            .putBoolean(KEY_MIC_AGC, value.autoGainControl)
+            .apply()
+        _micProcessing.value = value
+    }
 
     private val _groupChannelOrder = MutableStateFlow(loadGroupOrder())
     override val groupChannelOrder: StateFlow<GroupChannelOrder> =
@@ -277,6 +294,9 @@ class AndroidUiSettings(
         private const val KEY_ACCENT_MODE = "accent_mode"
         private const val KEY_ACCENT_HEX = "accent_hex"
         private const val KEY_THEMES = "custom_themes"
+private const val KEY_MIC_NS = "mic_noise_suppression"
+private const val KEY_MIC_AEC = "mic_echo_cancellation"
+private const val KEY_MIC_AGC = "mic_auto_gain"
         private const val KEY_GROUP_CHANNEL_ORDER = "group_channel_order"
         private const val KEY_FOLDER_ITEM_ORDER = "folder_item_order"
         private const val KEY_CHAT_PANE_LIST_FRACTION = "chat_pane_list_fraction"

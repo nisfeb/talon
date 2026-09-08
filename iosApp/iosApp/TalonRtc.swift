@@ -110,7 +110,13 @@ final class TalonRtcPeer: NSObject, NativeRtcPeer, RTCPeerConnectionDelegate {
         // track is created.
         configureAudioSession()
         if sendAudio {
-            let source = TalonRtcPeer.factory.audioSource(with: constraints)
+            // Noise suppression, echo cancellation and auto gain as the
+            // user set them in Settings › Calls; per device.
+            let micConstraints = RTCMediaConstraints(
+                mandatoryConstraints: nil,
+                optionalConstraints: IosVoipBridge.shared.micConstraints()
+            )
+            let source = TalonRtcPeer.factory.audioSource(with: micConstraints)
             let track = TalonRtcPeer.factory.audioTrack(with: source, trackId: "talon-mic")
             micTrack = track
             // Galène requires every stream to be one-directional: the

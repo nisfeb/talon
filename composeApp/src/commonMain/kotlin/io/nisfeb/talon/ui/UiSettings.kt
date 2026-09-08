@@ -32,6 +32,10 @@ interface UiSettings {
     val themeSettings: StateFlow<io.nisfeb.talon.ui.theme.ThemeSettings>
     fun setThemeSettings(settings: io.nisfeb.talon.ui.theme.ThemeSettings)
 
+    /** Microphone processing for calls. Per device: it depends on the mic, not the person. */
+    val micProcessing: StateFlow<io.nisfeb.talon.call.MicProcessing>
+    fun setMicProcessing(value: io.nisfeb.talon.call.MicProcessing)
+
     /**
      * How channels nested under a group head sort in the home list.
      * Default [GroupChannelOrder.Recent] keeps the historical
@@ -230,6 +234,11 @@ class InMemoryUiSettings(
     override val themeSettings: StateFlow<io.nisfeb.talon.ui.theme.ThemeSettings> = _themeSettings.asStateFlow()
     override fun setThemeSettings(settings: io.nisfeb.talon.ui.theme.ThemeSettings) {
         _themeSettings.value = settings
+    }
+    private val _micProcessing = MutableStateFlow(io.nisfeb.talon.call.MicProcessing())
+    override val micProcessing: StateFlow<io.nisfeb.talon.call.MicProcessing> = _micProcessing.asStateFlow()
+    override fun setMicProcessing(value: io.nisfeb.talon.call.MicProcessing) {
+        _micProcessing.value = value
     }
 
     private val _groupChannelOrder = MutableStateFlow(initialGroupOrder)

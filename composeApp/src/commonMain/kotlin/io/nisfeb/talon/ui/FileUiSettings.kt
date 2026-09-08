@@ -65,6 +65,9 @@ class FileUiSettings(
         val alwaysPatp: Boolean = false,
         /** [io.nisfeb.talon.ui.theme.ThemeSettings] as JSON text. */
         val customThemes: String = "",
+        val micNoiseSuppression: Boolean = true,
+        val micEchoCancellation: Boolean = true,
+        val micAutoGainControl: Boolean = true,
     )
 
     private val initial = loadInitial()
@@ -101,6 +104,19 @@ class FileUiSettings(
     override fun setThemeSettings(settings: io.nisfeb.talon.ui.theme.ThemeSettings) {
         if (_themeSettings.value == settings) return
         _themeSettings.value = settings
+        persistCurrent()
+    }
+    private val _micProcessing = MutableStateFlow(
+        io.nisfeb.talon.call.MicProcessing(
+            noiseSuppression = initial.micNoiseSuppression,
+            echoCancellation = initial.micEchoCancellation,
+            autoGainControl = initial.micAutoGainControl,
+        ),
+    )
+    override val micProcessing: StateFlow<io.nisfeb.talon.call.MicProcessing> = _micProcessing.asStateFlow()
+    override fun setMicProcessing(value: io.nisfeb.talon.call.MicProcessing) {
+        if (_micProcessing.value == value) return
+        _micProcessing.value = value
         persistCurrent()
     }
 
@@ -252,6 +268,9 @@ class FileUiSettings(
                 mnemonymNames = MnemonymNames.enabled.value,
                 alwaysPatp = ShipNames.alwaysPatp.value,
                 customThemes = _themeSettings.value.toJson(),
+                micNoiseSuppression = _micProcessing.value.noiseSuppression,
+                micEchoCancellation = _micProcessing.value.echoCancellation,
+                micAutoGainControl = _micProcessing.value.autoGainControl,
             ),
         )
     }

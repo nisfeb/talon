@@ -154,6 +154,9 @@ class MainActivity : ComponentActivity() {
                 }
             }
             val themeSettings by app.uiSettings.themeSettings.collectAsState()
+            androidx.compose.runtime.LaunchedEffect(app) {
+                app.uiSettings.micProcessing.collect { io.nisfeb.talon.call.MicProcessingSettings.current = it }
+            }
             TalonTheme(darkTheme = darkTheme, accentOverride = accentOverride, customTheme = themeSettings.active) {
                 CompositionLocalProvider(LocalImageDownloader provides imageDownloader) {
                     TalonApp(

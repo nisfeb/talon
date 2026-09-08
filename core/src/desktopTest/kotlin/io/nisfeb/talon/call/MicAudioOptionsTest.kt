@@ -30,4 +30,24 @@ class MicAudioOptionsTest {
         assertTrue(opts.noiseSuppression, "noise suppression must be on")
         assertTrue(opts.highpassFilter, "highpass filter must be on")
     }
+
+    @Test
+    fun theUsersChoiceFlowsThrough() {
+        MicProcessingSettings.current = MicProcessing(noiseSuppression = false, autoGainControl = false)
+        try {
+            val opts = try {
+                micAudioOptions()
+            } catch (e: UnsatisfiedLinkError) {
+                return
+            } catch (e: NoClassDefFoundError) {
+                return
+            }
+            assertTrue(opts.echoCancellation, "untouched flags stay on")
+            assertTrue(!opts.noiseSuppression, "noise suppression follows the choice")
+            assertTrue(!opts.autoGainControl, "auto gain follows the choice")
+            assertTrue(opts.highpassFilter, "the high-pass filter is not a user choice")
+        } finally {
+            MicProcessingSettings.current = MicProcessing()
+        }
+    }
 }

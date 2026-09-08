@@ -374,9 +374,10 @@ val DesktopCallEngineProvider: CallEngineProvider =
  */
 internal fun micAudioOptions(): AudioOptions = AudioOptions().apply {
     val on = DesktopWebRtcFactory.audioProcessing
-    echoCancellation = on
-    autoGainControl = on
-    noiseSuppression = on
+    val mine = MicProcessingSettings.current
+    echoCancellation = on && mine.echoCancellation
+    autoGainControl = on && mine.autoGainControl
+    noiseSuppression = on && mine.noiseSuppression
     highpassFilter = on
 }
 

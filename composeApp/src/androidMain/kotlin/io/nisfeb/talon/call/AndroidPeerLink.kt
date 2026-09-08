@@ -134,7 +134,7 @@ class AndroidPeerLink(
         // and only the last tears down.
         CallAudioSession.acquire(appContext)
         if (sendAudio) {
-            val source = factory.createAudioSource(MediaConstraints())
+            val source = factory.createAudioSource(micConstraints())
             val track = factory.createAudioTrack("talon-mic", source)
             // Galène requires one-directional streams: the offerer sends.
             pc.addTransceiver(
@@ -448,4 +448,12 @@ class AndroidPeerLink(
         d.await()
     }
 
+}
+
+/** The user's microphone processing choice as libwebrtc's audio-source constraints. */
+internal fun micConstraints(): MediaConstraints = MediaConstraints().apply {
+    val mine = io.nisfeb.talon.call.MicProcessingSettings.current
+    optional.add(MediaConstraints.KeyValuePair("googNoiseSuppression", mine.noiseSuppression.toString()))
+    optional.add(MediaConstraints.KeyValuePair("googEchoCancellation", mine.echoCancellation.toString()))
+    optional.add(MediaConstraints.KeyValuePair("googAutoGainControl", mine.autoGainControl.toString()))
 }

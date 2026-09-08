@@ -147,7 +147,7 @@ class AndroidCallEngine(
     }
 
     init {
-        val source = factory.createAudioSource(MediaConstraints())
+        val source = factory.createAudioSource(micConstraints())
         val track = factory.createAudioTrack("talon-mic", source)
         pc.addTrack(track, listOf("talon-call"))
         micTrack = track

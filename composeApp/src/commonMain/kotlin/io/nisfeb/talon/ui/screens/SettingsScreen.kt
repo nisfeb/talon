@@ -951,6 +951,43 @@ fun SettingsScreen(
             if (isCallsSupported && callController != null) {
                 CallPolicySection(callController)
                 CallServersSection(callController)
+                Spacer(Modifier.height(16.dp))
+                HorizontalDivider()
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "Microphone processing",
+                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
+                )
+                Text(
+                    "What the app does to your microphone before sending it. " +
+                        "One size does not fit all: a headset in a quiet room wants " +
+                        "less of this than a laptop mic in a café. Per device; takes " +
+                        "effect on the next call or line you join.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                val mic by uiSettings.micProcessing.collectAsState()
+                FeatureToggleRow(
+                    label = "Noise suppression",
+                    description = "Removes fans, keyboards and room hum. Also eats music " +
+                        "and some voices; turn it off if people say you sound underwater.",
+                    enabled = mic.noiseSuppression,
+                    onChange = { uiSettings.setMicProcessing(mic.copy(noiseSuppression = it)) },
+                )
+                FeatureToggleRow(
+                    label = "Echo cancellation",
+                    description = "Stops the room from hearing itself when you use speakers. " +
+                        "Safe to turn off with a headset.",
+                    enabled = mic.echoCancellation,
+                    onChange = { uiSettings.setMicProcessing(mic.copy(echoCancellation = it)) },
+                )
+                FeatureToggleRow(
+                    label = "Auto gain",
+                    description = "Evens out your level so whispers and shouts arrive alike. " +
+                        "Turn it off for a mic you have already set up, or for music.",
+                    enabled = mic.autoGainControl,
+                    onChange = { uiSettings.setMicProcessing(mic.copy(autoGainControl = it)) },
+                )
                 // No background ring on this platform — say so plainly
                 // rather than letting a missed call be the discovery.
                 if (!isBackgroundCallRingSupported) {
