@@ -124,10 +124,61 @@ object Pulse {
      */
     fun routeOwn(pid: Long = ProcessHandle.current().pid()): Boolean {
         val mine = playback().filter { it.pid == pid }
-        mine.filter { it.target != MIC }.forEach { movePlayback(it.index, MIC) }
+        val movedPlay = mine.filter { it.target != MIC }.onEach { movePlayback(it.index, MIC) }
         val ours = capture().filter { it.pid == pid }
-        ours.filter { it.target != SPACE_MONITOR }.forEach { moveCapture(it.index, SPACE_MONITOR) }
+        val movedRec = ours.filter { it.target != SPACE_MONITOR }.onEach { moveCapture(it.index, SPACE_MONITOR) }
+        // Pulse remembers those moves under the streams' application
+        // name, and libwebrtc names its streams the same in every app,
+        // so the Talon desktop app would open its next call on our
+        // silent devices. Put the memory back to the defaults now.
+        if (movedPlay.isNotEmpty() || movedRec.isNotEmpty()) {
+            mine.map { it.app }.plus(ours.map { it.app }).distinct().forEach { forgetDevices(it) }
+        }
         return mine.isNotEmpty() && ours.isNotEmpty()
+    }
+
+    /**
+     * Resets what Pulse restores for streams named [app] to the default
+     * devices. Stream-restore only writes on a move, so a throwaway
+     * stream under that name is opened (it lands wherever the memory
+     * says), moved to the default, and closed. Existing streams,
+     * ours included, are not touched.
+     */
+    fun forgetDevices(app: String) {
+        runCatching {
+            val play = ProcessBuilder("pacat", "--playback", "--raw", "--client-name=$app", "--volume=0")
+                .redirectInput(File("/dev/zero")).redirectOutput(ProcessBuilder.Redirect.DISCARD)
+                .redirectError(ProcessBuilder.Redirect.DISCARD).start()
+            try {
+                awaitStream { playback().firstOrNull { it.pid == play.pid() } }?.let {
+                    if (it.target != defaultSink()) movePlayback(it.index, DEFAULT_SINK)
+                }
+            } finally {
+                play.destroy()
+            }
+        }
+        runCatching {
+            val rec = ProcessBuilder("parec", "--raw", "--client-name=$app")
+                .redirectOutput(ProcessBuilder.Redirect.DISCARD).redirectError(ProcessBuilder.Redirect.DISCARD).start()
+            try {
+                awaitStream { capture().firstOrNull { it.pid == rec.pid() } }?.let {
+                    if (it.target != defaultSource()) moveCapture(it.index, DEFAULT_SOURCE)
+                }
+            } finally {
+                rec.destroy()
+            }
+        }
+    }
+
+    fun defaultSink(): String = pactl("get-default-sink").trim()
+    fun defaultSource(): String = pactl("get-default-source").trim()
+
+    private fun <T> awaitStream(find: () -> T?): T? {
+        repeat(20) {
+            find()?.let { return it }
+            Thread.sleep(100)
+        }
+        return null
     }
 
     /** Plays a wav/ogg/flac clip into [sink] at [percent] volume; the process ends with the clip. */

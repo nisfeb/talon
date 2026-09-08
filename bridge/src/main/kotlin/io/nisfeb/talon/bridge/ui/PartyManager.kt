@@ -224,9 +224,7 @@ private fun ManagerScreen(runner: BridgeRunner, hostMic: HostMic, configFile: Fi
                 hostMic.sync(playback)
                 // Our own streams (the bridge), helpers (meters, clips, loopbacks)
                 // and the combine sink's internal feeds are not "apps".
-                // The launcher names every stream of this process tree "TalonBridge"
-                // (see scripts/talon-party-manager), so parec and paplay carry it too.
-                val helpers = setOf("parec", "paplay", "TalonBridge", Pulse.LOOP_APP, Pulse.HOST_MIC_APP)
+                val helpers = setOf("parec", "paplay", "pacat", Pulse.LOOP_APP, Pulse.HOST_MIC_APP)
                 fun Pulse.Stream.isApp() =
                     pid != ownPid && app !in helpers && !app.startsWith("Simultaneous output")
                 // A stream we have not seen before (a restarted browser, a new
