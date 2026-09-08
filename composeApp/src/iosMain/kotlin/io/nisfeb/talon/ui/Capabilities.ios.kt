@@ -30,6 +30,7 @@ actual fun isOnDeviceAiFeatureSupported(
 // passing a factory, so a build without it shows no call UI.
 actual val isCallsSupported: Boolean = true
 actual val isCallRecordingSupported: Boolean = false
+actual val isWindowFullScreenSupported: Boolean = false
 
 // No CallKit/PushKit by design; UIBackgroundModes audio only sustains
 // a call already in progress. Backgrounded, the app can't hear a ring.

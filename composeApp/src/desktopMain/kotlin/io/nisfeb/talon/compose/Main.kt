@@ -9,6 +9,8 @@ import androidx.compose.ui.window.Tray
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberTrayState
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.window.rememberWindowState
 import io.nisfeb.talon.notify.Notifier
 import io.nisfeb.talon.notify.SystemNotifier
@@ -404,6 +406,21 @@ fun main() {
                 onActivate = showAndFocus,
             )
         }
+        // The call view's meeting mode: the window itself goes full
+        // screen, and Esc brings it back, like every video app.
+        val fullScreen = remember(windowState) {
+            object : io.nisfeb.talon.ui.WindowFullScreen {
+                override fun isFullScreen() =
+                    windowState.placement == androidx.compose.ui.window.WindowPlacement.Fullscreen
+                override fun set(full: Boolean) {
+                    windowState.placement = if (full) {
+                        androidx.compose.ui.window.WindowPlacement.Fullscreen
+                    } else {
+                        androidx.compose.ui.window.WindowPlacement.Floating
+                    }
+                }
+            }
+        }
         Window(
             // Close button = full quit. See the comment above
             // application { } for why we don't minimize-to-tray here.
@@ -411,6 +428,17 @@ fun main() {
             state = windowState,
             title = "Talon",
             icon = iconPainter,
+            onPreviewKeyEvent = { e ->
+                if (e.type == androidx.compose.ui.input.key.KeyEventType.KeyDown &&
+                    e.key == androidx.compose.ui.input.key.Key.Escape &&
+                    fullScreen.isFullScreen()
+                ) {
+                    fullScreen.set(false)
+                    true
+                } else {
+                    false
+                }
+            },
         ) {
             // Override Compose's default desktop UriHandler. The
             // default delegates to java.awt.Desktop.browse, which
@@ -421,6 +449,7 @@ fun main() {
             androidx.compose.runtime.CompositionLocalProvider(
                 androidx.compose.ui.platform.LocalUriHandler provides
                     io.nisfeb.talon.ui.DesktopUriHandler,
+                io.nisfeb.talon.ui.LocalWindowFullScreen provides fullScreen,
             ) {
                 App(
                     http = graph.ktorHttp,

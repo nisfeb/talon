@@ -35,6 +35,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CallEnd
 import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.Fullscreen
+import androidx.compose.material.icons.filled.FullscreenExit
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
 import androidx.compose.material.icons.filled.MoreVert
@@ -130,6 +132,12 @@ fun PartyLineFullScreen(
      *  PeerLink — so the caller supplies the pane instead. */
     videoPane: (@Composable () -> Unit)? = null,
 ) {
+    val fullScreen = LocalWindowFullScreen.current
+    val meeting = isWindowFullScreenSupported && fullScreen.isFullScreen()
+    // Leaving the call view by any road gives the window back.
+    androidx.compose.runtime.DisposableEffect(Unit) {
+        onDispose { fullScreen.set(false) }
+    }
     Surface(
         modifier = Modifier.fillMaxSize(),
         color = MaterialTheme.colorScheme.surface,
@@ -219,7 +227,9 @@ fun PartyLineFullScreen(
                 // The roster is always present under the grid: it is the
                 // only place ops can moderate, and the only listing of
                 // people who aren't on camera.
-                LazyColumn(
+                // Meeting mode: the tiles are the meeting; names live on them,
+                // so the list only steals height.
+                if (!meeting) LazyColumn(
                     modifier = Modifier.weight(0.6f).fillMaxWidth(),
                     verticalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
@@ -320,6 +330,20 @@ fun PartyLineFullScreen(
 
                 if (audioDevices.supported) {
                     SpeakerControl(audioDevices)
+                }
+                if (isWindowFullScreenSupported) {
+                    ControlButton(
+                        label = if (meeting) "Exit full screen" else "Full screen",
+                        onClick = { fullScreen.set(!meeting) },
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                        contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                    ) {
+                        Icon(
+                            if (meeting) Icons.Filled.FullscreenExit else Icons.Filled.Fullscreen,
+                            contentDescription = null,
+                            modifier = Modifier.size(26.dp),
+                        )
+                    }
                 }
 
                 if (onToggleCamera != null) {

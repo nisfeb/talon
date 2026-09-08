@@ -132,6 +132,14 @@ expect val isCallsSupported: Boolean
 expect val isCallRecordingSupported: Boolean
 
 /**
+ * Whether the call view can take the host window full screen for a
+ * meeting-style video layout. Desktop: true (the window's placement
+ * is ours to set; Esc leaves). Android and iOS: false, the app is
+ * already the whole screen and the immersive call view covers it.
+ */
+expect val isWindowFullScreenSupported: Boolean
+
+/**
  * Whether an incoming call can ring this device while the app is in
  * the background. Android: true (UnifiedPush wakes the process).
  * Desktop: true (a long-running process hears the channel). iOS: true
