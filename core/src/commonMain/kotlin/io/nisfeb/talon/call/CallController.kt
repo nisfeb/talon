@@ -252,6 +252,9 @@ class CallController(
     // gather on the caller's side) — accept() awaits this instead of
     // racing it.
     private var pendingOffer = CompletableDeferred<SessionDesc>()
+    /** The last line asked for, so a grant that outlives the ask timeout still joins. */
+    private var lastAskKey: String? = null
+    private var lastAskAtMs = 0L
     private var mediaWatch: Job? = null
     // Ended is a notice, not a call: it must never make us look busy.
     // It used to, and because it was only cleared by the overlay's
@@ -425,8 +428,15 @@ class CallController(
                                 // between.
                                 val key = "${up.from}/${up.ticket.name}"
                                 trace?.invoke("ticket $key pending=${_pendingJoin.value}")
-                                if (_pendingJoin.value == key) {
+                                // A slow ship delivers the grant after the ask timed
+                                // out; the person is still waiting, so a grant for a
+                                // room this device asked for within the last couple of
+                                // minutes is taken as well.
+                                val late = lastAskKey == key && nowMs() - lastAskAtMs < LATE_GRANT_MS
+                                if (_pendingJoin.value == key || late) {
                                     _pendingJoin.value = null
+                                    lastAskKey = null
+                                    if (late && _pendingJoin.value != key) Log.i(TAG, "late ticket for $key; joining anyway")
                                     onTicket?.invoke(up.from, up.ticket)
                                 } else {
                                     Log.i(TAG, "ignoring ticket for $key; this device didn't ask")
@@ -1334,6 +1344,8 @@ class CallController(
         val token = ++joinToken
         trace?.invoke("joinRoom $key (call=${_state.value::class.simpleName})")
         _pendingJoin.value = key
+        lastAskKey = key
+        lastAskAtMs = nowMs()
         runCatching {
             ch.poke(
                 TrunkWire.AGENT, TrunkWire.ACTION_MARK,
@@ -1744,7 +1756,9 @@ class CallController(
 
         /** How long a party-line ask may sit unanswered before the
          *  pending indicator gives up on the host. */
-        internal const val JOIN_ASK_TIMEOUT_MS = 15_000L
+        internal const val JOIN_ASK_TIMEOUT_MS = 20_000L
+        /** How long after an ask a grant is still welcome. */
+        private const val LATE_GRANT_MS = 120_000L
 
         /** How long the "call ended" notice lingers before the surface
          *  goes quiet. Cleared here, not in the UI, so a backgrounded
