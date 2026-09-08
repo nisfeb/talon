@@ -95,11 +95,10 @@ object NowPlaying {
 
     private val quoted = """'((?:[^'\\]|\\.)*)'"""
 
-    /** The playing track, else a paused one, else null. */
+    /** The track a player is playing right now, or null; paused players are not news. */
     fun read(): Track? {
         val names = gdbus("org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus.ListNames") ?: return null
         val players = Regex("""org\.mpris\.MediaPlayer2\.[A-Za-z0-9_.]+""").findAll(names).map { it.value }.distinct()
-        var paused: Track? = null
         for (p in players) {
             val status = gdbus(p, "/org/mpris/MediaPlayer2", "org.freedesktop.DBus.Properties.Get", "org.mpris.MediaPlayer2.Player", "PlaybackStatus")
                 ?.let { Regex(quoted).find(it)?.groupValues?.get(1) } ?: continue
@@ -107,9 +106,8 @@ object NowPlaying {
             val meta = gdbus(p, "/org/mpris/MediaPlayer2", "org.freedesktop.DBus.Properties.Get", "org.mpris.MediaPlayer2.Player", "Metadata") ?: continue
             val t = parse(p, status, meta) ?: continue
             if (status == "Playing") return t
-            paused = paused ?: t
         }
-        return paused
+        return null
     }
 
     /** Reads a track out of gdbus's GVariant text for a Metadata property. */
