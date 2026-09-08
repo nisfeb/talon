@@ -250,6 +250,22 @@ class UrbitChannel internal constructor(
     }
 
     /**
+     * Ends the channel on the ship: every subscription on it is
+     * dropped and eyre stops queuing events for it. Without this an
+     * abandoned channel lives on for hours with its subscriptions
+     * intact, and the ship keeps delivering every fact into a queue
+     * nobody reads ("eyre: clogged"). Call it before opening a
+     * replacement and on the way out.
+     */
+    suspend fun delete() {
+        val msg = buildJsonObject {
+            put("id", nextRequestId())
+            put("action", "delete")
+        }
+        put(buildJsonArray { add(msg) })
+    }
+
+    /**
      * Run a spider thread and return its output JSON. Threads are
      * one-shot RPCs that do synchronous work (like creating a group).
      * Path: `/spider/<desk>/<input-mark>/<thread-name>/<output-mark>.json`.

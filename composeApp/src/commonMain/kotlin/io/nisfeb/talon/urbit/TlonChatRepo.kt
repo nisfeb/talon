@@ -620,6 +620,14 @@ class TlonChatRepo(
                 // Close on normal completion AND cancellation so the ack
                 // consumer drains what's queued and exits with us.
                 ackQueue.close()
+                // End the channel on the ship. Left alone it keeps every
+                // subscription for hours and the ship queues each fact for
+                // a reader that is gone: dozens of "eyre: clogged" lines
+                // and a pegged core, which made it slow, which made this
+                // watchdog reconnect, which opened yet another channel.
+                kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
+                    runCatching { kotlinx.coroutines.withTimeoutOrNull(5_000) { ch.delete() } }
+                }
             }
             Log.w(TAG, "event stream completed; will reconnect")
         }
@@ -691,6 +699,11 @@ class TlonChatRepo(
 
     fun stop() {
         started = false
+        channel?.let { ch ->
+            kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Default).launch {
+                runCatching { kotlinx.coroutines.withTimeoutOrNull(3_000) { ch.delete() } }
+            }
+        }
         channel = null
         notificationHealth.markSseConnected(false)
         scope.cancel()

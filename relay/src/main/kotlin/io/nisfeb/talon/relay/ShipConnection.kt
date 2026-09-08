@@ -97,13 +97,35 @@ class ShipConnection(
     private suspend fun runConnection(): Boolean {
         val channelId = openChannel() ?: return false
         val subscribed = subscribe(channelId)
-        if (!subscribed) return false
+        if (!subscribed) {
+            deleteChannel(channelId)
+            return false
+        }
         // Per-connection state for the suppression decision (see
         // [decideSuppress]). Captured into the handler closure so
         // each fresh SSE connection starts a new warmup window.
         val connStartMs = System.currentTimeMillis()
         val isFirstConnect = db.lastEventId(shipRowId, deviceId) == null
-        return consumeEvents(channelId, connStartMs, isFirstConnect)
+        try {
+            return consumeEvents(channelId, connStartMs, isFirstConnect)
+        } finally {
+            // End the channel on the ship. Every reconnect used to leave
+            // the old one behind with its subscriptions live, and the
+            // ship queued each activity and call fact for it until it
+            // expired hours later ("eyre: clogged"), which was enough
+            // to peg a ship's core.
+            kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) { deleteChannel(channelId) }
+        }
+    }
+
+    private fun deleteChannel(channelId: String) {
+        val req = Request.Builder()
+            .url("$shipUrl/~/channel/$channelId")
+            .put("""[{"id":1,"action":"delete"}]""".toRequestBody(JSON_MEDIA))
+            .header("Cookie", cookie)
+            .build()
+        runCatching { http.newCall(req).execute().use { } }
+            .onFailure { log.warn("deleteChannel failed: ${it.message}") }
     }
 
     /** Open a `/~/channel/<id>` and return its id. Cookie auth via

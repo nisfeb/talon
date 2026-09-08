@@ -285,6 +285,10 @@ class CallController(
     fun stop() {
         loop?.cancel()
         loop = null
+        channel?.let { ch ->
+            scope.launch { runCatching { withTimeoutOrNull(3_000) { ch.delete() } } }
+        }
+        channel = null
         endLocal("stopped")
     }
 
@@ -555,6 +559,12 @@ class CallController(
                 if (it is kotlin.coroutines.cancellation.CancellationException) throw it
                 Log.w(TAG, "signal loop ended", it)
             }
+            // The channel this iteration opened is done; end it on the
+            // ship rather than leaving its /calls subscription to clog.
+            channel?.let { ch ->
+                runCatching { withTimeoutOrNull(5_000) { ch.delete() } }
+            }
+            channel = null
             if (!scope.isActive) break
             delay(backoff)
             backoff = (backoff * 2).coerceAtMost(60_000L)
