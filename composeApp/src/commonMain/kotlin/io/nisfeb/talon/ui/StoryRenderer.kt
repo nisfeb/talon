@@ -270,6 +270,9 @@ fun StoryRenderer(
                         model = part.src,
                         contentDescription = part.alt,
                         contentScale = ContentScale.Fit,
+                        // The default (low) filter aliases a large photo
+                        // scaled into a chat column; it read as compression.
+                        filterQuality = androidx.compose.ui.graphics.FilterQuality.High,
                         // A dead URL used to render as a 0-height nothing —
                         // the message looked empty. The tile makes the
                         // failure visible.
@@ -487,6 +490,7 @@ private fun InlineLinkPreview(
                 model = preview.imageUrl,
                 contentDescription = null,
                 contentScale = ContentScale.Crop,
+                filterQuality = androidx.compose.ui.graphics.FilterQuality.High,
                 modifier = Modifier
                     .widthIn(max = 96.dp)
                     .heightIn(min = 72.dp, max = 72.dp)

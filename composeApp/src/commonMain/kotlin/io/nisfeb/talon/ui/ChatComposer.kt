@@ -1090,6 +1090,7 @@ private fun AttachmentPreviewRow(
                 model = pending.bytes,
                 contentDescription = pending.displayName,
                 contentScale = ContentScale.Crop,
+                filterQuality = androidx.compose.ui.graphics.FilterQuality.High,
                 modifier = Modifier
                     .size(56.dp)
                     .clip(RoundedCornerShape(8.dp))

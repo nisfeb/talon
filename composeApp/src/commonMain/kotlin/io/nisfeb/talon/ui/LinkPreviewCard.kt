@@ -62,6 +62,7 @@ fun LinkPreviewCard(
                 model = p.imageUrl,
                 contentDescription = null,
                 contentScale = ContentScale.Crop,
+                filterQuality = androidx.compose.ui.graphics.FilterQuality.High,
                 modifier = Modifier
                     .widthIn(max = 96.dp)
                     .height(72.dp)

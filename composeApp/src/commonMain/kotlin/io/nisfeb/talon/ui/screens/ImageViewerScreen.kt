@@ -194,10 +194,21 @@ fun ImageViewerScreen(
                 )
             },
     ) {
+        // Decode the original, not a screen-sized copy: with pinch zoom
+        // up to 6x a screen-sized decode is what "too compressed" looked
+        // like. High filter quality so the downscale is not aliased.
+        val context = coil3.compose.LocalPlatformContext.current
+        val request = androidx.compose.runtime.remember(url) {
+            coil3.request.ImageRequest.Builder(context)
+                .data(url)
+                .size(coil3.size.Size.ORIGINAL)
+                .build()
+        }
         AsyncImage(
-            model = url,
+            model = request,
             contentDescription = null,
             contentScale = ContentScale.Fit,
+            filterQuality = androidx.compose.ui.graphics.FilterQuality.High,
             modifier = Modifier
                 .fillMaxSize()
                 .graphicsLayer(
