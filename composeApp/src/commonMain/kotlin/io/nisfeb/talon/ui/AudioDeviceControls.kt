@@ -18,6 +18,9 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -136,9 +139,13 @@ private fun DevicePicker(
     // "System default" stays first and reachable: it is where everyone
     // starts, and a user who picks a headset then unplugs it needs a
     // way back that doesn't involve guessing which entry is the laptop.
-    DeviceRow("System default", selected == null) { onPick(null) }
-    for (d in devices) {
-        DeviceRow(d.label, selected == d.id) { onPick(d.id) }
+    // Bounded and scrollable: a machine with a dozen outputs used to
+    // push the rows past the bottom of the panel with no way to reach them.
+    Column(Modifier.heightIn(max = 220.dp).verticalScroll(rememberScrollState())) {
+        DeviceRow("System default", selected == null) { onPick(null) }
+        for (d in devices) {
+            DeviceRow(d.label, selected == d.id) { onPick(d.id) }
+        }
     }
 }
 

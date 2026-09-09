@@ -11,6 +11,9 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -501,17 +504,21 @@ private fun SpeakerControl(audioDevices: AudioDevices) {
                 }
             }
             DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                for (out in outputs) {
-                    DropdownMenuItem(
-                        text = { Text(out.label) },
-                        onClick = {
-                            menuOpen = false
-                            audioDevices.selectOutput(out.id)
-                            // Reflect what actually took effect: the
-                            // platform can refuse a route.
-                            selected = audioDevices.selectedOutput
-                        },
-                    )
+                // A long device list must scroll; a menu taller than the window
+                // otherwise just runs off it.
+                Column(Modifier.heightIn(max = 320.dp).verticalScroll(rememberScrollState())) {
+                    for (out in outputs) {
+                        DropdownMenuItem(
+                            text = { Text(out.label) },
+                            onClick = {
+                                menuOpen = false
+                                audioDevices.selectOutput(out.id)
+                                // Reflect what actually took effect: the
+                                // platform can refuse a route.
+                                selected = audioDevices.selectedOutput
+                            },
+                        )
+                    }
                 }
             }
         }
@@ -649,16 +656,20 @@ private fun CameraControl(videoDevices: io.nisfeb.talon.call.VideoDevices, onSel
                 }
             }
             DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                for (cam in cameras) {
-                    DropdownMenuItem(
-                        text = { Text(cam.label) },
-                        onClick = {
-                            menuOpen = false
-                            if (cam.id == selected) return@DropdownMenuItem
-                            selected = cam.id
-                            onSelectCamera(cam.id)
-                        },
-                    )
+                // A long device list must scroll; a menu taller than the window
+                // otherwise just runs off it.
+                Column(Modifier.heightIn(max = 320.dp).verticalScroll(rememberScrollState())) {
+                    for (cam in cameras) {
+                        DropdownMenuItem(
+                            text = { Text(cam.label) },
+                            onClick = {
+                                menuOpen = false
+                                if (cam.id == selected) return@DropdownMenuItem
+                                selected = cam.id
+                                onSelectCamera(cam.id)
+                            },
+                        )
+                    }
                 }
             }
         }
