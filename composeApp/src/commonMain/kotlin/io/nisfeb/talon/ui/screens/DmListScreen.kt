@@ -563,7 +563,11 @@ fun DmListScreen(
     // return; then expand + scroll) or no-ops. Setting expandedGroups
     // to a structurally-equal set is a no-op under mutableStateOf's
     // default equality, so there's no re-run loop.
-    androidx.compose.runtime.LaunchedEffect(revealGroupFlag, homeRows) {
+    // Keyed on the view selectors as well: the first pass switches the
+    // view and returns, and only a re-run on that change can do the
+    // expand and scroll. Keyed on the rows alone, the first tap from
+    // search switched the tab and stopped, and only a second tap landed.
+    androidx.compose.runtime.LaunchedEffect(revealGroupFlag, homeRows, selectedFolderId, selectedSpecial, selectedHomeTab) {
         val flag = revealGroupFlag ?: return@LaunchedEffect
         if (selectedFolderId != null || selectedSpecial != SpecialTab.All ||
             selectedHomeTab != HomeTab.Groups
