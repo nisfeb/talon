@@ -98,6 +98,8 @@ fun PartyLineFullScreen(
     onMinimize: () -> Unit,
     audioDevices: AudioDevices = AudioDevices.Noop,
     videoDevices: io.nisfeb.talon.call.VideoDevices = io.nisfeb.talon.call.VideoDevices.Noop,
+    /** Switch to a camera by id; restarts a live camera on it. */
+    onSelectCamera: ((String) -> Unit)? = null,
     onRevokeSpeaking: ((String) -> Unit)? = null,
     onRestoreSpeaking: ((String) -> Unit)? = null,
     /** Open a DM with a member. Anyone on the line can, op or not. */
@@ -370,8 +372,8 @@ fun PartyLineFullScreen(
                         )
                     }
                 }
-                if (onToggleCamera != null && videoDevices.supported) {
-                    CameraControl(videoDevices, cameraOn, onToggleCamera)
+                if (onToggleCamera != null && videoDevices.supported && onSelectCamera != null) {
+                    CameraControl(videoDevices, onSelectCamera)
                 }
 
                 if (onSwitchCamera != null && cameraOn) {
@@ -624,11 +626,10 @@ private fun ParticipantRow(
 
 /** Which camera to send from, next to the camera toggle; a live camera is restarted on the new one. */
 @Composable
-private fun CameraControl(videoDevices: io.nisfeb.talon.call.VideoDevices, cameraOn: Boolean, onToggleCamera: () -> Unit) {
+private fun CameraControl(videoDevices: io.nisfeb.talon.call.VideoDevices, onSelectCamera: (String) -> Unit) {
     var menuOpen by remember { mutableStateOf(false) }
     val cameras = remember(menuOpen) { videoDevices.cameras() }
     var selected by remember { mutableStateOf(videoDevices.selectedCamera) }
-    val scope = androidx.compose.runtime.rememberCoroutineScope()
     val label = cameras.firstOrNull { it.id == selected }?.label ?: cameras.firstOrNull()?.label ?: "No camera"
     if (cameras.isEmpty()) return
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -654,16 +655,8 @@ private fun CameraControl(videoDevices: io.nisfeb.talon.call.VideoDevices, camer
                         onClick = {
                             menuOpen = false
                             if (cam.id == selected) return@DropdownMenuItem
-                            videoDevices.selectCamera(cam.id)
                             selected = cam.id
-                            if (cameraOn) {
-                                // Off, then on: the engine reads the new choice when it restarts.
-                                onToggleCamera()
-                                scope.launch {
-                                    kotlinx.coroutines.delay(400)
-                                    onToggleCamera()
-                                }
-                            }
+                            onSelectCamera(cam.id)
                         },
                     )
                 }

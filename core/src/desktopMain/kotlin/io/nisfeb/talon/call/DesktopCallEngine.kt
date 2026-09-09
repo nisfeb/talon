@@ -65,6 +65,8 @@ class DesktopCallEngine(configuredIce: List<IceServer> = emptyList()) : CallEngi
      * [setCameraEnabled]; the track simply carries no frames.
      */
     private var cameraSource: VideoDeviceSource? = null
+    private var cameraSender: dev.onvoid.webrtc.RTCRtpSender? = null
+    private var cameraDeviceName: String? = null
     private var localVideo: VideoTrack? = null
 
     /** Tracks the renderer attaches a sink to. Desktop-only members:
@@ -143,12 +145,13 @@ class DesktopCallEngine(configuredIce: List<IceServer> = emptyList()) : CallEngi
             val camSource = VideoDeviceSource()
             val camTrack = factory.createVideoTrack("talon-cam", camSource)
             camTrack.isEnabled = false
-            pc.addTransceiver(
+            val transceiver = pc.addTransceiver(
                 camTrack,
                 dev.onvoid.webrtc.RTCRtpTransceiverInit().apply {
                     direction = dev.onvoid.webrtc.RTCRtpTransceiverDirection.SEND_RECV
                 },
             )
+            cameraSender = transceiver.sender
             cameraSource = camSource
             localVideo = camTrack
         }.onFailure {
@@ -177,12 +180,28 @@ class DesktopCallEngine(configuredIce: List<IceServer> = emptyList()) : CallEngi
         return runCatching {
             val device = DesktopVideoDevices.pick()
                 ?: error("no camera on this machine")
-            source.setVideoCaptureDevice(device)
-            // 640x480@30 to match the other platforms. Talon has no
-            // simulcast, so one modest stream is the whole budget.
-            source.setVideoCaptureCapability(VideoCaptureCapability(640, 480, 30))
-            source.start()
-            track.isEnabled = true
+            // A VideoDeviceSource keeps the device it first opened, so a change
+            // of camera gets a fresh source and track, swapped into the sender
+            // without renegotiation.
+            val previous = cameraDeviceName
+            val src = if (previous != null && previous != device.name) {
+                val fresh = VideoDeviceSource()
+                val freshTrack = factory.createVideoTrack("talon-cam", fresh)
+                cameraSender?.replaceTrack(freshTrack)
+                runCatching { source.stop() }
+                runCatching { source.dispose() }
+                cameraSource = fresh
+                localVideo = freshTrack
+                fresh
+            } else {
+                source
+            }
+            val liveTrack = localVideo ?: track
+            src.setVideoCaptureDevice(device)
+            src.setVideoCaptureCapability(VideoCaptureCapability(640, 480, 30))
+            src.start()
+            cameraDeviceName = device.name
+            liveTrack.isEnabled = true
             _video.value = _video.value.copy(localOn = true)
             true
         }.getOrElse {

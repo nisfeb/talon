@@ -142,6 +142,21 @@ fun PartyLineBar(
         videoOnShips = videoOnShips,
         focusedShip = focused,
         onFocusVideo = { videoScope.launch { party.setFocusedVideo(it) } },
+        onSelectCamera = if (isPartyVideoSupported && videoDevices.supported) {
+            { id ->
+                // One coroutine: stop, then start on the new device. Two
+                // independent toggles raced each other and left the old camera.
+                videoScope.launch {
+                    videoDevices.selectCamera(id)
+                    if (party.cameraOn.value) {
+                        party.setCameraEnabled(false)
+                        party.setCameraEnabled(true)
+                    }
+                }
+            }
+        } else {
+            null
+        },
         onSwitchCamera = if (isCameraSwitchSupported) {
             { party.switchCamera() }
         } else {
@@ -246,6 +261,7 @@ fun PartyLineBarContent(
     focusedShip: String? = null,
     onFocusVideo: (String?) -> Unit = {},
     onSwitchCamera: (() -> Unit)? = null,
+    onSelectCamera: ((String) -> Unit)? = null,
     /** A fresh non-null value opens the immersive full screen once:
      *  a call that just connected lands there, not on a strip. */
     autoOpenKey: Any? = null,
@@ -559,6 +575,7 @@ fun PartyLineBarContent(
                 focusedShip = focusedShip,
                 onFocusVideo = onFocusVideo,
                 onSwitchCamera = onSwitchCamera,
+                onSelectCamera = onSelectCamera,
                 videoPane = videoPane,
             )
         }
