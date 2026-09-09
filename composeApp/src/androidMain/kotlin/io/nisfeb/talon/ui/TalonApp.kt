@@ -44,6 +44,7 @@ import io.nisfeb.talon.ui.VoiceRecordButton
 import io.nisfeb.talon.ui.rememberAutofillModifier
 import io.nisfeb.talon.ui.rememberLocationProvider
 import io.nisfeb.talon.data.MessageEntity
+import io.nisfeb.talon.notify.isMentioned
 import io.nisfeb.talon.data.NotifyLevel
 import io.nisfeb.talon.urbit.StoryCache
 import io.nisfeb.talon.ui.screens.ShareTargetScreen
@@ -87,11 +88,6 @@ import kotlinx.coroutines.launch
 private const val PEEK_ATTEMPTS = 3
 
 /** Cheap substring test — Story mention spans serialize as {"ship":"~patp"}. */
-private fun isMentioned(contentJson: String, ourPatp: String): Boolean {
-    if (ourPatp.isBlank()) return false
-    return contentJson.contains("\"ship\":\"$ourPatp\"")
-}
-
 /**
  * Resolve a share-intent URI to a human-readable filename. Falls back
  * to the last path segment (also sanitized) then `default` if nothing

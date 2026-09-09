@@ -73,7 +73,7 @@ class NewMessageDiffTest {
             lastSeen = emptyMap(),
             ourPatp = "~zod",
             openChat = null,
-            mutedWhoms = emptySet(),
+            levels = emptyMap(),
             storyText = storyText,
             nowMs = now,
             freshnessMaxAgeMs = 5L * 60_000L,
@@ -92,7 +92,7 @@ class NewMessageDiffTest {
             lastSeen = emptyMap(),
             ourPatp = "~zod",
             openChat = null,
-            mutedWhoms = emptySet(),
+            levels = emptyMap(),
             storyText = storyText,
             nowMs = now,
             freshnessMaxAgeMs = 5L * 60_000L,
@@ -109,7 +109,7 @@ class NewMessageDiffTest {
             lastSeen = emptyMap(),
             ourPatp = "~zod",
             openChat = null,
-            mutedWhoms = emptySet(),
+            levels = emptyMap(),
             storyText = storyText,
         )
         assertEquals(1, diff.notifications.size)
@@ -124,7 +124,7 @@ class NewMessageDiffTest {
             lastSeen = mapOf("~zod" to "id-1"),
             ourPatp = "~zod",
             openChat = null,
-            mutedWhoms = emptySet(),
+            levels = emptyMap(),
             storyText = storyText,
         )
         assertTrue(diff.notifications.isEmpty())
@@ -138,7 +138,7 @@ class NewMessageDiffTest {
             lastSeen = emptyMap(),
             ourPatp = "~me",
             openChat = null,
-            mutedWhoms = emptySet(),
+            levels = emptyMap(),
             storyText = storyText,
         )
         assertEquals(1, diff.notifications.size)
@@ -154,7 +154,7 @@ class NewMessageDiffTest {
             lastSeen = mapOf("~zod" to "id-1"),
             ourPatp = "~me",
             openChat = null,
-            mutedWhoms = emptySet(),
+            levels = emptyMap(),
             storyText = storyText,
         )
         assertEquals(1, diff.notifications.size)
@@ -168,7 +168,7 @@ class NewMessageDiffTest {
             lastSeen = mapOf("~zod" to "id-1"),
             ourPatp = "~me",
             openChat = null,
-            mutedWhoms = emptySet(),
+            levels = emptyMap(),
             storyText = storyText,
         )
         assertTrue(diff.notifications.isEmpty(),
@@ -187,7 +187,7 @@ class NewMessageDiffTest {
             lastSeen = mapOf("~zod" to "id-1"),
             ourPatp = "~me",
             openChat = "~zod",  // user is staring at this chat
-            mutedWhoms = emptySet(),
+            levels = emptyMap(),
             storyText = storyText,
         )
         assertTrue(diff.notifications.isEmpty())
@@ -202,7 +202,7 @@ class NewMessageDiffTest {
             lastSeen = mapOf("~zod" to "id-1"),
             ourPatp = "~me",
             openChat = null,
-            mutedWhoms = setOf("~zod"),
+            levels = mapOf("~zod" to "none"),
             storyText = storyText,
         )
         assertTrue(diff.notifications.isEmpty())
@@ -223,7 +223,7 @@ class NewMessageDiffTest {
             lastSeen = emptyMap(),
             ourPatp = "~me",
             openChat = null,
-            mutedWhoms = emptySet(),
+            levels = emptyMap(),
             storyText = storyText,
         )
         assertEquals("hello there", diff.notifications[0].body)
@@ -241,7 +241,7 @@ class NewMessageDiffTest {
             lastSeen = emptyMap(),
             ourPatp = "~me",
             openChat = null,
-            mutedWhoms = emptySet(),
+            levels = emptyMap(),
             storyText = customStoryText,
         )
         assertEquals("first second third", diff.notifications[0].body)
@@ -256,7 +256,7 @@ class NewMessageDiffTest {
             lastSeen = emptyMap(),
             ourPatp = "~me",
             openChat = null,
-            mutedWhoms = emptySet(),
+            levels = emptyMap(),
             storyText = customStoryText,
         )
         assertEquals(200, diff.notifications[0].body.length)
@@ -272,7 +272,7 @@ class NewMessageDiffTest {
             lastSeen = emptyMap(),
             ourPatp = "~me",
             openChat = null,
-            mutedWhoms = emptySet(),
+            levels = emptyMap(),
             storyText = customStoryText,
         )
         assertEquals("(attachment)", diff.notifications[0].body)
@@ -295,7 +295,7 @@ class NewMessageDiffTest {
             ),
             ourPatp = "~me",
             openChat = null,
-            mutedWhoms = emptySet(),
+            levels = emptyMap(),
             storyText = storyText,
         )
         assertEquals(3, diff.notifications.size)
@@ -329,7 +329,7 @@ class NewMessageDiffTest {
             ),
             ourPatp = "~me",
             openChat = "~bus",
-            mutedWhoms = setOf("0vclub"),
+            levels = mapOf("0vclub" to "none"),
             storyText = storyText,
         )
         assertEquals(1, diff.notifications.size)
@@ -357,9 +357,50 @@ class NewMessageDiffTest {
             lastSeen = emptyMap(),
             ourPatp = null,
             openChat = null,
-            mutedWhoms = emptySet(),
+            levels = emptyMap(),
             storyText = storyText,
         )
         assertEquals(1, diff.notifications.size)
+    }
+
+    // ── levels: "mentions" is the default and means it ─────────────
+
+    private fun groupRow(contentJson: String) = MessageEntity(
+        whom = "chat/~host/general",
+        id = "m1",
+        author = "~bud",
+        sentMs = 0L,
+        contentJson = contentJson,
+        kind = "note",
+    )
+
+    private fun fire(rows: List<MessageEntity>, levels: Map<String, String>) =
+        diffNewMessageNotifications(
+            rows = rows,
+            lastSeen = emptyMap(),
+            ourPatp = "~zod",
+            openChat = null,
+            levels = levels,
+            storyText = { _, json -> json },
+        ).notifications.size
+
+    @Test
+    fun `group channel at the default level fires only on a mention`() {
+        assertEquals(0, fire(listOf(groupRow("""{"inline":["hi all"]}""")), emptyMap()))
+        assertEquals(1, fire(listOf(groupRow("""{"inline":[{"ship":"~zod"}," hi"]}""")), emptyMap()))
+    }
+
+    @Test
+    fun `all notifies everything and none nothing`() {
+        val plain = groupRow("""{"inline":["hi all"]}""")
+        assertEquals(1, fire(listOf(plain), mapOf(plain.whom to "all")))
+        val mention = groupRow("""{"inline":[{"ship":"~zod"}]}""")
+        assertEquals(0, fire(listOf(mention), mapOf(plain.whom to "none")))
+    }
+
+    @Test
+    fun `a DM at the default level still fires`() {
+        val dm = groupRow("""{"inline":["hey"]}""").copy(whom = "~bud")
+        assertEquals(1, fire(listOf(dm), emptyMap()))
     }
 }

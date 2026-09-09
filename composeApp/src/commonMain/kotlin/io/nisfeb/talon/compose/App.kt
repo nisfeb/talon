@@ -944,12 +944,12 @@ fun App(
                 var seeded = false
                 kotlinx.coroutines.flow.combine(
                     db.messages().conversationLatest(),
-                    db.notifyPrefs().streamMutedWhoms(),
+                    db.notifyPrefs().streamAll(),
                     repo.bootstrapping,
-                ) { rows, muted, bootstrapping ->
-                    Triple(rows, muted.toHashSet(), bootstrapping)
+                ) { rows, prefs, bootstrapping ->
+                    Triple(rows, prefs.associate { it.whom to it.level }, bootstrapping)
                 }
-                    .collect { (rows, muted, bootstrapping) ->
+                    .collect { (rows, levels, bootstrapping) ->
                         if (bootstrapping || !seeded) {
                             lastSeenIds = io.nisfeb.talon.notify
                                 .seedNewMessageBaseline(rows)
@@ -965,7 +965,7 @@ fun App(
                                 // window is focused — an unfocused window's
                                 // open chat should still notify.
                                 openChat = openChat.takeIf { windowInfo.isWindowFocused },
-                                mutedWhoms = muted,
+                                levels = levels,
                                 storyText = { id, json ->
                                     io.nisfeb.talon.urbit.StoryCache.textFor(id, json)
                                 },

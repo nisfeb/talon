@@ -31,6 +31,11 @@ interface NotifyPreferenceDao {
     @Query("SELECT whom FROM notify_preferences WHERE level = 'none'")
     fun streamMutedWhoms(): Flow<List<String>>
 
+    /** Every stored level, live. The desktop notification filter
+     *  applies "mentions" as well as "none", so it needs them all. */
+    @Query("SELECT * FROM notify_preferences")
+    fun streamAll(): Flow<List<NotifyPreferenceEntity>>
+
     @Query("DELETE FROM notify_preferences")
     suspend fun clearAll()
 

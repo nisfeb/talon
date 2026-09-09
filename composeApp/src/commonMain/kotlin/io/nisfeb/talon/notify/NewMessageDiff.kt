@@ -1,6 +1,7 @@
 package io.nisfeb.talon.notify
 
 import io.nisfeb.talon.data.MessageEntity
+import io.nisfeb.talon.data.NotifyLevel
 
 /**
  * What [diffNewMessageNotifications] decides should be fired as an
@@ -42,7 +43,7 @@ fun seedNewMessageBaseline(rows: List<MessageEntity>): Map<String, String> =
  *   2. Its author is not the local user (no self-notify).
  *   3. Its whom is not the currently-open chat (the user is already
  *      looking at it).
- *   4. Its whom is not in the muted set.
+ *   4. Its whom's notification level allows it — see [notifyAllowed].
  *
  * Even rows that are filtered out still update the baseline so the
  * next emission compares against the latest known id rather than
@@ -54,7 +55,9 @@ fun diffNewMessageNotifications(
     lastSeen: Map<String, String>,
     ourPatp: String?,
     openChat: String?,
-    mutedWhoms: Set<String>,
+    /** whom → stored level ("all" / "mentions" / "none"). A whom with
+     *  no entry is at [NotifyLevel.DEFAULT], mentions only. */
+    levels: Map<String, String>,
     storyText: (id: String, contentJson: String) -> String,
     /** Current wall-clock ms. Paired with [freshnessMaxAgeMs] for the
      *  staleness guard below. Defaults to 0 which, with the default
@@ -79,7 +82,8 @@ fun diffNewMessageNotifications(
         if (prior == row.id) continue
         if (row.author == ourPatp) continue
         if (row.whom == openChat) continue
-        if (row.whom in mutedWhoms) continue
+        val level = levels[row.whom] ?: NotifyLevel.DEFAULT
+        if (!notifyAllowed(row.whom, level, isMentioned(row.contentJson, ourPatp))) continue
         // Staleness guard: backfilled / re-synced messages have an old
         // sentMs and must not notify. Baseline already advanced above,
         // so a suppressed-as-stale row won't re-fire on a later pass.
@@ -99,4 +103,23 @@ fun diffNewMessageNotifications(
         newLastSeen = newLastSeen,
         notifications = notifications,
     )
+}
+
+/** Does the story name our ship? Same test the Android filter and
+ *  the relay use: a mention inline is `{"ship":"~us"}` in the JSON. */
+fun isMentioned(contentJson: String, ourPatp: String?): Boolean {
+    if (ourPatp.isNullOrBlank()) return false
+    return contentJson.contains("\"ship\":\"$ourPatp\"")
+}
+
+/**
+ * The per-chat level applied to one message. Mirrors the relay's
+ * NotifyPolicy so desktop, Android and push agree: "none" is silent,
+ * "mentions" needs a mention in a group channel but always passes a
+ * DM or club (those are addressed to you), anything else notifies.
+ */
+fun notifyAllowed(whom: String, level: String?, mention: Boolean): Boolean = when (level) {
+    NotifyLevel.NONE -> false
+    NotifyLevel.MENTIONS -> mention || !whom.contains('/')
+    else -> true
 }
