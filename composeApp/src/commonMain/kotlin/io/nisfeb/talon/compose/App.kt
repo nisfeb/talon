@@ -683,18 +683,38 @@ fun App(
             }
             // The desk is expected; only a failure is worth a dialog.
             callController?.installTrunkQuietly()
-            step("Joined. Waiting for the group's channels")
-            val whom = kotlinx.coroutines.withTimeoutOrNull(120_000) {
-                db.groups().streamChannelsForGroup(flag)
-                    .first { chans -> chans.any { it.nest.startsWith("chat/") } }
-                    .first { it.nest.startsWith("chat/") }.nest
+            // The group row lands before its channels do, sometimes by
+            // minutes, and the channel facts can be lost the same way
+            // the join's were. Keep reconciling until a chat channel is
+            // really there, on the same overall clock.
+            var whom: String? = null
+            var polls = 0
+            while (whom == null && nowMs() < deadline) {
+                whom = db.groups().streamChannelsForGroup(flag).first()
+                    .firstOrNull { it.nest.startsWith("chat/") }?.nest
+                if (whom == null) {
+                    polls++
+                    step("Joined Nisfeb Software. Waiting for its channels to arrive" + if (polls > 6) " (the ship is still busy)" else "")
+                    runCatching { repo.refreshGroups() }
+                    kotlinx.coroutines.delay(5_000)
+                }
+            }
+            if (whom == null) {
+                step("Joined Nisfeb Software, but its channels did not arrive in ten minutes. They will appear when the ship catches up.", failed = true)
+                pendingLanding = null
+                return@LaunchedEffect
+            }
+            openChat = whom
+            revealGroupRequest = flag
+            // Now the messages: the chat opens empty until its first
+            // page is fetched, so the banner stays up for that too.
+            step("Opening the chat and loading messages")
+            runCatching { repo.refreshConversation(whom, count = 30) }
+            kotlinx.coroutines.withTimeoutOrNull(60_000) {
+                db.messages().stream(whom).first { it.isNotEmpty() }
             }
             pendingLanding = null
             landingProgress = null
-            if (whom != null) {
-                openChat = whom
-                revealGroupRequest = flag
-            }
         }
         val partyLine = remember(callController, peerLinkFactory) {
             if (callController != null && peerLinkFactory != null) {
