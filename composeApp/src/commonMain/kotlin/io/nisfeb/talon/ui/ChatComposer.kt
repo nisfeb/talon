@@ -219,6 +219,9 @@ fun ChatComposer(
     /** Triggered when `/call` is sent. Null where calls are
      *  unsupported (isCallsSupported gates the wiring upstream). */
     onSlashCall: (() -> Unit)? = null,
+    /** `/party`: show who is on this channel's line. Null when the
+     *  chat has no line, which also hides the suggestion. */
+    onSlashParty: (() -> Unit)? = null,
     /** Per-device opt-in for the `/poke` advanced surface. Defaults
      *  off; off → /poke returns "enable in Settings" instead of
      *  poking. Caller threads `uiSettings.powerFeaturesEnabled`
@@ -458,12 +461,13 @@ fun ChatComposer(
     // /mic and /loc are wiring-dependent, and offering them where the
     // wiring is null just autocompletes into an error. Typed
     // invocations still hit the per-command error strings as a backstop.
-    val slashSuggestions = remember(slashTrigger, onSlashCall, onSlashMic, locationProvider) {
+    val slashSuggestions = remember(slashTrigger, onSlashCall, onSlashMic, onSlashParty, locationProvider) {
         slashTrigger?.let {
             filterSlashCommands(it.query).filter { s ->
                 when (s.name) {
                     "call" -> onSlashCall != null
                     "mic" -> onSlashMic != null
+                    "party" -> onSlashParty != null
                     "loc" -> locationProvider != null
                     else -> true
                 }
@@ -607,6 +611,14 @@ fun ChatComposer(
                     } else {
                         state.sendError =
                             "/mic: tap the mic button instead — slash trigger isn't wired here"
+                    }
+                    true
+                }
+                firstWord == "/party" -> {
+                    if (onSlashParty != null) {
+                        onSlashParty()
+                    } else {
+                        state.sendError = "/party: this chat has no party line"
                     }
                     true
                 }

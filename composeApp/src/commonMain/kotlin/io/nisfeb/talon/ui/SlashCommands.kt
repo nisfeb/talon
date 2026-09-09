@@ -79,6 +79,11 @@ val SLASH_COMMANDS: List<SlashCommandSpec> = listOf(
         description = "Set your %contacts nickname (visible to peers)",
     ),
     SlashCommandSpec(
+        name = "party",
+        synopsis = "/party",
+        description = "Show who is on this channel's party line (only you see it)",
+    ),
+    SlashCommandSpec(
         name = "pet",
         synopsis = "/pet ~ship <name>",
         description = "Set a local-only pet name for a ship (private to you)",

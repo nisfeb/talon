@@ -126,6 +126,7 @@ fun DmListScreen(
     onSignOut: () -> Unit,
     onOpenSelfProfile: () -> Unit,
     onOpenStatusFeed: () -> Unit,
+    onOpenPartyLines: () -> Unit = {},
     onOpenBookmarks: () -> Unit,
     onOpenActivity: () -> Unit,
     /** Open the curated Contacts (book) screen. Always shown in the
@@ -890,6 +891,15 @@ fun DmListScreen(
                                     runCatching { repo.settingsSync?.pushStatusesSeen(now) }
                                 }
                                 onOpenStatusFeed()
+                            },
+                        )
+                    }
+                    if (RailItem.PartyLines in kebabItems) {
+                        DropdownMenuItem(
+                            text = { Text("Party lines") },
+                            onClick = {
+                                menuOpen = false
+                                onOpenPartyLines()
                             },
                         )
                     }

@@ -314,6 +314,7 @@ fun App(
     }
     var showSelfProfile by remember { mutableStateOf(false) }
     var showStatusFeed by remember { mutableStateOf(false) }
+    var showPartyLines by remember { mutableStateOf(false) }
     var showInvites by remember { mutableStateOf(false) }
     var showBookmarks by remember { mutableStateOf(false) }
     var showActivity by remember { mutableStateOf(false) }
@@ -361,6 +362,7 @@ fun App(
         showSettings = false
         showSelfProfile = false
         showStatusFeed = false
+        showPartyLines = false
         showInvites = false
         showBookmarks = false
         showActivity = false
@@ -482,6 +484,9 @@ fun App(
     }
     PlatformBackHandler(enabled = showStatusFeed) {
         showStatusFeed = false
+    }
+    PlatformBackHandler(enabled = showPartyLines) {
+        showPartyLines = false
     }
     PlatformBackHandler(enabled = showInvites) {
         showInvites = false
@@ -1426,6 +1431,20 @@ fun App(
                         if (expanded) uiSettings.setActiveRailTab(RailTab.Statuses)
                         else showStatusFeed = true
                     }
+                    val onOpenPartyLines: () -> Unit = {
+                        if (expanded) uiSettings.setActiveRailTab(RailTab.PartyLines)
+                        else showPartyLines = true
+                    }
+                    // Land in the group's most recent channel and join its
+                    // line — the same path as the channel header's button.
+                    val openLineFromList: (String) -> Unit = { whom ->
+                        jumpToChat(whom)
+                        callController?.let { cc ->
+                            loopScope.launch {
+                                io.nisfeb.talon.call.PartyLineHost.joinLine(cc, db, whom)
+                            }
+                        }
+                    }
                     val onOpenBookmarks: () -> Unit = {
                         if (expanded) uiSettings.setActiveRailTab(RailTab.Bookmarks)
                         else showBookmarks = true
@@ -1566,6 +1585,14 @@ fun App(
                         ourPatp = ship,
                         onBack = { showStatusFeed = false },
                         onOpenContact = { other -> profileSheetShip = other },
+                    )
+                    showPartyLines -> io.nisfeb.talon.ui.screens.PartyLinesScreen(
+                        db = db,
+                        callController = callController,
+                        partyLine = partyLine,
+                        contacts = callContacts,
+                        onOpenLine = openLineFromList,
+                        onBack = { showPartyLines = false },
                     )
                     showInvites -> GroupInvitesScreen(
                         repo = repo,
@@ -1982,6 +2009,22 @@ fun App(
                                 val partyLiveHere = (partyLine?.state?.collectAsState()?.value as? io.nisfeb.talon.call.PartyState.Live)
                                     ?.takeIf { it.room == partyRoomHere?.second }?.members?.size ?: 0
                                 val partyShown = maxOf(partyPresent, partyLiveHere)
+                                // `/party` roll call (wire 8): our own roster
+                                // while on the line, else the host's answer.
+                                val onLineFlow = remember(callController) {
+                                    callController?.onLine
+                                        ?: kotlinx.coroutines.flow.MutableStateFlow(emptyMap())
+                                }
+                                val onLine by onLineFlow.collectAsState()
+                                val partyStatus = partyRoomHere?.let { (h, n) ->
+                                    val live = (partyLine?.state?.value as? io.nisfeb.talon.call.PartyState.Live)
+                                        ?.takeIf { it.room == n }?.members?.map { it.ship }
+                                    io.nisfeb.talon.ui.partyRollCall(
+                                        count = partyShown,
+                                        ships = live ?: onLine["$h/$n"].orEmpty().toList(),
+                                        nameFor = { callContacts.displayName(it) },
+                                    )
+                                }
                                 LaunchedEffect(partyRoomHere) {
                                     val (h, n) = partyRoomHere ?: return@LaunchedEffect
                                     while (true) {
@@ -2096,6 +2139,11 @@ fun App(
                                             null
                                         },
                                     partyPresent = partyShown,
+                                    partyStatus = partyStatus,
+                                    onSlashParty = {
+                                        val (h, n) = partyRoomHere ?: return@DmChatScreen
+                                        loopScope.launch { callController?.whoIsOn(h, n) }
+                                    },
                                     // One slot under the channel header
                                     // for both: a 1:1 call and a party
                                     // line are the same kind of thing
@@ -2345,7 +2393,8 @@ fun App(
                                 RailItem.Invites -> showInvites = true
                                 RailItem.Settings -> showSettings = true
                                 // pane tabs handled above; never reaches here
-                                RailItem.Chats, RailItem.Statuses, RailItem.Bookmarks, RailItem.Activity -> Unit
+                                RailItem.Chats, RailItem.Statuses, RailItem.PartyLines,
+                                RailItem.Bookmarks, RailItem.Activity -> Unit
                             }
                         }
                         val railListSlot: @Composable () -> Unit = {
@@ -2400,6 +2449,7 @@ fun App(
                                         onOpenSelfProfile = { showSelfProfile = true },
                                         kebabItems = kebabItems,
                                         onOpenStatusFeed = onOpenStatusFeed,
+                                        onOpenPartyLines = onOpenPartyLines,
                                         onOpenInvites = { showInvites = true },
                                         onOpenBookmarks = onOpenBookmarks,
                                         onOpenActivity = onOpenActivity,
@@ -2481,6 +2531,14 @@ fun App(
                                     repo = repo,
                                     ourPatp = ship,
                                     onOpenContact = { other -> profileSheetShip = other },
+                                )
+                                RailTab.PartyLines -> io.nisfeb.talon.ui.screens.PartyLinesScreen(
+                                    db = db,
+                                    callController = callController,
+                                    partyLine = partyLine,
+                                    contacts = callContacts,
+                                    onOpenLine = openLineFromList,
+                                    onBack = null,
                                 )
                                 RailTab.Bookmarks -> BookmarksList(
                                     db = db,

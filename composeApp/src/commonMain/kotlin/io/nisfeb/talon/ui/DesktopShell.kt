@@ -18,6 +18,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.Build
+import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.Home
@@ -256,6 +257,7 @@ private fun railIcon(item: RailItem): ImageVector? = when (item) {
     // slim-jar strip; auditIconKeepList catches any drift.
     RailItem.Chats -> Icons.Filled.Home
     RailItem.Statuses -> Icons.Filled.Person
+    RailItem.PartyLines -> Icons.Filled.Call
     RailItem.Bookmarks -> Icons.Filled.Star
     RailItem.Activity -> Icons.Filled.Notifications
     // Null → rendered as the letter "A" in RailIconButton.
@@ -271,6 +273,7 @@ private fun railIcon(item: RailItem): ImageVector? = when (item) {
 private fun railLabel(item: RailItem): String = when (item) {
     RailItem.Chats -> "Chats"
     RailItem.Statuses -> "Statuses"
+    RailItem.PartyLines -> "Party lines"
     RailItem.Bookmarks -> "Bookmarks"
     RailItem.Activity -> "Activity"
     RailItem.Assistant -> "Assistant"

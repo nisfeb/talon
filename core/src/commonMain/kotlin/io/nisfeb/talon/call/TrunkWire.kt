@@ -170,6 +170,14 @@ sealed interface TrunkUpdate {
         val who: Set<String>,
     ) : TrunkUpdate
 
+    /** The host's answer to %who-is-on: which ships are on a line
+     *  right now — the names behind [Present]. Wire 8. */
+    data class OnLine(
+        override val from: String,
+        val name: String,
+        val who: Set<String>,
+    ) : TrunkUpdate
+
     /** The host's answer to %access, %get-access or %moderate: the
      *  room's current role gates. Wire 5. */
     data class AccessState(
@@ -202,12 +210,18 @@ object TrunkWire {
     // 6: live presence — enter/leave heartbeats and %present occupancy.
     // 7: call-recording announcement — start/stop-recording heartbeats
     // and %recorders, so the room shows a recording badge.
-    const val WIRE_VERSION = 7
+    // 8: who-is-on — the ships behind the occupancy count, for the
+    // /party roll call and the party-lines list.
+    const val WIRE_VERSION = 8
 
     /** The wire that added the call-recording announcement. A ship
      *  below this relays no %recording-on, so nobody on the line would
      *  ever see the badge the consent dialog promises. */
     const val WIRE_VERSION_RECORDING = 7
+
+    /** The wire that added %who-is-on. Below it our own ship nacks the
+     *  poke, so the client only ever shows counts. */
+    const val WIRE_VERSION_WHO = 8
 
     const val PUBLISHER = "~ricsul-bilwyt"
     const val DESK = "trunk"
@@ -480,6 +494,10 @@ object TrunkWire {
         putJsonObject("occupancy-of") { put("host", host); put("name", name) }
     }
 
+    fun whoIsOnAction(host: String, name: String): JsonElement = buildJsonObject {
+        putJsonObject("who-is-on") { put("host", host); put("name", name) }
+    }
+
     fun startRecordingAction(host: String, name: String): JsonElement = buildJsonObject {
         putJsonObject("start-recording") { put("host", host); put("name", name) }
     }
@@ -597,6 +615,13 @@ object TrunkWire {
                 from = who(rc) ?: return null,
                 name = rc["name"]?.jsonPrimitive?.content ?: return null,
                 who = strings(rc, "who").toSet(),
+            )
+        }
+        (obj["on-line"] as? JsonObject)?.let { ol ->
+            return TrunkUpdate.OnLine(
+                from = who(ol) ?: return null,
+                name = ol["name"]?.jsonPrimitive?.content ?: return null,
+                who = strings(ol, "who").toSet(),
             )
         }
         (obj["access-state"] as? JsonObject)?.let { a ->

@@ -112,6 +112,7 @@ import kotlinx.coroutines.flow.collectLatest
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.key.Key
@@ -221,6 +222,13 @@ fun DmChatScreen(
     onPartyLine: (() -> Unit)? = null,
     /** How many are on the line right now (wire 6). 0 hides the badge. */
     partyPresent: Int = 0,
+    /** `/party` roll call for this channel's line, or null when the
+     *  chat has no line (which also hides the slash suggestion). Live:
+     *  the note row re-renders as the host answers. */
+    partyStatus: String? = null,
+    /** Fired when `/party` is sent, so the caller can ask the host for
+     *  fresh names. The note itself is local UI state here. */
+    onSlashParty: (() -> Unit)? = null,
     /** Slot for the live party-line strip, rendered under the header. */
     partyLineBar: (@Composable () -> Unit)? = null,
     /**
@@ -579,6 +587,7 @@ fun DmChatScreen(
 
     // ── message action sheet state ──
     var actionTarget by remember { mutableStateOf<MessageEntity?>(null) }
+    var partyNoteOpen by remember(whom) { mutableStateOf(false) }
     // Long-press / right-click on any reaction chip surfaces the
     // per-reactor breakdown. Set to the message's reactions list and
     // the sheet renders; null = closed.
@@ -999,6 +1008,13 @@ fun DmChatScreen(
             reverseLayout = true,
             verticalArrangement = Arrangement.spacedBy(chatDensity.messageSpacing),
         ) {
+            // `/party` roll call: a local, greyed note under the newest
+            // message. Never sent; tap to dismiss.
+            if (partyNoteOpen && partyStatus != null) {
+                item(key = "__party", contentType = "party-note") {
+                    PartyNoteRow(partyStatus, onDismiss = { partyNoteOpen = false })
+                }
+            }
             items(
                 items = displayRows.asReversed(),
                 key = { it.key },
@@ -1094,6 +1110,11 @@ fun DmChatScreen(
             voicePlayer = voicePlayer,
             onSlashMic = onSlashMic,
             onSlashCall = onStartCall,
+            onSlashParty = if (partyStatus != null) {
+                { partyNoteOpen = true; onSlashParty?.invoke() }
+            } else {
+                null
+            },
             powerFeaturesEnabled = powerFeaturesEnabled,
             // Up-arrow-on-empty-composer edits your most recent
             // message. Same predicate as the Edit menu action
@@ -1816,6 +1837,30 @@ private fun EmptyChatPlaceholder(
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+        )
+    }
+}
+
+@Composable
+private fun PartyNoteRow(text: String, onDismiss: () -> Unit) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(MaterialTheme.shapes.medium)
+            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+            .clickable(onClick = onDismiss)
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+    ) {
+        Text(
+            text,
+            style = MaterialTheme.typography.bodyMedium.copy(fontStyle = FontStyle.Italic),
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Text(
+            "Only you can see this. Tap to dismiss.",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+            modifier = Modifier.padding(top = 2.dp),
         )
     }
 }

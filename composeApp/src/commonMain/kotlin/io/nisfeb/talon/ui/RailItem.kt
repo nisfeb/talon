@@ -15,6 +15,7 @@ package io.nisfeb.talon.ui
 enum class RailItem(val isPaneTab: Boolean) {
     Chats(true),
     Statuses(true),
+    PartyLines(true),
     Bookmarks(true),
     Activity(true),
     Assistant(false),

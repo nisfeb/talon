@@ -232,7 +232,22 @@ class TrunkWireTest {
         // The agent answers /x/version with ++wire-version. Bump both or
         // neither: a client claiming a version the desk doesn't speak
         // reports every ship as out of date.
-        assertEquals(7, TrunkWire.WIRE_VERSION)
+        assertEquals(8, TrunkWire.WIRE_VERSION)
+    }
+
+    // ── wire 8: who is on a line ──────────────────────────────────
+
+    @Test
+    fun whoIsOnActionAndAnswerRoundTrip() {
+        val body = (TrunkWire.whoIsOnAction("~zod", "lounge") as JsonObject)["who-is-on"] as JsonObject
+        assertEquals("~zod", body["host"]!!.jsonPrimitive.content)
+        assertEquals("lounge", body["name"]!!.jsonPrimitive.content)
+        val up = TrunkWire.parseUpdate(
+            Json.parseToJsonElement(
+                """{"on-line":{"from":"~zod","name":"lounge","who":["~nec","~bud"]}}""",
+            ),
+        )
+        assertEquals(TrunkUpdate.OnLine("~zod", "lounge", setOf("~nec", "~bud")), up)
     }
 
     // ── wire 4: group-mirrored rosters ────────────────────────────
