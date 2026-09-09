@@ -63,6 +63,14 @@ expect val isBackgroundSchedulingSupported: Boolean
 expect val isQrLoginScanSupported: Boolean
 
 /**
+ * Whether Talon can run a comet on this machine for someone with no
+ * ship (see [io.nisfeb.talon.comet.LocalShip]). Desktop: true, the
+ * runtime is downloaded and driven under a pseudo-terminal. Android
+ * and iOS: false — no background process can host a ship there.
+ */
+expect val isLocalCometSupported: Boolean
+
+/**
  * Whether touch swipe-navigation gestures are wired. Android: true.
  * Desktop: false — a mouse can't "swipe" without ambiguity, and the
  * horizontal-drag detectors these gestures need compete with normal

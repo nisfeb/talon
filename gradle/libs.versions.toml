@@ -27,6 +27,7 @@ junit = "4.13.2"
 djl = "0.36.0"
 webrtcJava = "0.14.0"  # 0.15.0 lacks linux natives on maven central
 webrtcAndroid = "1.3.10"
+pty4j = "0.13.10"  # pseudo-terminal for the local comet runtime
 coreTelecom = "1.1.0-beta01"
 androidxWork = "2.11.2"
 unifiedpush = "3.3.3"
@@ -62,6 +63,7 @@ androidx-sqlite-bundled = { group = "androidx.sqlite", name = "sqlite-bundled", 
 
 okhttp = { group = "com.squareup.okhttp3", name = "okhttp", version.ref = "okhttp" }
 okhttp-sse = { group = "com.squareup.okhttp3", name = "okhttp-sse", version.ref = "okhttp" }
+pty4j = { group = "org.jetbrains.pty4j", name = "pty4j", version.ref = "pty4j" }
 
 kotlinx-serialization-json = { group = "org.jetbrains.kotlinx", name = "kotlinx-serialization-json", version.ref = "kotlinxSerialization" }
 kotlinx-coroutines-core = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-core", version.ref = "kotlinxCoroutines" }

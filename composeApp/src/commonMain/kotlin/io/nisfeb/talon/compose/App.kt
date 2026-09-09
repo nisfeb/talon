@@ -38,6 +38,7 @@ import androidx.compose.runtime.setValue
 import kotlinx.coroutines.DelicateCoroutinesApi
 import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import io.nisfeb.talon.ai.AiSettingsRepository
 import io.nisfeb.talon.ui.parseHexColor
@@ -162,6 +163,8 @@ fun App(
     audioDevices: io.nisfeb.talon.call.AudioDevices =
         io.nisfeb.talon.call.AudioDevices.Noop,
     videoDevices: io.nisfeb.talon.call.VideoDevices = io.nisfeb.talon.call.VideoDevices.Noop,
+    /** A comet Talon runs on this machine; Noop where unsupported. */
+    localShip: io.nisfeb.talon.comet.LocalShip = io.nisfeb.talon.comet.LocalShip.Noop,
     /** Call tones. Noop renders the app silent rather than absent, so
      *  a platform without playback needs no gating. */
     callSounds: io.nisfeb.talon.call.CallSoundPlayer =
@@ -236,6 +239,10 @@ fun App(
     // tryRestore() returns null while loggedInShip stays non-null
     // and repo.start crashes on session.ourPatp ("not logged in").
     var loggedInShip by remember { mutableStateOf(sessionStore.active()?.ship) }
+    // Local comet: the setup screen replaces the login form, and a
+    // first login lands in the public Nisfeb Software group.
+    var localShipSetupOpen by remember { mutableStateOf(false) }
+    var pendingLanding by remember { mutableStateOf<String?>(null) }
     var showSettings by remember { mutableStateOf(false) }
     var showSidebarSettings by remember { mutableStateOf(false) }
     var showLoops by remember { mutableStateOf(false) }
@@ -635,6 +642,29 @@ fun App(
             } else {
                 null
             }
+        // A comet's first login: join Nisfeb Software, put the calling
+        // desk on the ship, and open the group's chat once it arrives.
+        LaunchedEffect(repo, pendingLanding) {
+            val flag = pendingLanding ?: return@LaunchedEffect
+            repo.bootstrapping.first { !it }
+            var joined = false
+            var tries = 0
+            while (!joined && tries < 15) {
+                joined = runCatching { repo.acceptInvite(flag) }.isSuccess
+                if (!joined) { tries++; kotlinx.coroutines.delay(3_000) }
+            }
+            callController?.installTrunk()
+            val whom = kotlinx.coroutines.withTimeoutOrNull(120_000) {
+                db.groups().streamChannelsForGroup(flag)
+                    .first { chans -> chans.any { it.nest.startsWith("chat/") } }
+                    .first { it.nest.startsWith("chat/") }.nest
+            }
+            pendingLanding = null
+            if (whom != null) {
+                openChat = whom
+                revealGroupRequest = flag
+            }
+        }
         val partyLine = remember(callController, peerLinkFactory) {
             if (callController != null && peerLinkFactory != null) {
                 io.nisfeb.talon.call.PartyLine(
@@ -1512,10 +1542,36 @@ fun App(
                     shareLoginQrOpen -> io.nisfeb.talon.ui.screens.LoginQrShareScreen(
                         onBack = { shareLoginQrOpen = false },
                     )
+                    ship == null && localShipSetupOpen -> io.nisfeb.talon.ui.screens.LocalShipSetupScreen(
+                        localShip = localShip,
+                        onReady = { ready ->
+                            loopScope.launch {
+                                session.login(ready.url, ready.code)
+                                    .onSuccess { who ->
+                                        pendingLanding = io.nisfeb.talon.comet.LocalShip.LANDING_GROUP
+                                        localShipSetupOpen = false
+                                        loggedInShip = who
+                                    }
+                                    .onFailure {
+                                        loginNotice = "The ship booted but signing in failed: ${it.message}"
+                                        localShipSetupOpen = false
+                                    }
+                            }
+                        },
+                        onCancel = {
+                            localShipSetupOpen = false
+                            loopScope.launch { runCatching { localShip.stop() } }
+                        },
+                    )
                     ship == null -> LoginScreen(
                         session = session,
                         onLoggedIn = { loggedInShip = it },
                         notice = loginNotice,
+                        onRunLocalShip = if (io.nisfeb.talon.ui.isLocalCometSupported) {
+                            { localShipSetupOpen = true }
+                        } else {
+                            null
+                        },
                         // Desktop has no QR scanner (no camera to assume,
                         // keyboard is already the fast path) but the
                         // generator works — Compose Desktop can paint the

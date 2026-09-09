@@ -79,6 +79,8 @@ private class DesktopAppGraph {
     // TlonChatRepo, link previews). Ktor over an OkHttp engine on desktop.
     val ktorHttp: HttpClient = createAppHttpClient()
     val sessionStore: SessionStore = createSessionStore()
+    /** The comet Talon runs on this machine, if the user set one up. */
+    val localShip = io.nisfeb.talon.comet.DesktopLocalShip(ktorHttp)
     val aiSettings: AiSettingsRepository = createAiSettings()
     val dailyDigestSettings: DailyDigestSettings = DesktopDailyDigestSettings()
     val watchwordsSync: WatchwordsSyncSettings = DesktopWatchwordsSyncSettings()
@@ -185,6 +187,8 @@ private class DesktopAppGraph {
     }
 
     fun shutdown() {
+        // The local ship first: |exit lets it checkpoint. Bounded inside.
+        runCatching { kotlinx.coroutines.runBlocking { localShip.stop() } }
         // Best-effort teardown. Order matters:
         //  1. Cancel update scope so its in-flight HTTP calls bail.
         //  2. dispatcher.cancelAll() — soft signal to dispatcher-
@@ -351,6 +355,13 @@ fun main() {
             }.apply { isDaemon = true; name = "Talon-shutdown" }.start()
             exitApplication()
         }
+        // A comet set up earlier boots before the app connects; the
+        // repo's connect path retries, so the few seconds are invisible.
+        if (graph.localShip.pierExists()) {
+            Thread({
+                kotlinx.coroutines.runBlocking { runCatching { graph.localShip.start() } }
+            }, "Talon-comet-start").apply { isDaemon = true }.start()
+        }
         // Bring-to-front routine — used by tray click and the "Show
         // Talon" menu entry. Un-minimizing alone leaves the window
         // behind whatever the user was looking at; toFront + focus
@@ -455,6 +466,7 @@ fun main() {
                 App(
                     http = graph.ktorHttp,
                     sessionStore = graph.sessionStore,
+                    localShip = graph.localShip,
                     aiSettings = graph.aiSettings,
                     createDb = graph.createDb,
                     drafts = graph.drafts,

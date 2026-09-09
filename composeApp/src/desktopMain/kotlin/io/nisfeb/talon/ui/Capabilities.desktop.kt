@@ -3,6 +3,7 @@ package io.nisfeb.talon.ui
 actual val isDailyDigestSupported: Boolean = false
 actual val isVoiceMessagesSupported: Boolean = false
 actual val isQrLoginScanSupported: Boolean = false
+actual val isLocalCometSupported: Boolean = true
 // Loops run on desktop via a while-open ticker in App.kt (no
 // AlarmManager off Android): due loops fire once a minute while the
 // window is live, and "Run now" works any time. Honest about the

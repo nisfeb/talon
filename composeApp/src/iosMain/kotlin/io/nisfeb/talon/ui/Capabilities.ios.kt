@@ -15,6 +15,7 @@ actual val isAssistantSupported: Boolean = true
 actual val isLoopsSupported: Boolean = false
 actual val isBackgroundSchedulingSupported: Boolean = false
 actual val isQrLoginScanSupported: Boolean = false
+actual val isLocalCometSupported: Boolean = false
 actual val isTouchSwipeNavSupported: Boolean = true
 actual val isTapToOpenMenuSupported: Boolean = true
 

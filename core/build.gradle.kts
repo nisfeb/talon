@@ -52,6 +52,9 @@ kotlin {
         val desktopMain by getting
         desktopMain.dependencies {
             implementation(libs.ktor.client.okhttp)
+            // Pseudo-terminal for the local comet: vere refuses to run
+            // without a tty, and the dojo is the only source of +code.
+            implementation(libs.pty4j)
             // libwebrtc via JNI. The base jar is pure API; natives ship
             // per-platform, and only the host's are bundled.
             implementation(libs.webrtc.java)

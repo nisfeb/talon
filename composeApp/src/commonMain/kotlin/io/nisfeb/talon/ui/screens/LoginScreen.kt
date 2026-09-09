@@ -41,6 +41,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -102,6 +103,9 @@ fun LoginScreen(
      *  (FOSS, no Google Play Services required — works on GrapheneOS).
      *  Desktop passes null. */
     qrScanIntegration: (@Composable (onResult: (TalonLoginUri.Payload?) -> Unit) -> (() -> Unit)?)? = null,
+    /** Desktop only: boot a comet on this computer instead of signing
+     *  in to a hosted ship. Null hides the action. */
+    onRunLocalShip: (() -> Unit)? = null,
     /** Optional callback to open the "Generate handoff QR" screen.
      *  When non-null, LoginScreen shows a "Generate QR for someone"
      *  link below the main form so helpers/admins can build a QR
@@ -363,6 +367,12 @@ fun LoginScreen(
                                 .clickable(enabled = !connecting) { openShare() },
                         )
                     }
+                }
+            }
+            onRunLocalShip?.let { run ->
+                Spacer(Modifier.height(12.dp))
+                TextButton(onClick = run, enabled = !connecting) {
+                    Text("No ship? Run one on this computer (beta)")
                 }
             }
 
