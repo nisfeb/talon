@@ -100,6 +100,18 @@ object StoryCache {
         return fresh
     }
 
+    /** [textFor] with a notebook post's title in front, which lives
+     *  on the row, not in the content, and is often all the post says. */
+    fun previewFor(m: io.nisfeb.talon.data.MessageEntity): String {
+        val body = textFor(m.id, m.contentJson)
+        val title = m.title?.trim().orEmpty()
+        return when {
+            title.isEmpty() -> body
+            body.isBlank() -> title
+            else -> "$title: $body"
+        }
+    }
+
     fun textFor(id: String, contentJson: String): String {
         val hash = cacheKey(contentJson)
         synchronized(lock) {

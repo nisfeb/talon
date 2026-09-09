@@ -89,7 +89,9 @@ fun diffNewMessageNotifications(
         // so a suppressed-as-stale row won't re-fire on a later pass.
         if (nowMs - row.sentMs > freshnessMaxAgeMs) continue
 
-        val body = storyText(row.id, row.contentJson)
+        val text = storyText(row.id, row.contentJson)
+        val title = row.title?.trim().orEmpty()
+        val body = (if (title.isEmpty()) text else if (text.isBlank()) title else "$title: $text")
             .replace('\n', ' ')
             .take(200)
             .ifBlank { "(attachment)" }

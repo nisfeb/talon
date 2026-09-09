@@ -73,7 +73,7 @@ class EmbeddingIndexer(
                     existing += key
                     continue
                 }
-                val text = StoryCache.textFor(m.id, m.contentJson)
+                val text = StoryCache.previewFor(m)
                     .trim()
                     .take(1000)
                 if (text.length < 4) {

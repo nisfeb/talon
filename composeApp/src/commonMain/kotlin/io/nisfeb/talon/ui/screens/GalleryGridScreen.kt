@@ -38,6 +38,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -92,7 +93,22 @@ fun GalleryGridScreen(
     // cached posts arrive the grid renders them — a background refresh
     // that fails (wedged network ⇒ 6s OkHttp cap) shouldn't leave a
     // spinner running on top of content.
-    var loading by remember { mutableStateOf(true) }
+    var loading by remember(whom) { mutableStateOf(true) }
+    // Older pages: the newest 30 come from the refresh below; the rest
+    // load as the grid nears its end, the way the chat list does.
+    val gridState = androidx.compose.foundation.lazy.staggeredgrid.rememberLazyStaggeredGridState()
+    var paginating by remember(whom) { mutableStateOf(false) }
+    var exhausted by remember(whom) { mutableStateOf(false) }
+    LaunchedEffect(whom, gridState) {
+        androidx.compose.runtime.snapshotFlow {
+            gridState.layoutInfo.visibleItemsInfo.lastOrNull()?.index to gridState.layoutInfo.totalItemsCount
+        }.collect { (last, total) ->
+            if (last == null || total == 0 || last < total - 4 || paginating || exhausted) return@collect
+            paginating = true
+            exhausted = !runCatching { repo.loadOlder(whom) }.getOrDefault(false)
+            paginating = false
+        }
+    }
     // Clear the badge instantly: zero out the home-snapshot row (so a
     // back-nav paints a fresh state immediately) and tell the repo the
     // chat is focused. setOpenChat fires markRead off-thread so the
@@ -143,6 +159,7 @@ fun GalleryGridScreen(
             )
 
             else -> LazyVerticalStaggeredGrid(
+                state = gridState,
                 columns = StaggeredGridCells.Fixed(2),
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(8.dp),
@@ -190,10 +207,17 @@ private fun GalleryTile(
         }
         ?: parts.firstOrNull { it is StoryPart.LinkPreview }
         ?: parts.firstOrNull { it is StoryPart.Text }
+        ?: parts.firstOrNull { it is StoryPart.Citation }
+    // An optimistic twin the ship has not echoed, or one it refused:
+    // same dimming and marker as a chat row, so a post that never
+    // landed does not pass for a real one.
+    val pending = post.status == "pending" || post.id.startsWith("local_")
+    val failed = post.status == "failed"
 
     Surface(
         modifier = Modifier
             .fillMaxWidth()
+            .alpha(if (pending || failed) 0.55f else 1f)
             .clickable { onClick() },
         shape = RoundedCornerShape(12.dp),
         tonalElevation = 1.dp,
@@ -259,6 +283,17 @@ private fun GalleryTile(
                         )
                     }
                 }
+                // A share-to-gallery post: a reference to another post,
+                // channel or group and nothing else.
+                is StoryPart.Citation -> {
+                    Column(Modifier.padding(12.dp)) {
+                        Text(
+                            primary.label,
+                            style = MaterialTheme.typography.bodyMedium,
+                            maxLines = 4,
+                        )
+                    }
+                }
                 else -> {
                     Text(
                         "(empty post)",
@@ -269,9 +304,13 @@ private fun GalleryTile(
                 }
             }
             Text(
-                contactMap.nickname(post.author) ?: post.author,
+                when {
+                    failed -> "Not posted"
+                    pending -> "Sending…"
+                    else -> contactMap.nickname(post.author) ?: post.author
+                },
                 style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = if (failed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
             )
         }

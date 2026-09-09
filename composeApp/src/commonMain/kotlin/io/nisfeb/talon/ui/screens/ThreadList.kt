@@ -282,7 +282,7 @@ fun ThreadList(
         }
     }
     val canSend = remember(whom) {
-        whom.startsWith("~") || whom.startsWith("0v") || whom.startsWith("chat/")
+        whom.startsWith("~") || whom.startsWith("0v") || isChannelNest(whom)
     }
     var pendingDelete by remember(parentId) { mutableStateOf<MessageEntity?>(null) }
     var pendingReport by remember(parentId) { mutableStateOf<MessageEntity?>(null) }
@@ -339,7 +339,7 @@ fun ThreadList(
     val clipboardManager = androidx.compose.ui.platform.LocalClipboardManager.current
     val threadActionMenuFor: @Composable (MessageEntity) -> Unit = { target ->
         val isMine = target.author == ourPatp
-        val isChannel = whom.startsWith("chat/")
+        val isChannel = isChannelNest(whom)
         ThreadActionMenu(
             db = db,
             ourPatp = ourPatp,
@@ -506,7 +506,7 @@ fun ThreadList(
 
     pendingDelete?.let { target ->
         val isMine = target.author == ourPatp
-        val isChannel = whom.startsWith("chat/")
+        val isChannel = isChannelNest(whom)
         if (!(isMine || isChannel)) {
             pendingDelete = null
             return@let
@@ -1018,3 +1018,9 @@ private fun ThreadActionMenu(
             }
     }
 }
+
+/** A %channels nest: chat, gallery or notebook. Comments on a gallery
+ *  or notebook post ride the same reply shape as a chat thread, so the
+ *  thread screen serves all three. */
+private fun isChannelNest(whom: String): Boolean =
+    whom.startsWith("chat/") || whom.startsWith("heap/") || whom.startsWith("diary/")

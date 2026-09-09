@@ -510,7 +510,37 @@ fun App(
     ) { showGroupAdminList = false }
     PlatformBackHandler(enabled = openGroupHomeFlag != null) { openGroupHomeFlag = null }
     // Notebook: compose overlays the post viewer (which overlays the list).
-    PlatformBackHandler(enabled = notebookComposeOpen) { notebookComposeOpen = false }
+    PlatformBackHandler(enabled = notebookComposeOpen) {
+        notebookComposeOpen = false
+        notebookEditPostId = null
+    }
+    // A gallery / notebook's open post and compose state belong to
+    // the channel they were set in: leaving it any way (activity feed,
+    // search, a notification, group home) must not carry a post id or
+    // an abandoned compose into the next channel of that type.
+    LaunchedEffect(openChat) {
+        openGalleryPostId = null
+        galleryComposeOpen = false
+        openNotebookPostId = null
+        notebookComposeOpen = false
+        notebookEditPostId = null
+    }
+    // A deep link into a gallery / notebook (search hit, bookmark,
+    // watchword, notification) names the post; the chat screen is the
+    // only consumer of the anchor otherwise, so open the post here.
+    LaunchedEffect(openChat, openChatFocusMessageId) {
+        val anchor = openChatFocusMessageId ?: return@LaunchedEffect
+        when {
+            openChat?.startsWith("heap/") == true -> {
+                openGalleryPostId = anchor
+                openChatFocusMessageId = null
+            }
+            openChat?.startsWith("diary/") == true -> {
+                openNotebookPostId = anchor
+                openChatFocusMessageId = null
+            }
+        }
+    }
     PlatformBackHandler(
         enabled = openNotebookPostId != null && !notebookComposeOpen,
     ) { openNotebookPostId = null }
@@ -1870,7 +1900,10 @@ fun App(
                                     whom = openChat!!,
                                     onBack = { openChat = null },
                                     onOpenPost = { id -> openNotebookPostId = id },
-                                    onCompose = { notebookComposeOpen = true },
+                                    onCompose = {
+                                        notebookEditPostId = null
+                                        notebookComposeOpen = true
+                                    },
                                 )
                             })
                             // Gallery channels (whom prefix "heap/").

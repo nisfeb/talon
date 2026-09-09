@@ -2472,8 +2472,8 @@ private fun GroupChannelRow(
     }
     val glow = MaterialTheme.colorScheme.primary.copy(alpha = 0.22f * flash.value)
     val preview = m?.let {
-        remember(it.id, it.contentJson) {
-            StoryCache.textFor(it.id, it.contentJson).take(200).replace('\n', ' ')
+        remember(it.id, it.contentJson, it.title) {
+            StoryCache.previewFor(it).take(200).replace('\n', ' ')
         }
     }
     val timestamp = m?.let { remember(it.sentMs) { formatRelative(it.sentMs) } }

@@ -15,6 +15,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 
@@ -37,7 +38,8 @@ class ShortcutsPublisher(private val context: Context, private val db: AppDataba
         if (job?.isActive == true) return
         job = scope.launch {
             combine(
-                db.messages().conversationLatest(),
+                db.messages().conversationLatest()
+                .map { rows -> rows.filterNot { it.whom.startsWith("diary/") || it.whom.startsWith("notes/") } },
                 contactMapFlow(
                     db.contacts().stream(),
                     db.clubs().stream(),

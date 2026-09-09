@@ -276,7 +276,7 @@ fun GalleryComposeScreen(
                         modifier = Modifier.fillMaxWidth(),
                     )
                     Text(
-                        "The ship fetches a title + preview automatically once posted.",
+                        "Talon fetches the page's title and preview when you post.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )

@@ -45,6 +45,10 @@ import io.nisfeb.talon.ui.rememberAutofillModifier
 import io.nisfeb.talon.ui.rememberLocationProvider
 import io.nisfeb.talon.data.MessageEntity
 import io.nisfeb.talon.notify.isMentioned
+import kotlinx.serialization.json.put
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.buildJsonArray
+import kotlinx.serialization.json.JsonPrimitive
 import io.nisfeb.talon.data.NotifyLevel
 import io.nisfeb.talon.urbit.StoryCache
 import io.nisfeb.talon.ui.screens.ShareTargetScreen
@@ -718,7 +722,51 @@ fun TalonApp(
         }
     }
     val dispatchShare: (ShareIntent, String) -> Unit = { share, whom ->
-        when (share) {
+        // A gallery is not a chat: its posts are gallery essays, and
+        // there is no draft box to drop text into. Post directly.
+        if (whom.startsWith("heap/")) {
+            appScope.launch {
+                runCatching {
+                    val content = when (share) {
+                        is ShareIntent.Text -> {
+                            val text = share.text.trim()
+                            val url = text.takeIf { Regex("^https?://\\S+$").matches(it) }
+                            if (url != null) {
+                                val preview = kotlinx.coroutines.withTimeoutOrNull(8_000) {
+                                    runCatching { io.nisfeb.talon.urbit.LinkPreviewCache.await(app.ktorHttp, url) }.getOrNull()
+                                }
+                                buildJsonArray { add(io.nisfeb.talon.urbit.galleryLinkBlock(url, io.nisfeb.talon.urbit.linkMeta(preview))) }
+                            } else {
+                                buildJsonArray { add(buildJsonObject { put("inline", buildJsonArray { add(JsonPrimitive(text)) }) }) }
+                            }
+                        }
+                        is ShareIntent.Image, is ShareIntent.File -> {
+                            val resolver = context.contentResolver
+                            val uri = (share as? ShareIntent.Image)?.uri ?: (share as ShareIntent.File).uri
+                            val mime = (share as? ShareIntent.Image)?.mimeType ?: (share as ShareIntent.File).mimeType
+                            val name = resolveFileName(resolver, uri, default = "image")
+                            val bytes = resolver.openInputStream(uri)?.use { it.readBytes() }
+                                ?: error("cannot read shared bytes")
+                            val dims = io.nisfeb.talon.util.decodeImageDimensions(bytes) ?: error("not an image")
+                            val hosted = app.repo.uploadImage(bytes = bytes, contentType = mime, fileName = name)
+                            buildJsonArray {
+                                add(buildJsonObject {
+                                    put("block", buildJsonObject {
+                                        put("image", buildJsonObject {
+                                            put("src", hosted)
+                                            put("width", dims.first)
+                                            put("height", dims.second)
+                                            put("alt", name)
+                                        })
+                                    })
+                                })
+                            }
+                        }
+                    }
+                    app.repo.sendGalleryPost(whom, content)
+                }.onFailure { shareFailedToast(it) }
+            }
+        } else when (share) {
             is ShareIntent.Text -> {
                 val existing = app.drafts.load(whom)
                 val merged = if (existing.isBlank()) share.text
@@ -840,7 +888,7 @@ fun TalonApp(
                     if (shouldFire) {
                         val title = contactMap.conversationLabel(m.whom)
                         val authorLabel = contactMap.displayName(m.author)
-                        val preview = StoryCache.textFor(m.id, m.contentJson)
+                        val preview = StoryCache.previewFor(m)
                             .replace('\n', ' ')
                             .take(160)
                         Notifications.showMessage(
@@ -1167,7 +1215,32 @@ fun TalonApp(
         }
         BackHandler(enabled = invitesOpen) { invitesOpen = false }
         BackHandler(enabled = shareLoginQrOpen) { shareLoginQrOpen = false }
-        BackHandler(enabled = notebookComposeOpen) { notebookComposeOpen = false }
+        BackHandler(enabled = notebookComposeOpen) {
+            notebookComposeOpen = false
+            notebookEditPostId = null
+        }
+        // See App.kt: post / compose state is per channel, and a deep
+        // link's anchor names the post to open in a gallery or notebook.
+        LaunchedEffect(openWhom) {
+            openGalleryPostId = null
+            galleryComposeOpen = false
+            openNotebookPostId = null
+            notebookComposeOpen = false
+            notebookEditPostId = null
+        }
+        LaunchedEffect(openWhom, pendingScrollMessageId) {
+            val anchor = pendingScrollMessageId ?: return@LaunchedEffect
+            when {
+                openWhom?.startsWith("heap/") == true -> {
+                    openGalleryPostId = anchor
+                    pendingScrollMessageId = null
+                }
+                openWhom?.startsWith("diary/") == true -> {
+                    openNotebookPostId = anchor
+                    pendingScrollMessageId = null
+                }
+            }
+        }
         BackHandler(enabled = openNotebookPostId != null) { openNotebookPostId = null }
         BackHandler(enabled = galleryComposeOpen) { galleryComposeOpen = false }
         BackHandler(enabled = openGalleryPostId != null) { openGalleryPostId = null }
@@ -1752,7 +1825,10 @@ fun TalonApp(
                     whom = openWhom!!,
                     onBack = { openWhom = null },
                     onOpenPost = { openNotebookPostId = it },
-                    onCompose = { notebookComposeOpen = true },
+                    onCompose = {
+                        notebookEditPostId = null
+                        notebookComposeOpen = true
+                    },
                     modifier = mod,
                 )
             }

@@ -33,6 +33,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -103,9 +104,14 @@ fun GalleryPostScreen(
         )
     }.collectAsState(initial = ContactMap.EMPTY)
 
-    var replyText by remember { mutableStateOf("") }
-    var sending by remember { mutableStateOf(false) }
-    var actionError by remember { mutableStateOf<String?>(null) }
+    var replyText by remember(postId) { mutableStateOf("") }
+    var sending by remember(postId) { mutableStateOf(false) }
+    var actionError by remember(postId) { mutableStateOf<String?>(null) }
+    // Deleted from another client while open: there is nothing left
+    // to comment on, so leave rather than post into a tombstone.
+    LaunchedEffect(post?.isDeleted) {
+        if (post?.isDeleted == true) onBack()
+    }
     var menuOpen by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
     val isOurs = post?.author == ourPatp

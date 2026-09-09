@@ -70,7 +70,7 @@ abstract class MessageDao {
      * `where` paths reference posts by bare @da (not the full
      * "~author/<da>" key we store), so we suffix-match on id.
      */
-    @Query("SELECT * FROM messages WHERE whom = :whom AND id LIKE '%/' || :da LIMIT 1")
+    @Query("SELECT * FROM messages WHERE whom = :whom AND (id = :da OR id LIKE '%/' || :da) LIMIT 1")
     abstract suspend fun findByDa(whom: String, da: String): MessageEntity?
 
     /** Oldest non-deleted top-level post id for a conversation (pagination cursor). */
@@ -260,7 +260,8 @@ abstract class MessageDao {
     @Query("""
         SELECT * FROM messages
         WHERE isDeleted = 0
-          AND contentJson LIKE '%' || :needle || '%' ESCAPE '\' COLLATE NOCASE
+          AND (contentJson LIKE '%' || :needle || '%' ESCAPE '\' COLLATE NOCASE
+               OR title LIKE '%' || :needle || '%' ESCAPE '\' COLLATE NOCASE)
         ORDER BY sentMs DESC
         LIMIT 100
     """)

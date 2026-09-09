@@ -85,7 +85,7 @@ data class ContactMap(
 
     fun conversationColor(whom: String): String? = when {
         whom.startsWith("~") -> byShip[whom]?.color
-        whom.startsWith("chat/") -> {
+        whom.startsWith("chat/") || whom.startsWith("heap/") || whom.startsWith("diary/") -> {
             val img = nestToFlag[whom]?.let { byGroupFlag[it]?.image }
             if (img != null && img.startsWith("#")) img else null
         }

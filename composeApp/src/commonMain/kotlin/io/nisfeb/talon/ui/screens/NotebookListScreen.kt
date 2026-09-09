@@ -89,7 +89,21 @@ fun NotebookListScreen(
     // Once cached posts arrive the LazyColumn just renders them — a
     // background refresh that fails (wedged network ⇒ 6s OkHttp cap)
     // shouldn't leave a spinner running on top of content.
-    var loading by remember { mutableStateOf(true) }
+    var loading by remember(whom) { mutableStateOf(true) }
+    // Older pages load as the list nears its end; see GalleryGridScreen.
+    val listState = androidx.compose.foundation.lazy.rememberLazyListState()
+    var paginating by remember(whom) { mutableStateOf(false) }
+    var exhausted by remember(whom) { mutableStateOf(false) }
+    LaunchedEffect(whom, listState) {
+        androidx.compose.runtime.snapshotFlow {
+            listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index to listState.layoutInfo.totalItemsCount
+        }.collect { (last, total) ->
+            if (last == null || total == 0 || last < total - 4 || paginating || exhausted) return@collect
+            paginating = true
+            exhausted = !runCatching { repo.loadOlder(whom) }.getOrDefault(false)
+            paginating = false
+        }
+    }
     // Clear the badge instantly: zero out the home-snapshot row (so a
     // back-nav paints a fresh state immediately) and tell the repo the
     // chat is focused. setOpenChat fires markRead off-thread so the
@@ -145,6 +159,7 @@ fun NotebookListScreen(
             )
 
             else -> LazyColumn(
+                state = listState,
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(16.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),

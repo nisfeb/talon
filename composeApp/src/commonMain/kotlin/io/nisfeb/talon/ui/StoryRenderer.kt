@@ -549,7 +549,7 @@ private fun InlineCitation(cite: StoryPart.Citation) {
         val da = cite.replyDa ?: cite.postDa ?: return@LaunchedEffect
         resolved = CiteCache.resolve(whom, da) {
             resolver.findLocal(whom, da)?.let { return@resolve it }
-            if (whom.startsWith("chat/")) {
+            if (whom.startsWith("chat/") || whom.startsWith("heap/") || whom.startsWith("diary/")) {
                 if (cite.replyDa != null && cite.postDa != null) {
                     resolver.fetchReply(whom, cite.postDa, cite.replyDa)
                 } else {

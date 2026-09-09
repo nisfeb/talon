@@ -364,8 +364,8 @@ fun SearchScreen(
 
 @Composable
 private fun ResultRow(m: MessageEntity, contactMap: ContactMap, onClick: () -> Unit) {
-    val preview = remember(m.id, m.contentJson) {
-        StoryCache.textFor(m.id, m.contentJson).replace('\n', ' ')
+    val preview = remember(m.id, m.contentJson, m.title) {
+        StoryCache.previewFor(m).replace('\n', ' ')
     }
     val title = remember(m.whom, contactMap) { contactMap.conversationLabel(m.whom) }
     val authorLabel = remember(m.author, contactMap) { contactMap.displayName(m.author) }

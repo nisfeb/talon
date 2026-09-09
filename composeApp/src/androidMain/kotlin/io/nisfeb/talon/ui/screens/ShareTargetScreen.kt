@@ -55,7 +55,9 @@ fun ShareTargetScreen(
         db.messages().conversationLatest()
     }.collectAsState(initial = emptyList<MessageEntity>())
     val dedupedConversations = remember(conversations) {
+        // A notebook post needs a title; nothing shared has one.
         conversations.distinctBy { it.whom }
+            .filterNot { it.whom.startsWith("diary/") || it.whom.startsWith("notes/") }
     }
 
     val contactMap by remember {

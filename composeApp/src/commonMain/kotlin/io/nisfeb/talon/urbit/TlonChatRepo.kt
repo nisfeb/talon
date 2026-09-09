@@ -1898,7 +1898,9 @@ class TlonChatRepo(
         // Clean up stale optimistic-insert rows for channels whose id
         // format we'd gotten wrong in earlier builds. One-shot; no-op
         // once all such ghosts are gone.
-        if (whom.startsWith("chat/")) db.messages().purgeStaleLocalIds(whom)
+        if (whom.startsWith("chat/") || whom.startsWith("heap/") || whom.startsWith("diary/")) {
+            db.messages().purgeStaleLocalIds(whom)
+        }
     }
 
     /**
