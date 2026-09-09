@@ -20,6 +20,18 @@ private const val TAG = "AppDirs"
  * standard "user data" path.
  */
 object AppDirs {
+    /**
+     * An optional profile name from `TALON_PROFILE`, so a second build
+     * (a beta AppImage, a test copy) keeps its own data directory,
+     * sessions, database and single-instance lock beside the everyday
+     * one. Null is the everyday install. Letters, digits, `-`, `_`.
+     */
+    val profile: String? = System.getenv("TALON_PROFILE")
+        ?.trim()?.takeIf { it.isNotEmpty() && it.all { c -> c.isLetterOrDigit() || c == '-' || c == '_' } }
+
+    private val lowerName: String get() = profile?.let { "talon-$it" } ?: "talon"
+    private val titleName: String get() = profile?.let { "Talon-$it" } ?: "Talon"
+
     val userData: File by lazy {
         resolve().also { dir ->
             // mkdirs() returns false on permission denied, read-only
@@ -40,15 +52,15 @@ object AppDirs {
             osName.contains("win") -> {
                 val localAppData = System.getenv("LOCALAPPDATA")
                     ?: System.getenv("APPDATA")
-                if (localAppData != null) File(localAppData, "Talon")
-                else File(userHome, ".talon")
+                if (localAppData != null) File(localAppData, titleName)
+                else File(userHome, ".$lowerName")
             }
             osName.contains("mac") || osName.contains("darwin") ->
-                File(userHome, "Library/Application Support/Talon")
+                File(userHome, "Library/Application Support/$titleName")
             else -> {
                 val xdg = System.getenv("XDG_CONFIG_HOME")
-                if (!xdg.isNullOrBlank()) File(xdg, "talon")
-                else File(userHome, ".config/talon")
+                if (!xdg.isNullOrBlank()) File(xdg, lowerName)
+                else File(userHome, ".config/$lowerName")
             }
         }
     }

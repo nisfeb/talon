@@ -15,7 +15,13 @@
 # already have it. AppImages can also be extracted with
 # `--appimage-extract` if FUSE isn't available.
 #
-# Usage: scripts/build-appimage.sh [--skip-build]
+# Usage: scripts/build-appimage.sh [--skip-build] [--profile NAME]
+#
+# --profile NAME bakes TALON_PROFILE=NAME into the launcher, so the
+# AppImage keeps its own data directory (~/.config/talon-NAME), its own
+# sessions, database and single-instance lock, and titles its window
+# "Talon (NAME)". It can then run beside the everyday Talon. The
+# output is dist/Talon-NAME-x86_64.AppImage.
 
 set -euo pipefail
 
@@ -25,9 +31,19 @@ ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$ROOT"
 
 SKIP_BUILD=0
-if [[ "${1:-}" == "--skip-build" ]]; then
-    SKIP_BUILD=1
+PROFILE=""
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --skip-build) SKIP_BUILD=1; shift ;;
+        --profile) PROFILE="${2:?--profile needs a name}"; shift 2 ;;
+        *) echo "unknown argument: $1" >&2; exit 2 ;;
+    esac
+done
+if [[ -n "$PROFILE" && ! "$PROFILE" =~ ^[A-Za-z0-9_-]+$ ]]; then
+    echo "--profile must be letters, digits, - or _" >&2; exit 2
 fi
+APP_TITLE="Talon"
+if [[ -n "$PROFILE" ]]; then APP_TITLE="Talon ($PROFILE)"; fi
 
 DIST_SRC="composeApp/build/compose/binaries/main-release/app/Talon"
 ICON_SRC="composeApp/src/desktopMain/resources/icon.png"
@@ -135,10 +151,10 @@ done
 cp "$ICON_SRC" "$APPDIR/talon.png"
 
 # .desktop file — AppImage spec needs exactly one at the root.
-cat > "$APPDIR/talon.desktop" <<'EOF'
+cat > "$APPDIR/talon.desktop" <<EOF
 [Desktop Entry]
 Type=Application
-Name=Talon
+Name=$APP_TITLE
 GenericName=Urbit Chat Client
 Exec=Talon
 Icon=talon
@@ -150,16 +166,17 @@ EOF
 
 # AppRun: AppImage's entrypoint. Mirrors what the bin/Talon launcher
 # would do if invoked directly — set HERE, exec the launcher.
-cat > "$APPDIR/AppRun" <<'EOF'
+cat > "$APPDIR/AppRun" <<EOF
 #!/usr/bin/env bash
-HERE="$(dirname "$(readlink -f "${0}")")"
-exec "${HERE}/bin/Talon" "$@"
+HERE="\$(dirname "\$(readlink -f "\${0}")")"
+${PROFILE:+export TALON_PROFILE="$PROFILE"}
+exec "\${HERE}/bin/Talon" "\$@"
 EOF
 chmod +x "$APPDIR/AppRun"
 
 # 4. Build the AppImage.
 mkdir -p "$OUT_DIR"
-OUT_FILE="$OUT_DIR/Talon-x86_64.AppImage"
+OUT_FILE="$OUT_DIR/Talon${PROFILE:+-$PROFILE}-x86_64.AppImage"
 echo "==> Packaging into $OUT_FILE"
 # ARCH must be set for appimagetool 13+. Disable FUSE for the tool
 # itself (--appimage-extract-and-run) so this works inside CI/sandbox
@@ -169,4 +186,4 @@ ARCH=x86_64 "$APPIMAGETOOL" --appimage-extract-and-run "$APPDIR" "$OUT_FILE"
 ls -lh "$OUT_FILE"
 echo
 echo "Built $OUT_FILE"
-echo "Testers run it with: chmod +x Talon-x86_64.AppImage && ./Talon-x86_64.AppImage"
+echo "Testers run it with: chmod +x $(basename "$OUT_FILE") && ./$(basename "$OUT_FILE")"

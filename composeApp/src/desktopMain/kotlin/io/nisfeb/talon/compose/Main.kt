@@ -438,7 +438,7 @@ fun main() {
             // application { } for why we don't minimize-to-tray here.
             onCloseRequest = quitToOs,
             state = windowState,
-            title = "Talon",
+            title = io.nisfeb.talon.util.AppDirs.profile?.let { "Talon ($it)" } ?: "Talon",
             icon = iconPainter,
             onPreviewKeyEvent = { e ->
                 if (e.type == androidx.compose.ui.input.key.KeyEventType.KeyDown &&
