@@ -246,6 +246,7 @@ fun App(
     // Shown as a banner while the landing runs; null when there is
     // nothing to wait for.
     var landingProgress by remember { mutableStateOf<io.nisfeb.talon.ui.LandingProgress?>(null) }
+    var landingHidden by remember { mutableStateOf(false) }
     var settingsStartOnAccount by remember { mutableStateOf(false) }
     var showSettings by remember { mutableStateOf(false) }
     var showSidebarSettings by remember { mutableStateOf(false) }
@@ -651,8 +652,11 @@ fun App(
         LaunchedEffect(repo, pendingLanding) {
             val flag = pendingLanding ?: return@LaunchedEffect
             val began = nowMs()
-            fun step(text: String, failed: Boolean = false) {
-                landingProgress = io.nisfeb.talon.ui.LandingProgress(text, (nowMs() - began) / 1000, failed)
+            landingHidden = false
+            fun step(text: String) {
+                val secs = (nowMs() - began) / 1000
+                io.nisfeb.talon.util.Log.i("Landing", "$text (${secs}s)")
+                if (!landingHidden) landingProgress = io.nisfeb.talon.ui.LandingProgress(text, secs, slow = secs > 600)
             }
             step("Connecting to your ship")
             repo.bootstrapping.first { !it }
@@ -660,12 +664,16 @@ fun App(
             // is really here. A fresh comet is busy with updates and the
             // calling desk: it acks late or not at all, and a channel
             // that cycles in between loses the join's facts. The join
-            // poke is idempotent, so it is repeated while we wait.
-            val deadline = nowMs() + 10 * 60_000L
+            // poke is idempotent, so it is repeated while we wait. There
+            // is no deadline: a slow machine took eleven minutes and the
+            // old ten-minute cutoff called that a failure just as the
+            // group arrived. After ten minutes the banner only says it
+            // is slow, and the pokes space out.
             var lastJoin = 0L
             var asks = 0
-            while (db.groups().getGroup(flag) == null && nowMs() < deadline) {
-                if (nowMs() - lastJoin > 30_000L) {
+            while (db.groups().getGroup(flag) == null) {
+                val slow = nowMs() - began > 600_000L
+                if (nowMs() - lastJoin > (if (slow) 90_000L else 30_000L)) {
                     asks++
                     step(if (asks == 1) "Joining Nisfeb Software" else "Joining Nisfeb Software, try $asks. The ship is still installing updates")
                     runCatching { repo.acceptInvite(flag) }
@@ -674,36 +682,26 @@ fun App(
                 runCatching { repo.refreshGroups() }
                 if (db.groups().getGroup(flag) == null) {
                     step(if (asks <= 1) "Waiting for the ship to confirm the group" else "Joining Nisfeb Software, try $asks. The ship is still installing updates")
-                    kotlinx.coroutines.delay(5_000)
+                    kotlinx.coroutines.delay(if (slow) 15_000 else 5_000)
                 }
-            }
-            if (db.groups().getGroup(flag) == null) {
-                step("The join did not complete in ten minutes. The ship may still be busy; the group will appear when it does.", failed = true)
-                pendingLanding = null
-                return@LaunchedEffect
             }
             // The desk is expected; only a failure is worth a dialog.
             callController?.installTrunkQuietly()
             // The group row lands before its channels do, sometimes by
             // minutes, and the channel facts can be lost the same way
             // the join's were. Keep reconciling until a chat channel is
-            // really there, on the same overall clock.
+            // really there.
             var whom: String? = null
             var polls = 0
-            while (whom == null && nowMs() < deadline) {
+            while (whom == null) {
                 whom = db.groups().streamChannelsForGroup(flag).first()
                     .firstOrNull { it.nest.startsWith("chat/") }?.nest
                 if (whom == null) {
                     polls++
                     step("Joined Nisfeb Software. Waiting for its channels to arrive" + if (polls > 6) " (the ship is still busy)" else "")
                     runCatching { repo.refreshGroups() }
-                    kotlinx.coroutines.delay(5_000)
+                    kotlinx.coroutines.delay(if (nowMs() - began > 600_000L) 15_000 else 5_000)
                 }
-            }
-            if (whom == null) {
-                step("Joined Nisfeb Software, but its channels did not arrive in ten minutes. They will appear when the ship catches up.", failed = true)
-                pendingLanding = null
-                return@LaunchedEffect
             }
             openChat = whom
             revealGroupRequest = flag
@@ -714,6 +712,7 @@ fun App(
             kotlinx.coroutines.withTimeoutOrNull(60_000) {
                 db.messages().stream(whom).first { it.isNotEmpty() }
             }
+            step("Ready")
             pendingLanding = null
             landingProgress = null
         }
@@ -1330,7 +1329,7 @@ fun App(
                             settingsStartOnAccount = true
                             showSettings = true
                         },
-                        onDismiss = { landingProgress = null },
+                        onDismiss = { landingProgress = null; landingHidden = true },
                     )
                 }
                 androidx.compose.foundation.layout.Column(

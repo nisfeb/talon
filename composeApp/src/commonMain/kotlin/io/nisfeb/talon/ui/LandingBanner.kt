@@ -31,8 +31,9 @@ data class LandingProgress(
     val step: String,
     /** Seconds since the landing began. */
     val elapsedSecs: Long,
-    /** True once we have given up; the banner then offers Dismiss. */
-    val failed: Boolean = false,
+    /** True once this has run well past the usual time. Nothing has
+     *  failed; the ship is just slow, and the wait goes on. */
+    val slow: Boolean = false,
 )
 
 @Composable
@@ -47,33 +48,34 @@ fun LandingBanner(
 ) {
     Surface(
         modifier = modifier.fillMaxWidth(),
-        color = if (progress.failed) MaterialTheme.colorScheme.errorContainer
-        else MaterialTheme.colorScheme.secondaryContainer,
+        color = MaterialTheme.colorScheme.secondaryContainer,
     ) {
         Column(Modifier.fillMaxWidth()) {
-            if (!progress.failed) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+            LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
             Row(
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Column(Modifier.weight(1f)) {
                     Text(
-                        if (progress.failed) "Your ship is up, but the group did not arrive"
-                        else "Getting your ship ready",
+                        if (progress.slow) "Still getting your ship ready" else "Getting your ship ready",
                         style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
                     )
                     Text(
                         progress.step + "  ·  " + formatElapsed(progress.elapsedSecs),
                         style = MaterialTheme.typography.bodySmall,
                     )
-                    if (!progress.failed) {
-                        Text(
+                    Text(
+                        if (progress.slow) {
+                            "This is taking longer than usual, which happens on a slower machine or network. " +
+                                "Nothing has gone wrong; the ship is still installing its updates and the chat opens when it is done."
+                        } else {
                             "The ship is installing its updates and using most of a CPU core. " +
-                                "Talon may stutter or freeze for a minute at a time until it settles; it recovers on its own.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
+                                "Talon may stutter or freeze for a minute at a time until it settles; it recovers on its own."
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                     terminalLine?.takeIf { it.isNotBlank() }?.let {
                         Text(
                             it,
@@ -88,7 +90,7 @@ fun LandingBanner(
                 }
                 Spacer(Modifier.width(8.dp))
                 TextButton(onClick = onOpenTerminal) { Text("Terminal") }
-                if (progress.failed) TextButton(onClick = onDismiss) { Text("Dismiss") }
+                TextButton(onClick = onDismiss) { Text("Hide") }
             }
         }
     }
