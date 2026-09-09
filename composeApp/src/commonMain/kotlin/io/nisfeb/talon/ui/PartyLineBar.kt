@@ -522,7 +522,7 @@ fun PartyLineBarContent(
         // Behind the same expander as the roster: picking a headset is
         // a thing you do once, not something worth a permanent row over
         // the conversation. Renders nothing where the OS owns routing.
-        AudioDeviceControls(audioDevices)
+        AudioDeviceControls(audioDevices, videoDevices = videoDevices, onSelectCamera = onSelectCamera)
         // Recording control for non-immersive clients (desktop): the
         // immersive full-screen has its own Record button, but desktop
         // never opens it, so the control would otherwise be unreachable

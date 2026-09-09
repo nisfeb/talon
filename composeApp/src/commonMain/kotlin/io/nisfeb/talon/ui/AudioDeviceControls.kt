@@ -47,8 +47,13 @@ import io.nisfeb.talon.call.AudioDevices
 fun AudioDeviceControls(
     devices: AudioDevices,
     modifier: Modifier = Modifier,
+    /** Cameras, shown as a third section where the platform lists them. */
+    videoDevices: io.nisfeb.talon.call.VideoDevices = io.nisfeb.talon.call.VideoDevices.Noop,
+    /** Switches a live camera to the picked one; null hides the camera section. */
+    onSelectCamera: ((String) -> Unit)? = null,
 ) {
     if (!devices.supported) return
+    val showCamera = videoDevices.supported && onSelectCamera != null
     var open by remember { mutableStateOf(false) }
 
     Surface(
@@ -62,7 +67,11 @@ fun AudioDeviceControls(
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {
                 Text(
-                    if (devices.unifiedRoute) "Audio device" else "Microphone and speaker",
+                    when {
+                        devices.unifiedRoute -> "Audio device"
+                        showCamera -> "Microphone, speaker and camera"
+                        else -> "Microphone and speaker"
+                    },
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -108,6 +117,23 @@ fun AudioDeviceControls(
                         devices = outputs,
                         selected = output,
                         onPick = { output = it; devices.selectOutput(it) },
+                    )
+                }
+                if (showCamera) {
+                    // The same rows for cameras; "System default" is the first one found.
+                    val cameras = remember(open) {
+                        videoDevices.cameras().map { io.nisfeb.talon.call.AudioDevice(it.id, it.label) }
+                    }
+                    var camera by remember { mutableStateOf(videoDevices.selectedCamera) }
+                    HorizontalDivider(Modifier.padding(vertical = 4.dp))
+                    DevicePicker(
+                        title = "Camera",
+                        devices = cameras,
+                        selected = camera,
+                        onPick = { id ->
+                            camera = id
+                            if (id == null) videoDevices.selectCamera(null) else onSelectCamera?.invoke(id)
+                        },
                     )
                 }
             }
