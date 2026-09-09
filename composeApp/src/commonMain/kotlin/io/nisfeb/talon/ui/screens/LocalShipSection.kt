@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
@@ -28,6 +29,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.foundation.text.KeyboardActions
@@ -78,12 +81,22 @@ fun LocalShipSection(localShip: LocalShip) {
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         Spacer(Modifier.height(8.dp))
-        InfoRow("Ship", info.ship ?: "not yet known")
-        InfoRow("Status", status)
-        InfoRow("Pier", info.pierPath + (pierBytes?.let { "  (${it / 1_048_576} MB)" } ?: ""))
-        InfoRow("Runtime", "vere ${info.runtimeVersion}")
+        val clipboard = LocalClipboardManager.current
+        // Selectable, and the two things people paste elsewhere get a
+        // Copy of their own.
+        SelectionContainer {
+            Column {
+                InfoRow("Ship", info.ship ?: "not yet known")
+                InfoRow("Status", status)
+                InfoRow("Pier", info.pierPath + (pierBytes?.let { "  (${it / 1_048_576} MB)" } ?: ""))
+                InfoRow("Runtime", "vere ${info.runtimeVersion}")
+            }
+        }
         Spacer(Modifier.height(8.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            info.ship?.let { ship ->
+                TextButton(onClick = { clipboard.setText(AnnotatedString(ship)) }) { Text("Copy ship name") }
+            }
             if (running) {
                 OutlinedButton(
                     enabled = !busy,
@@ -113,12 +126,19 @@ fun LocalShipSection(localShip: LocalShip) {
         }
         if (codeShown) {
             val code = localShip.keptCode()
-            Text(
-                code?.let { "Login code: $it  (for signing in from another client on this computer)" }
-                    ?: "No code kept yet; it is read at the first boot.",
-                style = MaterialTheme.typography.bodySmall,
-                fontFamily = FontFamily.Monospace,
-            )
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                SelectionContainer {
+                    Text(
+                        code?.let { "Login code: $it  (for signing in from another client on this computer)" }
+                            ?: "No code kept yet; it is read at the first boot.",
+                        style = MaterialTheme.typography.bodySmall,
+                        fontFamily = FontFamily.Monospace,
+                    )
+                }
+                code?.let { c ->
+                    TextButton(onClick = { clipboard.setText(AnnotatedString(c)) }) { Text("Copy") }
+                }
+            }
         }
 
         // ── runtime upgrade ──
@@ -215,11 +235,13 @@ private fun DojoPanel(localShip: LocalShip, enabled: Boolean) {
             .verticalScroll(scroll)
             .padding(10.dp),
     ) {
-        Text(
-            shown.ifEmpty { if (enabled) "Waiting for output…" else "The ship is not running." },
-            style = MaterialTheme.typography.bodySmall,
-            fontFamily = FontFamily.Monospace,
-        )
+        SelectionContainer {
+            Text(
+                shown.ifEmpty { if (enabled) "Waiting for output…" else "The ship is not running." },
+                style = MaterialTheme.typography.bodySmall,
+                fontFamily = FontFamily.Monospace,
+            )
+        }
     }
     Spacer(Modifier.height(6.dp))
     var line by remember { mutableStateOf("") }
