@@ -48,11 +48,25 @@ object RawMarkdown {
      *  and for nested content inside bold / italic / link / quote. */
     fun renderInlines(spans: JsonArray): String {
         val sb = StringBuilder()
-        for (span in spans) {
-            sb.append(renderSpan(span))
+        spans.forEachIndexed { i, span ->
+            val piece = renderSpan(span)
+            if (piece.isEmpty()) return@forEachIndexed
+            // A quote is line-prefixed markdown, so it must own its
+            // lines: Tlon happily puts one mid-verse ("before", quote,
+            // "after"), which would otherwise render as `before> q…`.
+            val quote = isQuote(span)
+            if (quote && sb.isNotEmpty() && !sb.endsWith('\n')) sb.append('\n')
+            sb.append(piece)
+            if (quote && i < spans.lastIndex && !isBreak(spans[i + 1])) sb.append('\n')
         }
         return sb.toString()
     }
+
+    private fun isQuote(span: JsonElement): Boolean =
+        (span as? JsonObject)?.let { it.containsKey("blockquote") || it.containsKey("block-quote") } == true
+
+    private fun isBreak(span: JsonElement): Boolean =
+        (span as? JsonObject)?.containsKey("break") == true
 
     private fun renderSpan(span: JsonElement): String {
         if (span is JsonPrimitive && span.isString) return span.content
@@ -70,27 +84,35 @@ object RawMarkdown {
                 val inner = renderInlinesOrString(obj["strike"])
                 return "~~$inner~~"
             }
-            obj.containsKey("code") -> {
+            obj.containsKey("code") || obj.containsKey("inline-code") -> {
                 // Inline code carries either a string or a single-element
-                // wrapper; both forms appear in the wild.
-                val raw = (obj["code"] as? JsonPrimitive)?.content
-                    ?: renderInlinesOrString(obj["code"])
+                // wrapper; both forms appear in the wild. Tlon spells the
+                // span `inline-code`; our parser spells it `code`.
+                val node = obj["code"] ?: obj["inline-code"]
+                val raw = (node as? JsonPrimitive)?.content
+                    ?: renderInlinesOrString(node)
                 return "`$raw`"
             }
             obj.containsKey("link") -> {
                 val link = obj["link"] as? JsonObject ?: return ""
                 val href = (link["href"] as? JsonPrimitive)?.content.orEmpty()
                 val label = renderInlinesOrString(link["content"]).ifBlank { href }
-                return "[$label]($href)"
+                // An autolinked bare URL has label == href; give it back
+                // bare, which is what the user typed and what the parser
+                // autolinks again.
+                return if (label == href) href else "[$label]($href)"
             }
             obj.containsKey("ship") -> {
                 return (obj["ship"] as? JsonPrimitive)?.content.orEmpty()
             }
-            obj.containsKey("blockquote") -> {
-                val inner = renderInlinesOrString(obj["blockquote"])
+            obj.containsKey("blockquote") || obj.containsKey("block-quote") -> {
+                val inner = renderInlinesOrString(obj["blockquote"] ?: obj["block-quote"])
                 // Markdown blockquotes are line-prefixed. Split on the
                 // round-tripped breaks so multi-line quotes stay quoted.
-                return inner.split('\n').joinToString("\n") { "> $it" }
+                // Tlon closes most quotes with a trailing break; dropping
+                // the empty lines it makes keeps the editor tidy.
+                return inner.split('\n').dropLastWhile { it.isBlank() }
+                    .joinToString("\n") { "> $it" }
             }
             obj.containsKey("break") -> return "\n"
             obj.containsKey("task") -> {

@@ -98,4 +98,23 @@ class RawMarkdownTest {
     fun `null story returns empty`() {
         assertEquals("", RawMarkdown.fromStory(null))
     }
+
+    // ── wire shapes the parser never makes, but Tlon does ───────────
+
+    @Test
+    fun `a quote mid-verse sits on its own lines and drops its trailing break`() {
+        val story = """[{"inline":["before",{"blockquote":["q1",{"break":null},"q2",{"break":null}]},"after"]}]"""
+        assertEquals("before\n> q1\n> q2\nafter", RawMarkdown.fromStoryJson(story))
+    }
+
+    @Test
+    fun `tlon spellings render like ours`() {
+        assertEquals("> q", RawMarkdown.fromStoryJson("""[{"inline":[{"block-quote":["q"]}]}]"""))
+        assertEquals("`x`", RawMarkdown.fromStoryJson("""[{"inline":[{"inline-code":"x"}]}]"""))
+    }
+
+    @Test
+    fun `an autolinked url renders bare`() {
+        assertEquals("see https://a.b/c", render("see https://a.b/c"))
+    }
 }

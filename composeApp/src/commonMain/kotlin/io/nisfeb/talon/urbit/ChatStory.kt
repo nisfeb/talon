@@ -62,14 +62,17 @@ private fun versesOf(contentJson: String): List<JsonObject>? =
     }.getOrNull()
 
 /** The text an edit dialog should open with: everything except the
- *  blocks that can't survive a text round-trip (cites, images, links).
- *  Falls back to the whole story's plain text if the content won't
- *  parse — same as the pre-existing behaviour. */
+ *  blocks that can't survive a text round-trip (cites, images, links),
+ *  rendered as the markdown [chatTextToStory] parses back — `> ` for a
+ *  quote, `**bold**`, backticks, `[label](href)`, `~ship`. The display
+ *  renderer's curly-quoted, unstyled text used to land here, so an
+ *  edited quote came back as prose with “ ” baked in. Falls back to
+ *  the whole story's plain text if the content won't parse. */
 fun editableText(contentJson: String): String {
     val verses = versesOf(contentJson)
         ?: return Story.plainText(runCatching { STORY_JSON.parseToJsonElement(contentJson) }.getOrNull())
     val editable = verses.filterNot(::isPreservedBlock)
-    return Story.plainText(buildJsonArray { editable.forEach { add(it) } })
+    return RawMarkdown.fromStory(buildJsonArray { editable.forEach { add(it) } })
 }
 
 /**

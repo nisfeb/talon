@@ -55,7 +55,9 @@ class EditStoryTest {
         // Code is the one block the text form carries faithfully — it must
         // NOT be preserved as a block too, or the edit duplicates it.
         val code = """[{"block":{"code":{"code":"val x = 1","lang":"kotlin"}}}]"""
-        assertEquals("```\nval x = 1\n```", editableText(code))
+        // The fence keeps its language now: the parser preserves it, so
+        // the editor should show it rather than silently dropping it.
+        assertEquals("```kotlin\nval x = 1\n```", editableText(code))
         val reEdited = editedStory(code, "```\nval x = 2\n```")
         assertEquals(1, blocks(reEdited).size, "exactly one code block, not two")
         assertTrue(reEdited.toString().contains("val x = 2"))
@@ -88,5 +90,38 @@ class EditStoryTest {
         val text = editableText(quotePost)
         assertTrue(!text.contains("~zod"), "no cite label in the editor: '$text'")
         assertNull(text.lineSequence().firstOrNull { it.contains("msg/123") })
+    }
+
+    // ── the editor shows markdown the chat parser reads back ────────
+
+    private fun json(s: String) = kotlinx.serialization.json.Json.parseToJsonElement(s)
+
+    @Test
+    fun `a quote opens as a markdown quote and round-trips without curly quotes`() {
+        val quoted = """[{"inline":[{"blockquote":["hello",{"break":null}]}]}]"""
+        assertEquals("> hello", editableText(quoted))
+        assertEquals(
+            json("""[{"inline":[{"blockquote":["hello"]}]}]"""),
+            editedStory(quoted, editableText(quoted)),
+        )
+    }
+
+    @Test
+    fun `inline markup and mentions survive an edit`() {
+        val styled = """[{"inline":[{"bold":["b"]}," and ",{"ship":"~zod"}," ",{"inline-code":"x"}]}]"""
+        assertEquals("**b** and ~zod `x`", editableText(styled))
+        assertEquals(
+            json("""[{"inline":[{"bold":["b"]}," and ",{"ship":"~zod"}," ",{"code":"x"}]}]"""),
+            editedStory(styled, editableText(styled)),
+        )
+    }
+
+    @Test
+    fun `a block-level quote is preserved untouched`() {
+        val story = """[{"block":{"block-quote":["x"]}},{"inline":["text"]}]"""
+        assertEquals("text", editableText(story))
+        val edited = editedStory(story, "text 2")
+        assertTrue(edited.toString().contains("block-quote"), "quote block kept: $edited")
+        assertTrue(edited.toString().contains("text 2"))
     }
 }
