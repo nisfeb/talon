@@ -35,6 +35,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.rememberCoroutineScope
@@ -101,67 +102,28 @@ fun PartyLineBar(
     incomingCall: Boolean = false,
     /** Toggle recording, or null to hide the control. */
     onToggleRecord: (() -> Unit)? = null,
+    /** Desktop: open the meeting view that fills the window. */
+    onOpenMeeting: (() -> Unit)? = null,
 ) {
     val state by party.state.collectAsState()
-    val cameraOn by party.cameraOn.collectAsState()
-    val localLink by party.localVideoLink.collectAsState()
-    val videoOnShips by party.videoOn.collectAsState()
-    val focused by party.focusedVideo.collectAsState()
-    val videoScope = rememberCoroutineScope()
-    val camera = rememberCameraPermission()
-    // setCameraEnabled's false is the only report that the camera never
-    // opened — no device, a refused permission, or no up link. Dropped,
-    // the button was inert: the tap did nothing and said nothing.
-    var cameraError by remember { mutableStateOf(false) }
+    val w = rememberPartyWiring(party, videoDevices)
     PartyLineBarContent(
         state = state,
         modifier = modifier,
         onToggleMute = { party.setMuted(it) },
         onLeave = { party.leave() },
         partyVideoSupported = isPartyVideoSupported,
-        cameraOn = cameraOn,
-        cameraError = cameraError,
-        onToggleCamera = if (isPartyVideoSupported) {
-            {
-                // Ask the first time; the tap that grants isn't the tap
-                // that opens the camera — how every gated control behaves.
-                // Read the live value, so a fast double-tap can't desync.
-                if (!camera.granted) camera.request()
-                else videoScope.launch {
-                    val on = !party.cameraOn.value
-                    // A failed turn-off leaves nothing to warn about, and
-                    // a success clears the last failure's notice.
-                    cameraError = !party.setCameraEnabled(on) && on
-                }
-            }
-        } else {
-            null
-        },
-        localVideoLink = localLink,
+        cameraOn = w.cameraOn,
+        cameraError = w.cameraError,
+        onToggleCamera = w.onToggleCamera,
+        localVideoLink = w.localLink,
         videoLinkFor = { party.videoLinkFor(it) },
-        videoOnShips = videoOnShips,
-        focusedShip = focused,
-        onFocusVideo = { videoScope.launch { party.setFocusedVideo(it) } },
-        onSelectCamera = if (isPartyVideoSupported && videoDevices.supported) {
-            { id ->
-                // One coroutine: stop, then start on the new device. Two
-                // independent toggles raced each other and left the old camera.
-                videoScope.launch {
-                    videoDevices.selectCamera(id)
-                    if (party.cameraOn.value) {
-                        party.setCameraEnabled(false)
-                        party.setCameraEnabled(true)
-                    }
-                }
-            }
-        } else {
-            null
-        },
-        onSwitchCamera = if (isCameraSwitchSupported) {
-            { party.switchCamera() }
-        } else {
-            null
-        },
+        videoOnShips = w.videoOnShips,
+        focusedShip = w.focused,
+        onFocusVideo = w.onFocusVideo,
+        onSelectCamera = w.onSelectCamera,
+        onSwitchCamera = w.onSwitchCamera,
+        onOpenMeeting = onOpenMeeting,
         nameFor = nameFor,
         audioDevices = audioDevices,
         videoDevices = videoDevices,
@@ -238,6 +200,8 @@ fun PartyLineBarContent(
     videoPane: (@Composable () -> Unit)? = null,
     /** Toggle recording, or null to hide the control. */
     onToggleRecord: (() -> Unit)? = null,
+    /** Desktop: open the meeting view that fills the window. */
+    onOpenMeeting: (() -> Unit)? = null,
     /**
      * Camera toggle, shown only when non-null.
      *
@@ -522,6 +486,12 @@ fun PartyLineBarContent(
         // Behind the same expander as the roster: picking a headset is
         // a thing you do once, not something worth a permanent row over
         // the conversation. Renders nothing where the OS owns routing.
+        if (onOpenMeeting != null && !immersive && partyVideoSupported && headline == null) {
+            androidx.compose.material3.TextButton(
+                onClick = onOpenMeeting,
+                modifier = Modifier.padding(horizontal = 8.dp),
+            ) { Text("Meeting view") }
+        }
         AudioDeviceControls(audioDevices, videoDevices = videoDevices, onSelectCamera = onSelectCamera)
         // Recording control for non-immersive clients (desktop): the
         // immersive full-screen has its own Record button, but desktop
@@ -807,5 +777,124 @@ private fun RecordRow(
                 overflow = TextOverflow.Ellipsis,
             )
         }
+    }
+}
+
+
+/** Everything the call views derive from a [PartyLine], shared by the bar and the meeting view. */
+class PartyWiring(
+    val cameraOn: Boolean,
+    val cameraError: Boolean,
+    val onToggleCamera: (() -> Unit)?,
+    val localLink: io.nisfeb.talon.call.PeerLink?,
+    val videoOnShips: Set<String>,
+    val focused: String?,
+    val onFocusVideo: (String?) -> Unit,
+    val onSelectCamera: ((String) -> Unit)?,
+    val onSwitchCamera: (() -> Unit)?,
+)
+
+@Composable
+fun rememberPartyWiring(party: PartyLine, videoDevices: io.nisfeb.talon.call.VideoDevices): PartyWiring {
+    val cameraOn by party.cameraOn.collectAsState()
+    val localLink by party.localVideoLink.collectAsState()
+    val videoOnShips by party.videoOn.collectAsState()
+    val focused by party.focusedVideo.collectAsState()
+    val videoScope = rememberCoroutineScope()
+    val camera = rememberCameraPermission()
+    var cameraError by remember { mutableStateOf(false) }
+    return PartyWiring(
+        cameraOn = cameraOn,
+        cameraError = cameraError,
+        onToggleCamera = if (isPartyVideoSupported) {
+            {
+                if (!camera.granted) camera.request()
+                else videoScope.launch {
+                    val on = !party.cameraOn.value
+                    cameraError = !party.setCameraEnabled(on) && on
+                }
+            }
+        } else {
+            null
+        },
+        localLink = localLink,
+        videoOnShips = videoOnShips,
+        focused = focused,
+        onFocusVideo = { videoScope.launch { party.setFocusedVideo(it) } },
+        onSelectCamera = if (isPartyVideoSupported && videoDevices.supported) {
+            { id ->
+                videoScope.launch {
+                    videoDevices.selectCamera(id)
+                    if (party.cameraOn.value) {
+                        party.setCameraEnabled(false)
+                        party.setCameraEnabled(true)
+                    }
+                }
+            }
+        } else {
+            null
+        },
+        onSwitchCamera = if (isCameraSwitchSupported) {
+            { party.switchCamera() }
+        } else {
+            null
+        },
+    )
+}
+
+/**
+ * The meeting view for desktop: the full-screen call view hosted in
+ * the main window over everything, with its own Full screen control
+ * for the OS window. Phones get the same view as an immersive dialog
+ * from the bar; desktop never opened it before this.
+ */
+@Composable
+fun PartyLineMeeting(
+    party: PartyLine,
+    nameFor: (String) -> String,
+    selfShip: String,
+    audioDevices: io.nisfeb.talon.call.AudioDevices,
+    videoDevices: io.nisfeb.talon.call.VideoDevices,
+    onClose: () -> Unit,
+    onModerate: ((ship: String, mute: Boolean) -> Unit)? = null,
+    onMessage: ((String) -> Unit)? = null,
+    recording: Boolean = false,
+    recordedBy: Set<String> = emptySet(),
+    onToggleRecord: (() -> Unit)? = null,
+    modifier: Modifier = Modifier,
+) {
+    val state by party.state.collectAsState()
+    val live = state as? PartyState.Live
+    LaunchedEffect(live == null) { if (live == null) onClose() }
+    if (live == null) return
+    val w = rememberPartyWiring(party, videoDevices)
+    Box(modifier.fillMaxSize()) {
+        PartyLineFullScreen(
+            state = live,
+            roomName = live.room,
+            nameFor = nameFor,
+            selfShip = selfShip,
+            onToggleMute = { party.setMuted(it) },
+            onLeave = { party.leave(); onClose() },
+            onMinimize = onClose,
+            audioDevices = audioDevices,
+            videoDevices = videoDevices,
+            onSelectCamera = w.onSelectCamera,
+            onRevokeSpeaking = { ship -> party.revokeSpeaking(ship); onModerate?.invoke(ship, true) },
+            onRestoreSpeaking = { ship -> party.restoreSpeaking(ship); onModerate?.invoke(ship, false) },
+            onMessage = onMessage,
+            recording = recording,
+            recordedBy = recordedBy,
+            onToggleRecord = onToggleRecord,
+            partyVideoSupported = isPartyVideoSupported,
+            cameraOn = w.cameraOn,
+            onToggleCamera = w.onToggleCamera,
+            localVideoLink = w.localLink,
+            videoLinkFor = { party.videoLinkFor(it) },
+            videoOnShips = w.videoOnShips,
+            focusedShip = w.focused,
+            onFocusVideo = w.onFocusVideo,
+            onSwitchCamera = w.onSwitchCamera,
+        )
     }
 }

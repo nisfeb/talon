@@ -20,6 +20,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.zIndex
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -1186,11 +1189,16 @@ fun App(
                     ?: kotlinx.coroutines.flow.MutableStateFlow(io.nisfeb.talon.call.PartyState.Idle)
             }
             val partyUi by partyUiFlow.collectAsState()
+            // Desktop meeting view: the call view over the whole window.
+            var meetingOpen by remember { mutableStateOf(false) }
+            LaunchedEffect(partyUi) {
+                if (partyUi !is io.nisfeb.talon.call.PartyState.Live) meetingOpen = false
+            }
             val callFloats = !inlineCallUiShown.value &&
                 (callUi is io.nisfeb.talon.call.CallUiState.Active ||
                     callUi is io.nisfeb.talon.call.CallUiState.Ended)
             val partyFloats = !inlineCallUiShown.value &&
-                partyUi !is io.nisfeb.talon.call.PartyState.Idle
+                partyUi !is io.nisfeb.talon.call.PartyState.Idle && !meetingOpen
             val floats = callFloats || partyFloats
             androidx.compose.foundation.layout.Column(Modifier.fillMaxSize()) {
                 androidx.compose.foundation.layout.Column(
@@ -1220,6 +1228,7 @@ fun App(
                                 nameFor = { ship -> callContacts.displayName(ship) },
                                 audioDevices = audioDevices,
                                 videoDevices = videoDevices,
+                                onOpenMeeting = { meetingOpen = true },
                                 // Failed is sticky; with no chat slot to
                                 // return to, this is its only way off
                                 // the screen.
@@ -1241,6 +1250,23 @@ fun App(
                         if (floats) Modifier.consumeWindowInsets(WindowInsets.statusBars) else Modifier,
                     ),
                 ) {
+            // Drawn above the app content and catching pointer input, so
+            // nothing underneath reacts while the meeting is up.
+            if (meetingOpen && partyLine != null) {
+                io.nisfeb.talon.ui.PartyLineMeeting(
+                    party = partyLine,
+                    nameFor = { ship -> callContacts.displayName(ship) },
+                    selfShip = shipKey,
+                    audioDevices = audioDevices,
+                    videoDevices = videoDevices,
+                    onClose = { meetingOpen = false },
+                    onMessage = { who -> meetingOpen = false; jumpToChat(who) },
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .zIndex(1f)
+                        .pointerInput(Unit) { detectTapGestures { } },
+                )
+            }
             val rootFocusRequester = remember { FocusRequester() }
             LaunchedEffect(Unit) { rootFocusRequester.requestFocus() }
             Surface(
@@ -2119,6 +2145,7 @@ fun App(
                                                 nameFor = { partyContacts.displayName(it) },
                                                 audioDevices = audioDevices,
                                                 videoDevices = videoDevices,
+                                onOpenMeeting = { meetingOpen = true },
                                                 selfShip = ship.orEmpty(),
                                                 onMessage = jumpToChat,
                                                 // Persist ops mutes on the
