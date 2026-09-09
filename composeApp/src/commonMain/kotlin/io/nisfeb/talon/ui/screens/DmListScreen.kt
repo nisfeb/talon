@@ -578,6 +578,18 @@ fun DmListScreen(
             return@LaunchedEffect
         }
         expandedGroups = expandedGroups + flag
+        // Same landing as a manual expand: on a wide layout the group's
+        // most recent channel opens beside the list and glows.
+        if (autoOpenOnExpand && !editMode) {
+            homeRows.filterIsInstance<HomeRow.GroupChild>()
+                .filter { it.groupFlag == flag }
+                .maxByOrNull { it.m?.sentMs ?: 0L }
+                ?.let {
+                    jumpedWhom = it.whom
+                    jumpNonce++
+                    onRowOpen(it.whom)
+                }
+        }
         // Lazy-item index of the group head: each Header / GroupHead /
         // Flat is one item; GroupChild rows are bundled into their
         // head's item, so they don't count. -1 when the group isn't in
