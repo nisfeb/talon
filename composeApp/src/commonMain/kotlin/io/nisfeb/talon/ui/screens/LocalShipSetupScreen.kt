@@ -105,6 +105,15 @@ fun LocalShipSetupScreen(
                         style = MaterialTheme.typography.bodyMedium,
                         textAlign = TextAlign.Center,
                     )
+                    if (b.firstBoot) {
+                        Text(
+                            "For the first few minutes after it boots, the ship installs updates and uses most of a CPU core. " +
+                                "Talon may stutter or freeze for a minute at a time until it settles.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = TextAlign.Center,
+                        )
+                    }
                     Text(
                         b.detail,
                         style = MaterialTheme.typography.bodySmall,

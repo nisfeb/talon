@@ -246,6 +246,7 @@ private fun showStartupError(title: String, body: String) {
 
 fun main() {
     io.nisfeb.talon.util.DesktopNetworkWatcher.start()
+    io.nisfeb.talon.util.UiWatchdog.start()
     // Single-instance guard. Must be the first call so we exit before
     // racing the existing Talon on DJL native extraction, SQLite open,
     // SSE channel, etc. See SingleInstance.kt for the full post-mortem

@@ -66,6 +66,14 @@ fun LandingBanner(
                         progress.step + "  ·  " + formatElapsed(progress.elapsedSecs),
                         style = MaterialTheme.typography.bodySmall,
                     )
+                    if (!progress.failed) {
+                        Text(
+                            "The ship is installing its updates and using most of a CPU core. " +
+                                "Talon may stutter or freeze for a minute at a time until it settles; it recovers on its own.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                     terminalLine?.takeIf { it.isNotBlank() }?.let {
                         Text(
                             it,
