@@ -636,6 +636,8 @@ val iconsExtendedKeep = setOf(
     // Meeting mode in the call view (PartyLineFullScreen).
     "androidx/compose/material/icons/filled/FullscreenKt.class",
     "androidx/compose/material/icons/filled/FullscreenExitKt.class",
+    // Invite someone (GroupInfoPane).
+    "androidx/compose/material/icons/filled/PersonAddKt.class",
     "androidx/compose/material/icons/filled/MicOffKt.class",
     "androidx/compose/material/icons/filled/NotificationsOffKt.class",
     "androidx/compose/material/icons/filled/PauseKt.class",

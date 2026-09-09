@@ -19,6 +19,7 @@ import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.NotificationsOff
 import androidx.compose.material.icons.filled.People
+import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -82,6 +83,67 @@ fun GroupInfoPane(
     // lines render only when we actually know the number, never "0".
     var memberCount by remember(whom) { mutableStateOf<Int?>(null) }
     var pendingLeave by remember(whom) { mutableStateOf(false) }
+    var inviteOpen by remember(whom) { mutableStateOf(false) }
+    var inviteShip by remember(whom) { mutableStateOf("") }
+    var inviteBusy by remember(whom) { mutableStateOf(false) }
+    var inviteResult by remember(whom) { mutableStateOf<String?>(null) }
+    if (inviteOpen) {
+        AlertDialog(
+            onDismissRequest = { if (!inviteBusy) { inviteOpen = false; inviteResult = null } },
+            title = { Text("Invite someone") },
+            text = {
+                Column {
+                    Text(
+                        "They get an invite to this group on their ship. If the group " +
+                            "only lets admins invite, the host refuses and you will see that here.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.size(8.dp))
+                    androidx.compose.material3.OutlinedTextField(
+                        value = inviteShip,
+                        onValueChange = { inviteShip = it; inviteResult = null },
+                        label = { Text("~ship") },
+                        singleLine = true,
+                        enabled = !inviteBusy,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    inviteResult?.let {
+                        Spacer(Modifier.size(8.dp))
+                        Text(it, style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+            },
+            confirmButton = {
+                val ship = inviteShip.trim().let { if (it.isNotEmpty() && !it.startsWith("~")) "~$it" else it }
+                TextButton(
+                    enabled = !inviteBusy && ship.length > 1 && groupFlag != null,
+                    onClick = {
+                        val flag = groupFlag ?: return@TextButton
+                        inviteBusy = true
+                        inviteResult = null
+                        scope.launch {
+                            inviteResult = runCatching { repo.inviteToGroup(flag, ship) }
+                                .fold(
+                                    onSuccess = { "Invited $ship." },
+                                    onFailure = { e ->
+                                        if (e is io.nisfeb.talon.urbit.PokeNacked) {
+                                            "Invites are not permitted for members in this group; ask an admin."
+                                        } else {
+                                            "Could not send the invite: ${e.message ?: "no answer from your ship"}"
+                                        }
+                                    },
+                                )
+                            inviteBusy = false
+                        }
+                    },
+                ) { Text(if (inviteBusy) "Inviting…" else "Invite") }
+            },
+            dismissButton = {
+                TextButton(enabled = !inviteBusy, onClick = { inviteOpen = false; inviteResult = null }) { Text("Close") }
+            },
+        )
+    }
     LaunchedEffect(whom) {
         val mapping = runCatching { db.groups().channelGroupFor(whom) }.getOrNull()
         groupFlag = mapping?.groupFlag
@@ -247,6 +309,23 @@ fun GroupInfoPane(
                         Icons.AutoMirrored.Filled.KeyboardArrowRight,
                         contentDescription = "Open members",
                     )
+                }
+                HorizontalDivider()
+            }
+            // Any member may try to invite. The group's host decides:
+            // a group that lets members invite accepts the poke, one
+            // that does not nacks it, and the dialog says which.
+            item {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable(onClick = { inviteOpen = true })
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(Icons.Filled.PersonAdd, contentDescription = null)
+                    Spacer(Modifier.size(12.dp))
+                    Text("Invite someone", modifier = Modifier.weight(1f).padding(end = 8.dp))
                 }
                 HorizontalDivider()
             }
