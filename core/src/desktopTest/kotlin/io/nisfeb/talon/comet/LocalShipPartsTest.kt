@@ -54,6 +54,17 @@ class LocalShipPartsTest {
         val answer = "+code\r\n[1mhanmec-tirsup-fodpec-sablud[0m\r\n~zod:dojo> "
         assertEquals("hanmec-tirsup-fodpec-sablud", CometTerminal.code(answer))
         assertNull(CometTerminal.code("~zod:dojo> +code\r\n"))
+        // A comet's name is not its code, however code-like its halves look.
+        assertNull(CometTerminal.code("ames: ~tabdec-hopsep-rilmer-riglup--dolsev-lostug-tilter-binzod\r\n"))
+        assertEquals(
+            "hanmec-tirsup-fodpec-sablud",
+            CometTerminal.code("drum: ~tabdec-hopsep-rilmer-riglup--dolsev-lostug-tilter-binzod\r\n hanmec-tirsup-fodpec-sablud \r\n~tabdec_binzod:dojo> "),
+        )
+        // The busy spinner is redrawn with backspaces around the answer.
+        assertEquals(
+            "hanmec-tirsup-fodpec-sablud",
+            CometTerminal.code("+code\r\n/«behn»\u0008\u0008\u0008\u0008\u0008\u0008\u0008-«behn»\u0008\u0008\u0008\u0008\u0008\u0008\u0008hanmec-tirsup-fodpec-sablud\r\n"),
+        )
     }
 
     @Test

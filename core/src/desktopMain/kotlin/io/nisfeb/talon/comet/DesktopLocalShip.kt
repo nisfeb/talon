@@ -33,6 +33,9 @@ import kotlin.time.Duration.Companion.seconds
  *   vere-v4.6-<os>-<arch>[.exe]   the runtime, fetched once
  *   pier/                          the comet
  *   ports                          the HTTP port, chosen once
+ *   code                           the login code, read once at first
+ *                                  boot (owner-only file, like the
+ *                                  session cookies the app keeps)
  *
  * The terminal is the only way to learn the login code: vere refuses
  * pipes ("not a tty"), and `-t` disables the dojo. So the runtime gets
@@ -74,6 +77,7 @@ class DesktopLocalShip(
         if (current is LocalShipState.Ready && process?.isAlive == true) return current
         if (!pierExists()) fail("There is no local ship to start.")
         val bin = ensureRuntime()
+        clearStaleLock()
         return boot(bin, firstBoot = false)
     }
 
@@ -84,8 +88,27 @@ class DesktopLocalShip(
             waitFor(20.seconds) { !p.isAlive }
             if (p.isAlive) p.destroy()
         }
+        // The front process exits first; its worker unmaps the pier a
+        // moment later and drops the lock. A boot started before that
+        // dies with "serf unexpectedly shut down".
+        waitFor(20.seconds) { if (lockFile.exists()) null else true }
+        delay(500)
         process = null
         _state.value = LocalShipState.Stopped
+    }
+
+    private val lockFile: File get() = File(pier, ".vere.lock")
+
+    /** A lock left by a runtime that is no longer running (a crash, a
+     *  kill) would make vere refuse the pier; clear it. */
+    private fun clearStaleLock() {
+        val lock = lockFile.takeIf { it.isFile } ?: return
+        val pid = lock.readText().trim().toLongOrNull()
+        val alive = pid != null && ProcessHandle.of(pid).map { it.isAlive }.orElse(false)
+        if (!alive) {
+            Log.w(TAG, "clearing a stale pier lock (pid $pid)")
+            lock.delete()
+        }
     }
 
     // ── runtime ──────────────────────────────────────────────────
@@ -173,18 +196,49 @@ class DesktopLocalShip(
                 _state.value = LocalShipState.Booting(firstBoot, CometTerminal.lastDetail(text))
                 delay(500)
             }
-            val mark = transcriptLength()
-            send("+code\r")
-            val code = waitFor(30.seconds) { CometTerminal.code(textSince(mark)) }
-                ?: fail("The ship did not answer +code.")
             val port = File(pier, ".http.ports").takeIf { it.isFile }
                 ?.readText()?.let(CometTerminal::publicPort) ?: httpPort
             val url = "http://127.0.0.1:$port"
+            // The code does not change between boots, and a restarted
+            // ship is often busy (an OTA landing) exactly when the dojo
+            // would be asked. So the code read at first boot is kept,
+            // and later starts just log in with it; the dojo is the
+            // fallback, for a code reset or a lost file.
+            val cached = codeFile.takeIf { it.isFile }?.readText()?.trim()?.takeIf { it.isNotEmpty() }
+            if (cached != null) {
+                // A ship restarted while an update is landing (the
+                // Landscape OTA arrives minutes after first boot) answers
+                // nothing for a while; that is normal, so wait it out.
+                _state.value = LocalShipState.Booting(firstBoot, "waiting for the ship to finish installing updates")
+                val ship = waitFor(10.minutes) { loginShipName(url, cached) }
+                if (ship != null) {
+                    return@withContext LocalShipState.Ready(ship, url, cached).also {
+                        _state.value = it
+                        Log.i(TAG, "local ship ${it.ship} up on port $port")
+                    }
+                }
+                Log.w(TAG, "the kept code was refused; asking the dojo")
+            }
+            // Typing the instant the prompt shows can land while the
+            // dojo is still linking and crash the command, so wait for
+            // the terminal to go quiet first, and ask again if an
+            // answer does not come (a busy ship can take a while).
+            var code: String? = null
+            var asks = 0
+            while (code == null && asks < 8) {
+                waitQuiet(1500)
+                val mark = transcriptLength()
+                send("+code\r")
+                asks++
+                code = waitFor(15.seconds) { CometTerminal.code(textSince(mark)) }
+            }
+            if (code == null) fail("The ship did not answer +code.")
             // The prompt abbreviates a comet's name; the login cookie
             // carries the full one, and proves the code at the same time.
-            val ship = waitFor(30.seconds) { loginShipName(url, code) }
+            val ship = waitFor(2.minutes) { loginShipName(url, code) }
                 ?: CometTerminal.minedShip(snapshot())
                 ?: fail("The ship is up but did not accept its own code.")
+            keepCode(code)
             LocalShipState.Ready(ship, url, code).also {
                 _state.value = it
                 Log.i(TAG, "local ship ${it.ship} up on port $port")
@@ -194,6 +248,20 @@ class DesktopLocalShip(
             process = null
             throw t
         }
+    }
+
+    private val codeFile: File get() = File(dir, "code")
+
+    private fun keepCode(code: String) {
+        runCatching {
+            codeFile.writeText(code)
+            runCatching {
+                java.nio.file.Files.setPosixFilePermissions(
+                    codeFile.toPath(),
+                    java.nio.file.attribute.PosixFilePermissions.fromString("rw-------"),
+                )
+            }
+        }.onFailure { Log.w(TAG, "could not keep the login code", it) }
     }
 
     /** The ship named by the auth cookie a successful login sets, or
@@ -262,6 +330,20 @@ class DesktopLocalShip(
     private fun transcriptLength(): Int = synchronized(transcriptLock) { transcript.length }
     private fun textSince(mark: Int): String = synchronized(transcriptLock) {
         if (mark >= transcript.length) "" else transcript.substring(mark)
+    }
+
+    /** Wait until the terminal has printed nothing for [quietMs]
+     *  (bounded at ten times that, in case it never settles). */
+    private suspend fun waitQuiet(quietMs: Long) {
+        val deadline = System.nanoTime() + quietMs * 10 * 1_000_000
+        var last = transcriptLength()
+        var lastChange = System.nanoTime()
+        while (System.nanoTime() < deadline) {
+            delay(200)
+            val now = transcriptLength()
+            if (now != last) { last = now; lastChange = System.nanoTime() }
+            else if (System.nanoTime() - lastChange >= quietMs * 1_000_000) return
+        }
     }
 
     private suspend fun <T> waitFor(timeout: Duration, probe: suspend () -> T?): T? {

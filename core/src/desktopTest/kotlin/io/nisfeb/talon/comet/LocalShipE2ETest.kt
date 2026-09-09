@@ -45,6 +45,14 @@ class LocalShipE2ETest {
                 assertEquals(ready.url, again.url, "ports are stable across starts")
                 ship.stop()
             }
+        } catch (t: Throwable) {
+            // The terminal is the only witness; put its tail in the report.
+            val log = File(dir, "terminal.log")
+            if (log.isFile) {
+                val tail = log.readText().takeLast(4000)
+                System.err.println("── terminal.log tail ──\n" + CometTerminal.clean(tail))
+            }
+            throw t
         } finally {
             runBlocking { runCatching { ship.stop() } }
             http.close()
