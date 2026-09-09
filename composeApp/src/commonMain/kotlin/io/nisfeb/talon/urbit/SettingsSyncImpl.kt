@@ -317,9 +317,16 @@ class SettingsSyncImpl(
             return
         }
         Log.i(TAG, "bootstrap starting")
-        val body = runCatching { ch.scry("settings", "/desk/$DESK") }
-            .onFailure { Log.w(TAG, "bootstrap scry failed", it) }
-            .getOrNull() as? JsonObject
+        val scried = runCatching { ch.scry("settings", "/desk/$DESK") }
+        if (scried.isFailure) {
+            // A ship we could not reach is not a ship with no settings:
+            // seeding local state now would push this device's values
+            // over whatever the ship and other devices hold. The next
+            // connect runs bootstrap again.
+            Log.w(TAG, "bootstrap scry failed; not seeding", scried.exceptionOrNull())
+            return
+        }
+        val body = scried.getOrNull() as? JsonObject
 
         // Ship returns { "desk": { <bucket>: { <entry>: <value> } } }
         // or the inner desk map directly. Handle both.

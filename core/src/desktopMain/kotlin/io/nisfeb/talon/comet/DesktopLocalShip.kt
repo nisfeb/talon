@@ -98,6 +98,7 @@ class DesktopLocalShip(
         val current = _state.value
         if (current is LocalShipState.Ready && process?.isAlive == true) return current
         if (!pierExists()) fail("There is no local ship to start.")
+        Log.i(TAG, "starting the local ship")
         val bin = ensureRuntime(installedVersion())
         clearStaleLock()
         return boot(bin, firstBoot = false)
@@ -107,18 +108,33 @@ class DesktopLocalShip(
 
     private suspend fun stopLocked() {
         val p = process ?: return
+        Log.i(TAG, "stopping the local ship")
+        // The worker ("serf") is a child of the front process and can
+        // outlive it, still holding the pier; a forced stop must take
+        // it down too or the next boot fights it for the snapshot.
+        val workers = runCatching { p.toHandle().descendants().toList() }.getOrDefault(emptyList())
         if (p.isAlive) {
             runCatching { send("|exit") }
             waitFor(20.seconds) { !p.isAlive }
-            if (p.isAlive) p.destroy()
+            if (p.isAlive) {
+                Log.w(TAG, "the ship ignored |exit; terminating it")
+                p.destroy()
+                waitFor(5.seconds) { !p.isAlive }
+                if (p.isAlive) p.destroyForcibly()
+            }
         }
-        // The front process exits first; its worker unmaps the pier a
-        // moment later and drops the lock. A boot started before that
-        // dies with "serf unexpectedly shut down".
+        waitFor(30.seconds) { if (workers.any { it.isAlive }) null else true }
+        workers.filter { it.isAlive }.forEach {
+            Log.w(TAG, "the ship's worker ${it.pid()} outlived it; terminating")
+            it.destroyForcibly()
+        }
+        // The lock goes when the worker unmaps the pier. A boot started
+        // before that dies with "serf unexpectedly shut down".
         waitFor(20.seconds) { if (lockFile.exists()) null else true }
         delay(500)
         process = null
         _state.value = LocalShipState.Stopped
+        Log.i(TAG, "the local ship stopped")
     }
 
     override fun send(line: String) {

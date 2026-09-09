@@ -181,7 +181,11 @@ echo "==> Packaging into $OUT_FILE"
 # ARCH must be set for appimagetool 13+. Disable FUSE for the tool
 # itself (--appimage-extract-and-run) so this works inside CI/sandbox
 # environments without FUSE on the host.
-ARCH=x86_64 "$APPIMAGETOOL" --appimage-extract-and-run "$APPDIR" "$OUT_FILE"
+# Write beside the target and rename over it: a copy of the previous
+# build that is still running keeps its (now unlinked) file, where
+# writing in place would pull the classes out from under it.
+ARCH=x86_64 "$APPIMAGETOOL" --appimage-extract-and-run "$APPDIR" "$OUT_FILE.new"
+mv -f "$OUT_FILE.new" "$OUT_FILE"
 
 ls -lh "$OUT_FILE"
 echo
