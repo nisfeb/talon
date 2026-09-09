@@ -1,5 +1,9 @@
 package io.nisfeb.talon.urbit
 
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import kotlin.test.Test
@@ -97,5 +101,38 @@ class ThreadUnreadParserTest {
         val summary = buildJsonObject { put("count", 1) }
         assertNull(toThreadUnread("ship/~zod", summary))
         assertNull(toThreadUnread("channel/chat/~host/g", summary))
+    }
+
+    // ── reading a thread on the ship ────────────────────────────────
+
+    @Test
+    fun `thread read source carries the parent's dotted message key`() {
+        val chan = activityThreadReadSource(
+            whom = "chat/~zod/general",
+            parentPostId = "170141184505682734808612287823886221312",
+            parentAuthor = "~bud",
+            groupFlag = "~zod/g",
+        )!!
+        assertEquals(
+            Json.parseToJsonElement(
+                """{"thread":{"key":{"id":"~bud/170.141.184.505.682.734.808.612.287.823.886.221.312","time":"170.141.184.505.682.734.808.612.287.823.886.221.312"},"channel":"chat/~zod/general","group":"~zod/g"}}""",
+            ),
+            chan,
+        )
+        val dm = activityThreadReadSource("~bud", "~bud/170141184505682734808612287823886221312", null, null)!!
+        assertEquals("~bud", (dm["dm-thread"] as JsonObject)["whom"]!!.jsonObject["ship"]!!.jsonPrimitive.content)
+        assertNull(activityThreadReadSource("chat/~zod/general", "170141184505682734808612287823886221312", null, "~zod/g"))
+    }
+
+    @Test
+    fun `read and delete facts for a thread resolve to the local thread row`() {
+        val src = Json.parseToJsonElement(
+            """{"thread":{"key":{"id":"~bud/170.141","time":"170.141"},"channel":"chat/~zod/general","group":"~zod/g"}}""",
+        ).jsonObject
+        assertEquals(ThreadSource("chat/~zod/general", "170141"), sourceToThreadSource(src))
+        val dm = Json.parseToJsonElement(
+            """{"dm-thread":{"key":{"id":"~bud/170.141","time":"170.141"},"whom":{"ship":"~bud"}}}""",
+        ).jsonObject
+        assertEquals(ThreadSource("~bud", "~bud/170141"), sourceToThreadSource(dm))
     }
 }

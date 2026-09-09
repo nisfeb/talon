@@ -88,6 +88,13 @@ fun NotebookPostScreen(
     // unmounts underneath (mutually-exclusive App.kt branches), so without
     // this openWhom goes null and the channel's unread can re-bump / not
     // clear on navigate-away. See GalleryPostScreen for the full rationale.
+    // Comments are this post's thread: reading them here reads the
+    // thread, locally and on the ship, the way the thread list does.
+    DisposableEffect(whom, postId) {
+        repo.setOpenThread(whom, postId)
+        onDispose { repo.setOpenThread(null, null) }
+    }
+
     DisposableEffect(whom) {
         repo.setOpenChat(whom)
         onDispose { repo.setOpenChat(null) }

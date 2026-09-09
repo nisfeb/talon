@@ -86,10 +86,13 @@ class ActivityParserTest {
     @Test
     fun `toUnread populates count notify-count and recency`() {
         val summary = json.parseToJsonElement("""
-            {"count":7,"notify-count":3,"recency":1777000000000,"notify":true}
+            {"count":9,"notify-count":3,"recency":1777000000000,"notify":true,
+             "unread":{"id":"~sampel/170.141","time":"170.141","count":7,"notify":true}}
         """.trimIndent()).jsonObject
         val row = toUnread("ship/~sampel", summary)!!
         assertEquals("~sampel", row.whom)
+        // 9 on the wire includes two thread replies; the badge is the
+        // main stream's own 7.
         assertEquals(7, row.count)
         assertEquals(3, row.notifyCount)
         assertEquals(1777000000000L, row.recencyMs)
@@ -212,18 +215,19 @@ class ActivityParserTest {
     }
 
     @Test
-    fun `activityReadAction wraps source under read all time null deep true`() {
-        // deep=true is load-bearing: diary / heap channels carry
-        // per-post `thread/<nest>/<msg>` child sources that collapse
-        // onto the same whom in our unreads table. Without recursion
-        // the badge re-appears on the next /v4/activity push.
+    fun `activityReadAction wraps source under read all time null and is shallow`() {
+        // Shallow by default: a deep read marks every thread under the
+        // conversation read on the ship, which is not what opening a
+        // chat means. Threads are read one at a time.
         val src = activityReadSource("~sampel")!!
         val body = activityReadAction(src)
         val read = body["read"]!!.jsonObject
         assertTrue(read["source"] is JsonObject)
         val all = read["action"]!!.jsonObject["all"]!!.jsonObject
         assertEquals(JsonNull, all["time"])
-        assertEquals(true, all["deep"]!!.jsonPrimitive.content.toBoolean())
+        assertEquals(false, all["deep"]!!.jsonPrimitive.content.toBoolean())
+        val deep = activityReadAction(src, deep = true)["read"]!!.jsonObject["action"]!!.jsonObject["all"]!!.jsonObject
+        assertEquals(true, deep["deep"]!!.jsonPrimitive.content.toBoolean())
     }
 
     // ─── parseActivityEventTarget — deep-link extraction ────────

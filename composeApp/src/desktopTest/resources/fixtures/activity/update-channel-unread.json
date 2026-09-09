@@ -2,7 +2,12 @@
   "activity": {
     "channel/chat/~ricsul-bilwyt-dozzod-nisfeb/v2c3drm0": {
       "notify-count": 1,
-      "unread": null,
+      "unread": {
+        "id": "~zod/170.141.184.507.988.700.723.732",
+        "time": "170.141.184.507.988.700.723.732",
+        "count": 3,
+        "notify": true
+      },
       "count": 3,
       "recency": 1777054928725,
       "recency-uv": "0v4.00000.qe49o.98biv.00000.00000",
@@ -10,7 +15,12 @@
     },
     "ship/~sampel-palnet": {
       "notify-count": 0,
-      "unread": null,
+      "unread": {
+        "id": "~zod/170.141.184.507.988.700.723.732",
+        "time": "170.141.184.507.988.700.723.732",
+        "count": 1,
+        "notify": false
+      },
       "count": 1,
       "recency": 1777054900000,
       "recency-uv": "0v4.00000.qe49o.96xxx.00000.00000",
@@ -18,7 +28,12 @@
     },
     "club/0v2.abcde.fghij": {
       "notify-count": 2,
-      "unread": null,
+      "unread": {
+        "id": "~zod/170.141.184.507.988.700.723.732",
+        "time": "170.141.184.507.988.700.723.732",
+        "count": 5,
+        "notify": true
+      },
       "count": 5,
       "recency": 1777054910000,
       "recency-uv": "0v4.00000.qe49o.97yyy.00000.00000",

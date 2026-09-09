@@ -56,6 +56,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -224,6 +225,25 @@ class TlonChatRepo(
      * read whenever the app was backgrounded with that chat still open.
      */
     private fun focusedWhom(): String? = if (appForegrounded) openWhom else null
+
+    /** The thread the user is reading, as [openWhom] is the chat. Set
+     *  by the thread list and by the gallery / notebook post screens
+     *  (whose comments are that post's thread). */
+    private var openThread: Pair<String, String>? = null
+    private fun focusedThread(): Pair<String, String>? = if (appForegrounded) openThread else null
+
+    fun setOpenThread(whom: String?, parentId: String?) {
+        val next = if (whom != null && parentId != null) whom to parentId else null
+        val prev = openThread
+        openThread = next
+        if (prev != null && prev != next) {
+            // Leaving: a final read for replies that landed while open.
+            scope.launch { runCatching { markThreadRead(prev.first, prev.second) } }
+        }
+        if (next != null && prev != next) {
+            scope.launch { runCatching { markThreadRead(next.first, next.second) } }
+        }
+    }
 
     fun setOpenChat(whom: String?) {
         val prev = openWhom
@@ -3246,8 +3266,18 @@ class TlonChatRepo(
             }
             // See bootstrapActivity for the no-focus-override rationale —
             // thread indicator should tint even while the channel is open.
+            val focusedThreadNow = focusedThread()
             val threadRows = map.entries.mapNotNull { (key, summary) ->
                 toThreadUnread(key, summary as? JsonObject ?: return@mapNotNull null)
+            }.map { row ->
+                // The thread the user is reading: replies landing now
+                // are read, here and on the ship, like the focused chat.
+                if (focusedThreadNow != null && row.whom == focusedThreadNow.first &&
+                    row.parentPostId == focusedThreadNow.second && row.count > 0
+                ) {
+                    scope.launch { runCatching { markThreadRead(row.whom, row.parentPostId) } }
+                    row.copy(count = 0, notifyCount = 0)
+                } else row
             }
             if (rows.isNotEmpty()) db.unreads().upsertAll(rows)
             if (threadRows.isNotEmpty()) db.threadUnreads().upsertAll(threadRows)
@@ -3256,6 +3286,12 @@ class TlonChatRepo(
         (obj["read"] as? JsonObject)?.let { read ->
             val source = read["source"] as? JsonObject ?: return@let
             val summary = read["activity"] as? JsonObject ?: return@let
+            // A thread read on another client (or our own poke echoed
+            // back): mirror the ship's count for that one thread.
+            sourceToThreadSource(source)?.let { src ->
+                db.threadUnreads().upsert(threadUnreadOf(src, summary))
+                return
+            }
             val whom = sourceToWhom(source) ?: return@let
             toUnread(sourceKey = null, summary = summary, overrideWhom = whom)
                 ?.let { row ->
@@ -3274,6 +3310,10 @@ class TlonChatRepo(
             return
         }
         (obj["del"] as? JsonObject)?.let { source ->
+            sourceToThreadSource(source)?.let { src ->
+                db.threadUnreads().deleteOne(src.whom, src.parentPostId)
+                return
+            }
             sourceToWhom(source)?.let { db.unreads().delete(it) }
             return
         }
@@ -3349,18 +3389,6 @@ class TlonChatRepo(
     // toUnread / sourceKeyToWhom / sourceToWhom / activityReadSource /
     // activityReadAction extracted to ActivityParser.kt for testing.
 
-    /**
-     * Locally clear the unread row for one specific thread. Fired
-     * when the user opens a thread so the per-row indicator tint and
-     * any in-thread "New" divider clear immediately. No server poke —
-     * the channel-level [markRead] (with `deep=true`) is what
-     * propagates "thread seen" to the ship; this is purely a UI mirror
-     * for the case where the user opens a thread without leaving the
-     * channel (so the channel-wide markRead doesn't fire).
-     */
-    suspend fun markThreadReadLocal(whom: String, parentPostId: String) {
-        db.threadUnreads().deleteOne(whom, parentPostId)
-    }
 
     /**
      * Poke %activity to mark a conversation read. Channels require the
@@ -3402,12 +3430,43 @@ class TlonChatRepo(
             }
         } else null
         val source = activityReadSource(whom, groupFlag) ?: return
-        // Retry on transient errors (channel cycle, socket reset
-        // mid-poke). Mirrors Tlon's TS client (`backOff(...,
-        // numOfAttempts: 4)` in activityApi.ts) — without retry, a
-        // poke that races with a reconnect just dropped, leaving the
-        // ship's unread count stuck and Tlon's UI showing a stale
-        // badge after Talon already cleared it locally.
+        pokeActivityRead(ch, whom, source)
+    }
+
+    /**
+     * Tell the ship one thread is read. The local row goes first so the
+     * parent row's tint and the in-thread divider clear at once; the
+     * poke keeps other clients and the next activity scry in agreement.
+     * Channel parents are keyed by bare da, so the author comes from
+     * the parent row; a parent we have not mirrored yet cannot be read
+     * (nothing to show the user either).
+     */
+    suspend fun markThreadRead(whom: String, parentPostId: String) {
+        db.threadUnreads().deleteOne(whom, parentPostId)
+        val ch = channel ?: return
+        val isChannel = whom.startsWith("chat/") || whom.startsWith("diary/") || whom.startsWith("heap/")
+        val groupFlag = if (isChannel) {
+            db.groups().channelGroupFor(whom)?.groupFlag ?: run {
+                Log.w(TAG, "markThreadRead: no group flag for $whom; skipping poke")
+                return
+            }
+        } else null
+        val author = if (isChannel) {
+            db.messages().streamOne(whom, parentPostId).first()?.author ?: return
+        } else null
+        val source = activityThreadReadSource(whom, parentPostId, author, groupFlag) ?: return
+        pokeActivityRead(ch, "$whom#$parentPostId", source)
+    }
+
+    /**
+     * Retry on transient errors (channel cycle, socket reset
+     * mid-poke). Mirrors Tlon's TS client (`backOff(...,
+     * numOfAttempts: 4)` in activityApi.ts) — without retry, a
+     * poke that races with a reconnect just dropped, leaving the
+     * ship's unread count stuck and Tlon's UI showing a stale
+     * badge after Talon already cleared it locally.
+     */
+    private suspend fun pokeActivityRead(ch: UrbitChannel, label: String, source: JsonObject) {
         val maxAttempts = 4
         var attempt = 0
         var lastErr: Throwable? = null
@@ -3431,9 +3490,9 @@ class TlonChatRepo(
         lastErr?.let { err ->
             val transient = isTransientNetworkError(err)
             if (transient) {
-                Log.i(TAG, "markRead $whom gave up after $attempt attempts: ${err.message}")
+                Log.i(TAG, "markRead $label gave up after $attempt attempts: ${err.message}")
             } else {
-                Log.w(TAG, "markRead poke failed for $whom", err)
+                Log.w(TAG, "markRead poke failed for $label", err)
             }
         }
     }

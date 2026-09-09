@@ -108,13 +108,93 @@ private fun String.undot(): String = replace(".", "")
  */
 internal fun toThreadUnread(sourceKey: String, summary: JsonObject): ThreadUnreadEntity? {
     val src = sourceKeyToThreadSource(sourceKey) ?: return null
-    return ThreadUnreadEntity(
-        whom = src.whom,
-        parentPostId = src.parentPostId,
-        count = summary["count"].asInt() ?: 0,
-        notifyCount = summary["notify-count"].asInt() ?: 0,
-        recencyMs = summary["recency"].asLong() ?: 0L,
-    )
+    return threadUnreadOf(src, summary)
+}
+
+internal fun threadUnreadOf(src: ThreadSource, summary: JsonObject) = ThreadUnreadEntity(
+    whom = src.whom,
+    parentPostId = src.parentPostId,
+    count = summary["count"].asInt() ?: 0,
+    notifyCount = summary["notify-count"].asInt() ?: 0,
+    recencyMs = summary["recency"].asLong() ?: 0L,
+)
+
+/**
+ * The structured form of a thread source, as a read or delete fact
+ * carries it: `{thread: {key, channel, group}}` or
+ * `{dm-thread: {key, whom}}`. Same normalisation as
+ * [sourceKeyToThreadSource]. Null for any other source.
+ */
+internal fun sourceToThreadSource(source: JsonObject): ThreadSource? {
+    (source["thread"] as? JsonObject)?.let { t ->
+        val nest = t["channel"].asStr() ?: return null
+        val da = (t["key"] as? JsonObject)?.get("time").asStr() ?: return null
+        return ThreadSource(whom = nest, parentPostId = da.undot())
+    }
+    (source["dm-thread"] as? JsonObject)?.let { t ->
+        val whomObj = t["whom"] as? JsonObject ?: return null
+        val whom = whomObj["ship"].asStr() ?: whomObj["club"].asStr() ?: return null
+        val key = t["key"] as? JsonObject ?: return null
+        val id = key["id"].asStr() ?: return null
+        val slash = id.lastIndexOf('/')
+        if (slash <= 0) return null
+        return ThreadSource(
+            whom = whom,
+            parentPostId = id.substring(0, slash) + "/" + id.substring(slash + 1).undot(),
+        )
+    }
+    return null
+}
+
+/**
+ * The activity source for reading one thread: the parent's message
+ * key (`~author/<dotted-da>` + dotted time) under the conversation.
+ * Channel parents are stored by bare da, so the author comes from the
+ * parent row; DM parents already carry it in the id. Null when the
+ * key cannot be built.
+ */
+internal fun activityThreadReadSource(
+    whom: String,
+    parentPostId: String,
+    parentAuthor: String?,
+    groupFlag: String?,
+): JsonObject? {
+    val (author, da) = if (parentPostId.startsWith("~")) {
+        parentPostId.substringBefore('/') to parentPostId.substringAfter('/')
+    } else {
+        (parentAuthor ?: return null) to parentPostId
+    }
+    if (da.isEmpty() || !da.all { it.isDigit() }) return null
+    val dotted = dotAtom(da)
+    val key = buildJsonObject {
+        put("id", "$author/$dotted")
+        put("time", dotted)
+    }
+    return when {
+        whom.startsWith("~") -> buildJsonObject {
+            put("dm-thread", buildJsonObject {
+                put("key", key)
+                put("whom", buildJsonObject { put("ship", whom) })
+            })
+        }
+        whom.startsWith("0v") -> buildJsonObject {
+            put("dm-thread", buildJsonObject {
+                put("key", key)
+                put("whom", buildJsonObject { put("club", whom) })
+            })
+        }
+        whom.startsWith("chat/") || whom.startsWith("diary/") || whom.startsWith("heap/") -> {
+            groupFlag ?: return null
+            buildJsonObject {
+                put("thread", buildJsonObject {
+                    put("key", key)
+                    put("channel", whom)
+                    put("group", groupFlag)
+                })
+            }
+        }
+        else -> null
+    }
 }
 
 /**
@@ -154,13 +234,17 @@ internal fun toUnread(
     val whom = overrideWhom
         ?: sourceKeyToWhom(sourceKey ?: return null)
         ?: return null
-    val count = summary["count"].asInt() ?: 0
+    // `count` on the wire includes every child thread, which is why a
+    // channel badge built from it could only clear with a deep read
+    // that marked threads read behind the user's back. `unread` is the
+    // main stream alone: `~` (absent) when caught up, otherwise the
+    // first unread message id in wire form (`~author/<dotted-da>`) and
+    // how many follow. Threads keep their own rows (toThreadUnread).
+    val own = summary["unread"] as? JsonObject
+    val count = own?.get("count").asInt() ?: 0
     val notifyCount = summary["notify-count"].asInt() ?: 0
     val recency = summary["recency"].asLong() ?: 0L
-    // `unread` is `~` (absent) when the conversation is fully read;
-    // otherwise an object whose `id` is the first-unread message id in
-    // wire form (`~author/<dotted-da>`).
-    val firstUnreadId = (summary["unread"] as? JsonObject)
+    val firstUnreadId = own
         ?.get("id").asStr()
         ?.let { canonicalUnreadId(whom, it) }
     return UnreadEntity(
@@ -285,7 +369,7 @@ internal fun activityReadSource(whom: String, groupFlag: String? = null): JsonOb
  * conversation read. Caller supplies the source object (built with
  * [activityReadSource]).
  */
-internal fun activityReadAction(source: JsonObject): JsonObject =
+internal fun activityReadAction(source: JsonObject, deep: Boolean = false): JsonObject =
     buildJsonObject {
         put("read", buildJsonObject {
             put("source", source)
@@ -300,7 +384,15 @@ internal fun activityReadAction(source: JsonObject): JsonObject =
                     // refuses to clear on diary / heap channels (and on
                     // any chat with reply traffic).
                     put("time", kotlinx.serialization.json.JsonNull)
-                    put("deep", true)
+                    // deep=true recurses into child sources: every
+                    // thread under a channel, every reply thread under
+                    // a DM. Reading a conversation must NOT do that —
+                    // it marked threads read on the ship the user never
+                    // opened. Threads are read one at a time through
+                    // activityThreadReadSource; the channel badge is
+                    // the main stream's own count (toUnread), so a
+                    // shallow read clears it.
+                    put("deep", deep)
                 })
             })
         })

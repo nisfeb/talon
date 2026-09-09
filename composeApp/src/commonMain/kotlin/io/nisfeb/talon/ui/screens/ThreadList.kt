@@ -55,6 +55,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
@@ -198,17 +199,30 @@ fun ThreadList(
             val row = db.threadUnreads().getOne(whom, parentId)
             threadUnreadSnapshot = row?.count ?: 0
             threadDividerResolved = true
-            if ((row?.count ?: 0) > 0) {
-                runCatching { repo.markThreadReadLocal(whom, parentId) }
-            }
         }
+        // Focus the thread: reads it now (locally and on the ship),
+        // keeps replies that land while it is open read, and reads it
+        // once more on the way out.
+        repo.setOpenThread(whom, parentId)
+    }
+    DisposableEffect(whom, parentId) {
+        onDispose { repo.setOpenThread(null, null) }
     }
 
     var hasAnchored by remember(parentId) { mutableStateOf(false) }
     var flashReplyId by remember(parentId) { mutableStateOf<String?>(null) }
+    // The item count the last follow decision saw. "Pinned to bottom"
+    // has to be judged against the list as it was BEFORE a reply was
+    // appended: once the new row exists the old last row is no longer
+    // the last item, so the live check always says "not at bottom".
+    var knownTotal by remember(parentId) { mutableStateOf(0) }
     LaunchedEffect(rows.second.size, initialScrollReplyId) {
         val total = rows.second.size + (if (parent != null) 2 else 0)
         if (total <= 0) return@LaunchedEffect
+        val lastVisible = listState.layoutInfo.visibleItemsInfo.lastOrNull()
+        val wasPinned = lastVisible == null || lastVisible.index >= knownTotal - 1
+        val ownReply = total > knownTotal && rows.second.lastOrNull()?.m?.author == ourPatp
+        knownTotal = total
         if (!hasAnchored && initialScrollReplyId != null) {
             val idx = rows.second.indexOfFirst { it.m.id == initialScrollReplyId }
             if (idx >= 0) {
@@ -221,7 +235,7 @@ fun ThreadList(
             }
             if (rows.second.isNotEmpty()) onScrollConsumed()
         }
-        if (!hasAnchored || isPinnedToBottom) {
+        if (!hasAnchored || wasPinned || ownReply) {
             listState.scrollToItem(index = total - 1, scrollOffset = Int.MAX_VALUE)
             hasAnchored = true
         }

@@ -79,6 +79,13 @@ fun GalleryPostScreen(
     // focus-override stops suppressing unread re-bumps for this channel, and
     // navigating straight to another channel never fires this channel's
     // markRead — so the badge sticks until you back all the way out.
+    // Comments are this post's thread: reading them here reads the
+    // thread, locally and on the ship, the way the thread list does.
+    DisposableEffect(whom, postId) {
+        repo.setOpenThread(whom, postId)
+        onDispose { repo.setOpenThread(null, null) }
+    }
+
     DisposableEffect(whom) {
         repo.setOpenChat(whom)
         onDispose { repo.setOpenChat(null) }

@@ -54,6 +54,14 @@ class ActivityFocusReadTest {
                     put("notify-count", count)
                     put("recency", 1_777_000_000_000L)
                     put("notify", true)
+                    // The main stream's own unread point: what the badge
+                    // is built from (count on the wire includes threads).
+                    put("unread", buildJsonObject {
+                        put("id", "$whom/170.141")
+                        put("time", "170.141")
+                        put("count", count)
+                        put("notify", true)
+                    })
                 })
             })
         }
