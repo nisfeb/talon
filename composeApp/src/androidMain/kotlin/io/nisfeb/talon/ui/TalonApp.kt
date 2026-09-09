@@ -1780,6 +1780,7 @@ fun TalonApp(
             openWhom != null && openWhom!!.startsWith("heap/") -> when {
                 galleryComposeOpen -> GalleryComposeScreen(
                     repo = app.repo,
+                    http = app.ktorHttp,
                     whom = openWhom!!,
                     onBack = { galleryComposeOpen = false },
                     onPosted = { galleryComposeOpen = false },
@@ -1788,6 +1789,7 @@ fun TalonApp(
                 openGalleryPostId != null -> GalleryPostScreen(
                     db = app.db,
                     repo = app.repo,
+                    http = app.ktorHttp,
                     ourPatp = loggedInShip ?: "",
                     whom = openWhom!!,
                     postId = openGalleryPostId!!,
@@ -1797,6 +1799,7 @@ fun TalonApp(
                 else -> GalleryGridScreen(
                     db = app.db,
                     repo = app.repo,
+                    http = app.ktorHttp,
                     whom = openWhom!!,
                     onBack = { openWhom = null },
                     onOpenPost = { openGalleryPostId = it },

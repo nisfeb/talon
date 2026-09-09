@@ -134,6 +134,22 @@ fun firstLinkUrl(parts: List<io.nisfeb.talon.urbit.StoryPart>): String? {
     return null
 }
 
+/**
+ * The URL a gallery post should fetch its own preview for: a link
+ * block whose `meta` came back empty (every Talon post until now, and
+ * sites that block the poster's fetch), or a legacy inline link from
+ * before Tlon adopted the link block. Null when the story already
+ * carries a usable preview or has no URL at all.
+ */
+fun galleryPreviewUrl(parts: List<io.nisfeb.talon.urbit.StoryPart>): String? {
+    val link = parts.firstOrNull { it is io.nisfeb.talon.urbit.StoryPart.LinkPreview }
+        as? io.nisfeb.talon.urbit.StoryPart.LinkPreview
+    if (link != null) {
+        return if (link.title.isNullOrBlank() && link.imageUrl.isNullOrBlank()) link.url else null
+    }
+    return firstLinkUrl(parts)
+}
+
 /** The first urb:// link in [parts], for the [UrbUnfurlCard]. */
 fun firstUrbUrl(parts: List<io.nisfeb.talon.urbit.StoryPart>): String? {
     for (p in parts) {

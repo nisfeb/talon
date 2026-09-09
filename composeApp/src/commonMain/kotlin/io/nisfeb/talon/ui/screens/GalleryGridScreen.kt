@@ -63,6 +63,7 @@ import kotlinx.coroutines.flow.map
 fun GalleryGridScreen(
     db: AppDatabase,
     repo: TlonChatRepo,
+    http: io.ktor.client.HttpClient,
     whom: String,
     onBack: () -> Unit,
     onOpenPost: (postId: String) -> Unit,
@@ -150,6 +151,7 @@ fun GalleryGridScreen(
             ) {
                 items(items = posts, key = { it.id }) { post ->
                     GalleryTile(
+                        http = http,
                         post = post,
                         contactMap = contactMap,
                         onClick = { onOpenPost(post.id) },
@@ -162,6 +164,7 @@ fun GalleryGridScreen(
 
 @Composable
 private fun GalleryTile(
+    http: io.ktor.client.HttpClient,
     post: MessageEntity,
     contactMap: ContactMap,
     onClick: () -> Unit,
@@ -169,7 +172,22 @@ private fun GalleryTile(
     val parts = remember(post.id, post.contentJson) {
         StoryCache.partsFor(post.id, post.contentJson)
     }
+    // A link post whose meta is empty (Talon's own until now, or a
+    // site that blocked the poster) and a legacy inline link carry no
+    // preview of their own: fetch one here, like chat's preview card.
+    val previewUrl = remember(parts) { io.nisfeb.talon.ui.galleryPreviewUrl(parts) }
+    var fetched by remember(previewUrl) {
+        mutableStateOf<io.nisfeb.talon.urbit.LinkPreviewCache.Preview?>(null)
+    }
+    LaunchedEffect(previewUrl) {
+        if (previewUrl != null) {
+            fetched = io.nisfeb.talon.urbit.LinkPreviewCache.await(http, previewUrl)
+        }
+    }
     val primary = parts.firstOrNull { it is StoryPart.Image }
+        ?: fetched?.let {
+            StoryPart.LinkPreview(it.url, it.title, it.description, it.imageUrl, it.domain)
+        }
         ?: parts.firstOrNull { it is StoryPart.LinkPreview }
         ?: parts.firstOrNull { it is StoryPart.Text }
 

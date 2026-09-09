@@ -62,6 +62,7 @@ import kotlinx.coroutines.launch
 fun GalleryPostScreen(
     db: AppDatabase,
     repo: TlonChatRepo,
+    http: io.ktor.client.HttpClient,
     ourPatp: String,
     whom: String,
     postId: String,
@@ -157,6 +158,16 @@ fun GalleryPostScreen(
                 StoryCache.partsFor(p.id, p.contentJson)
             }
             StoryRenderer(parts = parts, modifier = Modifier.fillMaxWidth())
+            // Same fallback as the grid tile: a post with no preview of
+            // its own gets chat's client-side card.
+            val uriHandler = androidx.compose.ui.platform.LocalUriHandler.current
+            io.nisfeb.talon.ui.galleryPreviewUrl(parts)?.let { url ->
+                io.nisfeb.talon.ui.LinkPreviewCard(
+                    url = url,
+                    http = http,
+                    onOpen = { uriHandler.openUri(it) },
+                )
+            }
 
             Row(
                 verticalAlignment = Alignment.CenterVertically,

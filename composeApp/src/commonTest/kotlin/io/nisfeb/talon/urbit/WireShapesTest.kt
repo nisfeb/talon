@@ -258,6 +258,24 @@ class WireShapesTest {
         assertTrue(link["meta"]!!.jsonObject.isEmpty())
     }
 
+    @Test
+    fun `galleryLinkBlock carries the poster's preview under Tlon's keys`() {
+        val preview = LinkPreviewCache.Preview(
+            url = "https://www.example.com/a",
+            title = "A title",
+            description = "A description",
+            imageUrl = "https://www.example.com/a.png",
+        )
+        val meta = galleryLinkBlock("https://www.example.com/a", linkMeta(preview))["block"]!!
+            .jsonObject["link"]!!.jsonObject["meta"]!!.jsonObject
+        assertEquals("A title", meta["title"]!!.jsonPrimitive.content)
+        assertEquals("A description", meta["description"]!!.jsonPrimitive.content)
+        assertEquals("https://www.example.com/a.png", meta["previewImageUrl"]!!.jsonPrimitive.content)
+        assertEquals("example.com", meta["siteName"]!!.jsonPrimitive.content)
+        // A failed fetch posts the empty bag, exactly like Tlon.
+        assertTrue(linkMeta(null).isEmpty())
+    }
+
     // ─── end-to-end composition (what the actual poke payload looks like) ───
 
     @Test

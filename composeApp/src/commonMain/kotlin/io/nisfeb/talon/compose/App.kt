@@ -1877,6 +1877,7 @@ fun App(
                             openChat?.startsWith("heap/") == true && galleryComposeOpen -> ({
                                 GalleryComposeScreen(
                                     repo = repo,
+                                    http = http,
                                     whom = openChat!!,
                                     onBack = { galleryComposeOpen = false },
                                     onPosted = { galleryComposeOpen = false },
@@ -1886,6 +1887,7 @@ fun App(
                                 GalleryPostScreen(
                                     db = db,
                                     repo = repo,
+                                    http = http,
                                     ourPatp = ship,
                                     whom = openChat!!,
                                     postId = openGalleryPostId!!,
@@ -1896,6 +1898,7 @@ fun App(
                                 GalleryGridScreen(
                                     db = db,
                                     repo = repo,
+                                    http = http,
                                     whom = openChat!!,
                                     onBack = { openChat = null },
                                     onOpenPost = { id -> openGalleryPostId = id },

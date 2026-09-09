@@ -223,16 +223,28 @@ internal fun channelDelReact(postId: String, author: String): JsonObject =
         })
     }
 
-/** Gallery link block: `{block: {link: {url, meta: {}}}}`. */
-internal fun galleryLinkBlock(url: String): JsonObject =
+/** Gallery link block: `{block: {link: {url, meta}}}`. [meta] is the
+ *  poster's own preview fetch, see [linkMeta]; Tlon posts `{}` when
+ *  the fetch fails and so do we. */
+internal fun galleryLinkBlock(url: String, meta: JsonObject = buildJsonObject { }): JsonObject =
     buildJsonObject {
         put("block", buildJsonObject {
             put("link", buildJsonObject {
                 put("url", url)
-                put("meta", buildJsonObject { })
+                put("meta", meta)
             })
         })
     }
+
+/** Tlon's link `meta` bag from an OpenGraph fetch. Only the keys the
+ *  poster's client fills; nothing server-side ever touches it. */
+internal fun linkMeta(preview: LinkPreviewCache.Preview?): JsonObject = buildJsonObject {
+    if (preview == null) return@buildJsonObject
+    preview.title?.takeIf { it.isNotBlank() }?.let { put("title", it) }
+    preview.description?.takeIf { it.isNotBlank() }?.let { put("description", it) }
+    preview.imageUrl?.takeIf { it.isNotBlank() }?.let { put("previewImageUrl", it) }
+    put("siteName", preview.domain)
+}
 
 /** Notebook meta bag for an essay. */
 internal fun notebookMeta(title: String, image: String): JsonObject =

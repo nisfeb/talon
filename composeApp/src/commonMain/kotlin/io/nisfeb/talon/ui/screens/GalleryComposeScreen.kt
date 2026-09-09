@@ -62,6 +62,7 @@ private enum class GalleryTab(val label: String) {
 @Composable
 fun GalleryComposeScreen(
     repo: TlonChatRepo,
+    http: io.ktor.client.HttpClient,
     whom: String,
     onBack: () -> Unit,
     onPosted: () -> Unit,
@@ -151,7 +152,7 @@ fun GalleryComposeScreen(
                 onClick = {
                     sending = true
                     error = null
-                    val content = when (tab) {
+                    val content: kotlinx.serialization.json.JsonArray? = when (tab) {
                         GalleryTab.Image -> buildJsonArray {
                             add(buildJsonObject {
                                 put("block", buildJsonObject {
@@ -164,20 +165,9 @@ fun GalleryComposeScreen(
                                 })
                             })
                         }
-                        GalleryTab.Link -> buildJsonArray {
-                            // Tlon's LinkInput posts a link block so the
-                            // server-side previewer replaces it with an
-                            // enriched meta bag. Plain URLs in inline
-                            // arrays only render as literal text.
-                            add(buildJsonObject {
-                                put("block", buildJsonObject {
-                                    put("link", buildJsonObject {
-                                        put("url", linkUrl.trim())
-                                        put("meta", buildJsonObject { })
-                                    })
-                                })
-                            })
-                        }
+                        // Built in the coroutine below: the link block's
+                        // meta comes from our own preview fetch.
+                        GalleryTab.Link -> null
                         GalleryTab.Text -> buildJsonArray {
                             val lines = textBody.trim().split("\n")
                             add(buildJsonObject {
@@ -191,7 +181,20 @@ fun GalleryComposeScreen(
                         }
                     }
                     scope.launch {
-                        runCatching { repo.sendGalleryPost(whom, content) }
+                        val body = content ?: run {
+                            // Tlon's LinkInput fills the link block's meta
+                            // from the poster's own OpenGraph fetch; nothing
+                            // server-side ever does. Post the empty bag when
+                            // the site blocks us, exactly as Tlon does.
+                            val url = linkUrl.trim()
+                            val preview = kotlinx.coroutines.withTimeoutOrNull(8_000) {
+                                runCatching { io.nisfeb.talon.urbit.LinkPreviewCache.await(http, url) }.getOrNull()
+                            }
+                            buildJsonArray {
+                                add(io.nisfeb.talon.urbit.galleryLinkBlock(url, io.nisfeb.talon.urbit.linkMeta(preview)))
+                            }
+                        }
+                        runCatching { repo.sendGalleryPost(whom, body) }
                             .onSuccess {
                                 sending = false
                                 onPosted()
