@@ -137,6 +137,8 @@ fun SettingsScreen(
     /** Opens the Loops screen (scheduled agent prompts). Defaults to
      *  no-op; the row only renders where isLoopsSupported + a key. */
     onOpenLoops: () -> Unit = {},
+    /** The comet Talon runs on this computer; Noop where unsupported. */
+    localShip: io.nisfeb.talon.comet.LocalShip = io.nisfeb.talon.comet.LocalShip.Noop,
     /** Fired after the user flips the mnemonym-naming toggle; hosts
      *  push the new value to %settings (ui-prefs bucket) so the choice
      *  follows the user across devices. Local apply + persist happen
@@ -564,6 +566,11 @@ fun SettingsScreen(
             }
             Spacer(Modifier.height(4.dp))
 
+            if (io.nisfeb.talon.ui.isLocalCometSupported && localShip.pierExists()) {
+                Spacer(Modifier.height(8.dp))
+                HorizontalDivider()
+                LocalShipSection(localShip)
+            }
             }
             if (safeTab == SettingsTab.Notifications) {
             if (notificationHealth != null) {

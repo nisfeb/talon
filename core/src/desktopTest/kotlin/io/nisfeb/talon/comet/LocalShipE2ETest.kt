@@ -4,7 +4,9 @@ import io.ktor.client.HttpClient
 import io.ktor.client.engine.okhttp.OkHttp
 import io.ktor.client.request.forms.submitForm
 import io.ktor.http.parameters
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeoutOrNull
 import java.io.File
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -38,6 +40,18 @@ class LocalShipE2ETest {
                     formParameters = parameters { append("password", ready.code) },
                 )
                 assertEquals(200, resp.status.value, "login with the comet's code")
+                // Settings: the dojo panel types into the same terminal.
+                ship.send("+code")
+                val echoed = withTimeoutOrNull(20_000) {
+                    ship.terminal.first { it.contains(ready.code) }
+                }
+                assertTrue(echoed != null, "the dojo answered +code on the terminal flow")
+                assertEquals(ready.ship, ship.describe()?.ship, "describe() knows the ship")
+                assertEquals(ready.code, ship.keptCode(), "the code is kept for later starts")
+                // 4.6 is the newest release at the time of writing; a
+                // newer one just means this returns an update.
+                runCatching { ship.checkRuntimeUpdate() }
+                    .onFailure { throw AssertionError("release check failed: ${it.message}") }
                 ship.stop()
                 assertEquals(LocalShipState.Stopped, ship.state.value)
                 // Second start is the everyday path: same ports, no mining.

@@ -34,6 +34,16 @@ class LocalShipPartsTest {
         )
     }
 
+    @Test
+    fun `release tags and version order`() {
+        assertEquals("4.7", VereRelease.versionFromTag("vere-v4.7"))
+        assertNull(VereRelease.versionFromTag("vere-v4.7-rc1"))
+        assertTrue(VereRelease.isNewer("4.7", "4.6"))
+        assertTrue(VereRelease.isNewer("5.0", "4.12"))
+        assertFalse(VereRelease.isNewer("4.6", "4.6"))
+        assertFalse(VereRelease.isNewer("4.6", "4.10"))
+    }
+
     // ── CometTerminal ────────────────────────────────────────────
 
     private val boot = """

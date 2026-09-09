@@ -9,9 +9,12 @@ package io.nisfeb.talon.comet
  * `.exe` suffix, so we rename on extract.
  */
 object VereRelease {
-    /** Pinned per Talon release; bump deliberately, the pier migrates
-     *  itself on the next start. */
+    /** What a fresh setup installs; an upgrade from Settings can move a
+     *  pier past it. The pier migrates itself on the next start. */
     const val VERSION = "4.6"
+
+    /** The GitHub API answer for the newest release. */
+    const val LATEST_URL = "https://api.github.com/repos/urbit/vere/releases/latest"
 
     fun assetFor(osName: String, osArch: String): String? {
         val os = osName.lowercase()
@@ -35,4 +38,22 @@ object VereRelease {
     /** What we store it as. Windows gets the suffix its loader wants. */
     fun binaryName(asset: String, version: String = VERSION): String =
         memberName(asset, version) + if (asset.startsWith("windows")) ".exe" else ""
+
+    /** "4.7" from a release tag like `vere-v4.7`; null for anything else
+     *  (release candidates and the like are not offered). */
+    fun versionFromTag(tag: String): String? =
+        Regex("^vere-v(\\d+\\.\\d+)$").find(tag.trim())?.groupValues?.get(1)
+
+    /** Whether [candidate] is a later major.minor than [installed]. */
+    fun isNewer(candidate: String, installed: String): Boolean {
+        fun parts(v: String) = v.split('.').map { it.toIntOrNull() ?: 0 }
+        val c = parts(candidate)
+        val i = parts(installed)
+        for (k in 0 until maxOf(c.size, i.size)) {
+            val a = c.getOrElse(k) { 0 }
+            val b = i.getOrElse(k) { 0 }
+            if (a != b) return a > b
+        }
+        return false
+    }
 }
