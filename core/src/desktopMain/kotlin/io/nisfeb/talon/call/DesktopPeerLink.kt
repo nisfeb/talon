@@ -188,7 +188,7 @@ class DesktopPeerLink(
         // Already on (e.g. a double-tap): don't re-open the source.
         if (localVideo?.isEnabled == true) return true
         return runCatching {
-            val device = MediaDevices.getVideoCaptureDevices().firstOrNull()
+            val device = DesktopVideoDevices.pick()
                 ?: error("no camera on this machine")
             source.setVideoCaptureDevice(device)
             source.setVideoCaptureCapability(VideoCaptureCapability(640, 480, 30))

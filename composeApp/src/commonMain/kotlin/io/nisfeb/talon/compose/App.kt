@@ -158,6 +158,7 @@ fun App(
      *  routing — gate it, don't fake it. */
     audioDevices: io.nisfeb.talon.call.AudioDevices =
         io.nisfeb.talon.call.AudioDevices.Noop,
+    videoDevices: io.nisfeb.talon.call.VideoDevices = io.nisfeb.talon.call.VideoDevices.Noop,
     /** Call tones. Noop renders the app silent rather than absent, so
      *  a platform without playback needs no gating. */
     callSounds: io.nisfeb.talon.call.CallSoundPlayer =
@@ -1218,6 +1219,7 @@ fun App(
                                 line,
                                 nameFor = { ship -> callContacts.displayName(ship) },
                                 audioDevices = audioDevices,
+                                videoDevices = videoDevices,
                                 // Failed is sticky; with no chat slot to
                                 // return to, this is its only way off
                                 // the screen.
@@ -2116,6 +2118,7 @@ fun App(
                                                 line,
                                                 nameFor = { partyContacts.displayName(it) },
                                                 audioDevices = audioDevices,
+                                                videoDevices = videoDevices,
                                                 selfShip = ship.orEmpty(),
                                                 onMessage = jumpToChat,
                                                 // Persist ops mutes on the

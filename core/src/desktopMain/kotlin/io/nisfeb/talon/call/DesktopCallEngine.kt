@@ -175,7 +175,7 @@ class DesktopCallEngine(configuredIce: List<IceServer> = emptyList()) : CallEngi
             return true
         }
         return runCatching {
-            val device = MediaDevices.getVideoCaptureDevices().firstOrNull()
+            val device = DesktopVideoDevices.pick()
                 ?: error("no camera on this machine")
             source.setVideoCaptureDevice(device)
             // 640x480@30 to match the other platforms. Talon has no

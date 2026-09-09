@@ -49,6 +49,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import kotlinx.coroutines.launch
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -96,6 +97,7 @@ fun PartyLineFullScreen(
     onLeave: () -> Unit,
     onMinimize: () -> Unit,
     audioDevices: AudioDevices = AudioDevices.Noop,
+    videoDevices: io.nisfeb.talon.call.VideoDevices = io.nisfeb.talon.call.VideoDevices.Noop,
     onRevokeSpeaking: ((String) -> Unit)? = null,
     onRestoreSpeaking: ((String) -> Unit)? = null,
     /** Open a DM with a member. Anyone on the line can, op or not. */
@@ -368,6 +370,9 @@ fun PartyLineFullScreen(
                         )
                     }
                 }
+                if (onToggleCamera != null && videoDevices.supported) {
+                    CameraControl(videoDevices, cameraOn, onToggleCamera)
+                }
 
                 if (onSwitchCamera != null && cameraOn) {
                     ControlButton(
@@ -613,5 +618,58 @@ private fun ParticipantRow(
                 }
             }
         }
+    }
+}
+
+
+/** Which camera to send from, next to the camera toggle; a live camera is restarted on the new one. */
+@Composable
+private fun CameraControl(videoDevices: io.nisfeb.talon.call.VideoDevices, cameraOn: Boolean, onToggleCamera: () -> Unit) {
+    var menuOpen by remember { mutableStateOf(false) }
+    val cameras = remember(menuOpen) { videoDevices.cameras() }
+    var selected by remember { mutableStateOf(videoDevices.selectedCamera) }
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    val label = cameras.firstOrNull { it.id == selected }?.label ?: cameras.firstOrNull()?.label ?: "No camera"
+    if (cameras.isEmpty()) return
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Box {
+            Surface(
+                onClick = { menuOpen = true },
+                shape = CircleShape,
+                color = MaterialTheme.colorScheme.surfaceVariant,
+                contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(58.dp),
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Text(
+                        "Source",
+                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                    )
+                }
+            }
+            DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                for (cam in cameras) {
+                    DropdownMenuItem(
+                        text = { Text(cam.label) },
+                        onClick = {
+                            menuOpen = false
+                            if (cam.id == selected) return@DropdownMenuItem
+                            videoDevices.selectCamera(cam.id)
+                            selected = cam.id
+                            if (cameraOn) {
+                                // Off, then on: the engine reads the new choice when it restarts.
+                                onToggleCamera()
+                                scope.launch {
+                                    kotlinx.coroutines.delay(400)
+                                    onToggleCamera()
+                                }
+                            }
+                        },
+                    )
+                }
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+        Text(label, style = MaterialTheme.typography.labelLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }

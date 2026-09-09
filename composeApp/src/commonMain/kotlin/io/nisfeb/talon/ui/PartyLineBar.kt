@@ -71,6 +71,7 @@ fun PartyLineBar(
      *  owns routing rather than shown empty. */
     audioDevices: io.nisfeb.talon.call.AudioDevices =
         io.nisfeb.talon.call.AudioDevices.Noop,
+    videoDevices: io.nisfeb.talon.call.VideoDevices = io.nisfeb.talon.call.VideoDevices.Noop,
     /** Clears a Failed banner. Null falls back to the line's own
      *  dismissFailure — Failed is sticky by design, and no inline call
      *  site passed one, so a refused join left a permanent red strip
@@ -148,6 +149,7 @@ fun PartyLineBar(
         },
         nameFor = nameFor,
         audioDevices = audioDevices,
+        videoDevices = videoDevices,
         onDismiss = onDismiss ?: { party.dismissFailure() },
         selfShip = selfShip,
         onRevokeSpeaking = { ship ->
@@ -182,6 +184,7 @@ fun PartyLineBarContent(
     nameFor: (String) -> String = { it },
     audioDevices: io.nisfeb.talon.call.AudioDevices =
         io.nisfeb.talon.call.AudioDevices.Noop,
+    videoDevices: io.nisfeb.talon.call.VideoDevices = io.nisfeb.talon.call.VideoDevices.Noop,
     /**
      * Replaces the computed "N on the line" text.
      *
@@ -538,6 +541,7 @@ fun PartyLineBarContent(
                 onLeave = { fullScreen = false; onLeave() },
                 onMinimize = { fullScreen = false },
                 audioDevices = audioDevices,
+                videoDevices = videoDevices,
                 onRevokeSpeaking = onRevokeSpeaking,
                 onRestoreSpeaking = onRestoreSpeaking,
                 // The DM opens behind this dialog; close it so the
