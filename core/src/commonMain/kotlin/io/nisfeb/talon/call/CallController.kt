@@ -1106,6 +1106,19 @@ class CallController(
     }
 
     /**
+     * Install %trunk with no dialog while it works, but with the usual
+     * dialog if it fails. For a fresh comet's first login, where the
+     * desk is expected to arrive and only a problem is worth a word.
+     * Joins an install already under way rather than starting another.
+     */
+    fun installTrunkQuietly(publisher: String = TrunkWire.PUBLISHER) {
+        surfaceInstallFailure = true
+        startInstall(publisher)
+    }
+
+    private var surfaceInstallFailure = false
+
+    /**
      * Install %trunk without asking, once per login, when the ship
      * plainly hasn't got it. Calls used to wait for the first tap on a
      * call button and then stop to ask; a ship that has never had the
@@ -1127,9 +1140,11 @@ class CallController(
             val why = runInstall(publisher)
             when {
                 why == null -> _install.value = TrunkInstall.Hidden
-                _install.value is TrunkInstall.Installing -> _install.value = TrunkInstall.Failed(why)
+                _install.value is TrunkInstall.Installing || surfaceInstallFailure ->
+                    _install.value = TrunkInstall.Failed(why)
                 else -> Log.w(TAG, "quiet %trunk install did not complete: $why")
             }
+            surfaceInstallFailure = false
         }
     }
 

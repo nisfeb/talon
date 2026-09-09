@@ -500,9 +500,12 @@ class TlonChatRepo(
             // - channel orders: pin/unpin state, same reconnect-replay
             //   gap as contacts
             //
-            // Clubs / groups stay in a firstRun-only branch (their
-            // %groups /v1/groups + %chat /v4 subscriptions cover edits
-            // adequately on reconnect).
+            // Clubs stay in a firstRun-only branch (the %chat /v4
+            // subscription covers edits adequately on reconnect).
+            // Groups do not: a group joined while the channel was down
+            // never arrives as a fact, so the list is reconciled from a
+            // scry on every connect. Seen on a fresh comet, whose join
+            // landed while the ship was busy and the channel cycled.
             val initJob = async {
                 runCatching { bootstrap(ch, count = INITIAL_PAGE_COUNT) }
                     .onFailure { Log.e(TAG, "initPosts scry failed", it) }
@@ -533,20 +536,20 @@ class TlonChatRepo(
                 runCatching { refreshInvites(notify = false) }
                     .onFailure { Log.e(TAG, "group-invites scry failed", it) }
             }
+            val groupsJob = async {
+                runCatching { bootstrapGroups(ch) }
+                    .onFailure { Log.e(TAG, "groups scry failed", it) }
+            }
             val firstRunJobs = if (firstRun) {
                 listOf(
                     async {
                         runCatching { bootstrapClubs(ch) }
                             .onFailure { Log.e(TAG, "clubs scry failed", it) }
                     },
-                    async {
-                        runCatching { bootstrapGroups(ch) }
-                            .onFailure { Log.e(TAG, "groups scry failed", it) }
-                    },
                 )
             } else emptyList()
             (
-                listOf(initJob, activityJob, contactsJob, ordersJob, dmInvitesJob, groupInvitesJob) +
+                listOf(initJob, activityJob, contactsJob, ordersJob, dmInvitesJob, groupInvitesJob, groupsJob) +
                     firstRunJobs
                 ).awaitAll()
         } finally {
@@ -3931,6 +3934,13 @@ class TlonChatRepo(
      * We store title + image for each group and a nest→flag index so
      * list rows can pluck the enclosing group's image in O(1).
      */
+    /** Reconcile the group list from the ship now. For callers that
+     *  just asked the ship to join a group and want to see it land. */
+    suspend fun refreshGroups() {
+        val ch = channel ?: return
+        bootstrapGroups(ch)
+    }
+
     private suspend fun bootstrapGroups(channel: UrbitChannel) {
         val body = channel.scry("groups", "/v2/groups")
         val obj = body as? JsonObject ?: return

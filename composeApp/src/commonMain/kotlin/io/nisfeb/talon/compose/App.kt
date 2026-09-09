@@ -647,13 +647,23 @@ fun App(
         LaunchedEffect(repo, pendingLanding) {
             val flag = pendingLanding ?: return@LaunchedEffect
             repo.bootstrapping.first { !it }
-            var joined = false
-            var tries = 0
-            while (!joined && tries < 15) {
-                joined = runCatching { repo.acceptInvite(flag) }.isSuccess
-                if (!joined) { tries++; kotlinx.coroutines.delay(3_000) }
+            // Join, then keep reconciling the group list until the group
+            // is really here. A fresh comet is busy with updates and the
+            // calling desk: it acks late or not at all, and a channel
+            // that cycles in between loses the join's facts. The join
+            // poke is idempotent, so it is repeated while we wait.
+            val deadline = nowMs() + 10 * 60_000L
+            var lastJoin = 0L
+            while (db.groups().getGroup(flag) == null && nowMs() < deadline) {
+                if (nowMs() - lastJoin > 30_000L) {
+                    runCatching { repo.acceptInvite(flag) }
+                    lastJoin = nowMs()
+                }
+                runCatching { repo.refreshGroups() }
+                if (db.groups().getGroup(flag) == null) kotlinx.coroutines.delay(5_000)
             }
-            callController?.installTrunk()
+            // The desk is expected; only a failure is worth a dialog.
+            callController?.installTrunkQuietly()
             val whom = kotlinx.coroutines.withTimeoutOrNull(120_000) {
                 db.groups().streamChannelsForGroup(flag)
                     .first { chans -> chans.any { it.nest.startsWith("chat/") } }
