@@ -139,6 +139,8 @@ fun SettingsScreen(
     onOpenLoops: () -> Unit = {},
     /** The comet Talon runs on this computer; Noop where unsupported. */
     localShip: io.nisfeb.talon.comet.LocalShip = io.nisfeb.talon.comet.LocalShip.Noop,
+    /** Open on the Account tab, where the local ship and its dojo live. */
+    startOnAccount: Boolean = false,
     /** Fired after the user flips the mnemonym-naming toggle; hosts
      *  push the new value to %settings (ui-prefs bucket) so the choice
      *  follows the user across devices. Local apply + persist happen
@@ -216,7 +218,9 @@ fun SettingsScreen(
             add(SettingsTab.Account)
             add(SettingsTab.About)
         }
-        var tab by remember { mutableStateOf(SettingsTab.Appearance) }
+        var tab by remember {
+            mutableStateOf(if (startOnAccount) SettingsTab.Account else SettingsTab.Appearance)
+        }
         val safeTab = if (tab in visibleTabs) tab else visibleTabs.first()
 
         @Composable

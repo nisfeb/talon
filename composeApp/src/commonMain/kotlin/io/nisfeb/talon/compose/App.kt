@@ -246,6 +246,7 @@ fun App(
     // Shown as a banner while the landing runs; null when there is
     // nothing to wait for.
     var landingProgress by remember { mutableStateOf<io.nisfeb.talon.ui.LandingProgress?>(null) }
+    var settingsStartOnAccount by remember { mutableStateOf(false) }
     var showSettings by remember { mutableStateOf(false) }
     var showSidebarSettings by remember { mutableStateOf(false) }
     var showLoops by remember { mutableStateOf(false) }
@@ -1325,7 +1326,10 @@ fun App(
                     io.nisfeb.talon.ui.LandingBanner(
                         progress = progress,
                         terminalLine = lastLine,
-                        onOpenTerminal = { showSettings = true },
+                        onOpenTerminal = {
+                            settingsStartOnAccount = true
+                            showSettings = true
+                        },
                         onDismiss = { landingProgress = null },
                     )
                 }
@@ -1702,7 +1706,10 @@ fun App(
                                 activePatp = ship,
                                 activeShipUrl = activeShipUrl,
                             ),
-                            onBack = { showSettings = false },
+                            onBack = {
+                                showSettings = false
+                                settingsStartOnAccount = false
+                            },
                             dailyDigestSettings = dailyDigestSettings,
                             // onTestDigest stays null on desktop — Android
                             // wires it to dailyDigest.generateAndNotifyAsync
@@ -1711,6 +1718,7 @@ fun App(
                             onOpenShareLoginQr = { shareLoginQrOpen = true },
                             onOpenLoops = { showLoops = true },
                             localShip = localShip,
+                            startOnAccount = settingsStartOnAccount,
                             onMnemonymNamesChanged = { on ->
                                 repo.pushScope.launch {
                                     runCatching { settingsSync?.pushMnemonymNames(on) }
