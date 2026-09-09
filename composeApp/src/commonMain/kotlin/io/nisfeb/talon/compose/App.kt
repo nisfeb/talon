@@ -243,6 +243,9 @@ fun App(
     // first login lands in the public Nisfeb Software group.
     var localShipSetupOpen by remember { mutableStateOf(false) }
     var pendingLanding by remember { mutableStateOf<String?>(null) }
+    // Shown as a banner while the landing runs; null when there is
+    // nothing to wait for.
+    var landingProgress by remember { mutableStateOf<io.nisfeb.talon.ui.LandingProgress?>(null) }
     var showSettings by remember { mutableStateOf(false) }
     var showSidebarSettings by remember { mutableStateOf(false) }
     var showLoops by remember { mutableStateOf(false) }
@@ -646,6 +649,11 @@ fun App(
         // desk on the ship, and open the group's chat once it arrives.
         LaunchedEffect(repo, pendingLanding) {
             val flag = pendingLanding ?: return@LaunchedEffect
+            val began = nowMs()
+            fun step(text: String, failed: Boolean = false) {
+                landingProgress = io.nisfeb.talon.ui.LandingProgress(text, (nowMs() - began) / 1000, failed)
+            }
+            step("Connecting to your ship")
             repo.bootstrapping.first { !it }
             // Join, then keep reconciling the group list until the group
             // is really here. A fresh comet is busy with updates and the
@@ -654,22 +662,35 @@ fun App(
             // poke is idempotent, so it is repeated while we wait.
             val deadline = nowMs() + 10 * 60_000L
             var lastJoin = 0L
+            var asks = 0
             while (db.groups().getGroup(flag) == null && nowMs() < deadline) {
                 if (nowMs() - lastJoin > 30_000L) {
+                    asks++
+                    step(if (asks == 1) "Joining Nisfeb Software" else "Joining Nisfeb Software, try $asks. The ship is still installing updates")
                     runCatching { repo.acceptInvite(flag) }
                     lastJoin = nowMs()
                 }
                 runCatching { repo.refreshGroups() }
-                if (db.groups().getGroup(flag) == null) kotlinx.coroutines.delay(5_000)
+                if (db.groups().getGroup(flag) == null) {
+                    step(if (asks <= 1) "Waiting for the ship to confirm the group" else "Joining Nisfeb Software, try $asks. The ship is still installing updates")
+                    kotlinx.coroutines.delay(5_000)
+                }
+            }
+            if (db.groups().getGroup(flag) == null) {
+                step("The join did not complete in ten minutes. The ship may still be busy; the group will appear when it does.", failed = true)
+                pendingLanding = null
+                return@LaunchedEffect
             }
             // The desk is expected; only a failure is worth a dialog.
             callController?.installTrunkQuietly()
+            step("Joined. Waiting for the group's channels")
             val whom = kotlinx.coroutines.withTimeoutOrNull(120_000) {
                 db.groups().streamChannelsForGroup(flag)
                     .first { chans -> chans.any { it.nest.startsWith("chat/") } }
                     .first { it.nest.startsWith("chat/") }.nest
             }
             pendingLanding = null
+            landingProgress = null
             if (whom != null) {
                 openChat = whom
                 revealGroupRequest = flag
@@ -1276,6 +1297,18 @@ fun App(
                 partyUi !is io.nisfeb.talon.call.PartyState.Idle && !meetingOpen
             val floats = callFloats || partyFloats
             androidx.compose.foundation.layout.Column(Modifier.fillMaxSize()) {
+                landingProgress?.let { progress ->
+                    val terminalText by localShip.terminal.collectAsState()
+                    val lastLine = remember(terminalText) {
+                        terminalText.lineSequence().map { it.trim() }.lastOrNull { it.isNotEmpty() }
+                    }
+                    io.nisfeb.talon.ui.LandingBanner(
+                        progress = progress,
+                        terminalLine = lastLine,
+                        onOpenTerminal = { showSettings = true },
+                        onDismiss = { landingProgress = null },
+                    )
+                }
                 androidx.compose.foundation.layout.Column(
                     Modifier.fillMaxWidth().then(
                         if (floats) Modifier.windowInsetsPadding(WindowInsets.statusBars) else Modifier,
