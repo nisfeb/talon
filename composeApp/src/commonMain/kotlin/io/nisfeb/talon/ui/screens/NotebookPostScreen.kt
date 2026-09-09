@@ -420,6 +420,9 @@ private fun editSeedMarkdown(id: String, contentJson: String): String {
     val md = story.mapNotNull { verse ->
         val block = (verse as? JsonObject)?.get("block") as? JsonObject
         val table = block?.get("table") as? JsonObject
+        // A cite has no text form; editNotebookPost puts the original
+        // block back at its position on save.
+        if (block?.containsKey("cite") == true) return@mapNotNull null
         val rendered = when {
             // Listings go through RawMarkdown.fromStory's own renderer
             // (the else branch): it accepts both the composer's

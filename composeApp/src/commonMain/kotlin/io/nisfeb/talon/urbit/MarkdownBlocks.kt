@@ -2,6 +2,9 @@ package io.nisfeb.talon.urbit
 
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
@@ -53,19 +56,20 @@ object MarkdownBlocks {
                         i = close + 1
                     }
                 }
-                line.startsWith("### ") -> {
+                HEADER_RE.matches(line) -> {
                     flushParagraph()
-                    add(headerBlock("h3", line.removePrefix("### ")))
+                    val m = HEADER_RE.find(line)!!
+                    add(headerBlock("h${m.groupValues[1].length}", m.groupValues[2]))
                     i++
                 }
-                line.startsWith("## ") -> {
+                IMAGE_RE.matches(line) -> {
+                    // `![alt](src)` on its own line: the shape RawMarkdown
+                    // gives a Tlon image block. Dimensions are restored
+                    // from the original post on edit (mergeEdit); a new
+                    // image is posted without them.
                     flushParagraph()
-                    add(headerBlock("h2", line.removePrefix("## ")))
-                    i++
-                }
-                line.startsWith("# ") -> {
-                    flushParagraph()
-                    add(headerBlock("h1", line.removePrefix("# ")))
+                    val m = IMAGE_RE.find(line)!!
+                    add(imageBlock(src = m.groupValues[2], alt = m.groupValues[1]))
                     i++
                 }
                 line.startsWith("> ") -> {
@@ -154,8 +158,13 @@ object MarkdownBlocks {
     // least one space and a non-blank item body. The body guard keeps a
     // bare `* ` (or a `**bold**` line, which starts with `*` but not
     // `* `) from being read as a list.
-    private val UNORDERED_LIST_RE = Regex("^[-*+] +\\S.*")
-    private val ORDERED_LIST_RE = Regex("^\\d+[.)] +\\S.*")
+    // Leading spaces are allowed so a nested list RawMarkdown indents
+    // still parses; the composer keeps one flat list, so the nesting
+    // itself is not kept, only the items.
+    private val UNORDERED_LIST_RE = Regex("^\\s*[-*+] +\\S.*")
+    private val ORDERED_LIST_RE = Regex("^\\s*\\d+[.)] +\\S.*")
+    private val HEADER_RE = Regex("^(#{1,6}) (.*)")
+    private val IMAGE_RE = Regex("^!\\[([^\\]]*)\\]\\(([^)\\s]+)\\)\\s*$")
 
     /** True if [line] opens a bullet or numbered list item. Shared with
      *  the render-time markdown detector in [Story]. */
@@ -163,8 +172,62 @@ object MarkdownBlocks {
         UNORDERED_LIST_RE.matches(line) || ORDERED_LIST_RE.matches(line)
 
     private fun stripListMarker(line: String): String = when {
-        ORDERED_LIST_RE.matches(line) -> line.replaceFirst(Regex("^\\d+[.)] +"), "")
-        else -> line.replaceFirst(Regex("^[-*+] +"), "")
+        ORDERED_LIST_RE.matches(line) -> line.replaceFirst(Regex("^\\s*\\d+[.)] +"), "")
+        else -> line.replaceFirst(Regex("^\\s*[-*+] +"), "")
+    }
+
+    private fun imageBlock(src: String, alt: String) = buildJsonObject {
+        put("block", buildJsonObject {
+            put("image", buildJsonObject {
+                put("src", src)
+                put("width", 0)
+                put("height", 0)
+                put("alt", alt)
+            })
+        })
+    }
+
+    /**
+     * Rebuild an edited post from the re-parsed markdown plus what the
+     * text form could not carry, read from the post as it was:
+     *  - cite blocks (no markdown form) come back at their original
+     *    position relative to the text, the way chat's editedStory
+     *    keeps a quote above its message;
+     *  - an image the editor round-tripped as `![alt](src)` gets its
+     *    original width/height back, matched by src.
+     * With no prior content this is the parsed story unchanged.
+     */
+    fun mergeEdit(prior: JsonArray?, parsed: JsonArray): JsonArray {
+        if (prior == null) return parsed
+        val priorImages = prior.mapNotNull { v ->
+            ((v as? JsonObject)?.get("block") as? JsonObject)?.get("image") as? JsonObject
+        }.associateBy { (it["src"] as? JsonPrimitive)?.content.orEmpty() }
+        val withDims = buildJsonArray {
+            parsed.forEach { v ->
+                val img = ((v as? JsonObject)?.get("block") as? JsonObject)?.get("image") as? JsonObject
+                val src = (img?.get("src") as? JsonPrimitive)?.content
+                val original = src?.let { priorImages[it] }
+                if (img != null && original != null && (img["width"] as? JsonPrimitive)?.content == "0") {
+                    add(buildJsonObject { put("block", buildJsonObject { put("image", original) }) })
+                } else {
+                    add(v)
+                }
+            }
+        }
+        fun isCite(v: JsonElement) = ((v as? JsonObject)?.get("block") as? JsonObject)?.containsKey("cite") == true
+        if (prior.none(::isCite)) return withDims
+        return buildJsonArray {
+            var textEmitted = false
+            for (v in prior) {
+                if (isCite(v)) {
+                    add(v)
+                } else if (!textEmitted) {
+                    withDims.forEach { add(it) }
+                    textEmitted = true
+                }
+            }
+            if (!textEmitted) withDims.forEach { add(it) }
+        }
     }
 
     // A GFM table separator: only pipes, dashes, optional alignment

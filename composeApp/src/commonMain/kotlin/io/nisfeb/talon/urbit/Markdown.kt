@@ -58,6 +58,10 @@ object Markdown {
         data class Ship(val patp: String) : Token
     }
 
+    /** Characters a backslash makes literal, both here and in
+     *  [RawMarkdown]'s escaping. */
+    const val ESCAPABLE = "\\`*_~[]()#>+-!"
+
     private fun tokenize(text: String): List<Token> {
         val out = mutableListOf<Token>()
         var i = 0
@@ -73,6 +77,15 @@ object Markdown {
 
         while (i < len) {
             val c = text[i]
+            // Backslash escape: the next markdown-significant character
+            // is literal. RawMarkdown writes these so an edited or
+            // copied message keeps its `*`, `_`, `~ship` and `[x](y)`
+            // as text instead of re-parsing them as markup.
+            if (c == '\\' && i + 1 < len && text[i + 1] in ESCAPABLE) {
+                plain.append(text[i + 1])
+                i += 2
+                continue
+            }
 
             // Inline code: `text`
             if (c == '`') {

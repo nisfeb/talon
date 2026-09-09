@@ -2516,12 +2516,23 @@ class TlonChatRepo(
     ) {
         require(nest.startsWith("diary/")) { "not a diary channel: $nest" }
         val ch = channel ?: error("not connected")
-        val content = MarkdownBlocks.toStory(bodyMarkdown)
+        // The post as the ship has it: cites and image dimensions have
+        // no markdown form and come back from here (mergeEdit), and
+        // description / cover are not stored locally at all. A failed
+        // scry degrades to the old behaviour, not to a failed edit.
+        val prior = runCatching {
+            ch.scry("channels", "/v5/$nest/posts/post/${dotAtom(postId)}") as? JsonObject
+        }.getOrNull()?.get("essay") as? JsonObject
+        val priorMeta = prior?.get("meta") as? JsonObject
+        val content = MarkdownBlocks.mergeEdit(
+            prior = prior?.get("content") as? JsonArray,
+            parsed = MarkdownBlocks.toStory(bodyMarkdown),
+        )
         val meta = buildJsonObject {
             put("title", title)
             put("image", image)
-            put("description", "")
-            put("cover", "")
+            put("description", priorMeta?.get("description").asStr().orEmpty())
+            put("cover", priorMeta?.get("cover").asStr().orEmpty())
         }
         val essay = buildEssay(content, originalSentMs, kind = "/diary", meta = meta)
         ch.poke(
