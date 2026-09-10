@@ -40,6 +40,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
+import kotlin.concurrent.Volatile
 import kotlin.random.Random
 
 /**
