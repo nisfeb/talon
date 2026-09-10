@@ -2709,7 +2709,7 @@ class TlonChatRepo(
         val flag = nest.substringAfter("chat/", missingDelimiterValue = "")
             .ifBlank { return }
         Log.i(TAG, "ensureChannelGroupRow inserting stub for nest=$nest flag=$flag")
-        db.groups().upsertChannelGroups(
+        db.groups().upsertChannelGroupsKeepingPin(
             listOf(
                 io.nisfeb.talon.data.ChannelGroupEntity(
                     nest = nest,
@@ -2977,7 +2977,7 @@ class TlonChatRepo(
                     )
                 ))
                 if (intent.channels.isNotEmpty()) {
-                    db.groups().upsertChannelGroups(intent.channels.map { (nest, title) ->
+                    db.groups().upsertChannelGroupsKeepingPin(intent.channels.map { (nest, title) ->
                         ChannelGroupEntity(
                             nest = nest,
                             groupFlag = intent.flag,
@@ -3000,7 +3000,7 @@ class TlonChatRepo(
                 ))
             }
             is GroupEventIntent.AddChannel -> {
-                db.groups().upsertChannelGroups(listOf(
+                db.groups().upsertChannelGroupsKeepingPin(listOf(
                     ChannelGroupEntity(
                         nest = intent.nest,
                         groupFlag = intent.flag,
@@ -3009,7 +3009,7 @@ class TlonChatRepo(
                 ))
             }
             is GroupEventIntent.EditChannel -> {
-                db.groups().upsertChannelGroups(listOf(
+                db.groups().upsertChannelGroupsKeepingPin(listOf(
                     ChannelGroupEntity(
                         nest = intent.nest,
                         groupFlag = intent.flag,
@@ -4022,7 +4022,7 @@ class TlonChatRepo(
 
         if (parsed.groups.isNotEmpty()) db.groups().upsertGroups(parsed.groups)
         if (parsed.channelGroups.isNotEmpty()) {
-            db.groups().upsertChannelGroups(parsed.channelGroups)
+            db.groups().upsertChannelGroupsKeepingPin(parsed.channelGroups)
         }
     }
 

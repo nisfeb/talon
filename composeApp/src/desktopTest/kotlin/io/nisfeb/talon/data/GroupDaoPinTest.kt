@@ -120,4 +120,39 @@ class GroupDaoPinTest {
             assertNull(db.groups().pinnedPostIdFor(nest))
             assertNull(db.groups().streamPinnedPostId(nest).first())
         }
+
+    @Test
+    fun `a group reconcile refreshes the row without blanking the pin`() = runBlocking {
+        val nest = "chat/~sampel/pinned"
+        // The channels agent supplies the pin...
+        db.groups().upsertChannelGroups(
+            listOf(ChannelGroupEntity(nest = nest, groupFlag = "~sampel/g", title = "old")),
+        )
+        db.groups().setPinnedPostId(nest, "post-7")
+        // ...then %groups reconciles the same row. Its parser has no
+        // pin to give, so the plain upsert used to write null here and
+        // the pinned banner went blank.
+        db.groups().upsertChannelGroupsKeepingPin(
+            listOf(ChannelGroupEntity(nest = nest, groupFlag = "~sampel/g", title = "new", ordinal = 3)),
+        )
+        assertEquals("post-7", db.groups().pinnedPostIdFor(nest), "the pin survived the reconcile")
+        val row = db.groups().channelGroupFor(nest)!!
+        assertEquals("new", row.title, "group-owned columns still refresh")
+        assertEquals(3, row.ordinal)
+        assertEquals("~sampel/g", row.groupFlag)
+    }
+
+    @Test
+    fun `the same upsert inserts a missing row with no pin`() = runBlocking {
+        val nest = "chat/~sampel/fresh"
+        db.groups().upsertChannelGroupsKeepingPin(
+            listOf(ChannelGroupEntity(nest = nest, groupFlag = "~sampel/g", title = "t")),
+        )
+        val row = db.groups().channelGroupFor(nest)!!
+        assertEquals("~sampel/g", row.groupFlag)
+        assertNull(row.pinnedPostId)
+        // and the orders pass can then fill it in
+        assertEquals(1, db.groups().setPinnedPostId(nest, "post-1"))
+        assertEquals("post-1", db.groups().pinnedPostIdFor(nest))
+    }
 }
