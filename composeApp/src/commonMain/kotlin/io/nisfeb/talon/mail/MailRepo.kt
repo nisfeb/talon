@@ -184,6 +184,64 @@ class MailRepo(
         }
     }
 
+    // ---- one thread ----------------------------------------------------
+
+    /** Read one thread. Null when it is gone, which the reader shows
+     *  differently from a thread that failed to load. */
+    suspend fun loadThread(id: String): MailThread? {
+        val a = api ?: return null
+        return try {
+            a.thread(id).also { _error.value = null }
+        } catch (e: AuspexError) {
+            onFailure(e)
+            null
+        }
+    }
+
+    /**
+     * Mark messages read, then re-read the listing.
+     *
+     * The refresh is the point, not politeness: a write answers when the
+     * ship's writer accepts the poke, so the listing is the only thing
+     * that can say the mark landed. Read marks are invisible to every
+     * other client, so nothing else will ever tell us.
+     */
+    suspend fun markRead(msgIds: List<String>) = write { it.markRead(msgIds) }
+
+    suspend fun setArchived(threadId: String, archived: Boolean) =
+        write { it.setArchived(threadId, archived) }
+
+    suspend fun deleteThread(threadId: String) = write { it.deleteThread(threadId) }
+
+    /** Ask the network for an attachment we do not hold. */
+    suspend fun fetchBlob(hash: String, from: String) {
+        val a = api ?: return
+        runCatching { a.fetchBlob(hash, from) }
+            .onFailure { if (it is AuspexError) onFailure(it) else throw it }
+    }
+
+    /** An attachment's bytes, or null while this ship holds no copy. */
+    suspend fun blob(hash: String, name: String, mime: String): Blob? {
+        val a = api ?: return null
+        return try {
+            a.blob(hash, name, mime)
+        } catch (e: AuspexError) {
+            onFailure(e)
+            null
+        }
+    }
+
+    private suspend fun write(block: suspend (AuspexApi) -> Unit) {
+        val a = api ?: return
+        try {
+            block(a)
+        } catch (e: AuspexError) {
+            onFailure(e)
+            return
+        }
+        refresh()
+    }
+
     // ---- the timer -----------------------------------------------------
 
     /**

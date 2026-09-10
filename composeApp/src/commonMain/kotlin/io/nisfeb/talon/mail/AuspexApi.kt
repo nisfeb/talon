@@ -4,6 +4,7 @@ import io.ktor.client.HttpClient
 import io.ktor.client.request.request
 import io.ktor.client.request.setBody
 import io.ktor.client.statement.bodyAsText
+import io.ktor.client.statement.readRawBytes
 import io.ktor.http.ContentType
 import io.ktor.http.HttpMethod
 import io.ktor.http.contentType
@@ -100,6 +101,74 @@ class AuspexApi(
             "/api/send",
             json.encodeToString(SendReq.serializer(), SendReq(to, subject, body, prev, attachments)),
         )
+    }
+
+    /** Move a thread in or out of the archive. Local state: no other
+     *  ship can see it, so the client that changed it refreshes. */
+    suspend fun setArchived(threadId: String, archived: Boolean) {
+        request(
+            HttpMethod.Post,
+            "/api/archive",
+            json.encodeToString(ArchiveReq.serializer(), ArchiveReq(threadId, archived)),
+        )
+    }
+
+    suspend fun deleteThread(threadId: String) {
+        request(
+            HttpMethod.Post,
+            "/api/delete-thread",
+            json.encodeToString(ThreadReq.serializer(), ThreadReq(threadId)),
+        )
+    }
+
+    /**
+     * Ask the network for an attachment's bytes. [from] is a hint only:
+     * any ship holding them may serve them, and the hash proves them.
+     * Nothing pushes the answer, so the caller polls [blob].
+     */
+    suspend fun fetchBlob(hash: String, from: String) {
+        request(
+            HttpMethod.Post,
+            "/api/fetch-blob",
+            json.encodeToString(FetchBlobReq.serializer(), FetchBlobReq(hash, from)),
+        )
+    }
+
+    /**
+     * An attachment's bytes, or null when this ship holds no copy yet.
+     *
+     * Null is not "no such file". Bytes are never pushed, so a file on a
+     * message we hold and have not pulled is the ordinary state of an
+     * inbound one, and the answer to it is a fetch control rather than
+     * an error.
+     *
+     * The filename comes back in the header and NOT from the message.
+     * The name on an attachment is signed, which proves the author chose
+     * it and not that it is safe to write to a disk; the ship's
+     * sanitiser is what makes it a filename, and it runs on that header.
+     */
+    suspend fun blob(hash: String, name: String, mime: String): Blob? {
+        val url = root + "/api/blob/" + hash.encodeURLParameter() +
+            "?name=" + name.encodeURLParameter() + "&mime=" + mime.encodeURLParameter()
+        val resp = try {
+            http.request(url) { this.method = HttpMethod.Get }
+        } catch (c: CancellationException) {
+            throw c
+        } catch (t: Throwable) {
+            throw AuspexError.Unreachable(t)
+        }
+        if (resp.status.value == NOT_FETCHED) return null
+        if (!resp.status.isSuccess()) {
+            throw AuspexError.Refused(resp.status.value, reasonOf(runCatching { resp.bodyAsText() }.getOrDefault("")))
+        }
+        val bytes = try {
+            resp.readRawBytes()
+        } catch (c: CancellationException) {
+            throw c
+        } catch (t: Throwable) {
+            throw AuspexError.Garbled(t)
+        }
+        return Blob(bytes, dispositionName(resp.headers["content-disposition"]) ?: hash)
     }
 
     /** Mark messages read. A set per request, deliberately: one id per
@@ -380,3 +449,31 @@ private data class SendReq(
 
 @Serializable
 private data class MarkReq(@SerialName("msg-ids") val msgIds: List<String>)
+
+@Serializable
+private data class ArchiveReq(@SerialName("thread-id") val threadId: String, val archived: Boolean)
+
+@Serializable
+private data class ThreadReq(@SerialName("thread-id") val threadId: String)
+
+@Serializable
+private data class FetchBlobReq(val hash: String, val from: String)
+
+/** Bytes, and the name the SHIP chose for them. */
+class Blob(val bytes: ByteArray, val name: String)
+
+/**
+ * The filename out of a Content-Disposition header, or null when it is
+ * absent or not the shape auspex sends. The ship's sanitiser has
+ * already run on this value; the message's own name has not.
+ */
+internal fun dispositionName(header: String?): String? {
+    val h = header ?: return null
+    val marker = "filename=\""
+    val start = h.indexOf(marker)
+    if (start < 0) return null
+    val from = start + marker.length
+    val end = h.indexOf('"', from)
+    if (end < 0) return null
+    return h.substring(from, end).ifBlank { null }
+}

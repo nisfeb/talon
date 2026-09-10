@@ -68,7 +68,18 @@ class MailRepoTest {
         assertEquals(MailAvailability.PRESENT, r.availability.value)
         assertEquals(0, r.page.value?.total)
         assertNull(r.error.value)
+        // attach() starts the poller, whose first read can still be in
+        // flight behind the lock; the flag is only settled once it is.
+        settle(r)
         assertEquals(false, r.loading.value)
+    }
+
+    /** Wait for any in-flight read to finish. */
+    private suspend fun settle(r: MailRepo) {
+        repeat(100) {
+            if (!r.loading.value) return
+            kotlinx.coroutines.delay(20)
+        }
     }
 
     @Test

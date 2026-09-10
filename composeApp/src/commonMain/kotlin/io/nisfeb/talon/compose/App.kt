@@ -1980,6 +1980,17 @@ fun App(
                         // on narrow windows and in the right pane on wide
                         // windows (showing EmptyChatPane as placeholder).
                         val detailSlot: (@Composable () -> Unit)? = when {
+                            // A mail thread owns the detail pane. Leaving the
+                            // Mail rail tab clears the selection below, so a
+                            // thread can never sit beside the chat list.
+                            openMailThread != null -> ({
+                                io.nisfeb.talon.ui.screens.MailThreadPane(
+                                    repo = mailRepo,
+                                    threadId = openMailThread!!,
+                                    contacts = callContacts,
+                                    onBack = { openMailThread = null },
+                                )
+                            })
                             // Notebook channels (whom prefix "diary/").
                             // Compose overlays the post viewer overlays the
                             // list — same precedence as production.
@@ -2546,6 +2557,8 @@ fun App(
                                     menuSeen.markInvitesSeen(railInvitesSnapshot)
                                 else -> Unit
                             }
+                            // Leaving Mail closes the thread it was showing.
+                            if (item != RailItem.Mail) openMailThread = null
                             item.toRailTab()?.let { tab ->
                                 uiSettings.setActiveRailTab(tab)
                             } ?: when (item) {
