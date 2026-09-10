@@ -80,6 +80,23 @@ class MailRepo(
     private val _error = MutableStateFlow<String?>(null)
     val error: StateFlow<String?> = _error.asStateFlow()
 
+    /**
+     * Raised for mail that arrived since the last read. Set by the host,
+     * which owns the platform's notifier; null means nothing is
+     * listening, which is the correct state for a host that has no way
+     * to raise one.
+     */
+    var onNewMail: ((List<MailNotification>) -> Unit)? = null
+
+    /** How a ship is shown to a person. The host knows contacts; this
+     *  does not, and should not learn. */
+    var nameFor: (String) -> String = { it }
+
+    /** Threads that were unread when we last looked. Null until the
+     *  first read seeds it, which is what stops a launch from replaying
+     *  a backlog somebody has had for days. */
+    private var seenUnread: Set<String>? = null
+
     private val _view = MutableStateFlow(MailView.INBOX)
     val view: StateFlow<MailView> = _view.asStateFlow()
 
@@ -93,6 +110,7 @@ class MailRepo(
         _availability.value = MailAvailability.UNKNOWN
         _page.value = null
         _error.value = null
+        seenUnread = null
         startPolling()
     }
 
@@ -143,11 +161,32 @@ class MailRepo(
             _page.value = p
             _error.value = null
             _availability.value = MailAvailability.PRESENT
+            announce(p)
         } catch (e: AuspexError) {
             onFailure(e)
         } finally {
             _loading.value = false
         }
+    }
+
+    /**
+     * Tell the host about mail that is new since the last read.
+     *
+     * Only the inbox: the sent and archived views are places a person
+     * goes looking, not places mail arrives, and announcing a thread
+     * because they switched tabs would be noise. The first read of a
+     * session only seeds the baseline.
+     */
+    private fun announce(p: InboxPage) {
+        if (_view.value != MailView.INBOX) return
+        val before = seenUnread
+        if (before == null) {
+            seenUnread = seedMailBaseline(p.threads)
+            return
+        }
+        val (fired, now) = diffMailNotifications(p.threads, before, nameFor)
+        seenUnread = now
+        if (fired.isNotEmpty()) onNewMail?.invoke(fired)
     }
 
     /**

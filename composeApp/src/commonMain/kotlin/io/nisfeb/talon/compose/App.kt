@@ -887,6 +887,15 @@ fun App(
         LaunchedEffect(mailRepo, mailShipUrl) {
             if (mailShipUrl != null) mailRepo.attach(mailShipUrl) else mailRepo.detach()
         }
+        // One decision in common, delivered through the interface that
+        // already exists. Chat notifies twice on this codebase; mail has
+        // no reason to inherit that.
+        LaunchedEffect(mailRepo, notifier, callContacts) {
+            mailRepo.nameFor = { callContacts.displayName(it) }
+            mailRepo.onNewMail = { news ->
+                news.forEach { notifier.notify(it.title, it.body) }
+            }
+        }
         // "Run now", from both the Loops screen and the assistant's jobs pane.
         val runLoopNow: (Long) -> Unit = { loopId ->
             loopScope.launch { db.loops().get(loopId)?.let { loopRunner.runLoop(it) } }

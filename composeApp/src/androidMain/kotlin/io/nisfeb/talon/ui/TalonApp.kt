@@ -137,6 +137,8 @@ fun TalonApp(
      *  unused for routing today (the screen reads the active ship's
      *  digest itself) but stashed for future per-ship routing. */
     initialOpenDigest: String? = null,
+    /** A tapped mail notification: open Mail on arrival. */
+    initialOpenMail: Boolean = false,
     pendingShare: ShareIntent? = null,
     /** When non-null, the user already picked the share target in
      *  the system share sheet (Sharing Shortcut). Skip the in-app
@@ -503,7 +505,22 @@ fun TalonApp(
     }
     var editingProfile by remember { mutableStateOf(false) }
     var statusFeedOpen by remember { mutableStateOf(false) }
-    var mailOpen by remember { mutableStateOf(false) }
+    var mailOpen by remember { mutableStateOf(initialOpenMail) }
+
+    val mailContext = LocalContext.current
+    LaunchedEffect(mailRepo, contactMap) {
+        mailRepo.nameFor = { contactMap.displayName(it) }
+        mailRepo.onNewMail = { news ->
+            news.forEach {
+                io.nisfeb.talon.Notifications.showMail(
+                    mailContext,
+                    it.threadId,
+                    it.title,
+                    it.body,
+                )
+            }
+        }
+    }
     var bookmarksOpen by remember { mutableStateOf(false) }
     var activityOpen by remember { mutableStateOf(false) }
     var contactsOpen by remember { mutableStateOf(false) }

@@ -25,6 +25,7 @@ import io.nisfeb.talon.util.Log
 object Notifications {
 
     const val CHANNEL_MESSAGES = "messages"
+    const val CHANNEL_MAIL = "mail"
     const val CHANNEL_SYNC = "sync"
     const val CHANNEL_WATCHWORDS = "watchwords"
     const val CHANNEL_DAILY_DIGEST = "daily-digest"
@@ -60,6 +61,9 @@ object Notifications {
     /** When EXTRA_OPEN_THREAD is set, the specific reply id to anchor
      *  the thread's initial scroll on. */
     const val EXTRA_THREAD_ANCHOR = "thread_anchor"
+    /** Tap on a mail notification: open Mail. The thread is not named
+     *  because the listing is re-read on the way in anyway. */
+    const val EXTRA_OPEN_MAIL = "open_mail"
     const val EXTRA_OPEN_DIGEST = "open_digest"
     const val EXTRA_DIGEST_DATE = "digest_date"
 
@@ -484,6 +488,51 @@ object Notifications {
         // collapse into one row, but never collide with showMessage's
         // <whom>-tagged notification for the same chat.
         mgr.notify("watchword:$whom", NOTIFICATION_ID, notification)
+    }
+
+    /**
+     * New mail. Its own channel because mail is considered
+     * correspondence and a person may reasonably want it quieter than
+     * chat, or louder, without touching the other.
+     *
+     * Tag is the thread, so a thread that somehow announces twice
+     * replaces rather than stacks. The summary row ("and N more") has no
+     * thread and gets its own tag.
+     */
+    fun showMail(context: Context, threadId: String, title: String, body: String) {
+        val mgr = ContextCompat.getSystemService(context, NotificationManager::class.java)
+            ?: return
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
+            mgr.getNotificationChannel(CHANNEL_MAIL) == null
+        ) {
+            mgr.createNotificationChannel(
+                NotificationChannel(
+                    CHANNEL_MAIL,
+                    "Mail",
+                    NotificationManager.IMPORTANCE_DEFAULT,
+                ).apply { description = "New signed mail" },
+            )
+        }
+        val tapIntent = Intent(context, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            putExtra(EXTRA_OPEN_MAIL, true)
+        }
+        val pending = PendingIntent.getActivity(
+            context,
+            ("mail:" + threadId).hashCode(),
+            tapIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+        val notification = NotificationCompat.Builder(context, CHANNEL_MAIL)
+            .setSmallIcon(R.drawable.ic_stat_talon)
+            .setContentTitle(title)
+            .setContentText(body)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(body))
+            .setContentIntent(pending)
+            .setAutoCancel(true)
+            .setCategory(NotificationCompat.CATEGORY_EMAIL)
+            .build()
+        mgr.notify("mail:" + threadId.ifBlank { "more" }, NOTIFICATION_ID, notification)
     }
 
     /**
