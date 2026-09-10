@@ -138,6 +138,42 @@ class AuspexApi(
         return decode<Uploaded>(text).hash
     }
 
+    /**
+     * Put a label on a thread, or take it off. Local and unsigned: no
+     * other ship can see it, which is why the caller refreshes its own
+     * view rather than waiting to be told.
+     */
+    suspend fun setLabel(threadId: String, label: String, add: Boolean) {
+        request(
+            HttpMethod.Post,
+            "/api/label",
+            json.encodeToString(LabelReq.serializer(), LabelReq(threadId, label, add)),
+        )
+    }
+
+    suspend fun rules(): List<Rule> = decode(request(HttpMethod.Get, "/api/rules"))
+
+    /** Save a filter. The id is the client's, like a draft's. */
+    suspend fun saveRule(r: Rule) {
+        request(HttpMethod.Post, "/api/rule", json.encodeToString(Rule.serializer(), r))
+    }
+
+    suspend fun deleteRule(id: String) {
+        request(HttpMethod.Post, "/api/rule-delete", json.encodeToString(IdReq.serializer(), IdReq(id)))
+    }
+
+    suspend fun lists(): List<MailingList> = decode(request(HttpMethod.Get, "/api/lists"))
+
+    /** Create, rename, add to and drop from: one verb for all of it,
+     *  because the name IS the storage key. */
+    suspend fun saveList(l: MailingList) {
+        request(HttpMethod.Post, "/api/list", json.encodeToString(MailingList.serializer(), l))
+    }
+
+    suspend fun deleteList(name: String) {
+        request(HttpMethod.Post, "/api/list-delete", json.encodeToString(NameReq.serializer(), NameReq(name)))
+    }
+
     suspend fun drafts(): List<Draft> = decode(request(HttpMethod.Get, "/api/drafts"))
 
     /**
@@ -519,6 +555,41 @@ private data class MarkReq(@SerialName("msg-ids") val msgIds: List<String>)
 
 @Serializable
 private data class IdReq(val id: String)
+
+@Serializable
+private data class NameReq(val name: String)
+
+@Serializable
+private data class LabelReq(
+    @SerialName("thread-id") val threadId: String,
+    val label: String,
+    val add: Boolean,
+)
+
+/**
+ * A filter. Matches on sender, on a subject substring, or both, and
+ * answers by adding labels and optionally archiving. A rule with
+ * neither a sender nor a subject is refused: it would match everything.
+ */
+@Serializable
+data class Rule(
+    val id: String,
+    val from: String? = null,
+    val subject: String? = null,
+    val add: List<String> = emptyList(),
+    val archive: Boolean = false,
+)
+
+/**
+ * A named set of ships. Local and unsigned, exactly like a rule or a
+ * draft: the name never travels, so nothing downstream of the composer
+ * knows lists exist — a send sees ships.
+ */
+@Serializable
+data class MailingList(
+    val name: String,
+    val members: List<String> = emptyList(),
+)
 
 /**
  * A message not yet sent. Local and unsigned: it never travels, and no

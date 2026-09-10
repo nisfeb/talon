@@ -67,6 +67,49 @@ class AndroidImageDownloader(
         }
     }
 
+    /**
+     * An attachment we already hold. Goes to Downloads rather than the
+     * image collection: mail carries whatever somebody attached, and a
+     * text file in Photos is a filing mistake.
+     */
+    override suspend fun saveBytes(fileName: String, bytes: ByteArray): SaveResult =
+        withContext(Dispatchers.IO) {
+            runCatching {
+                val name = fileName.ifBlank { "attachment" }
+                val values = android.content.ContentValues().apply {
+                    put(MediaStore.Downloads.DISPLAY_NAME, name)
+                    put(MediaStore.Downloads.MIME_TYPE, "application/octet-stream")
+                }
+                val collection = if (android.os.Build.VERSION.SDK_INT >= 29) {
+                    MediaStore.Downloads.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+                } else {
+                    android.net.Uri.fromFile(
+                        java.io.File(
+                            android.os.Environment.getExternalStoragePublicDirectory(
+                                android.os.Environment.DIRECTORY_DOWNLOADS,
+                            ),
+                            name,
+                        ),
+                    )
+                }
+                if (android.os.Build.VERSION.SDK_INT >= 29) {
+                    val uri = context.contentResolver.insert(collection, values)
+                        ?: error("no MediaStore row")
+                    context.contentResolver.openOutputStream(uri)?.use { it.write(bytes) }
+                        ?: error("no output stream")
+                } else {
+                    java.io.File(collection.path!!).writeBytes(bytes)
+                }
+                "Downloads"
+            }.fold(
+                onSuccess = { SaveResult.Saved(it) },
+                onFailure = { e ->
+                    Log.w(TAG, "attachment save failed", e)
+                    SaveResult.Failed("Couldn't save: ${e.message ?: e::class.simpleName}")
+                },
+            )
+        }
+
     private fun writeViaMediaStore(fileName: String, mime: String, bytes: ByteArray): String {
         val resolver = context.contentResolver
         val collection = MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)

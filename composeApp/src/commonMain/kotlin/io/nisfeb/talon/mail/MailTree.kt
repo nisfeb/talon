@@ -95,6 +95,42 @@ fun pathTo(forest: List<MailNode>, id: String): List<MailMessage> {
 fun flatten(forest: List<MailNode>, depth: Int = 0): List<Pair<MailNode, Int>> =
     forest.flatMap { listOf(it to depth) + flatten(it.children, depth + 1) }
 
+/**
+ * Flatten, hiding what sits under a collapsed node.
+ *
+ * A collapsed node keeps its own line and loses its descendants, which
+ * is the Thunderbird reading: folding a reply folds the conversation
+ * under it, not the reply itself. The count of what is hidden goes on
+ * the node, because a fold that does not say how much it swallowed is
+ * indistinguishable from a thread that simply ends there.
+ */
+fun flattenVisible(
+    forest: List<MailNode>,
+    collapsed: Set<String>,
+    depth: Int = 0,
+): List<VisibleNode> = forest.flatMap { n ->
+    val hidden = if (n.message.id in collapsed) countDescendants(n) else 0
+    listOf(VisibleNode(n, depth, hidden)) +
+        if (hidden > 0) emptyList() else flattenVisible(n.children, collapsed, depth + 1)
+}
+
+data class VisibleNode(val node: MailNode, val depth: Int, val hidden: Int)
+
+fun countDescendants(n: MailNode): Int =
+    n.children.size + n.children.sumOf { countDescendants(it) }
+
+/** Every node that has anything under it, so a reader can offer "fold
+ *  all" without offering it on leaves. */
+fun foldableIds(forest: List<MailNode>): Set<String> {
+    val out = mutableSetOf<String>()
+    fun walk(n: MailNode) {
+        if (n.children.isNotEmpty()) out += n.message.id
+        n.children.forEach { walk(it) }
+    }
+    forest.forEach { walk(it) }
+    return out
+}
+
 /** Does this thread actually branch? A reader can offer the tree only
  *  where there is one, and say nothing where the thread is a line. */
 fun branches(forest: List<MailNode>): Boolean {

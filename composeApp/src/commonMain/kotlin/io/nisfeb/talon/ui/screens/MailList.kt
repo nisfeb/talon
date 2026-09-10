@@ -76,6 +76,9 @@ fun MailList(
     val error by repo.error.collectAsState()
     val view by repo.view.collectAsState()
     val drafts by repo.drafts.collectAsState()
+    val labels by repo.knownLabels.collectAsState()
+    val activeLabel by repo.label.collectAsState()
+    var organising by remember { mutableStateOf(false) }
     // Drafts are not one of the ship's views: they live on their own
     // route, so this is a mode of the list rather than another chip
     // handed to setView.
@@ -92,12 +95,19 @@ fun MailList(
             drafts = showingDrafts,
             onDrafts = { showingDrafts = it },
             showDrafts = onOpenDraft != null,
+            labels = labels,
+            activeLabel = activeLabel,
+            onLabel = { showingDrafts = false; repo.filterByLabel(it) },
+            onOrganise = { organising = true },
             onRefresh = { scope.launch { repo.refresh() } },
             onCompose = onCompose,
         )
         HorizontalDivider()
 
         error?.let { MailNotice(it) }
+        if (organising) {
+            MailOrganiseSheet(repo = repo, onDismiss = { organising = false })
+        }
 
         when {
             showingDrafts -> if (drafts.isEmpty()) {
@@ -106,7 +116,7 @@ fun MailList(
                 LazyColumn(Modifier.fillMaxSize()) {
                     items(drafts, key = { it.id }) { d ->
                         DraftRow(d, onOpen = { onOpenDraft?.invoke(d) })
-                        HorizontalDivider(modifier = Modifier.padding(start = 14.dp))
+                        HorizontalDivider(modifier = Modifier.padding(start = 12.dp))
                     }
                 }
             }
@@ -141,7 +151,7 @@ fun MailList(
                         nameFor = { contacts.displayName(it) },
                         onClick = { onOpenThread(row.id) },
                     )
-                    HorizontalDivider(modifier = Modifier.padding(start = 14.dp))
+                    HorizontalDivider(modifier = Modifier.padding(start = 12.dp))
                 }
             }
         }
@@ -166,6 +176,10 @@ private fun MailToolbar(
     drafts: Boolean,
     onDrafts: (Boolean) -> Unit,
     showDrafts: Boolean,
+    labels: List<String>,
+    activeLabel: String?,
+    onLabel: (String?) -> Unit,
+    onOrganise: () -> Unit,
 ) {
     Row(
         modifier = Modifier.fillMaxWidth().padding(start = 8.dp, end = 4.dp, top = 8.dp, bottom = 8.dp),
@@ -192,9 +206,19 @@ private fun MailToolbar(
                     )
                 }
             }
+            // Labels the current listing mentions. The ship keeps no
+            // index of them, so this is where they come from.
+            items(labels, key = { "label:$it" }) { l ->
+                FilterChip(
+                    selected = activeLabel == l,
+                    onClick = { onLabel(if (activeLabel == l) null else l) },
+                    label = { Text(l) },
+                )
+            }
         }
         // The reader always knows better than a ten-minute timer, so the
         // manual ask is a control and not a hidden gesture.
+        androidx.compose.material3.TextButton(onClick = onOrganise) { Text("Organise") }
         if (onCompose != null) {
             androidx.compose.material3.TextButton(onClick = onCompose) { Text("New") }
         }
@@ -258,13 +282,13 @@ private fun MailRow(row: InboxEntry, nameFor: (String) -> String, onClick: () ->
         Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick)
-            .padding(horizontal = 14.dp, vertical = 7.dp),
-        verticalArrangement = Arrangement.spacedBy(1.dp),
+            .padding(horizontal = 12.dp, vertical = 5.dp),
+        verticalArrangement = Arrangement.spacedBy(0.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
                 nameFor(row.from),
-                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = weight),
+                style = MaterialTheme.typography.bodySmall.copy(fontWeight = weight),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f, fill = true),
@@ -288,14 +312,16 @@ private fun MailRow(row: InboxEntry, nameFor: (String) -> String, onClick: () ->
         }
         Text(
             row.subject.ifBlank { "(no subject)" },
-            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = weight),
+            style = MaterialTheme.typography.bodySmall.copy(fontWeight = weight),
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
-        if (row.snippet.isNotBlank()) {
+        // The preview is what an unread row is for. A read one has been
+        // seen, so it gives its line back to the rows below it.
+        if (row.snippet.isNotBlank() && row.unread) {
             Text(
                 row.snippet,
-                style = MaterialTheme.typography.bodySmall,
+                style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -347,8 +373,8 @@ private fun DraftRow(d: io.nisfeb.talon.mail.Draft, onOpen: () -> Unit) {
         Modifier
             .fillMaxWidth()
             .clickable(onClick = onOpen)
-            .padding(horizontal = 14.dp, vertical = 7.dp),
-        verticalArrangement = Arrangement.spacedBy(1.dp),
+            .padding(horizontal = 12.dp, vertical = 5.dp),
+        verticalArrangement = Arrangement.spacedBy(0.dp),
     ) {
         Text(
             if (d.to.isEmpty()) "No recipients yet" else d.to.joinToString(),

@@ -18,6 +18,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
@@ -29,7 +31,9 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -38,6 +42,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.nisfeb.talon.mail.Attachment
 import io.nisfeb.talon.mail.MailMessage
@@ -80,6 +85,9 @@ fun MailThreadPane(
     var gone by remember(threadId) { mutableStateOf(false) }
     var loading by remember(threadId) { mutableStateOf(true) }
     var drawn by remember(threadId) { mutableStateOf(false) }
+    // Folded subtrees, and messages read down to their header line.
+    val folded = remember(threadId) { mutableStateListOf<String>() }
+    val shut = remember(threadId) { mutableStateListOf<String>() }
     var selected by remember(threadId) { mutableStateOf<String?>(null) }
 
     LaunchedEffect(threadId) {
@@ -94,6 +102,7 @@ fun MailThreadPane(
         if (unread.isNotEmpty()) scope.launch { repo.markRead(unread) }
     }
 
+    val knownLabels by repo.knownLabels.collectAsState()
     val forest = remember(thread) { threadTree(thread?.messages.orEmpty()) }
     val hasBranches = remember(forest) { branches(forest) }
     // Whatever is selected, defaulting to the newest honest message —
@@ -110,6 +119,14 @@ fun MailThreadPane(
             subject = thread?.messages?.firstOrNull()?.subject.orEmpty(),
             participants = thread?.participants.orEmpty().map { contacts.displayName(it) },
             unreadable = thread?.unreadable ?: 0,
+            labels = thread?.labels.orEmpty(),
+            known = knownLabels,
+            onLabel = { l, add ->
+                scope.launch {
+                    repo.setLabel(threadId, l, add)
+                    thread = repo.loadThread(threadId)
+                }
+            },
             showTree = hasBranches,
             drawn = drawn,
             onMode = { drawn = it },
@@ -184,28 +201,44 @@ fun MailThreadPane(
                                     onPath = false,
                                     selected = false,
                                     selectable = false,
+                                    hidden = 0,
+                                    foldable = false,
+                                    folded = false,
+                                    onFold = {},
+                                    shut = false,
+                                    onShut = {},
                                     nameFor = { contacts.displayName(it) },
                                     onSelect = {},
-                                    onFetch = { a2 ->
-                                        scope.launch { repo.fetchBlob(a2.hash, shown.from) }
-                                    },
+                                    repo = repo,
                                 )
                             }
                         }
                     }
                 } else LazyColumn(Modifier.fillMaxSize()) {
-                    items(flatten(forest), key = { it.first.message.id }) { (node, depth) ->
+                    items(
+                        io.nisfeb.talon.mail.flattenVisible(forest, folded.toSet()),
+                        key = { it.node.message.id },
+                    ) { v ->
+                        val node = v.node
                         MailMessageCard(
                             node = node,
-                            depth = depth,
+                            depth = v.depth,
+                            hidden = v.hidden,
+                            foldable = node.children.isNotEmpty(),
+                            folded = node.message.id in folded,
+                            onFold = {
+                                if (!folded.remove(node.message.id)) folded.add(node.message.id)
+                            },
+                            shut = node.message.id in shut,
+                            onShut = {
+                                if (!shut.remove(node.message.id)) shut.add(node.message.id)
+                            },
                             onPath = node.message.id in travelling.map { it.id },
                             selected = node.message.id == selected,
                             selectable = node.message.verdict != Verdict.FORGED,
                             nameFor = { contacts.displayName(it) },
                             onSelect = { selected = node.message.id },
-                            onFetch = { a ->
-                                scope.launch { repo.fetchBlob(a.hash, node.message.from) }
-                            },
+                            repo = repo,
                         )
                         HorizontalDivider()
                     }
@@ -237,6 +270,9 @@ private fun MailThreadHeader(
     subject: String,
     participants: List<String>,
     unreadable: Int,
+    labels: List<String>,
+    known: List<String>,
+    onLabel: (String, Boolean) -> Unit,
     showTree: Boolean,
     drawn: Boolean,
     onMode: (Boolean) -> Unit,
@@ -278,6 +314,7 @@ private fun MailThreadHeader(
                 modifier = Modifier.padding(start = 8.dp),
             )
         }
+        MailLabelRow(labels = labels, known = known, onToggle = onLabel)
         if (unreadable > 0) {
             Text(
                 unreadableThreadLine(unreadable),
@@ -324,12 +361,18 @@ private fun MailAbsentLine(text: String) {
 private fun MailMessageCard(
     node: MailNode,
     depth: Int,
+    hidden: Int,
+    foldable: Boolean,
+    folded: Boolean,
+    onFold: () -> Unit,
+    shut: Boolean,
+    onShut: () -> Unit,
     onPath: Boolean,
     selected: Boolean,
     selectable: Boolean,
     nameFor: (String) -> String,
     onSelect: () -> Unit,
-    onFetch: (Attachment) -> Unit,
+    repo: MailRepo,
 ) {
     val m = node.message
     val ground = when {
@@ -342,12 +385,31 @@ private fun MailMessageCard(
             .fillMaxWidth()
             .background(ground)
             .then(if (selectable) Modifier.clickable(onClick = onSelect) else Modifier)
-            .padding(start = (16 + depth * 14).dp, end = 16.dp, top = 10.dp, bottom = 12.dp),
+            .padding(start = (12 + depth * 14).dp, end = 12.dp, top = 8.dp, bottom = 10.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
+            // The twisty folds the conversation UNDER this message. A
+            // reply that swallows itself is not what a reader means by
+            // folding a thread.
+            if (foldable) {
+                IconButton(onClick = onFold, modifier = Modifier.size(22.dp)) {
+                    Icon(
+                        if (folded) Icons.AutoMirrored.Filled.KeyboardArrowRight
+                        else Icons.Filled.KeyboardArrowDown,
+                        contentDescription = if (folded) "Unfold replies" else "Fold replies",
+                        modifier = Modifier.size(18.dp),
+                    )
+                }
+                Spacer(Modifier.width(2.dp))
+            } else {
+                Spacer(Modifier.width(24.dp))
+            }
             Text(
                 nameFor(m.from),
                 style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.clickable(onClick = onShut),
             )
             Spacer(Modifier.width(8.dp))
             when (m.verdict) {
@@ -364,12 +426,35 @@ private fun MailMessageCard(
                 )
             }
         }
+        if (hidden > 0) {
+            Text(
+                if (hidden == 1) "1 reply folded" else "$hidden replies folded",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.padding(start = 24.dp),
+            )
+        }
         if (node.orphaned) {
             Text(
                 "Answers a message this build cannot read.",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(start = 24.dp),
             )
+        }
+        // Shut reads the message down to its header, the way a read
+        // message collapses in a mail client. The subject line stays so
+        // the row still says what it is.
+        if (shut) {
+            Text(
+                m.body.lineSequence().firstOrNull().orEmpty().take(120),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(start = 24.dp),
+            )
+            return@Column
         }
         if (m.verdict == Verdict.FORGED) {
             Text(
@@ -377,53 +462,33 @@ private fun MailMessageCard(
                     "evidence and cannot be answered.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.error,
-                modifier = Modifier.padding(top = 2.dp),
+                modifier = Modifier.padding(start = 24.dp, top = 2.dp),
             )
         }
-        Spacer(Modifier.size(6.dp))
-        SelectionContainer {
-            Text(m.body, style = MaterialTheme.typography.bodyMedium)
-        }
-        // The author's rendering instruction is signed, which proves they
-        // chose it and not that it is safe. Plain text is what we render;
-        // saying so is better than quietly ignoring the request.
-        if (m.bodyMime.isNotBlank() && m.bodyMime != "text/plain") {
-            Text(
-                "Shown as plain text; this message asked for ${m.bodyMime}.",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(top = 4.dp),
-            )
-        }
-        if (m.attachments.isNotEmpty()) {
-            Spacer(Modifier.size(8.dp))
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                m.attachments.forEach { a -> AttachmentRow(a) { onFetch(a) } }
+        Column(Modifier.padding(start = 24.dp, top = 6.dp)) {
+            SelectionContainer {
+                Text(m.body, style = MaterialTheme.typography.bodyMedium)
+            }
+            // The author's rendering instruction is signed, which proves
+            // they chose it and not that it is safe. Plain text is what
+            // we render; saying so beats quietly ignoring the request.
+            if (m.bodyMime.isNotBlank() && m.bodyMime != "text/plain") {
+                Text(
+                    "Shown as plain text; this message asked for ${m.bodyMime}.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 4.dp),
+                )
+            }
+            if (m.attachments.isNotEmpty()) {
+                Spacer(Modifier.size(8.dp))
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    m.attachments.forEach { a ->
+                        MailAttachmentRow(repo = repo, attachment = a, from = m.from)
+                    }
+                }
             }
         }
-    }
-}
-
-/**
- * One attachment. Bytes are never pushed, so a file on a message we
- * hold and have not pulled is the ordinary state of an inbound one, and
- * the answer to it is a control rather than an error.
- */
-@Composable
-private fun AttachmentRow(a: Attachment, onFetch: () -> Unit) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Column(Modifier.weight(1f)) {
-            Text(a.name.ifBlank { a.hash }, style = MaterialTheme.typography.bodySmall)
-            Text(
-                // The type is the sender's claim about bytes we may not
-                // even hold, so it is reported and never acted on.
-                listOfNotNull(sizeLabel(a.size), a.mime.takeIf { it.isNotBlank() })
-                    .joinToString(" · "),
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-        TextButton(onClick = onFetch) { Text("Fetch") }
     }
 }
 

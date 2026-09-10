@@ -194,4 +194,45 @@ class MailTreeTest {
         assertEquals(2000, l.cols)
         assertEquals(1, l.rows)
     }
+
+    // ---- folding -------------------------------------------------------
+
+    @Test
+    fun `folding a message hides what is under it, not itself`() {
+        val forest = threadTree(
+            listOf(
+                msg("root", sent = 1),
+                msg("a", prev = "root", sent = 2),
+                msg("a1", prev = "a", sent = 3),
+                msg("b", prev = "root", sent = 4),
+            ),
+        )
+        val open = flattenVisible(forest, emptySet()).map { it.node.message.id }
+        assertEquals(listOf("root", "a", "a1", "b"), open)
+
+        val shut = flattenVisible(forest, setOf("a"))
+        assertEquals(listOf("root", "a", "b"), shut.map { it.node.message.id })
+        assertEquals(1, shut.single { it.node.message.id == "a" }.hidden)
+    }
+
+    @Test
+    fun `a fold says how much it swallowed`() {
+        val forest = threadTree(
+            listOf(
+                msg("root", sent = 1),
+                msg("a", prev = "root", sent = 2),
+                msg("a1", prev = "a", sent = 3),
+                msg("a2", prev = "a1", sent = 4),
+            ),
+        )
+        val v = flattenVisible(forest, setOf("root"))
+        assertEquals(listOf("root"), v.map { it.node.message.id })
+        assertEquals(3, v.single().hidden, "a fold that does not count is just an ending")
+    }
+
+    @Test
+    fun `only a message with replies can be folded`() {
+        val forest = threadTree(listOf(msg("root", sent = 1), msg("a", prev = "root", sent = 2)))
+        assertEquals(setOf("root"), foldableIds(forest))
+    }
 }

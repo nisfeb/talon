@@ -13,6 +13,18 @@ import androidx.compose.runtime.staticCompositionLocalOf
  */
 interface ImageDownloader {
     suspend fun saveImage(url: String): SaveResult
+
+    /**
+     * Save bytes we already hold, under a name the CALLER has already
+     * made safe. Mail attachments come this way: they need the ship
+     * session to fetch, so the download happens where the session is
+     * and only the result lands here.
+     *
+     * Defaulted to unsupported so a leaf without a backend keeps
+     * compiling and the UI hides the control, per the Noop convention.
+     */
+    suspend fun saveBytes(fileName: String, bytes: ByteArray): SaveResult =
+        SaveResult.Unsupported
 }
 
 /** Outcome of a save attempt — drives the snackbar text in the viewer. */

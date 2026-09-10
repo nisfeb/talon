@@ -46,6 +46,23 @@ class DesktopImageDownloader(
         )
     }
 
+    override suspend fun saveBytes(fileName: String, bytes: ByteArray): SaveResult =
+        withContext(Dispatchers.IO) {
+            val dir = downloadsDir()
+            runCatching {
+                if (!dir.exists() && !dir.mkdirs()) throw IOException("couldn't create $dir")
+                val out = uniquify(File(dir, fileName.ifBlank { "attachment" }))
+                out.writeBytes(bytes)
+                out.absolutePath
+            }.fold(
+                onSuccess = { SaveResult.Saved(it) },
+                onFailure = { e ->
+                    Log.w(TAG, "write failed for $fileName", e)
+                    SaveResult.Failed("Couldn't save: ${e.message ?: e::class.simpleName}")
+                },
+            )
+        }
+
     private fun fetch(url: String): Pair<ByteArray, String?> {
         val req = Request.Builder().url(url).get().build()
         http.newCall(req).execute().use { resp ->

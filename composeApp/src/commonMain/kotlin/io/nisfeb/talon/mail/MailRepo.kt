@@ -137,7 +137,8 @@ class MailRepo(
 
     /** Which slice of the mailbox the list is showing. */
     fun setView(v: MailView) {
-        if (_view.value == v) return
+        if (_view.value == v && _label.value == null) return
+        _label.value = null
         _view.value = v
         _page.value = null
         scope.launch { refresh() }
@@ -157,7 +158,7 @@ class MailRepo(
         val a = api ?: return@withLock
         _loading.value = true
         try {
-            val p = a.inbox(view = _view.value)
+            val p = a.inbox(view = _view.value, label = _label.value)
             _page.value = p
             _error.value = null
             _availability.value = MailAvailability.PRESENT
@@ -308,6 +309,79 @@ class MailRepo(
             return
         }
         refresh()
+    }
+
+    // ---- labels, filters, lists ----------------------------------------
+
+    private val _label = MutableStateFlow<String?>(null)
+
+    /** The label the listing is filtered to, or null for none. */
+    val label: StateFlow<String?> = _label.asStateFlow()
+
+    private val _rules = MutableStateFlow<List<Rule>>(emptyList())
+    val rules: StateFlow<List<Rule>> = _rules.asStateFlow()
+
+    private val _lists = MutableStateFlow<List<MailingList>>(emptyList())
+    val lists: StateFlow<List<MailingList>> = _lists.asStateFlow()
+
+    /** Every label the current page mentions. The ship keeps no index
+     *  of them, so the listing is where they come from. */
+    val knownLabels: StateFlow<List<String>> = _page.let { p ->
+        MutableStateFlow<List<String>>(emptyList()).also { out ->
+            scope.launch {
+                p.collect { page ->
+                    out.value = page?.threads.orEmpty()
+                        .flatMap { it.labels }.distinct().sorted()
+                }
+            }
+        }
+    }
+
+    /** Show only threads carrying [name], or everything when null. */
+    fun filterByLabel(name: String?) {
+        _label.value = name
+        _view.value = if (name == null) MailView.INBOX else MailView.LABEL
+        _page.value = null
+        scope.launch { refresh() }
+    }
+
+    suspend fun setLabel(threadId: String, label: String, add: Boolean) =
+        write { it.setLabel(threadId, label, add) }
+
+    suspend fun refreshRules() {
+        val a = api ?: return
+        runCatching { _rules.value = a.rules() }
+            .onFailure { if (it is AuspexError) onFailure(it) }
+    }
+
+    suspend fun saveRule(r: Rule) {
+        val a = api ?: return
+        runCatching { a.saveRule(r) }.onFailure { if (it is AuspexError) onFailure(it); return }
+        refreshRules()
+    }
+
+    suspend fun deleteRule(id: String) {
+        val a = api ?: return
+        runCatching { a.deleteRule(id) }.onFailure { if (it is AuspexError) onFailure(it); return }
+        refreshRules()
+    }
+
+    suspend fun refreshLists() {
+        val a = api ?: return
+        runCatching { _lists.value = a.lists() }
+            .onFailure { if (it is AuspexError) onFailure(it) }
+    }
+
+    suspend fun saveList(l: MailingList) {
+        val a = api ?: return
+        runCatching { a.saveList(l) }.onFailure { if (it is AuspexError) onFailure(it); return }
+        refreshLists()
+    }
+
+    suspend fun deleteList(name: String) {
+        val a = api ?: return
+        runCatching { a.deleteList(name) }.onFailure { if (it is AuspexError) onFailure(it); return }
+        refreshLists()
     }
 
     // ---- drafts --------------------------------------------------------
