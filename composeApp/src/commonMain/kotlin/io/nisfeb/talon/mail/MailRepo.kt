@@ -100,6 +100,34 @@ class MailRepo(
     private val _view = MutableStateFlow(MailView.INBOX)
     val view: StateFlow<MailView> = _view.asStateFlow()
 
+    /**
+     * Which mailbox is open. One value rather than a view, a label and a
+     * drafts flag kept in step by hand: the sidebar and the list read the
+     * same thing, so they cannot disagree about what is showing.
+     */
+    private val _folder = MutableStateFlow<MailFolder>(MailFolder.View(MailView.INBOX))
+    val folder: StateFlow<MailFolder> = _folder.asStateFlow()
+
+    fun selectFolder(f: MailFolder) {
+        if (_folder.value == f) return
+        _folder.value = f
+        when (f) {
+            is MailFolder.View -> {
+                _view.value = f.view
+                _label.value = null
+                _page.value = null
+                scope.launch { refresh() }
+            }
+            is MailFolder.Label -> {
+                _view.value = MailView.LABEL
+                _label.value = f.name
+                _page.value = null
+                scope.launch { refresh() }
+            }
+            MailFolder.Drafts -> scope.launch { refreshDrafts() }
+        }
+    }
+
     // ---- lifecycle -----------------------------------------------------
 
     /** Point at a signed-in ship. Safe to call again on a re-login. */
@@ -135,14 +163,7 @@ class MailRepo(
         if (on && !was) scope.launch { refresh() }
     }
 
-    /** Which slice of the mailbox the list is showing. */
-    fun setView(v: MailView) {
-        if (_view.value == v && _label.value == null) return
-        _label.value = null
-        _view.value = v
-        _page.value = null
-        scope.launch { refresh() }
-    }
+
 
     // ---- reading -------------------------------------------------------
 
@@ -337,14 +358,6 @@ class MailRepo(
         }
     }
 
-    /** Show only threads carrying [name], or everything when null. */
-    fun filterByLabel(name: String?) {
-        _label.value = name
-        _view.value = if (name == null) MailView.INBOX else MailView.LABEL
-        _page.value = null
-        scope.launch { refresh() }
-    }
-
     suspend fun setLabel(threadId: String, label: String, add: Boolean) =
         write { it.setLabel(threadId, label, add) }
 
@@ -451,4 +464,15 @@ class MailRepo(
          *  control covers the case where the reader knows better. */
         const val DEFAULT_POLL_MS = 10 * 60 * 1000L
     }
+}
+
+/**
+ * A mailbox in the sidebar. The ship's own views, the local drafts
+ * store, and a label used as a folder — which is what a label is, once
+ * you can click it.
+ */
+sealed interface MailFolder {
+    data class View(val view: MailView) : MailFolder
+    data object Drafts : MailFolder
+    data class Label(val name: String) : MailFolder
 }

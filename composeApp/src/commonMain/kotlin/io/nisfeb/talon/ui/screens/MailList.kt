@@ -40,6 +40,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.material3.VerticalDivider
+import androidx.compose.material.icons.filled.Menu
+import io.nisfeb.talon.mail.MailFolder
 import io.nisfeb.talon.mail.InboxEntry
 import io.nisfeb.talon.mail.MailAvailability
 import io.nisfeb.talon.mail.MailRepo
@@ -74,154 +79,184 @@ fun MailList(
     val page by repo.page.collectAsState()
     val loading by repo.loading.collectAsState()
     val error by repo.error.collectAsState()
-    val view by repo.view.collectAsState()
     val drafts by repo.drafts.collectAsState()
     val labels by repo.knownLabels.collectAsState()
-    val activeLabel by repo.label.collectAsState()
+    val folder by repo.folder.collectAsState()
     var organising by remember { mutableStateOf(false) }
-    // Drafts are not one of the ship's views: they live on their own
-    // route, so this is a mode of the list rather than another chip
-    // handed to setView.
-    var showingDrafts by remember { mutableStateOf(false) }
-    LaunchedEffect(showingDrafts) {
-        if (showingDrafts) repo.refreshDrafts()
+    var pickingFolder by remember { mutableStateOf(false) }
+
+    if (organising) {
+        MailOrganiseSheet(repo = repo, onDismiss = { organising = false })
     }
 
-    Column(modifier.fillMaxSize()) {
-        MailToolbar(
-            view = view,
-            loading = loading,
-            onView = { showingDrafts = false; repo.setView(it) },
-            drafts = showingDrafts,
-            onDrafts = { showingDrafts = it },
-            showDrafts = onOpenDraft != null,
-            labels = labels,
-            activeLabel = activeLabel,
-            onLabel = { showingDrafts = false; repo.filterByLabel(it) },
-            onOrganise = { organising = true },
-            onRefresh = { scope.launch { repo.refresh() } },
-            onCompose = onCompose,
-        )
-        HorizontalDivider()
+    BoxWithConstraints(modifier.fillMaxSize()) {
+        // A mail client has a mailbox column. Where there is room it is
+        // simply there; where there is not, the same list arrives as a
+        // sheet rather than being crushed into chips along the top.
+        val roomForColumn = maxWidth >= 400.dp
 
-        error?.let { MailNotice(it) }
-        if (organising) {
-            MailOrganiseSheet(repo = repo, onDismiss = { organising = false })
+        Row(Modifier.fillMaxSize()) {
+            if (roomForColumn) {
+                MailFolderColumn(
+                    selected = folder,
+                    labels = labels,
+                    onSelect = { repo.selectFolder(it) },
+                    onOrganise = { organising = true },
+                    modifier = Modifier.width(158.dp).fillMaxHeight(),
+                )
+                VerticalDivider()
+            }
+            Column(Modifier.weight(1f).fillMaxHeight()) {
+                MailToolbar(
+                    title = folderName(folder),
+                    loading = loading,
+                    onRefresh = {
+                        scope.launch {
+                            if (folder is MailFolder.Drafts) repo.refreshDrafts()
+                            else repo.refresh()
+                        }
+                    },
+                    onCompose = onCompose,
+                    onFolders = if (roomForColumn) null else ({ pickingFolder = true }),
+                )
+                HorizontalDivider()
+                error?.let { MailNotice(it) }
+                MailBody(
+                    folder = folder,
+                    availability = availability,
+                    page = page,
+                    drafts = drafts,
+                    loading = loading,
+                    contacts = contacts,
+                    onOpenThread = onOpenThread,
+                    onOpenDraft = onOpenDraft,
+                    onInstall = onInstall,
+                )
+            }
         }
 
-        when {
-            showingDrafts -> if (drafts.isEmpty()) {
-                MailAbsent("Nothing half-written.", actionLabel = null, onAction = null)
-            } else {
-                LazyColumn(Modifier.fillMaxSize()) {
-                    items(drafts, key = { it.id }) { d ->
-                        DraftRow(d, onOpen = { onOpenDraft?.invoke(d) })
-                        HorizontalDivider(modifier = Modifier.padding(start = 12.dp))
-                    }
-                }
-            }
+        if (pickingFolder) {
+            MailFolderSheet(
+                selected = folder,
+                labels = labels,
+                onSelect = { repo.selectFolder(it); pickingFolder = false },
+                onOrganise = { pickingFolder = false; organising = true },
+                onDismiss = { pickingFolder = false },
+            )
+        }
+    }
+}
 
-            availability == MailAvailability.NO_GRUBBERY ->
-                MailAbsent(
-                    "Mail runs inside Grubbery, which this ship does not have yet.",
-                    actionLabel = if (onInstall != null) "Install Grubbery" else null,
-                    onAction = onInstall,
-                )
-
-            availability == MailAvailability.OLD_GRUBBERY ->
-                MailAbsent(
-                    "This ship's Grubbery predates Mail. It updates itself from " +
-                        "its publisher; check back shortly.",
-                    actionLabel = null,
-                    onAction = null,
-                )
-
-            page == null && loading ->
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator()
-                }
-
-            page?.threads.isNullOrEmpty() && availability == MailAvailability.PRESENT ->
-                MailAbsent(emptyLineFor(view), actionLabel = null, onAction = null)
-
-            else -> LazyColumn(Modifier.fillMaxSize()) {
-                items(page?.threads.orEmpty(), key = { it.id }) { row ->
-                    MailRow(
-                        row = row,
-                        nameFor = { contacts.displayName(it) },
-                        onClick = { onOpenThread(row.id) },
-                    )
+@Composable
+private fun MailBody(
+    folder: MailFolder,
+    availability: MailAvailability,
+    page: io.nisfeb.talon.mail.InboxPage?,
+    drafts: List<io.nisfeb.talon.mail.Draft>,
+    loading: Boolean,
+    contacts: ContactMap,
+    onOpenThread: (String) -> Unit,
+    onOpenDraft: ((io.nisfeb.talon.mail.Draft) -> Unit)?,
+    onInstall: (() -> Unit)?,
+) {
+    when {
+        folder is MailFolder.Drafts -> if (drafts.isEmpty()) {
+            MailAbsent("Nothing half-written.", actionLabel = null, onAction = null)
+        } else {
+            LazyColumn(Modifier.fillMaxSize()) {
+                items(drafts, key = { it.id }) { d ->
+                    DraftRow(d, onOpen = { onOpenDraft?.invoke(d) })
                     HorizontalDivider(modifier = Modifier.padding(start = 12.dp))
                 }
             }
         }
+
+        availability == MailAvailability.NO_GRUBBERY ->
+            MailAbsent(
+                "Mail runs inside Grubbery, which this ship does not have yet.",
+                actionLabel = if (onInstall != null) "Install Grubbery" else null,
+                onAction = onInstall,
+            )
+
+        availability == MailAvailability.OLD_GRUBBERY ->
+            MailAbsent(
+                "This ship's Grubbery predates Mail. It updates itself from " +
+                    "its publisher; check back shortly.",
+                actionLabel = null,
+                onAction = null,
+            )
+
+        page == null && loading ->
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator()
+            }
+
+        page?.threads.isNullOrEmpty() && availability == MailAvailability.PRESENT ->
+            MailAbsent(emptyLineFor(folder), actionLabel = null, onAction = null)
+
+        else -> LazyColumn(Modifier.fillMaxSize()) {
+            items(page?.threads.orEmpty(), key = { it.id }) { row ->
+                MailRow(
+                    row = row,
+                    nameFor = { contacts.displayName(it) },
+                    onClick = { onOpenThread(row.id) },
+                )
+                HorizontalDivider(modifier = Modifier.padding(start = 12.dp))
+            }
+        }
     }
 }
 
-private fun emptyLineFor(view: MailView): String = when (view) {
-    MailView.INBOX -> "No mail."
-    MailView.SENT -> "Nothing sent yet."
-    MailView.ARCHIVED -> "Nothing archived."
-    MailView.ALL -> "No mail."
-    MailView.LABEL -> "Nothing with this label."
+internal fun folderName(f: MailFolder): String = when (f) {
+    is MailFolder.View -> when (f.view) {
+        MailView.INBOX -> "Inbox"
+        MailView.SENT -> "Sent"
+        MailView.ARCHIVED -> "Archived"
+        MailView.ALL -> "All mail"
+        MailView.LABEL -> "Labelled"
+    }
+    MailFolder.Drafts -> "Drafts"
+    is MailFolder.Label -> f.name
+}
+
+private fun emptyLineFor(f: MailFolder): String = when (f) {
+    is MailFolder.View -> when (f.view) {
+        MailView.SENT -> "Nothing sent yet."
+        MailView.ARCHIVED -> "Nothing archived."
+        MailView.LABEL -> "Nothing with this label."
+        else -> "No mail."
+    }
+    MailFolder.Drafts -> "Nothing half-written."
+    is MailFolder.Label -> "Nothing labelled ${f.name}."
 }
 
 @Composable
 private fun MailToolbar(
-    view: MailView,
+    title: String,
     loading: Boolean,
-    onView: (MailView) -> Unit,
     onRefresh: () -> Unit,
     onCompose: (() -> Unit)?,
-    drafts: Boolean,
-    onDrafts: (Boolean) -> Unit,
-    showDrafts: Boolean,
-    labels: List<String>,
-    activeLabel: String?,
-    onLabel: (String?) -> Unit,
-    onOrganise: () -> Unit,
+    onFolders: (() -> Unit)?,
 ) {
     Row(
-        modifier = Modifier.fillMaxWidth().padding(start = 8.dp, end = 4.dp, top = 8.dp, bottom = 8.dp),
+        modifier = Modifier.fillMaxWidth().padding(start = 6.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        LazyRow(
-            modifier = Modifier.weight(1f),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            items(TABS, key = { it.first.name }) { (v, label) ->
-                FilterChip(
-                    selected = !drafts && view == v,
-                    onClick = { onView(v) },
-                    label = { Text(label) },
-                )
-            }
-            if (showDrafts) {
-                item(key = "drafts") {
-                    FilterChip(
-                        selected = drafts,
-                        onClick = { onDrafts(true) },
-                        label = { Text("Drafts") },
-                    )
-                }
-            }
-            // Labels the current listing mentions. The ship keeps no
-            // index of them, so this is where they come from.
-            items(labels, key = { "label:$it" }) { l ->
-                FilterChip(
-                    selected = activeLabel == l,
-                    onClick = { onLabel(if (activeLabel == l) null else l) },
-                    label = { Text(l) },
-                )
+        if (onFolders != null) {
+            IconButton(onClick = onFolders) {
+                Icon(Icons.Filled.Menu, contentDescription = "Mailboxes")
             }
         }
-        // The reader always knows better than a ten-minute timer, so the
-        // manual ask is a control and not a hidden gesture.
-        androidx.compose.material3.TextButton(onClick = onOrganise) { Text("Organise") }
+        Text(
+            title,
+            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
+            modifier = Modifier.weight(1f).padding(start = if (onFolders != null) 0.dp else 8.dp),
+        )
         if (onCompose != null) {
             androidx.compose.material3.TextButton(onClick = onCompose) { Text("New") }
         }
+        // The reader always knows better than a ten-minute timer, so the
+        // manual ask is a control and not a hidden gesture.
         IconButton(onClick = onRefresh, enabled = !loading) {
             if (loading) {
                 CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
@@ -231,13 +266,6 @@ private fun MailToolbar(
         }
     }
 }
-
-private val TABS = listOf(
-    MailView.INBOX to "Inbox",
-    MailView.SENT to "Sent",
-    MailView.ARCHIVED to "Archived",
-    MailView.ALL to "All",
-)
 
 @Composable
 private fun MailNotice(text: String) {
@@ -255,7 +283,7 @@ private fun MailNotice(text: String) {
 }
 
 @Composable
-private fun MailAbsent(text: String, actionLabel: String?, onAction: (() -> Unit)?) {
+internal fun MailAbsent(text: String, actionLabel: String?, onAction: (() -> Unit)?) {
     Box(Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Text(

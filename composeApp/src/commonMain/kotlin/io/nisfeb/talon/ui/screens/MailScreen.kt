@@ -43,56 +43,30 @@ fun MailScreen(
     var openThread by remember { mutableStateOf<String?>(null) }
     var composing by remember { mutableStateOf<MailIntent?>(null) }
 
-    when {
-        composing != null -> MailComposer(
-            repo = repo,
-            intent = composing!!,
-            onSent = { composing = null },
-            onCancel = { composing = null },
-            modifier = modifier,
-        )
-
-        openThread != null -> MailThreadPane(
-            repo = repo,
-            threadId = openThread!!,
-            contacts = contacts,
-            ourShip = ourShip,
-            onCompose = { composing = it },
-            onBack = { openThread = null },
-            modifier = modifier,
-        )
-
-        else -> Column(modifier.fillMaxSize()) {
-            Row(
-                Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                IconButton(onClick = onBack) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-                }
-                Text(
-                    "Mail",
-                    style = MaterialTheme.typography.titleMedium
-                        .copy(fontWeight = FontWeight.SemiBold),
-                    modifier = Modifier.padding(start = 4.dp),
-                )
+    Column(modifier.fillMaxSize()) {
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            IconButton(onClick = onBack) {
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
             }
-            HorizontalDivider()
-            MailList(
-                repo = repo,
-                contacts = contacts,
-                onOpenThread = { openThread = it },
-                onCompose = { composing = MailIntent() },
-                onOpenDraft = { d ->
-                    composing = MailIntent(
-                        prev = d.prev,
-                        to = d.to,
-                        subject = d.subject,
-                        body = d.body,
-                        draftId = d.id,
-                    )
-                },
+            Text(
+                "Mail",
+                style = MaterialTheme.typography.titleMedium
+                    .copy(fontWeight = FontWeight.SemiBold),
+                modifier = Modifier.padding(start = 4.dp),
             )
         }
+        HorizontalDivider()
+        MailWorkspace(
+            repo = repo,
+            contacts = contacts,
+            ourShip = ourShip,
+            openThread = openThread,
+            onOpenThread = { openThread = it },
+            composing = composing,
+            onCompose = { composing = it },
+        )
     }
 }

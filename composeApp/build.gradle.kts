@@ -619,6 +619,12 @@ ksp {
 val iconsExtendedKeep = setOf(
     "androidx/compose/material/icons/automirrored/filled/LogoutKt.class",
     "androidx/compose/material/icons/filled/AttachFileKt.class",
+    // The mail sidebar: a mailbox column wants mailbox icons, and core
+    // has no equivalent that reads as one.
+    "androidx/compose/material/icons/filled/ArchiveKt.class",
+    "androidx/compose/material/icons/filled/InboxKt.class",
+    "androidx/compose/material/icons/filled/LabelKt.class",
+    "androidx/compose/material/icons/filled/TuneKt.class",
     // Broken-image tile for dead chat-image URLs (StoryRenderer).
     "androidx/compose/material/icons/filled/BrokenImageKt.class",
     "androidx/compose/material/icons/filled/ContentCopyKt.class",

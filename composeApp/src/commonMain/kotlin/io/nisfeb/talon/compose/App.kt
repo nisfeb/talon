@@ -1992,27 +1992,6 @@ fun App(
                         // on narrow windows and in the right pane on wide
                         // windows (showing EmptyChatPane as placeholder).
                         val detailSlot: (@Composable () -> Unit)? = when {
-                            mailComposing != null -> ({
-                                io.nisfeb.talon.ui.screens.MailComposer(
-                                    repo = mailRepo,
-                                    intent = mailComposing!!,
-                                    onSent = { mailComposing = null },
-                                    onCancel = { mailComposing = null },
-                                )
-                            })
-                            // A mail thread owns the detail pane. Leaving the
-                            // Mail rail tab clears the selection below, so a
-                            // thread can never sit beside the chat list.
-                            openMailThread != null -> ({
-                                io.nisfeb.talon.ui.screens.MailThreadPane(
-                                    repo = mailRepo,
-                                    threadId = openMailThread!!,
-                                    contacts = callContacts,
-                                    ourShip = ship,
-                                    onCompose = { mailComposing = it },
-                                    onBack = { openMailThread = null },
-                                )
-                            })
                             // Notebook channels (whom prefix "diary/").
                             // Compose overlays the post viewer overlays the
                             // list — same precedence as production.
@@ -2743,23 +2722,9 @@ fun App(
                                         onRevealGroupHandled = { revealGroupRequest = null },
                                     )
                                 }
-                                RailTab.Mail -> io.nisfeb.talon.ui.screens.MailList(
-                                    repo = mailRepo,
-                                    contacts = callContacts,
-                                    onOpenThread = { openMailThread = it },
-                                    onCompose = {
-                                        mailComposing = io.nisfeb.talon.ui.screens.MailIntent()
-                                    },
-                                    onOpenDraft = { d ->
-                                        mailComposing = io.nisfeb.talon.ui.screens.MailIntent(
-                                            prev = d.prev,
-                                            to = d.to,
-                                            subject = d.subject,
-                                            body = d.body,
-                                            draftId = d.id,
-                                        )
-                                    },
-                                )
+                                // Mail takes the whole area instead; see
+                                // DesktopShell's content slot above.
+                                RailTab.Mail -> Unit
                                 RailTab.Statuses -> StatusFeedList(
                                     db = db,
                                     repo = repo,
@@ -2816,7 +2781,19 @@ fun App(
                             // width here instead of being crammed into the 30%
                             // list slot. Rail stays for navigation; back arrow
                             // only on narrow (where DesktopShell stacks it).
-                            content = if (showAssistant) {
+                            content = if (activeRailTab == RailTab.Mail) {
+                                {
+                                    io.nisfeb.talon.ui.screens.MailWorkspace(
+                                        repo = mailRepo,
+                                        contacts = callContacts,
+                                        ourShip = ship,
+                                        openThread = openMailThread,
+                                        onOpenThread = { openMailThread = it },
+                                        composing = mailComposing,
+                                        onCompose = { mailComposing = it },
+                                    )
+                                }
+                            } else if (showAssistant) {
                                 {
                                     AssistantScreen(
                                         db = db,

@@ -138,14 +138,36 @@ class MailRepoTest {
     }
 
     @Test
-    fun `switching view drops the page it no longer describes`() =
+    fun `one selection drives the view and the label together`() =
         withRepo({ 200 to emptyPage }) { r ->
             r.attach("https://ship.example")
             r.refresh()
-            assertEquals(MailView.INBOX, r.view.value)
-            r.setView(MailView.ARCHIVED)
+            assertEquals(MailFolder.View(MailView.INBOX), r.folder.value)
+
+            r.selectFolder(MailFolder.View(MailView.ARCHIVED))
             assertEquals(MailView.ARCHIVED, r.view.value)
+            assertNull(r.label.value)
+
+            // A label is a folder, and picking one moves both halves of
+            // the query rather than leaving them to be kept in step.
+            r.selectFolder(MailFolder.Label("work"))
+            assertEquals(MailView.LABEL, r.view.value)
+            assertEquals("work", r.label.value)
+
+            r.selectFolder(MailFolder.View(MailView.INBOX))
+            assertNull(r.label.value, "leaving a label clears the filter with it")
         }
+
+    @Test
+    fun `a listing asks for the label the folder names`() {
+        val asked = mutableListOf<String>()
+        withRepo({ path -> asked += path; 200 to emptyPage }) { r ->
+            r.attach("https://ship.example")
+            r.selectFolder(MailFolder.Label("work"))
+            r.refresh()
+        }
+        assertTrue(asked.isNotEmpty())
+    }
 
     @Test
     fun `detaching forgets the mailbox`() = withRepo({ 200 to emptyPage }) { r ->
