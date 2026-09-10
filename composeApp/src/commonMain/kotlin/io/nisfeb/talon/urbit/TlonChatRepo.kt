@@ -606,9 +606,13 @@ class TlonChatRepo(
         runCatching { notes.bootstrap() }
             .onFailure { Log.w(TAG, "notes bootstrap failed", it) }
 
-        // Watchdog: if we don't see an event for 90s, the SSE is likely
-        // a zombie (doze-frozen or server-side dropped). Cancel the
-        // collect job so runSessionLoop reconnects.
+        // Watchdog: if nothing at all arrives on the stream for 90s the
+        // SSE is a zombie (doze-frozen or server-side dropped) — cancel
+        // the collect job so runSessionLoop reconnects. "Nothing at all"
+        // counts eyre's heartbeats, which arrive every ~25s on the
+        // quietest ship: measuring events alone made this fire on every
+        // idle ship, forever, and each reconnect re-ran the whole
+        // bootstrap. See UrbitChannel.streamIdleMs.
         // Acks ride their own queue instead of being awaited inline. Each
         // ack is a network PUT to the ship; awaiting it after every event
         // capped ingestion at one round-trip per event, so a burst of
@@ -659,7 +663,7 @@ class TlonChatRepo(
         val watchdogJob = launch {
             while (isActive && collectJob.isActive) {
                 delay(30_000L)
-                val idleMs = nowMs() - lastEventMs
+                val idleMs = minOf(nowMs() - lastEventMs, ch.streamIdleMs)
                 if (idleMs > 90_000L) {
                     Log.w(TAG, "watchdog: ${idleMs}ms without event; force-reconnect")
                     notificationHealth.incrementForceReconnects()

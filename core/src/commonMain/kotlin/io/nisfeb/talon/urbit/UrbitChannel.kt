@@ -118,11 +118,18 @@ class UrbitChannel internal constructor(
                     header(HttpHeaders.AcceptEncoding, "identity")
                 }.execute { resp ->
                     if (!resp.status.isSuccess()) error("channel SSE: HTTP ${resp.status.value}")
+                    lastStreamMs = nowMs()
                     val body = resp.bodyAsChannel()
                     var id: Long? = null
                     val data = StringBuilder()
                     while (true) {
                         val line = body.readUTF8Line() ?: break
+                        // Any line at all means the stream is alive, and on
+                        // an idle ship the only lines are eyre's `:`
+                        // heartbeats (~every 25s). Recording them is what
+                        // separates "nothing is happening" from "the socket
+                        // is dead" — see [streamIdleMs].
+                        lastStreamMs = nowMs()
                         when {
                             // Blank line terminates a frame — dispatch it.
                             line.isEmpty() -> {
@@ -167,6 +174,23 @@ class UrbitChannel internal constructor(
             forwarder.cancel()
         }
     }
+
+    /**
+     * How long since anything at all arrived on the event stream,
+     * heartbeats included; [Long.MAX_VALUE] before it connects.
+     *
+     * Eyre sends an SSE comment every ~25 seconds whether or not the
+     * ship has news, so a live stream is never quiet for long. A
+     * watchdog that instead measured time since the last *event* fired
+     * on every idle ship: it force-reconnected every 90 seconds all
+     * day, and each reconnect re-ran the full bootstrap, which is most
+     * of what a busy ship was serving.
+     */
+    val streamIdleMs: Long
+        get() = lastStreamMs.let { if (it == 0L) Long.MAX_VALUE else nowMs() - it }
+
+    @Volatile
+    private var lastStreamMs: Long = 0L
 
     suspend fun subscribe(app: String, path: String, onShip: String = ship): Long {
         val id = nextRequestId()
