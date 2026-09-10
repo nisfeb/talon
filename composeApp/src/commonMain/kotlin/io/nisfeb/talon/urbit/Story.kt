@@ -185,9 +185,21 @@ object Story {
                 // (the notebook composer's parser) and parse the result
                 // with expansion OFF. Skip the round-trip for prose with
                 // no block markers — inline re-parsing below covers that.
-                if (expandMarkdown && isPlainTextInline(arr)) {
-                    val raw = reconstructPlainText(arr)
-                    if (hasBlockMarkdown(raw)) {
+                if (expandMarkdown) {
+                    val raw = when {
+                        isPlainTextInline(arr) -> reconstructPlainText(arr)
+                        // Inline styling inside a block construct used to
+                        // disable the whole block: `| **a** | b |` stayed
+                        // literal text, because the composer had already
+                        // turned the bold into a span and the verse was
+                        // no longer "only plain text". Rebuild the source
+                        // from the spans instead — RawMarkdown is the
+                        // composer's inverse — so the table, list or
+                        // heading still forms, styling and all.
+                        isInlineStyledOnly(arr) -> RawMarkdown.renderInlines(arr)
+                        else -> null
+                    }
+                    if (raw != null && hasBlockMarkdown(raw)) {
                         out.addAll(parse(MarkdownBlocks.toStory(raw), expandMarkdown = false))
                         return@let
                     }
@@ -312,6 +324,25 @@ object Story {
     /** True if every inline element is a plain string or a `break` — i.e.
      *  the verse has no structured spans we'd drop by re-flowing it
      *  through the markdown parser. */
+    /**
+     * Plain text, line breaks and inline styling only. A verse like
+     * this can still be carrying block markdown in its source form, so
+     * it is worth rebuilding and re-reading. Deliberately excludes
+     * spans that are already block-level — a blockquote, a task — so
+     * structured content is never re-derived from its own rendering.
+     */
+    private fun isInlineStyledOnly(arr: JsonArray): Boolean = arr.all { el ->
+        when (el) {
+            is JsonPrimitive -> el.isString
+            is JsonObject -> el.size == 1 && el.keys.first() in REFLOWABLE_SPANS
+            else -> false
+        }
+    }
+
+    private val REFLOWABLE_SPANS = setOf(
+        "break", "bold", "italics", "strike", "code", "inline-code", "link", "ship",
+    )
+
     private fun isPlainTextInline(arr: JsonArray): Boolean = arr.all { el ->
         when (el) {
             is JsonPrimitive -> el.isString
