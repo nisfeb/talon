@@ -21,6 +21,11 @@ interface NotesDao {
     @Query("SELECT * FROM notes_notebooks WHERE flag = :flag")
     suspend fun notebook(flag: String): NotesNotebookEntity?
 
+    /** Every notebook we hold, for comparing stamps before deciding
+     *  what a reconnect actually has to re-read. */
+    @Query("SELECT * FROM notes_notebooks")
+    suspend fun allNotebooks(): List<NotesNotebookEntity>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertNotebooks(rows: List<NotesNotebookEntity>)
 

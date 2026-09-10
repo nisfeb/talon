@@ -79,8 +79,13 @@ class ShipConnection(
                 val ok = runConnection()
                 if (ok) backoffMs = 1_000L
                 else {
-                    log.warn("SSE dropped; reconnecting in ${backoffMs}ms")
-                    delay(backoffMs)
+                    // Jittered: the relay holds one stream per registered
+                    // device, so a ship restart drops them all at the same
+                    // instant and a fixed delay marches them back in step.
+                    val waitMs = (backoffMs * kotlin.random.Random.nextDouble(0.5, 1.5))
+                        .toLong().coerceAtLeast(1L)
+                    log.warn("SSE dropped; reconnecting in ${waitMs}ms")
+                    delay(waitMs)
                     backoffMs = (backoffMs * 2).coerceAtMost(60_000L)
                 }
             }

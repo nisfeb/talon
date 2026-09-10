@@ -569,7 +569,9 @@ class CallController(
             }
             channel = null
             if (!scope.isActive) break
-            delay(backoff)
+            // Jittered: a ship restart drops every client at once, and a
+            // fixed delay brings the whole fleet back on the same tick.
+            delay((backoff * kotlin.random.Random.nextDouble(0.5, 1.5)).toLong().coerceAtLeast(1L))
             backoff = (backoff * 2).coerceAtMost(60_000L)
         }
     }

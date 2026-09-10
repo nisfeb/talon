@@ -88,6 +88,15 @@ class NotesRepo(
             .getOrNull() ?: return
 
         val summaries = NotesParser.notebookSummaries(body)
+        // What we already hold, read BEFORE the upsert below overwrites
+        // the stamps. Re-reading one notebook is two scries, so on a
+        // ship with ten notebooks the old unconditional refresh cost
+        // twenty scries on every connect for data that had not moved.
+        // Live edits arrive on the per-notebook stream we subscribe to
+        // just below; the scry only has to cover the disconnected gap.
+        val knownStamps = runCatching {
+            db.notes().allNotebooks().associate { it.flag to it.updatedAtMs }
+        }.getOrDefault(emptyMap())
         Log.i(TAG, "notes bootstrap: ${summaries.size} notebook(s)")
         db.notes().upsertNotebooks(
             summaries.map { s ->
@@ -104,10 +113,16 @@ class NotesRepo(
                 )
             },
         )
+        var reread = 0
         summaries.forEach { s ->
             ensureSubscribed(s.flag)
-            refreshNotebook(s.flag)
+            val known = knownStamps[s.flag.flagString]
+            if (known == null || known != s.notebook.updatedAtMs) {
+                reread++
+                refreshNotebook(s.flag)
+            }
         }
+        Log.i(TAG, "notes bootstrap: re-read $reread of ${summaries.size} notebook(s)")
     }
 
     /**

@@ -159,6 +159,13 @@ class TlonChatRepo(
     @Volatile private var sessionJob: Job? = null
     @Volatile private var lastEventMs: Long = 0L
 
+    /** When the reconciliation scries last ran. A reconnect that lands
+     *  right after one skips them: the previous pass already covered
+     *  the window, the subscriptions carry everything live, and a
+     *  reconnect must never re-run an expensive bootstrap. Bounds the
+     *  damage if anything ever loops again. */
+    @Volatile private var lastBootstrapMs: Long = 0L
+
     /** Authenticated client + base URL for the active ship (null until
      *  [start]). Lets ship-adjacent features — e.g. the MCP endpoint at
      *  `/mcp` — reuse the session without re-plumbing auth. */
@@ -404,7 +411,10 @@ class TlonChatRepo(
             // Back off exponentially after failures; reset on a normal
             // "stream completed" exit (rare, but polite).
             backoffMs = if (ok) 2_000L else (backoffMs * 2).coerceAtMost(60_000L)
-            delay(backoffMs)
+            // Jitter. A ship restart drops every client at the same
+            // instant, so a fixed delay brings them all back on the same
+            // tick and the ship meets the whole fleet at once.
+            delay(jittered(backoffMs))
         }
     }
 
@@ -484,74 +494,87 @@ class TlonChatRepo(
         // timed out the scry or left the user staring at a progress
         // bar with no idea if anything was happening. See `bootstrap`
         // for the count semantics.
+        // A reconnect this soon after the last full pass re-registers
+        // its subscriptions and nothing else. See the client-conduct
+        // rules: a reconnect must be cheap.
+        val sinceBootstrapMs = nowMs() - lastBootstrapMs
+        val skipBootstrap = !shouldBootstrap(firstRun, lastBootstrapMs, nowMs())
+        if (skipBootstrap) {
+            Log.i(TAG, "reconnected ${sinceBootstrapMs}ms after the last bootstrap; re-subscribed only")
+        }
         if (firstRun) _bootstrapping.value = true
         try {
-            // Parallel-fan-out the bootstrap scries — each is a network
-            // round-trip and they write to disjoint tables, so running
-            // them serially burned 4× wall time for no reason. Failures
-            // are caught per-job so a slow one doesn't poison the rest.
-            //
-            // - initPosts: chat/channel history + reactions
-            // - activity: unread + notify counts → also marks reconcile
-            //   success on notificationHealth
-            // - contacts: status / nickname / color updates that the
-            //   live %contacts /v1/news subscribe doesn't replay on
-            //   reconnect
-            // - channel orders: pin/unpin state, same reconnect-replay
-            //   gap as contacts
-            //
-            // Clubs stay in a firstRun-only branch (the %chat /v4
-            // subscription covers edits adequately on reconnect).
-            // Groups do not: a group joined while the channel was down
-            // never arrives as a fact, so the list is reconciled from a
-            // scry on every connect. Seen on a fresh comet, whose join
-            // landed while the ship was busy and the channel cycled.
-            val initJob = async {
-                runCatching { bootstrap(ch, count = INITIAL_PAGE_COUNT) }
-                    .onFailure { Log.e(TAG, "initPosts scry failed", it) }
+            // Skipped when a reconnect lands right after the last
+            // pass; the subscriptions above are re-registered either way.
+            if (!skipBootstrap) {
+                // Parallel-fan-out the bootstrap scries — each is a network
+                // round-trip and they write to disjoint tables, so running
+                // them serially burned 4× wall time for no reason. Failures
+                // are caught per-job so a slow one doesn't poison the rest.
+                //
+                // - initPosts: chat/channel history + reactions
+                // - activity: unread + notify counts → also marks reconcile
+                //   success on notificationHealth
+                // - contacts: status / nickname / color updates that the
+                //   live %contacts /v1/news subscribe doesn't replay on
+                //   reconnect
+                // - channel orders: pin/unpin state, same reconnect-replay
+                //   gap as contacts
+                //
+                // Clubs stay in a firstRun-only branch (the %chat /v4
+                // subscription covers edits adequately on reconnect).
+                // Groups do not: a group joined while the channel was down
+                // never arrives as a fact, so the list is reconciled from a
+                // scry on every connect. Seen on a fresh comet, whose join
+                // landed while the ship was busy and the channel cycled.
+                val initJob = async {
+                    runCatching { bootstrap(ch, count = INITIAL_PAGE_COUNT) }
+                        .onFailure { Log.e(TAG, "initPosts scry failed", it) }
+                }
+                val activityJob = async {
+                    runCatching { bootstrapActivity(ch) }
+                        .onSuccess { notificationHealth.markReconcileSuccess() }
+                        .onFailure { Log.e(TAG, "activity scry failed", it) }
+                }
+                val contactsJob = async {
+                    runCatching { bootstrapContacts(ch) }
+                        .onFailure { Log.e(TAG, "contacts scry failed", it) }
+                }
+                val ordersJob = async {
+                    runCatching { bootstrapChannelOrders(ch) }
+                        .onFailure { Log.e(TAG, "channel orders scry failed", it) }
+                }
+                val dmInvitesJob = async {
+                    runCatching { bootstrapDmInvites(ch) }
+                        .onFailure { Log.e(TAG, "dm-invites scry failed", it) }
+                }
+                // Group invites had no bootstrap at all — refreshInvites ran
+                // only when the Invites screen was opened, so an invite that
+                // arrived while you weren't looking never lit the badge.
+                // notify=false: populate the badge, don't fire a toast for
+                // invites that were already pending before this launch.
+                val groupInvitesJob = async {
+                    runCatching { refreshInvites(notify = false) }
+                        .onFailure { Log.e(TAG, "group-invites scry failed", it) }
+                }
+                val groupsJob = async {
+                    runCatching { bootstrapGroups(ch) }
+                        .onFailure { Log.e(TAG, "groups scry failed", it) }
+                }
+                val firstRunJobs = if (firstRun) {
+                    listOf(
+                        async {
+                            runCatching { bootstrapClubs(ch) }
+                                .onFailure { Log.e(TAG, "clubs scry failed", it) }
+                        },
+                    )
+                } else emptyList()
+                (
+                    listOf(initJob, activityJob, contactsJob, ordersJob, dmInvitesJob, groupInvitesJob, groupsJob) +
+                        firstRunJobs
+                    ).awaitAll()
+                lastBootstrapMs = nowMs()
             }
-            val activityJob = async {
-                runCatching { bootstrapActivity(ch) }
-                    .onSuccess { notificationHealth.markReconcileSuccess() }
-                    .onFailure { Log.e(TAG, "activity scry failed", it) }
-            }
-            val contactsJob = async {
-                runCatching { bootstrapContacts(ch) }
-                    .onFailure { Log.e(TAG, "contacts scry failed", it) }
-            }
-            val ordersJob = async {
-                runCatching { bootstrapChannelOrders(ch) }
-                    .onFailure { Log.e(TAG, "channel orders scry failed", it) }
-            }
-            val dmInvitesJob = async {
-                runCatching { bootstrapDmInvites(ch) }
-                    .onFailure { Log.e(TAG, "dm-invites scry failed", it) }
-            }
-            // Group invites had no bootstrap at all — refreshInvites ran
-            // only when the Invites screen was opened, so an invite that
-            // arrived while you weren't looking never lit the badge.
-            // notify=false: populate the badge, don't fire a toast for
-            // invites that were already pending before this launch.
-            val groupInvitesJob = async {
-                runCatching { refreshInvites(notify = false) }
-                    .onFailure { Log.e(TAG, "group-invites scry failed", it) }
-            }
-            val groupsJob = async {
-                runCatching { bootstrapGroups(ch) }
-                    .onFailure { Log.e(TAG, "groups scry failed", it) }
-            }
-            val firstRunJobs = if (firstRun) {
-                listOf(
-                    async {
-                        runCatching { bootstrapClubs(ch) }
-                            .onFailure { Log.e(TAG, "clubs scry failed", it) }
-                    },
-                )
-            } else emptyList()
-            (
-                listOf(initJob, activityJob, contactsJob, ordersJob, dmInvitesJob, groupInvitesJob, groupsJob) +
-                    firstRunJobs
-                ).awaitAll()
         } finally {
             if (firstRun) _bootstrapping.value = false
         }
