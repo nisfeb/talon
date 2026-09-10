@@ -325,6 +325,9 @@ fun App(
         applyRightPaneState(RightPaneStateReducer.switchShip(rightPaneSnapshot()))
     }
     var showSelfProfile by remember { mutableStateOf(false) }
+    /** The mail thread the reader is on. The reader itself is the next
+     *  slice; until it lands this records the tap and nothing renders it. */
+    var openMailThread by remember { mutableStateOf<String?>(null) }
     var showStatusFeed by remember { mutableStateOf(false) }
     var showInvites by remember { mutableStateOf(false) }
     var showBookmarks by remember { mutableStateOf(false) }
@@ -871,6 +874,16 @@ fun App(
             )
         }
         val loopScope = rememberCoroutineScope()
+
+        // Mail lives on the ship's own HTTP surface, not the eyre
+        // channel, so it needs only the session's cookie-bearing client.
+        val mailRepo = remember(session) {
+            io.nisfeb.talon.mail.MailRepo(session.http, loopScope)
+        }
+        val mailShipUrl = sessionStore.active()?.shipUrl
+        LaunchedEffect(mailRepo, mailShipUrl) {
+            if (mailShipUrl != null) mailRepo.attach(mailShipUrl) else mailRepo.detach()
+        }
         // "Run now", from both the Loops screen and the assistant's jobs pane.
         val runLoopNow: (Long) -> Unit = { loopId ->
             loopScope.launch { db.loops().get(loopId)?.let { loopRunner.runLoop(it) } }
@@ -1006,7 +1019,12 @@ fun App(
             val windowInfo = LocalWindowInfo.current
             LaunchedEffect(repo, windowInfo) {
                 snapshotFlow { windowInfo.isWindowFocused }
-                    .collect { focused -> repo.setForeground(focused) }
+                    .collect { focused ->
+                        repo.setForeground(focused)
+                        // Coming back to the window is one of the four
+                        // things that makes the mailbox ask again.
+                        mailRepo.setForeground(focused)
+                    }
             }
 
             // New pending DM request → tray notification. Always fires
@@ -2539,7 +2557,7 @@ fun App(
                                 RailItem.Invites -> showInvites = true
                                 RailItem.Settings -> showSettings = true
                                 // pane tabs handled above; never reaches here
-                                RailItem.Chats, RailItem.Statuses,
+                                RailItem.Chats, RailItem.Mail, RailItem.Statuses,
                                 RailItem.Bookmarks, RailItem.Activity -> Unit
                             }
                         }
@@ -2684,6 +2702,11 @@ fun App(
                                         onRevealGroupHandled = { revealGroupRequest = null },
                                     )
                                 }
+                                RailTab.Mail -> io.nisfeb.talon.ui.screens.MailList(
+                                    repo = mailRepo,
+                                    contacts = callContacts,
+                                    onOpenThread = { openMailThread = it },
+                                )
                                 RailTab.Statuses -> StatusFeedList(
                                     db = db,
                                     repo = repo,

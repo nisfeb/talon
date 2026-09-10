@@ -224,6 +224,7 @@ class DesktopShellTest {
  *  sync with the impl. */
 private fun railLabel(item: RailItem): String = when (item) {
     RailItem.Chats -> "Chats"
+    RailItem.Mail -> "Mail"
     RailItem.Statuses -> "Statuses"
     RailItem.Bookmarks -> "Bookmarks"
     RailItem.Activity -> "Activity"

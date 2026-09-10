@@ -22,6 +22,7 @@ import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.MailOutline
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Search
@@ -256,6 +257,9 @@ private fun railIcon(item: RailItem): ImageVector? = when (item) {
     // unzipping the core jar at plan-write time). Safe with the
     // slim-jar strip; auditIconKeepList catches any drift.
     RailItem.Chats -> Icons.Filled.Home
+    // MailOutline is in material-icons-core, so it survives the slim
+    // strip; Email is already spent on Invites.
+    RailItem.Mail -> Icons.Filled.MailOutline
     RailItem.Statuses -> Icons.Filled.Person
     RailItem.Bookmarks -> Icons.Filled.Star
     RailItem.Activity -> Icons.Filled.Notifications
@@ -271,6 +275,7 @@ private fun railIcon(item: RailItem): ImageVector? = when (item) {
 
 private fun railLabel(item: RailItem): String = when (item) {
     RailItem.Chats -> "Chats"
+    RailItem.Mail -> "Mail"
     RailItem.Statuses -> "Statuses"
     RailItem.Bookmarks -> "Bookmarks"
     RailItem.Activity -> "Activity"

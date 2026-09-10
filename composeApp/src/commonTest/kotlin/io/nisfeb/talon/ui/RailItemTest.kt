@@ -83,6 +83,7 @@ class RailItemTest {
         val custom = listOf(
             RailItem.Settings,
             RailItem.Chats,
+            RailItem.Mail,
             RailItem.Profile,
             RailItem.Statuses,
             RailItem.Bookmarks,

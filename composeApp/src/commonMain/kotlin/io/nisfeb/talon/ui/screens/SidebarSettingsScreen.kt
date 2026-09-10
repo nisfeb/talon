@@ -217,6 +217,8 @@ private fun sidebarRowState(
         fixedAlwaysOn = false,
         gatedOff = !dailyDigestEnabled,
     )
+    RailItem.Mail -> SidebarRowState("Mail", null, false, false)
+    RailItem.Mail -> SidebarRowState("Mail", null, false, false)
     RailItem.Statuses -> SidebarRowState("Statuses", null, false, false)
     RailItem.Bookmarks -> SidebarRowState("Bookmarks", null, false, false)
     RailItem.Activity -> SidebarRowState("Activity", null, false, false)
