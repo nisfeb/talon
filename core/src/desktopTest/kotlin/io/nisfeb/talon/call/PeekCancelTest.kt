@@ -6,6 +6,8 @@ import io.ktor.client.engine.mock.respond
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
+import io.ktor.utils.io.ByteChannel
+import io.ktor.utils.io.writeStringUtf8
 import io.nisfeb.talon.urbit.SavedSession
 import io.nisfeb.talon.urbit.SessionStore
 import io.nisfeb.talon.urbit.UrbitSession
@@ -61,10 +63,19 @@ class PeekCancelTest {
                 }
                 req.url.encodedPath.startsWith("/~/scry") ->
                     respond("{}", HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "application/json"))
-                else -> respond(
-                    sse, HttpStatusCode.OK,
-                    headersOf(HttpHeaders.ContentType, "text/event-stream"),
-                )
+                else -> {
+                    // A real event stream stays open. A body that ends
+                    // the moment it is read looks like a dropped stream,
+                    // so the controller reconnects on a backoff and the
+                    // peek below waits on a connection that keeps dying
+                    // — which is what made this test time out under
+                    // parallel load. Hand back a channel that carries
+                    // the frame and then simply stays open, and nothing
+                    // reconnects.
+                    val body = ByteChannel(autoFlush = true)
+                    body.writeStringUtf8(sse)
+                    respond(body, HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "text/event-stream"))
+                }
             }
         }
         fun sawPut(marker: String) = synchronized(puts) { puts.any { it.contains(marker) } }
