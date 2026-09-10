@@ -474,9 +474,22 @@ class CallController(
                             is TrunkUpdate.Present ->
                                 _presence.value = _presence.value +
                                     ("${up.from}/${up.name}" to up.n)
-                            is TrunkUpdate.OnLine ->
-                                _onLine.value = _onLine.value +
-                                    ("${up.from}/${up.name}" to up.who)
+                            is TrunkUpdate.OnLine -> {
+                                val key = "${up.from}/${up.name}"
+                                _onLine.value = _onLine.value + (key to up.who)
+                                // The count travels with the names. A
+                                // wire-9 host announces %on-line when a
+                                // line's roster changes and never sends
+                                // %present unasked, so a count left over
+                                // from the last ask outlived the people
+                                // it counted: the party tab's dot stayed
+                                // lit after the line emptied, until some
+                                // other surface happened to ask. Both
+                                // numbers come off the same pruned map on
+                                // the host, so the set's size is the
+                                // count, not a guess at it.
+                                _presence.value = _presence.value + (key to up.who.size)
+                            }
                             is TrunkUpdate.Recorders ->
                                 _recording.value = _recording.value +
                                     ("${up.from}/${up.name}" to up.who)
