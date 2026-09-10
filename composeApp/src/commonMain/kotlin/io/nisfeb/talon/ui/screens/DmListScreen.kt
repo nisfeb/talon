@@ -126,6 +126,7 @@ fun DmListScreen(
     onSignOut: () -> Unit,
     onOpenSelfProfile: () -> Unit,
     onOpenStatusFeed: () -> Unit,
+    onOpenMail: () -> Unit = {},
     partyLinesTab: (@Composable () -> Unit)? = null,
     partyLinesOccupied: Boolean = false,
     onOpenBookmarks: () -> Unit,
@@ -907,6 +908,15 @@ fun DmListScreen(
                                     runCatching { repo.settingsSync?.pushStatusesSeen(now) }
                                 }
                                 onOpenStatusFeed()
+                            },
+                        )
+                    }
+                    if (RailItem.Mail in kebabItems) {
+                        DropdownMenuItem(
+                            text = { Text("Mail") },
+                            onClick = {
+                                menuOpen = false
+                                onOpenMail()
                             },
                         )
                     }

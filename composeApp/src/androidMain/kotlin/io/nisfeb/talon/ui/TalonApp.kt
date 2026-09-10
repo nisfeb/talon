@@ -371,6 +371,17 @@ fun TalonApp(
     val androidAudioDevices = remember {
         io.nisfeb.talon.call.AndroidAudioDevices(app)
     }
+    // Mail rides the ship's own HTTP surface, not the eyre channel, so
+    // the session's cookie-bearing client is all it needs.
+    val mailRepo = remember(app.session) {
+        io.nisfeb.talon.mail.MailRepo(app.session.http, appScope)
+    }
+    val mailShipUrl = app.sessionStore.active()?.shipUrl
+    LaunchedEffect(mailRepo, mailShipUrl, loggedInShip) {
+        if (mailShipUrl != null && loggedInShip != null) mailRepo.attach(mailShipUrl)
+        else mailRepo.detach()
+    }
+
     val contactMap by remember {
         contactMapFlow(
             app.db.contacts().stream(),
@@ -492,6 +503,7 @@ fun TalonApp(
     }
     var editingProfile by remember { mutableStateOf(false) }
     var statusFeedOpen by remember { mutableStateOf(false) }
+    var mailOpen by remember { mutableStateOf(false) }
     var bookmarksOpen by remember { mutableStateOf(false) }
     var activityOpen by remember { mutableStateOf(false) }
     var contactsOpen by remember { mutableStateOf(false) }
@@ -553,6 +565,7 @@ fun TalonApp(
             initialScrollMessageId != null
         if (chatTargeted) {
             statusFeedOpen = false
+            mailOpen = false
             bookmarksOpen = false
             activityOpen = false
             watchwordsOpen = false
@@ -988,10 +1001,17 @@ fun TalonApp(
                     // viewed again (gates auto-mark-read in the repo).
                     app.repo.setForeground(true)
                     app.repo.forceReconnect()
+                    // Coming back is one of the four things that makes the
+                    // mailbox ask again; a ten-minute timer alone cannot
+                    // cover the moment somebody actually looks at it.
+                    mailRepo.setForeground(true)
                 }
                 // Background: stop treating the open chat as read so DMs
                 // arriving while away still badge + notify.
-                Lifecycle.Event.ON_STOP -> app.repo.setForeground(false)
+                Lifecycle.Event.ON_STOP -> {
+                    app.repo.setForeground(false)
+                    mailRepo.setForeground(false)
+                }
                 else -> {}
             }
         }
@@ -1197,6 +1217,7 @@ fun TalonApp(
         // the same time), so its handler is registered last.
         BackHandler(enabled = editingProfile) { editingProfile = false }
         BackHandler(enabled = statusFeedOpen) { statusFeedOpen = false }
+        BackHandler(enabled = mailOpen) { mailOpen = false }
         BackHandler(enabled = bookmarksOpen) { bookmarksOpen = false }
         BackHandler(enabled = activityOpen) { activityOpen = false }
         BackHandler(enabled = contactsOpen) { contactsOpen = false }
@@ -1277,6 +1298,7 @@ fun TalonApp(
             viewerImageUrl != null -> "ImageViewer"
             editingProfile -> "ProfileEdit"
             statusFeedOpen -> "StatusFeed"
+            mailOpen -> "Mail"
             bookmarksOpen -> "Bookmarks"
             activityOpen -> "Activity"
             groupInfoDrilldown != null -> "MediaList"
@@ -1426,6 +1448,14 @@ fun TalonApp(
                 repo = app.repo,
                 ourPatp = loggedInShip ?: "",
                 onBack = { editingProfile = false },
+                modifier = mod,
+            )
+
+            mailOpen -> io.nisfeb.talon.ui.screens.MailScreen(
+                repo = mailRepo,
+                contacts = contactMap,
+                ourShip = loggedInShip ?: "",
+                onBack = { mailOpen = false },
                 modifier = mod,
             )
 
@@ -2266,6 +2296,7 @@ fun TalonApp(
                 onNewMessage = { newDmOpen = true },
                 onOpenSelfProfile = { editingProfile = true },
                 onOpenStatusFeed = { statusFeedOpen = true },
+                onOpenMail = { mailOpen = true },
                 partyLinesOccupied = io.nisfeb.talon.ui.screens.rememberPartyLinesOccupied(
                     callController, contactMap,
                 ),

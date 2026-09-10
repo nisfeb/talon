@@ -2642,6 +2642,9 @@ fun App(
                                         onOpenSelfProfile = { showSelfProfile = true },
                                         kebabItems = kebabItems,
                                         onOpenStatusFeed = onOpenStatusFeed,
+                                        onOpenMail = {
+                                            uiSettings.setActiveRailTab(RailTab.Mail)
+                                        },
                                         partyLinesOccupied =
                                             io.nisfeb.talon.ui.screens.rememberPartyLinesOccupied(
                                                 callController, callContacts,
