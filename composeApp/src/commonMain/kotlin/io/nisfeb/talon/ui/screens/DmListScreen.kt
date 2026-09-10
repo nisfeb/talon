@@ -126,7 +126,7 @@ fun DmListScreen(
     onSignOut: () -> Unit,
     onOpenSelfProfile: () -> Unit,
     onOpenStatusFeed: () -> Unit,
-    onOpenPartyLines: () -> Unit = {},
+    partyLinesTab: (@Composable () -> Unit)? = null,
     onOpenBookmarks: () -> Unit,
     onOpenActivity: () -> Unit,
     /** Open the curated Contacts (book) screen. Always shown in the
@@ -350,7 +350,13 @@ fun DmListScreen(
         mutableStateOf(snap.initialTabApplied)
     }
     var selectedHomeTab by remember {
-        mutableStateOf(snap.selectedHomeTab)
+        // A persisted party tab is only restorable where the caller
+        // supplies the pane; elsewhere (tests, screenshots) fall back
+        // to Groups rather than strand the list on a hidden tab.
+        mutableStateOf(
+            if (partyLinesTab == null && snap.selectedHomeTab == HomeTab.PartyLines) HomeTab.Groups
+            else snap.selectedHomeTab
+        )
     }
     LaunchedEffect(folders) {
         if (!initialTabApplied) {
@@ -507,6 +513,7 @@ fun DmListScreen(
         when (selectedHomeTab) {
             HomeTab.Groups -> homeRows.filter { it is HomeRow.GroupHead || it is HomeRow.GroupChild }
             HomeTab.Dms -> homeRows.filterIsInstance<HomeRow.Flat>()
+            HomeTab.PartyLines -> emptyList()
         }
     }
     val groupsUnread = remember(homeRows) {
@@ -549,13 +556,21 @@ fun DmListScreen(
     val switchHomeTab: (HomeTab) -> Unit = { tab ->
         if (tab != selectedHomeTab) {
             val here = listState.firstVisibleItemIndex to listState.firstVisibleItemScrollOffset
-            if (selectedHomeTab == HomeTab.Groups) snap.groupsScroll = here else snap.dmsScroll = here
+            when (selectedHomeTab) {
+                HomeTab.Groups -> snap.groupsScroll = here
+                HomeTab.Dms -> snap.dmsScroll = here
+                HomeTab.PartyLines -> Unit
+            }
             selectedHomeTab = tab
         }
     }
     LaunchedEffect(selectedHomeTab) {
-        val (index, offset) = if (selectedHomeTab == HomeTab.Groups) snap.groupsScroll else snap.dmsScroll
-        runCatching { listState.scrollToItem(index, offset) }
+        val saved = when (selectedHomeTab) {
+            HomeTab.Groups -> snap.groupsScroll
+            HomeTab.Dms -> snap.dmsScroll
+            HomeTab.PartyLines -> null
+        } ?: return@LaunchedEffect
+        runCatching { listState.scrollToItem(saved.first, saved.second) }
     }
 
     // Reveal-a-group from search. Re-keyed on homeRows so it settles
@@ -894,15 +909,6 @@ fun DmListScreen(
                             },
                         )
                     }
-                    if (RailItem.PartyLines in kebabItems) {
-                        DropdownMenuItem(
-                            text = { Text("Party lines") },
-                            onClick = {
-                                menuOpen = false
-                                onOpenPartyLines()
-                            },
-                        )
-                    }
                     if (RailItem.Bookmarks in kebabItems) {
                         DropdownMenuItem(
                             text = { Text("Bookmarks") },
@@ -1029,7 +1035,7 @@ fun DmListScreen(
         )
         if (selectedFolderId == null && selectedSpecial == SpecialTab.All) {
             androidx.compose.material3.TabRow(
-                selectedTabIndex = if (selectedHomeTab == HomeTab.Groups) 0 else 1,
+                selectedTabIndex = selectedHomeTab.ordinal,
             ) {
                 androidx.compose.material3.Tab(
                     selected = selectedHomeTab == HomeTab.Groups,
@@ -1041,6 +1047,13 @@ fun DmListScreen(
                     onClick = { switchHomeTab(HomeTab.Dms) },
                     text = { Text(if (dmsUnread > 0) "DMs · $dmsUnread" else "DMs") },
                 )
+                if (partyLinesTab != null) {
+                    androidx.compose.material3.Tab(
+                        selected = selectedHomeTab == HomeTab.PartyLines,
+                        onClick = { switchHomeTab(HomeTab.PartyLines) },
+                        text = { Text("Party lines") },
+                    )
+                }
             }
         }
         HorizontalDivider()
@@ -1077,6 +1090,14 @@ fun DmListScreen(
                 .sortedByDescending { it.recencyMs }
                 .map { u -> u to rowsByWhom[u.whom] }
         }
+        // The party tab is a different list, not a slice of the home
+        // rows, so it stands in for the whole LazyColumn. Guarded on the
+        // view selectors too: selectedHomeTab survives a switch to a
+        // folder, where the tab strip that would let you leave is hidden.
+        if (partyLinesTab != null && selectedHomeTab == HomeTab.PartyLines &&
+            selectedFolderId == null && selectedSpecial == SpecialTab.All
+        ) partyLinesTab()
+        else
         LazyColumn(
             state = listState,
             contentPadding = PaddingValues(vertical = 8.dp),
@@ -2300,7 +2321,7 @@ private fun formatRelative(ms: Long): String {
 internal enum class SpecialTab { All, Unread, Mentions }
 
 /** The All view's two peers. The tabs are the section headers now. */
-internal enum class HomeTab { Groups, Dms }
+internal enum class HomeTab { Groups, Dms, PartyLines }
 
 @Composable
 private fun SpecialEmpty(text: String) {

@@ -326,7 +326,6 @@ fun App(
     }
     var showSelfProfile by remember { mutableStateOf(false) }
     var showStatusFeed by remember { mutableStateOf(false) }
-    var showPartyLines by remember { mutableStateOf(false) }
     var showInvites by remember { mutableStateOf(false) }
     var showBookmarks by remember { mutableStateOf(false) }
     var showActivity by remember { mutableStateOf(false) }
@@ -374,7 +373,6 @@ fun App(
         showSettings = false
         showSelfProfile = false
         showStatusFeed = false
-        showPartyLines = false
         showInvites = false
         showBookmarks = false
         showActivity = false
@@ -496,9 +494,6 @@ fun App(
     }
     PlatformBackHandler(enabled = showStatusFeed) {
         showStatusFeed = false
-    }
-    PlatformBackHandler(enabled = showPartyLines) {
-        showPartyLines = false
     }
     PlatformBackHandler(enabled = showInvites) {
         showInvites = false
@@ -1557,10 +1552,6 @@ fun App(
                         if (expanded) uiSettings.setActiveRailTab(RailTab.Statuses)
                         else showStatusFeed = true
                     }
-                    val onOpenPartyLines: () -> Unit = {
-                        if (expanded) uiSettings.setActiveRailTab(RailTab.PartyLines)
-                        else showPartyLines = true
-                    }
                     // Land in the group's most recent channel and join its
                     // line — the same path as the channel header's button.
                     val openLineFromList: (String) -> Unit = { whom ->
@@ -1742,14 +1733,6 @@ fun App(
                         ourPatp = ship,
                         onBack = { showStatusFeed = false },
                         onOpenContact = { other -> profileSheetShip = other },
-                    )
-                    showPartyLines -> io.nisfeb.talon.ui.screens.PartyLinesScreen(
-                        db = db,
-                        callController = callController,
-                        partyLine = partyLine,
-                        contacts = callContacts,
-                        onOpenLine = openLineFromList,
-                        onBack = { showPartyLines = false },
                     )
                     showInvites -> GroupInvitesScreen(
                         repo = repo,
@@ -2556,7 +2539,7 @@ fun App(
                                 RailItem.Invites -> showInvites = true
                                 RailItem.Settings -> showSettings = true
                                 // pane tabs handled above; never reaches here
-                                RailItem.Chats, RailItem.Statuses, RailItem.PartyLines,
+                                RailItem.Chats, RailItem.Statuses,
                                 RailItem.Bookmarks, RailItem.Activity -> Unit
                             }
                         }
@@ -2612,7 +2595,15 @@ fun App(
                                         onOpenSelfProfile = { showSelfProfile = true },
                                         kebabItems = kebabItems,
                                         onOpenStatusFeed = onOpenStatusFeed,
-                                        onOpenPartyLines = onOpenPartyLines,
+                                        partyLinesTab = {
+                                            io.nisfeb.talon.ui.screens.PartyLinesList(
+                                                db = db,
+                                                callController = callController,
+                                                partyLine = partyLine,
+                                                contacts = callContacts,
+                                                onOpenLine = openLineFromList,
+                                            )
+                                        },
                                         onOpenInvites = { showInvites = true },
                                         onOpenBookmarks = onOpenBookmarks,
                                         onOpenActivity = onOpenActivity,
@@ -2694,14 +2685,6 @@ fun App(
                                     repo = repo,
                                     ourPatp = ship,
                                     onOpenContact = { other -> profileSheetShip = other },
-                                )
-                                RailTab.PartyLines -> io.nisfeb.talon.ui.screens.PartyLinesScreen(
-                                    db = db,
-                                    callController = callController,
-                                    partyLine = partyLine,
-                                    contacts = callContacts,
-                                    onOpenLine = openLineFromList,
-                                    onBack = null,
                                 )
                                 RailTab.Bookmarks -> BookmarksList(
                                     db = db,

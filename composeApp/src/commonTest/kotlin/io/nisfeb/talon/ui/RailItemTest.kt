@@ -85,7 +85,6 @@ class RailItemTest {
             RailItem.Chats,
             RailItem.Profile,
             RailItem.Statuses,
-            RailItem.PartyLines,
             RailItem.Bookmarks,
             RailItem.Activity,
             RailItem.Watchwords,

@@ -492,7 +492,6 @@ fun TalonApp(
     }
     var editingProfile by remember { mutableStateOf(false) }
     var statusFeedOpen by remember { mutableStateOf(false) }
-    var partyLinesOpen by remember { mutableStateOf(false) }
     var bookmarksOpen by remember { mutableStateOf(false) }
     var activityOpen by remember { mutableStateOf(false) }
     var contactsOpen by remember { mutableStateOf(false) }
@@ -554,7 +553,6 @@ fun TalonApp(
             initialScrollMessageId != null
         if (chatTargeted) {
             statusFeedOpen = false
-            partyLinesOpen = false
             bookmarksOpen = false
             activityOpen = false
             watchwordsOpen = false
@@ -1199,7 +1197,6 @@ fun TalonApp(
         // the same time), so its handler is registered last.
         BackHandler(enabled = editingProfile) { editingProfile = false }
         BackHandler(enabled = statusFeedOpen) { statusFeedOpen = false }
-        BackHandler(enabled = partyLinesOpen) { partyLinesOpen = false }
         BackHandler(enabled = bookmarksOpen) { bookmarksOpen = false }
         BackHandler(enabled = activityOpen) { activityOpen = false }
         BackHandler(enabled = contactsOpen) { contactsOpen = false }
@@ -1280,7 +1277,6 @@ fun TalonApp(
             viewerImageUrl != null -> "ImageViewer"
             editingProfile -> "ProfileEdit"
             statusFeedOpen -> "StatusFeed"
-            partyLinesOpen -> "PartyLines"
             bookmarksOpen -> "Bookmarks"
             activityOpen -> "Activity"
             groupInfoDrilldown != null -> "MediaList"
@@ -1441,24 +1437,6 @@ fun TalonApp(
                     profileSheetShip = ship
                 },
                 onBack = { statusFeedOpen = false },
-                modifier = mod,
-            )
-
-            partyLinesOpen -> io.nisfeb.talon.ui.screens.PartyLinesScreen(
-                db = app.db,
-                callController = callController,
-                partyLine = partyLine,
-                contacts = contactMap,
-                onOpenLine = { whom ->
-                    partyLinesOpen = false
-                    openWhom = whom
-                    callController?.let { cc ->
-                        appScope.launch {
-                            io.nisfeb.talon.call.PartyLineHost.joinLine(cc, app.db, whom)
-                        }
-                    }
-                },
-                onBack = { partyLinesOpen = false },
                 modifier = mod,
             )
 
@@ -2288,7 +2266,22 @@ fun TalonApp(
                 onNewMessage = { newDmOpen = true },
                 onOpenSelfProfile = { editingProfile = true },
                 onOpenStatusFeed = { statusFeedOpen = true },
-                onOpenPartyLines = { partyLinesOpen = true },
+                partyLinesTab = {
+                    io.nisfeb.talon.ui.screens.PartyLinesList(
+                        db = app.db,
+                        callController = callController,
+                        partyLine = partyLine,
+                        contacts = contactMap,
+                        onOpenLine = { whom ->
+                            openWhom = whom
+                            callController?.let { cc ->
+                                appScope.launch {
+                                    io.nisfeb.talon.call.PartyLineHost.joinLine(cc, app.db, whom)
+                                }
+                            }
+                        },
+                    )
+                },
                 onOpenBookmarks = { bookmarksOpen = true },
                 onOpenActivity = { activityOpen = true },
                 onOpenContacts = { contactsOpen = true },

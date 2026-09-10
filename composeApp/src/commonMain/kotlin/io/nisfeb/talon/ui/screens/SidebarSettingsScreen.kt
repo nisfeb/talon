@@ -218,7 +218,6 @@ private fun sidebarRowState(
         gatedOff = !dailyDigestEnabled,
     )
     RailItem.Statuses -> SidebarRowState("Statuses", null, false, false)
-    RailItem.PartyLines -> SidebarRowState("Party lines", null, false, false)
     RailItem.Bookmarks -> SidebarRowState("Bookmarks", null, false, false)
     RailItem.Activity -> SidebarRowState("Activity", null, false, false)
     // Visibility preference only — whether the assistant appears at all is
