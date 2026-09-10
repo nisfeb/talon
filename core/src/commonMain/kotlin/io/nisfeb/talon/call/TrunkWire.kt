@@ -212,7 +212,9 @@ object TrunkWire {
     // and %recorders, so the room shows a recording badge.
     // 8: who-is-on — the ships behind the occupancy count, for the
     // /party roll call and the party-lines list.
-    const val WIRE_VERSION = 8
+    // 9: the host announces %on-line when a line's roster changes, so
+    // knowing who is on a line costs a join, not a poll interval.
+    const val WIRE_VERSION = 9
 
     /** The wire that added the call-recording announcement. A ship
      *  below this relays no %recording-on, so nobody on the line would
@@ -222,6 +224,12 @@ object TrunkWire {
     /** The wire that added %who-is-on. Below it our own ship nacks the
      *  poke, so the client only ever shows counts. */
     const val WIRE_VERSION_WHO = 8
+
+    /** The wire where the host announces presence instead of only
+     *  answering asks. Below it, a line's occupancy is only ever as
+     *  fresh as our last ask, so surfaces that do not poll show a
+     *  line as empty until something asks. */
+    const val WIRE_VERSION_ANNOUNCES = 9
 
     const val PUBLISHER = "~ricsul-bilwyt"
     const val DESK = "trunk"

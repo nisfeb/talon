@@ -113,13 +113,13 @@ fun PartyLinesList(
 
 /**
  * Whether anyone is on any line we know about — the party tab's pip.
- * Presence is pull-only in trunk (the host answers %occupancy-of; it
- * never fans occupancy at watchers), so a pip that is true outside the
- * list means polling from wherever the chat list is mounted.
  *
- * ponytail: one poke per line per minute, and %occupancy-of only —
- * the pip needs the count, not the names. If a user with many lines
- * ever feels this, raise the period rather than adding a second ask.
+ * One ask per line when the set of lines changes, and nothing after
+ * that: from wire 9 the host announces %on-line whenever a line's
+ * roster changes, so the pip stays right without a poll. The opening
+ * ask is what makes it right at launch, and what keeps it working
+ * against a host too old to announce, which answers here and then
+ * goes quiet until the list itself asks again.
  */
 @Composable
 fun rememberPartyLinesOccupied(
@@ -142,9 +142,9 @@ fun rememberPartyLinesOccupied(
     val rows = remember(rooms, invites, groups) { partyLineRows(rooms, invites, groups) }
 
     LaunchedEffect(rows.map { it.key }) {
-        while (true) {
-            for (r in rows) callController?.occupancyOf(r.host, r.name)
-            delay(60_000)
+        for (r in rows) {
+            callController?.occupancyOf(r.host, r.name)
+            callController?.whoIsOn(r.host, r.name)
         }
     }
     return anyPartyLineOccupied(rows, presence, onLine)
