@@ -504,6 +504,16 @@ class TlonChatRepo(
         }
         if (firstRun) _bootstrapping.value = true
         try {
+            // The group list is reconciled on EVERY connect, throttle or
+            // not. A group joined while the stream was down does not
+            // arrive as a fact when we re-subscribe, so without this a
+            // join can stay invisible until the app restarts — the exact
+            // bug a fresh comet hit. One scry is not the expensive
+            // bootstrap the throttle exists to prevent.
+            val groupsJob = async {
+                runCatching { bootstrapGroups(ch) }
+                    .onFailure { Log.e(TAG, "groups scry failed", it) }
+            }
             // Skipped when a reconnect lands right after the last
             // pass; the subscriptions above are re-registered either way.
             if (!skipBootstrap) {
@@ -557,10 +567,6 @@ class TlonChatRepo(
                     runCatching { refreshInvites(notify = false) }
                         .onFailure { Log.e(TAG, "group-invites scry failed", it) }
                 }
-                val groupsJob = async {
-                    runCatching { bootstrapGroups(ch) }
-                        .onFailure { Log.e(TAG, "groups scry failed", it) }
-                }
                 val firstRunJobs = if (firstRun) {
                     listOf(
                         async {
@@ -570,11 +576,12 @@ class TlonChatRepo(
                     )
                 } else emptyList()
                 (
-                    listOf(initJob, activityJob, contactsJob, ordersJob, dmInvitesJob, groupInvitesJob, groupsJob) +
+                    listOf(initJob, activityJob, contactsJob, ordersJob, dmInvitesJob, groupInvitesJob) +
                         firstRunJobs
                     ).awaitAll()
                 lastBootstrapMs = nowMs()
             }
+            groupsJob.await()
         } finally {
             if (firstRun) _bootstrapping.value = false
         }
@@ -1465,6 +1472,25 @@ class TlonChatRepo(
             },
         )
         _invites.value = _invites.value?.filterNot { it.flag == flag }
+        // The ship accepts the poke and does the join afterwards, and the
+        // groups subscription does not replay it. Reconcile until it
+        // lands instead of depending on a reconnect that may never come.
+        scope.launch { awaitJoinedGroup(flag) }
+    }
+
+    /** Poll the group list until [flag] appears, briefly. The join poke
+     *  is accepted long before the group exists, especially on a busy
+     *  ship; six tries over about a minute covers it without becoming
+     *  another timer that hammers the ship. */
+    private suspend fun awaitJoinedGroup(flag: String) {
+        var wait = 2_000L
+        repeat(6) {
+            delay(wait)
+            if (runCatching { db.groups().getGroup(flag) }.getOrNull() != null) return
+            runCatching { refreshGroups() }
+                .onFailure { Log.w(TAG, "post-join group refresh failed", it) }
+            wait = (wait * 2).coerceAtMost(20_000L)
+        }
     }
 
     /** Reject an inbound group invite via `invite-decline`. */
