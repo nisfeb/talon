@@ -5,6 +5,8 @@ import io.nisfeb.talon.call.PartyRoom
 import io.nisfeb.talon.data.GroupEntity
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertTrue
+import kotlin.test.assertFalse
 
 class PartyLinesTest {
     private val names = mapOf("~zod" to "Zod", "~nec" to "Nec")
@@ -40,5 +42,20 @@ class PartyLinesTest {
         assertEquals("~zod/nisfeb-software", rows[0].groupFlag)
         assertEquals("~nec/other", rows[1].groupFlag)
         assertEquals(null, rows[2].groupFlag)
+    }
+
+    @Test
+    fun `pip lights up from either presence source`() {
+        val rows = listOf(
+            PartyLineRow("~zod", "a", "A", null),
+            PartyLineRow("~nec", "b", "B", null),
+        )
+        assertFalse(anyPartyLineOccupied(rows, emptyMap(), emptyMap()))
+        // an old host answers a count without names
+        assertTrue(anyPartyLineOccupied(rows, mapOf("~nec/b" to 2), emptyMap()))
+        // a wire-8 host answers names; a zero count alongside them loses
+        assertTrue(anyPartyLineOccupied(rows, mapOf("~zod/a" to 0), mapOf("~zod/a" to setOf("~bud"))))
+        // stale entries for lines we no longer know about don't count
+        assertFalse(anyPartyLineOccupied(rows, mapOf("~bus/gone" to 9), emptyMap()))
     }
 }

@@ -127,6 +127,7 @@ fun DmListScreen(
     onOpenSelfProfile: () -> Unit,
     onOpenStatusFeed: () -> Unit,
     partyLinesTab: (@Composable () -> Unit)? = null,
+    partyLinesOccupied: Boolean = false,
     onOpenBookmarks: () -> Unit,
     onOpenActivity: () -> Unit,
     /** Open the curated Contacts (book) screen. Always shown in the
@@ -1051,7 +1052,15 @@ fun DmListScreen(
                     androidx.compose.material3.Tab(
                         selected = selectedHomeTab == HomeTab.PartyLines,
                         onClick = { switchHomeTab(HomeTab.PartyLines) },
-                        text = { Text("Party lines") },
+                        text = {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text("Party lines")
+                                // Someone is on one of the lines right now.
+                                if (partyLinesOccupied) {
+                                    MenuBadgeDot(Modifier.padding(start = 6.dp))
+                                }
+                            }
+                        },
                     )
                 }
             }

@@ -2266,6 +2266,9 @@ fun TalonApp(
                 onNewMessage = { newDmOpen = true },
                 onOpenSelfProfile = { editingProfile = true },
                 onOpenStatusFeed = { statusFeedOpen = true },
+                partyLinesOccupied = io.nisfeb.talon.ui.screens.rememberPartyLinesOccupied(
+                    callController, contactMap,
+                ),
                 partyLinesTab = {
                     io.nisfeb.talon.ui.screens.PartyLinesList(
                         db = app.db,

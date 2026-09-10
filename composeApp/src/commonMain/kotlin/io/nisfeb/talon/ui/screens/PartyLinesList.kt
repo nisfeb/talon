@@ -27,6 +27,7 @@ import io.nisfeb.talon.call.PartyState
 import io.nisfeb.talon.data.AppDatabase
 import io.nisfeb.talon.ui.ContactMap
 import io.nisfeb.talon.ui.PartyLineRow
+import io.nisfeb.talon.ui.anyPartyLineOccupied
 import io.nisfeb.talon.ui.partyLineRows
 import io.nisfeb.talon.ui.partyRollCall
 import kotlinx.coroutines.delay
@@ -108,6 +109,45 @@ fun PartyLinesList(
             )
         }
     }
+}
+
+/**
+ * Whether anyone is on any line we know about — the party tab's pip.
+ * Presence is pull-only in trunk (the host answers %occupancy-of; it
+ * never fans occupancy at watchers), so a pip that is true outside the
+ * list means polling from wherever the chat list is mounted.
+ *
+ * ponytail: one poke per line per minute, and %occupancy-of only —
+ * the pip needs the count, not the names. If a user with many lines
+ * ever feels this, raise the period rather than adding a second ask.
+ */
+@Composable
+fun rememberPartyLinesOccupied(
+    callController: CallController?,
+    contacts: ContactMap,
+): Boolean {
+    val rooms by remember(callController) {
+        callController?.rooms ?: MutableStateFlow(emptyMap())
+    }.collectAsState()
+    val invites by remember(callController) {
+        callController?.invites ?: MutableStateFlow(emptyMap())
+    }.collectAsState()
+    val presence by remember(callController) {
+        callController?.presence ?: MutableStateFlow(emptyMap())
+    }.collectAsState()
+    val onLine by remember(callController) {
+        callController?.onLine ?: MutableStateFlow(emptyMap())
+    }.collectAsState()
+    val groups = contacts.allGroups()
+    val rows = remember(rooms, invites, groups) { partyLineRows(rooms, invites, groups) }
+
+    LaunchedEffect(rows.map { it.key }) {
+        while (true) {
+            for (r in rows) callController?.occupancyOf(r.host, r.name)
+            delay(60_000)
+        }
+    }
+    return anyPartyLineOccupied(rows, presence, onLine)
 }
 
 @Composable

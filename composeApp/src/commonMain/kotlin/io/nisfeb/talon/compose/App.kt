@@ -2595,6 +2595,10 @@ fun App(
                                         onOpenSelfProfile = { showSelfProfile = true },
                                         kebabItems = kebabItems,
                                         onOpenStatusFeed = onOpenStatusFeed,
+                                        partyLinesOccupied =
+                                            io.nisfeb.talon.ui.screens.rememberPartyLinesOccupied(
+                                                callController, callContacts,
+                                            ),
                                         partyLinesTab = {
                                             io.nisfeb.talon.ui.screens.PartyLinesList(
                                                 db = db,

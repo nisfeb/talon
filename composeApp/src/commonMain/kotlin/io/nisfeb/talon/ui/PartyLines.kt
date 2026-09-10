@@ -58,3 +58,14 @@ fun partyLineRows(
         .map { row(it.host, it.name, it.title, null) }
     return (hosted + invited).distinctBy { it.key }.sortedBy { it.title.lowercase() }
 }
+
+/** Is anyone on any of [rows]? Drives the party tab's pip. Old hosts
+ *  answer occupancy without names and wire-8 hosts answer both, so
+ *  either source counts. */
+fun anyPartyLineOccupied(
+    rows: List<PartyLineRow>,
+    presence: Map<String, Int>,
+    onLine: Map<String, Set<String>>,
+): Boolean = rows.any { r ->
+    (presence[r.key] ?: 0) > 0 || onLine[r.key].orEmpty().isNotEmpty()
+}
