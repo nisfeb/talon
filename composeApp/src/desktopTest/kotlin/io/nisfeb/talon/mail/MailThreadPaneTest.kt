@@ -73,9 +73,6 @@ class MailThreadPaneTest {
         waitUntil(timeoutMillis = 5_000) {
             runCatching { onNodeWithText("the root").assertIsDisplayed(); true }.getOrDefault(false)
         }
-        // A branching thread offers the tree; a straight one would not.
-        onNodeWithText("Tree").performClick()
-
         // The default is the newest honest message, which is one of the
         // two branches: root plus that branch, and never its sibling.
         waitUntil(timeoutMillis = 5_000) {

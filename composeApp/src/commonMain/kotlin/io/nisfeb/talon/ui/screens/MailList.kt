@@ -106,7 +106,7 @@ fun MailList(
                 LazyColumn(Modifier.fillMaxSize()) {
                     items(drafts, key = { it.id }) { d ->
                         DraftRow(d, onOpen = { onOpenDraft?.invoke(d) })
-                        HorizontalDivider()
+                        HorizontalDivider(modifier = Modifier.padding(start = 14.dp))
                     }
                 }
             }
@@ -141,7 +141,7 @@ fun MailList(
                         nameFor = { contacts.displayName(it) },
                         onClick = { onOpenThread(row.id) },
                     )
-                    HorizontalDivider()
+                    HorizontalDivider(modifier = Modifier.padding(start = 14.dp))
                 }
             }
         }
@@ -250,69 +250,70 @@ private fun MailAbsent(text: String, actionLabel: String?, onAction: (() -> Unit
 @Composable
 private fun MailRow(row: InboxEntry, nameFor: (String) -> String, onClick: () -> Unit) {
     val weight = if (row.unread) FontWeight.SemiBold else FontWeight.Normal
-    ListItem(
-        modifier = Modifier.clickable(onClick = onClick),
-        colors = ListItemDefaults.colors(containerColor = MaterialTheme.colorScheme.surface),
-        overlineContent = {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    nameFor(row.from),
-                    style = MaterialTheme.typography.labelLarge.copy(fontWeight = weight),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f, fill = false),
-                )
-                // A thread carrying any forged copy says so here, even when
-                // the summary above it was drawn from an honest one.
-                if (row.forged || row.verdict == Verdict.FORGED) {
-                    Spacer(Modifier.width(6.dp))
-                    VerdictTag("FORGED", MaterialTheme.colorScheme.error)
-                } else if (row.verdict == Verdict.UNVERIFIED) {
-                    Spacer(Modifier.width(6.dp))
-                    VerdictTag("UNVERIFIED", MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-                Spacer(Modifier.weight(1f))
-                if (row.last > 0) {
-                    Text(
-                        shortRelativeTime(row.last, nowMs()),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
-        },
-        headlineContent = {
+    // Not a ListItem. Mail rows are scanned by the dozen, and the
+    // three-slot list item is built for one line of each with generous
+    // vertical padding — which put the timestamp floating in the middle
+    // of a tall cell instead of on the line it belongs to.
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 14.dp, vertical = 7.dp),
+        verticalArrangement = Arrangement.spacedBy(1.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
-                row.subject.ifBlank { "(no subject)" },
-                style = MaterialTheme.typography.bodyLarge.copy(fontWeight = weight),
+                nameFor(row.from),
+                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = weight),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f, fill = true),
+            )
+            // A thread carrying any forged copy says so here, even when
+            // the summary above it was drawn from an honest one.
+            if (row.forged || row.verdict == Verdict.FORGED) {
+                VerdictTag("FORGED", MaterialTheme.colorScheme.error)
+                Spacer(Modifier.width(6.dp))
+            } else if (row.verdict == Verdict.UNVERIFIED) {
+                VerdictTag("UNVERIFIED", MaterialTheme.colorScheme.onSurfaceVariant)
+                Spacer(Modifier.width(6.dp))
+            }
+            if (row.last > 0) {
+                Text(
+                    shortRelativeTime(row.last, nowMs()),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        Text(
+            row.subject.ifBlank { "(no subject)" },
+            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = weight),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        if (row.snippet.isNotBlank()) {
+            Text(
+                row.snippet,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
-        },
-        supportingContent = {
-            Column {
-                if (row.snippet.isNotBlank()) {
-                    Text(
-                        row.snippet,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-                // A thread whose only copies this build cannot read still
-                // gets a row: one silently vanishing from the listing is
-                // the failure the count exists to prevent.
-                if (row.unreadable > 0) {
-                    Text(
-                        unreadableLine(row),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
-        },
-    )
+        }
+        // A thread whose only copies this build cannot read still gets a
+        // row: one silently missing from the listing is the failure that
+        // count exists to prevent.
+        if (row.unreadable > 0) {
+            Text(
+                unreadableLine(row),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
 }
 
 internal fun unreadableLine(row: InboxEntry): String {
@@ -342,35 +343,34 @@ private fun VerdictTag(text: String, color: androidx.compose.ui.graphics.Color) 
 
 @Composable
 private fun DraftRow(d: io.nisfeb.talon.mail.Draft, onOpen: () -> Unit) {
-    ListItem(
-        modifier = Modifier.clickable(onClick = onOpen),
-        colors = ListItemDefaults.colors(containerColor = MaterialTheme.colorScheme.surface),
-        overlineContent = {
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onOpen)
+            .padding(horizontal = 14.dp, vertical = 7.dp),
+        verticalArrangement = Arrangement.spacedBy(1.dp),
+    ) {
+        Text(
+            if (d.to.isEmpty()) "No recipients yet" else d.to.joinToString(),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Text(
+            d.subject.ifBlank { "(no subject)" },
+            style = MaterialTheme.typography.bodyMedium,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        if (d.body.isNotBlank()) {
             Text(
-                if (d.to.isEmpty()) "No recipients yet" else d.to.joinToString(),
-                style = MaterialTheme.typography.labelLarge,
+                d.body,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
-        },
-        headlineContent = {
-            Text(
-                d.subject.ifBlank { "(no subject)" },
-                style = MaterialTheme.typography.bodyLarge,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        },
-        supportingContent = {
-            if (d.body.isNotBlank()) {
-                Text(
-                    d.body,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-        },
-    )
+        }
+    }
 }

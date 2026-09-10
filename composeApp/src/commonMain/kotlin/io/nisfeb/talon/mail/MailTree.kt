@@ -110,3 +110,104 @@ fun branches(forest: List<MailNode>): Boolean {
  */
 fun newestAnswerable(messages: List<MailMessage>): MailMessage? =
     messages.filter { it.verdict != Verdict.FORGED }.maxByOrNull { it.sent }
+
+/** One node placed on the drawing: [depth] is its generation, [row] its
+ *  line, fractional where a parent sits between its children. */
+data class PlacedNode(
+    val message: MailMessage,
+    val parentId: String?,
+    val depth: Int,
+    val row: Float,
+    val orphaned: Boolean,
+)
+
+data class TreeLayout(val nodes: List<PlacedNode>, val rows: Int, val cols: Int)
+
+/**
+ * Lay a thread out as a picture: a leaf takes the next free row, a
+ * parent sits at the midpoint of its first and last child, and x is
+ * simply the generation.
+ *
+ * Iterative on purpose. A thousand-message linear thread is a shape
+ * that arrives over the wire, and recursion on it is a stack overflow
+ * somebody else chooses to hand us.
+ *
+ * A parent naming an id we do not hold, or one that walks back into
+ * itself, has its link cut here rather than guarded at every later use.
+ * Both arrive over the wire and neither can be trusted to terminate.
+ */
+fun layoutTree(messages: List<MailMessage>): TreeLayout {
+    if (messages.isEmpty()) return TreeLayout(emptyList(), 0, 0)
+
+    class N(val m: MailMessage, var parent: String?, var orphan: Boolean, var depth: Int, var row: Float)
+
+    val byId = LinkedHashMap<String, N>()
+    for (m in messages) if (m.id !in byId) byId[m.id] = N(m, m.prev, false, 0, 0f)
+
+    for (n in byId.values) {
+        val p = n.parent
+        if (p != null && p !in byId) {
+            n.orphan = true
+            n.parent = null
+            continue
+        }
+        val seen = mutableSetOf(n.m.id)
+        var cur = n.parent
+        while (cur != null) {
+            if (!seen.add(cur)) { n.parent = null; break }
+            cur = byId[cur]?.parent
+        }
+    }
+
+    val kids = mutableMapOf<String, MutableList<N>>()
+    val roots = mutableListOf<N>()
+    for (n in byId.values) {
+        val p = n.parent
+        if (p == null) roots += n else kids.getOrPut(p) { mutableListOf() } += n
+    }
+    val order = compareBy<N>({ it.m.sent }, { it.m.id })
+    kids.values.forEach { it.sortWith(order) }
+    roots.sortWith(order)
+
+    var row = 0
+    var cols = 1
+    val stack = ArrayDeque<Pair<N, Boolean>>()
+    for (r in roots.asReversed()) stack.addLast(r to false)
+    while (stack.isNotEmpty()) {
+        val (n, entered) = stack.removeLast()
+        val k = kids[n.m.id]
+        if (!entered && !k.isNullOrEmpty()) {
+            stack.addLast(n to true)
+            for (c in k.asReversed()) {
+                c.depth = n.depth + 1
+                stack.addLast(c to false)
+            }
+            continue
+        }
+        if (!k.isNullOrEmpty()) {
+            n.row = (k.first().row + k.last().row) / 2f
+        } else {
+            n.row = row.toFloat()
+            row++
+        }
+        if (n.depth + 1 > cols) cols = n.depth + 1
+    }
+
+    return TreeLayout(
+        nodes = byId.values.map { PlacedNode(it.m, it.parent, it.depth, it.row, it.orphan) },
+        rows = row,
+        cols = cols,
+    )
+}
+
+/** The ids on the path from a root down to [id], for lighting edges. */
+fun litPath(layout: TreeLayout, id: String?): Set<String> {
+    if (id == null) return emptySet()
+    val byId = layout.nodes.associateBy { it.message.id }
+    val lit = mutableSetOf<String>()
+    var cur = byId[id]
+    while (cur != null && lit.add(cur.message.id)) {
+        cur = cur.parentId?.let { byId[it] }
+    }
+    return lit
+}

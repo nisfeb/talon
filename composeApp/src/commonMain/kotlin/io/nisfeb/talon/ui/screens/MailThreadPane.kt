@@ -79,7 +79,7 @@ fun MailThreadPane(
     var thread by remember(threadId) { mutableStateOf<MailThread?>(null) }
     var gone by remember(threadId) { mutableStateOf(false) }
     var loading by remember(threadId) { mutableStateOf(true) }
-    var treeMode by remember(threadId) { mutableStateOf(false) }
+    var drawn by remember(threadId) { mutableStateOf(false) }
     var selected by remember(threadId) { mutableStateOf<String?>(null) }
 
     LaunchedEffect(threadId) {
@@ -96,8 +96,8 @@ fun MailThreadPane(
 
     val forest = remember(thread) { threadTree(thread?.messages.orEmpty()) }
     val hasBranches = remember(forest) { branches(forest) }
-    // In list mode a reply answers the newest honest message; in tree
-    // mode it answers whatever is selected.
+    // Whatever is selected, defaulting to the newest honest message —
+    // the same rule a flat reading used, so the default never moves.
     val answering = remember(forest, selected, thread) {
         selected ?: newestAnswerable(thread?.messages.orEmpty())?.id
     }
@@ -111,8 +111,8 @@ fun MailThreadPane(
             participants = thread?.participants.orEmpty().map { contacts.displayName(it) },
             unreadable = thread?.unreadable ?: 0,
             showTree = hasBranches,
-            treeMode = treeMode,
-            onMode = { treeMode = it },
+            drawn = drawn,
+            onMode = { drawn = it },
             onBack = onBack,
         )
         HorizontalDivider()
@@ -133,10 +133,8 @@ fun MailThreadPane(
             )
 
             else -> {
-                if (treeMode) {
-                    TravelLine(travelling.size)
-                    HorizontalDivider()
-                }
+                TravelLine(travelling.size)
+                HorizontalDivider()
                 MailThreadActions(
                     // A forged copy cannot be answered, so a thread of
                     // nothing else has nothing to reply to.
@@ -164,14 +162,45 @@ fun MailThreadPane(
                     },
                 )
                 HorizontalDivider()
-                LazyColumn(Modifier.fillMaxSize()) {
+                if (drawn) {
+                    // The picture, and under it the message it selects.
+                    MailThreadTree(
+                        messages = thread!!.messages,
+                        selected = selected ?: answering,
+                        nameFor = { contacts.displayName(it) },
+                        onSelect = { selected = it },
+                        modifier = Modifier.weight(1f).fillMaxWidth(),
+                    )
+                    HorizontalDivider()
+                    val shown = thread!!.messages.firstOrNull {
+                        it.id == (selected ?: answering)
+                    }
+                    if (shown != null) {
+                        LazyColumn(Modifier.weight(1f).fillMaxWidth()) {
+                            item(key = shown.id) {
+                                MailMessageCard(
+                                    node = io.nisfeb.talon.mail.MailNode(shown),
+                                    depth = 0,
+                                    onPath = false,
+                                    selected = false,
+                                    selectable = false,
+                                    nameFor = { contacts.displayName(it) },
+                                    onSelect = {},
+                                    onFetch = { a2 ->
+                                        scope.launch { repo.fetchBlob(a2.hash, shown.from) }
+                                    },
+                                )
+                            }
+                        }
+                    }
+                } else LazyColumn(Modifier.fillMaxSize()) {
                     items(flatten(forest), key = { it.first.message.id }) { (node, depth) ->
                         MailMessageCard(
                             node = node,
-                            depth = if (treeMode) depth else 0,
-                            onPath = treeMode && node.message.id in travelling.map { it.id },
-                            selected = treeMode && node.message.id == selected,
-                            selectable = treeMode && node.message.verdict != Verdict.FORGED,
+                            depth = depth,
+                            onPath = node.message.id in travelling.map { it.id },
+                            selected = node.message.id == selected,
+                            selectable = node.message.verdict != Verdict.FORGED,
                             nameFor = { contacts.displayName(it) },
                             onSelect = { selected = node.message.id },
                             onFetch = { a ->
@@ -209,7 +238,7 @@ private fun MailThreadHeader(
     participants: List<String>,
     unreadable: Int,
     showTree: Boolean,
-    treeMode: Boolean,
+    drawn: Boolean,
     onMode: (Boolean) -> Unit,
     onBack: (() -> Unit)?,
 ) {
@@ -229,13 +258,13 @@ private fun MailThreadHeader(
             // thread has nothing the two modes would show differently.
             if (showTree) {
                 FilterChip(
-                    selected = !treeMode,
+                    selected = !drawn,
                     onClick = { onMode(false) },
-                    label = { Text("List") },
+                    label = { Text("Messages") },
                 )
                 Spacer(Modifier.width(6.dp))
                 FilterChip(
-                    selected = treeMode,
+                    selected = drawn,
                     onClick = { onMode(true) },
                     label = { Text("Tree") },
                 )

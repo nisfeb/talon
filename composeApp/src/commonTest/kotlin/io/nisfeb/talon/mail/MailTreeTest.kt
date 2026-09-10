@@ -132,4 +132,66 @@ class MailTreeTest {
         assertEquals(emptyList(), threadTree(emptyList()))
         assertFalse(branches(emptyList()))
     }
+
+    // ---- the drawing ---------------------------------------------------
+
+    @Test
+    fun `a parent sits between its children and depth is generation`() {
+        val l = layoutTree(
+            listOf(
+                msg("root", sent = 1),
+                msg("a", prev = "root", sent = 2),
+                msg("b", prev = "root", sent = 3),
+            ),
+        )
+        val by = l.nodes.associateBy { it.message.id }
+        assertEquals(0, by.getValue("root").depth)
+        assertEquals(1, by.getValue("a").depth)
+        assertEquals(0f, by.getValue("a").row)
+        assertEquals(1f, by.getValue("b").row)
+        assertEquals(0.5f, by.getValue("root").row, "centred on the span of its children")
+        assertEquals(2, l.rows)
+        assertEquals(2, l.cols)
+    }
+
+    @Test
+    fun `a lit path is the edges a reply would carry`() {
+        val l = layoutTree(
+            listOf(
+                msg("root", sent = 1),
+                msg("mine", prev = "root", sent = 2),
+                msg("theirs", prev = "root", sent = 3),
+                msg("deep", prev = "mine", sent = 4),
+            ),
+        )
+        assertEquals(setOf("root", "mine", "deep"), litPath(l, "deep"))
+        assertEquals(emptySet(), litPath(l, null))
+    }
+
+    @Test
+    fun `an orphan is drawn as its own root and marked`() {
+        val l = layoutTree(listOf(msg("root", sent = 1), msg("child", prev = "gone", sent = 2)))
+        val child = l.nodes.single { it.message.id == "child" }
+        assertTrue(child.orphaned)
+        assertEquals(null, child.parentId, "never silently reparented onto the real root")
+        assertEquals(0, child.depth)
+    }
+
+    @Test
+    fun `a cycle cannot hang the layout`() {
+        // Content-addressed ids cannot really cycle, but this arrives
+        // over the wire and a walk that does not terminate is a hang
+        // somebody else chose for us.
+        val l = layoutTree(listOf(msg("a", prev = "b"), msg("b", prev = "a")))
+        assertEquals(2, l.nodes.size)
+        assertTrue(l.nodes.any { it.parentId == null }, "one link is cut")
+    }
+
+    @Test
+    fun `a long linear thread lays out without recursing`() {
+        val chain = (0 until 2000).map { msg("m$it", prev = if (it == 0) null else "m${it - 1}", sent = it.toLong()) }
+        val l = layoutTree(chain)
+        assertEquals(2000, l.cols)
+        assertEquals(1, l.rows)
+    }
 }
