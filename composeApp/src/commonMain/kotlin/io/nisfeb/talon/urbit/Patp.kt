@@ -16,3 +16,56 @@ package io.nisfeb.talon.urbit
 // single-dash-only pattern locked comets out of every gate using this.
 val PATP_REGEX: Regex =
     Regex("~(?:[a-z]{6}|[a-z]{3})(?:--?(?:[a-z]{6}|[a-z]{3}))*")
+
+/**
+ * Whether [text] is a real `@p`: the right shape and every syllable
+ * from Urbit's phonetic tables. [PATP_REGEX] only checks the shape, so
+ * `~wisper` passes it; the ship's own parser rejects such a string and
+ * with it the whole post, as a user found when a stray `~word` in a
+ * message made every send fail. A 3-letter name is a galaxy (suffix
+ * only); 6-letter groups are prefix + suffix.
+ */
+fun isValidPatp(text: String): Boolean {
+    if (!PATP_REGEX.matches(text)) return false
+    val groups = text.removePrefix("~").split(Regex("--?"))
+    return groups.all { g ->
+        when (g.length) {
+            3 -> g in SUFFIXES
+            6 -> g.substring(0, 3) in PREFIXES && g.substring(3) in SUFFIXES
+            else -> false
+        }
+    }
+}
+
+// The 256 prefix and 256 suffix syllables, from `++po` in hoon.hoon.
+private val PREFIXES: Set<String> = (
+    "dozmarbinwansamlitsighidfidlissogdirwacsabwissibrigsoldopmodfogl" +
+            "idhopdardorlorhodfolrintogsilmirholpaslacrovlivdalsatlibtabhanti" +
+            "cpidtorbolfosdotlosdilforpilramtirwintadbicdifrocwidbisdasmidlop" +
+            "rilnardapmolsanlocnovsitnidtipsicropwitnatpanminritpodmottamtols" +
+            "avposnapnopsomfinfonbanmorworsipronnorbotwicsocwatdolmagpicdavbi" +
+            "dbaltimtasmalligsivtagpadsaldivdactansidfabtarmonranniswolmispal" +
+            "lasdismaprabtobrollatlonnodnavfignomnibpagsopralbilhaddocridmocp" +
+            "acravripfaltodtiltinhapmicfanpattaclabmogsimsonpinlomrictapfirha" +
+            "sbosbatpochactidhavsaplindibhosdabbitbarracparloddosbortochilmac" +
+            "tomdigfilfasmithobharmighinradmashalraglagfadtopmophabnilnosmilf" +
+            "opfamdatnoldinhatnacrisfotribhocnimlarfitwalrapsarnalmoslandonda" +
+            "nladdovrivbacpollaptalpitnambonrostonfodponsovnocsorlavmatmipfip" +
+            ""
+    ).chunked(3).toHashSet()
+
+private val SUFFIXES: Set<String> = (
+    "zodnecbudwessevpersutletfulpensytdurwepserwylsunrypsyxdyrnuphebp" +
+            "eglupdepdysputlughecryttyvsydnexlunmeplutseppesdelsulpedtemledtu" +
+            "lmetwenbynhexfebpyldulhetmevruttylwydtepbesdexsefwycburderneppur" +
+            "rysrebdennutsubpetrulsynregtydsupsemwynrecmegnetsecmulnymtevwebs" +
+            "ummutnyxrextebfushepbenmuswyxsymselrucdecwexsyrwetdylmynmesdetbe" +
+            "tbeltuxtugmyrpelsyptermebsetdutdegtexsurfeltudnuxruxrenwytnubmed" +
+            "lytdusnebrumtynseglyxpunresredfunrevrefmectedrusbexlebduxrynnump" +
+            "yxrygryxfeptyrtustyclegnemfermertenlusnussyltecmexpubrymtucfylle" +
+            "pdebbermughuttunbylsudpemdevlurdefbusbeprunmelpexdytbyttyplevmyl" +
+            "wedducfurfexnulluclennerlexrupnedlecrydlydfenwelnydhusrelrudnesh" +
+            "esfetdesretdunlernyrsebhulrylludremlysfynwerrycsugnysnyllyndynde" +
+            "mluxfedsedbecmunlyrtesmudnytbyrsenwegfyrmurtelreptegpecnelnevfes" +
+            ""
+    ).chunked(3).toHashSet()

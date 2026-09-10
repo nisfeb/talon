@@ -171,7 +171,10 @@ object Markdown {
                 if (match != null && match.range.first == 0) {
                     val end = i + match.range.last + 1
                     val after = text.getOrNull(end)
-                    if (after == null || !isPatpChar(after)) {
+                    // Only a real ship becomes a mention. The ship's own
+                    // parser rejects a shape-alike like `~wisper`, and
+                    // with it the whole message.
+                    if ((after == null || !isPatpChar(after)) && isValidPatp(match.value)) {
                         flushPlain()
                         out.add(Token.Ship(match.value))
                         i = end

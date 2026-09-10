@@ -8,6 +8,7 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 import kotlin.test.Test
 
@@ -233,5 +234,19 @@ class MarkdownTest {
         val out = Markdown.parseInlines("say [hi] there")
         // At least doesn't explode — output is some sequence of primitives.
         assertTrue(out.size >= 1)
+    }
+
+    @Test
+    fun `only a real ship becomes a mention`() {
+        // `~abcdef` has the shape of a planet but not the syllables; the
+        // ship's parser rejects it, so it must stay text.
+        val out = Markdown.parseInlines("hey ~abcdef and ~sampel-palnet and ~zod")
+        assertEquals("hey ~abcdef and ", (out[0] as JsonPrimitive).content)
+        assertEquals("~sampel-palnet", out[1].jsonObject["ship"]!!.jsonPrimitive.content)
+        assertEquals("~zod", out[3].jsonObject["ship"]!!.jsonPrimitive.content)
+        assertTrue(isValidPatp("~satnet-rinsyr-silsul-bacnec--todmeb-harwen-fadpem-ribdyr"))
+        assertFalse(isValidPatp("~abcdef"))
+        assertTrue(isValidPatp("~wisper"))
+        assertFalse(isValidPatp("~zodzod"))
     }
 }
