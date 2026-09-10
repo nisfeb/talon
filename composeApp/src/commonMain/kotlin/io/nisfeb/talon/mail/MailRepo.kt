@@ -310,6 +310,44 @@ class MailRepo(
         refresh()
     }
 
+    // ---- drafts --------------------------------------------------------
+
+    private val _drafts = MutableStateFlow<List<Draft>>(emptyList())
+    val drafts: StateFlow<List<Draft>> = _drafts.asStateFlow()
+
+    suspend fun refreshDrafts() {
+        val a = api ?: return
+        try {
+            _drafts.value = a.drafts()
+        } catch (e: AuspexError) {
+            onFailure(e)
+        }
+    }
+
+    /** Store a draft. The id comes from the caller and stays the same
+     *  across saves, so the second save overwrites the first. */
+    suspend fun saveDraft(d: Draft) {
+        val a = api ?: return
+        try {
+            a.saveDraft(d)
+        } catch (e: AuspexError) {
+            onFailure(e)
+            return
+        }
+        refreshDrafts()
+    }
+
+    suspend fun deleteDraft(id: String) {
+        val a = api ?: return
+        try {
+            a.deleteDraft(id)
+        } catch (e: AuspexError) {
+            onFailure(e)
+            return
+        }
+        refreshDrafts()
+    }
+
     // ---- the timer -----------------------------------------------------
 
     /**

@@ -2750,6 +2750,15 @@ fun App(
                                     onCompose = {
                                         mailComposing = io.nisfeb.talon.ui.screens.MailIntent()
                                     },
+                                    onOpenDraft = { d ->
+                                        mailComposing = io.nisfeb.talon.ui.screens.MailIntent(
+                                            prev = d.prev,
+                                            to = d.to,
+                                            subject = d.subject,
+                                            body = d.body,
+                                            draftId = d.id,
+                                        )
+                                    },
                                 )
                                 RailTab.Statuses -> StatusFeedList(
                                     db = db,

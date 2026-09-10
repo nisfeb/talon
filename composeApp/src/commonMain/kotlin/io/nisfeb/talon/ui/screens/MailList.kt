@@ -30,6 +30,10 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -61,6 +65,7 @@ fun MailList(
     contacts: ContactMap,
     onOpenThread: (threadId: String) -> Unit,
     onCompose: (() -> Unit)? = null,
+    onOpenDraft: ((io.nisfeb.talon.mail.Draft) -> Unit)? = null,
     onInstall: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
@@ -70,12 +75,23 @@ fun MailList(
     val loading by repo.loading.collectAsState()
     val error by repo.error.collectAsState()
     val view by repo.view.collectAsState()
+    val drafts by repo.drafts.collectAsState()
+    // Drafts are not one of the ship's views: they live on their own
+    // route, so this is a mode of the list rather than another chip
+    // handed to setView.
+    var showingDrafts by remember { mutableStateOf(false) }
+    LaunchedEffect(showingDrafts) {
+        if (showingDrafts) repo.refreshDrafts()
+    }
 
     Column(modifier.fillMaxSize()) {
         MailToolbar(
             view = view,
             loading = loading,
-            onView = { repo.setView(it) },
+            onView = { showingDrafts = false; repo.setView(it) },
+            drafts = showingDrafts,
+            onDrafts = { showingDrafts = it },
+            showDrafts = onOpenDraft != null,
             onRefresh = { scope.launch { repo.refresh() } },
             onCompose = onCompose,
         )
@@ -84,6 +100,17 @@ fun MailList(
         error?.let { MailNotice(it) }
 
         when {
+            showingDrafts -> if (drafts.isEmpty()) {
+                MailAbsent("Nothing half-written.", actionLabel = null, onAction = null)
+            } else {
+                LazyColumn(Modifier.fillMaxSize()) {
+                    items(drafts, key = { it.id }) { d ->
+                        DraftRow(d, onOpen = { onOpenDraft?.invoke(d) })
+                        HorizontalDivider()
+                    }
+                }
+            }
+
             availability == MailAvailability.NO_GRUBBERY ->
                 MailAbsent(
                     "Mail runs inside Grubbery, which this ship does not have yet.",
@@ -136,6 +163,9 @@ private fun MailToolbar(
     onView: (MailView) -> Unit,
     onRefresh: () -> Unit,
     onCompose: (() -> Unit)?,
+    drafts: Boolean,
+    onDrafts: (Boolean) -> Unit,
+    showDrafts: Boolean,
 ) {
     Row(
         modifier = Modifier.fillMaxWidth().padding(start = 8.dp, end = 4.dp, top = 8.dp, bottom = 8.dp),
@@ -148,10 +178,19 @@ private fun MailToolbar(
         ) {
             items(TABS, key = { it.first.name }) { (v, label) ->
                 FilterChip(
-                    selected = view == v,
+                    selected = !drafts && view == v,
                     onClick = { onView(v) },
                     label = { Text(label) },
                 )
+            }
+            if (showDrafts) {
+                item(key = "drafts") {
+                    FilterChip(
+                        selected = drafts,
+                        onClick = { onDrafts(true) },
+                        label = { Text("Drafts") },
+                    )
+                }
             }
         }
         // The reader always knows better than a ten-minute timer, so the
@@ -299,4 +338,39 @@ private fun VerdictTag(text: String, color: androidx.compose.ui.graphics.Color) 
             modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp),
         )
     }
+}
+
+@Composable
+private fun DraftRow(d: io.nisfeb.talon.mail.Draft, onOpen: () -> Unit) {
+    ListItem(
+        modifier = Modifier.clickable(onClick = onOpen),
+        colors = ListItemDefaults.colors(containerColor = MaterialTheme.colorScheme.surface),
+        overlineContent = {
+            Text(
+                if (d.to.isEmpty()) "No recipients yet" else d.to.joinToString(),
+                style = MaterialTheme.typography.labelLarge,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        },
+        headlineContent = {
+            Text(
+                d.subject.ifBlank { "(no subject)" },
+                style = MaterialTheme.typography.bodyLarge,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        },
+        supportingContent = {
+            if (d.body.isNotBlank()) {
+                Text(
+                    d.body,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        },
+    )
 }

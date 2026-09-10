@@ -83,6 +83,15 @@ fun MailScreen(
                 contacts = contacts,
                 onOpenThread = { openThread = it },
                 onCompose = { composing = MailIntent() },
+                onOpenDraft = { d ->
+                    composing = MailIntent(
+                        prev = d.prev,
+                        to = d.to,
+                        subject = d.subject,
+                        body = d.body,
+                        draftId = d.id,
+                    )
+                },
             )
         }
     }

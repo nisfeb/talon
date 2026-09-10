@@ -138,6 +138,29 @@ class AuspexApi(
         return decode<Uploaded>(text).hash
     }
 
+    suspend fun drafts(): List<Draft> = decode(request(HttpMethod.Get, "/api/drafts"))
+
+    /**
+     * Save a draft under an id THE CLIENT MINTS, and must.
+     *
+     * The route answers before the writer applies, so a ship-minted id
+     * could never be told to the client that needs it to overwrite the
+     * same draft on the next keystroke.
+     */
+    suspend fun saveDraft(d: Draft) {
+        request(HttpMethod.Post, "/api/draft", json.encodeToString(Draft.serializer(), d))
+    }
+
+    suspend fun deleteDraft(id: String) {
+        request(HttpMethod.Post, "/api/draft-delete", json.encodeToString(IdReq.serializer(), IdReq(id)))
+    }
+
+    /** Sign and send a stored draft. The ship deletes it only if the
+     *  send succeeded. */
+    suspend fun sendDraft(id: String) {
+        request(HttpMethod.Post, "/api/draft-send", json.encodeToString(IdReq.serializer(), IdReq(id)))
+    }
+
     /** Move a thread in or out of the archive. Local state: no other
      *  ship can see it, so the client that changed it refreshes. */
     suspend fun setArchived(threadId: String, archived: Boolean) {
@@ -493,6 +516,24 @@ private data class SendReq(
 
 @Serializable
 private data class MarkReq(@SerialName("msg-ids") val msgIds: List<String>)
+
+@Serializable
+private data class IdReq(val id: String)
+
+/**
+ * A message not yet sent. Local and unsigned: it never travels, and no
+ * other ship knows it exists. [at] is the ship's stamp and is ignored
+ * on the way up.
+ */
+@Serializable
+data class Draft(
+    val id: String,
+    val to: List<String> = emptyList(),
+    val subject: String = "",
+    val body: String = "",
+    val prev: String? = null,
+    val at: Long = 0,
+)
 
 @Serializable
 private data class ArchiveReq(@SerialName("thread-id") val threadId: String, val archived: Boolean)

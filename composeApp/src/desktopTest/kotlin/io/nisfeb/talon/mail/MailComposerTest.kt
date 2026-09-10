@@ -2,6 +2,7 @@ package io.nisfeb.talon.mail
 
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
@@ -130,6 +131,51 @@ class MailComposerTest {
         onNodeWithText("Not a ship: nonsense").assertIsDisplayed()
         // The good one still landed.
         onNodeWithText("~zod").assertIsDisplayed()
+    }
+
+    @OptIn(ExperimentalTestApi::class)
+    @Test
+    fun `closing with something written keeps it as a draft`() = runComposeUiTest {
+        var closed = false
+        setContent {
+            TalonTheme(darkTheme = false) {
+                MailComposer(
+                    repo = repo(),
+                    intent = MailIntent(),
+                    onSent = {},
+                    onCancel = { closed = true },
+                )
+            }
+        }
+        onNodeWithText("Message").performTextInput("half a thought")
+        onNodeWithContentDescription("Close").performClick()
+        waitUntil(timeoutMillis = 5_000) { closed }
+        val saved = seen.last { it.url.encodedPath.endsWith("/api/draft") }
+        val body = Json.parseToJsonElement((saved.body as TextContent).text).jsonObject
+        assertEquals("half a thought", body["body"]!!.jsonPrimitive.content)
+        assertTrue(
+            body["id"]!!.jsonPrimitive.content.startsWith("0v"),
+            "the client mints the id, because the route answers before the writer applies",
+        )
+    }
+
+    @OptIn(ExperimentalTestApi::class)
+    @Test
+    fun `closing an empty composer writes nothing`() = runComposeUiTest {
+        var closed = false
+        setContent {
+            TalonTheme(darkTheme = false) {
+                MailComposer(
+                    repo = repo(),
+                    intent = MailIntent(),
+                    onSent = {},
+                    onCancel = { closed = true },
+                )
+            }
+        }
+        onNodeWithContentDescription("Close").performClick()
+        waitUntil(timeoutMillis = 5_000) { closed }
+        assertTrue(seen.none { it.url.encodedPath.endsWith("/api/draft") })
     }
 
     @OptIn(ExperimentalTestApi::class)

@@ -57,6 +57,10 @@ data class MailIntent(
      *  thread's tree, never counted separately. */
     val travels: Int = 0,
     val forwarding: Boolean = false,
+    /** The draft this is editing, when it came from one. Kept so a save
+     *  overwrites rather than piling up a new draft per keystroke. */
+    val draftId: String? = null,
+    val body: String = "",
 )
 
 /**
@@ -82,7 +86,9 @@ fun MailComposer(
     val recipients = remember(intent) { mutableStateListOf(*intent.to.toTypedArray()) }
     var recipientDraft by remember(intent) { mutableStateOf("") }
     var subject by remember(intent) { mutableStateOf(intent.subject) }
-    var body by remember(intent) { mutableStateOf("") }
+    var body by remember(intent) { mutableStateOf(intent.body) }
+    // Minted once per composer, and reused, so saving twice overwrites.
+    val draftId = remember(intent) { intent.draftId ?: io.nisfeb.talon.mail.newDraftId() }
     val files = remember(intent) { mutableStateListOf<PickedImage>() }
     var sending by remember(intent) { mutableStateOf(false) }
     var progress by remember(intent) { mutableStateOf<String?>(null) }
@@ -101,8 +107,30 @@ fun MailComposer(
             Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            IconButton(onClick = onCancel) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Cancel")
+            IconButton(
+                onClick = {
+                    // Leaving with something written keeps it. Losing a
+                    // half-finished message to a back gesture is the one
+                    // failure a composer must not have.
+                    if (body.isNotBlank() || subject.isNotBlank() || recipients.isNotEmpty()) {
+                        scope.launch {
+                            repo.saveDraft(
+                                io.nisfeb.talon.mail.Draft(
+                                    id = draftId,
+                                    to = recipients.toList(),
+                                    subject = subject,
+                                    body = body,
+                                    prev = intent.prev,
+                                ),
+                            )
+                            onCancel()
+                        }
+                    } else {
+                        onCancel()
+                    }
+                },
+            ) {
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Close")
             }
             Text(
                 when {
@@ -152,7 +180,13 @@ fun MailComposer(
                                 val ok = repo.send(to, subject, body, intent.prev, refs)
                                 progress = null
                                 sending = false
-                                if (ok) onSent() else problem = repo.error.value ?: "Send refused."
+                                if (ok) {
+                                    // The draft, if this was one, is done.
+                                    if (intent.draftId != null) repo.deleteDraft(intent.draftId)
+                                    onSent()
+                                } else {
+                                    problem = repo.error.value ?: "Send refused."
+                                }
                             }
                         }
                     }
