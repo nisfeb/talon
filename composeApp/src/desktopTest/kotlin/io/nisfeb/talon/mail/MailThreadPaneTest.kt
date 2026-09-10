@@ -61,7 +61,13 @@ class MailThreadPaneTest {
         val repo = repoServing(branching)
         setContent {
             TalonTheme(darkTheme = false) {
-                MailThreadPane(repo = repo, threadId = "0vt", contacts = ContactMap.EMPTY)
+                MailThreadPane(
+                    repo = repo,
+                    threadId = "0vt",
+                    contacts = ContactMap.EMPTY,
+                    ourShip = "~nec",
+                    onCompose = {},
+                )
             }
         }
         waitUntil(timeoutMillis = 5_000) {
@@ -102,7 +108,13 @@ class MailThreadPaneTest {
         )
         setContent {
             TalonTheme(darkTheme = false) {
-                MailThreadPane(repo = repo, threadId = "0vt", contacts = ContactMap.EMPTY)
+                MailThreadPane(
+                    repo = repo,
+                    threadId = "0vt",
+                    contacts = ContactMap.EMPTY,
+                    ourShip = "~nec",
+                    onCompose = {},
+                )
             }
         }
         waitUntil(timeoutMillis = 5_000) {
@@ -127,7 +139,13 @@ class MailThreadPaneTest {
             )
             setContent {
                 TalonTheme(darkTheme = false) {
-                    MailThreadPane(repo = repo, threadId = "0vt", contacts = ContactMap.EMPTY)
+                    MailThreadPane(
+                    repo = repo,
+                    threadId = "0vt",
+                    contacts = ContactMap.EMPTY,
+                    ourShip = "~nec",
+                    onCompose = {},
+                )
                 }
             }
             waitUntil(timeoutMillis = 5_000) {

@@ -70,6 +70,8 @@ fun MailThreadPane(
     repo: MailRepo,
     threadId: String,
     contacts: ContactMap,
+    ourShip: String,
+    onCompose: (MailIntent) -> Unit,
     onBack: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
@@ -135,6 +137,33 @@ fun MailThreadPane(
                     TravelLine(travelling.size)
                     HorizontalDivider()
                 }
+                MailThreadActions(
+                    // A forged copy cannot be answered, so a thread of
+                    // nothing else has nothing to reply to.
+                    enabled = answering != null,
+                    onReply = {
+                        onCompose(
+                            MailIntent(
+                                prev = answering,
+                                to = thread!!.participants.filter { it != ourShip },
+                                subject = thread!!.messages.firstOrNull()?.subject.orEmpty(),
+                                travels = travelling.size,
+                            ),
+                        )
+                    },
+                    onForward = {
+                        onCompose(
+                            MailIntent(
+                                prev = answering,
+                                to = emptyList(),
+                                subject = thread!!.messages.firstOrNull()?.subject.orEmpty(),
+                                travels = travelling.size,
+                                forwarding = true,
+                            ),
+                        )
+                    },
+                )
+                HorizontalDivider()
                 LazyColumn(Modifier.fillMaxSize()) {
                     items(flatten(forest), key = { it.first.message.id }) { (node, depth) ->
                         MailMessageCard(
@@ -154,6 +183,23 @@ fun MailThreadPane(
                 }
             }
         }
+    }
+}
+
+/**
+ * Reply and forward. Both send from the message the reader is on: the
+ * newest honest one in list mode, the selected node in tree mode. That
+ * is what makes selecting a node and replying a deliberate act rather
+ * than a surprise.
+ */
+@Composable
+private fun MailThreadActions(enabled: Boolean, onReply: () -> Unit, onForward: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        TextButton(onClick = onReply, enabled = enabled) { Text("Reply") }
+        TextButton(onClick = onForward, enabled = enabled) { Text("Forward") }
     }
 }
 

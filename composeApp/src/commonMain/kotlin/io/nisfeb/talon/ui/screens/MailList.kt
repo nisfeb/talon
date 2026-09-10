@@ -60,6 +60,7 @@ fun MailList(
     repo: MailRepo,
     contacts: ContactMap,
     onOpenThread: (threadId: String) -> Unit,
+    onCompose: (() -> Unit)? = null,
     onInstall: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
@@ -76,6 +77,7 @@ fun MailList(
             loading = loading,
             onView = { repo.setView(it) },
             onRefresh = { scope.launch { repo.refresh() } },
+            onCompose = onCompose,
         )
         HorizontalDivider()
 
@@ -133,6 +135,7 @@ private fun MailToolbar(
     loading: Boolean,
     onView: (MailView) -> Unit,
     onRefresh: () -> Unit,
+    onCompose: (() -> Unit)?,
 ) {
     Row(
         modifier = Modifier.fillMaxWidth().padding(start = 8.dp, end = 4.dp, top = 8.dp, bottom = 8.dp),
@@ -153,6 +156,9 @@ private fun MailToolbar(
         }
         // The reader always knows better than a ten-minute timer, so the
         // manual ask is a control and not a hidden gesture.
+        if (onCompose != null) {
+            androidx.compose.material3.TextButton(onClick = onCompose) { Text("New") }
+        }
         IconButton(onClick = onRefresh, enabled = !loading) {
             if (loading) {
                 CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)

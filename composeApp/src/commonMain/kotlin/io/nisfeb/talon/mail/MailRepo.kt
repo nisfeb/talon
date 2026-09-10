@@ -231,6 +231,35 @@ class MailRepo(
         }
     }
 
+    /**
+     * Send, then re-read. True only when the ship accepted the poke;
+     * that it applied is a thing only the refetch can show, which is why
+     * one follows immediately rather than at the next tick.
+     */
+    suspend fun send(
+        to: List<String>,
+        subject: String,
+        body: String,
+        prev: String?,
+        attachments: List<AttachRef>,
+    ): Boolean {
+        val a = api ?: return false
+        try {
+            a.send(to, subject, body, prev, attachments)
+        } catch (e: AuspexError) {
+            onFailure(e)
+            return false
+        }
+        refresh()
+        return true
+    }
+
+    /** Store one file, answering the address a send will name. */
+    suspend fun uploadBlob(bytes: ByteArray): String {
+        val a = api ?: error("not signed in")
+        return a.uploadBlob(bytes)
+    }
+
     private suspend fun write(block: suspend (AuspexApi) -> Unit) {
         val a = api ?: return
         try {

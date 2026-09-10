@@ -325,6 +325,9 @@ fun App(
         applyRightPaneState(RightPaneStateReducer.switchShip(rightPaneSnapshot()))
     }
     var showSelfProfile by remember { mutableStateOf(false) }
+    /** A message being written, if any. Owns the detail pane while it
+     *  is open, so a reply cannot be lost behind the thread it answers. */
+    var mailComposing by remember { mutableStateOf<io.nisfeb.talon.ui.screens.MailIntent?>(null) }
     /** The mail thread the reader is on. The reader itself is the next
      *  slice; until it lands this records the tap and nothing renders it. */
     var openMailThread by remember { mutableStateOf<String?>(null) }
@@ -1980,6 +1983,14 @@ fun App(
                         // on narrow windows and in the right pane on wide
                         // windows (showing EmptyChatPane as placeholder).
                         val detailSlot: (@Composable () -> Unit)? = when {
+                            mailComposing != null -> ({
+                                io.nisfeb.talon.ui.screens.MailComposer(
+                                    repo = mailRepo,
+                                    intent = mailComposing!!,
+                                    onSent = { mailComposing = null },
+                                    onCancel = { mailComposing = null },
+                                )
+                            })
                             // A mail thread owns the detail pane. Leaving the
                             // Mail rail tab clears the selection below, so a
                             // thread can never sit beside the chat list.
@@ -1988,6 +1999,8 @@ fun App(
                                     repo = mailRepo,
                                     threadId = openMailThread!!,
                                     contacts = callContacts,
+                                    ourShip = ship,
+                                    onCompose = { mailComposing = it },
                                     onBack = { openMailThread = null },
                                 )
                             })
@@ -2558,7 +2571,10 @@ fun App(
                                 else -> Unit
                             }
                             // Leaving Mail closes the thread it was showing.
-                            if (item != RailItem.Mail) openMailThread = null
+                            if (item != RailItem.Mail) {
+                                openMailThread = null
+                                mailComposing = null
+                            }
                             item.toRailTab()?.let { tab ->
                                 uiSettings.setActiveRailTab(tab)
                             } ?: when (item) {
@@ -2719,6 +2735,9 @@ fun App(
                                     repo = mailRepo,
                                     contacts = callContacts,
                                     onOpenThread = { openMailThread = it },
+                                    onCompose = {
+                                        mailComposing = io.nisfeb.talon.ui.screens.MailIntent()
+                                    },
                                 )
                                 RailTab.Statuses -> StatusFeedList(
                                     db = db,

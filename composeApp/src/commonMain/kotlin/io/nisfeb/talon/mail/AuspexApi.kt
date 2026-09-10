@@ -103,6 +103,41 @@ class AuspexApi(
         )
     }
 
+    /**
+     * Store one file and get back the address the send will name.
+     *
+     * The body is the bytes, with no encoding: the nexus needs no
+     * decoder, which is what makes "uploading 2 of 5" possible at all.
+     * Idempotent — the same bytes answer the same address and rewrite
+     * nothing.
+     *
+     * Upload one at a time. Sixteen concurrent posts at a serialised
+     * pier is sixteen request fibers competing for one ship, and the
+     * progress it would report would not be true.
+     */
+    suspend fun uploadBlob(bytes: ByteArray): String {
+        val resp = try {
+            http.request(root + "/api/blob") {
+                this.method = HttpMethod.Post
+                contentType(ContentType.Application.OctetStream)
+                setBody(bytes)
+            }
+        } catch (c: CancellationException) {
+            throw c
+        } catch (t: Throwable) {
+            throw AuspexError.Unreachable(t)
+        }
+        val text = try {
+            resp.bodyAsText()
+        } catch (c: CancellationException) {
+            throw c
+        } catch (t: Throwable) {
+            throw AuspexError.Garbled(t)
+        }
+        if (!resp.status.isSuccess()) throw AuspexError.Refused(resp.status.value, reasonOf(text))
+        return decode<Uploaded>(text).hash
+    }
+
     /** Move a thread in or out of the archive. Local state: no other
      *  ship can see it, so the client that changed it refreshes. */
     suspend fun setArchived(threadId: String, archived: Boolean) {
@@ -239,6 +274,12 @@ class AuspexApi(
         /** Where grubbery binds the nexus. */
         const val APP_PATH = "/apps/auspex"
         const val DEFAULT_PAGE = 50
+
+        /** The ship's caps, mirrored so a file can be refused when it is
+         *  picked rather than after a quarter-megabyte upload comes back
+         *  rejected. A guard rail, never the boundary. */
+        const val MAX_BLOB_BYTES = 262_144
+        const val MAX_ATTACHMENTS = 16
 
         /** A thread or draft that is gone, which is not a load failure. */
         const val NOT_FOUND = 404
@@ -437,6 +478,9 @@ data class AttachRef(
 
 @Serializable
 private data class Whoami(val ship: String = "")
+
+@Serializable
+private data class Uploaded(val hash: String = "", val size: Long = 0)
 
 @Serializable
 private data class SendReq(
