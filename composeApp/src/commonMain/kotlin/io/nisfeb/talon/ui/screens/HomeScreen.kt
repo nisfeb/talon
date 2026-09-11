@@ -451,6 +451,9 @@ internal fun skyFor(atMs: Long, place: HomePlace?, weather: SkyClock.Sky?): SkyC
         twilight = place?.let { Solar.twilightMinutes(it.lat) } ?: base.twilight,
         polar = sun?.polar ?: false,
         polarDay = sun?.polarDay ?: false,
+        // Independent of where you are: the phase is the same moon for
+        // everybody, and where it sits on the dial follows from it.
+        moonElongationDeg = io.nisfeb.talon.ui.Moon.phaseAt(atMs).elongationDeg,
     )
 }
 

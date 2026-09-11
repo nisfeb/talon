@@ -28,50 +28,50 @@ object SkyClock {
         return (fromNoon / MINUTES_IN_DAY.toFloat()) * 360f
     }
 
-    /** What part of the day a band of the ring is showing. */
-    enum class Band { NIGHT, DAWN, DAY, DUSK }
-
-    /** One drawn arc: where it starts, how far it sweeps, and what it is. */
-    data class Arc(val startDeg: Float, val sweepDeg: Float, val band: Band)
-
     /**
-     * The ring, in drawing order.
+     * How lit the sky is at a minute of the day: -1 is deep night, 0
+     * is the sun exactly on the horizon — which is when the sky is at
+     * its most coloured — and +1 is full day.
      *
-     * Dawn and dusk are bands rather than lines because that is what
-     * they are: the sky takes a while. [twilightMinutes] is how long
-     * each takes, split either side of the sun crossing the horizon.
+     * Continuous on purpose. Four flat bands drew the day as four
+     * facts, and the sky does not do that; it slides. A dial somebody
+     * leaves open all day should slide with it, so that catching it at
+     * ten past five looks different from catching it at half four.
      *
-     * A sunrise after a sunset means the polar case — a day with no
-     * night, or a night with no day — and the ring becomes one band
-     * rather than a set of arcs that cross over each other.
+     * Night settles more slowly than day breaks, which is why the two
+     * ramps are not the same length: the sky keeps a little colour
+     * well after the sun has gone.
      */
-    fun arcs(
+    fun skyMix(
+        minuteOfDay: Int,
         sunriseMinute: Int,
         sunsetMinute: Int,
         twilightMinutes: Int = 60,
-    ): List<Arc> {
-        if (sunsetMinute <= sunriseMinute) {
-            // Nothing sane to draw as four bands. One band is honest.
-            return listOf(Arc(0f, 360f, Band.NIGHT))
+        polar: Boolean = false,
+        polarDay: Boolean = false,
+    ): Float {
+        if (polar) return if (polarDay) 1f else -1f
+        val half = (twilightMinutes / 2).coerceAtLeast(1).toFloat()
+        val sinceRise = forward(sunriseMinute, minuteOfDay)
+        val dayLength = forward(sunriseMinute, sunsetMinute)
+        if (dayLength == 0) return -1f
+        return if (sinceRise <= dayLength) {
+            val d = minOf(sinceRise, dayLength - sinceRise)
+            (d / half).coerceIn(0f, 1f)
+        } else {
+            val nightLength = MINUTES_IN_DAY - dayLength
+            val sinceSet = forward(sunsetMinute, minuteOfDay)
+            val d = minOf(sinceSet, nightLength - sinceSet)
+            -((d / (half * 2f)).coerceIn(0f, 1f))
         }
-        val half = (twilightMinutes / 2).coerceAtLeast(1)
-        val dawnStart = sunriseMinute - half
-        val dawnEnd = sunriseMinute + half
-        val duskStart = sunsetMinute - half
-        val duskEnd = sunsetMinute + half
+    }
 
-        fun arc(fromMin: Int, toMin: Int, band: Band): Arc {
-            val start = angleOf(fromMin)
-            var sweep = angleOf(toMin) - start
-            if (sweep <= 0f) sweep += 360f
-            return Arc(start, sweep, band)
-        }
-        return listOf(
-            arc(dawnEnd, duskStart, Band.DAY),
-            arc(duskStart, duskEnd, Band.DUSK),
-            arc(duskEnd, dawnStart + MINUTES_IN_DAY, Band.NIGHT),
-            arc(dawnStart, dawnEnd, Band.DAWN),
-        )
+    private fun wrap(m: Int): Int = ((m % MINUTES_IN_DAY) + MINUTES_IN_DAY) % MINUTES_IN_DAY
+
+    /** Minutes going forward from [from] to [to], over midnight if need be. */
+    private fun forward(from: Int, to: Int): Int {
+        val d = wrap(to) - wrap(from)
+        return if (d < 0) d + MINUTES_IN_DAY else d
     }
 
     /**
@@ -145,6 +145,9 @@ object SkyClock {
         val lowC: Double? = null,
         val lowAtMinute: Int? = null,
         val cloudCover: Float? = null,
+        /** How far round from the sun the moon has got, in degrees:
+         *  0 is new and 180 is full. Null before anything works it out. */
+        val moonElongationDeg: Double? = null,
         val dateLabel: String = "",
         /** How long dawn and dusk take here. Longer away from the
          *  equator, where the sun goes down at a shallower angle. */

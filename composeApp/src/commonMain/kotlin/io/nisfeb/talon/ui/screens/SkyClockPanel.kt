@@ -24,6 +24,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -33,6 +34,7 @@ import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.dp
+import io.nisfeb.talon.ui.Moon
 import io.nisfeb.talon.ui.SkyClock
 import kotlin.math.PI
 import kotlin.math.cos
@@ -56,19 +58,21 @@ fun SkyClockDial(
     twentyFourHour: Boolean,
     modifier: Modifier = Modifier,
 ) {
-    val arcs = remember(sky.sunriseMinute, sky.sunsetMinute, sky.twilight, sky.polar) {
-        if (sky.polar) {
-            // One band, because there is no sunrise to draw a boundary
-            // at. A ring showing dawn and dusk on a day that has
-            // neither would be a picture of somewhere else.
-            listOf(
-                SkyClock.Arc(
-                    0f, 360f,
-                    if (sky.polarDay) SkyClock.Band.DAY else SkyClock.Band.NIGHT,
-                ),
+    // The ring is drawn as a run of short segments rather than four
+    // bands, so the colour slides through sunrise, day, sunset and a
+    // deep blue night instead of cutting between them.
+    val mixes = remember(
+        sky.sunriseMinute, sky.sunsetMinute, sky.twilight, sky.polar, sky.polarDay,
+    ) {
+        FloatArray(SEGMENTS) { i ->
+            SkyClock.skyMix(
+                minuteOfDay = i * SEGMENT_MINUTES + SEGMENT_MINUTES / 2,
+                sunriseMinute = sky.sunriseMinute,
+                sunsetMinute = sky.sunsetMinute,
+                twilightMinutes = sky.twilight,
+                polar = sky.polar,
+                polarDay = sky.polarDay,
             )
-        } else {
-            SkyClock.arcs(sky.sunriseMinute, sky.sunsetMinute, sky.twilight)
         }
     }
 
@@ -79,6 +83,13 @@ fun SkyClockDial(
         targetValue = SkyClock.angleOf(sky.minuteOfDay),
         animationSpec = tween(durationMillis = 900),
         label = "sun",
+    )
+
+    val moonMinute = sky.moonElongationDeg?.let { Moon.dialMinute(sky.minuteOfDay, it) }
+    val moonAngle by animateFloatAsState(
+        targetValue = moonMinute?.let { SkyClock.angleOf(it) } ?: 0f,
+        animationSpec = tween(durationMillis = 900),
+        label = "moon",
     )
 
     val dayColor by animateColorAsState(
@@ -115,17 +126,16 @@ fun SkyClockDial(
                     (size.height - box.height) / 2f,
                 )
 
-                for (a in arcs) {
+                // A hair of overlap on each segment: without it the
+                // seams show as hairline gaps all the way round.
+                val sweep = 360f / SEGMENTS + 0.7f
+                for (i in 0 until SEGMENTS) {
                     drawArc(
-                        color = when (a.band) {
-                            SkyClock.Band.DAY -> dayColor
-                            SkyClock.Band.NIGHT -> nightColor
-                            else -> twilightColor
-                        },
+                        color = skyColor(mixes[i], dayColor, twilightColor, nightColor),
                         // Compose measures from three o'clock; the dial
                         // measures from twelve.
-                        startAngle = a.startDeg - 90f,
-                        sweepAngle = a.sweepDeg,
+                        startAngle = SkyClock.angleOf(i * SEGMENT_MINUTES) - 90f,
+                        sweepAngle = sweep,
                         useCenter = false,
                         topLeft = topLeft,
                         size = box,
@@ -148,31 +158,39 @@ fun SkyClockDial(
                 // A letter answers the question on the face of it, which
                 // no amount of colour was going to do.
                 sky.highAtMinute?.let {
-                    graduation(it, "H", centre, radius, ring, markColor, measurer, labelStyle)
+                    graduation(it, "H", centre, radius, ring, markColor(sky.highC), measurer, labelStyle)
                 }
                 if (sky.marksDistinct) {
                     sky.lowAtMinute?.let {
-                        graduation(it, "L", centre, radius, ring, markColor, measurer, labelStyle)
+                        graduation(it, "L", centre, radius, ring, markColor(sky.lowC), measurer, labelStyle)
                     }
                 }
 
-                // The sun, or the moon once it is down.
-                val p = pointOn(sunAngle, centre, radius)
-                drawCircle(
-                    color = if (sky.sunUp) SUN else MOON,
-                    radius = ring * 0.36f,
-                    center = p,
-                )
-                if (!sky.sunUp) {
-                    // A crescent, cut by overdrawing the night band's own
-                    // colour rather than by a second shape with a hole.
-                    drawCircle(
-                        color = nightColor,
-                        radius = ring * 0.30f,
-                        center = Offset(p.x + ring * 0.16f, p.y - ring * 0.10f),
+                // The moon, where it actually is and the shape it
+                // actually is. It lags the sun by its phase, so it is
+                // only opposite the sun when it is full — drawing it
+                // wherever the sun is not was a picture of nothing.
+                if (moonMinute != null && sky.moonElongationDeg != null) {
+                    drawMoon(
+                        centre = centre,
+                        angleDeg = moonAngle,
+                        orbit = radius,
+                        r = ring * 0.30f,
+                        elongationDeg = sky.moonElongationDeg,
+                        lit = MOON,
+                        dark = MOON_DARK,
                     )
                 }
 
+                // The sun, which is also where "now" is. Below the
+                // horizon it stays on the dial and dims: at two in the
+                // morning the sun is under the earth, which is exactly
+                // what the dark bottom of the ring is showing.
+                drawCircle(
+                    color = if (sky.sunUp) SUN else SUN_DOWN,
+                    radius = ring * 0.36f,
+                    center = pointOn(sunAngle, centre, radius),
+                )
             }
 
             Column(
@@ -264,7 +282,7 @@ private fun DrawScope.graduation(
         end = pointOn(a, centre, radius + ring * 0.5f),
         strokeWidth = ring * 0.09f,
     )
-    val laid = measurer.measure(label, style)
+    val laid = measurer.measure(label, style.copy(color = color))
     val p = pointOn(a, centre, radius - ring * 0.5f - laid.size.height * 0.60f)
     drawText(
         laid,
@@ -279,19 +297,100 @@ private fun DrawScope.graduation(
 // applied to the lit bands only — the night does not get warmer because
 // the afternoon was hot, and tinting it would just look like a bug.
 
+private const val SEGMENTS = 180
+private const val SEGMENT_MINUTES = SkyClock.MINUTES_IN_DAY / SEGMENTS
+
 private val SUN = Color(0xFFF5B740)
+
+/** The sun under the earth: still on the dial, plainly not lighting it. */
+private val SUN_DOWN = Color(0xFF6B5526)
+
 private val MOON = Color(0xFFE8E4DA)
+
+/** The unlit limb. A new moon is still there; it is simply catching
+ *  nothing, and a disc that vanished entirely would read as a bug. */
+private val MOON_DARK = Color(0xFF3A3F4D)
+
+// The high and low marks are tinted by the temperature they mark, but
+// from a brighter palette than the ring's own: a cold mark in the ring's
+// own blue would sit on the day band and disappear.
+private val MARK_COLD = Color(0xFF7FC4FF)
+private val MARK_MILD = Color(0xFFE6E9EE)
+private val MARK_HOT = Color(0xFFFF7A5C)
 
 private val DAY_TEMPERATE = Color(0xFF6E9BEA)
 private val DAY_COLD = Color(0xFF86BEEC)
 private val DAY_WARM = Color(0xFF5C86D8)
 private val DAY_OVERCAST = Color(0xFF9AA4B0)
 
-private val NIGHT_BASE = Color(0xFF11131A)
-private val NIGHT_OVERCAST = Color(0xFF2A2F38)
+// Night is a deep blue, not black. A black ring reads as a hole in
+// the dial; the sky at two in the morning is very dark and still blue.
+private val NIGHT_BASE = Color(0xFF0C1533)
+private val NIGHT_OVERCAST = Color(0xFF232B3D)
 
 private val TWILIGHT_BASE = Color(0xFFF0A33C)
 private val TWILIGHT_COLD = Color(0xFFE8956B)
+
+/**
+ * The ring's colour at one point in the day.
+ *
+ * The horizon colour is the hinge: the sky runs down to it from full
+ * day and on past it into night, so sunrise and sunset are where the
+ * ring is most coloured rather than two stripes laid over it.
+ */
+private fun skyColor(mix: Float, day: Color, horizon: Color, night: Color): Color =
+    if (mix >= 0f) lerp(horizon, day, mix) else lerp(horizon, night, -mix)
+
+/** A temperature as a mark colour, cold through mild to hot. */
+private fun markColor(celsius: Double?): Color {
+    val w = SkyClock.warmth(celsius)
+    return if (w >= 0f) lerp(MARK_MILD, MARK_HOT, w) else lerp(MARK_MILD, MARK_COLD, -w)
+}
+
+/**
+ * The lit part of the moon's disc.
+ *
+ * Two curves: the limb facing the sun, which is a half circle, and the
+ * terminator, which is that same half circle squashed by the phase.
+ * The squash is signed, so it bulges into the lit side for a crescent
+ * and away from it for a gibbous, and goes flat at the quarters. Drawn
+ * as a path rather than cut out with an overdrawn disc, because the
+ * moon can sit over any part of the ring and there is no one colour to
+ * cut it with.
+ */
+private fun moonLitPath(c: Offset, r: Float, elongationDeg: Double): Path {
+    val e = elongationDeg * PI / 180.0
+    val side = if (elongationDeg < 180.0) 1f else -1f
+    val term = side * cos(e).toFloat()
+    val path = Path()
+    val steps = 32
+    for (i in 0..steps) {
+        val t = PI * i / steps
+        val x = c.x + side * r * sin(t).toFloat()
+        val y = c.y - r * cos(t).toFloat()
+        if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
+    }
+    for (i in steps downTo 0) {
+        val t = PI * i / steps
+        path.lineTo(c.x + term * r * sin(t).toFloat(), c.y - r * cos(t).toFloat())
+    }
+    path.close()
+    return path
+}
+
+private fun DrawScope.drawMoon(
+    centre: Offset,
+    angleDeg: Float,
+    orbit: Float,
+    r: Float,
+    elongationDeg: Double,
+    lit: Color,
+    dark: Color,
+) {
+    val p = pointOn(angleDeg, centre, orbit)
+    drawCircle(color = dark, radius = r, center = p)
+    drawPath(moonLitPath(p, r, elongationDeg), color = lit)
+}
 
 private fun dayBand(sky: SkyClock.Sky): Color {
     // The sky stays sky. Temperature only nudges it between a cool and
