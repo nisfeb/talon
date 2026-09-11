@@ -5,18 +5,21 @@
   live with that: the sun moves a degree every four minutes and the
   weather is fetched on the same schedule the app uses.
 
+  No maxResize. It used to stop at 300dp, which on a tablet is a
+  postage stamp, and the ceiling bought nothing: the dial is square and
+  drawn at whatever size it is given. Where it stops now is where the
+  launcher's own grid stops.
+
   resizeMode is both ways because the dial is square and somebody will
-  want it two cells or four.
+  want it three cells or six.
 -->
 <appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
     android:minWidth="110dp"
     android:minHeight="110dp"
-    android:targetCellWidth="2"
-    android:targetCellHeight="2"
+    android:targetCellWidth="3"
+    android:targetCellHeight="3"
     android:minResizeWidth="110dp"
     android:minResizeHeight="110dp"
-    android:maxResizeWidth="300dp"
-    android:maxResizeHeight="300dp"
     android:updatePeriodMillis="1800000"
     android:resizeMode="horizontal|vertical"
     android:widgetCategory="home_screen"

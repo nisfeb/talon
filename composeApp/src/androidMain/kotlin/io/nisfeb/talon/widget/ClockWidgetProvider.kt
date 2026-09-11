@@ -128,14 +128,24 @@ class ClockWidgetProvider : AppWidgetProvider() {
         settings: WidgetSky.Settings,
     ) {
         val options = manager.getAppWidgetOptions(id)
-        val widthDp = options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH, 180)
-        val heightDp = options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT, 180)
+        // The larger of the two figures the launcher reports for each
+        // axis. The minimum is what the widget shrinks to in the other
+        // orientation; drawing at that and letting the ImageView scale
+        // up is how a big widget comes out soft.
+        val widthDp = maxOf(
+            options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH, 0),
+            options.getInt(AppWidgetManager.OPTION_APPWIDGET_MAX_WIDTH, 0),
+        ).takeIf { it > 0 } ?: DEFAULT_SIDE_DP
+        val heightDp = maxOf(
+            options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT, 0),
+            options.getInt(AppWidgetManager.OPTION_APPWIDGET_MAX_HEIGHT, 0),
+        ).takeIf { it > 0 } ?: DEFAULT_SIDE_DP
         val px = { dp: Int ->
             TypedValue.applyDimension(
                 TypedValue.COMPLEX_UNIT_DIP,
                 dp.toFloat(),
                 context.resources.displayMetrics,
-            ).toInt().coerceIn(96, 1024)
+            ).toInt().coerceIn(MIN_SIDE_PX, MAX_SIDE_PX)
         }
         val dark = (context.resources.configuration.uiMode and
             Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
@@ -186,6 +196,23 @@ class ClockWidgetProvider : AppWidgetProvider() {
 
     companion object {
         private const val WEATHER_TIMEOUT_MS = 8_000L
+
+        /** What to draw at when the launcher will not say. */
+        private const val DEFAULT_SIDE_DP = 180
+
+        private const val MIN_SIDE_PX = 96
+
+        /**
+         * The biggest bitmap worth handing over.
+         *
+         * A RemoteViews bitmap crosses a process boundary, and while
+         * large ones go through shared memory rather than the binder's
+         * own buffer, there is no sense sending more than anybody can
+         * see. Seven hundred and sixty-eight square is a widget filling
+         * most of a tablet at two-times density; past that the
+         * ImageView scales down and nothing is lost.
+         */
+        private const val MAX_SIDE_PX = 768
 
         /** Redraw every widget on the home screen. For the app to call
          *  when the place or the units change under it. */
