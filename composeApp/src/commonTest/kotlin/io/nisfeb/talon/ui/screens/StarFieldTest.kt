@@ -53,6 +53,17 @@ class StarFieldTest {
     }
 
     @Test
+    fun `a star is a speck`() {
+        // Under a hundredth of the band either way. This caught an
+        // order of magnitude once and is here to catch the next one.
+        for (i in 0 until STAR_COUNT) {
+            val r = starRadius(starNoise(i, 4), ring)
+            assertTrue(r < ring * 0.015f, "star $i has radius $r on a $ring band")
+            assertTrue(r > ring * 0.004f, "star $i at $r would not render at all")
+        }
+    }
+
+    @Test
     fun `stars come out as the sky goes`() {
         // Fading in through dusk rather than switching on at sunset.
         assertEquals(0f, starBrightness(0f, 0f, 1f), "none at the horizon")

@@ -551,9 +551,16 @@ internal fun starBrightness(depth: Float, cover: Float, noise: Float): Float {
 internal fun starOffset(noise: Float, ring: Float): Float =
     (noise - 0.5f) * STAR_SPREAD * ring
 
-/** A star's own size, small and not quite uniform. */
+/**
+ * A star's own size: a speck, and not quite a uniform one.
+ *
+ * Under a hundredth of the band's width. At that size a star is a
+ * pixel or two on a sharp screen and a soft one on a blunt screen,
+ * which is about right for something meant to be noticed on the
+ * second look rather than the first.
+ */
 internal fun starRadius(noise: Float, ring: Float): Float =
-    ring * (0.022f + 0.026f * noise)
+    ring * (0.0066f + 0.0078f * noise)
 
 private fun DrawScope.drawStars(
     centre: Offset,
