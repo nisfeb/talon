@@ -4,6 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -51,6 +52,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.boundsInWindow
@@ -186,7 +188,12 @@ fun HomeScreen(
         // widget set to full width on a desktop is still full width on
         // a phone; it just has nothing to sit beside.
         val columns = if (maxWidth >= 820.dp) HOME_COLUMNS else 1
-        val gridRows = remember(layout, columns) { packRows(layout.shown, columns) }
+        // Loose while arranging, so a widget can be dropped somewhere
+        // it does not quite fit. Nothing about that is stored, so the
+        // strict pack reflows it the moment arranging stops.
+        val gridRows = remember(layout, columns, editing) {
+            packRows(layout.shown, columns, loose = editing)
+        }
 
         Column(
             Modifier
@@ -219,8 +226,42 @@ fun HomeScreen(
                 )
             }
 
+            val guideBand = MaterialTheme.colorScheme.primary.copy(alpha = 0.07f)
+            val guideLine = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+
             gridRows.forEach { gridRow ->
-                Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(GRID_GAP),
+                    modifier = if (!editing) Modifier else Modifier.drawBehind {
+                        // Drawn per row rather than once behind the
+                        // page, because that is the only place both
+                        // axes are true: the columns are this row's own
+                        // widths, and a widget's height is counted from
+                        // the top of the row it sits on. A lattice over
+                        // the whole page would line up for the first
+                        // row and lie about every one after it.
+                        val gap = GRID_GAP.toPx()
+                        val colWidth = (size.width - gap * (columns - 1)) / columns
+                        for (i in 0 until columns) {
+                            drawRect(
+                                color = guideBand,
+                                topLeft = Offset(i * (colWidth + gap), 0f),
+                                size = Size(colWidth, size.height),
+                            )
+                        }
+                        val unit = HOME_ROW_UNIT.toPx()
+                        var y = unit
+                        while (y < size.height) {
+                            drawLine(
+                                color = guideLine,
+                                start = Offset(0f, y),
+                                end = Offset(size.width, y),
+                                strokeWidth = 1f,
+                            )
+                            y += unit
+                        }
+                    },
+                ) {
                     gridRow.forEach { widget ->
                         // Keyed, so Compose keeps each widget's state
                         // with the widget rather than with the position
@@ -397,6 +438,10 @@ fun HomeScreen(
  * and nothing anybody wanted sat on one of them.
  */
 private val HOME_ROW_UNIT = 56.dp
+
+/** The space between two widgets. Named because the grid guides have
+ *  to subtract exactly the same gaps the layout adds. */
+private val GRID_GAP = 14.dp
 
 /** How big a handle has to be to be hit with a thumb. */
 private val HANDLE = 26.dp

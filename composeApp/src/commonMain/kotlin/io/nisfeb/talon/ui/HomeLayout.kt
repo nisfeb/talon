@@ -200,18 +200,30 @@ data class HomeLayout(
  *
  * One column means one widget per row, whatever any of them asked for.
  */
-fun packRows(shown: List<HomeWidget>, columns: Int): List<List<HomeWidget>> {
+fun packRows(
+    shown: List<HomeWidget>,
+    columns: Int,
+    loose: Boolean = false,
+): List<List<HomeWidget>> {
     if (columns <= 1) return shown.map { listOf(it) }
     val rows = mutableListOf<MutableList<HomeWidget>>()
     var used = columns // forces the first widget to open a row
     for (w in shown) {
         val span = w.span.coerceIn(1, columns)
-        if (used + span > columns) {
-            rows += mutableListOf(w)
-            used = span
-        } else {
+        // Loose packing lets a widget join a row it does not quite fit
+        // on, so long as there is any room left at all. It is for while
+        // somebody is arranging: dropping a widget next to another and
+        // having it flick onto its own row, mid-drag, makes the page
+        // fight the hand moving it. Everything settles the moment they
+        // are done, because the strict pack is what draws the rest of
+        // the time.
+        val fits = if (loose) used < columns else used + span <= columns
+        if (fits) {
             rows.last() += w
             used += span
+        } else {
+            rows += mutableListOf(w)
+            used = span
         }
     }
     return rows

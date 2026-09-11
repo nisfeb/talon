@@ -447,3 +447,59 @@ class HomeResizeTest {
         }
     }
 }
+
+class HomeLoosePackTest {
+
+    private fun w(kind: HomeWidgetKind, span: Int) = HomeWidget(kind, span = span)
+    private val k = HomeWidgetKind.entries
+
+    @Test
+    fun `a widget that does not quite fit still joins the row while arranging`() {
+        // Otherwise it flicks onto its own row mid-drag and the page
+        // fights the hand moving it.
+        val shown = listOf(w(k[0], 8), w(k[1], 8))
+        assertEquals(2, packRows(shown, HOME_COLUMNS).size, "strictly, they do not share")
+        assertEquals(1, packRows(shown, HOME_COLUMNS, loose = true).size, "loosely, they do")
+    }
+
+    @Test
+    fun `loose packing still starts a new row once one is full`() {
+        // Any room at all, not no room at all: a row that is exactly
+        // full takes nothing more.
+        val shown = listOf(w(k[0], 12), w(k[1], 3))
+        val rows = packRows(shown, HOME_COLUMNS, loose = true)
+        assertEquals(2, rows.size)
+        assertEquals(listOf(k[0]), rows[0].map { it.kind })
+    }
+
+    @Test
+    fun `an overfull row settles as soon as arranging stops`() {
+        // Nothing about the loose arrangement is stored, so the strict
+        // pack is what draws the moment the mode ends.
+        val shown = listOf(w(k[0], 8), w(k[1], 8), w(k[2], 8))
+        val loose = packRows(shown, HOME_COLUMNS, loose = true)
+        val strict = packRows(shown, HOME_COLUMNS)
+        assertTrue(loose.any { it.sumOf { x -> x.span } > HOME_COLUMNS })
+        assertTrue(strict.all { it.sumOf { x -> x.span } <= HOME_COLUMNS })
+        assertEquals(
+            shown.map { it.kind },
+            strict.flatten().map { it.kind },
+            "and the order somebody arranged survives the reflow",
+        )
+    }
+
+    @Test
+    fun `loose packing never loses a widget`() {
+        for (spans in listOf(listOf(12, 12), listOf(3, 3, 3, 3, 3), listOf(11, 2, 11))) {
+            val shown = spans.mapIndexed { i, sp -> w(k[i % k.size], sp) }
+            val flat = packRows(shown, HOME_COLUMNS, loose = true).flatten()
+            assertEquals(shown.size, flat.size, "lost one packing $spans")
+        }
+    }
+
+    @Test
+    fun `one column ignores looseness entirely`() {
+        val shown = listOf(w(k[0], 12), w(k[1], 12))
+        assertEquals(2, packRows(shown, 1, loose = true).size)
+    }
+}
