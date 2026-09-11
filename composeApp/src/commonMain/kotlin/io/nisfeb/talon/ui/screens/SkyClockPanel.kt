@@ -26,8 +26,11 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -55,6 +58,7 @@ import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.dp
 import io.nisfeb.talon.ui.Moon
 import io.nisfeb.talon.ui.SkyClock
+import kotlinx.coroutines.delay
 import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.cos
@@ -82,6 +86,43 @@ fun SkyClockDial(
     // The ring is drawn as a run of short segments rather than four
     // bands, so the colour slides through sunrise, day, sunset and a
     // deep blue night instead of cutting between them.
+    val cloudAt = remember(
+        sky.hourlyCloud, sky.cloudCover, sky.sunriseMinute, sky.daylightMinutes,
+    ) {
+        cloudMinutes(
+            hourlyCloud = sky.hourlyCloud,
+            currentCover = sky.cloudCover ?: 0f,
+            sunriseMinute = sky.sunriseMinute,
+            dayMinutes = sky.daylightMinutes,
+        )
+    }
+
+    // Gloom by segment rather than one figure for the whole ring, so a
+    // shower at four darkens four o'clock and leaves the morning alone.
+    val gloomTarget = remember(sky.hourlyCondition, sky.condition) {
+        FloatArray(SEGMENTS) { i ->
+            gloomAt(i * SEGMENT_MINUTES + SEGMENT_MINUTES / 2, sky.hourlyCondition, sky.condition)
+        }
+    }
+    // Cross-faded by hand: one animated float cannot carry a hundred
+    // and eighty of them, and a new forecast landing as a hard cut is
+    // exactly the popping this is meant to avoid.
+    var glooms by remember { mutableStateOf(gloomTarget) }
+    LaunchedEffect(gloomTarget) {
+        val from = glooms
+        if (from.size != gloomTarget.size) {
+            glooms = gloomTarget
+            return@LaunchedEffect
+        }
+        val steps = 30
+        repeat(steps) { k ->
+            val t = (k + 1) / steps.toFloat()
+            glooms = FloatArray(SEGMENTS) { i -> from[i] + (gloomTarget[i] - from[i]) * t }
+            delay(66)
+        }
+        glooms = gloomTarget
+    }
+
     val mixes = remember(
         sky.sunriseMinute, sky.sunsetMinute, sky.twilight, sky.polar, sky.polarDay,
     ) {
@@ -129,13 +170,6 @@ fun SkyClockDial(
         label = "twilight",
     )
 
-    // Rain takes the light out of a sky. Animated with the rest so a
-    // shower arriving does not snap the dial to a different day.
-    val gloom by animateFloatAsState(
-        targetValue = sky.condition.gloom,
-        animationSpec = tween(2_000),
-        label = "gloom",
-    )
     val cloudiness by animateFloatAsState(
         targetValue = sky.cloudCover ?: 0f,
         animationSpec = tween(2_000),
@@ -176,7 +210,7 @@ fun SkyClockDial(
                 for (i in 0 until SEGMENTS) {
                     drawArc(
                         color = skyColor(
-                            mixes[i], dayColor, twilightColor, nightColor, gloom,
+                            mixes[i], dayColor, twilightColor, nightColor, glooms[i],
                         ),
                         // Compose measures from three o'clock; the dial
                         // measures from twelve.
@@ -201,10 +235,7 @@ fun SkyClockDial(
                     centre, radius, ring, sky, cloudiness,
                     bandPath(centre, radius, ring),
                 )
-                drawClouds(
-                    centre, radius, ring, cloudiness, cloudPainter,
-                    sky.sunriseMinute, sky.daylightMinutes,
-                )
+                drawClouds(centre, radius, ring, cloudAt, cloudPainter)
                 // Laid down before anything that sits inside the sky
                 // ring, or it paints over them.
                 drawCircle(color = faceColor, radius = radius - ring / 2f, center = centre)
@@ -435,23 +466,20 @@ private fun conditionIcon(w: SkyClock.Weather): Pair<ImageVector, String>? = whe
  * one lands away from those already there, which keeps four clouds
  * looking scattered rather than bunched.
  */
-/** Sizes that differ a lot, not a little: these are meant to read as
- *  separate masses of cloud, not as one shape repeated. Its length is
- *  also the most cloud the ring will ever carry. */
-internal val CLOUD_SCALES = floatArrayOf(1f, 1.34f, 0.86f, 1.16f)
+/** The most cloud the ring will carry at once. */
+internal const val CLOUD_MAX = 4
 
 /** How far off the band's centreline each one sits, as a fraction of
  *  the band's width. Some crop against the outer edge and some against
- *  the inner, which is what stops four identical crescents. */
+ *  the inner, which is what stops identical crescents. */
 internal val CLOUD_OFFSETS = floatArrayOf(-0.22f, 0.18f, -0.08f, 0.26f)
 
-/** Nudges off an even spread. Even spacing was what made the last
- *  version read as decoration rather than weather. */
-internal val CLOUD_JITTER = floatArrayOf(-0.06f, 0.05f, -0.03f, 0.07f)
+/** Below this there is nothing anybody would call a cloud. */
+internal const val CLOUD_THRESHOLD = 0.25f
 
-/** Roughly what one cloud takes up, so a short winter day does not get
- *  the same four a midsummer one does. */
-internal const val CLOUD_ROOM_DEG = 60f
+/** Two clouds nearer than this read as one smear. Also what keeps four
+ *  of them from bunching into the one cloudy afternoon. */
+internal const val CLOUD_MIN_GAP_MINUTES = 150
 
 /**
  * How much of its own square the cloud glyph actually fills, top to
@@ -470,32 +498,77 @@ internal const val CLOUD_GLYPH_FILL = 0.67f
 internal fun cloudBox(ring: Float): Float = ring * 1.9f
 
 /**
- * How many clouds, given the cover and how much daylight there is to
- * put them in.
+ * Which minutes of the day get a cloud, and how much cloud each one
+ * stands for.
  *
- * Bounded by the day's length because they only go in the lit part of
- * the ring: four clouds crammed into a December afternoon would be one
- * continuous smear, and a polar night has nowhere to put any.
+ * Taken from the hour-by-hour cover rather than spread evenly across
+ * the day, so the ring says when it is cloudy rather than merely that
+ * it is. Daylight only — pale shapes on the night band read as smudges
+ * — cloudiest hours first, and thinned so two never sit on top of each
+ * other.
+ *
+ * An empty [hourlyCloud] falls back to the current reading laid over
+ * every hour, which gives the same even scatter as before rather than
+ * an empty ring.
  */
-internal fun cloudCount(cover: Float, dayDegrees: Float): Int {
-    if (cover <= 0.05f) return 0
-    val room = (dayDegrees / CLOUD_ROOM_DEG).toInt()
-    if (room < 1) return 0
-    return (cover * CLOUD_SCALES.size).roundToInt().coerceIn(1, minOf(room, CLOUD_SCALES.size))
+internal fun cloudMinutes(
+    hourlyCloud: List<Float>,
+    currentCover: Float,
+    sunriseMinute: Int,
+    dayMinutes: Int,
+): List<Pair<Int, Float>> {
+    if (dayMinutes < CLOUD_MIN_GAP_MINUTES) return emptyList()
+    val byHour = if (hourlyCloud.size == 24) hourlyCloud else List(24) { currentCover }
+
+    val lit = (0 until 24).mapNotNull { h ->
+        val minute = h * 60
+        val since = ((minute - sunriseMinute) % 1440 + 1440) % 1440
+        // Kept off the very ends, where half a cloud would hang into a
+        // night that has no weather drawn in it at all.
+        if (since < 45 || since > dayMinutes - 45) null
+        else {
+            val cover = byHour[h]
+            if (cover < CLOUD_THRESHOLD) null else minute to cover
+        }
+    }
+    // Cloudiest first. The nudge breaks ties without favouring morning,
+    // which a plain sort would, and is stable because it comes out of
+    // the hour rather than out of a random number.
+    val ranked = lit.sortedByDescending { it.second + starNoise(it.first, 7) * 0.001f }
+
+    val taken = mutableListOf<Pair<Int, Float>>()
+    for (candidate in ranked) {
+        if (taken.size >= CLOUD_MAX) break
+        val clash = taken.any { (m, _) ->
+            val d = kotlin.math.abs(m - candidate.first)
+            minOf(d, 1440 - d) < CLOUD_MIN_GAP_MINUTES
+        }
+        if (!clash) taken += candidate
+    }
+    return taken.sortedBy { it.first }
 }
 
+/** A cloud's size, from how much cloud that hour holds. */
+internal fun cloudScale(cover: Float): Float = 0.82f + 0.52f * cover.coerceIn(0f, 1f)
+
 /**
- * Where one cloud sits along the daylight arc: 0 is sunrise and 1 is
- * sunset.
+ * How dark the sky is at a minute, from the hour-by-hour conditions.
  *
- * Spread across whatever room there is and then nudged off even, with
- * the ends left clear so a cloud does not hang past sunrise into a
- * night that, by the look of it, has no weather at all.
+ * Interpolated between neighbouring hours: a hundred and eighty
+ * segments over twenty-four hours is seven and a half to the hour, and
+ * stepping between them draws visible stairs around the ring.
  */
-internal fun cloudFraction(index: Int, count: Int): Float {
-    if (count <= 0) return 0.5f
-    val even = (index + 0.5f) / count
-    return (even + CLOUD_JITTER[index % CLOUD_JITTER.size]).coerceIn(0.12f, 0.88f)
+internal fun gloomAt(
+    minute: Int,
+    hourly: List<SkyClock.Weather>,
+    fallback: SkyClock.Weather,
+): Float {
+    if (hourly.size != 24) return fallback.gloom
+    val m = ((minute % 1440) + 1440) % 1440
+    val h = m / 60
+    val next = (h + 1) % 24
+    val t = (m % 60) / 60f
+    return hourly[h].gloom + (hourly[next].gloom - hourly[h].gloom) * t
 }
 
 /**
@@ -655,17 +728,10 @@ private fun DrawScope.drawClouds(
     centre: Offset,
     radius: Float,
     ring: Float,
-    cover: Float,
+    at: List<Pair<Int, Float>>,
     painter: VectorPainter,
-    sunriseMinute: Int,
-    dayMinutes: Int,
 ) {
-    // Daylight only. Nights are cloudy too, but a dark band with pale
-    // shapes on it reads as smudges rather than as weather, and the
-    // dial is better for leaving them off.
-    val dayDegrees = dayMinutes / SkyClock.MINUTES_IN_DAY.toFloat() * 360f
-    val count = cloudCount(cover, dayDegrees)
-    if (count == 0) return
+    if (at.isEmpty()) return
     val box = cloudBox(ring)
 
     // The clip is the shape. Each cloud is drawn far larger than the
@@ -676,18 +742,21 @@ private fun DrawScope.drawClouds(
     // Cloud seen from underneath is not opaque. The sky has to keep
     // reading through it, or the ring stops being a clock.
     val tint = ColorFilter.tint(Color.White)
-    val alpha = (0.15f + 0.22f * cover).coerceIn(0f, 1f)
+    fun alpha(cover: Float) = (0.15f + 0.22f * cover).coerceIn(0f, 1f)
 
     clipPath(band) {
-        for (i in 0 until count) {
-            val w = box * CLOUD_SCALES[i]
-            val minute = sunriseMinute + (cloudFraction(i, count) * dayMinutes).roundToInt()
+        at.forEachIndexed { i, (minute, cover) ->
+            val w = box * cloudScale(cover)
             // Off the centreline, so they crop against different edges.
             val p = pointOn(
-                SkyClock.angleOf(minute), centre, radius + ring * CLOUD_OFFSETS[i],
+                SkyClock.angleOf(minute), centre, radius + ring * CLOUD_OFFSETS[i % CLOUD_OFFSETS.size],
             )
             translate(p.x - w / 2f, p.y - w / 2f) {
-                with(painter) { draw(Size(w, w), alpha = alpha, colorFilter = tint) }
+                // Each carries its own hour's cover, so a thin morning
+                // and a solid afternoon do not come out the same weight.
+                with(painter) {
+                    draw(Size(w, w), alpha = alpha(cover), colorFilter = tint)
+                }
             }
         }
     }

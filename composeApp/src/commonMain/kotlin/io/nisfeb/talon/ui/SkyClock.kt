@@ -188,6 +188,17 @@ object SkyClock {
         val cloudCover: Float? = null,
         /** What the sky is doing, as far as the dial can show it. */
         val condition: Weather = Weather.CLEAR,
+        /**
+         * Cloud cover hour by hour, 0 to 1, indexed by the hour of the
+         * local day. Empty where only the current reading is known.
+         *
+         * What lets the ring say "cloudy from two until five" rather
+         * than "cloudy", which is the one thing a dial can tell you
+         * that a line of text cannot.
+         */
+        val hourlyCloud: List<Float> = emptyList(),
+        /** What the sky is doing hour by hour, indexed the same way. */
+        val hourlyCondition: List<Weather> = emptyList(),
         /** The place's own time zone, where the forecast named one.
          *  A dial set to somewhere else has to run on that somewhere
          *  else's clock or its day lands in the wrong half of the ring. */

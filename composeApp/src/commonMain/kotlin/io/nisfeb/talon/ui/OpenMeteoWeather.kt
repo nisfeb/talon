@@ -38,7 +38,8 @@ class OpenMeteoWeather(private val http: HttpClient) {
         val lon = round2(place.lon)
         val url = "$ENDPOINT?latitude=$lat&longitude=$lon" +
             "&current=temperature_2m,cloud_cover,weather_code" +
-            "&hourly=temperature_2m&forecast_days=1&timezone=auto"
+            "&hourly=temperature_2m,cloud_cover,weather_code" +
+            "&forecast_days=1&timezone=auto"
         val resp = http.get(url)
         if (!resp.status.isSuccess()) error("HTTP ${resp.status.value}")
         parseForecast(resp.bodyAsText()) ?: error("no weather in the answer")
@@ -78,6 +79,34 @@ internal fun parseForecast(body: String): SkyClock.Sky? {
     val high = pairs.maxByOrNull { it.second }
     val low = pairs.minByOrNull { it.second }
 
+    // Laid out by hour of the day rather than by position in the
+    // answer, so a run that starts late or skips an hour still puts
+    // each reading on the right part of the ring.
+    val byHour = MutableList(24) { -1f }
+    val condByHour = MutableList(24) { SkyClock.Weather.CLEAR }
+    var sawCloud = false
+    var sawCode = false
+    times.forEachIndexed { i, t ->
+        val m = minuteOfDay(t) ?: return@forEachIndexed
+        val h = m / 60
+        if (h !in 0..23) return@forEachIndexed
+        f.hourly?.cloudCover?.getOrNull(i)?.let {
+            byHour[h] = (it / 100f).coerceIn(0f, 1f)
+            sawCloud = true
+        }
+        f.hourly?.weatherCode?.getOrNull(i)?.let {
+            condByHour[h] = SkyClock.weatherOf(it)
+            sawCode = true
+        }
+    }
+    // A gap in the middle of the run is filled from the hour before it.
+    // Better a cloud that lingers an hour too long than a hole in the
+    // ring that reads as a sudden clearing.
+    var carry = 0f
+    for (h in 0 until 24) {
+        if (byHour[h] < 0f) byHour[h] = carry else carry = byHour[h]
+    }
+
     return SkyClock.Sky(
         minuteOfDay = 0,
         currentC = current,
@@ -86,6 +115,8 @@ internal fun parseForecast(body: String): SkyClock.Sky? {
         lowC = low?.second,
         lowAtMinute = low?.first,
         cloudCover = f.current.cloudCover?.let { (it / 100f).coerceIn(0f, 1f) },
+        hourlyCloud = if (sawCloud) byHour.toList() else emptyList(),
+        hourlyCondition = if (sawCode) condByHour.toList() else emptyList(),
         condition = SkyClock.weatherOf(f.current.weatherCode),
         // The request asks for the place's own zone, and the answer
         // says which one that turned out to be. It is how a set of
@@ -124,4 +155,6 @@ private data class Current(
 private data class Hourly(
     val time: List<String> = emptyList(),
     @SerialName("temperature_2m") val temperature: List<Double?> = emptyList(),
+    @SerialName("cloud_cover") val cloudCover: List<Float?> = emptyList(),
+    @SerialName("weather_code") val weatherCode: List<Int?> = emptyList(),
 )
