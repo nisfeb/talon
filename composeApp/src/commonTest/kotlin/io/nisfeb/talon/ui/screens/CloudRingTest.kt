@@ -1,58 +1,78 @@
 package io.nisfeb.talon.ui.screens
 
+import kotlin.math.PI
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 /**
- * The clouds shipped twice hanging off both edges of the ring, so the
- * geometry gets a check rather than another look.
+ * Cloud on the dial has been wrong in both directions — hanging off
+ * the ring, then shrunk into a row of equidistant emoji — so the shape
+ * of it is checked by arithmetic rather than by another look.
  */
 class CloudRingTest {
 
     private val ring = 51f // a 320dp dial's band
+    private val radius = 134f // and the circle that band sits on
 
     @Test
-    fun `every cloud stays inside the band, at every slot and every size`() {
-        val box = cloudBox(ring)
-        val limit = ring / 2f
+    fun `every cloud overruns the band and is cut off by it`() {
+        // The cropping is the effect. A cloud that fits inside the band
+        // is the emoji-in-a-slot version.
         for (i in CLOUD_SLOTS.indices) {
-            val w = box * CLOUD_SCALES[i]
+            val w = cloudBox(ring) * CLOUD_SCALES[i]
             val reach = cloudReach(w, CLOUD_SLOTS[i])
             assertTrue(
-                reach <= limit,
-                "slot ${CLOUD_SLOTS[i]} at scale ${CLOUD_SCALES[i]}: reaches $reach, band allows $limit",
+                reach > ring / 2f,
+                "slot ${CLOUD_SLOTS[i]} reaches $reach, band half is ${ring / 2f} — it would not crop",
             )
         }
     }
 
     @Test
-    fun `a cloud sits in the band rather than wedged into it`() {
-        // Touching both edges is arithmetically inside and looks like a
-        // cloud jammed into a slot. This is the difference between the
-        // version that shipped and one worth looking at.
-        val w = cloudBox(ring) * (CLOUD_SCALES.maxOrNull() ?: 1f)
-        val worst = (0 until 360).maxOf { cloudReach(w, it.toFloat()) }
-        assertTrue(worst <= ring * 0.42f, "reaches $worst of a ${ring / 2f} half-band")
+    fun `the ring holds only a few of them`() {
+        assertTrue(CLOUD_SLOTS.size <= 4, "${CLOUD_SLOTS.size} is a crowd")
+        assertEquals(CLOUD_SLOTS.size, cloudCount(1f))
     }
 
     @Test
-    fun `the worst angle is still inside the band`() {
-        // Not just the slots that happen to be in use: a slot moved
-        // later must not quietly break this.
-        val w = cloudBox(ring) * (CLOUD_SCALES.maxOrNull() ?: 1f)
-        for (a in 0 until 360) {
-            assertTrue(cloudReach(w, a.toFloat()) <= ring / 2f, "angle $a reaches ${cloudReach(w, a.toFloat())}")
+    fun `they are not equally spaced`() {
+        // Even spacing is what made them read as decoration.
+        val sorted = CLOUD_SLOTS.sorted()
+        val gaps = sorted.indices.map { i ->
+            ((sorted[(i + 1) % sorted.size] - sorted[i]) + 360f) % 360f
         }
+        assertTrue(
+            (gaps.max() - gaps.min()) > 15f,
+            "gaps ${gaps} are near enough equal to look deliberate",
+        )
     }
 
     @Test
-    fun `the sideways case is the tight one`() {
-        // Drawn upright, so at three o'clock the glyph's width runs
-        // radially and at twelve its height does. Width is the larger,
-        // which is what sizing has to respect.
-        val w = 40f
-        assertTrue(cloudReach(w, 90f) > cloudReach(w, 0f), "three o'clock is the binding case")
+    fun `sky still shows between them at full cover`() {
+        // Four clouds this size must not close the ring, or the dial
+        // stops telling the time.
+        val circumference = 2 * PI.toFloat() * radius
+        val covered = CLOUD_SLOTS.indices.sumOf { i ->
+            (cloudBox(ring) * CLOUD_SCALES[i] / circumference * 360f).toDouble()
+        }
+        assertTrue(covered < 300.0, "clouds would cover $covered degrees of the ring")
+    }
+
+    @Test
+    fun `they crop against different edges`() {
+        // All on the centreline gives four identical crescents.
+        assertTrue(CLOUD_OFFSETS.any { it < 0f }, "none hug the inner edge")
+        assertTrue(CLOUD_OFFSETS.any { it > 0f }, "none hug the outer edge")
+        // But none so far off that it leaves the band entirely.
+        for (o in CLOUD_OFFSETS) assertTrue(o in -0.5f..0.5f, "offset $o is off the band")
+    }
+
+    @Test
+    fun `the sizes differ enough to read as different clouds`() {
+        val hi = CLOUD_SCALES.max()
+        val lo = CLOUD_SCALES.min()
+        assertTrue(hi / lo > 1.3f, "scales $lo..$hi are one shape repeated")
     }
 
     @Test
@@ -60,24 +80,13 @@ class CloudRingTest {
         assertEquals(0, cloudCount(0f))
         assertEquals(0, cloudCount(0.04f))
         assertEquals(CLOUD_SLOTS.size, cloudCount(1f))
-        assertTrue(cloudCount(0.3f) in 1..3, "a partly cloudy sky is not a full ring")
-        // Never more slots than there are places to put them.
+        assertTrue(cloudCount(0.3f) in 1..2, "a partly cloudy sky is not a full ring")
         for (c in 0..20) assertTrue(cloudCount(c / 10f) <= CLOUD_SLOTS.size)
     }
 
     @Test
-    fun `there is a size for every slot`() {
+    fun `there is a size and an offset for every slot`() {
         assertEquals(CLOUD_SLOTS.size, CLOUD_SCALES.size)
-    }
-
-    @Test
-    fun `no two clouds sit on top of each other`() {
-        // A ring of seven that bunched into three would read as three.
-        val sorted = CLOUD_SLOTS.sorted()
-        for (i in sorted.indices) {
-            val next = sorted[(i + 1) % sorted.size]
-            val gap = ((next - sorted[i]) + 360f) % 360f
-            assertTrue(gap > 20f, "clouds at ${sorted[i]} and $next are ${gap}deg apart")
-        }
+        assertEquals(CLOUD_SLOTS.size, CLOUD_OFFSETS.size)
     }
 }

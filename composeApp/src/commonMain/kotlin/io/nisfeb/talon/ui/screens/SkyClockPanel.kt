@@ -419,45 +419,46 @@ private fun conditionIcon(w: SkyClock.Weather): Pair<ImageVector, String>? = whe
  * one lands away from those already there, which keeps four clouds
  * looking scattered rather than bunched.
  */
-internal val CLOUD_SLOTS = floatArrayOf(34f, 196f, 108f, 274f, 72f, 232f, 148f)
+internal val CLOUD_SLOTS = floatArrayOf(24f, 118f, 196f, 302f)
 
-/** A little variation in size, so a ring of them does not read as the
- *  same sticker pressed seven times. */
-internal val CLOUD_SCALES = floatArrayOf(1f, 0.84f, 1.08f, 0.9f, 1.02f, 0.8f, 0.95f)
+/** Sizes that differ a lot, not a little: these are meant to read as
+ *  separate masses of cloud, not as one shape repeated. */
+internal val CLOUD_SCALES = floatArrayOf(1f, 1.34f, 0.86f, 1.16f)
+
+/** How far off the band's centreline each one sits, as a fraction of
+ *  the band's width. Some crop against the outer edge and some against
+ *  the inner, which is what stops four identical crescents. */
+internal val CLOUD_OFFSETS = floatArrayOf(-0.22f, 0.18f, -0.08f, 0.26f)
 
 /**
  * How much of its own square the cloud glyph actually fills, top to
  * bottom. The Material cloud spans the full width of its 24-square but
- * only the middle two thirds of its height, and that gap is the
- * difference between a cloud sitting in the band and one hanging off
- * both edges of it.
+ * only the middle two thirds of its height.
  */
 internal const val CLOUD_GLYPH_FILL = 0.67f
 
 /**
  * The side of the square a cloud is drawn into.
  *
- * Bounded by the band's width rather than by how big a cloud would
- * look nice, because the glyph is drawn upright wherever it sits: its
- * width runs radially at three and nine o'clock and its height does at
- * twelve and six, so whichever is larger has to fit.
+ * Bigger than the band on purpose. Clouds sized to fit inside it came
+ * out as a row of equidistant emoji; clouds that overrun it and get
+ * cut off by its edges read as weather passing across the dial, which
+ * is what a cloudy sky actually looks like from underneath.
  */
-internal fun cloudBox(ring: Float): Float = ring * 0.62f
+internal fun cloudBox(ring: Float): Float = ring * 1.9f
 
 internal fun cloudCount(cover: Float): Int =
     if (cover <= 0.05f) 0 else (cover * CLOUD_SLOTS.size).roundToInt().coerceIn(1, CLOUD_SLOTS.size)
 
 /**
  * How far a cloud of side [w] at [angleDeg] reaches away from the ring
- * it sits on, in either direction. Must stay inside half the band's
- * width or the cloud crosses an edge.
+ * it sits on. Larger than half the band means it gets cut off there,
+ * which is now the point rather than the bug.
  */
 internal fun cloudReach(w: Float, angleDeg: Float): Float {
     val rad = (angleDeg - 90f) * PI.toFloat() / 180f
     val halfW = w / 2f
     val halfH = w * CLOUD_GLYPH_FILL / 2f
-    // The furthest corner of the drawn rectangle, measured along the
-    // radius through its centre.
     return halfW * abs(cos(rad)) + halfH * abs(sin(rad))
 }
 
@@ -472,9 +473,9 @@ private fun DrawScope.drawClouds(
     val count = cloudCount(cover)
     val box = cloudBox(ring)
 
-    // Clipped to the band. Belt and braces next to the sizing above,
-    // but it is the difference between a cloud that grazes the edge and
-    // one that smears across the face.
+    // The clip is the shape. Each cloud is drawn far larger than the
+    // band and cut off by both its edges, which is what gives a bank of
+    // cloud rather than a sticker sitting in a slot.
     val outer = Path().apply { addOval(Rect(centre, radius + ring / 2f)) }
     val inner = Path().apply { addOval(Rect(centre, radius - ring / 2f)) }
     val band = Path().apply { op(outer, inner, PathOperation.Difference) }
@@ -482,12 +483,13 @@ private fun DrawScope.drawClouds(
     // Cloud seen from underneath is not opaque. The sky has to keep
     // reading through it, or the ring stops being a clock.
     val tint = ColorFilter.tint(Color.White)
-    val alpha = (0.14f + 0.20f * cover).coerceIn(0f, 1f)
+    val alpha = (0.15f + 0.22f * cover).coerceIn(0f, 1f)
 
     clipPath(band) {
         for (i in 0 until count) {
             val w = box * CLOUD_SCALES[i]
-            val p = pointOn(CLOUD_SLOTS[i], centre, radius)
+            // Off the centreline, so they crop against different edges.
+            val p = pointOn(CLOUD_SLOTS[i], centre, radius + ring * CLOUD_OFFSETS[i])
             translate(p.x - w / 2f, p.y - w / 2f) {
                 with(painter) { draw(Size(w, w), alpha = alpha, colorFilter = tint) }
             }
