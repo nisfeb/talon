@@ -31,13 +31,16 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.PathOperation
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.text.TextMeasurer
 import androidx.compose.ui.text.TextStyle
@@ -51,6 +54,7 @@ import androidx.compose.ui.unit.dp
 import io.nisfeb.talon.ui.Moon
 import io.nisfeb.talon.ui.SkyClock
 import kotlin.math.PI
+import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.roundToInt
 import kotlin.math.sin
@@ -407,17 +411,55 @@ private fun conditionIcon(w: SkyClock.Weather): Pair<ImageVector, String>? = whe
 }
 
 /**
- * Where the puffs go, in the order they appear.
+ * Where the clouds go, in the order they appear.
  *
  * Fixed angles rather than anything random: the drawing is recomposed
  * every few seconds, and clouds that jumped to new places each time
- * would be the most distracting thing on the page. Ordered so that
- * each new one lands away from those already there, which keeps four
- * clouds looking scattered rather than bunched.
+ * would be the most distracting thing on the page. Ordered so each new
+ * one lands away from those already there, which keeps four clouds
+ * looking scattered rather than bunched.
  */
-private val CLOUD_SLOTS = floatArrayOf(
-    34f, 196f, 108f, 274f, 72f, 232f, 148f, 312f, 12f, 168f,
-)
+internal val CLOUD_SLOTS = floatArrayOf(34f, 196f, 108f, 274f, 72f, 232f, 148f)
+
+/** A little variation in size, so a ring of them does not read as the
+ *  same sticker pressed seven times. */
+internal val CLOUD_SCALES = floatArrayOf(1f, 0.84f, 1.08f, 0.9f, 1.02f, 0.8f, 0.95f)
+
+/**
+ * How much of its own square the cloud glyph actually fills, top to
+ * bottom. The Material cloud spans the full width of its 24-square but
+ * only the middle two thirds of its height, and that gap is the
+ * difference between a cloud sitting in the band and one hanging off
+ * both edges of it.
+ */
+internal const val CLOUD_GLYPH_FILL = 0.67f
+
+/**
+ * The side of the square a cloud is drawn into.
+ *
+ * Bounded by the band's width rather than by how big a cloud would
+ * look nice, because the glyph is drawn upright wherever it sits: its
+ * width runs radially at three and nine o'clock and its height does at
+ * twelve and six, so whichever is larger has to fit.
+ */
+internal fun cloudBox(ring: Float): Float = ring * 0.62f
+
+internal fun cloudCount(cover: Float): Int =
+    if (cover <= 0.05f) 0 else (cover * CLOUD_SLOTS.size).roundToInt().coerceIn(1, CLOUD_SLOTS.size)
+
+/**
+ * How far a cloud of side [w] at [angleDeg] reaches away from the ring
+ * it sits on, in either direction. Must stay inside half the band's
+ * width or the cloud crosses an edge.
+ */
+internal fun cloudReach(w: Float, angleDeg: Float): Float {
+    val rad = (angleDeg - 90f) * PI.toFloat() / 180f
+    val halfW = w / 2f
+    val halfH = w * CLOUD_GLYPH_FILL / 2f
+    // The furthest corner of the drawn rectangle, measured along the
+    // radius through its centre.
+    return halfW * abs(cos(rad)) + halfH * abs(sin(rad))
+}
 
 private fun DrawScope.drawClouds(
     centre: Offset,
@@ -427,22 +469,28 @@ private fun DrawScope.drawClouds(
     painter: VectorPainter,
 ) {
     if (cover <= 0.05f) return
-    val count = (cover * CLOUD_SLOTS.size).roundToInt().coerceIn(1, CLOUD_SLOTS.size)
-    // The glyph sits inside its own 24-square with room above and
-    // below, so the box is drawn wider than the band to put the cloud
-    // itself at about the band's height.
-    val box = ring * 1.3f
-    // Thin enough that the band still reads through them, which is
-    // what cloud actually looks like from underneath.
+    val count = cloudCount(cover)
+    val box = cloudBox(ring)
+
+    // Clipped to the band. Belt and braces next to the sizing above,
+    // but it is the difference between a cloud that grazes the edge and
+    // one that smears across the face.
+    val outer = Path().apply { addOval(Rect(centre, radius + ring / 2f)) }
+    val inner = Path().apply { addOval(Rect(centre, radius - ring / 2f)) }
+    val band = Path().apply { op(outer, inner, PathOperation.Difference) }
+
+    // Cloud seen from underneath is not opaque. The sky has to keep
+    // reading through it, or the ring stops being a clock.
     val tint = ColorFilter.tint(Color.White)
-    val alpha = (0.20f + 0.30f * cover).coerceIn(0f, 1f)
-    // Upright wherever they sit, like the H and L: a cloud rotated to
-    // the ring reads as a decoration going round a dial rather than as
-    // weather.
-    for (i in 0 until count) {
-        val p = pointOn(CLOUD_SLOTS[i], centre, radius)
-        translate(p.x - box / 2f, p.y - box / 2f) {
-            with(painter) { draw(Size(box, box), alpha = alpha, colorFilter = tint) }
+    val alpha = (0.14f + 0.20f * cover).coerceIn(0f, 1f)
+
+    clipPath(band) {
+        for (i in 0 until count) {
+            val w = box * CLOUD_SCALES[i]
+            val p = pointOn(CLOUD_SLOTS[i], centre, radius)
+            translate(p.x - w / 2f, p.y - w / 2f) {
+                with(painter) { draw(Size(w, w), alpha = alpha, colorFilter = tint) }
+            }
         }
     }
 }
