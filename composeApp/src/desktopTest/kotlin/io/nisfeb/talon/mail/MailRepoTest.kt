@@ -64,21 +64,23 @@ class MailRepoTest {
     @Test
     fun `a good read fills the page and clears any error`() = withRepo({ 200 to emptyPage }) { r ->
         r.attach("https://ship.example")
+        // attach() starts the poller, which reads once and then sleeps
+        // past the end of the test. Let that read finish BEFORE driving
+        // one by hand, or the two race over the loading flag and the
+        // assertion below reads whichever gap it happens to land in.
+        settle(r)
         r.refresh()
         assertEquals(MailAvailability.PRESENT, r.availability.value)
         assertEquals(0, r.page.value?.total)
         assertNull(r.error.value)
-        // attach() starts the poller, whose first read can still be in
-        // flight behind the lock; the flag is only settled once it is.
-        settle(r)
-        assertEquals(false, r.loading.value)
+        assertEquals(false, r.loading.value, "a finished read leaves nothing in flight")
     }
 
-    /** Wait for any in-flight read to finish. */
+    /** Wait for the poller's opening read to finish. */
     private suspend fun settle(r: MailRepo) {
-        repeat(100) {
-            if (!r.loading.value) return
+        repeat(200) {
             kotlinx.coroutines.delay(20)
+            if (!r.loading.value && r.page.value != null) return
         }
     }
 

@@ -61,6 +61,10 @@ class MailRepo(
 ) {
     private var api: AuspexApi? = null
     private var shipUrl: String? = null
+
+    /** Our own @p, learned from the nexus on the first good read. It is
+     *  what a published note's address is built from. */
+    private var ourShip: String? = null
     private var poller: Job? = null
     private var foreground = true
     private val gate = Mutex()
@@ -193,6 +197,9 @@ class MailRepo(
             _page.value = p
             _error.value = null
             _availability.value = MailAvailability.PRESENT
+            if (ourShip == null) {
+                ourShip = runCatching { a.whoami() }.getOrNull()
+            }
             announce(p)
         } catch (e: AuspexError) {
             onFailure(e)
@@ -290,6 +297,31 @@ class MailRepo(
         } finally {
             _loading.value = false
         }
+    }
+
+    // ---- filing to Lattice ---------------------------------------------
+
+    /**
+     * Publish a message or a whole thread to this ship's Lattice as a
+     * gemtext note, and answer its urb:// address.
+     *
+     * Null when it did not land, with the reason in [error]. Lattice
+     * lives in the same desk as auspex, so a ship with mail has it; a
+     * failure here is a real failure rather than a missing app.
+     *
+     * The slug is derived from the title and a seed, so publishing the
+     * same thread twice edits one note rather than piling up copies.
+     */
+    suspend fun publishToLattice(title: String, seed: String, gemtext: String): String? {
+        val url = shipUrl ?: return null
+        val ship = ourShip ?: return null
+        val slug = io.nisfeb.talon.urbit.LatticePublish.slug(title, seed)
+        return runCatching {
+            io.nisfeb.talon.urbit.LatticePublish.publish(http, url, ship, slug, gemtext)
+        }.onFailure {
+            Log.w(TAG, "lattice publish failed", it)
+            _error.value = "Could not file to Lattice: ${it.message}"
+        }.getOrNull()
     }
 
     // ---- one thread ----------------------------------------------------

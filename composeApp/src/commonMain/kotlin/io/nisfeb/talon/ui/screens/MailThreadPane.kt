@@ -94,6 +94,7 @@ fun MailThreadPane(
     var loading by remember(threadId) { mutableStateOf(true) }
     var drawn by remember(threadId) { mutableStateOf(false) }
     // Folded subtrees, and messages read down to their header line.
+    var filed by remember(threadId) { mutableStateOf<String?>(null) }
     val folded = remember(threadId) { mutableStateListOf<String>() }
     val shut = remember(threadId) { mutableStateListOf<String>() }
     var selected by remember(threadId) { mutableStateOf<String?>(null) }
@@ -161,8 +162,36 @@ fun MailThreadPane(
                     onGone()
                 }
             },
+            onFile = {
+                val t = thread ?: return@MailThreadHeader
+                scope.launch {
+                    filed = "Filing…"
+                    val url = repo.publishToLattice(
+                        title = t.messages.firstOrNull()?.subject.orEmpty()
+                            .ifBlank { "Mail thread" },
+                        seed = io.nisfeb.talon.mail.MailGemtext.seedFor(threadId, null),
+                        gemtext = io.nisfeb.talon.mail.MailGemtext.thread(
+                            t,
+                            nameFor = { contacts.displayName(it) },
+                            when_ = { shortRelativeTime(it, nowMs()) },
+                        ),
+                    )
+                    filed = url?.let { "Filed to Lattice at $it" }
+                        ?: repo.error.value ?: "Could not file it."
+                }
+            },
         )
         HorizontalDivider()
+        filed?.let {
+            Text(
+                it,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 6.dp)
+                    .clickable { filed = null },
+            )
+        }
 
         when {
             loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -239,6 +268,23 @@ fun MailThreadPane(
                                     onShut = {},
                                     nameFor = { contacts.displayName(it) },
                                     onSelect = {},
+                                    onFile = {
+                                        scope.launch {
+                                            filed = "Filing…"
+                                            val url = repo.publishToLattice(
+                                                title = shown.subject.ifBlank { "Mail" },
+                                                seed = io.nisfeb.talon.mail.MailGemtext
+                                                    .seedFor(threadId, shown.id),
+                                                gemtext = io.nisfeb.talon.mail.MailGemtext.message(
+                                                    shown,
+                                                    nameFor = { contacts.displayName(it) },
+                                                    when_ = { shortRelativeTime(it, nowMs()) },
+                                                ),
+                                            )
+                                            filed = url?.let { "Filed to Lattice at $it" }
+                                                ?: repo.error.value ?: "Could not file it."
+                                        }
+                                    },
                                     repo = repo,
                                 )
                             }
@@ -268,6 +314,24 @@ fun MailThreadPane(
                             selectable = node.message.verdict != Verdict.FORGED,
                             nameFor = { contacts.displayName(it) },
                             onSelect = { selected = node.message.id },
+                            onFile = {
+                                scope.launch {
+                                    filed = "Filing…"
+                                    val m = node.message
+                                    val url = repo.publishToLattice(
+                                        title = m.subject.ifBlank { "Mail" },
+                                        seed = io.nisfeb.talon.mail.MailGemtext
+                                            .seedFor(threadId, m.id),
+                                        gemtext = io.nisfeb.talon.mail.MailGemtext.message(
+                                            m,
+                                            nameFor = { contacts.displayName(it) },
+                                            when_ = { shortRelativeTime(it, nowMs()) },
+                                        ),
+                                    )
+                                    filed = url?.let { "Filed to Lattice at $it" }
+                                        ?: repo.error.value ?: "Could not file it."
+                                }
+                            },
                             repo = repo,
                         )
                         HorizontalDivider()
@@ -292,6 +356,7 @@ private fun ThreadActions(
     onArchive: () -> Unit,
     onMarkUnread: () -> Unit,
     onDelete: () -> Unit,
+    onFile: () -> Unit,
 ) {
     var open by remember { mutableStateOf(false) }
     var confirming by remember { mutableStateOf(false) }
@@ -308,6 +373,10 @@ private fun ThreadActions(
             DropdownMenuItem(
                 text = { Text("Mark unread") },
                 onClick = { open = false; onMarkUnread() },
+            )
+            DropdownMenuItem(
+                text = { Text("File to Lattice") },
+                onClick = { open = false; onFile() },
             )
             DropdownMenuItem(
                 text = { Text("Delete") },
@@ -365,6 +434,7 @@ private fun MailThreadHeader(
     onArchive: () -> Unit,
     onMarkUnread: () -> Unit,
     onDelete: () -> Unit,
+    onFile: () -> Unit,
     showTree: Boolean,
     drawn: Boolean,
     onMode: (Boolean) -> Unit,
@@ -387,6 +457,7 @@ private fun MailThreadHeader(
                 onArchive = onArchive,
                 onMarkUnread = onMarkUnread,
                 onDelete = onDelete,
+                onFile = onFile,
             )
             // Offered only where there is a tree to see. A straight
             // thread has nothing the two modes would show differently.
@@ -470,6 +541,7 @@ private fun MailMessageCard(
     selectable: Boolean,
     nameFor: (String) -> String,
     onSelect: () -> Unit,
+    onFile: () -> Unit,
     repo: MailRepo,
 ) {
     val m = node.message
@@ -523,6 +595,7 @@ private fun MailMessageCard(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
+            TextButton(onClick = onFile) { Text("File", style = MaterialTheme.typography.labelSmall) }
         }
         if (hidden > 0) {
             Text(
