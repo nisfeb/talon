@@ -188,6 +188,10 @@ fun SkyClockDial(
                 // who already knows that is what it means; puffs say it
                 // to everybody, and they say it at night too, where a
                 // drained night band looks the same as a clear one.
+                drawStars(
+                    centre, radius, ring, sky, cloudiness,
+                    bandPath(centre, radius, ring),
+                )
                 drawClouds(
                     centre, radius, ring, cloudiness, cloudPainter,
                     sky.sunriseMinute, sky.daylightMinutes,
@@ -497,6 +501,102 @@ internal fun cloudReach(w: Float, angleDeg: Float): Float {
     return halfW * abs(cos(rad)) + halfH * abs(sin(rad))
 }
 
+/** The ring itself, as a path, for cutting things off at its edges. */
+private fun bandPath(centre: Offset, radius: Float, ring: Float): Path {
+    val outer = Path().apply { addOval(Rect(centre, radius + ring / 2f)) }
+    val inner = Path().apply { addOval(Rect(centre, radius - ring / 2f)) }
+    return Path().apply { op(outer, inner, PathOperation.Difference) }
+}
+
+// ---- stars -------------------------------------------------------------
+
+internal const val STAR_COUNT = 34
+
+/** How far off the band's centreline a star may sit, as a fraction of
+ *  the band's width. Kept clear of both edges so none is a half dot
+ *  clipped against a rim. */
+internal const val STAR_SPREAD = 0.68f
+
+/** The brightest a star gets, before depth of night and cloud take
+ *  their cut. Subtle is the whole point: these are meant to be noticed
+ *  on the second look, not the first. */
+internal const val STAR_ALPHA = 0.62f
+
+/**
+ * A stable scatter.
+ *
+ * The canvas recomposes every few seconds, so the positions have to
+ * come out of the index rather than out of a random number: stars that
+ * moved between frames would be a fault, not a sky. Different salts
+ * give independent-looking values for the same star.
+ */
+internal fun starNoise(i: Int, salt: Int): Float {
+    var h = i * 374_761_393 + salt * 668_265_263
+    h = (h xor (h shr 13)) * 1_274_126_177
+    return ((h xor (h shr 16)) and 0x7fff_ffff) / 0x7fff_ffff.toFloat()
+}
+
+/**
+ * How brightly one star shows: not at all while the sky still holds
+ * any light, fully once the night is deep, and dimmed by whatever
+ * cloud is in the way. [depth] is the night's own depth, 0 at the
+ * horizon and 1 in the small hours.
+ */
+internal fun starBrightness(depth: Float, cover: Float, noise: Float): Float {
+    val clear = (1f - cover * 0.85f).coerceIn(0f, 1f)
+    return STAR_ALPHA * depth.coerceIn(0f, 1f) * clear * (0.4f + 0.6f * noise)
+}
+
+/** How far off the band's centreline a star sits. */
+internal fun starOffset(noise: Float, ring: Float): Float =
+    (noise - 0.5f) * STAR_SPREAD * ring
+
+/** A star's own size, small and not quite uniform. */
+internal fun starRadius(noise: Float, ring: Float): Float =
+    ring * (0.022f + 0.026f * noise)
+
+private fun DrawScope.drawStars(
+    centre: Offset,
+    radius: Float,
+    ring: Float,
+    sky: SkyClock.Sky,
+    cover: Float,
+    band: Path,
+) {
+    val nightMinutes = SkyClock.MINUTES_IN_DAY - sky.daylightMinutes
+    // Nothing to put them in through a polar summer.
+    if (nightMinutes < 60) return
+    if (starBrightness(1f, cover, 1f) < 0.03f) return
+
+    clipPath(band) {
+        for (i in 0 until STAR_COUNT) {
+            val minute = sky.sunsetMinute + (starNoise(i, 1) * nightMinutes).roundToInt()
+            val mix = SkyClock.skyMix(
+                minuteOfDay = minute,
+                sunriseMinute = sky.sunriseMinute,
+                sunsetMinute = sky.sunsetMinute,
+                twilightMinutes = sky.twilight,
+                polar = sky.polar,
+                polarDay = sky.polarDay,
+            )
+            // Stars come out as the sky goes, so they fade in through
+            // dusk rather than switching on at sunset.
+            if (mix >= 0f) continue
+            val a = starBrightness(-mix, cover, starNoise(i, 3))
+            if (a < 0.02f) continue
+            drawCircle(
+                color = Color.White.copy(alpha = a),
+                radius = starRadius(starNoise(i, 4), ring),
+                center = pointOn(
+                    SkyClock.angleOf(minute),
+                    centre,
+                    radius + starOffset(starNoise(i, 2), ring),
+                ),
+            )
+        }
+    }
+}
+
 private fun DrawScope.drawClouds(
     centre: Offset,
     radius: Float,
@@ -517,9 +617,7 @@ private fun DrawScope.drawClouds(
     // The clip is the shape. Each cloud is drawn far larger than the
     // band and cut off by both its edges, which is what gives a bank of
     // cloud rather than a sticker sitting in a slot.
-    val outer = Path().apply { addOval(Rect(centre, radius + ring / 2f)) }
-    val inner = Path().apply { addOval(Rect(centre, radius - ring / 2f)) }
-    val band = Path().apply { op(outer, inner, PathOperation.Difference) }
+    val band = bandPath(centre, radius, ring)
 
     // Cloud seen from underneath is not opaque. The sky has to keep
     // reading through it, or the ring stops being a clock.
