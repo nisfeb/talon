@@ -2,7 +2,9 @@ package io.nisfeb.talon.ui.screens
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -92,23 +94,22 @@ import io.nisfeb.talon.ui.shortRelativeTime
 import io.nisfeb.talon.urbit.StoryCache
 import io.nisfeb.talon.util.nowMs
 
-/** How many rows each quick-access list shows. Short on purpose: a
- *  home page that lists everything is the list it links to. */
-private const val QUICK = 5
-
 /**
  * The home page.
  *
- * Four panels, each a door rather than a destination: the conversations
- * that moved most recently, the newest mail, the time and weather, and
- * today's calendar. None of them tries to be the surface it points at —
- * five rows and a way through is the whole job.
+ * Widgets, each a door rather than a destination: the chats that moved
+ * most recently, the newest mail, the time and weather, today's
+ * calendar, who is up to what. None tries to be the surface it points
+ * at — a handful of rows and a way through is the whole job.
  *
- * Two of the four are deliberately unfinished. The clock and weather
- * panel is waiting on a design, and the calendar is waiting on a
- * feature that does not exist yet. They are drawn as what they are, so
- * the page reads as a page rather than as three quarters of one, and
- * so the seam each one drops into is obvious.
+ * Which of them appear, and how many rows each carries, is set in
+ * Settings under Home. Where they sit and how big they are is set
+ * here: a long press on any of them starts arranging, after which
+ * they can be dragged about and pulled by their corners.
+ *
+ * The calendar is still a placeholder. It is drawn as what it is, so
+ * the page reads as a page rather than as most of one, and so the seam
+ * it drops into is obvious.
  */
 @Composable
 fun HomeScreen(
@@ -201,8 +202,12 @@ fun HomeScreen(
                         .copy(fontWeight = FontWeight.SemiBold),
                     modifier = Modifier.weight(1f),
                 )
-                TextButton(onClick = { editing = !editing }) {
-                    Text(if (editing) "Done" else "Arrange")
+                // No Arrange button. A long press on any widget starts
+                // it, which is the gesture people already try on a
+                // page of tiles; a permanent button for a mode nobody
+                // is in most of the time is a worse trade.
+                if (editing) {
+                    TextButton(onClick = { editing = false }) { Text("Done") }
                 }
             }
 
@@ -256,6 +261,18 @@ fun HomeScreen(
                                     }
                                 }
                                 .onGloballyPositioned { bounds[widget.kind] = it.boundsInWindow() }
+                                // Catches the panel's own background,
+                                // its heading and the dial. The rows
+                                // inside carry their own long press,
+                                // because a plain clickable fires its
+                                // click on release however long it was
+                                // held, which would arrange the page
+                                // and then navigate away from it.
+                                .then(
+                                    if (editing) Modifier else Modifier.pointerInput(Unit) {
+                                        detectTapGestures(onLongPress = { editing = true })
+                                    }
+                                )
                                 .then(
                                     if (!editing) Modifier else Modifier.border(
                                         width = 1.dp,
@@ -289,6 +306,7 @@ fun HomeScreen(
                                 onOpenMail = onOpenMail,
                                 onOpenContact = onOpenContact,
                                 onOpenStatuses = onOpenStatuses,
+                                onLongPress = { editing = true },
                             )
 
                             if (editing) {
@@ -525,7 +543,7 @@ private fun Grip(
 /** What each widget is called, wherever one needs naming. */
 fun title(kind: HomeWidgetKind): String = when (kind) {
     HomeWidgetKind.CLOCK -> "Clock and weather"
-    HomeWidgetKind.MESSAGES -> "Recent"
+    HomeWidgetKind.MESSAGES -> "Chat"
     HomeWidgetKind.MAIL -> "Mail"
     HomeWidgetKind.CALENDAR -> "Today"
     HomeWidgetKind.STATUS -> "Statuses"
@@ -553,6 +571,7 @@ private fun WidgetBody(
     onOpenMail: () -> Unit,
     onOpenContact: (String) -> Unit,
     onOpenStatuses: () -> Unit,
+    onLongPress: () -> Unit,
 ) {
     when (widget.kind) {
         HomeWidgetKind.CLOCK -> ClockWeatherPanel(
@@ -561,12 +580,14 @@ private fun WidgetBody(
         )
         HomeWidgetKind.MESSAGES -> ChatsPanel(
             recent.take(widget.count), unreadBy, contacts, ourShip,
-            onOpenConversation, onOpenChats,
+            onOpenConversation, onOpenChats, onLongPress,
         )
-        HomeWidgetKind.MAIL -> MailPanel(mail, contacts, widget.count, onOpenMailThread, onOpenMail)
+        HomeWidgetKind.MAIL -> MailPanel(
+            mail, contacts, widget.count, onOpenMailThread, onOpenMail, onLongPress,
+        )
         HomeWidgetKind.CALENDAR -> CalendarPanel(widget.calendarRange)
         HomeWidgetKind.STATUS -> StatusPanel(
-            statuses, contacts, ourShip, widget, onOpenContact, onOpenStatuses,
+            statuses, contacts, ourShip, widget, onOpenContact, onOpenStatuses, onLongPress,
         )
     }
 }
@@ -623,6 +644,7 @@ private fun Panel(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun QuickRow(
     title: String,
@@ -630,11 +652,16 @@ private fun QuickRow(
     at: Long,
     strong: Boolean,
     onClick: () -> Unit,
+    onLongPress: () -> Unit,
 ) {
     Column(
         Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick)
+            // Combined rather than a long-press detector over the top:
+            // a plain clickable fires its click on release no matter
+            // how long it was held, so a long press on a row would
+            // arrange the page and then walk off it.
+            .combinedClickable(onClick = onClick, onLongClick = onLongPress)
             .padding(horizontal = 14.dp, vertical = 6.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -685,8 +712,9 @@ private fun ChatsPanel(
     ourShip: String,
     onOpen: (String) -> Unit,
     onAll: () -> Unit,
+    onLongPress: () -> Unit,
 ) {
-    Panel("Recent", Icons.AutoMirrored.Filled.Chat, "All chats" to onAll) {
+    Panel(title(HomeWidgetKind.MESSAGES), Icons.AutoMirrored.Filled.Chat, "All chats" to onAll) {
         if (recent.isEmpty()) {
             Empty("Nothing yet.")
         } else {
@@ -698,6 +726,7 @@ private fun ChatsPanel(
                     at = m.sentMs,
                     strong = unread,
                     onClick = { onOpen(m.whom) },
+                    onLongPress = onLongPress,
                 )
             }
         }
@@ -721,6 +750,7 @@ private fun MailPanel(
     count: Int,
     onOpen: (String) -> Unit,
     onAll: () -> Unit,
+    onLongPress: () -> Unit,
 ) {
     // Null where the host wires no mailbox at all; PRESENT is the ship
     // actually having the app. Anything else and the panel says so
@@ -746,6 +776,7 @@ private fun MailPanel(
                     at = row.last,
                     strong = row.unread,
                     onClick = { onOpen(row.id) },
+                    onLongPress = onLongPress,
                 )
             }
         }
@@ -961,6 +992,7 @@ private fun StatusPanel(
     widget: HomeWidget,
     onOpenContact: (String) -> Unit,
     onAll: () -> Unit,
+    onLongPress: () -> Unit,
 ) {
     val rows = remember(statuses, widget.pinned, widget.count, ourShip) {
         statusRows(statuses, widget.pinned, widget.count, ourShip)
@@ -976,6 +1008,7 @@ private fun StatusPanel(
                     at = contact.statusUpdatedMs ?: 0L,
                     strong = pinned,
                     onClick = { onOpenContact(contact.ship) },
+                    onLongPress = onLongPress,
                 )
             }
         }
