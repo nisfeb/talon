@@ -109,7 +109,8 @@ class MailRepo(
     val folder: StateFlow<MailFolder> = _folder.asStateFlow()
 
     fun selectFolder(f: MailFolder) {
-        if (_folder.value == f) return
+        if (_folder.value == f && _query.value.isEmpty()) return
+        _query.value = ""
         _folder.value = f
         when (f) {
             is MailFolder.View -> {
@@ -179,7 +180,16 @@ class MailRepo(
         val a = api ?: return@withLock
         _loading.value = true
         try {
-            val p = a.inbox(view = _view.value, label = _label.value)
+            // Re-read everything already on screen, not just the first
+            // page: a refresh that silently threw away what somebody had
+            // paged into would look like mail disappearing.
+            val want = maxOf(_page.value?.threads?.size ?: 0, AuspexApi.DEFAULT_PAGE)
+            val p = a.inbox(
+                view = _view.value,
+                label = _label.value,
+                query = _query.value.takeIf { it.isNotEmpty() },
+                limit = want.coerceAtMost(MAX_PAGE),
+            )
             _page.value = p
             _error.value = null
             _availability.value = MailAvailability.PRESENT
@@ -200,7 +210,7 @@ class MailRepo(
      * session only seeds the baseline.
      */
     private fun announce(p: InboxPage) {
-        if (_view.value != MailView.INBOX) return
+        if (_view.value != MailView.INBOX || _query.value.isNotEmpty()) return
         val before = seenUnread
         if (before == null) {
             seenUnread = seedMailBaseline(p.threads)
@@ -245,6 +255,43 @@ class MailRepo(
         }
     }
 
+    /** True while there is more of this view than we have asked for. */
+    val hasMore: StateFlow<Boolean> = MutableStateFlow(false).also { out ->
+        scope.launch {
+            _page.collect { p ->
+                out.value = p != null && p.threads.size < p.total &&
+                    p.threads.size < MAX_PAGE
+            }
+        }
+    }
+
+    /**
+     * Ask for more of the same view.
+     *
+     * A longer first page rather than a second one appended: the ship
+     * caps a listing at two hundred anyway, and re-reading is how every
+     * other refresh works, so one shape covers both.
+     */
+    suspend fun loadMore() = gate.withLock {
+        val a = api ?: return@withLock
+        val have = _page.value?.threads?.size ?: return@withLock
+        if (have >= MAX_PAGE) return@withLock
+        _loading.value = true
+        try {
+            _page.value = a.inbox(
+                view = _view.value,
+                label = _label.value,
+                query = _query.value.takeIf { it.isNotEmpty() },
+                limit = (have + AuspexApi.DEFAULT_PAGE).coerceAtMost(MAX_PAGE),
+            )
+            _error.value = null
+        } catch (e: AuspexError) {
+            onFailure(e)
+        } finally {
+            _loading.value = false
+        }
+    }
+
     // ---- one thread ----------------------------------------------------
 
     /** Read one thread. Null when it is gone, which the reader shows
@@ -268,6 +315,10 @@ class MailRepo(
      * other client, so nothing else will ever tell us.
      */
     suspend fun markRead(msgIds: List<String>) = write { it.markRead(msgIds) }
+
+    /** Put a thread back to unread, so it stands out again on return.
+     *  Also local, so this refreshes its own view like the rest. */
+    suspend fun markUnread(msgIds: List<String>) = write { it.markUnread(msgIds) }
 
     suspend fun setArchived(threadId: String, archived: Boolean) =
         write { it.setArchived(threadId, archived) }
@@ -333,6 +384,32 @@ class MailRepo(
     }
 
     // ---- labels, filters, lists ----------------------------------------
+
+    private val _query = MutableStateFlow("")
+
+    /** What the listing is searching for, or empty. */
+    val query: StateFlow<String> = _query.asStateFlow()
+
+    /**
+     * Search, which the ship runs over subjects, bodies and rendered
+     * senders, case-insensitively.
+     *
+     * It leaves the current mailbox on purpose: an archived forgery is
+     * exactly the thing somebody searches for, and a search that only
+     * looked where they already were would not find it.
+     */
+    fun search(q: String) {
+        val trimmed = q.trim()
+        if (_query.value == trimmed) return
+        _query.value = trimmed
+        if (trimmed.isNotEmpty()) {
+            _folder.value = MailFolder.View(MailView.ALL)
+            _view.value = MailView.ALL
+            _label.value = null
+        }
+        _page.value = null
+        scope.launch { refresh() }
+    }
 
     private val _label = MutableStateFlow<String?>(null)
 
@@ -463,6 +540,10 @@ class MailRepo(
         /** Mail is considered correspondence, not chat. The refresh
          *  control covers the case where the reader knows better. */
         const val DEFAULT_POLL_MS = 10 * 60 * 1000L
+
+        /** The ship's own ceiling on a listing. Asking past it answers
+         *  the same page, so the control has to stop here and say so. */
+        const val MAX_PAGE = 200
     }
 }
 

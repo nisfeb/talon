@@ -20,6 +20,10 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
@@ -77,6 +81,10 @@ fun MailThreadPane(
     contacts: ContactMap,
     ourShip: String,
     onCompose: (MailIntent) -> Unit,
+    /** The thread left this view: archived, deleted, or marked unread.
+     *  The reader cannot keep showing something the listing no longer
+     *  has, and on a wide layout there is no back arrow to do it. */
+    onGone: () -> Unit = {},
     onBack: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
@@ -131,6 +139,28 @@ fun MailThreadPane(
             drawn = drawn,
             onMode = { drawn = it },
             onBack = onBack,
+            archived = thread?.archived == true,
+            onArchive = {
+                scope.launch {
+                    repo.setArchived(threadId, thread?.archived != true)
+                    onGone()
+                }
+            },
+            onMarkUnread = {
+                scope.launch {
+                    // The newest message is the one whose state the row
+                    // reads, so unread means that one.
+                    val newest = thread?.messages.orEmpty().maxByOrNull { it.sent }
+                    if (newest != null) repo.markUnread(listOf(newest.id))
+                    onGone()
+                }
+            },
+            onDelete = {
+                scope.launch {
+                    repo.deleteThread(threadId)
+                    onGone()
+                }
+            },
         )
         HorizontalDivider()
 
@@ -249,6 +279,64 @@ fun MailThreadPane(
 }
 
 /**
+ * What can be done to the whole thread. All of it is local: no other
+ * ship sees an archive or a read mark, which is why each one refreshes
+ * the listing itself rather than waiting to be told.
+ *
+ * Delete asks first. It is the one action here that destroys evidence,
+ * and a signed message is exactly the kind of thing somebody wants back.
+ */
+@Composable
+private fun ThreadActions(
+    archived: Boolean,
+    onArchive: () -> Unit,
+    onMarkUnread: () -> Unit,
+    onDelete: () -> Unit,
+) {
+    var open by remember { mutableStateOf(false) }
+    var confirming by remember { mutableStateOf(false) }
+
+    Box {
+        IconButton(onClick = { open = true }) {
+            Icon(Icons.Filled.MoreVert, contentDescription = "Thread actions")
+        }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            DropdownMenuItem(
+                text = { Text(if (archived) "Move to inbox" else "Archive") },
+                onClick = { open = false; onArchive() },
+            )
+            DropdownMenuItem(
+                text = { Text("Mark unread") },
+                onClick = { open = false; onMarkUnread() },
+            )
+            DropdownMenuItem(
+                text = { Text("Delete") },
+                onClick = { open = false; confirming = true },
+            )
+        }
+    }
+
+    if (confirming) {
+        AlertDialog(
+            onDismissRequest = { confirming = false },
+            title = { Text("Delete this thread?") },
+            text = {
+                Text(
+                    "Every copy on this ship goes, including any forged one " +
+                        "kept as evidence. Nobody else's copy is touched.",
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { confirming = false; onDelete() }) { Text("Delete") }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirming = false }) { Text("Keep") }
+            },
+        )
+    }
+}
+
+/**
  * Reply and forward. Both send from the message the reader is on: the
  * newest honest one in list mode, the selected node in tree mode. That
  * is what makes selecting a node and replying a deliberate act rather
@@ -273,6 +361,10 @@ private fun MailThreadHeader(
     labels: List<String>,
     known: List<String>,
     onLabel: (String, Boolean) -> Unit,
+    archived: Boolean,
+    onArchive: () -> Unit,
+    onMarkUnread: () -> Unit,
+    onDelete: () -> Unit,
     showTree: Boolean,
     drawn: Boolean,
     onMode: (Boolean) -> Unit,
@@ -289,6 +381,12 @@ private fun MailThreadHeader(
                 subject.ifBlank { "(no subject)" },
                 style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
                 modifier = Modifier.weight(1f).padding(start = if (onBack != null) 4.dp else 8.dp),
+            )
+            ThreadActions(
+                archived = archived,
+                onArchive = onArchive,
+                onMarkUnread = onMarkUnread,
+                onDelete = onDelete,
             )
             // Offered only where there is a tree to see. A straight
             // thread has nothing the two modes would show differently.

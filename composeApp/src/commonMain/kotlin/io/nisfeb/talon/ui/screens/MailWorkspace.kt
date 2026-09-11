@@ -57,6 +57,7 @@ fun MailWorkspace(
                     contacts = contacts,
                     ourShip = ourShip,
                     onCompose = { onCompose(it) },
+                    onGone = { onOpenThread(null) },
                     onBack = { onOpenThread(null) },
                 )
 
@@ -98,6 +99,7 @@ fun MailWorkspace(
                         contacts = contacts,
                         ourShip = ourShip,
                         onCompose = { onCompose(it) },
+                        onGone = { onOpenThread(null) },
                         onBack = null,
                     )
 

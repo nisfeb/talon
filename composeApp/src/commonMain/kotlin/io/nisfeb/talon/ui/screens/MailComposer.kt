@@ -24,6 +24,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -82,6 +83,8 @@ fun MailComposer(
 ) {
     val scope = rememberCoroutineScope()
     val pickFile = rememberAnyFilePicker()
+    val lists by repo.lists.collectAsState()
+    androidx.compose.runtime.LaunchedEffect(repo) { repo.refreshLists() }
 
     val recipients = remember(intent) { mutableStateListOf(*intent.to.toTypedArray()) }
     var recipientDraft by remember(intent) { mutableStateOf("") }
@@ -218,7 +221,20 @@ fun MailComposer(
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
             )
-            TextButton(onClick = { commitRecipients() }) { Text("Add recipient") }
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                TextButton(onClick = { commitRecipients() }) { Text("Add recipient") }
+                // A list is a name for a set of ships, and the name never
+                // travels: it expands here, so everything downstream of
+                // this composer only ever sees ships.
+                lists.forEach { l ->
+                    TextButton(
+                        onClick = {
+                            l.members.forEach { if (it !in recipients) recipients += it }
+                            problem = null
+                        },
+                    ) { Text("+ ${l.name}") }
+                }
+            }
 
             OutlinedTextField(
                 value = subject,

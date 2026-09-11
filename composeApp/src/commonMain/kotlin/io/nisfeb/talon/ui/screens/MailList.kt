@@ -16,6 +16,8 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
@@ -82,6 +84,8 @@ fun MailList(
     val drafts by repo.drafts.collectAsState()
     val labels by repo.knownLabels.collectAsState()
     val folder by repo.folder.collectAsState()
+    val query by repo.query.collectAsState()
+    val hasMore by repo.hasMore.collectAsState()
     var organising by remember { mutableStateOf(false) }
     var pickingFolder by remember { mutableStateOf(false) }
 
@@ -108,7 +112,9 @@ fun MailList(
             }
             Column(Modifier.weight(1f).fillMaxHeight()) {
                 MailToolbar(
-                    title = folderName(folder),
+                    title = if (query.isNotEmpty()) "Results for \"$query\"" else folderName(folder),
+                    query = query,
+                    onSearch = { repo.search(it) },
                     loading = loading,
                     onRefresh = {
                         scope.launch {
@@ -122,6 +128,8 @@ fun MailList(
                 HorizontalDivider()
                 error?.let { MailNotice(it) }
                 MailBody(
+                    hasMore = hasMore,
+                    onMore = { scope.launch { repo.loadMore() } },
                     folder = folder,
                     availability = availability,
                     page = page,
@@ -149,6 +157,8 @@ fun MailList(
 
 @Composable
 private fun MailBody(
+    hasMore: Boolean,
+    onMore: () -> Unit,
     folder: MailFolder,
     availability: MailAvailability,
     page: io.nisfeb.talon.mail.InboxPage?,
@@ -203,6 +213,27 @@ private fun MailBody(
                 )
                 HorizontalDivider(modifier = Modifier.padding(start = 12.dp))
             }
+            if (hasMore) {
+                item(key = "__more") {
+                    androidx.compose.material3.TextButton(
+                        onClick = onMore,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text("Show more") }
+                }
+            } else if ((page?.total ?: 0) > (page?.threads?.size ?: 0)) {
+                // The ship will not answer past its own ceiling, so the
+                // honest thing is to say what is not being shown rather
+                // than offer a control that would do nothing.
+                item(key = "__capped") {
+                    Text(
+                        "Showing ${page?.threads?.size} of ${page?.total}. " +
+                            "Search to reach the rest.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.fillMaxWidth().padding(12.dp),
+                    )
+                }
+            }
         }
     }
 }
@@ -233,6 +264,8 @@ private fun emptyLineFor(f: MailFolder): String = when (f) {
 @Composable
 private fun MailToolbar(
     title: String,
+    query: String,
+    onSearch: (String) -> Unit,
     loading: Boolean,
     onRefresh: () -> Unit,
     onCompose: (() -> Unit)?,
@@ -247,11 +280,42 @@ private fun MailToolbar(
                 Icon(Icons.Filled.Menu, contentDescription = "Mailboxes")
             }
         }
-        Text(
-            title,
-            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
-            modifier = Modifier.weight(1f).padding(start = if (onFolders != null) 0.dp else 8.dp),
-        )
+        var searching by remember(query.isEmpty()) { mutableStateOf(query.isNotEmpty()) }
+        var draft by remember(query) { mutableStateOf(query) }
+        if (searching) {
+            androidx.compose.material3.OutlinedTextField(
+                value = draft,
+                onValueChange = { draft = it },
+                placeholder = { Text("Search all mail") },
+                singleLine = true,
+                trailingIcon = {
+                    IconButton(
+                        onClick = {
+                            if (draft.isBlank()) { searching = false; onSearch("") } else onSearch(draft)
+                        },
+                    ) { Icon(Icons.Filled.Search, contentDescription = "Search") }
+                },
+                keyboardActions = androidx.compose.foundation.text.KeyboardActions(
+                    onSearch = { onSearch(draft) },
+                ),
+                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                    imeAction = androidx.compose.ui.text.input.ImeAction.Search,
+                ),
+                modifier = Modifier.weight(1f).padding(end = 4.dp),
+            )
+            IconButton(onClick = { draft = ""; searching = false; onSearch("") }) {
+                Icon(Icons.Filled.Close, contentDescription = "Clear search")
+            }
+        } else {
+            Text(
+                title,
+                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
+                modifier = Modifier.weight(1f).padding(start = if (onFolders != null) 0.dp else 8.dp),
+            )
+            IconButton(onClick = { searching = true }) {
+                Icon(Icons.Filled.Search, contentDescription = "Search mail")
+            }
+        }
         if (onCompose != null) {
             androidx.compose.material3.TextButton(onClick = onCompose) { Text("New") }
         }

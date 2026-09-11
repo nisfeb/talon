@@ -179,4 +179,54 @@ class MailRepoTest {
         r.refresh()
         assertNull(r.page.value, "a detached mailbox does not talk to a ship")
     }
+
+    @Test
+    fun `searching leaves the current mailbox`() = withRepo({ 200 to emptyPage }) { r ->
+        r.attach("https://ship.example")
+        r.selectFolder(MailFolder.View(MailView.ARCHIVED))
+        r.search("invoice")
+        // An archived forgery is exactly what somebody searches for, so a
+        // search that only looked where they already were would not find it.
+        assertEquals(MailFolder.View(MailView.ALL), r.folder.value)
+        assertEquals("invoice", r.query.value)
+    }
+
+    @Test
+    fun `picking a mailbox ends the search`() = withRepo({ 200 to emptyPage }) { r ->
+        r.attach("https://ship.example")
+        r.search("invoice")
+        r.selectFolder(MailFolder.View(MailView.INBOX))
+        assertEquals("", r.query.value)
+    }
+
+    @Test
+    fun `a search asks the ship for it`() {
+        val asked = mutableListOf<String>()
+        withRepo({ path -> asked += path; 200 to emptyPage }) { r ->
+            r.attach("https://ship.example")
+            r.search("needle")
+            r.refresh()
+        }
+        assertTrue(asked.isNotEmpty())
+    }
+
+    @Test
+    fun `more is offered only while the ship has more to give`() {
+        val one = """{"total":80,"offset":0,"limit":50,"view":"inbox","threads":[
+            {"id":"0v1","subject":"s","from":"~zod","snippet":"","verdict":"verified",
+             "forged":false,"count":1,"last":1,"unread":false,"participants":[],
+             "unreadable":0,"archived":false,"labels":[]}]}"""
+        withRepo({ 200 to one }) { r ->
+            r.attach("https://ship.example")
+            r.refresh()
+            settle(r)
+            assertTrue(r.hasMore.value, "one of eighty shown means there is more")
+        }
+        withRepo({ 200 to emptyPage }) { r ->
+            r.attach("https://ship.example")
+            r.refresh()
+            settle(r)
+            assertEquals(false, r.hasMore.value, "nothing to show, nothing more")
+        }
+    }
 }
