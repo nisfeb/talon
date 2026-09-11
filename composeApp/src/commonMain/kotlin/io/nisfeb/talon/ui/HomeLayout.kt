@@ -164,40 +164,17 @@ data class HomeLayout(
     /**
      * [kind] put down with its top left corner at [col], [row].
      *
-     * Whatever it lands on is pushed down out of the way, the way every
-     * dashboard grid does it: the thing in your hand goes exactly where
-     * you let go of it, and the rest gets on with accommodating that.
+     * Nothing else moves. A widget that is not being dragged stays
+     * where it was put, even when the one in hand lands on top of it:
+     * shoving it downwards to make room sent it off the bottom of the
+     * page as often as not, and it had never been asked to move.
+     * Making space is the arranger's business, and they can see what
+     * they are doing.
      */
     fun placed(kind: HomeWidgetKind, col: Int, row: Int): HomeLayout {
         val moving = widgets.firstOrNull { it.kind == kind } ?: return this
         val put = moving.copy(col = col, row = row).sane()
         return copy(widgets = widgets.map { if (it.kind == kind) put else it })
-            .resolved(kind)
-    }
-
-    /**
-     * Nothing on top of anything else, with [anchor] left exactly where
-     * it is and everything else shuffled downwards until it fits.
-     *
-     * Downwards only. Sideways would move a widget out from under the
-     * pointer that is placing it, and upwards would close the gaps
-     * somebody deliberately left.
-     */
-    fun resolved(anchor: HomeWidgetKind?): HomeLayout {
-        val settled = mutableListOf<HomeWidget>()
-        // The anchor first so it keeps its place, then the rest from
-        // the top down so the page is rebuilt in reading order.
-        val order = widgets.filter { it.visible }
-            .sortedWith(compareBy({ it.kind != anchor }, { it.row }, { it.col }))
-        for (w in order) {
-            var cur = w.sane()
-            if (w.kind != anchor) {
-                while (settled.any { overlaps(it, cur) }) cur = cur.copy(row = cur.row + 1)
-            }
-            settled += cur
-        }
-        val byKind = settled.associateBy { it.kind }
-        return copy(widgets = widgets.map { byKind[it.kind] ?: it })
     }
 
     /** How many row units tall the whole arrangement is. */
@@ -217,12 +194,10 @@ data class HomeLayout(
         val missing = HomeWidgetKind.entries
             .filterNot { it in seen }
             .map { HomeWidget(kind = it, visible = false) }
-        // Resolved on the way in as well as on every move. A stored
-        // line can overlap — hand-edited, or written by a migration
-        // from a model that had no coordinates — and two widgets drawn
-        // on top of each other is the one state the page cannot
-        // recover from on its own.
-        return HomeLayout(kept + missing, version = HOME_LAYOUT_VERSION).resolved(null)
+        // Not untangled. An arrangement is whatever somebody made of
+        // it, overlaps included: they put it there, they can see it,
+        // and nothing here knows better than they do.
+        return HomeLayout(kept + missing, version = HOME_LAYOUT_VERSION)
     }
 
     companion object {

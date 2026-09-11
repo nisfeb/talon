@@ -324,48 +324,6 @@ class HomePlacementTest {
     }
 
     @Test
-    fun `a gap somebody left is left alone`() {
-        // Nothing is pulled upwards to close it. An empty row is a
-        // choice as much as a full one.
-        val l = layout(w(k[0], 0, 0, rows = 4), w(k[1], 0, 9, rows = 4))
-        assertEquals(9, l.resolved(null)[k[1]].row)
-    }
-
-    @Test
-    fun `dropping onto something pushes it down, not sideways`() {
-        // Sideways would shove a widget out from under the pointer
-        // that is placing it.
-        val l = layout(w(k[0], 0, 0, rows = 4), w(k[1], 0, 4, rows = 4))
-        val moved = l.placed(k[0], col = 0, row = 4)
-        assertEquals(4, moved[k[0]].row, "the one in hand stays where it was dropped")
-        assertTrue(moved[k[1]].row >= 8, "and the one underneath moved down, not across")
-        assertEquals(0, moved[k[1]].col)
-    }
-
-    @Test
-    fun `nothing ever ends up on top of anything else`() {
-        val l = layout(
-            w(k[0], 0, 0, rows = 4), w(k[1], 0, 0, rows = 4),
-            w(k[2], 0, 0, rows = 4), w(k[3], 0, 0, rows = 4),
-        )
-        val settled = l.resolved(k[0]).shown
-        for (i in settled.indices) {
-            for (j in i + 1 until settled.size) {
-                assertTrue(
-                    !overlaps(settled[i], settled[j]),
-                    "${settled[i].kind} and ${settled[j].kind} overlap",
-                )
-            }
-        }
-    }
-
-    @Test
-    fun `a hidden widget neither blocks nor is blocked`() {
-        val l = layout(w(k[0], 0, 0), HomeWidget(k[1], visible = false, col = 0, row = 0))
-        assertEquals(0, l.resolved(null)[k[0]].row)
-    }
-
-    @Test
     fun `nothing may hang off the right hand edge`() {
         val l = layout(w(k[0], 0, 0, span = 7))
         assertEquals(HOME_COLUMNS - 7, l.placed(k[0], col = 11, row = 0)[k[0]].col)
@@ -501,23 +459,6 @@ class HomeStackTest {
     }
 
     @Test
-    fun `a decoded layout never overlaps itself`() {
-        // A stored line can overlap: hand-edited, or written by a
-        // migration from a model that had no coordinates at all.
-        val piled = """{"version":$HOME_LAYOUT_VERSION,"widgets":[
-            {"kind":"CLOCK","col":0,"row":0,"span":6,"rows":4},
-            {"kind":"MAIL","col":0,"row":0,"span":6,"rows":4},
-            {"kind":"MESSAGES","col":3,"row":1,"span":6,"rows":4}
-        ]}"""
-        val shown = HomeLayoutCodec.decode(piled).shown
-        for (i in shown.indices) {
-            for (j in i + 1 until shown.size) {
-                assertTrue(!overlaps(shown[i], shown[j]), "${shown[i].kind} sits on ${shown[j].kind}")
-            }
-        }
-    }
-
-    @Test
     fun `the default still opens exactly as it was written`() {
         // Resolving on decode must not quietly rearrange a layout that
         // was already fine.
@@ -527,5 +468,68 @@ class HomeStackTest {
             val b = back[kind]
             assertEquals(a.col to a.row, b.col to b.row, "$kind moved")
         }
+    }
+}
+
+/**
+ * Nothing moves except what is being moved.
+ *
+ * Pushing the others down to make room sent them off the bottom of the
+ * page as often as not, and they had never been asked to move.
+ */
+class HomeNoShoveTest {
+
+    private val k = HomeWidgetKind.entries
+    private fun w(kind: HomeWidgetKind, col: Int, row: Int, span: Int = 6, rows: Int = 4) =
+        HomeWidget(kind, col = col, row = row, span = span, rows = rows)
+
+    private fun layout(vararg ws: HomeWidget) = HomeLayout(ws.toList(), HOME_LAYOUT_VERSION)
+
+    @Test
+    fun `dropping one widget on another leaves the other alone`() {
+        val l = layout(w(k[0], 0, 0), w(k[1], 0, 4))
+        val moved = l.placed(k[0], col = 0, row = 4)
+        assertEquals(4, moved[k[0]].row, "the one in hand goes where it was dropped")
+        assertEquals(4, moved[k[1]].row, "and the one it landed on has not budged")
+        assertEquals(0, moved[k[1]].col)
+    }
+
+    @Test
+    fun `an overlap is allowed to persist`() {
+        // Making space is the arranger's business. The page is not
+        // entitled to an opinion about it.
+        val l = layout(w(k[0], 0, 0), w(k[1], 0, 0))
+        assertTrue(overlaps(l.shown[0], l.shown[1]))
+        val back = HomeLayoutCodec.decode(HomeLayoutCodec.encode(l))
+        assertEquals(0, back[k[0]].row)
+        assertEquals(0, back[k[1]].row)
+    }
+
+    @Test
+    fun `nothing drifts while one widget is dragged the length of the page`() {
+        val l = layout(w(k[0], 0, 0), w(k[1], 6, 0), w(k[2], 0, 4), w(k[3], 6, 4))
+        var cur = l
+        for (row in 0..20) cur = cur.placed(k[0], col = row % 7, row = row)
+        for (kind in listOf(k[1], k[2], k[3])) {
+            assertEquals(
+                l[kind].col to l[kind].row,
+                cur[kind].col to cur[kind].row,
+                "$kind moved while something else was being dragged",
+            )
+        }
+    }
+
+    @Test
+    fun `a gap somebody left stays a gap`() {
+        val l = layout(w(k[0], 0, 0), w(k[1], 0, 12))
+        val back = HomeLayoutCodec.decode(HomeLayoutCodec.encode(l))
+        assertEquals(12, back[k[1]].row, "it was pulled up to close the gap")
+    }
+
+    @Test
+    fun `resizing onto a neighbour does not shove it either`() {
+        val l = layout(w(k[0], 0, 0, rows = 4), w(k[1], 0, 4, rows = 4))
+        val grown = l.with(l[k[0]].copy(rows = 9))
+        assertEquals(4, grown[k[1]].row)
     }
 }

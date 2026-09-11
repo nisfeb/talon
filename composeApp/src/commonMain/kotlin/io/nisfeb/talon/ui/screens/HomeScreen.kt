@@ -178,7 +178,7 @@ fun HomeScreen(
         onLayoutChanged(layout.placed(kind, col, row))
     }
     val resizeTo by rememberUpdatedState<(HomeWidget) -> Unit> { w ->
-        onLayoutChanged(layout.with(w).resolved(w.kind))
+        onLayoutChanged(layout.with(w))
     }
 
     BoxWithConstraints(modifier.fillMaxSize()) {
@@ -279,6 +279,12 @@ fun HomeScreen(
                 // the arrangement made on a desktop.
                 val real by rememberUpdatedState(layout[widget.kind])
                 val held = dragging == widget.kind
+                // Overlapping is allowed, so it has to be visible.
+                // Nothing gets moved out of the way any more, and two
+                // widgets silently stacked would read as one missing.
+                val clashes = editing && !held && placedWidgets.any {
+                    it.kind != widget.kind && io.nisfeb.talon.ui.overlaps(it, widget)
+                }
                 Box(
                     Modifier
                         .fillMaxSize()
@@ -299,10 +305,10 @@ fun HomeScreen(
                         .then(
                             if (!editing) Modifier else Modifier.border(
                                 width = 1.dp,
-                                color = if (held) {
-                                    MaterialTheme.colorScheme.primary
-                                } else {
-                                    MaterialTheme.colorScheme.outlineVariant
+                                color = when {
+                                    held -> MaterialTheme.colorScheme.primary
+                                    clashes -> MaterialTheme.colorScheme.error
+                                    else -> MaterialTheme.colorScheme.outlineVariant
                                 },
                                 shape = RoundedCornerShape(10.dp),
                             )
