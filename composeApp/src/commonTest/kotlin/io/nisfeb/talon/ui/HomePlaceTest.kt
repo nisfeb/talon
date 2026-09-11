@@ -35,6 +35,32 @@ class HomePlaceTest {
     }
 
     @Test
+    fun `a time zone survives storage`() {
+        // The field the dial's orientation hangs on.
+        val p = HomePlace(-41.29, 174.78, "Wellington, New Zealand", timeZoneId = "Pacific/Auckland")
+        assertEquals("Pacific/Auckland", HomePlaceCodec.decode(HomePlaceCodec.encode(p))?.timeZoneId)
+        assertEquals(p, HomePlaceCodec.decode(HomePlaceCodec.encode(p)))
+    }
+
+    @Test
+    fun `a place with no zone stays without one`() {
+        val p = HomePlace(1.0, 2.0, "here", fromGps = true)
+        assertNull(HomePlaceCodec.decode(HomePlaceCodec.encode(p))!!.timeZoneId)
+    }
+
+    @Test
+    fun `a location saved before zones were carried still reads`() {
+        // Dropping somebody's saved place to add a field would be a poor
+        // trade. The old five-field line has no version tag.
+        val old = "42.3601,-71.0589,0,43.0,Boston, Massachusetts, US"
+        val p = HomePlaceCodec.decode(old)!!
+        assertEquals(42.3601, p.lat)
+        assertEquals("Boston, Massachusetts, US", p.label, "the label keeps its own commas")
+        assertEquals(43.0, p.elevationMetres)
+        assertNull(p.timeZoneId, "there was none to read")
+    }
+
+    @Test
     fun `nothing stored is no place`() {
         assertNull(HomePlaceCodec.decode(""))
         assertNull(HomePlaceCodec.decode("garbage"))

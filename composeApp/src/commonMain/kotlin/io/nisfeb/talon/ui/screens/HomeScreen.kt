@@ -428,7 +428,7 @@ private fun ClockWeatherPanel(
  * panel's own caption is what admits there is no location.
  */
 internal fun skyFor(atMs: Long, place: HomePlace?, weather: SkyClock.Sky?): SkyClock.Sky {
-    val zone = TimeZone.currentSystemDefault()
+    val zone = zoneFor(place?.timeZoneId ?: weather?.zoneId)
     val local = Instant.fromEpochMilliseconds(atMs).toLocalDateTime(zone)
     val minuteOfDay = local.hour * 60 + local.minute
     val offsetMinutes = zone.offsetAt(Instant.fromEpochMilliseconds(atMs)).totalSeconds / 60
@@ -456,6 +456,23 @@ internal fun skyFor(atMs: Long, place: HomePlace?, weather: SkyClock.Sky?): SkyC
         moonElongationDeg = io.nisfeb.talon.ui.Moon.phaseAt(atMs).elongationDeg,
     )
 }
+
+/**
+ * The clock the dial runs on.
+ *
+ * The place's own, wherever it is known, and the device's otherwise.
+ * This is not cosmetic: the sun's times come out of the solar geometry
+ * in UTC and are shifted into a local clock, so shifting a remote
+ * place's by the device's offset rotates the whole lit arc — fifteen
+ * degrees of dial for every hour of error. New Zealand read on an
+ * American clock is sixteen hours out and lands its daylight across
+ * the bottom of the ring, very nearly upside down.
+ *
+ * An unknown zone id falls back rather than throwing: a dial on the
+ * wrong clock is a bad dial, and a dial that crashes is no dial.
+ */
+internal fun zoneFor(id: String?): TimeZone =
+    id?.let { runCatching { TimeZone.of(it) }.getOrNull() } ?: TimeZone.currentSystemDefault()
 
 private val MONTHS = listOf(
     "Jan", "Feb", "Mar", "Apr", "May", "Jun",

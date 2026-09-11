@@ -45,6 +45,10 @@ class OpenMeteoPlaces(private val http: HttpClient) {
                 // dial uses to move the horizon. A device fix would
                 // carry its own; this is the town's.
                 elevationMetres = r.elevation,
+                // Load-bearing, not a nicety: without it a place
+                // across the world draws its day in the wrong half
+                // of the ring.
+                timeZoneId = r.timezone?.takeIf { it.isNotBlank() },
             )
         }
     }
@@ -61,6 +65,7 @@ class OpenMeteoPlaces(private val http: HttpClient) {
         val latitude: Double = 0.0,
         val longitude: Double = 0.0,
         val elevation: Double? = null,
+        val timezone: String? = null,
         @SerialName("admin1") val admin1: String? = null,
         val country: String? = null,
     )

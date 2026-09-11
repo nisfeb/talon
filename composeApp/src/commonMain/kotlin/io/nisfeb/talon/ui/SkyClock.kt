@@ -188,6 +188,10 @@ object SkyClock {
         val cloudCover: Float? = null,
         /** What the sky is doing, as far as the dial can show it. */
         val condition: Weather = Weather.CLEAR,
+        /** The place's own time zone, where the forecast named one.
+         *  A dial set to somewhere else has to run on that somewhere
+         *  else's clock or its day lands in the wrong half of the ring. */
+        val zoneId: String? = null,
         /** How far round from the sun the moon has got, in degrees:
          *  0 is new and 180 is full. Null before anything works it out. */
         val moonElongationDeg: Double? = null,
@@ -242,6 +246,21 @@ data class HomePlace(
      *  horizon: from higher up the sun clears it earlier and the dark
      *  part of the dial shrinks. */
     val elevationMetres: Double? = null,
+    /**
+     * The place's own time zone, as an IANA id.
+     *
+     * Load-bearing for anywhere that is not where you are. The sun's
+     * times come out of the solar geometry in UTC and are shifted into
+     * a local clock; shift them by the *device's* offset while reading
+     * a *remote* place's coordinates and the whole lit arc rotates —
+     * fifteen degrees of dial per hour of error, so New Zealand seen
+     * from the US east coast lands very nearly upside down.
+     *
+     * Null where nothing knows it: a device fix (where the device's own
+     * zone is right by definition) and typed coordinates (where the
+     * forecast fills it in on the first fetch).
+     */
+    val timeZoneId: String? = null,
 )
 
 /**
@@ -262,20 +281,29 @@ typealias PlaceLookup = suspend (String) -> Result<List<HomePlace>>
  * silently moves somewhere else.
  */
 object HomePlaceCodec {
-    /** `lat,lon,fromGps,label` — the label last, because it is the only
-     *  part that can contain anything, commas included. */
+    /** Tags the six-field layout. Lines without it are the older
+     *  five-field one and still decode, because throwing away somebody's
+     *  saved location to add a field would be a poor trade. */
+    private const val V2 = "v2"
+
+    /** `v2,lat,lon,fromGps,elevation,zone,label` — the label last,
+     *  because it is the only part that can contain anything, commas
+     *  included. */
     fun encode(p: HomePlace): String =
         listOf(
+            V2,
             p.lat.toString(),
             p.lon.toString(),
             if (p.fromGps) "1" else "0",
             p.elevationMetres?.toString() ?: "",
+            p.timeZoneId.orEmpty(),
             p.label,
         ).joinToString(",")
 
     fun decode(s: String): HomePlace? {
         if (s.isBlank()) return null
-        val parts = s.split(",", limit = 5)
+        val v2 = s.startsWith("$V2,")
+        val parts = if (v2) s.split(",", limit = 7).drop(1) else s.split(",", limit = 5)
         if (parts.size < 5) return null
         val lat = parts[0].toDoubleOrNull() ?: return null
         val lon = parts[1].toDoubleOrNull() ?: return null
@@ -286,9 +314,10 @@ object HomePlaceCodec {
         return HomePlace(
             lat = lat,
             lon = lon,
-            label = parts[4],
+            label = if (v2) parts[5] else parts[4],
             fromGps = parts[2] == "1",
             elevationMetres = parts[3].toDoubleOrNull(),
+            timeZoneId = if (v2) parts[4].takeIf { it.isNotBlank() } else null,
         )
     }
 }

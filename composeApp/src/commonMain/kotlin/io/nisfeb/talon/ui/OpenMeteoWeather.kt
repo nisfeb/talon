@@ -87,6 +87,10 @@ internal fun parseForecast(body: String): SkyClock.Sky? {
         lowAtMinute = low?.first,
         cloudCover = f.current.cloudCover?.let { (it / 100f).coerceIn(0f, 1f) },
         condition = SkyClock.weatherOf(f.current.weatherCode),
+        // The request asks for the place's own zone, and the answer
+        // says which one that turned out to be. It is how a set of
+        // typed coordinates ever learns what clock it is on.
+        zoneId = f.timezone?.takeIf { it.isNotBlank() },
     )
 }
 
@@ -104,6 +108,7 @@ private val forecastJson = Json { ignoreUnknownKeys = true }
 
 @Serializable
 private data class Forecast(
+    val timezone: String? = null,
     val current: Current? = null,
     val hourly: Hourly? = null,
 )
