@@ -79,12 +79,20 @@ class MailListTest {
             var offered = false
             setContent {
                 TalonTheme(darkTheme = false) {
-                    MailList(
-                        repo = repo,
-                        contacts = ContactMap.EMPTY,
-                        onOpenThread = {},
-                        onInstall = { offered = true },
-                    )
+                    // The offer arrives through the local; without one
+                    // the empty state says what is wrong and no more.
+                    androidx.compose.runtime.CompositionLocalProvider(
+                        io.nisfeb.talon.mail.LocalGrubberyInstall provides {
+                            offered = true
+                            Result.success(Unit)
+                        },
+                    ) {
+                        MailList(
+                            repo = repo,
+                            contacts = ContactMap.EMPTY,
+                            onOpenThread = {},
+                        )
+                    }
                 }
             }
             repo.attach("https://ship.example")
@@ -95,6 +103,29 @@ class MailListTest {
             }
             assertTrue(!offered, "the offer is a control, not something that fires on its own")
         }
+
+    @OptIn(ExperimentalTestApi::class)
+    @Test
+    fun `with no installer there is no button to press`() = runComposeUiTest {
+        val repo = repoServing { path ->
+            if (path.endsWith("manifest.webmanifest")) 404 to ""
+            else 404 to """{"error":"not found"}"""
+        }
+        setContent {
+            TalonTheme(darkTheme = false) {
+                MailList(repo = repo, contacts = ContactMap.EMPTY, onOpenThread = {})
+            }
+        }
+        repo.attach("https://ship.example")
+        waitUntil(timeoutMillis = 5_000) {
+            runCatching {
+                onNodeWithText("Mail runs inside Grubbery, which this ship does not have yet.")
+                    .assertIsDisplayed()
+                true
+            }.getOrDefault(false)
+        }
+        onNodeWithText("Install Grubbery").assertDoesNotExist()
+    }
 
     @Test
     fun `a thread with no readable copy says that, not just how many`() {

@@ -599,3 +599,15 @@ sealed interface MailFolder {
  * have to be handed the plumbing to know that.
  */
 val LocalMailTo = androidx.compose.runtime.staticCompositionLocalOf<((String) -> Unit)?> { null }
+
+/**
+ * Install the desk mail lives in, on the viewer's own ship, and wait
+ * for it to arrive. Null where the host cannot do it.
+ *
+ * A composition local for the same reason [LocalMailTo] is one: the
+ * place that needs to offer this is an empty state several screens
+ * deep, and it should not have to be handed a ship URL and a poke
+ * function to say one sentence.
+ */
+val LocalGrubberyInstall =
+    androidx.compose.runtime.staticCompositionLocalOf<(suspend () -> Result<Unit>)?> { null }

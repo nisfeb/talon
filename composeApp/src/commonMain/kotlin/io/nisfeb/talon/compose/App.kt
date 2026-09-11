@@ -883,6 +883,26 @@ fun App(
         val mailRepo = remember(session) {
             io.nisfeb.talon.mail.MailRepo(session.http, loopScope)
         }
+        // Mail lives in the same desk as the link handler's app, so the
+        // install is one thing offered from two places.
+        val grubberyInstall: (suspend () -> Result<Unit>)? = remember(session) {
+            {
+                val url = sessionStore.active()?.shipUrl
+                if (url == null) {
+                    Result.failure(IllegalStateException("Not signed in to a ship."))
+                } else {
+                    io.nisfeb.talon.urbit.LatticeInstall.installAndWait(
+                        http = http,
+                        shipUrl = url,
+                        // Named, not trailing: the last parameter is the
+                        // wait, so a trailing lambda binds to that.
+                        poke = { app, mark, body ->
+                            runCatching { repo.pokeRaw(app, mark, body) }.isSuccess
+                        },
+                    )
+                }
+            }
+        }
         val mailAvailability by mailRepo.availability.collectAsState()
         // Null until the nexus answers, so nothing offers mail on a ship
         // that has none.
@@ -1309,6 +1329,7 @@ fun App(
           androidx.compose.runtime.CompositionLocalProvider(
               io.nisfeb.talon.ui.LocalImageDownloader provides imageDownloader,
               io.nisfeb.talon.mail.LocalMailTo provides mailTarget,
+              io.nisfeb.talon.mail.LocalGrubberyInstall provides grubberyInstall,
               io.nisfeb.talon.ui.LocalChatDensity provides chatDensity,
               androidx.compose.ui.platform.LocalDensity provides scaledDensity,
               io.nisfeb.talon.ui.LocalUrbLinkHandler provides urbLinkHandler,

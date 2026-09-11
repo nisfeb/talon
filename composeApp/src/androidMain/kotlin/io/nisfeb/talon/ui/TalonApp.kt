@@ -1152,6 +1152,22 @@ fun TalonApp(
     androidx.compose.runtime.CompositionLocalProvider(
         // Null until the nexus answers, so nothing offers mail on a ship
         // that has none.
+        // Mail lives in the same desk as the link handler's app, so the
+        // install is one thing offered from two places.
+        io.nisfeb.talon.mail.LocalGrubberyInstall provides {
+            val url = app.sessionStore.active()?.shipUrl
+            if (url == null) {
+                Result.failure(IllegalStateException("Not signed in to a ship."))
+            } else {
+                io.nisfeb.talon.urbit.LatticeInstall.installAndWait(
+                    http = app.ktorHttp,
+                    shipUrl = url,
+                    poke = { a, mark, body ->
+                        runCatching { app.repo.pokeRaw(a, mark, body) }.isSuccess
+                    },
+                )
+            }
+        },
         io.nisfeb.talon.mail.LocalMailTo provides
             if (mailAvailable) {
                 { peer: String ->

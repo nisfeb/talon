@@ -73,7 +73,6 @@ fun MailList(
     onOpenThread: (threadId: String) -> Unit,
     onCompose: (() -> Unit)? = null,
     onOpenDraft: ((io.nisfeb.talon.mail.Draft) -> Unit)? = null,
-    onInstall: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val scope = rememberCoroutineScope()
@@ -87,6 +86,9 @@ fun MailList(
     val query by repo.query.collectAsState()
     val hasMore by repo.hasMore.collectAsState()
     var organising by remember { mutableStateOf(false) }
+    val installer = io.nisfeb.talon.mail.LocalGrubberyInstall.current
+    var installing by remember { mutableStateOf(false) }
+    var installProblem by remember { mutableStateOf<String?>(null) }
     var pickingFolder by remember { mutableStateOf(false) }
 
     if (organising) {
@@ -128,6 +130,18 @@ fun MailList(
                 HorizontalDivider()
                 error?.let { MailNotice(it) }
                 MailBody(
+                    installing = installing,
+                    installProblem = installProblem,
+                    onInstall = if (installer == null) null else ({
+                        installing = true
+                        installProblem = null
+                        scope.launch {
+                            installer().fold(
+                                onSuccess = { installing = false; repo.refresh() },
+                                onFailure = { installing = false; installProblem = it.message },
+                            )
+                        }
+                    }),
                     hasMore = hasMore,
                     onMore = { scope.launch { repo.loadMore() } },
                     folder = folder,
@@ -138,7 +152,6 @@ fun MailList(
                     contacts = contacts,
                     onOpenThread = onOpenThread,
                     onOpenDraft = onOpenDraft,
-                    onInstall = onInstall,
                 )
             }
         }
@@ -157,6 +170,9 @@ fun MailList(
 
 @Composable
 private fun MailBody(
+    installing: Boolean,
+    installProblem: String?,
+    onInstall: (() -> Unit)?,
     hasMore: Boolean,
     onMore: () -> Unit,
     folder: MailFolder,
@@ -167,7 +183,6 @@ private fun MailBody(
     contacts: ContactMap,
     onOpenThread: (String) -> Unit,
     onOpenDraft: ((io.nisfeb.talon.mail.Draft) -> Unit)?,
-    onInstall: (() -> Unit)?,
 ) {
     when {
         folder is MailFolder.Drafts -> if (drafts.isEmpty()) {
@@ -183,8 +198,19 @@ private fun MailBody(
 
         availability == MailAvailability.NO_GRUBBERY ->
             MailAbsent(
-                "Mail runs inside Grubbery, which this ship does not have yet.",
-                actionLabel = if (onInstall != null) "Install Grubbery" else null,
+                when {
+                    installing ->
+                        "Installing Grubbery. The desk arrives over the network, " +
+                            "which takes a moment."
+                    installProblem != null -> installProblem
+                    else -> "Mail runs inside Grubbery, which this ship does not have yet."
+                },
+                actionLabel = when {
+                    installing -> null
+                    onInstall == null -> null
+                    installProblem != null -> "Try again"
+                    else -> "Install Grubbery"
+                },
                 onAction = onInstall,
             )
 
