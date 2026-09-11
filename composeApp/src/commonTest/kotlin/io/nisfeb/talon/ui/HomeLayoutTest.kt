@@ -199,3 +199,122 @@ class HomeGridTest {
         assertEquals(1, rows[0].size)
     }
 }
+
+class HomeDragTest {
+
+    private val k = HomeWidgetKind.entries
+    private val l = HomeLayout.DEFAULT
+
+    private fun order(layout: HomeLayout) = layout.widgets.map { it.kind }
+
+    @Test
+    fun `dragging onto another widget takes its place`() {
+        val moved = l.movedTo(k.last(), k.first())
+        assertEquals(k.last(), moved.widgets.first().kind)
+    }
+
+    @Test
+    fun `the one displaced shuffles along rather than vanishing`() {
+        val moved = l.movedTo(k.last(), k.first())
+        assertEquals(order(l).size, order(moved).size)
+        assertEquals(order(l).toSet(), order(moved).toSet())
+    }
+
+    @Test
+    fun `dragging onto itself changes nothing`() {
+        assertEquals(l, l.movedTo(k[1], k[1]))
+    }
+
+    @Test
+    fun `dragging downwards lands in the right place too`() {
+        // Removing first then inserting shifts every later index by one,
+        // which is the easy way to get this off by one.
+        val first = order(l)[0]
+        val third = order(l)[2]
+        val moved = l.movedTo(first, third)
+        assertEquals(third, order(moved)[1], "the third moved up")
+        assertEquals(first, order(moved)[2], "and the first landed on its index")
+    }
+
+    @Test
+    fun `a widget nobody has heard of is ignored, not an exception`() {
+        val partial = HomeLayout(listOf(HomeWidget(k[0]), HomeWidget(k[1])))
+        assertEquals(partial, partial.movedTo(k[0], k[4]))
+        assertEquals(partial, partial.movedTo(k[4], k[0]))
+    }
+
+    @Test
+    fun `every drag leaves a layout that still draws`() {
+        var cur = l
+        for (a in k) for (b in k) {
+            cur = cur.movedTo(a, b)
+            assertEquals(k.size, cur.widgets.size, "lost a widget dragging $a onto $b")
+            assertEquals(k.toSet(), cur.widgets.map { it.kind }.toSet())
+        }
+    }
+}
+
+class HomeResizeTest {
+
+    private val col = 300f // a column's width in pixels
+    private val row = 168f // a row unit's height
+
+    @Test
+    fun `no drag is no change`() {
+        assertEquals(1, resizedSpan(1, 0f, col, 2))
+        assertEquals(2, resizedRows(2, 0f, row))
+    }
+
+    @Test
+    fun `the handle flips at the half way mark`() {
+        // Rounding, not truncation: a handle that only widened after a
+        // whole column felt like it was ignoring you.
+        assertEquals(1, resizedSpan(1, col * 0.49f, col, 2))
+        assertEquals(2, resizedSpan(1, col * 0.51f, col, 2))
+        assertEquals(2, resizedRows(1, row * 0.6f, row))
+    }
+
+    @Test
+    fun `dragging back the other way shrinks`() {
+        assertEquals(1, resizedSpan(2, -col * 0.8f, col, 2))
+        assertEquals(1, resizedRows(3, -row * 1.7f, row))
+    }
+
+    @Test
+    fun `a handle dragged off the screen stops at the edge of the grid`() {
+        assertEquals(2, resizedSpan(1, col * 50f, col, 2))
+        assertEquals(1, resizedSpan(2, -col * 50f, col, 2))
+        assertEquals(HOME_ROW_RANGE.last, resizedRows(1, row * 50f, row))
+        assertEquals(HOME_ROW_RANGE.first, resizedRows(3, -row * 50f, row))
+    }
+
+    @Test
+    fun `one column means a widget can only ever be one wide`() {
+        assertEquals(1, resizedSpan(1, col * 10f, col, 1))
+        assertEquals(1, resizedSpan(2, col * 10f, col, 1))
+    }
+
+    @Test
+    fun `a zero sized unit does not divide by zero`() {
+        // Measured from layout, so it is zero for the frame before the
+        // widget has been placed.
+        assertEquals(2, resizedSpan(2, 500f, 0f, 2))
+        assertEquals(2, resizedRows(2, 500f, 0f))
+    }
+
+    @Test
+    fun `every drag lands on something the grid can draw`() {
+        for (start in 1..2) {
+            for (px in -2000..2000 step 37) {
+                val sp = resizedSpan(start, px.toFloat(), col, HOME_COLUMNS)
+                assertTrue(sp in 1..HOME_COLUMNS, "span $sp from $px")
+            }
+        }
+        for (start in HOME_ROW_RANGE) {
+            for (px in -2000..2000 step 37) {
+                val r = resizedRows(start, px.toFloat(), row)
+                assertTrue(r in HOME_ROW_RANGE, "rows $r from $px")
+            }
+        }
+    }
+}

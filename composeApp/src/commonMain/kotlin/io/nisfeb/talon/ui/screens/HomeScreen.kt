@@ -1,8 +1,12 @@
 package io.nisfeb.talon.ui.screens
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -40,6 +44,14 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -48,6 +60,7 @@ import io.nisfeb.talon.data.AppDatabase
 import io.nisfeb.talon.mail.MailAvailability
 import io.nisfeb.talon.mail.MailRepo
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import io.nisfeb.talon.ui.CalendarRange
@@ -59,6 +72,8 @@ import io.nisfeb.talon.ui.HomePlace
 import io.nisfeb.talon.ui.HomeWidget
 import io.nisfeb.talon.ui.HomeWidgetKind
 import io.nisfeb.talon.ui.packRows
+import io.nisfeb.talon.ui.resizedRows
+import io.nisfeb.talon.ui.resizedSpan
 import io.nisfeb.talon.ui.SkyClock
 import io.nisfeb.talon.ui.Solar
 import kotlinx.coroutines.delay
@@ -140,6 +155,11 @@ fun HomeScreen(
     val unreadBy = remember(unreads) { unreads.associateBy { it.whom } }
 
     var editing by remember { mutableStateOf(false) }
+    // Where each widget ended up on screen, so a drag can work out what
+    // it is being dropped onto. Filled as they are laid out.
+    val bounds = remember { mutableStateMapOf<HomeWidgetKind, Rect>() }
+    var dragging by remember { mutableStateOf<HomeWidgetKind?>(null) }
+    var dragBy by remember { mutableStateOf(Offset.Zero) }
 
     BoxWithConstraints(modifier.fillMaxSize()) {
         // Two columns where there is room, one where there is not. A
@@ -178,24 +198,75 @@ fun HomeScreen(
             gridRows.forEach { gridRow ->
                 Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
                     gridRow.forEach { widget ->
-                        Column(
+                        val held = dragging == widget.kind
+                        Box(
                             Modifier
                                 .weight(widget.span.coerceIn(1, columns).toFloat())
                                 // A minimum rather than a fixed height:
                                 // a list told to show ten rows in one
                                 // row-unit should outgrow its box, not
                                 // have the last four clipped off.
-                                .heightIn(min = HOME_ROW_UNIT * widget.rows),
-                            verticalArrangement = Arrangement.spacedBy(6.dp),
-                        ) {
-                            if (editing) {
-                                ArrangeBar(
-                                    widget = widget,
-                                    columns = columns,
-                                    onChange = { onLayoutChanged(layout.with(it)) },
-                                    onMove = { by -> onLayoutChanged(layout.moved(widget.kind, by)) },
+                                .heightIn(min = HOME_ROW_UNIT * widget.rows)
+                                // The one being carried draws over the
+                                // rest and follows the finger.
+                                .zIndex(if (held) 1f else 0f)
+                                .graphicsLayer {
+                                    if (held) {
+                                        translationX = dragBy.x
+                                        translationY = dragBy.y
+                                        scaleX = 1.02f
+                                        scaleY = 1.02f
+                                    }
+                                }
+                                .onGloballyPositioned { bounds[widget.kind] = it.boundsInWindow() }
+                                .then(
+                                    if (!editing) Modifier else Modifier.border(
+                                        width = 1.dp,
+                                        color = if (held) {
+                                            MaterialTheme.colorScheme.primary
+                                        } else {
+                                            MaterialTheme.colorScheme.outlineVariant
+                                        },
+                                        shape = RoundedCornerShape(10.dp),
+                                    )
                                 )
-                            }
+                                .then(
+                                    if (!editing) Modifier else Modifier.pointerInput(widget.kind, layout) {
+                                        detectDragGestures(
+                                            onDragStart = {
+                                                dragging = widget.kind
+                                                dragBy = Offset.Zero
+                                            },
+                                            onDragEnd = { dragging = null; dragBy = Offset.Zero },
+                                            onDragCancel = { dragging = null; dragBy = Offset.Zero },
+                                        ) { change, delta ->
+                                            change.consume()
+                                            dragBy += delta
+                                            // Hit-tested from the middle
+                                            // of what is being carried
+                                            // rather than from the
+                                            // finger: dragging by a
+                                            // corner should still drop
+                                            // where the widget looks
+                                            // like it is.
+                                            val home = bounds[widget.kind] ?: return@detectDragGestures
+                                            val at = home.center + dragBy
+                                            val over = bounds.entries.firstOrNull { (k, r) ->
+                                                k != widget.kind && r.contains(at) &&
+                                                    layout[k].visible
+                                            }?.key
+                                            if (over != null) {
+                                                onLayoutChanged(layout.movedTo(widget.kind, over))
+                                                // It has just been put
+                                                // where the finger is,
+                                                // so the offset starts
+                                                // again from there.
+                                                dragBy = Offset.Zero
+                                            }
+                                        }
+                                    }
+                                ),
+                        ) {
                             WidgetBody(
                                 widget = widget,
                                 recent = recent,
@@ -218,6 +289,16 @@ fun HomeScreen(
                                 onOpenContact = onOpenContact,
                                 onOpenStatuses = onOpenStatuses,
                             )
+                            if (editing && !held) {
+                                ResizeHandles(
+                                    widget = widget,
+                                    columns = columns,
+                                    onResize = { onLayoutChanged(layout.with(it)) },
+                                    onRemove = {
+                                        onLayoutChanged(layout.with(widget.copy(visible = false)))
+                                    },
+                                )
+                            }
                         }
                     }
                 }
@@ -229,72 +310,121 @@ fun HomeScreen(
 /** One grid row's worth of height. Two of them is about a dial. */
 private val HOME_ROW_UNIT = 168.dp
 
+/** How big a handle has to be to be hit with a thumb. */
+private val HANDLE = 26.dp
+
 /**
- * The controls over each widget while the page is being arranged.
+ * The grips on a widget's edges while the page is being arranged.
  *
- * Buttons rather than dragging. Dragging a resizable tile is a great
- * deal of machinery and a fiddly thing to land on a phone; four arrows
- * and a cross say the same and can be hit with a thumb.
+ * A right edge for width, a bottom edge for height, a corner for both,
+ * and a cross to take the thing off the page. Dragging the widget
+ * itself moves it; these only resize, which is why they sit on the
+ * edges where nothing else wants the pointer.
+ *
+ * Each snaps to whole grid units. The grid is two columns by three
+ * rows, so a handle that followed the finger continuously would only
+ * ever be settling back onto one of a handful of positions.
  */
 @Composable
-private fun ArrangeBar(
+private fun BoxScope.ResizeHandles(
     widget: HomeWidget,
     columns: Int,
-    onChange: (HomeWidget) -> Unit,
-    onMove: (Int) -> Unit,
+    onResize: (HomeWidget) -> Unit,
+    onRemove: () -> Unit,
 ) {
-    Surface(
-        color = MaterialTheme.colorScheme.secondaryContainer,
-        shape = RoundedCornerShape(8.dp),
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        Row(
-            Modifier.padding(horizontal = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                title(widget.kind),
-                style = MaterialTheme.typography.labelMedium,
-                modifier = Modifier.weight(1f).padding(start = 8.dp),
+    // Measured rather than assumed: the column width is whatever the
+    // window gave this widget divided by how many columns it spans.
+    var cellWidthPx by remember { mutableStateOf(0f) }
+    val rowUnitPx = with(LocalDensity.current) { HOME_ROW_UNIT.toPx() }
+    val grip = MaterialTheme.colorScheme.primary
+
+    Box(
+        Modifier.matchParentSize().onGloballyPositioned {
+            cellWidthPx = it.size.width.toFloat() / widget.span.coerceAtLeast(1)
+        },
+    )
+
+    // Width. Pointless where there is only one column to have.
+    if (columns > 1) {
+        Grip(
+            Modifier.align(Alignment.CenterEnd),
+            grip,
+            onDrag = { total ->
+                onResize(widget.copy(span = resizedSpan(widget.span, total.x, cellWidthPx, columns)))
+            },
+        )
+    }
+    Grip(
+        Modifier.align(Alignment.BottomCenter),
+        grip,
+        onDrag = { total ->
+            onResize(widget.copy(rows = resizedRows(widget.rows, total.y, rowUnitPx)))
+        },
+    )
+    Grip(
+        Modifier.align(Alignment.BottomEnd),
+        grip,
+        corner = true,
+        onDrag = { total ->
+            onResize(
+                widget.copy(
+                    span = resizedSpan(widget.span, total.x, cellWidthPx, columns),
+                    rows = resizedRows(widget.rows, total.y, rowUnitPx),
+                ),
             )
-            IconButton(onClick = { onMove(-1) }) {
-                Icon(Icons.Filled.KeyboardArrowUp, "Move earlier", Modifier.size(18.dp))
-            }
-            IconButton(onClick = { onMove(1) }) {
-                Icon(Icons.Filled.KeyboardArrowDown, "Move later", Modifier.size(18.dp))
-            }
-            // Only worth offering where there are two columns to span.
-            if (columns > 1) {
-                IconButton(
-                    enabled = widget.span > 1,
-                    onClick = { onChange(widget.copy(span = widget.span - 1)) },
-                ) {
-                    Icon(Icons.Filled.KeyboardArrowLeft, "Narrower", Modifier.size(18.dp))
+        },
+    )
+
+    IconButton(
+        onClick = onRemove,
+        modifier = Modifier.align(Alignment.TopEnd).size(HANDLE),
+    ) {
+        Icon(
+            Icons.Filled.Close,
+            contentDescription = "Take ${title(widget.kind)} off the home page",
+            modifier = Modifier.size(16.dp),
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+/**
+ * One grip.
+ *
+ * The drag is reported as a running total from where it started rather
+ * than as a delta, because the size it maps to is absolute: a handful
+ * of pixels either side of a snap point would otherwise ratchet the
+ * widget across the grid instead of settling it.
+ */
+@Composable
+private fun Grip(
+    modifier: Modifier,
+    color: androidx.compose.ui.graphics.Color,
+    corner: Boolean = false,
+    onDrag: (Offset) -> Unit,
+) {
+    var total by remember { mutableStateOf(Offset.Zero) }
+    Box(
+        modifier
+            .size(HANDLE)
+            .pointerInput(Unit) {
+                detectDragGestures(
+                    onDragStart = { total = Offset.Zero },
+                    onDragEnd = { total = Offset.Zero },
+                    onDragCancel = { total = Offset.Zero },
+                ) { change, delta ->
+                    change.consume()
+                    total += delta
+                    onDrag(total)
                 }
-                IconButton(
-                    enabled = widget.span < HOME_COLUMNS,
-                    onClick = { onChange(widget.copy(span = widget.span + 1)) },
-                ) {
-                    Icon(Icons.Filled.KeyboardArrowRight, "Wider", Modifier.size(18.dp))
-                }
-            }
-            IconButton(
-                enabled = widget.rows > HOME_ROW_RANGE.first,
-                onClick = { onChange(widget.copy(rows = widget.rows - 1)) },
-            ) {
-                Text("\u2013", style = MaterialTheme.typography.labelLarge)
-            }
-            Text("${widget.rows}", style = MaterialTheme.typography.labelSmall)
-            IconButton(
-                enabled = widget.rows < HOME_ROW_RANGE.last,
-                onClick = { onChange(widget.copy(rows = widget.rows + 1)) },
-            ) {
-                Text("+", style = MaterialTheme.typography.labelLarge)
-            }
-            IconButton(onClick = { onChange(widget.copy(visible = false)) }) {
-                Icon(Icons.Filled.Close, "Take off the home page", Modifier.size(18.dp))
-            }
-        }
+            },
+        contentAlignment = Alignment.Center,
+    ) {
+        Box(
+            Modifier
+                .size(if (corner) 14.dp else 10.dp)
+                .background(color, RoundedCornerShape(3.dp)),
+        )
     }
 }
 

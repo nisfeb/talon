@@ -2,6 +2,7 @@ package io.nisfeb.talon.ui
 
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import kotlin.math.roundToInt
 
 /**
  * What sits on the home page, in what order, at what size.
@@ -101,6 +102,24 @@ data class HomeLayout(val widgets: List<HomeWidget> = emptyList()) {
     }
 
     /**
+     * [kind] taken out and put back where [target] currently sits.
+     *
+     * What a drag actually means: the thing in your hand goes where
+     * the thing you are hovering over is, and that one shuffles along.
+     * Expressed against the whole list rather than the visible part,
+     * so a hidden widget keeps its place in the order.
+     */
+    fun movedTo(kind: HomeWidgetKind, target: HomeWidgetKind): HomeLayout {
+        if (kind == target) return this
+        val from = widgets.indexOfFirst { it.kind == kind }
+        val to = widgets.indexOfFirst { it.kind == target }
+        if (from < 0 || to < 0) return this
+        val next = widgets.toMutableList()
+        next.add(to, next.removeAt(from))
+        return copy(widgets = next)
+    }
+
+    /**
      * Every kind present exactly once, clamped, with anything the
      * stored copy never heard of appended switched off.
      *
@@ -162,6 +181,28 @@ fun packRows(shown: List<HomeWidget>, columns: Int): List<List<HomeWidget>> {
         }
     }
     return rows
+}
+
+/**
+ * Where a sideways drag of [dragPx] leaves a widget that started at
+ * [startSpan], given a column [unitPx] wide.
+ *
+ * Snapped to whole columns: the grid has two of them and a widget that
+ * followed the finger continuously would only ever be settling back
+ * onto one of two positions anyway. Rounding means the handle flips at
+ * the half-way mark, which is where it looks like it should.
+ */
+fun resizedSpan(startSpan: Int, dragPx: Float, unitPx: Float, columns: Int): Int {
+    if (unitPx <= 0f) return startSpan.coerceIn(1, columns)
+    val steps = (dragPx / unitPx).roundToInt()
+    return (startSpan + steps).coerceIn(1, columns.coerceAtLeast(1))
+}
+
+/** The same, downwards, in row units. */
+fun resizedRows(startRows: Int, dragPx: Float, unitPx: Float): Int {
+    if (unitPx <= 0f) return startRows.coerceIn(HOME_ROW_RANGE.first, HOME_ROW_RANGE.last)
+    val steps = (dragPx / unitPx).roundToInt()
+    return (startRows + steps).coerceIn(HOME_ROW_RANGE.first, HOME_ROW_RANGE.last)
 }
 
 /**
