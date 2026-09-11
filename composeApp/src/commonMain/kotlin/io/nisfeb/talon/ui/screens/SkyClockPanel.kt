@@ -27,7 +27,11 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.text.TextMeasurer
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.dp
 import io.nisfeb.talon.ui.SkyClock
 import kotlin.math.PI
@@ -93,14 +97,12 @@ fun SkyClockDial(
         label = "twilight",
     )
 
-    val tempColor by animateColorAsState(
-        targetValue = tempRing(sky),
-        animationSpec = tween(2_000),
-        label = "temp",
-    )
     val faceColor = MaterialTheme.colorScheme.surface
     val inkColor = MaterialTheme.colorScheme.onSurface
     val markColor = MaterialTheme.colorScheme.onSurfaceVariant
+    val measurer = rememberTextMeasurer()
+    val labelStyle = MaterialTheme.typography.labelSmall
+        .copy(fontWeight = FontWeight.SemiBold, color = markColor)
 
     Box(modifier, contentAlignment = Alignment.Center) {
         Box(Modifier.fillMaxWidth().aspectRatio(1f).widthIn(max = 320.dp)) {
@@ -137,35 +139,20 @@ fun SkyClockDial(
                 // ring, or it paints over them.
                 drawCircle(color = faceColor, radius = radius - ring / 2f, center = centre)
 
-                // How warm it is, as a thin ring inside the sky.
-                if (sky.currentC != null) {
-                    val tw = ring * 0.22f
-                    val r = radius - ring / 2f - tw
-                    drawCircle(
-                        color = tempColor,
-                        radius = r,
-                        center = centre,
-                        style = Stroke(width = tw),
-                    )
-                }
-
-                // The high and low, on the temperature ring.
+                // The high and low, as graduations on the sky ring
+                // with a letter each.
                 //
-                // They were neutral ticks across the sky band once, and
-                // read as scratches on the dial: nothing about a grey bar
-                // says "this is when it was warmest", and the one at dawn
-                // cut the night band like damage. Here, position says
-                // when and colour says how warm — the same palette the
-                // ring itself uses. The face-coloured surround keeps a
-                // mark from vanishing into a ring of its own warmth,
-                // which is exactly what a high near the current
-                // temperature would otherwise do.
-                if (sky.currentC != null) {
-                    val tw = ring * 0.22f
-                    val r = radius - ring / 2f - tw
-                    sky.highAtMinute?.let { mark(it, centre, r, tw, warmthColor(sky.highC), faceColor) }
-                    if (sky.marksDistinct) {
-                        sky.lowAtMinute?.let { mark(it, centre, r, tw, warmthColor(sky.lowC), faceColor) }
+                // Unlabelled ticks were the first thing anyone asked
+                // about — a grey bar says nothing about what it marks,
+                // whether it sits on the sky or on a ring of its own.
+                // A letter answers the question on the face of it, which
+                // no amount of colour was going to do.
+                sky.highAtMinute?.let {
+                    graduation(it, "H", centre, radius, ring, markColor, measurer, labelStyle)
+                }
+                if (sky.marksDistinct) {
+                    sky.lowAtMinute?.let {
+                        graduation(it, "L", centre, radius, ring, markColor, measurer, labelStyle)
                     }
                 }
 
@@ -252,17 +239,37 @@ private fun pointOn(angleDeg: Float, centre: Offset, radius: Float): Offset {
     return Offset(centre.x + radius * cos(rad), centre.y + radius * sin(rad))
 }
 
-private fun DrawScope.mark(
+/**
+ * One graduation on the sky ring, with its letter just inside.
+ *
+ * The tick spans the ring's own width the way a clock's hour mark
+ * does, so it reads as part of the dial rather than as something laid
+ * across it. The letter sits on the plain face, where nothing behind
+ * it can swallow it.
+ */
+private fun DrawScope.graduation(
     minute: Int,
+    label: String,
     centre: Offset,
-    ringRadius: Float,
-    ringWidth: Float,
+    radius: Float,
+    ring: Float,
     color: Color,
-    surround: Color,
+    measurer: TextMeasurer,
+    style: TextStyle,
 ) {
-    val p = pointOn(SkyClock.angleOf(minute), centre, ringRadius)
-    drawCircle(color = surround, radius = ringWidth * 0.86f, center = p)
-    drawCircle(color = color, radius = ringWidth * 0.52f, center = p)
+    val a = SkyClock.angleOf(minute)
+    drawLine(
+        color = color,
+        start = pointOn(a, centre, radius - ring * 0.5f),
+        end = pointOn(a, centre, radius + ring * 0.5f),
+        strokeWidth = ring * 0.09f,
+    )
+    val laid = measurer.measure(label, style)
+    val p = pointOn(a, centre, radius - ring * 0.5f - laid.size.height * 0.60f)
+    drawText(
+        laid,
+        topLeft = Offset(p.x - laid.size.width / 2f, p.y - laid.size.height / 2f),
+    )
 }
 
 // ---- the palette -------------------------------------------------------
@@ -280,10 +287,6 @@ private val DAY_COLD = Color(0xFF86BEEC)
 private val DAY_WARM = Color(0xFF5C86D8)
 private val DAY_OVERCAST = Color(0xFF9AA4B0)
 
-private val TEMP_COLD = Color(0xFF4E8FD6)
-private val TEMP_MILD = Color(0xFFB9BFC6)
-private val TEMP_HOT = Color(0xFFD9553C)
-
 private val NIGHT_BASE = Color(0xFF11131A)
 private val NIGHT_OVERCAST = Color(0xFF2A2F38)
 
@@ -299,22 +302,6 @@ private fun dayBand(sky: SkyClock.Sky): Color {
     // Cloud drains the colour rather than painting grey over it, so an
     // overcast afternoon reads as flat instead of as a different hour.
     return lerp(nudged, DAY_OVERCAST, sky.overcast * 0.8f)
-}
-
-/**
- * The red/blue shift for temperature, on its own ring inside the sky.
- *
- * Separate because the two facts are separate: the outer ring is what
- * time it is and the inner one is how warm. Folding them into a single
- * band made a mild afternoon render purple, which says nothing about
- * either.
- */
-private fun tempRing(sky: SkyClock.Sky): Color = warmthColor(sky.currentC)
-
-/** A temperature as its colour, cold blue through mild grey to hot red. */
-private fun warmthColor(celsius: Double?): Color {
-    val w = SkyClock.warmth(celsius)
-    return if (w >= 0f) lerp(TEMP_MILD, TEMP_HOT, w) else lerp(TEMP_MILD, TEMP_COLD, -w)
 }
 
 private fun nightBand(sky: SkyClock.Sky): Color =
