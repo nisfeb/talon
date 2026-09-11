@@ -58,6 +58,8 @@ class FileUiSettings(
         val activeRailTab: String = RailTab.Chats.name,
         val smartSearchPreferred: Boolean = false,
         val homePlace: String = "",
+        val homeFahrenheit: Boolean = true,
+        val homeTwentyFourHour: Boolean = false,
         val railItemOrder: List<String> = emptyList(),
         val powerFeaturesEnabled: Boolean = false,
         val density: String = Density.Comfortable.name,
@@ -152,6 +154,22 @@ class FileUiSettings(
     override fun setHomePlace(encoded: String) {
         if (_homePlace.value == encoded) return
         _homePlace.value = encoded
+        persistCurrent()
+    }
+
+    private val _homeFahrenheit = MutableStateFlow(initial.homeFahrenheit)
+    override val homeFahrenheit: StateFlow<Boolean> = _homeFahrenheit.asStateFlow()
+    override fun setHomeFahrenheit(on: Boolean) {
+        if (_homeFahrenheit.value == on) return
+        _homeFahrenheit.value = on
+        persistCurrent()
+    }
+
+    private val _homeTwentyFourHour = MutableStateFlow(initial.homeTwentyFourHour)
+    override val homeTwentyFourHour: StateFlow<Boolean> = _homeTwentyFourHour.asStateFlow()
+    override fun setHomeTwentyFourHour(on: Boolean) {
+        if (_homeTwentyFourHour.value == on) return
+        _homeTwentyFourHour.value = on
         persistCurrent()
     }
 
@@ -271,6 +289,8 @@ class FileUiSettings(
                 activeRailTab = _activeRailTab.value.name,
                 smartSearchPreferred = _smartSearchPreferred.value,
                 homePlace = _homePlace.value,
+                homeFahrenheit = _homeFahrenheit.value,
+                homeTwentyFourHour = _homeTwentyFourHour.value,
                 railItemOrder = _railItemOrder.value.map { it.name },
                 powerFeaturesEnabled = _powerFeaturesEnabled.value,
                 density = _density.value.name,

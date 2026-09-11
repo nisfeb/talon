@@ -111,6 +111,20 @@ interface UiSettings {
      */
     val homePlace: StateFlow<String>
     fun setHomePlace(encoded: String)
+
+    /**
+     * How the home dial reads out temperature and the hour.
+     *
+     * Per install, like the place: which units somebody reads is a fact
+     * about them and their device, not about the ship they are logged
+     * into. Defaults match where the app has most of its users rather
+     * than where most of the world is, so the setting exists precisely
+     * so everyone else can put it right once.
+     */
+    val homeFahrenheit: StateFlow<Boolean>
+    fun setHomeFahrenheit(on: Boolean)
+    val homeTwentyFourHour: StateFlow<Boolean>
+    fun setHomeTwentyFourHour(on: Boolean)
     fun setSmartSearchPreferred(preferred: Boolean)
 
     /**
@@ -296,6 +310,14 @@ class InMemoryUiSettings(
     private val _homePlace = MutableStateFlow("")
     override val homePlace: StateFlow<String> = _homePlace.asStateFlow()
     override fun setHomePlace(encoded: String) { _homePlace.value = encoded }
+
+    private val _homeFahrenheit = MutableStateFlow(true)
+    override val homeFahrenheit: StateFlow<Boolean> = _homeFahrenheit.asStateFlow()
+    override fun setHomeFahrenheit(on: Boolean) { _homeFahrenheit.value = on }
+
+    private val _homeTwentyFourHour = MutableStateFlow(false)
+    override val homeTwentyFourHour: StateFlow<Boolean> = _homeTwentyFourHour.asStateFlow()
+    override fun setHomeTwentyFourHour(on: Boolean) { _homeTwentyFourHour.value = on }
 
     private val _smartSearchPreferred = MutableStateFlow(initialSmartSearchPreferred)
     override val smartSearchPreferred: StateFlow<Boolean> =

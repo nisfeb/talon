@@ -82,15 +82,25 @@ fun HomeScreen(
     ourShip: String,
     /** Where the dial thinks you are, or null before anyone has said. */
     place: HomePlace? = null,
-    /** Today's weather for a place. Null leaves the dial showing the
-     *  day and saying nothing about the temperature. */
-    weatherFor: io.nisfeb.talon.ui.WeatherLookup? = null,
+    /**
+     * Today's weather, or null before anything has fetched it.
+     *
+     * Passed in rather than fetched here. This screen is torn down
+     * every time somebody looks at their messages, so state kept
+     * inside it comes back empty: the dial would redraw with no
+     * weather, then pop when the answer arrived. It lives above the
+     * navigation instead, and comes back ready.
+     */
+    weather: SkyClock.Sky? = null,
     /** Ask the device where it is. Null where it cannot say, which is
      *  desktop and a refused permission alike. */
     onUseDeviceLocation: (suspend () -> Result<HomePlace>)? = null,
     /** Turn a typed place into coordinates, or null for coordinates only. */
     placeLookup: io.nisfeb.talon.ui.PlaceLookup? = null,
     onPlacePicked: (HomePlace) -> Unit = {},
+    /** How the dial reads out. Set in Settings, under Home. */
+    fahrenheit: Boolean = true,
+    twentyFourHour: Boolean = false,
     onOpenConversation: (whom: String) -> Unit,
     onOpenChats: () -> Unit,
     onOpenMailThread: (threadId: String) -> Unit,
@@ -128,7 +138,8 @@ fun HomeScreen(
                 Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
                     Box(Modifier.weight(1f)) {
                         ClockWeatherPanel(
-                            place, weatherFor, onUseDeviceLocation, placeLookup, onPlacePicked,
+                            place, weather, onUseDeviceLocation, placeLookup, onPlacePicked,
+                            fahrenheit, twentyFourHour,
                         )
                     }
                     Column(
@@ -142,7 +153,8 @@ fun HomeScreen(
                 }
             } else {
                 ClockWeatherPanel(
-                    place, weatherFor, onUseDeviceLocation, placeLookup, onPlacePicked,
+                    place, weather, onUseDeviceLocation, placeLookup, onPlacePicked,
+                    fahrenheit, twentyFourHour,
                 )
                 ChatsPanel(recent, unreadBy, contacts, ourShip, onOpenConversation, onOpenChats)
                 MailPanel(mail, contacts, onOpenMailThread, onOpenMail)
@@ -343,30 +355,15 @@ private fun MailPanel(
 @Composable
 private fun ClockWeatherPanel(
     place: HomePlace?,
-    weatherFor: io.nisfeb.talon.ui.WeatherLookup?,
+    weather: SkyClock.Sky?,
     onUseDeviceLocation: (suspend () -> Result<HomePlace>)?,
     placeLookup: io.nisfeb.talon.ui.PlaceLookup?,
     onPlacePicked: (HomePlace) -> Unit,
+    fahrenheit: Boolean,
+    twentyFourHour: Boolean,
 ) {
     var picking by remember { mutableStateOf(false) }
-    var weather by remember { mutableStateOf<SkyClock.Sky?>(null) }
     var nowMsState by remember { mutableStateOf(nowMs()) }
-
-    // Refetched when the place changes and then every half hour, which
-    // is finer than the forecast grid updates. A page somebody leaves
-    // open all day should not be a page that talks to a server all day.
-    LaunchedEffect(place, weatherFor) {
-        val look = weatherFor
-        if (place == null || look == null) {
-            weather = null
-            return@LaunchedEffect
-        }
-        while (true) {
-            look(place).onSuccess { weather = it }
-            delay(30 * 60_000L)
-        }
-    }
-
     LaunchedEffect(Unit) {
         while (true) {
             delay(10_000)
@@ -388,8 +385,8 @@ private fun ClockWeatherPanel(
         ) {
             SkyClockDial(
                 sky = sky,
-                fahrenheit = true,
-                twentyFourHour = false,
+                fahrenheit = fahrenheit,
+                twentyFourHour = twentyFourHour,
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp),
             )
             TextButton(onClick = { picking = true }, modifier = Modifier.padding(top = 4.dp)) {
@@ -456,6 +453,19 @@ internal fun skyFor(atMs: Long, place: HomePlace?, weather: SkyClock.Sky?): SkyC
         moonElongationDeg = io.nisfeb.talon.ui.Moon.phaseAt(atMs).elongationDeg,
     )
 }
+
+/** How long a forecast is good for. Finer than the model updates. */
+internal const val WEATHER_MAX_AGE_MS = 30 * 60_000L
+
+/**
+ * Whether what we have is old enough to ask again.
+ *
+ * Never fetched counts as stale, and so does a clock that has gone
+ * backwards: a machine that woke with a corrected time should refetch
+ * rather than sit on an answer it now believes is from the future.
+ */
+internal fun weatherIsStale(fetchedAtMs: Long, nowMs: Long): Boolean =
+    fetchedAtMs <= 0L || nowMs < fetchedAtMs || nowMs - fetchedAtMs >= WEATHER_MAX_AGE_MS
 
 /**
  * The clock the dial runs on.

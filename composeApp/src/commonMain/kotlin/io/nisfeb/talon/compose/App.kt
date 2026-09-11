@@ -912,6 +912,33 @@ fun App(
         val placeLookup = remember(http) { io.nisfeb.talon.ui.OpenMeteoPlaces(http).asLookup() }
         val deviceLocation = io.nisfeb.talon.ui.rememberDeviceLocation()
         val weatherFor = remember(http) { io.nisfeb.talon.ui.OpenMeteoWeather(http).asLookup() }
+        val homeFahrenheit by uiSettings.homeFahrenheit.collectAsState()
+        val homeTwentyFourHour by uiSettings.homeTwentyFourHour.collectAsState()
+
+        // Kept here rather than inside HomeScreen, which is torn down
+        // every time somebody looks at their messages. Held below the
+        // navigation it came back empty, so the dial redrew with no
+        // weather and then popped when the answer landed. Up here it is
+        // already waiting, and the panel's own cross-fades carry any
+        // change that arrived while it was away.
+        var homeWeather by remember { mutableStateOf<io.nisfeb.talon.ui.SkyClock.Sky?>(null) }
+        LaunchedEffect(homePlace, weatherFor) {
+            val where = homePlace
+            if (where == null) {
+                homeWeather = null
+                return@LaunchedEffect
+            }
+            var fetchedAt = 0L
+            while (true) {
+                if (io.nisfeb.talon.ui.screens.weatherIsStale(fetchedAt, nowMs())) {
+                    weatherFor(where).onSuccess {
+                        homeWeather = it
+                        fetchedAt = nowMs()
+                    }
+                }
+                delay(60_000L)
+            }
+        }
         val mailAvailability by mailRepo.availability.collectAsState()
         // Null until the nexus answers, so nothing offers mail on a ship
         // that has none.
@@ -2833,7 +2860,9 @@ fun App(
                                         // manual-fallback case by default.
                                         onUseDeviceLocation = deviceLocation,
                                         placeLookup = placeLookup,
-                                        weatherFor = weatherFor,
+                                        weather = homeWeather,
+                                        fahrenheit = homeFahrenheit,
+                                        twentyFourHour = homeTwentyFourHour,
                                         onPlacePicked = { p ->
                                             uiSettings.setHomePlace(
                                                 io.nisfeb.talon.ui.HomePlaceCodec.encode(p),

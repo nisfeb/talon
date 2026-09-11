@@ -121,6 +121,22 @@ class AndroidUiSettings(
         prefs.edit().putString(KEY_HOME_PLACE, encoded).apply()
     }
 
+    private val _homeFahrenheit = MutableStateFlow(prefs.getBoolean(KEY_HOME_FAHRENHEIT, true))
+    override val homeFahrenheit: StateFlow<Boolean> = _homeFahrenheit.asStateFlow()
+    override fun setHomeFahrenheit(on: Boolean) {
+        if (_homeFahrenheit.value == on) return
+        _homeFahrenheit.value = on
+        prefs.edit().putBoolean(KEY_HOME_FAHRENHEIT, on).apply()
+    }
+
+    private val _homeTwentyFourHour = MutableStateFlow(prefs.getBoolean(KEY_HOME_24H, false))
+    override val homeTwentyFourHour: StateFlow<Boolean> = _homeTwentyFourHour.asStateFlow()
+    override fun setHomeTwentyFourHour(on: Boolean) {
+        if (_homeTwentyFourHour.value == on) return
+        _homeTwentyFourHour.value = on
+        prefs.edit().putBoolean(KEY_HOME_24H, on).apply()
+    }
+
     private val _smartSearchPreferred = MutableStateFlow(
         prefs.getBoolean(KEY_SMART_SEARCH_PREFERRED, false),
     )
@@ -299,6 +315,8 @@ class AndroidUiSettings(
     private companion object {
         private const val KEY_HIDE_COMPOSER_BUTTONS = "hide_composer_buttons"
         private const val KEY_HOME_PLACE = "home_place"
+        private const val KEY_HOME_FAHRENHEIT = "home_fahrenheit"
+        private const val KEY_HOME_24H = "home_24h"
         private const val KEY_ACCENT_ENABLED = "accent_enabled"
         private const val KEY_ACCENT_MODE = "accent_mode"
         private const val KEY_ACCENT_HEX = "accent_hex"

@@ -48,6 +48,8 @@ import androidx.compose.ui.text.drawText
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.vector.VectorPainter
 import androidx.compose.ui.graphics.vector.rememberVectorPainter
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.dp
@@ -152,7 +154,14 @@ fun SkyClockDial(
 
     Box(modifier, contentAlignment = Alignment.Center) {
         Box(Modifier.fillMaxWidth().aspectRatio(1f).widthIn(max = 320.dp)) {
-            Canvas(Modifier.fillMaxSize()) {
+            // The richest thing on the page was a bare Canvas, which
+            // reads out as nothing at all. The numbers in the middle are
+            // separate Text and are spoken on their own; this is for
+            // what only the drawing says.
+            val spoken = dialDescription(sky, fahrenheit, twentyFourHour)
+            Canvas(
+                Modifier.fillMaxSize().semantics { contentDescription = spoken },
+            ) {
                 val ring = size.minDimension * 0.16f
                 val inset = ring / 2f
                 val box = Size(size.minDimension - ring, size.minDimension - ring)
@@ -499,6 +508,44 @@ internal fun cloudReach(w: Float, angleDeg: Float): Float {
     val halfW = w / 2f
     val halfH = w * CLOUD_GLYPH_FILL / 2f
     return halfW * abs(cos(rad)) + halfH * abs(sin(rad))
+}
+
+/**
+ * The dial, in words.
+ *
+ * Everything the drawing carries and the centre text does not: whether
+ * the sun is up, when it rises or sets, and what the sky is doing. Not
+ * the time or the temperature — those are Text already and would be
+ * read out twice.
+ */
+internal fun dialDescription(
+    sky: SkyClock.Sky,
+    fahrenheit: Boolean,
+    twentyFourHour: Boolean,
+): String {
+    fun at(m: Int) = SkyClock.clockLabel(m, twentyFourHour)
+    val parts = mutableListOf<String>()
+    parts += when {
+        sky.polar && sky.polarDay -> "The sun does not set today"
+        sky.polar -> "The sun does not rise today"
+        sky.sunUp -> "The sun is up. It set" + "s at ${at(sky.sunsetMinute)}"
+        else -> "The sun is down. It rises at ${at(sky.sunriseMinute)}"
+    }
+    if (!sky.polar) {
+        val h = sky.daylightMinutes / 60
+        val m = sky.daylightMinutes % 60
+        parts += "${h} hours and ${m} minutes of daylight"
+    }
+    conditionIcon(sky.condition)?.let { parts += it.second }
+    sky.highC?.let { hi ->
+        val whenAt = sky.highAtMinute?.let { " at ${at(it)}" }.orEmpty()
+        parts += "High ${SkyClock.tempLabel(hi, fahrenheit)}$whenAt"
+    }
+    sky.lowC?.let { lo ->
+        val whenAt = sky.lowAtMinute?.let { " at ${at(it)}" }.orEmpty()
+        parts += "Low ${SkyClock.tempLabel(lo, fahrenheit)}$whenAt"
+    }
+    return parts.joinToString(". ") + "."
 }
 
 /** The ring itself, as a path, for cutting things off at its edges. */

@@ -154,6 +154,8 @@ fun SettingsScreen(
     val hideComposerButtons by uiSettings.hideComposerButtons.collectAsState()
     val powerFeaturesEnabled by uiSettings.powerFeaturesEnabled.collectAsState()
     val density by uiSettings.density.collectAsState()
+    val homeFahrenheit by uiSettings.homeFahrenheit.collectAsState()
+    val homeTwentyFourHour by uiSettings.homeTwentyFourHour.collectAsState()
     val accentSettings by uiSettings.accentSettings.collectAsState()
     val groupChannelOrder by uiSettings.groupChannelOrder.collectAsState()
     val folderItemOrder by uiSettings.folderItemOrder.collectAsState()
@@ -208,6 +210,7 @@ fun SettingsScreen(
 
         val visibleTabs = buildList {
             add(SettingsTab.Appearance)
+            add(SettingsTab.Home)
             add(SettingsTab.Chats)
             if (notificationHealth != null || relayConfig != null ||
                 dailyDigestSettings != null) {
@@ -505,6 +508,59 @@ fun SettingsScreen(
             }
             Spacer(Modifier.height(8.dp))
 
+            }
+            if (safeTab == SettingsTab.Home) {
+            Text(
+                "Home",
+                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
+            )
+            // One group so far. The home page has four panels and only
+            // the dial has anything to set yet, so this is laid out as a
+            // list of groups rather than a flat run of controls — the
+            // next thing added should be another heading, not a chip
+            // dropped in beside these.
+            Text(
+                "Clock and weather",
+                style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
+                modifier = Modifier.padding(top = 4.dp),
+            )
+            Text(
+                "How the dial reads out temperature and the hour. Kept on this " +
+                    "device rather than on the ship: which units somebody reads " +
+                    "is a fact about them, not about their identity.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilterChip(
+                    selected = homeFahrenheit,
+                    onClick = { uiSettings.setHomeFahrenheit(true) },
+                    label = { Text("Fahrenheit") },
+                )
+                FilterChip(
+                    selected = !homeFahrenheit,
+                    onClick = { uiSettings.setHomeFahrenheit(false) },
+                    label = { Text("Celsius") },
+                )
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilterChip(
+                    selected = !homeTwentyFourHour,
+                    onClick = { uiSettings.setHomeTwentyFourHour(false) },
+                    label = { Text("12-hour") },
+                )
+                FilterChip(
+                    selected = homeTwentyFourHour,
+                    onClick = { uiSettings.setHomeTwentyFourHour(true) },
+                    label = { Text("24-hour") },
+                )
+            }
+            Text(
+                "The place the dial uses is set on the dial itself.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 4.dp),
+            )
             }
             if (safeTab == SettingsTab.Chats) {
             // ── Sidebar visibility ─────────────────────────────────
@@ -2130,6 +2186,7 @@ private fun SystemPromptEditorDialog(
 /** Settings groups. Order here is the rail / tab-row order. */
 private enum class SettingsTab(val label: String) {
     Appearance("Appearance"),
+    Home("Home"),
     Chats("Chats"),
     Notifications("Notifications"),
     Ai("AI"),
