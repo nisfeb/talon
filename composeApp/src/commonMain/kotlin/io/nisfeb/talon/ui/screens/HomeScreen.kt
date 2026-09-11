@@ -42,6 +42,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -51,6 +52,8 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.zIndex
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
@@ -161,6 +164,20 @@ fun HomeScreen(
     var dragging by remember { mutableStateOf<HomeWidgetKind?>(null) }
     var dragBy by remember { mutableStateOf(Offset.Zero) }
 
+    // Gesture modifiers capture their lambdas once and keep them. Keyed
+    // on the layout instead, every reorder would restart the gesture
+    // and drop the drag half way through; captured plainly, they would
+    // go on reading the layout as it was when the drag began. Held
+    // through rememberUpdatedState they stay current and the gesture
+    // stays alive.
+    val dropOver by rememberUpdatedState<(HomeWidgetKind, HomeWidgetKind) -> Unit> { moved, over ->
+        onLayoutChanged(layout.movedTo(moved, over))
+    }
+    val resizeTo by rememberUpdatedState<(HomeWidget) -> Unit> { w ->
+        onLayoutChanged(layout.with(w))
+    }
+    val isShown by rememberUpdatedState<(HomeWidgetKind) -> Boolean> { k -> layout[k].visible }
+
     BoxWithConstraints(modifier.fillMaxSize()) {
         // Two columns where there is room, one where there is not. A
         // widget set to full width on a desktop is still full width on
@@ -229,42 +246,6 @@ fun HomeScreen(
                                         },
                                         shape = RoundedCornerShape(10.dp),
                                     )
-                                )
-                                .then(
-                                    if (!editing) Modifier else Modifier.pointerInput(widget.kind, layout) {
-                                        detectDragGestures(
-                                            onDragStart = {
-                                                dragging = widget.kind
-                                                dragBy = Offset.Zero
-                                            },
-                                            onDragEnd = { dragging = null; dragBy = Offset.Zero },
-                                            onDragCancel = { dragging = null; dragBy = Offset.Zero },
-                                        ) { change, delta ->
-                                            change.consume()
-                                            dragBy += delta
-                                            // Hit-tested from the middle
-                                            // of what is being carried
-                                            // rather than from the
-                                            // finger: dragging by a
-                                            // corner should still drop
-                                            // where the widget looks
-                                            // like it is.
-                                            val home = bounds[widget.kind] ?: return@detectDragGestures
-                                            val at = home.center + dragBy
-                                            val over = bounds.entries.firstOrNull { (k, r) ->
-                                                k != widget.kind && r.contains(at) &&
-                                                    layout[k].visible
-                                            }?.key
-                                            if (over != null) {
-                                                onLayoutChanged(layout.movedTo(widget.kind, over))
-                                                // It has just been put
-                                                // where the finger is,
-                                                // so the offset starts
-                                                // again from there.
-                                                dragBy = Offset.Zero
-                                            }
-                                        }
-                                    }
                                 ),
                         ) {
                             WidgetBody(
@@ -289,15 +270,68 @@ fun HomeScreen(
                                 onOpenContact = onOpenContact,
                                 onOpenStatuses = onOpenStatuses,
                             )
-                            if (editing && !held) {
-                                ResizeHandles(
-                                    widget = widget,
-                                    columns = columns,
-                                    onResize = { onLayoutChanged(layout.with(it)) },
-                                    onRemove = {
-                                        onLayoutChanged(layout.with(widget.copy(visible = false)))
-                                    },
+
+                            if (editing) {
+                                // The move surface sits over the whole
+                                // widget, and the grips sit over that.
+                                // Overlapping siblings hit-test topmost
+                                // first, so a grip takes the pointer
+                                // outright rather than racing the move
+                                // gesture for it — which is what had
+                                // them doing nothing at all.
+                                Box(
+                                    Modifier
+                                        .matchParentSize()
+                                        .pointerInput(widget.kind) {
+                                            detectDragGestures(
+                                                onDragStart = {
+                                                    dragging = widget.kind
+                                                    dragBy = Offset.Zero
+                                                },
+                                                onDragEnd = { dragging = null; dragBy = Offset.Zero },
+                                                onDragCancel = { dragging = null; dragBy = Offset.Zero },
+                                            ) { change, delta ->
+                                                change.consume()
+                                                dragBy += delta
+                                                // Hit-tested from the
+                                                // middle of what is
+                                                // being carried rather
+                                                // than from the finger,
+                                                // so picking a widget
+                                                // up by a corner still
+                                                // drops it where it
+                                                // looks like it is.
+                                                val home = bounds[widget.kind]
+                                                    ?: return@detectDragGestures
+                                                val at = home.center + dragBy
+                                                val over = bounds.entries.firstOrNull { (k, r) ->
+                                                    k != widget.kind && r.contains(at) && isShown(k)
+                                                }?.key
+                                                if (over != null) {
+                                                    dropOver(widget.kind, over)
+                                                    // Just put where the
+                                                    // finger is, so the
+                                                    // offset starts from
+                                                    // there again.
+                                                    dragBy = Offset.Zero
+                                                }
+                                            }
+                                        },
                                 )
+                                if (!held) {
+                                    ResizeHandles(
+                                        widget = widget,
+                                        columns = columns,
+                                        // Measured, not assumed: the
+                                        // column is whatever width the
+                                        // window gave this widget over
+                                        // the columns it spans.
+                                        cellWidthPx = (bounds[widget.kind]?.width ?: 0f) /
+                                            widget.span.coerceAtLeast(1),
+                                        onResize = resizeTo,
+                                        onRemove = { resizeTo(widget.copy(visible = false)) },
+                                    )
+                                }
                             }
                         }
                     }
@@ -329,51 +363,43 @@ private val HANDLE = 26.dp
 private fun BoxScope.ResizeHandles(
     widget: HomeWidget,
     columns: Int,
+    cellWidthPx: Float,
     onResize: (HomeWidget) -> Unit,
     onRemove: () -> Unit,
 ) {
-    // Measured rather than assumed: the column width is whatever the
-    // window gave this widget divided by how many columns it spans.
-    var cellWidthPx by remember { mutableStateOf(0f) }
     val rowUnitPx = with(LocalDensity.current) { HOME_ROW_UNIT.toPx() }
     val grip = MaterialTheme.colorScheme.primary
-
-    Box(
-        Modifier.matchParentSize().onGloballyPositioned {
-            cellWidthPx = it.size.width.toFloat() / widget.span.coerceAtLeast(1)
-        },
-    )
 
     // Width. Pointless where there is only one column to have.
     if (columns > 1) {
         Grip(
             Modifier.align(Alignment.CenterEnd),
             grip,
-            onDrag = { total ->
-                onResize(widget.copy(span = resizedSpan(widget.span, total.x, cellWidthPx, columns)))
-            },
-        )
+            label = "Width of ${title(widget.kind)}",
+        ) { total ->
+            onResize(widget.copy(span = resizedSpan(widget.span, total.x, cellWidthPx, columns)))
+        }
     }
     Grip(
         Modifier.align(Alignment.BottomCenter),
         grip,
-        onDrag = { total ->
-            onResize(widget.copy(rows = resizedRows(widget.rows, total.y, rowUnitPx)))
-        },
-    )
+        label = "Height of ${title(widget.kind)}",
+    ) { total ->
+        onResize(widget.copy(rows = resizedRows(widget.rows, total.y, rowUnitPx)))
+    }
     Grip(
         Modifier.align(Alignment.BottomEnd),
         grip,
         corner = true,
-        onDrag = { total ->
-            onResize(
-                widget.copy(
-                    span = resizedSpan(widget.span, total.x, cellWidthPx, columns),
-                    rows = resizedRows(widget.rows, total.y, rowUnitPx),
-                ),
-            )
-        },
-    )
+        label = "Size of ${title(widget.kind)}",
+    ) { total ->
+        onResize(
+            widget.copy(
+                span = resizedSpan(widget.span, total.x, cellWidthPx, columns),
+                rows = resizedRows(widget.rows, total.y, rowUnitPx),
+            ),
+        )
+    }
 
     IconButton(
         onClick = onRemove,
@@ -392,22 +418,31 @@ private fun BoxScope.ResizeHandles(
  * One grip.
  *
  * The drag is reported as a running total from where it started rather
- * than as a delta, because the size it maps to is absolute: a handful
- * of pixels either side of a snap point would otherwise ratchet the
+ * than as a delta, because the size it maps to is absolute: a few
+ * pixels either side of a snap point would otherwise ratchet the
  * widget across the grid instead of settling it.
+ *
+ * [onDrag] is held through rememberUpdatedState because pointerInput
+ * keeps whatever lambda it was given when the node was made. Captured
+ * plainly, this one went on resizing against the width the widget had
+ * before it had been measured, which is zero, which is no resize at
+ * all.
  */
 @Composable
 private fun Grip(
     modifier: Modifier,
     color: androidx.compose.ui.graphics.Color,
+    label: String,
     corner: Boolean = false,
     onDrag: (Offset) -> Unit,
 ) {
-    var total by remember { mutableStateOf(Offset.Zero) }
+    val current by rememberUpdatedState(onDrag)
     Box(
         modifier
             .size(HANDLE)
+            .semantics { contentDescription = label }
             .pointerInput(Unit) {
+                var total = Offset.Zero
                 detectDragGestures(
                     onDragStart = { total = Offset.Zero },
                     onDragEnd = { total = Offset.Zero },
@@ -415,7 +450,7 @@ private fun Grip(
                 ) { change, delta ->
                     change.consume()
                     total += delta
-                    onDrag(total)
+                    current(total)
                 }
             },
         contentAlignment = Alignment.Center,
