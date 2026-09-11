@@ -52,20 +52,57 @@ class HomeLayoutTest {
 
     @Test
     fun `a key a newer build wrote does not reset the page`() {
-        val future = """{"widgets":[{"kind":"CLOCK","span":2,"somethingNew":7}],"alsoNew":"x"}"""
+        val future = """{"version":$HOME_LAYOUT_VERSION,
+            "widgets":[{"kind":"CLOCK","span":8,"somethingNew":7}],"alsoNew":"x"}"""
         val back = HomeLayoutCodec.decode(future)
-        assertEquals(2, back[HomeWidgetKind.CLOCK].span)
+        assertEquals(8, back[HomeWidgetKind.CLOCK].span, "the keys it does know still read")
     }
 
     @Test
     fun `nonsense sizes are clamped to what the grid can draw`() {
         val silly = HomeLayout(
-            listOf(HomeWidget(HomeWidgetKind.MAIL, count = 900, span = 7, rows = 99)),
+            listOf(HomeWidget(HomeWidgetKind.MAIL, count = 900, span = 70, rows = 99)),
+            version = HOME_LAYOUT_VERSION,
         ).complete()
         val w = silly[HomeWidgetKind.MAIL]
         assertEquals(HOME_COUNTS.last(), w.count)
         assertEquals(HOME_COLUMNS, w.span)
         assertEquals(HOME_ROW_RANGE.last, w.rows)
+    }
+
+    @Test
+    fun `a widget can never be a sliver`() {
+        val thin = HomeLayout(
+            listOf(HomeWidget(HomeWidgetKind.MAIL, span = 1, rows = 0)),
+            version = HOME_LAYOUT_VERSION,
+        ).complete()
+        assertEquals(HOME_SPAN_RANGE.first, thin[HomeWidgetKind.MAIL].span)
+        assertEquals(HOME_ROW_RANGE.first, thin[HomeWidgetKind.MAIL].rows)
+    }
+
+    @Test
+    fun `a page arranged on the old coarse grid keeps its proportions`() {
+        // Version 1 counted two columns and 168dp rows. Read against
+        // the finer grid without scaling, a half-width widget would
+        // come back a twelfth of the page.
+        val v1 = """{"widgets":[
+            {"kind":"CLOCK","span":1,"rows":2},
+            {"kind":"MAIL","span":2,"rows":1}
+        ]}"""
+        val back = HomeLayoutCodec.decode(v1)
+        assertEquals(HOME_COLUMNS / 2, back[HomeWidgetKind.CLOCK].span, "half stays half")
+        assertEquals(HOME_COLUMNS, back[HomeWidgetKind.MAIL].span, "full stays full")
+        assertEquals(6, back[HomeWidgetKind.CLOCK].rows, "two old rows is six new ones")
+        assertEquals(3, back[HomeWidgetKind.MAIL].rows)
+        assertEquals(HOME_LAYOUT_VERSION, back.version, "and it is written back as current")
+    }
+
+    @Test
+    fun `a current layout is not scaled a second time`() {
+        val once = HomeLayoutCodec.decode(HomeLayoutCodec.encode(HomeLayout.DEFAULT))
+        val twice = HomeLayoutCodec.decode(HomeLayoutCodec.encode(once))
+        assertEquals(once.widgets, twice.widgets)
+        assertEquals(HomeLayout.DEFAULT.widgets, once.widgets)
     }
 
     @Test
@@ -261,53 +298,68 @@ class HomeResizeTest {
 
     @Test
     fun `no drag is no change`() {
-        assertEquals(1, resizedSpan(1, 0f, col, 2))
-        assertEquals(2, resizedRows(2, 0f, row))
+        assertEquals(6, resizedSpan(6, 0f, col, HOME_COLUMNS))
+        assertEquals(4, resizedRows(4, 0f, row))
     }
 
     @Test
     fun `the handle flips at the half way mark`() {
         // Rounding, not truncation: a handle that only widened after a
         // whole column felt like it was ignoring you.
-        assertEquals(1, resizedSpan(1, col * 0.49f, col, 2))
-        assertEquals(2, resizedSpan(1, col * 0.51f, col, 2))
-        assertEquals(2, resizedRows(1, row * 0.6f, row))
+        assertEquals(6, resizedSpan(6, col * 0.49f, col, HOME_COLUMNS))
+        assertEquals(7, resizedSpan(6, col * 0.51f, col, HOME_COLUMNS))
+        assertEquals(3, resizedRows(2, row * 0.6f, row))
     }
 
     @Test
     fun `dragging back the other way shrinks`() {
-        assertEquals(1, resizedSpan(2, -col * 0.8f, col, 2))
-        assertEquals(1, resizedRows(3, -row * 1.7f, row))
+        assertEquals(5, resizedSpan(6, -col * 0.8f, col, HOME_COLUMNS))
+        assertEquals(2, resizedRows(4, -row * 1.7f, row))
     }
 
     @Test
     fun `a handle dragged off the screen stops at the edge of the grid`() {
-        assertEquals(2, resizedSpan(1, col * 50f, col, 2))
-        assertEquals(1, resizedSpan(2, -col * 50f, col, 2))
-        assertEquals(HOME_ROW_RANGE.last, resizedRows(1, row * 50f, row))
+        assertEquals(HOME_COLUMNS, resizedSpan(6, col * 50f, col, HOME_COLUMNS))
+        assertEquals(HOME_SPAN_RANGE.first, resizedSpan(6, -col * 50f, col, HOME_COLUMNS))
+        assertEquals(HOME_ROW_RANGE.last, resizedRows(3, row * 50f, row))
         assertEquals(HOME_ROW_RANGE.first, resizedRows(3, -row * 50f, row))
     }
 
     @Test
     fun `one column means a widget can only ever be one wide`() {
         assertEquals(1, resizedSpan(1, col * 10f, col, 1))
-        assertEquals(1, resizedSpan(2, col * 10f, col, 1))
+        assertEquals(1, resizedSpan(6, col * 10f, col, 1))
+    }
+
+    @Test
+    fun `the steps are fine enough to be worth dragging`() {
+        // The complaint that prompted the finer grid: two columns and
+        // three row heights meant every drag jumped half the page.
+        assertTrue(HOME_COLUMNS >= 8, "$HOME_COLUMNS columns is a step, not a grid")
+        assertTrue(HOME_SPAN_RANGE.count() >= 6, "only ${HOME_SPAN_RANGE.count()} widths on offer")
+        assertTrue(HOME_ROW_RANGE.count() >= 6, "only ${HOME_ROW_RANGE.count()} heights on offer")
+    }
+
+    @Test
+    fun `a narrow drag moves one column, not half the page`() {
+        assertEquals(7, resizedSpan(6, col, col, HOME_COLUMNS))
+        assertEquals(5, resizedSpan(6, -col, col, HOME_COLUMNS))
     }
 
     @Test
     fun `a zero sized unit does not divide by zero`() {
         // Measured from layout, so it is zero for the frame before the
         // widget has been placed.
-        assertEquals(2, resizedSpan(2, 500f, 0f, 2))
-        assertEquals(2, resizedRows(2, 500f, 0f))
+        assertEquals(6, resizedSpan(6, 500f, 0f, HOME_COLUMNS))
+        assertEquals(4, resizedRows(4, 500f, 0f))
     }
 
     @Test
     fun `every drag lands on something the grid can draw`() {
-        for (start in 1..2) {
+        for (start in HOME_SPAN_RANGE) {
             for (px in -2000..2000 step 37) {
                 val sp = resizedSpan(start, px.toFloat(), col, HOME_COLUMNS)
-                assertTrue(sp in 1..HOME_COLUMNS, "span $sp from $px")
+                assertTrue(sp in HOME_SPAN_RANGE, "span $sp from $px")
             }
         }
         for (start in HOME_ROW_RANGE) {

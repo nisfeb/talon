@@ -37,12 +37,40 @@ enum class CalendarRange(val label: String, val minutes: Int?) {
 /** The counts a list widget can be set to. */
 val HOME_COUNTS = listOf(3, 5, 8, 10)
 
-/** Columns the grid offers at its widest. Two, because three columns of
- *  five-row lists is a dashboard nobody reads. */
-const val HOME_COLUMNS = 2
+/**
+ * Columns the grid offers at its widest.
+ *
+ * Twelve because two was the size of the step, not the size of the
+ * grid: a widget could be half the page or all of it and nothing in
+ * between. Twelve divides by two, three, four and six, so the useful
+ * fractions all land on whole columns.
+ */
+const val HOME_COLUMNS = 12
+
+/**
+ * How wide a widget may be, in columns.
+ *
+ * Never narrower than a quarter of the page. A two-column widget is
+ * arithmetically possible and is a sliver nothing reads in.
+ */
+val HOME_SPAN_RANGE = 3..HOME_COLUMNS
 
 /** How tall a widget may be, in row units. */
-val HOME_ROW_RANGE = 1..3
+val HOME_ROW_RANGE = 2..12
+
+/**
+ * What the layout's numbers currently mean.
+ *
+ * Bumped when a stored span or row count would be read as the wrong
+ * size. Version 1 counted a two-column grid in 168dp rows; version 2
+ * counts twelve columns in 56dp ones, and a version 1 layout read
+ * without scaling would come back as a row of slivers.
+ */
+const val HOME_LAYOUT_VERSION = 2
+
+/** How much finer version 2 is than version 1, per axis. */
+private const val V2_COLUMN_SCALE = 6
+private const val V2_ROW_SCALE = 3
 
 @Serializable
 data class HomeWidget(
@@ -50,10 +78,10 @@ data class HomeWidget(
     val visible: Boolean = true,
     /** How many rows a list widget shows. Ignored by the clock. */
     val count: Int = 5,
-    /** Grid columns it takes, 1 or [HOME_COLUMNS]. */
-    val span: Int = 1,
+    /** Grid columns it takes, within [HOME_SPAN_RANGE]. */
+    val span: Int = HOME_COLUMNS / 2,
     /** Grid rows it takes, within [HOME_ROW_RANGE]. */
-    val rows: Int = 1,
+    val rows: Int = 3,
     val calendarRange: CalendarRange = CalendarRange.REST_OF_DAY,
     /** Ships whose status is kept at the top of the status widget,
      *  in the order they were pinned. */
@@ -63,7 +91,7 @@ data class HomeWidget(
      *  line or an older version happened to say. */
     fun sane(): HomeWidget = copy(
         count = count.coerceIn(HOME_COUNTS.first(), HOME_COUNTS.last()),
-        span = span.coerceIn(1, HOME_COLUMNS),
+        span = span.coerceIn(HOME_SPAN_RANGE.first, HOME_SPAN_RANGE.last),
         rows = rows.coerceIn(HOME_ROW_RANGE.first, HOME_ROW_RANGE.last),
         pinned = pinned.distinct().take(HOME_PINNED_MAX),
     )
@@ -73,7 +101,12 @@ data class HomeWidget(
 const val HOME_PINNED_MAX = 8
 
 @Serializable
-data class HomeLayout(val widgets: List<HomeWidget> = emptyList()) {
+data class HomeLayout(
+    val widgets: List<HomeWidget> = emptyList(),
+    /** Defaults to 1 because a layout written before versioning has no
+     *  such key, and that is exactly what it is. */
+    val version: Int = 1,
+) {
 
     /** In the order they should be drawn, skipping what is switched off. */
     val shown: List<HomeWidget> get() = widgets.filter { it.visible }
@@ -133,7 +166,7 @@ data class HomeLayout(val widgets: List<HomeWidget> = emptyList()) {
         val missing = HomeWidgetKind.entries
             .filterNot { it in seen }
             .map { HomeWidget(kind = it, visible = false) }
-        return HomeLayout(kept + missing)
+        return HomeLayout(kept + missing, version = HOME_LAYOUT_VERSION)
     }
 
     companion object {
@@ -146,12 +179,13 @@ data class HomeLayout(val widgets: List<HomeWidget> = emptyList()) {
          */
         val DEFAULT = HomeLayout(
             listOf(
-                HomeWidget(HomeWidgetKind.CLOCK, span = 1, rows = 2),
-                HomeWidget(HomeWidgetKind.MESSAGES, count = 5, span = 1, rows = 1),
-                HomeWidget(HomeWidgetKind.MAIL, count = 5, span = 1, rows = 1),
-                HomeWidget(HomeWidgetKind.CALENDAR, span = 1, rows = 1),
-                HomeWidget(HomeWidgetKind.STATUS, visible = false, count = 5),
+                HomeWidget(HomeWidgetKind.CLOCK, span = 6, rows = 6),
+                HomeWidget(HomeWidgetKind.MESSAGES, count = 5, span = 6, rows = 3),
+                HomeWidget(HomeWidgetKind.MAIL, count = 5, span = 6, rows = 3),
+                HomeWidget(HomeWidgetKind.CALENDAR, span = 6, rows = 3),
+                HomeWidget(HomeWidgetKind.STATUS, visible = false, count = 5, span = 6, rows = 3),
             ),
+            version = HOME_LAYOUT_VERSION,
         )
     }
 }
@@ -193,9 +227,11 @@ fun packRows(shown: List<HomeWidget>, columns: Int): List<List<HomeWidget>> {
  * the half-way mark, which is where it looks like it should.
  */
 fun resizedSpan(startSpan: Int, dragPx: Float, unitPx: Float, columns: Int): Int {
-    if (unitPx <= 0f) return startSpan.coerceIn(1, columns)
+    val widest = columns.coerceAtLeast(1)
+    val narrowest = HOME_SPAN_RANGE.first.coerceAtMost(widest)
+    if (unitPx <= 0f) return startSpan.coerceIn(narrowest, widest)
     val steps = (dragPx / unitPx).roundToInt()
-    return (startSpan + steps).coerceIn(1, columns.coerceAtLeast(1))
+    return (startSpan + steps).coerceIn(narrowest, widest)
 }
 
 /** The same, downwards, in row units. */
@@ -220,7 +256,27 @@ object HomeLayoutCodec {
         encodeDefaults = true
     }
 
-    fun encode(layout: HomeLayout): String = json.encodeToString(layout)
+    fun encode(layout: HomeLayout): String =
+        json.encodeToString(layout.copy(version = HOME_LAYOUT_VERSION))
+
+    /**
+     * Old numbers read as the sizes they were meant to be.
+     *
+     * A version 1 span of 1 meant half the page and a row meant 168dp.
+     * Read against the finer grid without scaling, somebody who had
+     * arranged their page would open it to find every widget shrunk to
+     * a sliver — which is a worse first impression than the feature
+     * never having existed.
+     */
+    private fun migrate(layout: HomeLayout): HomeLayout {
+        if (layout.version >= HOME_LAYOUT_VERSION) return layout
+        return layout.copy(
+            widgets = layout.widgets.map {
+                it.copy(span = it.span * V2_COLUMN_SCALE, rows = it.rows * V2_ROW_SCALE)
+            },
+            version = HOME_LAYOUT_VERSION,
+        )
+    }
 
     /** Anything unreadable falls back to the default rather than to an
      *  empty page, which would look like the feature had been removed. */
@@ -229,6 +285,6 @@ object HomeLayoutCodec {
         val parsed = runCatching { json.decodeFromString<HomeLayout>(stored) }.getOrNull()
             ?: return HomeLayout.DEFAULT
         if (parsed.widgets.isEmpty()) return HomeLayout.DEFAULT
-        return parsed.complete()
+        return migrate(parsed).complete()
     }
 }

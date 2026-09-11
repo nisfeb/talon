@@ -341,8 +341,14 @@ fun HomeScreen(
     }
 }
 
-/** One grid row's worth of height. Two of them is about a dial. */
-private val HOME_ROW_UNIT = 168.dp
+/**
+ * One grid row's worth of height.
+ *
+ * Small, because it is the size of the step rather than the size of a
+ * widget: at 168dp the only heights on offer were 168, 336 and 504,
+ * and nothing anybody wanted sat on one of them.
+ */
+private val HOME_ROW_UNIT = 56.dp
 
 /** How big a handle has to be to be hit with a thumb. */
 private val HANDLE = 26.dp
