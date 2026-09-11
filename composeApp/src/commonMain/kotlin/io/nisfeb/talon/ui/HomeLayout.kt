@@ -77,7 +77,7 @@ const val HOME_ROW_UNIT_DP = 40
  * counts twelve columns in 56dp ones, and a version 1 layout read
  * without scaling would come back as a row of slivers.
  */
-const val HOME_LAYOUT_VERSION = 3
+const val HOME_LAYOUT_VERSION = 4
 
 /** How much finer version 2 is than version 1, per axis. */
 private const val V2_COLUMN_SCALE = 6
@@ -93,6 +93,18 @@ data class HomeWidget(
     val visible: Boolean = true,
     /** How many rows a list widget shows. Ignored by the clock. */
     val count: Int = 5,
+    /**
+     * Where its top left corner sits, in columns from the left.
+     *
+     * A coordinate rather than a place in a queue. Packed from an
+     * ordered list, a widget's row was worked out rather than chosen,
+     * so there was no way to say "the calendar goes on the second row"
+     * — and the arrangement somebody saw while dragging was not the
+     * one they got when they stopped.
+     */
+    val col: Int = 0,
+    /** And in row units from the top. */
+    val row: Int = 0,
     /** Grid columns it takes, within [HOME_SPAN_RANGE]. */
     val span: Int = HOME_COLUMNS / 2,
     /** Grid rows it takes, within [HOME_ROW_RANGE]. */
@@ -104,13 +116,30 @@ data class HomeWidget(
 ) {
     /** Clamped into what the grid can actually draw, whatever a stored
      *  line or an older version happened to say. */
-    fun sane(): HomeWidget = copy(
-        count = count.coerceIn(HOME_COUNTS.first(), HOME_COUNTS.last()),
-        span = span.coerceIn(HOME_SPAN_RANGE.first, HOME_SPAN_RANGE.last),
-        rows = rows.coerceIn(HOME_ROW_RANGE.first, HOME_ROW_RANGE.last),
-        pinned = pinned.distinct().take(HOME_PINNED_MAX),
-    )
+    fun sane(): HomeWidget {
+        val w = span.coerceIn(HOME_SPAN_RANGE.first, HOME_SPAN_RANGE.last)
+        return copy(
+            count = count.coerceIn(HOME_COUNTS.first(), HOME_COUNTS.last()),
+            span = w,
+            rows = rows.coerceIn(HOME_ROW_RANGE.first, HOME_ROW_RANGE.last),
+            // Never hanging off the right-hand edge, whatever a stored
+            // line or a half-finished drag happened to say.
+            col = col.coerceIn(0, HOME_COLUMNS - w),
+            row = row.coerceAtLeast(0),
+            pinned = pinned.distinct().take(HOME_PINNED_MAX),
+        )
+    }
+
+    /** One past its right-hand column. */
+    val right: Int get() = col + span
+
+    /** One past its bottom row. */
+    val bottom: Int get() = row + rows
 }
+
+/** Whether two widgets are trying to occupy the same squares. */
+fun overlaps(a: HomeWidget, b: HomeWidget): Boolean =
+    a.col < b.right && b.col < a.right && a.row < b.bottom && b.row < a.bottom
 
 /** More pinned people than this and the widget is just a contact list. */
 const val HOME_PINNED_MAX = 8
@@ -133,39 +162,46 @@ data class HomeLayout(
         copy(widgets = widgets.map { if (it.kind == updated.kind) updated.sane() else it })
 
     /**
-     * Moved one place towards the front or back.
+     * [kind] put down with its top left corner at [col], [row].
      *
-     * Over the whole list rather than only the visible part: a hidden
-     * widget still holds a position, and stepping over it would make
-     * one press do nothing for no reason anybody could see.
+     * Whatever it lands on is pushed down out of the way, the way every
+     * dashboard grid does it: the thing in your hand goes exactly where
+     * you let go of it, and the rest gets on with accommodating that.
      */
-    fun moved(kind: HomeWidgetKind, by: Int): HomeLayout {
-        val i = widgets.indexOfFirst { it.kind == kind }
-        if (i < 0) return this
-        val j = (i + by).coerceIn(0, widgets.size - 1)
-        if (i == j) return this
-        val next = widgets.toMutableList()
-        next.add(j, next.removeAt(i))
-        return copy(widgets = next)
+    fun placed(kind: HomeWidgetKind, col: Int, row: Int): HomeLayout {
+        val moving = widgets.firstOrNull { it.kind == kind } ?: return this
+        val put = moving.copy(col = col, row = row).sane()
+        return copy(widgets = widgets.map { if (it.kind == kind) put else it })
+            .resolved(kind)
     }
 
     /**
-     * [kind] taken out and put back where [target] currently sits.
+     * Nothing on top of anything else, with [anchor] left exactly where
+     * it is and everything else shuffled downwards until it fits.
      *
-     * What a drag actually means: the thing in your hand goes where
-     * the thing you are hovering over is, and that one shuffles along.
-     * Expressed against the whole list rather than the visible part,
-     * so a hidden widget keeps its place in the order.
+     * Downwards only. Sideways would move a widget out from under the
+     * pointer that is placing it, and upwards would close the gaps
+     * somebody deliberately left.
      */
-    fun movedTo(kind: HomeWidgetKind, target: HomeWidgetKind): HomeLayout {
-        if (kind == target) return this
-        val from = widgets.indexOfFirst { it.kind == kind }
-        val to = widgets.indexOfFirst { it.kind == target }
-        if (from < 0 || to < 0) return this
-        val next = widgets.toMutableList()
-        next.add(to, next.removeAt(from))
-        return copy(widgets = next)
+    fun resolved(anchor: HomeWidgetKind?): HomeLayout {
+        val settled = mutableListOf<HomeWidget>()
+        // The anchor first so it keeps its place, then the rest from
+        // the top down so the page is rebuilt in reading order.
+        val order = widgets.filter { it.visible }
+            .sortedWith(compareBy({ it.kind != anchor }, { it.row }, { it.col }))
+        for (w in order) {
+            var cur = w.sane()
+            if (w.kind != anchor) {
+                while (settled.any { overlaps(it, cur) }) cur = cur.copy(row = cur.row + 1)
+            }
+            settled += cur
+        }
+        val byKind = settled.associateBy { it.kind }
+        return copy(widgets = widgets.map { byKind[it.kind] ?: it })
     }
+
+    /** How many row units tall the whole arrangement is. */
+    fun heightInRows(): Int = shown.maxOfOrNull { it.bottom } ?: 0
 
     /**
      * Every kind present exactly once, clamped, with anything the
@@ -194,11 +230,14 @@ data class HomeLayout(
          */
         val DEFAULT = HomeLayout(
             listOf(
-                HomeWidget(HomeWidgetKind.CLOCK, span = 6, rows = 9),
-                HomeWidget(HomeWidgetKind.MESSAGES, count = 5, span = 6, rows = 5),
-                HomeWidget(HomeWidgetKind.MAIL, count = 5, span = 6, rows = 5),
-                HomeWidget(HomeWidgetKind.CALENDAR, span = 6, rows = 4),
-                HomeWidget(HomeWidgetKind.STATUS, visible = false, count = 5, span = 6, rows = 5),
+                HomeWidget(HomeWidgetKind.CLOCK, col = 0, row = 0, span = 5, rows = 9),
+                HomeWidget(HomeWidgetKind.MESSAGES, count = 5, col = 5, row = 0, span = 7, rows = 5),
+                HomeWidget(HomeWidgetKind.MAIL, count = 5, col = 5, row = 5, span = 7, rows = 4),
+                HomeWidget(HomeWidgetKind.CALENDAR, col = 0, row = 9, span = 5, rows = 4),
+                HomeWidget(
+                    HomeWidgetKind.STATUS, visible = false, count = 5,
+                    col = 5, row = 9, span = 7, rows = 4,
+                ),
             ),
             version = HOME_LAYOUT_VERSION,
         )
@@ -206,57 +245,16 @@ data class HomeLayout(
 }
 
 /**
- * The shown widgets packed into rows of at most [columns] wide.
+ * Laid out one under another, for a window too narrow to have columns.
  *
- * Greedy, left to right, in the order the user arranged them: a widget
- * that will not fit beside what is already on the row starts the next
- * one. No shuffling to fill gaps — somebody who put mail second
- * expects to find it second, not tucked into a hole further down.
- *
- * One column means one widget per row, whatever any of them asked for.
+ * A phone has no second column to put anything in, so the coordinates
+ * collapse to their reading order and every widget takes the full
+ * width. Its height is kept, because that is a choice about the widget
+ * rather than about the grid.
  */
-fun packRows(
-    shown: List<HomeWidget>,
-    columns: Int,
-    loose: Boolean = false,
-): List<List<HomeWidget>> {
-    if (columns <= 1) return shown.map { listOf(it) }
-    val rows = mutableListOf<MutableList<HomeWidget>>()
-    var used = columns // forces the first widget to open a row
-    for (w in shown) {
-        val span = w.span.coerceIn(1, columns)
-        // Loose packing lets a widget join a row it does not quite fit
-        // on, so long as there is any room left at all. It is for while
-        // somebody is arranging: dropping a widget next to another and
-        // having it flick onto its own row, mid-drag, makes the page
-        // fight the hand moving it. Everything settles the moment they
-        // are done, because the strict pack is what draws the rest of
-        // the time.
-        val fits = if (loose) used < columns else used + span <= columns
-        if (fits) {
-            rows.last() += w
-            used += span
-        } else {
-            rows += mutableListOf(w)
-            used = span
-        }
-    }
-    return rows
-}
-
-/**
- * The columns on a row that nothing claimed.
- *
- * Load-bearing rather than cosmetic. Widths are laid out by weight, so
- * a widget alone on a row takes all of it whatever its span says: a
- * six-column widget widened to seven would jump from half the page to
- * the whole of it. Filling the remainder keeps every widget at the
- * fraction it was set to.
- */
-fun rowSpare(row: List<HomeWidget>, columns: Int): Int {
-    val used = row.sumOf { it.span.coerceIn(1, columns.coerceAtLeast(1)) }
-    return (columns - used).coerceAtLeast(0)
-}
+fun stacked(shown: List<HomeWidget>): List<HomeWidget> =
+    shown.sortedWith(compareBy({ it.row }, { it.col }))
+        .map { it.copy(col = 0, span = HOME_COLUMNS) }
 
 /**
  * Where a sideways drag of [dragPx] leaves a widget that started at
@@ -280,6 +278,26 @@ fun resizedRows(startRows: Int, dragPx: Float, unitPx: Float): Int {
     if (unitPx <= 0f) return startRows.coerceIn(HOME_ROW_RANGE.first, HOME_ROW_RANGE.last)
     val steps = (dragPx / unitPx).roundToInt()
     return (startRows + steps).coerceIn(HOME_ROW_RANGE.first, HOME_ROW_RANGE.last)
+}
+
+/**
+ * Which column and row a widget's top left corner lands in, given how
+ * far it has been dragged from where it started.
+ *
+ * Rounded, so it settles on the nearest square rather than the one it
+ * has fully entered — the same reason the resize handles round.
+ */
+fun droppedAt(
+    startCol: Int,
+    startRow: Int,
+    dragXPx: Float,
+    dragYPx: Float,
+    colPitchPx: Float,
+    rowPitchPx: Float,
+): Pair<Int, Int> {
+    val c = if (colPitchPx <= 0f) startCol else startCol + (dragXPx / colPitchPx).roundToInt()
+    val r = if (rowPitchPx <= 0f) startRow else startRow + (dragYPx / rowPitchPx).roundToInt()
+    return c to r.coerceAtLeast(0)
 }
 
 /**
@@ -330,7 +348,35 @@ object HomeLayoutCodec {
                 version = 3,
             )
         }
+        if (m.version < 4) m = m.copy(widgets = coordinatesFor(m.widgets), version = 4)
         return m.copy(version = HOME_LAYOUT_VERSION)
+    }
+
+    /**
+     * Coordinates for a layout that only had an order.
+     *
+     * Versions up to three packed an ordered list into rows greedily,
+     * so this reads that packing once and writes down where each widget
+     * actually ended up. The page somebody had opens looking the same;
+     * the difference is that from now on they can move things off it.
+     */
+    private fun coordinatesFor(widgets: List<HomeWidget>): List<HomeWidget> {
+        var col = 0
+        var row = 0
+        var tallest = 0
+        return widgets.map { w ->
+            if (!w.visible) return@map w
+            val span = w.span.coerceIn(1, HOME_COLUMNS)
+            if (col + span > HOME_COLUMNS) {
+                col = 0
+                row += tallest
+                tallest = 0
+            }
+            val placed = w.copy(col = col, row = row)
+            col += span
+            if (w.rows > tallest) tallest = w.rows
+            placed
+        }
     }
 
     /** Anything unreadable falls back to the default rather than to an

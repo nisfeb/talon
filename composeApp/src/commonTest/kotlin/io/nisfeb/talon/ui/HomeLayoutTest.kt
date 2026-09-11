@@ -125,34 +125,6 @@ class HomeLayoutTest {
     }
 
     @Test
-    fun `moving a widget changes the order`() {
-        val l = HomeLayout.DEFAULT
-        val first = l.widgets.first().kind
-        val moved = l.moved(first, 1)
-        assertEquals(first, moved.widgets[1].kind)
-        assertNotEquals(l.widgets.map { it.kind }, moved.widgets.map { it.kind })
-    }
-
-    @Test
-    fun `moving off either end does nothing rather than throwing`() {
-        val l = HomeLayout.DEFAULT
-        assertEquals(l, l.moved(l.widgets.first().kind, -1))
-        assertEquals(l, l.moved(l.widgets.last().kind, 1))
-        assertEquals(l, l.moved(l.widgets.first().kind, -50))
-    }
-
-    @Test
-    fun `moving steps over hidden widgets too`() {
-        // A hidden widget still holds a place. Skipping it would make
-        // one press do nothing for a reason nobody could see.
-        val l = HomeLayout.DEFAULT
-        val last = l.widgets.last()
-        assertTrue(!last.visible, "this test wants the default's hidden widget at the end")
-        val moved = l.moved(l.widgets[l.widgets.size - 2].kind, 1)
-        assertEquals(last.kind, moved.widgets[moved.widgets.size - 2].kind)
-    }
-
-    @Test
     fun `switching everything off is allowed and stays off`() {
         // Somebody who wants a blank home page may have one; it is only
         // an *unreadable* stored line that falls back to the default.
@@ -183,149 +155,6 @@ class HomeLayoutTest {
         for (r in CalendarRange.entries) {
             assertTrue(r.label.isNotBlank(), "$r has no label")
             r.minutes?.let { assertTrue(it > 0, "$r looks $it minutes ahead") }
-        }
-    }
-}
-
-class HomeGridTest {
-
-    private fun w(kind: HomeWidgetKind, span: Int) = HomeWidget(kind, span = span)
-    private val k = HomeWidgetKind.entries
-
-    @Test
-    fun `narrow layouts give every widget its own row`() {
-        val shown = k.map { w(it, span = 2) }
-        val rows = packRows(shown, columns = 1)
-        assertEquals(shown.size, rows.size)
-        assertTrue(rows.all { it.size == 1 })
-    }
-
-    @Test
-    fun `two single widgets share a row`() {
-        val rows = packRows(listOf(w(k[0], 1), w(k[1], 1)), columns = 2)
-        assertEquals(1, rows.size)
-        assertEquals(2, rows[0].size)
-    }
-
-    @Test
-    fun `a full width widget gets a row to itself`() {
-        val rows = packRows(listOf(w(k[0], 2), w(k[1], 1), w(k[2], 1)), columns = 2)
-        assertEquals(2, rows.size)
-        assertEquals(listOf(k[0]), rows[0].map { it.kind })
-        assertEquals(listOf(k[1], k[2]), rows[1].map { it.kind })
-    }
-
-    @Test
-    fun `no row is ever overfull`() {
-        for (spans in listOf(listOf(1, 2, 1, 1, 2), listOf(2, 2), listOf(1, 1, 1, 1, 1))) {
-            val shown = spans.mapIndexed { i, sp -> w(k[i % k.size], sp) }
-            for (row in packRows(shown, columns = HOME_COLUMNS)) {
-                assertTrue(row.sumOf { it.span } <= HOME_COLUMNS, "row ${row.map { it.span }} overflows")
-            }
-        }
-    }
-
-    @Test
-    fun `order is kept exactly`() {
-        // Somebody who put mail second expects to find it second, not
-        // shuffled into a gap further down the page.
-        val shown = listOf(w(k[0], 2), w(k[1], 1), w(k[2], 2), w(k[3], 1))
-        val flat = packRows(shown, columns = 2).flatten().map { it.kind }
-        assertEquals(shown.map { it.kind }, flat)
-    }
-
-    @Test
-    fun `a part full row leaves the rest of the columns empty`() {
-        // Widths come from weights, so a lone widget takes the whole
-        // row unless the remainder is filled. That turned one column of
-        // widening into a jump from half the page to all of it.
-        assertEquals(HOME_COLUMNS - 7, rowSpare(listOf(w(k[0], 7)), HOME_COLUMNS))
-        assertEquals(0, rowSpare(listOf(w(k[0], 6), w(k[1], 6)), HOME_COLUMNS))
-        assertEquals(0, rowSpare(listOf(w(k[0], HOME_COLUMNS)), HOME_COLUMNS))
-    }
-
-    @Test
-    fun `every packed row accounts for all its columns`() {
-        val shown = listOf(w(k[0], 7), w(k[1], 4), w(k[2], 12), w(k[3], 3), w(k[4], 3))
-        for (row in packRows(shown, HOME_COLUMNS)) {
-            val used = row.sumOf { it.span }
-            assertEquals(HOME_COLUMNS, used + rowSpare(row, HOME_COLUMNS), "row ${row.map { it.span }}")
-        }
-    }
-
-    @Test
-    fun `a spare column count is never negative`() {
-        // An overwide span is clamped by the grid, not carried through
-        // into a Spacer with a negative weight, which throws.
-        assertEquals(0, rowSpare(listOf(w(k[0], 99)), HOME_COLUMNS))
-        assertEquals(0, rowSpare(listOf(w(k[0], 9), w(k[1], 9)), HOME_COLUMNS))
-        assertEquals(0, rowSpare(listOf(w(k[0], 5)), 1))
-    }
-
-    @Test
-    fun `nothing shown is no rows, not one empty row`() {
-        assertTrue(packRows(emptyList(), columns = 2).isEmpty())
-        assertTrue(packRows(emptyList(), columns = 1).isEmpty())
-    }
-
-    @Test
-    fun `a span wider than the grid still fits on its own row`() {
-        val rows = packRows(listOf(w(k[0], 9)), columns = 2)
-        assertEquals(1, rows.size)
-        assertEquals(1, rows[0].size)
-    }
-}
-
-class HomeDragTest {
-
-    private val k = HomeWidgetKind.entries
-    private val l = HomeLayout.DEFAULT
-
-    private fun order(layout: HomeLayout) = layout.widgets.map { it.kind }
-
-    @Test
-    fun `dragging onto another widget takes its place`() {
-        val moved = l.movedTo(k.last(), k.first())
-        assertEquals(k.last(), moved.widgets.first().kind)
-    }
-
-    @Test
-    fun `the one displaced shuffles along rather than vanishing`() {
-        val moved = l.movedTo(k.last(), k.first())
-        assertEquals(order(l).size, order(moved).size)
-        assertEquals(order(l).toSet(), order(moved).toSet())
-    }
-
-    @Test
-    fun `dragging onto itself changes nothing`() {
-        assertEquals(l, l.movedTo(k[1], k[1]))
-    }
-
-    @Test
-    fun `dragging downwards lands in the right place too`() {
-        // Removing first then inserting shifts every later index by one,
-        // which is the easy way to get this off by one.
-        val first = order(l)[0]
-        val third = order(l)[2]
-        val moved = l.movedTo(first, third)
-        assertEquals(third, order(moved)[1], "the third moved up")
-        assertEquals(first, order(moved)[2], "and the first landed on its index")
-    }
-
-    @Test
-    fun `a widget nobody has heard of is ignored, not an exception`() {
-        val partial = HomeLayout(listOf(HomeWidget(k[0]), HomeWidget(k[1])))
-        assertEquals(partial, partial.movedTo(k[0], k[4]))
-        assertEquals(partial, partial.movedTo(k[4], k[0]))
-    }
-
-    @Test
-    fun `every drag leaves a layout that still draws`() {
-        var cur = l
-        for (a in k) for (b in k) {
-            cur = cur.movedTo(a, b)
-            assertEquals(k.size, cur.widgets.size, "lost a widget dragging $a onto $b")
-            assertEquals(k.toSet(), cur.widgets.map { it.kind }.toSet())
         }
     }
 }
@@ -459,58 +288,164 @@ class HomeResizeTest {
     }
 }
 
-class HomeLoosePackTest {
 
-    private fun w(kind: HomeWidgetKind, span: Int) = HomeWidget(kind, span = span)
+/**
+ * Widgets have coordinates now rather than a place in a queue.
+ *
+ * Packed from an order, a widget's row was worked out instead of
+ * chosen: there was no way to say "the calendar goes on the second
+ * row", and the arrangement somebody saw while dragging was not the
+ * one they got when they let go.
+ */
+class HomePlacementTest {
+
     private val k = HomeWidgetKind.entries
+    private fun w(kind: HomeWidgetKind, col: Int, row: Int, span: Int = 6, rows: Int = 4) =
+        HomeWidget(kind, col = col, row = row, span = span, rows = rows)
+
+    private fun layout(vararg ws: HomeWidget) = HomeLayout(ws.toList(), HOME_LAYOUT_VERSION)
 
     @Test
-    fun `a widget that does not quite fit still joins the row while arranging`() {
-        // Otherwise it flicks onto its own row mid-drag and the page
-        // fights the hand moving it.
-        val shown = listOf(w(k[0], 8), w(k[1], 8))
-        assertEquals(2, packRows(shown, HOME_COLUMNS).size, "strictly, they do not share")
-        assertEquals(1, packRows(shown, HOME_COLUMNS, loose = true).size, "loosely, they do")
+    fun `a widget goes exactly where it is put`() {
+        val l = layout(w(k[0], 0, 0), w(k[1], 6, 0))
+        val moved = l.placed(k[1], col = 3, row = 7)
+        assertEquals(3, moved[k[1]].col)
+        assertEquals(7, moved[k[1]].row)
     }
 
     @Test
-    fun `loose packing still starts a new row once one is full`() {
-        // Any room at all, not no room at all: a row that is exactly
-        // full takes nothing more.
-        val shown = listOf(w(k[0], 12), w(k[1], 3))
-        val rows = packRows(shown, HOME_COLUMNS, loose = true)
-        assertEquals(2, rows.size)
-        assertEquals(listOf(k[0]), rows[0].map { it.kind })
+    fun `the second row is reachable`() {
+        // The complaint outright: a widget could not be put on the row
+        // below, because rows were a consequence of the order.
+        val l = layout(w(k[0], 0, 0, rows = 4), w(k[1], 6, 0, rows = 4))
+        val moved = l.placed(k[1], col = 0, row = 4)
+        assertEquals(4, moved[k[1]].row)
+        assertEquals(0, moved[k[0]].row, "and the one above it did not move")
     }
 
     @Test
-    fun `an overfull row settles as soon as arranging stops`() {
-        // Nothing about the loose arrangement is stored, so the strict
-        // pack is what draws the moment the mode ends.
-        val shown = listOf(w(k[0], 8), w(k[1], 8), w(k[2], 8))
-        val loose = packRows(shown, HOME_COLUMNS, loose = true)
-        val strict = packRows(shown, HOME_COLUMNS)
-        assertTrue(loose.any { it.sumOf { x -> x.span } > HOME_COLUMNS })
-        assertTrue(strict.all { it.sumOf { x -> x.span } <= HOME_COLUMNS })
-        assertEquals(
-            shown.map { it.kind },
-            strict.flatten().map { it.kind },
-            "and the order somebody arranged survives the reflow",
+    fun `a gap somebody left is left alone`() {
+        // Nothing is pulled upwards to close it. An empty row is a
+        // choice as much as a full one.
+        val l = layout(w(k[0], 0, 0, rows = 4), w(k[1], 0, 9, rows = 4))
+        assertEquals(9, l.resolved(null)[k[1]].row)
+    }
+
+    @Test
+    fun `dropping onto something pushes it down, not sideways`() {
+        // Sideways would shove a widget out from under the pointer
+        // that is placing it.
+        val l = layout(w(k[0], 0, 0, rows = 4), w(k[1], 0, 4, rows = 4))
+        val moved = l.placed(k[0], col = 0, row = 4)
+        assertEquals(4, moved[k[0]].row, "the one in hand stays where it was dropped")
+        assertTrue(moved[k[1]].row >= 8, "and the one underneath moved down, not across")
+        assertEquals(0, moved[k[1]].col)
+    }
+
+    @Test
+    fun `nothing ever ends up on top of anything else`() {
+        val l = layout(
+            w(k[0], 0, 0, rows = 4), w(k[1], 0, 0, rows = 4),
+            w(k[2], 0, 0, rows = 4), w(k[3], 0, 0, rows = 4),
         )
-    }
-
-    @Test
-    fun `loose packing never loses a widget`() {
-        for (spans in listOf(listOf(12, 12), listOf(3, 3, 3, 3, 3), listOf(11, 2, 11))) {
-            val shown = spans.mapIndexed { i, sp -> w(k[i % k.size], sp) }
-            val flat = packRows(shown, HOME_COLUMNS, loose = true).flatten()
-            assertEquals(shown.size, flat.size, "lost one packing $spans")
+        val settled = l.resolved(k[0]).shown
+        for (i in settled.indices) {
+            for (j in i + 1 until settled.size) {
+                assertTrue(
+                    !overlaps(settled[i], settled[j]),
+                    "${settled[i].kind} and ${settled[j].kind} overlap",
+                )
+            }
         }
     }
 
     @Test
-    fun `one column ignores looseness entirely`() {
-        val shown = listOf(w(k[0], 12), w(k[1], 12))
-        assertEquals(2, packRows(shown, 1, loose = true).size)
+    fun `a hidden widget neither blocks nor is blocked`() {
+        val l = layout(w(k[0], 0, 0), HomeWidget(k[1], visible = false, col = 0, row = 0))
+        assertEquals(0, l.resolved(null)[k[0]].row)
+    }
+
+    @Test
+    fun `nothing may hang off the right hand edge`() {
+        val l = layout(w(k[0], 0, 0, span = 7))
+        assertEquals(HOME_COLUMNS - 7, l.placed(k[0], col = 11, row = 0)[k[0]].col)
+        assertEquals(0, l.placed(k[0], col = -4, row = 0)[k[0]].col)
+    }
+
+    @Test
+    fun `a widget cannot be dropped above the top`() {
+        val l = layout(w(k[0], 0, 4))
+        assertEquals(0, l.placed(k[0], col = 0, row = -3)[k[0]].row)
+    }
+
+    @Test
+    fun `the height is the lowest edge, not the widget count`() {
+        val l = layout(w(k[0], 0, 0, rows = 4), w(k[1], 6, 2, rows = 9))
+        assertEquals(11, l.heightInRows())
+        assertEquals(0, HomeLayout(emptyList()).heightInRows())
+    }
+
+    @Test
+    fun `a narrow window stacks them in reading order`() {
+        val l = layout(w(k[0], 6, 0), w(k[1], 0, 0), w(k[2], 0, 4))
+        val stack = stacked(l.shown)
+        assertEquals(listOf(k[1], k[0], k[2]), stack.map { it.kind })
+        assertTrue(stack.all { it.col == 0 && it.span == HOME_COLUMNS })
+        assertEquals(l.shown.map { it.rows }.toSet(), stack.map { it.rows }.toSet(), "heights survive")
+    }
+
+    @Test
+    fun `a page arranged before coordinates opens looking the same`() {
+        // Version 3 packed an ordered list greedily. The migration reads
+        // that packing once and writes down where each widget was.
+        val v3 = """{"version":3,"widgets":[
+            {"kind":"CLOCK","span":6,"rows":9},
+            {"kind":"MESSAGES","span":6,"rows":5},
+            {"kind":"MAIL","span":6,"rows":5},
+            {"kind":"CALENDAR","span":6,"rows":4}
+        ]}"""
+        val back = HomeLayoutCodec.decode(v3)
+        assertEquals(0 to 0, back[HomeWidgetKind.CLOCK].col to back[HomeWidgetKind.CLOCK].row)
+        assertEquals(6 to 0, back[HomeWidgetKind.MESSAGES].col to back[HomeWidgetKind.MESSAGES].row)
+        assertEquals(0 to 9, back[HomeWidgetKind.MAIL].col to back[HomeWidgetKind.MAIL].row, "second row")
+        assertEquals(6 to 9, back[HomeWidgetKind.CALENDAR].col to back[HomeWidgetKind.CALENDAR].row)
+        assertEquals(HOME_LAYOUT_VERSION, back.version)
+    }
+
+    @Test
+    fun `the default arrangement does not overlap itself`() {
+        val d = HomeLayout.DEFAULT.complete().shown
+        for (i in d.indices) {
+            for (j in i + 1 until d.size) {
+                assertTrue(!overlaps(d[i], d[j]), "${d[i].kind} sits on ${d[j].kind}")
+            }
+        }
+        assertTrue(d.all { it.right <= HOME_COLUMNS }, "something hangs off the edge")
+    }
+}
+
+class HomeDropTest {
+
+    @Test
+    fun `no drag leaves it where it was`() {
+        assertEquals(3 to 5, droppedAt(3, 5, 0f, 0f, 100f, 40f))
+    }
+
+    @Test
+    fun `it settles on the nearest square, not the one fully entered`() {
+        assertEquals(3 to 5, droppedAt(3, 5, 49f, 19f, 100f, 40f))
+        assertEquals(4 to 6, droppedAt(3, 5, 51f, 21f, 100f, 40f))
+        assertEquals(1 to 3, droppedAt(3, 5, -180f, -90f, 100f, 40f))
+    }
+
+    @Test
+    fun `it cannot be dropped above the top`() {
+        assertEquals(0, droppedAt(1, 1, 0f, -900f, 100f, 40f).second)
+    }
+
+    @Test
+    fun `an unmeasured grid does not divide by zero`() {
+        // Zero for the frame before the grid has been laid out.
+        assertEquals(3 to 5, droppedAt(3, 5, 400f, 400f, 0f, 0f))
     }
 }

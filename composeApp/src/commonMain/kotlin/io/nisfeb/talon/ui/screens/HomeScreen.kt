@@ -81,9 +81,10 @@ import io.nisfeb.talon.ui.HomeLayout
 import io.nisfeb.talon.ui.HomePlace
 import io.nisfeb.talon.ui.HomeWidget
 import io.nisfeb.talon.ui.HomeWidgetKind
-import io.nisfeb.talon.ui.packRows
+import io.nisfeb.talon.ui.droppedAt
 import io.nisfeb.talon.ui.resizedRows
 import io.nisfeb.talon.ui.resizedSpan
+import io.nisfeb.talon.ui.stacked
 import io.nisfeb.talon.ui.SkyClock
 import io.nisfeb.talon.ui.Solar
 import kotlinx.coroutines.delay
@@ -164,37 +165,35 @@ fun HomeScreen(
     val unreadBy = remember(unreads) { unreads.associateBy { it.whom } }
 
     var editing by remember { mutableStateOf(false) }
-    // Where each widget ended up on screen, so a drag can work out what
-    // it is being dropped onto. Filled as they are laid out.
-    val bounds = remember { mutableStateMapOf<HomeWidgetKind, Rect>() }
     var dragging by remember { mutableStateOf<HomeWidgetKind?>(null) }
     var dragBy by remember { mutableStateOf(Offset.Zero) }
+    // Where the widget was when the drag began. The running offset is
+    // measured from there, so it has to be added to there.
+    var dragFrom by remember { mutableStateOf(0 to 0) }
 
-    // Gesture modifiers capture their lambdas once and keep them. Keyed
-    // on the layout instead, every reorder would restart the gesture
-    // and drop the drag half way through; captured plainly, they would
-    // go on reading the layout as it was when the drag began. Held
-    // through rememberUpdatedState they stay current and the gesture
-    // stays alive.
-    val dropOver by rememberUpdatedState<(HomeWidgetKind, HomeWidgetKind) -> Unit> { moved, over ->
-        onLayoutChanged(layout.movedTo(moved, over))
+    // Gesture modifiers keep whatever lambda they were made with. Keyed
+    // on the layout they would restart on every change and drop the
+    // drag; captured plainly they would go on reading a stale layout.
+    val put by rememberUpdatedState<(HomeWidgetKind, Int, Int) -> Unit> { kind, col, row ->
+        onLayoutChanged(layout.placed(kind, col, row))
     }
     val resizeTo by rememberUpdatedState<(HomeWidget) -> Unit> { w ->
-        onLayoutChanged(layout.with(w))
+        onLayoutChanged(layout.with(w).resolved(w.kind))
     }
-    val isShown by rememberUpdatedState<(HomeWidgetKind) -> Boolean> { k -> layout[k].visible }
 
     BoxWithConstraints(modifier.fillMaxSize()) {
-        // Two columns where there is room, one where there is not. A
-        // widget set to full width on a desktop is still full width on
-        // a phone; it just has nothing to sit beside.
-        val columns = if (maxWidth >= 820.dp) HOME_COLUMNS else 1
-        // Loose while arranging, so a widget can be dropped somewhere
-        // it does not quite fit. Nothing about that is stored, so the
-        // strict pack reflows it the moment arranging stops.
-        val gridRows = remember(layout, columns, editing) {
-            packRows(layout.shown, columns, loose = editing)
+        // A phone has no second column to put anything in, so the
+        // coordinates collapse to reading order and everything runs
+        // full width.
+        val wide = maxWidth >= 820.dp
+        val placedWidgets = remember(layout, wide) {
+            if (wide) layout.shown.sortedWith(compareBy({ it.row }, { it.col }))
+            else stacked(layout.shown)
         }
+        val guideBand = MaterialTheme.colorScheme.primary.copy(alpha = 0.030f)
+        val guideLine = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.20f)
+        var colPitch by remember { mutableStateOf(0f) }
+        val rowPitch = with(LocalDensity.current) { HOME_ROW_UNIT.toPx() }
 
         Column(
             Modifier
@@ -211,9 +210,8 @@ fun HomeScreen(
                     modifier = Modifier.weight(1f),
                 )
                 // No Arrange button. A long press on any widget starts
-                // it, which is the gesture people already try on a
-                // page of tiles; a permanent button for a mode nobody
-                // is in most of the time is a worse trade.
+                // it, which is the gesture people already try on a page
+                // of tiles.
                 if (editing) {
                     TextButton(onClick = { editing = false }) { Text("Done") }
                 }
@@ -227,209 +225,204 @@ fun HomeScreen(
                 )
             }
 
-            val guideBand = MaterialTheme.colorScheme.primary.copy(alpha = 0.030f)
-            val guideLine = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.20f)
-
-            gridRows.forEach { gridRow ->
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(GRID_GAP),
-                    modifier = if (!editing) Modifier else Modifier.drawBehind {
-                        // Drawn per row rather than once behind the
-                        // page, because that is the only place both
-                        // axes are true: the columns are this row's own
-                        // widths, and a widget's height is counted from
-                        // the top of the row it sits on. A lattice over
-                        // the whole page would line up for the first
-                        // row and lie about every one after it.
-                        val gap = GRID_GAP.toPx()
-                        val colWidth = (size.width - gap * (columns - 1)) / columns
-                        for (i in 0 until columns) {
-                            drawRect(
-                                color = guideBand,
-                                topLeft = Offset(i * (colWidth + gap), 0f),
-                                size = Size(colWidth, size.height),
-                            )
-                        }
-                        val unit = HOME_ROW_UNIT.toPx()
-                        var y = unit
-                        while (y < size.height) {
-                            drawLine(
-                                color = guideLine,
-                                start = Offset(0f, y),
-                                end = Offset(size.width, y),
-                                strokeWidth = 1f,
-                            )
-                            y += unit
-                        }
-                    },
-                ) {
-                    gridRow.forEach { widget ->
-                        // Keyed, so Compose keeps each widget's state
-                        // with the widget rather than with the position
-                        // in the row. Without it a reorder handed one
-                        // widget's half-finished drag to whichever one
-                        // slid into its place, which is how two of them
-                        // ended up drawn on top of each other.
-                        key(widget.kind) {
-                        val held = dragging == widget.kind
-                        // A drag that is interrupted by the widget
-                        // leaving the page never gets its onDragEnd, so
-                        // it would stay lifted and offset forever.
-                        DisposableEffect(widget.kind) {
-                            onDispose {
-                                if (dragging == widget.kind) {
-                                    dragging = null
-                                    dragBy = Offset.Zero
-                                }
+            HomeGrid(
+                widgets = placedWidgets,
+                columns = HOME_COLUMNS,
+                rowUnit = HOME_ROW_UNIT,
+                gap = GRID_GAP,
+                onColumnPitch = { colPitch = it },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    // One lattice over the whole page now, because every
+                    // widget sits on the same grid rather than in a row
+                    // of its own working out.
+                    .then(
+                        if (!editing) Modifier else Modifier.drawBehind {
+                            val gap = GRID_GAP.toPx()
+                            val colWidth = (size.width - gap * (HOME_COLUMNS - 1)) / HOME_COLUMNS
+                            for (i in 0 until HOME_COLUMNS) {
+                                drawRect(
+                                    color = guideBand,
+                                    topLeft = Offset(i * (colWidth + gap), 0f),
+                                    size = Size(colWidth, size.height),
+                                )
+                            }
+                            var y = rowPitch
+                            while (y < size.height) {
+                                drawLine(
+                                    color = guideLine,
+                                    start = Offset(0f, y),
+                                    end = Offset(size.width, y),
+                                    strokeWidth = 1f,
+                                )
+                                y += rowPitch
                             }
                         }
+                    ),
+            ) { widget ->
+                val held = dragging == widget.kind
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        .zIndex(if (held) 1f else 0f)
+                        .graphicsLayer {
+                            if (held) {
+                                translationX = dragBy.x
+                                translationY = dragBy.y
+                                scaleX = 1.02f
+                                scaleY = 1.02f
+                            }
+                        }
+                        .then(
+                            if (editing) Modifier else Modifier.pointerInput(Unit) {
+                                detectTapGestures(onLongPress = { editing = true })
+                            }
+                        )
+                        .then(
+                            if (!editing) Modifier else Modifier.border(
+                                width = 1.dp,
+                                color = if (held) {
+                                    MaterialTheme.colorScheme.primary
+                                } else {
+                                    MaterialTheme.colorScheme.outlineVariant
+                                },
+                                shape = RoundedCornerShape(10.dp),
+                            )
+                        ),
+                ) {
+                    WidgetBody(
+                        widget = widget,
+                        recent = recent,
+                        unreadBy = unreadBy,
+                        contacts = contacts,
+                        ourShip = ourShip,
+                        mail = mail,
+                        statuses = statuses,
+                        place = place,
+                        weather = weather,
+                        fahrenheit = fahrenheit,
+                        twentyFourHour = twentyFourHour,
+                        onUseDeviceLocation = onUseDeviceLocation,
+                        placeLookup = placeLookup,
+                        onPlacePicked = onPlacePicked,
+                        onOpenConversation = onOpenConversation,
+                        onOpenChats = onOpenChats,
+                        onOpenMailThread = onOpenMailThread,
+                        onOpenMail = onOpenMail,
+                        onOpenContact = onOpenContact,
+                        onOpenStatuses = onOpenStatuses,
+                        onLongPress = { editing = true },
+                    )
+
+                    if (editing) {
+                        // The move surface sits over the whole widget
+                        // and the grips sit over that. Overlapping
+                        // siblings hit-test topmost first, so a grip
+                        // takes the pointer outright rather than racing
+                        // the move gesture for it.
                         Box(
                             Modifier
-                                .weight(widget.span.coerceIn(1, columns).toFloat())
-                                // A minimum rather than a fixed height:
-                                // a list told to show ten rows in one
-                                // row-unit should outgrow its box, not
-                                // have the last four clipped off.
-                                .heightIn(min = HOME_ROW_UNIT * widget.rows)
-                                // The one being carried draws over the
-                                // rest and follows the finger.
-                                .zIndex(if (held) 1f else 0f)
-                                .graphicsLayer {
-                                    if (held) {
-                                        translationX = dragBy.x
-                                        translationY = dragBy.y
-                                        scaleX = 1.02f
-                                        scaleY = 1.02f
-                                    }
-                                }
-                                .onGloballyPositioned { bounds[widget.kind] = it.boundsInWindow() }
-                                // Catches the panel's own background,
-                                // its heading and the dial. The rows
-                                // inside carry their own long press,
-                                // because a plain clickable fires its
-                                // click on release however long it was
-                                // held, which would arrange the page
-                                // and then navigate away from it.
-                                .then(
-                                    if (editing) Modifier else Modifier.pointerInput(Unit) {
-                                        detectTapGestures(onLongPress = { editing = true })
-                                    }
-                                )
-                                .then(
-                                    if (!editing) Modifier else Modifier.border(
-                                        width = 1.dp,
-                                        color = if (held) {
-                                            MaterialTheme.colorScheme.primary
-                                        } else {
-                                            MaterialTheme.colorScheme.outlineVariant
+                                .matchParentSize()
+                                .pointerInput(widget.kind) {
+                                    detectDragGestures(
+                                        onDragStart = {
+                                            dragging = widget.kind
+                                            dragBy = Offset.Zero
+                                            dragFrom = widget.col to widget.row
                                         },
-                                        shape = RoundedCornerShape(10.dp),
-                                    )
-                                ),
-                        ) {
-                            WidgetBody(
+                                        onDragEnd = { dragging = null; dragBy = Offset.Zero },
+                                        onDragCancel = { dragging = null; dragBy = Offset.Zero },
+                                    ) { change, delta ->
+                                        change.consume()
+                                        dragBy += delta
+                                        val (c, r) = droppedAt(
+                                            startCol = dragFrom.first,
+                                            startRow = dragFrom.second,
+                                            dragXPx = dragBy.x,
+                                            dragYPx = dragBy.y,
+                                            colPitchPx = colPitch,
+                                            rowPitchPx = rowPitch,
+                                        )
+                                        if (c != widget.col || r != widget.row) {
+                                            put(widget.kind, c, r)
+                                            // It has just been moved to
+                                            // where the pointer is, so
+                                            // the offset and the origin
+                                            // both start again there.
+                                            dragFrom = c to r
+                                            dragBy = Offset.Zero
+                                        }
+                                    }
+                                },
+                        )
+                        if (!held) {
+                            ResizeHandles(
                                 widget = widget,
-                                recent = recent,
-                                unreadBy = unreadBy,
-                                contacts = contacts,
-                                ourShip = ourShip,
-                                mail = mail,
-                                statuses = statuses,
-                                place = place,
-                                weather = weather,
-                                fahrenheit = fahrenheit,
-                                twentyFourHour = twentyFourHour,
-                                onUseDeviceLocation = onUseDeviceLocation,
-                                placeLookup = placeLookup,
-                                onPlacePicked = onPlacePicked,
-                                onOpenConversation = onOpenConversation,
-                                onOpenChats = onOpenChats,
-                                onOpenMailThread = onOpenMailThread,
-                                onOpenMail = onOpenMail,
-                                onOpenContact = onOpenContact,
-                                onOpenStatuses = onOpenStatuses,
-                                onLongPress = { editing = true },
+                                columns = HOME_COLUMNS,
+                                cellWidthPx = colPitch,
+                                onResize = resizeTo,
+                                onRemove = { resizeTo(widget.copy(visible = false)) },
                             )
-
-                            if (editing) {
-                                // The move surface sits over the whole
-                                // widget, and the grips sit over that.
-                                // Overlapping siblings hit-test topmost
-                                // first, so a grip takes the pointer
-                                // outright rather than racing the move
-                                // gesture for it — which is what had
-                                // them doing nothing at all.
-                                Box(
-                                    Modifier
-                                        .matchParentSize()
-                                        .pointerInput(widget.kind) {
-                                            detectDragGestures(
-                                                onDragStart = {
-                                                    dragging = widget.kind
-                                                    dragBy = Offset.Zero
-                                                },
-                                                onDragEnd = { dragging = null; dragBy = Offset.Zero },
-                                                onDragCancel = { dragging = null; dragBy = Offset.Zero },
-                                            ) { change, delta ->
-                                                change.consume()
-                                                dragBy += delta
-                                                // Hit-tested from the
-                                                // middle of what is
-                                                // being carried rather
-                                                // than from the finger,
-                                                // so picking a widget
-                                                // up by a corner still
-                                                // drops it where it
-                                                // looks like it is.
-                                                val home = bounds[widget.kind]
-                                                    ?: return@detectDragGestures
-                                                val at = home.center + dragBy
-                                                val over = bounds.entries.firstOrNull { (k, r) ->
-                                                    k != widget.kind && r.contains(at) && isShown(k)
-                                                }?.key
-                                                if (over != null) {
-                                                    dropOver(widget.kind, over)
-                                                    // Just put where the
-                                                    // finger is, so the
-                                                    // offset starts from
-                                                    // there again.
-                                                    dragBy = Offset.Zero
-                                                }
-                                            }
-                                        },
-                                )
-                                if (!held) {
-                                    ResizeHandles(
-                                        widget = widget,
-                                        columns = columns,
-                                        // Measured, not assumed: the
-                                        // column is whatever width the
-                                        // window gave this widget over
-                                        // the columns it spans.
-                                        cellWidthPx = (bounds[widget.kind]?.width ?: 0f) /
-                                            widget.span.coerceAtLeast(1),
-                                        onResize = resizeTo,
-                                        onRemove = { resizeTo(widget.copy(visible = false)) },
-                                    )
-                                }
-                            }
-                        }
                         }
                     }
-                    // The columns nobody claimed.
-                    //
-                    // Without this a widget alone on a row stretched to
-                    // fill it, so widening from six columns to seven
-                    // jumped it from half the page to all of it — which
-                    // is not a finer grid, it is the same two sizes
-                    // with more numbers.
-                    val spare = io.nisfeb.talon.ui.rowSpare(gridRow, columns)
-                    if (spare > 0) Spacer(Modifier.weight(spare.toFloat()))
                 }
             }
         }
     }
 }
+
+/**
+ * The widgets, each at its own coordinates.
+ *
+ * A plain layout rather than rows of weights. Rows were the whole
+ * trouble: a widget's row was worked out from the order and its width,
+ * so the page could not be told where to put anything, and the loose
+ * packing that made dragging bearable drew an arrangement that
+ * rearranged itself the moment dragging stopped.
+ */
+@Composable
+private fun HomeGrid(
+    widgets: List<HomeWidget>,
+    columns: Int,
+    rowUnit: androidx.compose.ui.unit.Dp,
+    gap: androidx.compose.ui.unit.Dp,
+    onColumnPitch: (Float) -> Unit,
+    modifier: Modifier = Modifier,
+    cell: @Composable (HomeWidget) -> Unit,
+) {
+    androidx.compose.ui.layout.Layout(
+        modifier = modifier,
+        content = { widgets.forEach { w -> key(w.kind) { cell(w) } } },
+    ) { measurables, constraints ->
+        val gapPx = gap.roundToPx()
+        val unitPx = rowUnit.roundToPx()
+        val width = constraints.maxWidth
+        val colWidth = (width - gapPx * (columns - 1)).toFloat() / columns
+        onColumnPitch(colWidth + gapPx)
+
+        val placeables = measurables.mapIndexed { i, m ->
+            val w = widgets[i]
+            m.measure(
+                androidx.compose.ui.unit.Constraints.fixed(
+                    width = (w.span * colWidth + (w.span - 1) * gapPx).toInt().coerceAtLeast(0),
+                    // A gap's worth is left below each widget, so the
+                    // spacing comes out of the grid rather than being
+                    // added on top of it and pushing every row out of
+                    // step with the guides.
+                    height = (w.rows * unitPx - gapPx).coerceAtLeast(0),
+                ),
+            )
+        }
+        val height = widgets.maxOfOrNull { it.bottom * unitPx } ?: 0
+        layout(width, height.coerceAtLeast(0)) {
+            placeables.forEachIndexed { i, p ->
+                val w = widgets[i]
+                p.place((w.col * (colWidth + gapPx)).toInt(), w.row * unitPx)
+            }
+        }
+    }
+}
+
 
 /**
  * One grid row's worth of height.
