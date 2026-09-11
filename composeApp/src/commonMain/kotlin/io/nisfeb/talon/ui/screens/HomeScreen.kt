@@ -3,6 +3,7 @@ package io.nisfeb.talon.ui.screens
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -443,9 +444,14 @@ private val HOME_ROW_UNIT = io.nisfeb.talon.ui.HOME_ROW_UNIT_DP.dp
  *  to subtract exactly the same gaps the layout adds. */
 private val GRID_GAP = 14.dp
 
-/** Roughly what the clock panel spends on padding and its location
- *  button, above and below the dial itself. */
-private val DIAL_CHROME = 76.dp
+/** The most the clock panel spends on padding and its location line,
+ *  above and below the dial itself. */
+private val DIAL_CHROME = 34.dp
+
+/** And the most of a short widget it may take. A flat allowance ate
+ *  nearly the whole of the smallest cell, which is what left the
+ *  smallest dial a dot and made the next one look twice its size. */
+private const val DIAL_CHROME_SHARE = 0.22f
 
 /**
  * How big the dial may be in a clock widget [rows] units tall.
@@ -460,8 +466,15 @@ private val DIAL_CHROME = 76.dp
  * refused to offer. The readout inside thins out to suit whatever size
  * it ends up at, which is what a floor was standing in for.
  */
-internal fun dialSizeFor(rows: Int): androidx.compose.ui.unit.Dp =
-    (HOME_ROW_UNIT * rows - DIAL_CHROME).coerceAtLeast(0.dp)
+internal fun dialSizeFor(rows: Int): androidx.compose.ui.unit.Dp {
+    val cell = HOME_ROW_UNIT * rows
+    // Proportional while the cell is short, fixed once there is room.
+    // Taken flat it was most of the smallest cell, so the dial began
+    // near nothing and one row unit of drag nearly doubled it: a step
+    // of ninety per cent where the cell itself grew by thirty.
+    val chrome = minOf(DIAL_CHROME, cell * DIAL_CHROME_SHARE)
+    return (cell - chrome).coerceAtLeast(0.dp)
+}
 
 /** How big a handle has to be to be hit with a thumb. */
 private val HANDLE = 26.dp
@@ -886,7 +899,7 @@ private fun ClockWeatherPanel(
         modifier = Modifier.fillMaxWidth(),
     ) {
         Column(
-            Modifier.padding(vertical = 18.dp),
+            Modifier.padding(vertical = 6.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             SkyClockDial(
@@ -894,14 +907,22 @@ private fun ClockWeatherPanel(
                 fahrenheit = fahrenheit,
                 twentyFourHour = twentyFourHour,
                 maxSize = maxDial,
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp),
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp),
             )
-            TextButton(onClick = { picking = true }, modifier = Modifier.padding(top = 4.dp)) {
-                Text(
-                    place?.label ?: "Set a location",
-                    style = MaterialTheme.typography.labelMedium,
-                )
-            }
+            // A line of text rather than a button. A Material button
+            // carries a forty-eight dip touch target, and on the
+            // shortest clock that was more of the widget than the dial
+            // itself got.
+            Text(
+                place?.label ?: "Set a location",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.primary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier
+                    .clickable { picking = true }
+                    .padding(horizontal = 12.dp, vertical = 2.dp),
+            )
             if (place == null) {
                 Text(
                     "Without one the dial shows an even day and no weather.",

@@ -27,17 +27,41 @@ class DialSizeTest {
     }
 
     @Test
-    fun `each step is one row unit and no more`() {
-        // The complaint that started this: one row unit of drag doubled
-        // the widget.
+    fun `no step is bigger than a row unit`() {
         for (rows in HOME_ROW_RANGE.first until HOME_ROW_RANGE.last) {
             val step = dialSizeFor(rows + 1).value - dialSizeFor(rows).value
-            assertEquals(
-                HOME_ROW_UNIT_DP.toFloat(),
-                step,
-                0.01f,
+            assertTrue(
+                step <= HOME_ROW_UNIT_DP.toFloat() + 0.01f,
+                "going from $rows to ${rows + 1} rows grows the dial by ${step}dp",
             )
         }
+    }
+
+    @Test
+    fun `the smallest steps are no worse than the cells they come from`() {
+        // The complaint that started this: one row unit of drag nearly
+        // doubled the dial, because a flat chrome allowance ate most of
+        // the smallest cell and the dial began near nothing. The dial's
+        // proportions have to track the cell's own.
+        for (rows in HOME_ROW_RANGE.first until HOME_ROW_RANGE.last) {
+            val dialStep = dialSizeFor(rows + 1).value / dialSizeFor(rows).value
+            val cellStep = (rows + 1).toFloat() / rows
+            assertTrue(
+                dialStep <= cellStep * 1.1f,
+                "at $rows rows the dial grows by ${(dialStep - 1) * 100}% " +
+                    "where the cell grows by ${(cellStep - 1) * 100}%",
+            )
+        }
+    }
+
+    @Test
+    fun `the smallest dial is not a dot`() {
+        val smallest = dialSizeFor(HOME_ROW_RANGE.first)
+        val cell = HOME_ROW_RANGE.first * HOME_ROW_UNIT_DP
+        assertTrue(
+            smallest.value > cell * 0.7f,
+            "the shortest clock gives the dial ${smallest.value}dp of its ${cell}dp",
+        )
     }
 
     @Test
@@ -45,7 +69,7 @@ class DialSizeTest {
         // A window dragged narrow takes the dial continuously down to
         // nothing and back up, so a floor or a ceiling on the arranged
         // size is a limit the app visibly does not honour elsewhere.
-        assertTrue(dialSizeFor(HOME_ROW_RANGE.first).value < 60f, "the smallest is not small")
+        assertTrue(dialSizeFor(HOME_ROW_RANGE.first).value < 120f, "the smallest is not small")
         assertTrue(dialSizeFor(HOME_ROW_RANGE.last).value > 500f, "the largest is not large")
     }
 
