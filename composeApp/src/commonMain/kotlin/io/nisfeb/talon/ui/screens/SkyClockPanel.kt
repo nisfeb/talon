@@ -33,14 +33,18 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.text.TextMeasurer
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.drawText
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.graphics.vector.VectorPainter
+import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.dp
@@ -131,6 +135,10 @@ fun SkyClockDial(
         animationSpec = tween(2_000),
         label = "cloud",
     )
+    // The same glyph the condition line uses, painted onto the ring.
+    // Three overlapping circles were a good enough cloud for a
+    // thumbnail and an obvious three circles at this size.
+    val cloudPainter = rememberVectorPainter(Icons.Filled.Cloud)
     val faceColor = MaterialTheme.colorScheme.surface
     val inkColor = MaterialTheme.colorScheme.onSurface
     val markColor = MaterialTheme.colorScheme.onSurfaceVariant
@@ -176,7 +184,7 @@ fun SkyClockDial(
                 // who already knows that is what it means; puffs say it
                 // to everybody, and they say it at night too, where a
                 // drained night band looks the same as a clear one.
-                drawClouds(centre, radius, ring, cloudiness)
+                drawClouds(centre, radius, ring, cloudiness, cloudPainter)
                 // Laid down before anything that sits inside the sky
                 // ring, or it paints over them.
                 drawCircle(color = faceColor, radius = radius - ring / 2f, center = centre)
@@ -411,23 +419,31 @@ private val CLOUD_SLOTS = floatArrayOf(
     34f, 196f, 108f, 274f, 72f, 232f, 148f, 312f, 12f, 168f,
 )
 
-private fun DrawScope.drawClouds(centre: Offset, radius: Float, ring: Float, cover: Float) {
+private fun DrawScope.drawClouds(
+    centre: Offset,
+    radius: Float,
+    ring: Float,
+    cover: Float,
+    painter: VectorPainter,
+) {
     if (cover <= 0.05f) return
     val count = (cover * CLOUD_SLOTS.size).roundToInt().coerceIn(1, CLOUD_SLOTS.size)
+    // The glyph sits inside its own 24-square with room above and
+    // below, so the box is drawn wider than the band to put the cloud
+    // itself at about the band's height.
+    val box = ring * 1.3f
     // Thin enough that the band still reads through them, which is
     // what cloud actually looks like from underneath.
-    val paint = Color.White.copy(alpha = 0.16f + 0.26f * cover)
-    val r = ring * 0.17f
+    val tint = ColorFilter.tint(Color.White)
+    val alpha = (0.20f + 0.30f * cover).coerceIn(0f, 1f)
+    // Upright wherever they sit, like the H and L: a cloud rotated to
+    // the ring reads as a decoration going round a dial rather than as
+    // weather.
     for (i in 0 until count) {
-        val a = CLOUD_SLOTS[i]
-        val rad = (a - 90f) * PI.toFloat() / 180f
-        val p = pointOn(a, centre, radius)
-        // Along the ring, not across it: a puff that spread radially
-        // would poke out of the band at both edges.
-        val t = Offset(-sin(rad), cos(rad))
-        drawCircle(paint, r, p)
-        drawCircle(paint, r * 0.66f, Offset(p.x - t.x * r * 1.05f, p.y - t.y * r * 1.05f))
-        drawCircle(paint, r * 0.58f, Offset(p.x + t.x * r * 1.05f, p.y + t.y * r * 1.05f))
+        val p = pointOn(CLOUD_SLOTS[i], centre, radius)
+        translate(p.x - box / 2f, p.y - box / 2f) {
+            with(painter) { draw(Size(box, box), alpha = alpha, colorFilter = tint) }
+        }
     }
 }
 
