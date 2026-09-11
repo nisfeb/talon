@@ -911,6 +911,7 @@ fun App(
         // note on the class about what leaves the machine.
         val placeLookup = remember(http) { io.nisfeb.talon.ui.OpenMeteoPlaces(http).asLookup() }
         val deviceLocation = io.nisfeb.talon.ui.rememberDeviceLocation()
+        val weatherFor = remember(http) { io.nisfeb.talon.ui.OpenMeteoWeather(http).asLookup() }
         val mailAvailability by mailRepo.availability.collectAsState()
         // Null until the nexus answers, so nothing offers mail on a ship
         // that has none.
@@ -2832,6 +2833,7 @@ fun App(
                                         // manual-fallback case by default.
                                         onUseDeviceLocation = deviceLocation,
                                         placeLookup = placeLookup,
+                                        weatherFor = weatherFor,
                                         onPlacePicked = { p ->
                                             uiSettings.setHomePlace(
                                                 io.nisfeb.talon.ui.HomePlaceCodec.encode(p),

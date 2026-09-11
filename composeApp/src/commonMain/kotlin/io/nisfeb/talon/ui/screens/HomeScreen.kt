@@ -82,8 +82,9 @@ fun HomeScreen(
     ourShip: String,
     /** Where the dial thinks you are, or null before anyone has said. */
     place: HomePlace? = null,
-    /** Today's weather, or null before a source exists. */
-    weather: SkyClock.Sky? = null,
+    /** Today's weather for a place. Null leaves the dial showing the
+     *  day and saying nothing about the temperature. */
+    weatherFor: io.nisfeb.talon.ui.WeatherLookup? = null,
     /** Ask the device where it is. Null where it cannot say, which is
      *  desktop and a refused permission alike. */
     onUseDeviceLocation: (suspend () -> Result<HomePlace>)? = null,
@@ -127,7 +128,7 @@ fun HomeScreen(
                 Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
                     Box(Modifier.weight(1f)) {
                         ClockWeatherPanel(
-                            place, weather, onUseDeviceLocation, placeLookup, onPlacePicked,
+                            place, weatherFor, onUseDeviceLocation, placeLookup, onPlacePicked,
                         )
                     }
                     Column(
@@ -141,7 +142,7 @@ fun HomeScreen(
                 }
             } else {
                 ClockWeatherPanel(
-                    place, weather, onUseDeviceLocation, placeLookup, onPlacePicked,
+                    place, weatherFor, onUseDeviceLocation, placeLookup, onPlacePicked,
                 )
                 ChatsPanel(recent, unreadBy, contacts, ourShip, onOpenConversation, onOpenChats)
                 MailPanel(mail, contacts, onOpenMailThread, onOpenMail)
@@ -342,13 +343,30 @@ private fun MailPanel(
 @Composable
 private fun ClockWeatherPanel(
     place: HomePlace?,
-    weather: SkyClock.Sky?,
+    weatherFor: io.nisfeb.talon.ui.WeatherLookup?,
     onUseDeviceLocation: (suspend () -> Result<HomePlace>)?,
     placeLookup: io.nisfeb.talon.ui.PlaceLookup?,
     onPlacePicked: (HomePlace) -> Unit,
 ) {
     var picking by remember { mutableStateOf(false) }
+    var weather by remember { mutableStateOf<SkyClock.Sky?>(null) }
     var nowMsState by remember { mutableStateOf(nowMs()) }
+
+    // Refetched when the place changes and then every half hour, which
+    // is finer than the forecast grid updates. A page somebody leaves
+    // open all day should not be a page that talks to a server all day.
+    LaunchedEffect(place, weatherFor) {
+        val look = weatherFor
+        if (place == null || look == null) {
+            weather = null
+            return@LaunchedEffect
+        }
+        while (true) {
+            look(place).onSuccess { weather = it }
+            delay(30 * 60_000L)
+        }
+    }
+
     LaunchedEffect(Unit) {
         while (true) {
             delay(10_000)
