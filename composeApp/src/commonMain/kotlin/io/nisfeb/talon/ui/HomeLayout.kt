@@ -217,7 +217,12 @@ data class HomeLayout(
         val missing = HomeWidgetKind.entries
             .filterNot { it in seen }
             .map { HomeWidget(kind = it, visible = false) }
-        return HomeLayout(kept + missing, version = HOME_LAYOUT_VERSION)
+        // Resolved on the way in as well as on every move. A stored
+        // line can overlap — hand-edited, or written by a migration
+        // from a model that had no coordinates — and two widgets drawn
+        // on top of each other is the one state the page cannot
+        // recover from on its own.
+        return HomeLayout(kept + missing, version = HOME_LAYOUT_VERSION).resolved(null)
     }
 
     companion object {
@@ -252,9 +257,18 @@ data class HomeLayout(
  * width. Its height is kept, because that is a choice about the widget
  * rather than about the grid.
  */
-fun stacked(shown: List<HomeWidget>): List<HomeWidget> =
-    shown.sortedWith(compareBy({ it.row }, { it.col }))
-        .map { it.copy(col = 0, span = HOME_COLUMNS) }
+fun stacked(shown: List<HomeWidget>): List<HomeWidget> {
+    var row = 0
+    return shown.sortedWith(compareBy({ it.row }, { it.col })).map { w ->
+        // Rows are reassigned, not kept. Two widgets that sat side by
+        // side shared a row perfectly well while they were half the
+        // page each; made full width and left where they were, they
+        // land on top of one another.
+        val placed = w.copy(col = 0, row = row, span = HOME_COLUMNS)
+        row += w.rows
+        placed
+    }
+}
 
 /**
  * Where a sideways drag of [dragPx] leaves a widget that started at

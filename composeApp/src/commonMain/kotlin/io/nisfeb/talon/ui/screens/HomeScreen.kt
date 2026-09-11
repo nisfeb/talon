@@ -260,6 +260,12 @@ fun HomeScreen(
                         }
                     ),
             ) { widget ->
+                // The widget as it is drawn, and the widget as it is
+                // stored. On a narrow window they differ: everything is
+                // laid out full width in reading order, and editing has
+                // to write to what is stored or a phone would flatten
+                // the arrangement made on a desktop.
+                val real = layout[widget.kind]
                 val held = dragging == widget.kind
                 Box(
                     Modifier
@@ -328,7 +334,7 @@ fun HomeScreen(
                                         onDragStart = {
                                             dragging = widget.kind
                                             dragBy = Offset.Zero
-                                            dragFrom = widget.col to widget.row
+                                            dragFrom = real.col to real.row
                                         },
                                         onDragEnd = { dragging = null; dragBy = Offset.Zero },
                                         onDragCancel = { dragging = null; dragBy = Offset.Zero },
@@ -343,13 +349,19 @@ fun HomeScreen(
                                             colPitchPx = colPitch,
                                             rowPitchPx = rowPitch,
                                         )
-                                        if (c != widget.col || r != widget.row) {
-                                            put(widget.kind, c, r)
+                                        // Sideways means nothing where
+                                        // there is one column, and a
+                                        // drag that quietly rewrote the
+                                        // stored column would undo the
+                                        // desktop arrangement.
+                                        val col = if (wide) c else real.col
+                                        if (col != real.col || r != real.row) {
+                                            put(widget.kind, col, r)
                                             // It has just been moved to
                                             // where the pointer is, so
                                             // the offset and the origin
                                             // both start again there.
-                                            dragFrom = c to r
+                                            dragFrom = col to r
                                             dragBy = Offset.Zero
                                         }
                                     }
@@ -357,11 +369,13 @@ fun HomeScreen(
                         )
                         if (!held) {
                             ResizeHandles(
-                                widget = widget,
-                                columns = HOME_COLUMNS,
+                                widget = real,
+                                // One column means no width to change,
+                                // which hides the grip for it.
+                                columns = if (wide) HOME_COLUMNS else 1,
                                 cellWidthPx = colPitch,
                                 onResize = resizeTo,
-                                onRemove = { resizeTo(widget.copy(visible = false)) },
+                                onRemove = { resizeTo(real.copy(visible = false)) },
                             )
                         }
                     }
