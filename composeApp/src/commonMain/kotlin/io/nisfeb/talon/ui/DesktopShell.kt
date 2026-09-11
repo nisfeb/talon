@@ -21,6 +21,7 @@ import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Email
+import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.MailOutline
 import androidx.compose.material.icons.filled.Notifications
@@ -256,7 +257,10 @@ private fun railIcon(item: RailItem): ImageVector? = when (item) {
     // All icons resolve to material-icons-core (verified by
     // unzipping the core jar at plan-write time). Safe with the
     // slim-jar strip; auditIconKeepList catches any drift.
-    RailItem.Chats -> Icons.Filled.Home
+    RailItem.Home -> Icons.Filled.Home
+    // Chats gave up the house to the home page and took the icon
+    // that actually means chat.
+    RailItem.Chats -> Icons.AutoMirrored.Filled.Chat
     // MailOutline is in material-icons-core, so it survives the slim
     // strip; Email is already spent on Invites.
     RailItem.Mail -> Icons.Filled.MailOutline
@@ -267,13 +271,13 @@ private fun railIcon(item: RailItem): ImageVector? = when (item) {
     RailItem.Assistant -> null
     RailItem.Profile -> Icons.Filled.AccountCircle
     RailItem.Watchwords -> Icons.Filled.Search
-    RailItem.TodaysBrief -> Icons.Filled.DateRange
     RailItem.Administration -> Icons.Filled.Build
     RailItem.Invites -> Icons.Filled.Email
     RailItem.Settings -> Icons.Filled.Settings
 }
 
 private fun railLabel(item: RailItem): String = when (item) {
+    RailItem.Home -> "Home"
     RailItem.Chats -> "Chats"
     RailItem.Mail -> "Mail"
     RailItem.Statuses -> "Statuses"
@@ -282,7 +286,6 @@ private fun railLabel(item: RailItem): String = when (item) {
     RailItem.Assistant -> "Assistant"
     RailItem.Profile -> "My profile"
     RailItem.Watchwords -> "Watchwords"
-    RailItem.TodaysBrief -> "Today's brief"
     RailItem.Administration -> "Administration"
     RailItem.Invites -> "Invites"
     RailItem.Settings -> "Settings"

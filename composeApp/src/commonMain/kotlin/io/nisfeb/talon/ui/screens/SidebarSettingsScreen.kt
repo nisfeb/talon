@@ -211,12 +211,7 @@ private fun sidebarRowState(
         fixedAlwaysOn = true,
         gatedOff = false,
     )
-    RailItem.TodaysBrief -> SidebarRowState(
-        label = "Today's brief",
-        subtitle = if (!dailyDigestEnabled) "Enable Daily Digest in Settings to use this" else null,
-        fixedAlwaysOn = false,
-        gatedOff = !dailyDigestEnabled,
-    )
+    RailItem.Home -> SidebarRowState("Home", null, false, false)
     RailItem.Mail -> SidebarRowState("Mail", null, false, false)
     RailItem.Mail -> SidebarRowState("Mail", null, false, false)
     RailItem.Statuses -> SidebarRowState("Statuses", null, false, false)

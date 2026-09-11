@@ -854,7 +854,6 @@ fun DmListScreen(
             // rail instead). The rail itself doesn't carry badges
             // today; that's a separate follow-up.
             val anyMenuBadge =
-                (hasFreshDigest && RailItem.TodaysBrief in kebabItems) ||
                 (hasFreshStatuses && RailItem.Statuses in kebabItems) ||
                 (hasPendingInvites && RailItem.Invites in kebabItems)
             Box {
@@ -951,21 +950,6 @@ fun DmListScreen(
                             onClick = {
                                 menuOpen = false
                                 onOpenWatchwords()
-                            },
-                        )
-                    }
-                    if (RailItem.TodaysBrief in kebabItems && digestEnabled) {
-                        DropdownMenuItem(
-                            text = { Text("Today's brief") },
-                            trailingIcon = {
-                                if (hasFreshDigest) MenuBadgeDot()
-                            },
-                            onClick = {
-                                menuOpen = false
-                                latestDigest?.dateLocal?.let {
-                                    menuSeen.markDigestSeen(it)
-                                }
-                                onOpenDigest()
                             },
                         )
                     }

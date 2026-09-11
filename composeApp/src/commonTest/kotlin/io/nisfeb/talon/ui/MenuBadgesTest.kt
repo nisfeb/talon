@@ -31,10 +31,12 @@ class MenuBadgesTest {
     }
 
     @Test
-    fun `digestFresh maps only to RailItem TodaysBrief`() {
+    fun `digestFresh no longer lights anything`() {
+        // The brief lost its rail entry to the home page. The flag is
+        // still carried because the digest itself still exists; it just
+        // has nothing on the rail to put a dot on.
         val b = MenuBadges(digestFresh = true)
-        assertTrue(b.forItem(RailItem.TodaysBrief))
-        for (item in RailItem.entries.filter { it != RailItem.TodaysBrief }) {
+        for (item in RailItem.entries) {
             assertFalse(b.forItem(item), "$item should not be fresh when only digest is")
         }
     }
@@ -56,7 +58,6 @@ class MenuBadgesTest {
             invitesPending = true,
         )
         assertTrue(b.forItem(RailItem.Statuses))
-        assertTrue(b.forItem(RailItem.TodaysBrief))
         assertTrue(b.forItem(RailItem.Invites))
         // Items without a freshness concept stay quiet
         for (item in listOf(

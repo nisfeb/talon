@@ -618,6 +618,10 @@ ksp {
 // belong in this list.
 val iconsExtendedKeep = setOf(
     "androidx/compose/material/icons/automirrored/filled/LogoutKt.class",
+    // The home page: a chat icon for Chats, now that Home has the house,
+    // and a calendar for the day's panel.
+    "androidx/compose/material/icons/automirrored/filled/ChatKt.class",
+    "androidx/compose/material/icons/filled/CalendarTodayKt.class",
     "androidx/compose/material/icons/filled/AttachFileKt.class",
     // The mail sidebar: a mailbox column wants mailbox icons, and core
     // has no equivalent that reads as one.

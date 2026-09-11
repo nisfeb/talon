@@ -7,7 +7,7 @@ package io.nisfeb.talon.ui
  * change for landing a new rail surface — `DesktopShell`'s list
  * resolver and the rail icon list both fan out from this enum.
  */
-enum class RailTab { Chats, Mail, Statuses, Bookmarks, Activity }
+enum class RailTab { Home, Chats, Mail, Statuses, Bookmarks, Activity }
 
 /**
  * Persistence helper. `RailTab.valueOf(name)` throws on unknown

@@ -2502,8 +2502,7 @@ fun App(
                                 // (regardless of map state) and falls back to true
                                 // for absent entries.
                                 val visible = railVisibility.isVisible(item)
-                                val gateOk = (item != RailItem.TodaysBrief || dailyDigestEnabled) &&
-                                    (item != RailItem.Assistant || assistantEnabled)
+                                val gateOk = item != RailItem.Assistant || assistantEnabled
                                 visible && gateOk
                             }
                         }
@@ -2584,8 +2583,6 @@ fun App(
                                         runCatching { repo.settingsSync?.pushStatusesSeen(now) }
                                     }
                                 }
-                                RailItem.TodaysBrief ->
-                                    railLatestDigest?.dateLocal?.let { menuSeen.markDigestSeen(it) }
                                 RailItem.Invites ->
                                     menuSeen.markInvitesSeen(railInvitesSnapshot)
                                 else -> Unit
@@ -2601,17 +2598,19 @@ fun App(
                                 RailItem.Assistant -> openAssistantAction()
                                 RailItem.Profile -> showSelfProfile = true
                                 RailItem.Watchwords -> showWatchwords = true
-                                RailItem.TodaysBrief -> showDailyDigest = true
                                 RailItem.Administration -> showGroupAdminList = true
                                 RailItem.Invites -> showInvites = true
                                 RailItem.Settings -> showSettings = true
                                 // pane tabs handled above; never reaches here
-                                RailItem.Chats, RailItem.Mail, RailItem.Statuses,
+                                RailItem.Home, RailItem.Chats, RailItem.Mail, RailItem.Statuses,
                                 RailItem.Bookmarks, RailItem.Activity -> Unit
                             }
                         }
                         val railListSlot: @Composable () -> Unit = {
                             when (activeRailTab) {
+                                // Home takes the whole area; see the content
+                                // slot, where it sits beside Mail.
+                                RailTab.Home -> Unit
                                 RailTab.Chats -> {
                                     DmListScreen(
                                         db = db,
@@ -2813,7 +2812,23 @@ fun App(
                             // width here instead of being crammed into the 30%
                             // list slot. Rail stays for navigation; back arrow
                             // only on narrow (where DesktopShell stacks it).
-                            content = if (activeRailTab == RailTab.Mail) {
+                            content = if (activeRailTab == RailTab.Home) {
+                                {
+                                    io.nisfeb.talon.ui.screens.HomeScreen(
+                                        db = db,
+                                        mail = mailRepo,
+                                        contacts = callContacts,
+                                        ourShip = ship,
+                                        onOpenConversation = { whom -> jumpToChat(whom) },
+                                        onOpenChats = { uiSettings.setActiveRailTab(RailTab.Chats) },
+                                        onOpenMailThread = { id ->
+                                            openMailThread = id
+                                            uiSettings.setActiveRailTab(RailTab.Mail)
+                                        },
+                                        onOpenMail = { uiSettings.setActiveRailTab(RailTab.Mail) },
+                                    )
+                                }
+                            } else if (activeRailTab == RailTab.Mail) {
                                 {
                                     io.nisfeb.talon.ui.screens.MailWorkspace(
                                         repo = mailRepo,

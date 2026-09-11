@@ -13,6 +13,7 @@ package io.nisfeb.talon.ui
  * stays exclusively in the kebab dropdown.
  */
 enum class RailItem(val isPaneTab: Boolean) {
+    Home(true),
     Chats(true),
     Mail(true),
     Statuses(true),
@@ -21,7 +22,6 @@ enum class RailItem(val isPaneTab: Boolean) {
     Assistant(false),
     Profile(false),
     Watchwords(false),
-    TodaysBrief(false),
     Administration(false),
     Invites(false),
     Settings(false),

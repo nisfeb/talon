@@ -25,7 +25,6 @@ data class MenuBadges(
      */
     fun forItem(item: RailItem): Boolean = when (item) {
         RailItem.Statuses -> statusesFresh
-        RailItem.TodaysBrief -> digestFresh
         RailItem.Invites -> invitesPending
         else -> false
     }

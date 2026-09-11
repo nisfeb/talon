@@ -223,6 +223,7 @@ class DesktopShellTest {
  *  test can find each icon by its contentDescription. Must stay in
  *  sync with the impl. */
 private fun railLabel(item: RailItem): String = when (item) {
+    RailItem.Home -> "Home"
     RailItem.Chats -> "Chats"
     RailItem.Mail -> "Mail"
     RailItem.Statuses -> "Statuses"
@@ -231,7 +232,6 @@ private fun railLabel(item: RailItem): String = when (item) {
     RailItem.Assistant -> "Assistant"
     RailItem.Profile -> "My profile"
     RailItem.Watchwords -> "Watchwords"
-    RailItem.TodaysBrief -> "Today's brief"
     RailItem.Administration -> "Administration"
     RailItem.Invites -> "Invites"
     RailItem.Settings -> "Settings"
