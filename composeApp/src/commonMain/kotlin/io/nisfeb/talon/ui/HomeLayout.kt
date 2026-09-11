@@ -225,34 +225,11 @@ data class HomeLayout(
 }
 
 /**
- * Laid out one under another, for a window too narrow to have columns.
- *
- * A phone has no second column to put anything in, so the coordinates
- * collapse to their reading order and every widget takes the full
- * width. Its height is kept, because that is a choice about the widget
- * rather than about the grid.
- */
-fun stacked(shown: List<HomeWidget>): List<HomeWidget> {
-    var row = 0
-    return shown.sortedWith(compareBy({ it.row }, { it.col })).map { w ->
-        // Rows are reassigned, not kept. Two widgets that sat side by
-        // side shared a row perfectly well while they were half the
-        // page each; made full width and left where they were, they
-        // land on top of one another.
-        val placed = w.copy(col = 0, row = row, span = HOME_COLUMNS)
-        row += w.rows
-        placed
-    }
-}
-
-/**
  * Where a sideways drag of [dragPx] leaves a widget that started at
  * [startSpan], given a column [unitPx] wide.
  *
- * Snapped to whole columns: the grid has two of them and a widget that
- * followed the finger continuously would only ever be settling back
- * onto one of two positions anyway. Rounding means the handle flips at
- * the half-way mark, which is where it looks like it should.
+ * Snapped to whole columns, and rounded, so the handle flips at the
+ * half-way mark rather than once a column has been fully entered.
  */
 fun resizedSpan(startSpan: Int, dragPx: Float, unitPx: Float, columns: Int): Int {
     val widest = columns.coerceAtLeast(1)

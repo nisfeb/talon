@@ -344,15 +344,6 @@ class HomePlacementTest {
     }
 
     @Test
-    fun `a narrow window stacks them in reading order`() {
-        val l = layout(w(k[0], 6, 0), w(k[1], 0, 0), w(k[2], 0, 4))
-        val stack = stacked(l.shown)
-        assertEquals(listOf(k[1], k[0], k[2]), stack.map { it.kind })
-        assertTrue(stack.all { it.col == 0 && it.span == HOME_COLUMNS })
-        assertEquals(l.shown.map { it.rows }.toSet(), stack.map { it.rows }.toSet(), "heights survive")
-    }
-
-    @Test
     fun `a page arranged before coordinates opens looking the same`() {
         // Version 3 packed an ordered list greedily. The migration reads
         // that packing once and writes down where each widget was.
@@ -408,75 +399,19 @@ class HomeDropTest {
     }
 }
 
-/**
- * A window too narrow for columns stacks the widgets instead.
- *
- * Collapsing them to full width without moving them piled every
- * widget that had shared a row on top of the others.
- */
-class HomeStackTest {
-
-    private val k = HomeWidgetKind.entries
-    private fun w(kind: HomeWidgetKind, col: Int, row: Int, span: Int = 6, rows: Int = 4) =
-        HomeWidget(kind, col = col, row = row, span = span, rows = rows)
-
-    @Test
-    fun `widgets that shared a row do not land on each other`() {
-        val stack = stacked(listOf(w(k[0], 0, 0), w(k[1], 6, 0), w(k[2], 0, 4)))
-        for (i in stack.indices) {
-            for (j in i + 1 until stack.size) {
-                assertTrue(!overlaps(stack[i], stack[j]), "${stack[i].kind} sits on ${stack[j].kind}")
-            }
-        }
-    }
-
-    @Test
-    fun `each one starts where the one above it ends`() {
-        val stack = stacked(listOf(w(k[0], 0, 0, rows = 9), w(k[1], 6, 0, rows = 5)))
-        assertEquals(0, stack[0].row)
-        assertEquals(9, stack[1].row, "the second begins where the first finishes")
-    }
-
-    @Test
-    fun `reading order decides the order`() {
-        val stack = stacked(listOf(w(k[2], 0, 8), w(k[0], 6, 0), w(k[1], 0, 0)))
-        assertEquals(listOf(k[1], k[0], k[2]), stack.map { it.kind })
-    }
-
-    @Test
-    fun `heights survive and widths do not`() {
-        // Height is a choice about the widget; width is a fact about
-        // the grid, and a narrow window has only the one column.
-        val shown = listOf(w(k[0], 0, 0, span = 5, rows = 9), w(k[1], 5, 0, span = 7, rows = 4))
-        val stack = stacked(shown)
-        assertEquals(listOf(9, 4), stack.map { it.rows })
-        assertTrue(stack.all { it.span == HOME_COLUMNS && it.col == 0 })
-    }
-
-    @Test
-    fun `nothing stacked is nothing, not a crash`() {
-        assertTrue(stacked(emptyList()).isEmpty())
-    }
+class HomeDecodeTest {
 
     @Test
     fun `the default still opens exactly as it was written`() {
-        // Resolving on decode must not quietly rearrange a layout that
-        // was already fine.
         val back = HomeLayoutCodec.decode(HomeLayoutCodec.encode(HomeLayout.DEFAULT))
         for (kind in HomeWidgetKind.entries) {
             val a = HomeLayout.DEFAULT[kind]
             val b = back[kind]
             assertEquals(a.col to a.row, b.col to b.row, "$kind moved")
+            assertEquals(a.span to a.rows, b.span to b.rows, "$kind changed size")
         }
     }
 }
-
-/**
- * Nothing moves except what is being moved.
- *
- * Pushing the others down to make room sent them off the bottom of the
- * page as often as not, and they had never been asked to move.
- */
 class HomeNoShoveTest {
 
     private val k = HomeWidgetKind.entries

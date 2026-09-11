@@ -82,9 +82,9 @@ import io.nisfeb.talon.ui.HomePlace
 import io.nisfeb.talon.ui.HomeWidget
 import io.nisfeb.talon.ui.HomeWidgetKind
 import io.nisfeb.talon.ui.droppedAt
+import io.nisfeb.talon.ui.keepEdgeGesture
 import io.nisfeb.talon.ui.resizedRows
 import io.nisfeb.talon.ui.resizedSpan
-import io.nisfeb.talon.ui.stacked
 import io.nisfeb.talon.ui.SkyClock
 import io.nisfeb.talon.ui.Solar
 import kotlinx.coroutines.delay
@@ -182,13 +182,15 @@ fun HomeScreen(
     }
 
     BoxWithConstraints(modifier.fillMaxSize()) {
-        // A phone has no second column to put anything in, so the
-        // coordinates collapse to reading order and everything runs
-        // full width.
-        val wide = maxWidth >= 820.dp
-        val placedWidgets = remember(layout, wide) {
-            if (wide) layout.shown.sortedWith(compareBy({ it.row }, { it.col }))
-            else stacked(layout.shown)
+        // The same twelve columns at every width. Collapsing a narrow
+        // window to a single column took the columns away from the one
+        // device most likely to want them arranged — and with no
+        // columns there was nothing for the width grip to do, so it
+        // was hidden, so a phone could not make anything narrower at
+        // all. Twelve columns of a phone's width is a small column,
+        // which is what a small screen is.
+        val placedWidgets = remember(layout) {
+            layout.shown.sortedWith(compareBy({ it.row }, { it.col }))
         }
         val guideBand = MaterialTheme.colorScheme.primary.copy(alpha = 0.030f)
         val guideLine = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.20f)
@@ -372,12 +374,7 @@ fun HomeScreen(
                                             colPitchPx = pitch.value.first,
                                             rowPitchPx = pitch.value.second,
                                         )
-                                        // Sideways means nothing where
-                                        // there is one column, and a
-                                        // drag that quietly rewrote the
-                                        // stored column would undo the
-                                        // desktop arrangement.
-                                        val col = if (wide) c else real.col
+                                        val col = c
                                         if (col != real.col || r != real.row) {
                                             put(widget.kind, col, r)
                                             // It has just been moved to
@@ -393,9 +390,7 @@ fun HomeScreen(
                         if (!held) {
                             ResizeHandles(
                                 widget = real,
-                                // One column means no width to change,
-                                // which hides the grip for it.
-                                columns = if (wide) HOME_COLUMNS else 1,
+                                columns = HOME_COLUMNS,
                                 cellWidthPx = colPitch,
                                 onResize = resizeTo,
                                 onRemove = { resizeTo(real.copy(visible = false)) },
@@ -627,6 +622,11 @@ private fun Grip(
     Box(
         modifier
             .size(HANDLE)
+            // A grip on a widget flush against the side of a phone
+            // sits in the strip the system keeps for its back swipe,
+            // which makes it a grip that leaves the app instead of
+            // being dragged.
+            .keepEdgeGesture()
             .semantics { contentDescription = label }
             .pointerInput(Unit) {
                 var total = Offset.Zero
