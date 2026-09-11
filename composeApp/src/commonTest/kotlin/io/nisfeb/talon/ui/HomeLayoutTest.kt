@@ -340,6 +340,55 @@ class HomeResizeTest {
         assertTrue(HOME_ROW_RANGE.count() >= 6, "only ${HOME_ROW_RANGE.count()} heights on offer")
     }
 
+    /** One grip drag, frame by frame, the way the gesture delivers it. */
+    private fun drag(
+        from: Int,
+        travel: Float,
+        frames: Int = 24,
+        liveBase: Boolean = false,
+    ): Int {
+        var span = from
+        var total = 0f
+        repeat(frames) {
+            total += travel / frames
+            span = resizedSpan(if (liveBase) span else from, total, col, HOME_COLUMNS)
+        }
+        return span
+    }
+
+    @Test
+    fun `dragging one column wide widens by exactly one column`() {
+        assertEquals(7, drag(from = 6, travel = col))
+        assertEquals(8, drag(from = 6, travel = col * 2))
+        assertEquals(5, drag(from = 6, travel = -col))
+    }
+
+    @Test
+    fun `the handle keeps up with the pointer rather than running ahead`() {
+        // The fault this guards: the running total is measured from
+        // where the pointer went down, so it has to be added to the
+        // size the widget had then. Added to the size it has *now*, the
+        // first snap becomes the new base and the same total reads as
+        // another column, and another — a mouse moved one column wide
+        // sent the widget clear across the grid.
+        val honest = drag(from = 6, travel = col, liveBase = false)
+        val compounding = drag(from = 6, travel = col, liveBase = true)
+        assertEquals(7, honest)
+        assertTrue(
+            compounding > honest,
+            "the live-base form should overshoot, or this test is not watching anything",
+        )
+    }
+
+    @Test
+    fun `a slow drag lands in the same place as a fast one`() {
+        // Same travel, different numbers of frames: the result must
+        // come from where the pointer is, not from how it got there.
+        for (frames in listOf(1, 3, 24, 200)) {
+            assertEquals(8, drag(from = 6, travel = col * 2, frames = frames), "at $frames frames")
+        }
+    }
+
     @Test
     fun `a narrow drag moves one column, not half the page`() {
         assertEquals(7, resizedSpan(6, col, col, HOME_COLUMNS))

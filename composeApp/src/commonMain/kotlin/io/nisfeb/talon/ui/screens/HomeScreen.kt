@@ -376,33 +376,56 @@ private fun BoxScope.ResizeHandles(
     val rowUnitPx = with(LocalDensity.current) { HOME_ROW_UNIT.toPx() }
     val grip = MaterialTheme.colorScheme.primary
 
+    // The size the widget was when this drag began.
+    //
+    // Load-bearing. The running total is measured from where the
+    // pointer went down, so it has to be added to the size the widget
+    // had at that moment. Adding it to the *current* size instead
+    // compounds: cross the first snap point and the widget grows a
+    // column, which becomes the new base, so the same total then reads
+    // as another column, and another. A mouse moved one column wide
+    // sent the widget clear across the grid.
+    var startSpan by remember { mutableStateOf(widget.span) }
+    var startRows by remember { mutableStateOf(widget.rows) }
+    var startCell by remember { mutableStateOf(cellWidthPx) }
+    fun freeze() {
+        startSpan = widget.span
+        startRows = widget.rows
+        // Frozen too, because it is derived from the widget's own width
+        // and would otherwise shift under the drag that is changing it.
+        startCell = cellWidthPx
+    }
+
     // Width. Pointless where there is only one column to have.
     if (columns > 1) {
         Grip(
             Modifier.align(Alignment.CenterEnd),
             grip,
             label = "Width of ${title(widget.kind)}",
+            onStart = ::freeze,
         ) { total ->
-            onResize(widget.copy(span = resizedSpan(widget.span, total.x, cellWidthPx, columns)))
+            onResize(widget.copy(span = resizedSpan(startSpan, total.x, startCell, columns)))
         }
     }
     Grip(
         Modifier.align(Alignment.BottomCenter),
         grip,
         label = "Height of ${title(widget.kind)}",
+        onStart = ::freeze,
     ) { total ->
-        onResize(widget.copy(rows = resizedRows(widget.rows, total.y, rowUnitPx)))
+        onResize(widget.copy(rows = resizedRows(startRows, total.y, rowUnitPx)))
     }
     Grip(
         Modifier.align(Alignment.BottomEnd),
         grip,
         corner = true,
         label = "Size of ${title(widget.kind)}",
+        onStart = ::freeze,
     ) { total ->
         onResize(
             widget.copy(
-                span = resizedSpan(widget.span, total.x, cellWidthPx, columns),
-                rows = resizedRows(widget.rows, total.y, rowUnitPx),
+                span = resizedSpan(startSpan, total.x, startCell, columns),
+                rows = resizedRows(startRows, total.y, rowUnitPx),
             ),
         )
     }
@@ -423,16 +446,14 @@ private fun BoxScope.ResizeHandles(
 /**
  * One grip.
  *
- * The drag is reported as a running total from where it started rather
- * than as a delta, because the size it maps to is absolute: a few
- * pixels either side of a snap point would otherwise ratchet the
- * widget across the grid instead of settling it.
+ * The drag is reported as a running total from where the pointer went
+ * down, and [onStart] is where the caller notes the size to add it to.
+ * Both halves matter: a per-frame delta would ratchet the widget
+ * across the grid on a few pixels of jitter, and a running total added
+ * to a size that is itself changing compounds every snap.
  *
  * [onDrag] is held through rememberUpdatedState because pointerInput
- * keeps whatever lambda it was given when the node was made. Captured
- * plainly, this one went on resizing against the width the widget had
- * before it had been measured, which is zero, which is no resize at
- * all.
+ * keeps whatever lambda it was given when the node was made.
  */
 @Composable
 private fun Grip(
@@ -440,9 +461,11 @@ private fun Grip(
     color: androidx.compose.ui.graphics.Color,
     label: String,
     corner: Boolean = false,
+    onStart: () -> Unit = {},
     onDrag: (Offset) -> Unit,
 ) {
     val current by rememberUpdatedState(onDrag)
+    val began by rememberUpdatedState(onStart)
     Box(
         modifier
             .size(HANDLE)
@@ -450,7 +473,7 @@ private fun Grip(
             .pointerInput(Unit) {
                 var total = Offset.Zero
                 detectDragGestures(
-                    onDragStart = { total = Offset.Zero },
+                    onDragStart = { total = Offset.Zero; began() },
                     onDragEnd = { total = Offset.Zero },
                     onDragCancel = { total = Offset.Zero },
                 ) { change, delta ->
