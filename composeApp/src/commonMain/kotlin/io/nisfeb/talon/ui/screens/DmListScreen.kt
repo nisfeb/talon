@@ -135,6 +135,9 @@ fun DmListScreen(
      *  overflow menu (not a rail item). */
     onOpenContacts: () -> Unit = {},
     onOpenWatchwords: () -> Unit = {},
+    /** Open the home page. Null where the host has no Home surface,
+     *  which hides the entry rather than offering a dead one. */
+    onOpenHome: (() -> Unit)? = null,
     onOpenDigest: () -> Unit = {},
     /** Hide the "Today's brief" menu entry when the digest alarm is
      *  disabled in settings — no point routing into a screen the user
@@ -883,6 +886,18 @@ fun DmListScreen(
                                 },
                             )
                         }
+                    }
+                    // First in the list where a host has one at all.
+                    // Desktop reaches Home from the rail; a phone has
+                    // no rail, so this is the way in.
+                    onOpenHome?.let { open ->
+                        DropdownMenuItem(
+                            text = { Text("Home") },
+                            onClick = {
+                                menuOpen = false
+                                open()
+                            },
+                        )
                     }
                     if (RailItem.Profile in kebabItems) {
                         DropdownMenuItem(

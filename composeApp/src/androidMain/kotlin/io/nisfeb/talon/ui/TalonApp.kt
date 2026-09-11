@@ -5,6 +5,7 @@ import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Scaffold
+import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.consumeWindowInsets
@@ -540,6 +541,7 @@ fun TalonApp(
     val aiState by app.aiSettings.state.collectAsState()
     // Daily Digest screen — initialOpenDigest non-null means we
     // arrived from a notification tap, so route straight there.
+    var homeOpen by remember { mutableStateOf(false) }
     var digestOpen by remember { mutableStateOf(initialOpenDigest != null) }
     var settingsOpen by remember { mutableStateOf(false) }
     var assistantOpen by remember { mutableStateOf(false) }
@@ -592,6 +594,7 @@ fun TalonApp(
             bookmarksOpen = false
             activityOpen = false
             watchwordsOpen = false
+            homeOpen = false
             digestOpen = false
             settingsOpen = false
             sidebarSettingsOpen = false
@@ -1271,6 +1274,7 @@ fun TalonApp(
         BackHandler(enabled = activityOpen) { activityOpen = false }
         BackHandler(enabled = contactsOpen) { contactsOpen = false }
         BackHandler(enabled = watchwordsOpen) { watchwordsOpen = false }
+        BackHandler(enabled = homeOpen) { homeOpen = false }
         BackHandler(enabled = digestOpen) { digestOpen = false }
         BackHandler(enabled = settingsOpen) { settingsOpen = false }
         BackHandler(enabled = assistantOpen) { assistantOpen = false }
@@ -1353,6 +1357,7 @@ fun TalonApp(
             groupInfoDrilldown != null -> "MediaList"
             groupInfoOpenFor != null -> "GroupInfo"
             watchwordsOpen -> "Watchwords"
+            homeOpen -> "Home"
             digestOpen -> "Today's brief"
             adminGroupFlag != null -> "GroupAdmin($adminGroupFlag)"
             adminListOpen -> "AdminList"
@@ -1585,6 +1590,86 @@ fun TalonApp(
                 },
                 modifier = mod,
             )
+
+            homeOpen -> {
+                val homePlaceRaw by app.uiSettings.homePlace.collectAsState()
+                val homePlace = remember(homePlaceRaw) {
+                    io.nisfeb.talon.ui.HomePlaceCodec.decode(homePlaceRaw)
+                }
+                val homeLayoutRaw by app.uiSettings.homeLayout.collectAsState()
+                val homeLayout = remember(homeLayoutRaw) {
+                    io.nisfeb.talon.ui.HomeLayoutCodec.decode(homeLayoutRaw)
+                }
+                val homeFahrenheit by app.uiSettings.homeFahrenheit.collectAsState()
+                val homeTwentyFourHour by app.uiSettings.homeTwentyFourHour.collectAsState()
+                val homeStatuses by remember(app.db) {
+                    app.db.contacts().streamStatusFeed()
+                }.collectAsState(initial = emptyList())
+                val deviceLocation = io.nisfeb.talon.ui.rememberDeviceLocation()
+                val weatherFor = remember(app.session.http) {
+                    io.nisfeb.talon.ui.OpenMeteoWeather(app.session.http).asLookup()
+                }
+                val placeLookup = remember(app.session.http) {
+                    io.nisfeb.talon.ui.OpenMeteoPlaces(app.session.http).asLookup()
+                }
+                // Held here rather than inside HomeScreen for the same
+                // reason it is on desktop: the screen is torn down every
+                // time somebody looks at their messages, and weather
+                // kept inside it comes back empty and pops.
+                var homeWeather by remember {
+                    mutableStateOf<io.nisfeb.talon.ui.SkyClock.Sky?>(null)
+                }
+                LaunchedEffect(homePlace, weatherFor) {
+                    val where = homePlace
+                    if (where == null) {
+                        homeWeather = null
+                        return@LaunchedEffect
+                    }
+                    var fetchedAt = 0L
+                    while (true) {
+                        if (io.nisfeb.talon.ui.screens.weatherIsStale(
+                                fetchedAt, io.nisfeb.talon.util.nowMs(),
+                            )
+                        ) {
+                            weatherFor(where).onSuccess {
+                                homeWeather = it
+                                fetchedAt = io.nisfeb.talon.util.nowMs()
+                            }
+                        }
+                        kotlinx.coroutines.delay(60_000L)
+                    }
+                }
+
+                io.nisfeb.talon.ui.screens.HomeScreen(
+                    db = app.db,
+                    mail = mailRepo,
+                    contacts = contactMap,
+                    ourShip = loggedInShip.orEmpty(),
+                    place = homePlace,
+                    weather = homeWeather,
+                    onUseDeviceLocation = deviceLocation,
+                    placeLookup = placeLookup,
+                    onPlacePicked = { p ->
+                        app.uiSettings.setHomePlace(io.nisfeb.talon.ui.HomePlaceCodec.encode(p))
+                    },
+                    fahrenheit = homeFahrenheit,
+                    twentyFourHour = homeTwentyFourHour,
+                    layout = homeLayout,
+                    onLayoutChanged = { next ->
+                        app.uiSettings.setHomeLayout(
+                            io.nisfeb.talon.ui.HomeLayoutCodec.encode(next),
+                        )
+                    },
+                    statuses = homeStatuses,
+                    onOpenContact = { other -> profileSheetShip = other },
+                    onOpenStatuses = { homeOpen = false; statusFeedOpen = true },
+                    onOpenConversation = { whom -> homeOpen = false; openWhom = whom },
+                    onOpenChats = { homeOpen = false },
+                    onOpenMailThread = { homeOpen = false; mailOpen = true },
+                    onOpenMail = { homeOpen = false; mailOpen = true },
+                    modifier = Modifier.windowInsetsPadding(WindowInsets.safeDrawing),
+                )
+            }
 
             digestOpen -> DailyDigestScreen(
                 db = app.db,
@@ -2371,6 +2456,7 @@ fun TalonApp(
                 onOpenActivity = { activityOpen = true },
                 onOpenContacts = { contactsOpen = true },
                 onOpenWatchwords = { watchwordsOpen = true },
+                onOpenHome = { homeOpen = true },
                 onOpenDigest = { digestOpen = true },
                 digestEnabled = app.dailyDigestSettings.state.collectAsState().value.enabled,
                 onOpenAdministration = { adminListOpen = true },
