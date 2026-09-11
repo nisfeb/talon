@@ -25,10 +25,62 @@ data class MailNode(
 )
 
 /**
+ * Collapse every stored copy of a message to the one thing a reader
+ * can point at.
+ *
+ * COPIES ARE NOT MESSAGES. Several grubs can share one id and differ
+ * only in signature — one genuine, the rest forged — and drawing each
+ * as its own node would show a two-message conversation as five, with
+ * the forgeries indistinguishable from real replies.
+ *
+ * Three rules, and each exists to stop a forgery deciding something:
+ *
+ * - The node's verdict is the LOUDEST of its copies. One forged copy
+ *   makes the node forged, so a forgery cannot hide behind a genuine
+ *   copy of the same id.
+ * - The copy that SPEAKS is the newest that is not forged, falling
+ *   back to the newest of all when there is nothing honest to choose.
+ *   `sent` is a signed field the author picks, so letting a forged copy
+ *   speak would let whoever poked the chain choose what the node says.
+ * - The parent is the SPEAKER's, not the first copy's. A forged copy
+ *   naming a different parent would otherwise re-hang a genuine branch
+ *   somewhere else in the picture.
+ */
+fun collapse(messages: List<MailMessage>): List<MailMessage> {
+    if (messages.isEmpty()) return emptyList()
+    val byId = LinkedHashMap<String, MutableList<MailMessage>>()
+    for (m in messages) byId.getOrPut(m.id) { mutableListOf() } += m
+    return byId.values.map { copies ->
+        val honest = copies.filter { it.verdict != Verdict.FORGED }
+        val speaker = (honest.ifEmpty { copies })
+            .maxByOrNull { it.sent } ?: copies.first()
+        val loudest =
+            if (copies.any { it.verdict == Verdict.FORGED }) Verdict.FORGED else speaker.verdict
+        if (loudest == speaker.verdict) speaker else speaker.copy(verdict = loudest)
+    }
+}
+
+/** How many stored copies each id has. More than one is worth showing:
+ *  it is the shape a forgery arrives in. */
+fun copyCounts(messages: List<MailMessage>): Map<String, Int> =
+    messages.groupingBy { it.id }.eachCount()
+
+/** Every copy of one id failed its signature. Such a node is not a
+ *  reply target: the new message's whole travelling path would point at
+ *  something nobody wrote. */
+fun allForged(messages: List<MailMessage>, id: String): Boolean {
+    val copies = messages.filter { it.id == id }
+    return copies.isNotEmpty() && copies.all { it.verdict == Verdict.FORGED }
+}
+
+/**
  * The thread's messages as a forest. Roots first, siblings oldest
  * first, ties broken by id so the order is stable across reads.
  */
-fun threadTree(messages: List<MailMessage>): List<MailNode> {
+fun threadTree(raw: List<MailMessage>): List<MailNode> {
+    // Collapsed HERE rather than by the caller, so this and the drawn
+    // layout cannot end up disagreeing about which copy speaks.
+    val messages = collapse(raw)
     if (messages.isEmpty()) return emptyList()
     val byId = messages.associateBy { it.id }
     val childrenOf = mutableMapOf<String, MutableList<MailMessage>>()
@@ -145,7 +197,7 @@ fun branches(forest: List<MailNode>): Boolean {
  * mean the newest honest one.
  */
 fun newestAnswerable(messages: List<MailMessage>): MailMessage? =
-    messages.filter { it.verdict != Verdict.FORGED }.maxByOrNull { it.sent }
+    collapse(messages).filter { it.verdict != Verdict.FORGED }.maxByOrNull { it.sent }
 
 /** One node placed on the drawing: [depth] is its generation, [row] its
  *  line, fractional where a parent sits between its children. */
@@ -172,7 +224,8 @@ data class TreeLayout(val nodes: List<PlacedNode>, val rows: Int, val cols: Int)
  * itself, has its link cut here rather than guarded at every later use.
  * Both arrive over the wire and neither can be trusted to terminate.
  */
-fun layoutTree(messages: List<MailMessage>): TreeLayout {
+fun layoutTree(raw: List<MailMessage>): TreeLayout {
+    val messages = collapse(raw)
     if (messages.isEmpty()) return TreeLayout(emptyList(), 0, 0)
 
     class N(val m: MailMessage, var parent: String?, var orphan: Boolean, var depth: Int, var row: Float)

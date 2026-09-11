@@ -132,4 +132,19 @@ class MailGemtextTest {
         assertEquals("0vt", MailGemtext.seedFor("0vt", null))
         assertEquals("0vt/0vm", MailGemtext.seedFor("0vt", "0vm"))
     }
+
+    @Test
+    fun `a filed note counts messages, not copies`() {
+        val t = MailThread(
+            id = "0vt",
+            messages = listOf(
+                msg("m", sent = 1),
+                msg("m", sent = 2, verdict = Verdict.FORGED),
+            ),
+        )
+        val out = MailGemtext.thread(t, name, at)
+        assertTrue("1 message" in out, "two copies of one message are one message")
+        assertTrue("2 stored copies" in out, "and the note says there were two")
+        assertTrue("FORGED" in out, "with the strongest verdict among them")
+    }
 }

@@ -37,11 +37,14 @@ object MailGemtext {
         nameFor: (String) -> String,
         when_: (Long) -> String,
     ): String = buildString {
-        val subject = t.messages.firstOrNull()?.subject?.ifBlank { null } ?: "(no subject)"
+        val shown = collapse(t.messages)
+        val subject = shown.firstOrNull()?.subject?.ifBlank { null } ?: "(no subject)"
         append("# ").append(subject).append("\n\n")
+        // Messages, not copies: several grubs under one id are one
+        // message, and counting copies would overstate the conversation.
         append("Signed mail, ")
-            .append(t.messages.size)
-            .append(if (t.messages.size == 1) " message" else " messages")
+            .append(shown.size)
+            .append(if (shown.size == 1) " message" else " messages")
         if (t.participants.isNotEmpty()) {
             append(", between ").append(t.participants.joinToString { nameFor(it) })
         }
@@ -58,11 +61,17 @@ object MailGemtext {
                     "which does not show which reply answered which.\n",
             )
         }
-        for (m in t.messages.sortedWith(compareBy({ it.sent }, { it.id }))) {
+        val counts = copyCounts(t.messages)
+        for (m in collapse(t.messages).sortedWith(compareBy({ it.sent }, { it.id }))) {
             append("\n## ").append(nameFor(m.from))
             append(" · ").append(when_(m.sent))
             append("\n\n")
             append(provenance(m, nameFor, when_, short = true))
+            val n = counts[m.id] ?: 1
+            if (n > 1) {
+                append(n).append(" stored copies of this message; the verdict above ")
+                    .append("is the strongest among them.\n")
+            }
             append("\n")
             append(body(m))
             append(attachments(m))

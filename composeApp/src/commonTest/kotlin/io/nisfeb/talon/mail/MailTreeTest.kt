@@ -235,4 +235,99 @@ class MailTreeTest {
         val forest = threadTree(listOf(msg("root", sent = 1), msg("a", prev = "root", sent = 2)))
         assertEquals(setOf("root"), foldableIds(forest))
     }
+
+    // ---- copies of one message -----------------------------------------
+    //
+    // Several grubs can share an id and differ only in signature. Each
+    // rule below exists to stop a forged copy deciding something.
+
+    private fun copy(
+        id: String,
+        verdict: Verdict,
+        sent: Long,
+        body: String = "body",
+        prev: String? = null,
+    ) = MailMessage(id = id, from = "~zod", prev = prev, sent = sent, body = body, verdict = verdict)
+
+    @Test
+    fun `a forgery cannot hide behind a genuine copy of the same id`() {
+        val out = collapse(
+            listOf(
+                copy("m", Verdict.VERIFIED, sent = 5),
+                copy("m", Verdict.FORGED, sent = 1),
+            ),
+        )
+        assertEquals(1, out.size, "copies are not messages")
+        assertEquals(Verdict.FORGED, out.single().verdict, "the loudest verdict wins")
+    }
+
+    @Test
+    fun `the honest copy speaks, even when a forged one is newer`() {
+        // `sent` is signed and the author picks it, so letting a forged
+        // copy speak lets whoever poked the chain choose what it says.
+        val out = collapse(
+            listOf(
+                copy("m", Verdict.VERIFIED, sent = 1, body = "what was written"),
+                copy("m", Verdict.FORGED, sent = 9, body = "what was not"),
+            ),
+        )
+        assertEquals("what was written", out.single().body)
+        assertEquals(Verdict.FORGED, out.single().verdict, "and it is still marked")
+    }
+
+    @Test
+    fun `a forged copy cannot re-hang a genuine branch`() {
+        val out = collapse(
+            listOf(
+                copy("m", Verdict.VERIFIED, sent = 5, prev = "real-parent"),
+                copy("m", Verdict.FORGED, sent = 9, prev = "somewhere-else"),
+            ),
+        )
+        assertEquals("real-parent", out.single().prev)
+    }
+
+    @Test
+    fun `with nothing honest the newest copy speaks`() {
+        val out = collapse(
+            listOf(
+                copy("m", Verdict.FORGED, sent = 1, body = "older"),
+                copy("m", Verdict.FORGED, sent = 9, body = "newer"),
+            ),
+        )
+        assertEquals("newer", out.single().body)
+        assertEquals(Verdict.FORGED, out.single().verdict)
+    }
+
+    @Test
+    fun `an all-forged node is not a reply target`() {
+        val ms = listOf(copy("m", Verdict.FORGED, sent = 1), copy("m", Verdict.FORGED, sent = 2))
+        assertTrue(allForged(ms, "m"))
+        assertEquals(null, newestAnswerable(ms))
+    }
+
+    @Test
+    fun `the reader and the drawing cannot disagree about a node`() {
+        // The bug this replaces: one kept the last copy of an id and the
+        // other kept the first, so the two views could show different
+        // verdicts for the same message.
+        val ms = listOf(
+            copy("root", Verdict.VERIFIED, sent = 1),
+            copy("m", Verdict.VERIFIED, sent = 2, prev = "root"),
+            copy("m", Verdict.FORGED, sent = 3, prev = "root"),
+        )
+        val inList = flatten(threadTree(ms)).single { it.first.message.id == "m" }
+        val inTree = layoutTree(ms).nodes.single { it.message.id == "m" }
+        assertEquals(Verdict.FORGED, inList.first.message.verdict)
+        assertEquals(inList.first.message.verdict, inTree.message.verdict)
+    }
+
+    @Test
+    fun `copies are counted for display`() {
+        val ms = listOf(
+            copy("a", Verdict.VERIFIED, sent = 1),
+            copy("a", Verdict.FORGED, sent = 2),
+            copy("b", Verdict.VERIFIED, sent = 3),
+        )
+        assertEquals(mapOf("a" to 2, "b" to 1), copyCounts(ms))
+    }
 }

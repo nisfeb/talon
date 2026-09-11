@@ -118,7 +118,7 @@ class MailThreadPaneTest {
             runCatching { onNodeWithText("FORGED").assertIsDisplayed(); true }.getOrDefault(false)
         }
         onNodeWithText(
-            "This copy's signature does not match its contents. It is kept as " +
+            "A copy of this message failed its signature. It is kept as " +
                 "evidence and cannot be answered.",
         ).assertIsDisplayed()
     }

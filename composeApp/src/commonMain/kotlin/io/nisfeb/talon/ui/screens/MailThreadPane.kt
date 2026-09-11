@@ -113,6 +113,9 @@ fun MailThreadPane(
 
     val knownLabels by repo.knownLabels.collectAsState()
     val forest = remember(thread) { threadTree(thread?.messages.orEmpty()) }
+    val copies = remember(thread) {
+        io.nisfeb.talon.mail.copyCounts(thread?.messages.orEmpty())
+    }
     val hasBranches = remember(forest) { branches(forest) }
     // Whatever is selected, defaulting to the newest honest message —
     // the same rule a flat reading used, so the default never moves.
@@ -261,6 +264,7 @@ fun MailThreadPane(
                                     selected = false,
                                     selectable = false,
                                     hidden = 0,
+                                    copies = copies[shown.id] ?: 1,
                                     foldable = false,
                                     folded = false,
                                     onFold = {},
@@ -300,6 +304,7 @@ fun MailThreadPane(
                             node = node,
                             depth = v.depth,
                             hidden = v.hidden,
+                            copies = copies[node.message.id] ?: 1,
                             foldable = node.children.isNotEmpty(),
                             folded = node.message.id in folded,
                             onFold = {
@@ -531,6 +536,7 @@ private fun MailMessageCard(
     node: MailNode,
     depth: Int,
     hidden: Int,
+    copies: Int,
     foldable: Boolean,
     folded: Boolean,
     onFold: () -> Unit,
@@ -627,9 +633,21 @@ private fun MailMessageCard(
             )
             return@Column
         }
+        // Several grubs under one id, differing only in signature, is the
+        // shape a forgery arrives in. Worth saying even when the node
+        // reads verified, because it is what the verdict was drawn from.
+        if (copies > 1) {
+            Text(
+                "$copies stored copies of this message; the strongest verdict " +
+                    "among them is shown.",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(start = 24.dp),
+            )
+        }
         if (m.verdict == Verdict.FORGED) {
             Text(
-                "This copy's signature does not match its contents. It is kept as " +
+                "A copy of this message failed its signature. It is kept as " +
                     "evidence and cannot be answered.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.error,
