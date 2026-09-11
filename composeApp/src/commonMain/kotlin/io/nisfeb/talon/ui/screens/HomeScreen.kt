@@ -40,7 +40,9 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
@@ -215,7 +217,25 @@ fun HomeScreen(
             gridRows.forEach { gridRow ->
                 Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
                     gridRow.forEach { widget ->
+                        // Keyed, so Compose keeps each widget's state
+                        // with the widget rather than with the position
+                        // in the row. Without it a reorder handed one
+                        // widget's half-finished drag to whichever one
+                        // slid into its place, which is how two of them
+                        // ended up drawn on top of each other.
+                        key(widget.kind) {
                         val held = dragging == widget.kind
+                        // A drag that is interrupted by the widget
+                        // leaving the page never gets its onDragEnd, so
+                        // it would stay lifted and offset forever.
+                        DisposableEffect(widget.kind) {
+                            onDispose {
+                                if (dragging == widget.kind) {
+                                    dragging = null
+                                    dragBy = Offset.Zero
+                                }
+                            }
+                        }
                         Box(
                             Modifier
                                 .weight(widget.span.coerceIn(1, columns).toFloat())
@@ -334,7 +354,17 @@ fun HomeScreen(
                                 }
                             }
                         }
+                        }
                     }
+                    // The columns nobody claimed.
+                    //
+                    // Without this a widget alone on a row stretched to
+                    // fill it, so widening from six columns to seven
+                    // jumped it from half the page to all of it — which
+                    // is not a finer grid, it is the same two sizes
+                    // with more numbers.
+                    val spare = io.nisfeb.talon.ui.rowSpare(gridRow, columns)
+                    if (spare > 0) Spacer(Modifier.weight(spare.toFloat()))
                 }
             }
         }

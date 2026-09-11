@@ -224,6 +224,34 @@ class HomeGridTest {
     }
 
     @Test
+    fun `a part full row leaves the rest of the columns empty`() {
+        // Widths come from weights, so a lone widget takes the whole
+        // row unless the remainder is filled. That turned one column of
+        // widening into a jump from half the page to all of it.
+        assertEquals(HOME_COLUMNS - 7, rowSpare(listOf(w(k[0], 7)), HOME_COLUMNS))
+        assertEquals(0, rowSpare(listOf(w(k[0], 6), w(k[1], 6)), HOME_COLUMNS))
+        assertEquals(0, rowSpare(listOf(w(k[0], HOME_COLUMNS)), HOME_COLUMNS))
+    }
+
+    @Test
+    fun `every packed row accounts for all its columns`() {
+        val shown = listOf(w(k[0], 7), w(k[1], 4), w(k[2], 12), w(k[3], 3), w(k[4], 3))
+        for (row in packRows(shown, HOME_COLUMNS)) {
+            val used = row.sumOf { it.span }
+            assertEquals(HOME_COLUMNS, used + rowSpare(row, HOME_COLUMNS), "row ${row.map { it.span }}")
+        }
+    }
+
+    @Test
+    fun `a spare column count is never negative`() {
+        // An overwide span is clamped by the grid, not carried through
+        // into a Spacer with a negative weight, which throws.
+        assertEquals(0, rowSpare(listOf(w(k[0], 99)), HOME_COLUMNS))
+        assertEquals(0, rowSpare(listOf(w(k[0], 9), w(k[1], 9)), HOME_COLUMNS))
+        assertEquals(0, rowSpare(listOf(w(k[0], 5)), 1))
+    }
+
+    @Test
     fun `nothing shown is no rows, not one empty row`() {
         assertTrue(packRows(emptyList(), columns = 2).isEmpty())
         assertTrue(packRows(emptyList(), columns = 1).isEmpty())

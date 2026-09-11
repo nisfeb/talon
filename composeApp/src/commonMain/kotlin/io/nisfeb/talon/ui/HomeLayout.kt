@@ -218,6 +218,20 @@ fun packRows(shown: List<HomeWidget>, columns: Int): List<List<HomeWidget>> {
 }
 
 /**
+ * The columns on a row that nothing claimed.
+ *
+ * Load-bearing rather than cosmetic. Widths are laid out by weight, so
+ * a widget alone on a row takes all of it whatever its span says: a
+ * six-column widget widened to seven would jump from half the page to
+ * the whole of it. Filling the remainder keeps every widget at the
+ * fraction it was set to.
+ */
+fun rowSpare(row: List<HomeWidget>, columns: Int): Int {
+    val used = row.sumOf { it.span.coerceIn(1, columns.coerceAtLeast(1)) }
+    return (columns - used).coerceAtLeast(0)
+}
+
+/**
  * Where a sideways drag of [dragPx] leaves a widget that started at
  * [startSpan], given a column [unitPx] wide.
  *
