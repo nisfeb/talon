@@ -188,7 +188,10 @@ fun SkyClockDial(
                 // who already knows that is what it means; puffs say it
                 // to everybody, and they say it at night too, where a
                 // drained night band looks the same as a clear one.
-                drawClouds(centre, radius, ring, cloudiness, cloudPainter)
+                drawClouds(
+                    centre, radius, ring, cloudiness, cloudPainter,
+                    sky.sunriseMinute, sky.daylightMinutes,
+                )
                 // Laid down before anything that sits inside the sky
                 // ring, or it paints over them.
                 drawCircle(color = faceColor, radius = radius - ring / 2f, center = centre)
@@ -419,16 +422,23 @@ private fun conditionIcon(w: SkyClock.Weather): Pair<ImageVector, String>? = whe
  * one lands away from those already there, which keeps four clouds
  * looking scattered rather than bunched.
  */
-internal val CLOUD_SLOTS = floatArrayOf(24f, 118f, 196f, 302f)
-
 /** Sizes that differ a lot, not a little: these are meant to read as
- *  separate masses of cloud, not as one shape repeated. */
+ *  separate masses of cloud, not as one shape repeated. Its length is
+ *  also the most cloud the ring will ever carry. */
 internal val CLOUD_SCALES = floatArrayOf(1f, 1.34f, 0.86f, 1.16f)
 
 /** How far off the band's centreline each one sits, as a fraction of
  *  the band's width. Some crop against the outer edge and some against
  *  the inner, which is what stops four identical crescents. */
 internal val CLOUD_OFFSETS = floatArrayOf(-0.22f, 0.18f, -0.08f, 0.26f)
+
+/** Nudges off an even spread. Even spacing was what made the last
+ *  version read as decoration rather than weather. */
+internal val CLOUD_JITTER = floatArrayOf(-0.06f, 0.05f, -0.03f, 0.07f)
+
+/** Roughly what one cloud takes up, so a short winter day does not get
+ *  the same four a midsummer one does. */
+internal const val CLOUD_ROOM_DEG = 60f
 
 /**
  * How much of its own square the cloud glyph actually fills, top to
@@ -442,18 +452,43 @@ internal const val CLOUD_GLYPH_FILL = 0.67f
  *
  * Bigger than the band on purpose. Clouds sized to fit inside it came
  * out as a row of equidistant emoji; clouds that overrun it and get
- * cut off by its edges read as weather passing across the dial, which
- * is what a cloudy sky actually looks like from underneath.
+ * cut off by its edges read as weather passing across the dial.
  */
 internal fun cloudBox(ring: Float): Float = ring * 1.9f
 
-internal fun cloudCount(cover: Float): Int =
-    if (cover <= 0.05f) 0 else (cover * CLOUD_SLOTS.size).roundToInt().coerceIn(1, CLOUD_SLOTS.size)
+/**
+ * How many clouds, given the cover and how much daylight there is to
+ * put them in.
+ *
+ * Bounded by the day's length because they only go in the lit part of
+ * the ring: four clouds crammed into a December afternoon would be one
+ * continuous smear, and a polar night has nowhere to put any.
+ */
+internal fun cloudCount(cover: Float, dayDegrees: Float): Int {
+    if (cover <= 0.05f) return 0
+    val room = (dayDegrees / CLOUD_ROOM_DEG).toInt()
+    if (room < 1) return 0
+    return (cover * CLOUD_SCALES.size).roundToInt().coerceIn(1, minOf(room, CLOUD_SCALES.size))
+}
+
+/**
+ * Where one cloud sits along the daylight arc: 0 is sunrise and 1 is
+ * sunset.
+ *
+ * Spread across whatever room there is and then nudged off even, with
+ * the ends left clear so a cloud does not hang past sunrise into a
+ * night that, by the look of it, has no weather at all.
+ */
+internal fun cloudFraction(index: Int, count: Int): Float {
+    if (count <= 0) return 0.5f
+    val even = (index + 0.5f) / count
+    return (even + CLOUD_JITTER[index % CLOUD_JITTER.size]).coerceIn(0.12f, 0.88f)
+}
 
 /**
  * How far a cloud of side [w] at [angleDeg] reaches away from the ring
  * it sits on. Larger than half the band means it gets cut off there,
- * which is now the point rather than the bug.
+ * which is the point rather than the bug.
  */
 internal fun cloudReach(w: Float, angleDeg: Float): Float {
     val rad = (angleDeg - 90f) * PI.toFloat() / 180f
@@ -468,9 +503,15 @@ private fun DrawScope.drawClouds(
     ring: Float,
     cover: Float,
     painter: VectorPainter,
+    sunriseMinute: Int,
+    dayMinutes: Int,
 ) {
-    if (cover <= 0.05f) return
-    val count = cloudCount(cover)
+    // Daylight only. Nights are cloudy too, but a dark band with pale
+    // shapes on it reads as smudges rather than as weather, and the
+    // dial is better for leaving them off.
+    val dayDegrees = dayMinutes / SkyClock.MINUTES_IN_DAY.toFloat() * 360f
+    val count = cloudCount(cover, dayDegrees)
+    if (count == 0) return
     val box = cloudBox(ring)
 
     // The clip is the shape. Each cloud is drawn far larger than the
@@ -488,8 +529,11 @@ private fun DrawScope.drawClouds(
     clipPath(band) {
         for (i in 0 until count) {
             val w = box * CLOUD_SCALES[i]
+            val minute = sunriseMinute + (cloudFraction(i, count) * dayMinutes).roundToInt()
             // Off the centreline, so they crop against different edges.
-            val p = pointOn(CLOUD_SLOTS[i], centre, radius + ring * CLOUD_OFFSETS[i])
+            val p = pointOn(
+                SkyClock.angleOf(minute), centre, radius + ring * CLOUD_OFFSETS[i],
+            )
             translate(p.x - w / 2f, p.y - w / 2f) {
                 with(painter) { draw(Size(w, w), alpha = alpha, colorFilter = tint) }
             }

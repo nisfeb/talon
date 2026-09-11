@@ -200,6 +200,14 @@ object SkyClock {
         val polar: Boolean = false,
         val polarDay: Boolean = false,
     ) {
+        /** How long the sun is up, in minutes. Zero through a polar
+         *  night and the whole day through a polar summer. */
+        val daylightMinutes: Int
+            get() = when {
+                polar -> if (polarDay) MINUTES_IN_DAY else 0
+                else -> forward(sunriseMinute, sunsetMinute)
+            }
+
         val warmth: Float get() = warmth(currentC)
         val overcast: Float get() = overcast(cloudCover)
         val sunUp: Boolean
