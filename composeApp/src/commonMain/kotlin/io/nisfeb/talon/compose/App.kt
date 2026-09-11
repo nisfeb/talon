@@ -903,6 +903,14 @@ fun App(
                 }
             }
         }
+        val homePlaceRaw by uiSettings.homePlace.collectAsState()
+        val homePlace = remember(homePlaceRaw) {
+            io.nisfeb.talon.ui.HomePlaceCodec.decode(homePlaceRaw)
+        }
+        // Only ever called when somebody types a place and asks; see the
+        // note on the class about what leaves the machine.
+        val placeLookup = remember(http) { io.nisfeb.talon.ui.OpenMeteoPlaces(http).asLookup() }
+        val deviceLocation = io.nisfeb.talon.ui.rememberDeviceLocation()
         val mailAvailability by mailRepo.availability.collectAsState()
         // Null until the nexus answers, so nothing offers mail on a ship
         // that has none.
@@ -2819,6 +2827,16 @@ fun App(
                                         mail = mailRepo,
                                         contacts = callContacts,
                                         ourShip = ship,
+                                        place = homePlace,
+                                        // Null on desktop, which is the
+                                        // manual-fallback case by default.
+                                        onUseDeviceLocation = deviceLocation,
+                                        placeLookup = placeLookup,
+                                        onPlacePicked = { p ->
+                                            uiSettings.setHomePlace(
+                                                io.nisfeb.talon.ui.HomePlaceCodec.encode(p),
+                                            )
+                                        },
                                         onOpenConversation = { whom -> jumpToChat(whom) },
                                         onOpenChats = { uiSettings.setActiveRailTab(RailTab.Chats) },
                                         onOpenMailThread = { id ->

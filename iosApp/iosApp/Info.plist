@@ -20,6 +20,8 @@
 		<string>audio</string>
 		<string>voip</string>
 	</array>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Talon uses your location to show sunrise, sunset and weather for where you are on the home dial. It is kept on this device.</string>
 	<key>NSCameraUsageDescription</key>
 	<string>Talon uses your camera for video calls, and only while a call is on screen and you have turned your camera on.</string>
 	<key>CFBundleDevelopmentRegion</key>

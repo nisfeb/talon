@@ -184,6 +184,10 @@ data class HomePlace(
     val lon: Double,
     val label: String,
     val fromGps: Boolean = false,
+    /** Height above sea level, where the device knows it. It moves the
+     *  horizon: from higher up the sun clears it earlier and the dark
+     *  part of the dial shrinks. */
+    val elevationMetres: Double? = null,
 )
 
 /**
@@ -194,3 +198,43 @@ data class HomePlace(
  * decision to take deliberately rather than to inherit from a widget.
  */
 typealias PlaceLookup = suspend (String) -> Result<List<HomePlace>>
+
+/**
+ * Storing a place, as one line.
+ *
+ * A string rather than a table because there is exactly one of these
+ * and it is settings, not data. Round-tripping is what matters: a
+ * stored place that comes back slightly different is a dial that
+ * silently moves somewhere else.
+ */
+object HomePlaceCodec {
+    /** `lat,lon,fromGps,label` — the label last, because it is the only
+     *  part that can contain anything, commas included. */
+    fun encode(p: HomePlace): String =
+        listOf(
+            p.lat.toString(),
+            p.lon.toString(),
+            if (p.fromGps) "1" else "0",
+            p.elevationMetres?.toString() ?: "",
+            p.label,
+        ).joinToString(",")
+
+    fun decode(s: String): HomePlace? {
+        if (s.isBlank()) return null
+        val parts = s.split(",", limit = 5)
+        if (parts.size < 5) return null
+        val lat = parts[0].toDoubleOrNull() ?: return null
+        val lon = parts[1].toDoubleOrNull() ?: return null
+        // Coordinates off the globe mean a corrupt line, and a dial
+        // pointed at nowhere is worse than one that admits it has no
+        // location at all.
+        if (lat !in -90.0..90.0 || lon !in -180.0..180.0) return null
+        return HomePlace(
+            lat = lat,
+            lon = lon,
+            label = parts[4],
+            fromGps = parts[2] == "1",
+            elevationMetres = parts[3].toDoubleOrNull(),
+        )
+    }
+}

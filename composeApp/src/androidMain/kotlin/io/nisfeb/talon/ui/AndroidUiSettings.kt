@@ -113,6 +113,14 @@ class AndroidUiSettings(
     override val activeRailTab: StateFlow<RailTab> =
         _activeRailTab.asStateFlow()
 
+    private val _homePlace = MutableStateFlow(prefs.getString(KEY_HOME_PLACE, "") ?: "")
+    override val homePlace: StateFlow<String> = _homePlace.asStateFlow()
+    override fun setHomePlace(encoded: String) {
+        if (_homePlace.value == encoded) return
+        _homePlace.value = encoded
+        prefs.edit().putString(KEY_HOME_PLACE, encoded).apply()
+    }
+
     private val _smartSearchPreferred = MutableStateFlow(
         prefs.getBoolean(KEY_SMART_SEARCH_PREFERRED, false),
     )
@@ -290,6 +298,7 @@ class AndroidUiSettings(
 
     private companion object {
         private const val KEY_HIDE_COMPOSER_BUTTONS = "hide_composer_buttons"
+        private const val KEY_HOME_PLACE = "home_place"
         private const val KEY_ACCENT_ENABLED = "accent_enabled"
         private const val KEY_ACCENT_MODE = "accent_mode"
         private const val KEY_ACCENT_HEX = "accent_hex"

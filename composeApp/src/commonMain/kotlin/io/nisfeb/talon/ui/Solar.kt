@@ -51,6 +51,7 @@ object Solar {
         longitude: Double,
         dayOfYear: Int,
         zoneOffsetMinutes: Int,
+        elevationMetres: Double = 0.0,
     ): SunTimes {
         val gamma = 2.0 * PI / 365.0 * (dayOfYear - 1)
         val eqTime = 229.18 * (
@@ -64,7 +65,11 @@ object Solar {
             0.002697 * cos(3 * gamma) + 0.00148 * sin(3 * gamma)
 
         val lat = latitude * DEG
-        val cosHa = cos(90.833 * DEG) / (cos(lat) * cos(decl)) - tan(lat) * tan(decl)
+        // Standing higher puts the horizon further down, so the sun
+        // clears it earlier and sets later and the dark part of the day
+        // shrinks. On a mountain that is worth minutes, not seconds.
+        val zenith = 90.833 + horizonDip(elevationMetres)
+        val cosHa = cos(zenith * DEG) / (cos(lat) * cos(decl)) - tan(lat) * tan(decl)
 
         // Out of range means the sun never crosses the horizon that day.
         // Which side it is out on says whether the day or the night is
@@ -102,6 +107,24 @@ object Solar {
         // The sun set after local midnight, which happens near a pole
         // in summer and with far-flung time zones.
         else -> SkyClock.MINUTES_IN_DAY - (t.sunriseMinute - t.sunsetMinute)
+    }
+
+    /**
+     * How far below level the horizon sits, in degrees, for somebody
+     * [metres] above sea level.
+     *
+     * The earth curves away, so from higher up you see over more of it.
+     * A thousand metres buys about a degree, which is roughly four
+     * minutes of daylight at each end; the summit of Everest buys three.
+     * Negative elevations are clamped rather than trusted: below sea
+     * level the horizon rises, but a GPS fix reading minus two hundred
+     * is far more likely to be wrong than to be the Dead Sea.
+     */
+    fun horizonDip(metres: Double): Double {
+        val h = metres.coerceIn(0.0, 9000.0)
+        if (h == 0.0) return 0.0
+        val earthRadius = 6_371_000.0
+        return acos(earthRadius / (earthRadius + h)) / DEG
     }
 
     /**

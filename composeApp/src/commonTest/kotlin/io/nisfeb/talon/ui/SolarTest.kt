@@ -78,4 +78,46 @@ class SolarTest {
         // than a number anybody depends on.
         assertTrue(Solar.twilightMinutes(89.9) <= 180)
     }
+
+    // ---- elevation -----------------------------------------------------
+
+    @Test
+    fun `standing higher lengthens the day at both ends`() {
+        val seaLevel = Solar.sunTimes(40.0, 0.0, 100, 0, elevationMetres = 0.0)
+        val mountain = Solar.sunTimes(40.0, 0.0, 100, 0, elevationMetres = 3000.0)
+        assertTrue(
+            mountain.sunriseMinute < seaLevel.sunriseMinute,
+            "the sun clears a lower horizon sooner",
+        )
+        assertTrue(mountain.sunsetMinute > seaLevel.sunsetMinute, "and sets later")
+        assertTrue(
+            Solar.daylightMinutes(mountain) > Solar.daylightMinutes(seaLevel) + 10,
+            "three kilometres is worth more than ten minutes of light",
+        )
+    }
+
+    @Test
+    fun `the horizon dips about a degree per kilometre at first`() {
+        assertEquals(0.0, Solar.horizonDip(0.0))
+        assertTrue(abs(Solar.horizonDip(1000.0) - 1.0) < 0.1, "${Solar.horizonDip(1000.0)}")
+        assertTrue(Solar.horizonDip(8848.0) > 2.5, "Everest should be worth about three degrees")
+    }
+
+    @Test
+    fun `a nonsense elevation cannot move the horizon`() {
+        // A fix reading far below sea level is far more likely to be
+        // broken than to be the Dead Sea, and a dial is not the place
+        // to find out.
+        assertEquals(0.0, Solar.horizonDip(-500.0))
+        assertEquals(Solar.horizonDip(9000.0), Solar.horizonDip(40_000.0))
+    }
+
+    @Test
+    fun `elevation cannot invent a sunrise past the polar circle`() {
+        // Height helps, but not by five weeks. Midwinter at 78 north is
+        // still a night that does not end.
+        val t = Solar.sunTimes(78.0, 15.0, december, 60, elevationMetres = 3000.0)
+        assertTrue(t.polar)
+        assertFalse(t.polarDay)
+    }
 }

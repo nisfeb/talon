@@ -103,6 +103,14 @@ interface UiSettings {
      * on; the chip is hidden otherwise.
      */
     val smartSearchPreferred: StateFlow<Boolean>
+
+    /**
+     * Where the home page's dial thinks you are, as one encoded line,
+     * or empty when nobody has said. Per install rather than per ship:
+     * it is a fact about the device, not about the identity.
+     */
+    val homePlace: StateFlow<String>
+    fun setHomePlace(encoded: String)
     fun setSmartSearchPreferred(preferred: Boolean)
 
     /**
@@ -284,6 +292,10 @@ class InMemoryUiSettings(
             if (visible) remove(item) else this[item] = false
         }
     }
+
+    private val _homePlace = MutableStateFlow("")
+    override val homePlace: StateFlow<String> = _homePlace.asStateFlow()
+    override fun setHomePlace(encoded: String) { _homePlace.value = encoded }
 
     private val _smartSearchPreferred = MutableStateFlow(initialSmartSearchPreferred)
     override val smartSearchPreferred: StateFlow<Boolean> =

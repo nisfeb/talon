@@ -57,6 +57,7 @@ class FileUiSettings(
         val chatPaneListFraction: Float = 0.30f,
         val activeRailTab: String = RailTab.Chats.name,
         val smartSearchPreferred: Boolean = false,
+        val homePlace: String = "",
         val railItemOrder: List<String> = emptyList(),
         val powerFeaturesEnabled: Boolean = false,
         val density: String = Density.Comfortable.name,
@@ -145,6 +146,14 @@ class FileUiSettings(
     )
     override val activeRailTab: StateFlow<RailTab> =
         _activeRailTab.asStateFlow()
+
+    private val _homePlace = MutableStateFlow(initial.homePlace)
+    override val homePlace: StateFlow<String> = _homePlace.asStateFlow()
+    override fun setHomePlace(encoded: String) {
+        if (_homePlace.value == encoded) return
+        _homePlace.value = encoded
+        persistCurrent()
+    }
 
     private val _smartSearchPreferred = MutableStateFlow(initial.smartSearchPreferred)
     override val smartSearchPreferred: StateFlow<Boolean> =
@@ -261,6 +270,7 @@ class FileUiSettings(
                 chatPaneListFraction = _chatPaneListFraction.value,
                 activeRailTab = _activeRailTab.value.name,
                 smartSearchPreferred = _smartSearchPreferred.value,
+                homePlace = _homePlace.value,
                 railItemOrder = _railItemOrder.value.map { it.name },
                 powerFeaturesEnabled = _powerFeaturesEnabled.value,
                 density = _density.value.name,

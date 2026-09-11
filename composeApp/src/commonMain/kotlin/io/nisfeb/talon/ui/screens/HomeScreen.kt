@@ -84,6 +84,12 @@ fun HomeScreen(
     place: HomePlace? = null,
     /** Today's weather, or null before a source exists. */
     weather: SkyClock.Sky? = null,
+    /** Ask the device where it is. Null where it cannot say, which is
+     *  desktop and a refused permission alike. */
+    onUseDeviceLocation: (suspend () -> Result<HomePlace>)? = null,
+    /** Turn a typed place into coordinates, or null for coordinates only. */
+    placeLookup: io.nisfeb.talon.ui.PlaceLookup? = null,
+    onPlacePicked: (HomePlace) -> Unit = {},
     onOpenConversation: (whom: String) -> Unit,
     onOpenChats: () -> Unit,
     onOpenMailThread: (threadId: String) -> Unit,
@@ -119,7 +125,11 @@ fun HomeScreen(
                 // beside it keeps it whole rather than squaring it off
                 // against a panel of five rows.
                 Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                    Box(Modifier.weight(1f)) { ClockWeatherPanel(place, weather) }
+                    Box(Modifier.weight(1f)) {
+                        ClockWeatherPanel(
+                            place, weather, onUseDeviceLocation, placeLookup, onPlacePicked,
+                        )
+                    }
                     Column(
                         Modifier.weight(1f),
                         verticalArrangement = Arrangement.spacedBy(14.dp),
@@ -130,7 +140,9 @@ fun HomeScreen(
                     }
                 }
             } else {
-                ClockWeatherPanel(place, weather)
+                ClockWeatherPanel(
+                    place, weather, onUseDeviceLocation, placeLookup, onPlacePicked,
+                )
                 ChatsPanel(recent, unreadBy, contacts, ourShip, onOpenConversation, onOpenChats)
                 MailPanel(mail, contacts, onOpenMailThread, onOpenMail)
                 CalendarPanel()
@@ -328,7 +340,14 @@ private fun MailPanel(
  * a page that costs them battery all day.
  */
 @Composable
-private fun ClockWeatherPanel(place: HomePlace?, weather: SkyClock.Sky?) {
+private fun ClockWeatherPanel(
+    place: HomePlace?,
+    weather: SkyClock.Sky?,
+    onUseDeviceLocation: (suspend () -> Result<HomePlace>)?,
+    placeLookup: io.nisfeb.talon.ui.PlaceLookup?,
+    onPlacePicked: (HomePlace) -> Unit,
+) {
+    var picking by remember { mutableStateOf(false) }
     var nowMsState by remember { mutableStateOf(nowMs()) }
     LaunchedEffect(Unit) {
         while (true) {
@@ -355,13 +374,31 @@ private fun ClockWeatherPanel(place: HomePlace?, weather: SkyClock.Sky?) {
                 twentyFourHour = false,
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp),
             )
-            Text(
-                place?.label ?: "No location set",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(top = 10.dp),
-            )
+            TextButton(onClick = { picking = true }, modifier = Modifier.padding(top = 4.dp)) {
+                Text(
+                    place?.label ?: "Set a location",
+                    style = MaterialTheme.typography.labelMedium,
+                )
+            }
+            if (place == null) {
+                Text(
+                    "Without one the dial shows an even day and no weather.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 24.dp),
+                )
+            }
         }
+    }
+
+    if (picking) {
+        LocationPicker(
+            current = place,
+            onUseDevice = onUseDeviceLocation,
+            lookup = placeLookup,
+            onPick = { picking = false; onPlacePicked(it) },
+            onDismiss = { picking = false },
+        )
     }
 }
 
@@ -379,7 +416,13 @@ internal fun skyFor(atMs: Long, place: HomePlace?, weather: SkyClock.Sky?): SkyC
     val offsetMinutes = zone.offsetAt(Instant.fromEpochMilliseconds(atMs)).totalSeconds / 60
 
     val sun = place?.let {
-        Solar.sunTimes(it.lat, it.lon, local.date.dayOfYear, offsetMinutes)
+        Solar.sunTimes(
+            latitude = it.lat,
+            longitude = it.lon,
+            dayOfYear = local.date.dayOfYear,
+            zoneOffsetMinutes = offsetMinutes,
+            elevationMetres = it.elevationMetres ?: 0.0,
+        )
     }
     val base = weather ?: SkyClock.Sky(minuteOfDay = minuteOfDay)
     return base.copy(
