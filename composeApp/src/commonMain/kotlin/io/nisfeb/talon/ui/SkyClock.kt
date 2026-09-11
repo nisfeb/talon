@@ -93,6 +93,47 @@ object SkyClock {
     }
 
     /**
+     * What the sky is actually doing, as far as the dial cares.
+     *
+     * Coarser than the forecast's own vocabulary on purpose: the dial
+     * has one small icon and a ring to say it with, and the difference
+     * between slight and moderate drizzle is not something either can
+     * carry. [gloom] is how much the light goes out of the day — rain
+     * darkens a sky, snow rather less, and a thunderstorm most of all.
+     */
+    enum class Weather(val gloom: Float, val precipitating: Boolean) {
+        CLEAR(0f, false),
+        CLOUD(0f, false),
+        FOG(0.26f, false),
+        DRIZZLE(0.20f, true),
+        RAIN(0.38f, true),
+        SLEET(0.36f, true),
+        // Snow falls out of a bright sky more often than a black one,
+        // and the ground throws light back up into it.
+        SNOW(0.20f, true),
+        THUNDER(0.55f, true),
+    }
+
+    /**
+     * A WMO present-weather code as something the dial can draw.
+     *
+     * The codes run in bands — sixties are rain, seventies snow,
+     * eighties showers — and anything unrecognised is treated as clear
+     * rather than guessed at, because a wrong icon is worse than none.
+     */
+    fun weatherOf(code: Int?): Weather = when (code) {
+        null, 0, 1 -> Weather.CLEAR
+        2, 3 -> Weather.CLOUD
+        45, 48 -> Weather.FOG
+        51, 53, 55 -> Weather.DRIZZLE
+        56, 57, 66, 67 -> Weather.SLEET
+        61, 63, 65, 80, 81, 82 -> Weather.RAIN
+        71, 73, 75, 77, 85, 86 -> Weather.SNOW
+        95, 96, 99 -> Weather.THUNDER
+        else -> Weather.CLEAR
+    }
+
+    /**
      * How much the sky is doing something, from 0 (clear) to 1
      * (overcast). Drains the day band's colour rather than painting
      * grey over it, so a cloudy afternoon reads as flat rather than as
@@ -145,6 +186,8 @@ object SkyClock {
         val lowC: Double? = null,
         val lowAtMinute: Int? = null,
         val cloudCover: Float? = null,
+        /** What the sky is doing, as far as the dial can show it. */
+        val condition: Weather = Weather.CLEAR,
         /** How far round from the sun the moon has got, in degrees:
          *  0 is new and 180 is full. Null before anything works it out. */
         val moonElongationDeg: Double? = null,

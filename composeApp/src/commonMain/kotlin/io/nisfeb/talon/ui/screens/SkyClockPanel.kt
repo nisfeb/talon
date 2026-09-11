@@ -12,8 +12,17 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AcUnit
+import androidx.compose.material.icons.filled.Air
+import androidx.compose.material.icons.filled.Cloud
+import androidx.compose.material.icons.filled.Grain
+import androidx.compose.material.icons.filled.Thunderstorm
+import androidx.compose.material.icons.filled.WaterDrop
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -31,6 +40,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.TextMeasurer
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.drawText
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.dp
@@ -38,6 +48,7 @@ import io.nisfeb.talon.ui.Moon
 import io.nisfeb.talon.ui.SkyClock
 import kotlin.math.PI
 import kotlin.math.cos
+import kotlin.math.roundToInt
 import kotlin.math.sin
 
 /**
@@ -108,6 +119,18 @@ fun SkyClockDial(
         label = "twilight",
     )
 
+    // Rain takes the light out of a sky. Animated with the rest so a
+    // shower arriving does not snap the dial to a different day.
+    val gloom by animateFloatAsState(
+        targetValue = sky.condition.gloom,
+        animationSpec = tween(2_000),
+        label = "gloom",
+    )
+    val cloudiness by animateFloatAsState(
+        targetValue = sky.cloudCover ?: 0f,
+        animationSpec = tween(2_000),
+        label = "cloud",
+    )
     val faceColor = MaterialTheme.colorScheme.surface
     val inkColor = MaterialTheme.colorScheme.onSurface
     val markColor = MaterialTheme.colorScheme.onSurfaceVariant
@@ -131,7 +154,9 @@ fun SkyClockDial(
                 val sweep = 360f / SEGMENTS + 0.7f
                 for (i in 0 until SEGMENTS) {
                     drawArc(
-                        color = skyColor(mixes[i], dayColor, twilightColor, nightColor),
+                        color = skyColor(
+                            mixes[i], dayColor, twilightColor, nightColor, gloom,
+                        ),
                         // Compose measures from three o'clock; the dial
                         // measures from twelve.
                         startAngle = SkyClock.angleOf(i * SEGMENT_MINUTES) - 90f,
@@ -145,6 +170,13 @@ fun SkyClockDial(
 
                 val radius = box.minDimension / 2f
                 val centre = Offset(size.width / 2f, size.height / 2f)
+
+                // Cloud, drawn rather than only drained out of the
+                // colour. A flat grey ring says "overcast" to somebody
+                // who already knows that is what it means; puffs say it
+                // to everybody, and they say it at night too, where a
+                // drained night band looks the same as a clear one.
+                drawClouds(centre, radius, ring, cloudiness)
                 // Laid down before anything that sits inside the sky
                 // ring, or it paints over them.
                 drawCircle(color = faceColor, radius = radius - ring / 2f, center = centre)
@@ -209,6 +241,21 @@ fun SkyClockDial(
                     style = MaterialTheme.typography.bodyMedium,
                     color = markColor,
                 )
+                conditionIcon(sky.condition)?.let { (icon, word) ->
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        modifier = Modifier.padding(top = 2.dp),
+                    ) {
+                        Icon(
+                            icon,
+                            contentDescription = null,
+                            modifier = Modifier.size(14.dp),
+                            tint = markColor,
+                        )
+                        Text(word, style = MaterialTheme.typography.labelMedium, color = markColor)
+                    }
+                }
                 if (sky.currentC != null) {
                     Text(
                         SkyClock.tempLabel(sky.currentC, fahrenheit),
@@ -328,8 +375,61 @@ private val DAY_OVERCAST = Color(0xFF9AA4B0)
 private val NIGHT_BASE = Color(0xFF0C1533)
 private val NIGHT_OVERCAST = Color(0xFF232B3D)
 
+/** What a sky under rain heads toward. Not grey: a wet sky keeps its
+ *  blue, it just stops being lit. */
+private val GLOOM = Color(0xFF1E2530)
+
 private val TWILIGHT_BASE = Color(0xFFF0A33C)
 private val TWILIGHT_COLD = Color(0xFFE8956B)
+
+/**
+ * Which icon and word say what the sky is doing, or null when it is
+ * doing nothing worth a line. A clear day should not have to carry a
+ * label saying so.
+ */
+private fun conditionIcon(w: SkyClock.Weather): Pair<ImageVector, String>? = when (w) {
+    SkyClock.Weather.CLEAR -> null
+    SkyClock.Weather.CLOUD -> Icons.Filled.Cloud to "Cloudy"
+    SkyClock.Weather.FOG -> Icons.Filled.Air to "Fog"
+    SkyClock.Weather.DRIZZLE -> Icons.Filled.Grain to "Drizzle"
+    SkyClock.Weather.RAIN -> Icons.Filled.WaterDrop to "Rain"
+    SkyClock.Weather.SLEET -> Icons.Filled.Grain to "Sleet"
+    SkyClock.Weather.SNOW -> Icons.Filled.AcUnit to "Snow"
+    SkyClock.Weather.THUNDER -> Icons.Filled.Thunderstorm to "Storm"
+}
+
+/**
+ * Where the puffs go, in the order they appear.
+ *
+ * Fixed angles rather than anything random: the drawing is recomposed
+ * every few seconds, and clouds that jumped to new places each time
+ * would be the most distracting thing on the page. Ordered so that
+ * each new one lands away from those already there, which keeps four
+ * clouds looking scattered rather than bunched.
+ */
+private val CLOUD_SLOTS = floatArrayOf(
+    34f, 196f, 108f, 274f, 72f, 232f, 148f, 312f, 12f, 168f,
+)
+
+private fun DrawScope.drawClouds(centre: Offset, radius: Float, ring: Float, cover: Float) {
+    if (cover <= 0.05f) return
+    val count = (cover * CLOUD_SLOTS.size).roundToInt().coerceIn(1, CLOUD_SLOTS.size)
+    // Thin enough that the band still reads through them, which is
+    // what cloud actually looks like from underneath.
+    val paint = Color.White.copy(alpha = 0.16f + 0.26f * cover)
+    val r = ring * 0.17f
+    for (i in 0 until count) {
+        val a = CLOUD_SLOTS[i]
+        val rad = (a - 90f) * PI.toFloat() / 180f
+        val p = pointOn(a, centre, radius)
+        // Along the ring, not across it: a puff that spread radially
+        // would poke out of the band at both edges.
+        val t = Offset(-sin(rad), cos(rad))
+        drawCircle(paint, r, p)
+        drawCircle(paint, r * 0.66f, Offset(p.x - t.x * r * 1.05f, p.y - t.y * r * 1.05f))
+        drawCircle(paint, r * 0.58f, Offset(p.x + t.x * r * 1.05f, p.y + t.y * r * 1.05f))
+    }
+}
 
 /**
  * The ring's colour at one point in the day.
@@ -338,8 +438,18 @@ private val TWILIGHT_COLD = Color(0xFFE8956B)
  * day and on past it into night, so sunrise and sunset are where the
  * ring is most coloured rather than two stripes laid over it.
  */
-private fun skyColor(mix: Float, day: Color, horizon: Color, night: Color): Color =
-    if (mix >= 0f) lerp(horizon, day, mix) else lerp(horizon, night, -mix)
+private fun skyColor(
+    mix: Float,
+    day: Color,
+    horizon: Color,
+    night: Color,
+    gloom: Float,
+): Color {
+    val base = if (mix >= 0f) lerp(horizon, day, mix) else lerp(horizon, night, -mix)
+    // Rain does not recolour a sky so much as take the light out of
+    // it, so this pulls toward a dark slate rather than toward grey.
+    return lerp(base, GLOOM, gloom.coerceIn(0f, 1f))
+}
 
 /** A temperature as a mark colour, cold through mild to hot. */
 private fun markColor(celsius: Double?): Color {

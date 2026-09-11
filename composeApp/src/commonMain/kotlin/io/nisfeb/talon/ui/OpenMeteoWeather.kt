@@ -37,7 +37,7 @@ class OpenMeteoWeather(private val http: HttpClient) {
         val lat = round2(place.lat)
         val lon = round2(place.lon)
         val url = "$ENDPOINT?latitude=$lat&longitude=$lon" +
-            "&current=temperature_2m,cloud_cover" +
+            "&current=temperature_2m,cloud_cover,weather_code" +
             "&hourly=temperature_2m&forecast_days=1&timezone=auto"
         val resp = http.get(url)
         if (!resp.status.isSuccess()) error("HTTP ${resp.status.value}")
@@ -86,6 +86,7 @@ internal fun parseForecast(body: String): SkyClock.Sky? {
         lowC = low?.second,
         lowAtMinute = low?.first,
         cloudCover = f.current.cloudCover?.let { (it / 100f).coerceIn(0f, 1f) },
+        condition = SkyClock.weatherOf(f.current.weatherCode),
     )
 }
 
@@ -111,6 +112,7 @@ private data class Forecast(
 private data class Current(
     @SerialName("temperature_2m") val temperature: Double? = null,
     @SerialName("cloud_cover") val cloudCover: Float? = null,
+    @SerialName("weather_code") val weatherCode: Int? = null,
 )
 
 @Serializable
