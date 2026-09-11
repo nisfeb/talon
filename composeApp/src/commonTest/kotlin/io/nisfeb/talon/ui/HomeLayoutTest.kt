@@ -92,8 +92,19 @@ class HomeLayoutTest {
         val back = HomeLayoutCodec.decode(v1)
         assertEquals(HOME_COLUMNS / 2, back[HomeWidgetKind.CLOCK].span, "half stays half")
         assertEquals(HOME_COLUMNS, back[HomeWidgetKind.MAIL].span, "full stays full")
-        assertEquals(6, back[HomeWidgetKind.CLOCK].rows, "two old rows is six new ones")
-        assertEquals(3, back[HomeWidgetKind.MAIL].rows)
+        // Asserted as height rather than as a row count, because the
+        // count only means anything against the unit of the day. Two
+        // old rows of 168dp is 336dp, and the nearest the 40dp grid
+        // gets is 320.
+        assertEquals(336, 2 * 168, "the old unit, for the arithmetic below")
+        assertTrue(
+            kotlin.math.abs(back[HomeWidgetKind.CLOCK].rows * HOME_ROW_UNIT_DP - 336) <= HOME_ROW_UNIT_DP,
+            "the clock came back ${back[HomeWidgetKind.CLOCK].rows * HOME_ROW_UNIT_DP}dp, not about 336",
+        )
+        assertTrue(
+            kotlin.math.abs(back[HomeWidgetKind.MAIL].rows * HOME_ROW_UNIT_DP - 168) <= HOME_ROW_UNIT_DP,
+            "the mail came back ${back[HomeWidgetKind.MAIL].rows * HOME_ROW_UNIT_DP}dp, not about 168",
+        )
         assertEquals(HOME_LAYOUT_VERSION, back.version, "and it is written back as current")
     }
 
@@ -342,7 +353,7 @@ class HomeResizeTest {
     @Test
     fun `dragging back the other way shrinks`() {
         assertEquals(5, resizedSpan(6, -col * 0.8f, col, HOME_COLUMNS))
-        assertEquals(2, resizedRows(4, -row * 1.7f, row))
+        assertEquals(6, resizedRows(8, -row * 1.7f, row))
     }
 
     @Test

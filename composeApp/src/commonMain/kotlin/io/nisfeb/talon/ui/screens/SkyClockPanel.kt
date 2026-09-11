@@ -55,6 +55,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import io.nisfeb.talon.ui.Moon
 import io.nisfeb.talon.ui.SkyClock
@@ -81,6 +82,16 @@ fun SkyClockDial(
     sky: SkyClock.Sky,
     fahrenheit: Boolean,
     twentyFourHour: Boolean,
+    /**
+     * How big the dial is allowed to get.
+     *
+     * Passed in rather than fixed, because the dial is square and its
+     * width therefore sets the whole widget's height. Pinned at one
+     * size it ignored every height below its own: the clock widget
+     * drew identically at two row units and at six, then suddenly grew
+     * at seven, which is the jump that made the grid feel coarse.
+     */
+    maxSize: Dp = 320.dp,
     modifier: Modifier = Modifier,
 ) {
     // The ring is drawn as a run of short segments rather than four
@@ -187,7 +198,7 @@ fun SkyClockDial(
         .copy(fontWeight = FontWeight.SemiBold, color = markColor)
 
     Box(modifier, contentAlignment = Alignment.Center) {
-        Box(Modifier.fillMaxWidth().aspectRatio(1f).widthIn(max = 320.dp)) {
+        Box(Modifier.fillMaxWidth().aspectRatio(1f).widthIn(max = maxSize)) {
             // The richest thing on the page was a bare Canvas, which
             // reads out as nothing at all. The numbers in the middle are
             // separate Text and are spoken on their own; this is for

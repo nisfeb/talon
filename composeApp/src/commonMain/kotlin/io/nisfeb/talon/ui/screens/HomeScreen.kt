@@ -226,8 +226,8 @@ fun HomeScreen(
                 )
             }
 
-            val guideBand = MaterialTheme.colorScheme.primary.copy(alpha = 0.07f)
-            val guideLine = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+            val guideBand = MaterialTheme.colorScheme.primary.copy(alpha = 0.030f)
+            val guideLine = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.20f)
 
             gridRows.forEach { gridRow ->
                 Row(
@@ -437,11 +437,31 @@ fun HomeScreen(
  * widget: at 168dp the only heights on offer were 168, 336 and 504,
  * and nothing anybody wanted sat on one of them.
  */
-private val HOME_ROW_UNIT = 56.dp
+private val HOME_ROW_UNIT = io.nisfeb.talon.ui.HOME_ROW_UNIT_DP.dp
 
 /** The space between two widgets. Named because the grid guides have
  *  to subtract exactly the same gaps the layout adds. */
 private val GRID_GAP = 14.dp
+
+/** Roughly what the clock panel spends on padding and its location
+ *  button, above and below the dial itself. */
+private val DIAL_CHROME = 76.dp
+
+/** The smallest dial with room for the time written across it. */
+private val DIAL_MIN = 100.dp
+
+/** And the largest worth drawing; past this it is just a big circle. */
+private val DIAL_MAX = 420.dp
+
+/**
+ * How big the dial may be in a clock widget [rows] units tall.
+ *
+ * The dial is square, so its width is what sets the widget's height.
+ * Left to fill whatever width it had, it ignored the height entirely
+ * and the clock drew the same at two row units as at six.
+ */
+internal fun dialSizeFor(rows: Int): androidx.compose.ui.unit.Dp =
+    (HOME_ROW_UNIT * rows - DIAL_CHROME).coerceIn(DIAL_MIN, DIAL_MAX)
 
 /** How big a handle has to be to be hit with a thumb. */
 private val HANDLE = 26.dp
@@ -620,6 +640,7 @@ private fun WidgetBody(
 ) {
     when (widget.kind) {
         HomeWidgetKind.CLOCK -> ClockWeatherPanel(
+            dialSizeFor(widget.rows),
             place, weather, onUseDeviceLocation, placeLookup, onPlacePicked,
             fahrenheit, twentyFourHour,
         )
@@ -838,6 +859,7 @@ private fun MailPanel(
  */
 @Composable
 private fun ClockWeatherPanel(
+    maxDial: androidx.compose.ui.unit.Dp,
     place: HomePlace?,
     weather: SkyClock.Sky?,
     onUseDeviceLocation: (suspend () -> Result<HomePlace>)?,
@@ -871,6 +893,7 @@ private fun ClockWeatherPanel(
                 sky = sky,
                 fahrenheit = fahrenheit,
                 twentyFourHour = twentyFourHour,
+                maxSize = maxDial,
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp),
             )
             TextButton(onClick = { picking = true }, modifier = Modifier.padding(top = 4.dp)) {

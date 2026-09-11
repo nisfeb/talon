@@ -55,8 +55,19 @@ const val HOME_COLUMNS = 12
  */
 val HOME_SPAN_RANGE = 3..HOME_COLUMNS
 
-/** How tall a widget may be, in row units. */
-val HOME_ROW_RANGE = 2..12
+/**
+ * How tall a widget may be, in row units of [HOME_ROW_UNIT_DP].
+ *
+ * Eighteen of them rather than twelve of a taller unit: the unit is
+ * the size of the step, and the clock spends a fixed amount of its
+ * height on chrome before the dial gets any, so a coarse unit left
+ * only a handful of heights that changed anything at all.
+ */
+val HOME_ROW_RANGE = 3..18
+
+/** How tall one row unit is. Here rather than in the drawing because
+ *  migrations have to know what a stored row count was worth. */
+const val HOME_ROW_UNIT_DP = 40
 
 /**
  * What the layout's numbers currently mean.
@@ -66,11 +77,15 @@ val HOME_ROW_RANGE = 2..12
  * counts twelve columns in 56dp ones, and a version 1 layout read
  * without scaling would come back as a row of slivers.
  */
-const val HOME_LAYOUT_VERSION = 2
+const val HOME_LAYOUT_VERSION = 3
 
 /** How much finer version 2 is than version 1, per axis. */
 private const val V2_COLUMN_SCALE = 6
 private const val V2_ROW_SCALE = 3
+
+/** Version 3 keeps version 2's columns and halves its row unit from
+ *  56dp to 40dp, so a stored height is worth 56/40 of what it was. */
+private const val V3_ROW_SCALE = 56.0 / HOME_ROW_UNIT_DP
 
 @Serializable
 data class HomeWidget(
@@ -81,7 +96,7 @@ data class HomeWidget(
     /** Grid columns it takes, within [HOME_SPAN_RANGE]. */
     val span: Int = HOME_COLUMNS / 2,
     /** Grid rows it takes, within [HOME_ROW_RANGE]. */
-    val rows: Int = 3,
+    val rows: Int = 4,
     val calendarRange: CalendarRange = CalendarRange.REST_OF_DAY,
     /** Ships whose status is kept at the top of the status widget,
      *  in the order they were pinned. */
@@ -179,11 +194,11 @@ data class HomeLayout(
          */
         val DEFAULT = HomeLayout(
             listOf(
-                HomeWidget(HomeWidgetKind.CLOCK, span = 6, rows = 6),
-                HomeWidget(HomeWidgetKind.MESSAGES, count = 5, span = 6, rows = 3),
-                HomeWidget(HomeWidgetKind.MAIL, count = 5, span = 6, rows = 3),
-                HomeWidget(HomeWidgetKind.CALENDAR, span = 6, rows = 3),
-                HomeWidget(HomeWidgetKind.STATUS, visible = false, count = 5, span = 6, rows = 3),
+                HomeWidget(HomeWidgetKind.CLOCK, span = 6, rows = 9),
+                HomeWidget(HomeWidgetKind.MESSAGES, count = 5, span = 6, rows = 5),
+                HomeWidget(HomeWidgetKind.MAIL, count = 5, span = 6, rows = 5),
+                HomeWidget(HomeWidgetKind.CALENDAR, span = 6, rows = 4),
+                HomeWidget(HomeWidgetKind.STATUS, visible = false, count = 5, span = 6, rows = 5),
             ),
             version = HOME_LAYOUT_VERSION,
         )
@@ -296,12 +311,26 @@ object HomeLayoutCodec {
      */
     private fun migrate(layout: HomeLayout): HomeLayout {
         if (layout.version >= HOME_LAYOUT_VERSION) return layout
-        return layout.copy(
-            widgets = layout.widgets.map {
-                it.copy(span = it.span * V2_COLUMN_SCALE, rows = it.rows * V2_ROW_SCALE)
-            },
-            version = HOME_LAYOUT_VERSION,
-        )
+        var m = layout
+        // Step by step rather than one combined factor, so each change
+        // to the grid can be read against the one before it.
+        if (m.version < 2) {
+            m = m.copy(
+                widgets = m.widgets.map {
+                    it.copy(span = it.span * V2_COLUMN_SCALE, rows = it.rows * V2_ROW_SCALE)
+                },
+                version = 2,
+            )
+        }
+        if (m.version < 3) {
+            m = m.copy(
+                widgets = m.widgets.map {
+                    it.copy(rows = (it.rows * V3_ROW_SCALE).roundToInt())
+                },
+                version = 3,
+            )
+        }
+        return m.copy(version = HOME_LAYOUT_VERSION)
     }
 
     /** Anything unreadable falls back to the default rather than to an
