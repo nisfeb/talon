@@ -149,12 +149,24 @@ fun SkyClockDial(
                     )
                 }
 
-                // The high and low, where they happen. Ticks rather than
-                // dots: they mark a moment on the ring, and a dot would
-                // read as another body in the sky.
-                sky.highAtMinute?.let { tick(it, centre, radius, ring, markColor) }
-                if (sky.marksDistinct) {
-                    sky.lowAtMinute?.let { tick(it, centre, radius, ring, markColor) }
+                // The high and low, on the temperature ring.
+                //
+                // They were neutral ticks across the sky band once, and
+                // read as scratches on the dial: nothing about a grey bar
+                // says "this is when it was warmest", and the one at dawn
+                // cut the night band like damage. Here, position says
+                // when and colour says how warm — the same palette the
+                // ring itself uses. The face-coloured surround keeps a
+                // mark from vanishing into a ring of its own warmth,
+                // which is exactly what a high near the current
+                // temperature would otherwise do.
+                if (sky.currentC != null) {
+                    val tw = ring * 0.22f
+                    val r = radius - ring / 2f - tw
+                    sky.highAtMinute?.let { mark(it, centre, r, tw, warmthColor(sky.highC), faceColor) }
+                    if (sky.marksDistinct) {
+                        sky.lowAtMinute?.let { mark(it, centre, r, tw, warmthColor(sky.lowC), faceColor) }
+                    }
                 }
 
                 // The sun, or the moon once it is down.
@@ -240,17 +252,17 @@ private fun pointOn(angleDeg: Float, centre: Offset, radius: Float): Offset {
     return Offset(centre.x + radius * cos(rad), centre.y + radius * sin(rad))
 }
 
-private fun DrawScope.tick(
+private fun DrawScope.mark(
     minute: Int,
     centre: Offset,
-    radius: Float,
-    ring: Float,
+    ringRadius: Float,
+    ringWidth: Float,
     color: Color,
+    surround: Color,
 ) {
-    val a = SkyClock.angleOf(minute)
-    val outer = pointOn(a, centre, radius + ring * 0.34f)
-    val inner = pointOn(a, centre, radius - ring * 0.34f)
-    drawLine(color = color, start = inner, end = outer, strokeWidth = ring * 0.10f)
+    val p = pointOn(SkyClock.angleOf(minute), centre, ringRadius)
+    drawCircle(color = surround, radius = ringWidth * 0.86f, center = p)
+    drawCircle(color = color, radius = ringWidth * 0.52f, center = p)
 }
 
 // ---- the palette -------------------------------------------------------
@@ -297,8 +309,11 @@ private fun dayBand(sky: SkyClock.Sky): Color {
  * band made a mild afternoon render purple, which says nothing about
  * either.
  */
-private fun tempRing(sky: SkyClock.Sky): Color {
-    val w = sky.warmth
+private fun tempRing(sky: SkyClock.Sky): Color = warmthColor(sky.currentC)
+
+/** A temperature as its colour, cold blue through mild grey to hot red. */
+private fun warmthColor(celsius: Double?): Color {
+    val w = SkyClock.warmth(celsius)
     return if (w >= 0f) lerp(TEMP_MILD, TEMP_HOT, w) else lerp(TEMP_MILD, TEMP_COLD, -w)
 }
 
