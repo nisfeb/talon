@@ -5,7 +5,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
-import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -192,14 +192,26 @@ fun HomeScreen(
         }
         val guideBand = MaterialTheme.colorScheme.primary.copy(alpha = 0.030f)
         val guideLine = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.20f)
-        var colPitch by remember { mutableStateOf(0f) }
-        val rowPitch = with(LocalDensity.current) { HOME_ROW_UNIT.toPx() }
+        // Worked out from the width the page already has rather than
+        // reported back out of the layout pass. Set from inside measure
+        // it was still zero when a drag read it, and a column pitch of
+        // zero is a widget that cannot be moved sideways at all.
+        val density = LocalDensity.current
+        val rowPitch = with(density) { HOME_ROW_UNIT.toPx() }
+        val colPitch = with(density) {
+            val inner = maxWidth - PAGE_PADDING * 2
+            ((inner - GRID_GAP * (HOME_COLUMNS - 1)) / HOME_COLUMNS + GRID_GAP).toPx()
+        }
+        // Held rather than captured, for the same reason as everything
+        // else a gesture reads: pointerInput keeps whatever it was
+        // given when the node was made.
+        val pitch = rememberUpdatedState(colPitch to rowPitch)
 
         Column(
             Modifier
                 .fillMaxSize()
                 .verticalScroll(rememberScrollState())
-                .padding(16.dp),
+                .padding(PAGE_PADDING),
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -230,14 +242,14 @@ fun HomeScreen(
                 columns = HOME_COLUMNS,
                 rowUnit = HOME_ROW_UNIT,
                 gap = GRID_GAP,
-                onColumnPitch = { colPitch = it },
                 modifier = Modifier
                     .fillMaxWidth()
                     // One lattice over the whole page now, because every
                     // widget sits on the same grid rather than in a row
                     // of its own working out.
                     .then(
-                        if (!editing) Modifier else Modifier.drawBehind {
+                        if (!editing) Modifier else Modifier.drawWithContent {
+                            drawContent()
                             val gap = GRID_GAP.toPx()
                             val colWidth = (size.width - gap * (HOME_COLUMNS - 1)) / HOME_COLUMNS
                             for (i in 0 until HOME_COLUMNS) {
@@ -265,7 +277,7 @@ fun HomeScreen(
                 // laid out full width in reading order, and editing has
                 // to write to what is stored or a phone would flatten
                 // the arrangement made on a desktop.
-                val real = layout[widget.kind]
+                val real by rememberUpdatedState(layout[widget.kind])
                 val held = dragging == widget.kind
                 Box(
                     Modifier
@@ -329,6 +341,11 @@ fun HomeScreen(
                         Box(
                             Modifier
                                 .matchParentSize()
+                                // Keyed on the widget alone. Keyed on
+                                // the layout it would be torn down and
+                                // rebuilt on every step of the drag
+                                // that changed it, which is to say on
+                                // every step that worked.
                                 .pointerInput(widget.kind) {
                                     detectDragGestures(
                                         onDragStart = {
@@ -346,8 +363,8 @@ fun HomeScreen(
                                             startRow = dragFrom.second,
                                             dragXPx = dragBy.x,
                                             dragYPx = dragBy.y,
-                                            colPitchPx = colPitch,
-                                            rowPitchPx = rowPitch,
+                                            colPitchPx = pitch.value.first,
+                                            rowPitchPx = pitch.value.second,
                                         )
                                         // Sideways means nothing where
                                         // there is one column, and a
@@ -400,7 +417,6 @@ private fun HomeGrid(
     columns: Int,
     rowUnit: androidx.compose.ui.unit.Dp,
     gap: androidx.compose.ui.unit.Dp,
-    onColumnPitch: (Float) -> Unit,
     modifier: Modifier = Modifier,
     cell: @Composable (HomeWidget) -> Unit,
 ) {
@@ -412,7 +428,6 @@ private fun HomeGrid(
         val unitPx = rowUnit.roundToPx()
         val width = constraints.maxWidth
         val colWidth = (width - gapPx * (columns - 1)).toFloat() / columns
-        onColumnPitch(colWidth + gapPx)
 
         val placeables = measurables.mapIndexed { i, m ->
             val w = widgets[i]
@@ -450,6 +465,10 @@ private val HOME_ROW_UNIT = io.nisfeb.talon.ui.HOME_ROW_UNIT_DP.dp
 /** The space between two widgets. Named because the grid guides have
  *  to subtract exactly the same gaps the layout adds. */
 private val GRID_GAP = 14.dp
+
+/** And the page's own margin, for the same reason: the drag has to
+ *  work out a column's width from the space the grid actually gets. */
+private val PAGE_PADDING = 16.dp
 
 /** The most the clock panel spends on padding and its location line,
  *  above and below the dial itself. */
