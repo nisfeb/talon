@@ -51,6 +51,21 @@ if [ "$WANT" != "$HAVE" ]; then
     exit 1
 fi
 
+# The builder's CLI comes from nvm, which a non-login shell does not
+# put on PATH. Take the newest installed node rather than pinning a
+# version that a machine will eventually move past.
+if ! command -v npx >/dev/null 2>&1; then
+    NVM_BIN="$(ls -d "$HOME"/.nvm/versions/node/*/bin 2>/dev/null | sort -V | tail -1 || true)"
+    if [ -n "$NVM_BIN" ]; then
+        PATH="$NVM_BIN:$PATH"
+        export PATH
+    fi
+fi
+if ! command -v npx >/dev/null 2>&1; then
+    echo "refusing: npx is not on PATH and no nvm node was found." >&2
+    exit 1
+fi
+
 echo "==> compiling the iOS targets first (a free check before a paid slot)"
 JAVA_HOME="${JAVA_HOME:-/usr/lib/jvm/java-21-openjdk}" \
     ./gradlew :composeApp:compileKotlinIosArm64 --quiet
