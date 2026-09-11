@@ -37,11 +37,21 @@ fun MailScreen(
     repo: MailRepo,
     contacts: ContactMap,
     ourShip: String,
+    /** A ship to open a composer for, from somewhere outside mail —
+     *  the profile sheet's Mail button. */
+    composeTo: String? = null,
+    onComposeToConsumed: () -> Unit = {},
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var openThread by remember { mutableStateOf<String?>(null) }
     var composing by remember { mutableStateOf<MailIntent?>(null) }
+    androidx.compose.runtime.LaunchedEffect(composeTo) {
+        if (composeTo != null) {
+            composing = MailIntent(to = listOf(composeTo))
+            onComposeToConsumed()
+        }
+    }
 
     Column(modifier.fillMaxSize()) {
         Row(

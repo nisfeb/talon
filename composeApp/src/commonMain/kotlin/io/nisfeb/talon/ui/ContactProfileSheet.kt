@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.MailOutline
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -65,6 +66,9 @@ fun ContactProfileSheet(
      *  book membership, not mere presence in the /v1/all peer cache. */
     isInBook: Boolean = false,
 ) {
+    // Where the viewer's ship has no mail app this is null and the
+    // button is simply not drawn, rather than drawn and dead.
+    val mailTo = io.nisfeb.talon.mail.LocalMailTo.current
     val sheetState = rememberModalBottomSheetState()
     val label = remember(contact, ship) { contact?.nickname ?: ship }
 
@@ -189,6 +193,16 @@ fun ContactProfileSheet(
                         Icon(Icons.AutoMirrored.Filled.Send, contentDescription = null)
                         Spacer(Modifier.width(6.dp))
                         Text("Message")
+                    }
+                    if (mailTo != null) {
+                        OutlinedButton(
+                            onClick = { onDismiss(); mailTo(ship) },
+                            modifier = Modifier.weight(1f),
+                        ) {
+                            Icon(Icons.Filled.MailOutline, contentDescription = null)
+                            Spacer(Modifier.width(6.dp))
+                            Text("Mail")
+                        }
                     }
                     OutlinedButton(onClick = onDismiss) { Text("Close") }
                 }

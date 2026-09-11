@@ -506,6 +506,12 @@ fun TalonApp(
     var editingProfile by remember { mutableStateOf(false) }
     var statusFeedOpen by remember { mutableStateOf(false) }
     var mailOpen by remember { mutableStateOf(initialOpenMail) }
+    /** A ship the profile sheet asked us to write to, consumed by the
+     *  mail screen when it opens. */
+    var mailTo by remember { mutableStateOf<String?>(null) }
+    val mailAvailabilityState = mailRepo.availability.collectAsState()
+    val mailAvailable =
+        mailAvailabilityState.value == io.nisfeb.talon.mail.MailAvailability.PRESENT
 
     val mailContext = LocalContext.current
     LaunchedEffect(mailRepo, contactMap) {
@@ -1144,6 +1150,16 @@ fun TalonApp(
         { ship -> citeContacts.displayName(ship) }
     }
     androidx.compose.runtime.CompositionLocalProvider(
+        // Null until the nexus answers, so nothing offers mail on a ship
+        // that has none.
+        io.nisfeb.talon.mail.LocalMailTo provides
+            if (mailAvailable) {
+                { peer: String ->
+                    statusFeedOpen = false
+                    mailTo = peer
+                    mailOpen = true
+                }
+            } else null,
         // Bind the real ExoPlayer-backed inline players for chat
         // messages. Without this, StoryRenderer falls back to a
         // tap-to-open-in-browser pill — the desktop default.
@@ -1472,6 +1488,8 @@ fun TalonApp(
                 repo = mailRepo,
                 contacts = contactMap,
                 ourShip = loggedInShip ?: "",
+                composeTo = mailTo,
+                onComposeToConsumed = { mailTo = null },
                 onBack = { mailOpen = false },
                 modifier = mod,
             )

@@ -589,3 +589,13 @@ sealed interface MailFolder {
     data object Drafts : MailFolder
     data class Label(val name: String) : MailFolder
 }
+
+/**
+ * Open a mail composer addressed to a ship, from anywhere in the app.
+ *
+ * Null where this ship has no mail app, and every consumer treats null
+ * as "do not offer it". A control that cannot work is worse than one
+ * that is not there, and a profile sheet three screens deep should not
+ * have to be handed the plumbing to know that.
+ */
+val LocalMailTo = androidx.compose.runtime.staticCompositionLocalOf<((String) -> Unit)?> { null }

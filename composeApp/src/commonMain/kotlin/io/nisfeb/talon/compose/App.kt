@@ -883,6 +883,16 @@ fun App(
         val mailRepo = remember(session) {
             io.nisfeb.talon.mail.MailRepo(session.http, loopScope)
         }
+        val mailAvailability by mailRepo.availability.collectAsState()
+        // Null until the nexus answers, so nothing offers mail on a ship
+        // that has none.
+        val mailTarget: ((String) -> Unit)? =
+            if (mailAvailability == io.nisfeb.talon.mail.MailAvailability.PRESENT) {
+                { peer ->
+                    mailComposing = io.nisfeb.talon.ui.screens.MailIntent(to = listOf(peer))
+                    uiSettings.setActiveRailTab(RailTab.Mail)
+                }
+            } else null
         val mailShipUrl = sessionStore.active()?.shipUrl
         LaunchedEffect(mailRepo, mailShipUrl) {
             if (mailShipUrl != null) mailRepo.attach(mailShipUrl) else mailRepo.detach()
@@ -1298,6 +1308,7 @@ fun App(
           }
           androidx.compose.runtime.CompositionLocalProvider(
               io.nisfeb.talon.ui.LocalImageDownloader provides imageDownloader,
+              io.nisfeb.talon.mail.LocalMailTo provides mailTarget,
               io.nisfeb.talon.ui.LocalChatDensity provides chatDensity,
               androidx.compose.ui.platform.LocalDensity provides scaledDensity,
               io.nisfeb.talon.ui.LocalUrbLinkHandler provides urbLinkHandler,
