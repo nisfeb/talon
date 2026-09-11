@@ -160,6 +160,24 @@
             android:name="io.nisfeb.talon.DigestAlarmReceiver"
             android:exported="false" />
 
+        <!--
+          The home-screen clock. Exported because the launcher is what
+          sends it its update broadcasts, which is the one case where
+          exported="true" on a receiver is not a way in for anybody
+          else: APPWIDGET_UPDATE is delivered by the system.
+        -->
+        <receiver
+            android:name="io.nisfeb.talon.widget.ClockWidgetProvider"
+            android:exported="true"
+            android:label="@string/widget_clock_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/clock_widget_info" />
+        </receiver>
+
         <receiver
             android:name="io.nisfeb.talon.LoopAlarmReceiver"
             android:exported="false" />

@@ -31,24 +31,34 @@ typealias WeatherLookup = suspend (HomePlace) -> Result<SkyClock.Sky>
 class OpenMeteoWeather(private val http: HttpClient) {
 
     suspend fun fetch(place: HomePlace): Result<SkyClock.Sky> = runCatching {
-        // Two decimal places is about a kilometre, and the forecast
-        // model's own cells are coarser than that. Sending the raw fix
-        // would give away more than the answer uses.
-        val lat = round2(place.lat)
-        val lon = round2(place.lon)
-        val url = "$ENDPOINT?latitude=$lat&longitude=$lon" +
-            "&current=temperature_2m,cloud_cover,weather_code" +
-            "&hourly=temperature_2m,cloud_cover,weather_code" +
-            "&forecast_days=1&timezone=auto"
-        val resp = http.get(url)
+        val resp = http.get(requestUrl(place))
         if (!resp.status.isSuccess()) error("HTTP ${resp.status.value}")
         parseForecast(resp.bodyAsText()) ?: error("no weather in the answer")
     }
 
     fun asLookup(): WeatherLookup = { p -> fetch(p) }
 
-    private companion object {
-        const val ENDPOINT = "https://api.open-meteo.com/v1/forecast"
+    companion object {
+        private const val ENDPOINT = "https://api.open-meteo.com/v1/forecast"
+
+        /**
+         * The request for a place. Public because the home-screen
+         * widget asks the same question from a different process and
+         * must not ask it differently — not least about how much of
+         * somebody's position it sends.
+         *
+         * Two decimal places is about a kilometre, and the forecast
+         * model's own cells are coarser than that. Sending the raw fix
+         * would give away more than the answer uses.
+         */
+        fun requestUrl(place: HomePlace): String {
+            val lat = round2(place.lat)
+            val lon = round2(place.lon)
+            return "$ENDPOINT?latitude=$lat&longitude=$lon" +
+                "&current=temperature_2m,cloud_cover,weather_code" +
+                "&hourly=temperature_2m,cloud_cover,weather_code" +
+                "&forecast_days=1&timezone=auto"
+        }
     }
 }
 

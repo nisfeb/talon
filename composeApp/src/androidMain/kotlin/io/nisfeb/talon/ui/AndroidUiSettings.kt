@@ -39,7 +39,18 @@ class AndroidUiSettings(
     initialDb: AppDatabase,
     scope: CoroutineScope,
 ) : UiSettings {
-    private val prefs = context.getSharedPreferences("talon.ui", Context.MODE_PRIVATE)
+    private val prefs = context.getSharedPreferences(HomePrefs.FILE, Context.MODE_PRIVATE)
+    private val appContext = context.applicationContext
+
+    /**
+     * The home-screen widget reads these same preferences from another
+     * process, and has no way of knowing they changed. Without this it
+     * would go on showing the old place until its half-hourly update
+     * came round, which looks like the setting not having taken.
+     */
+    private fun nudgeWidget() {
+        runCatching { io.nisfeb.talon.widget.ClockWidgetProvider.nudge(appContext) }
+    }
 
     init {
         // Mnemonym naming: the runtime switch lives in the shared
@@ -119,6 +130,7 @@ class AndroidUiSettings(
         if (_homePlace.value == encoded) return
         _homePlace.value = encoded
         prefs.edit().putString(KEY_HOME_PLACE, encoded).apply()
+        nudgeWidget()
     }
 
     private val _homeFahrenheit = MutableStateFlow(prefs.getBoolean(KEY_HOME_FAHRENHEIT, true))
@@ -127,6 +139,7 @@ class AndroidUiSettings(
         if (_homeFahrenheit.value == on) return
         _homeFahrenheit.value = on
         prefs.edit().putBoolean(KEY_HOME_FAHRENHEIT, on).apply()
+        nudgeWidget()
     }
 
     private val _homeLayout = MutableStateFlow(prefs.getString(KEY_HOME_LAYOUT, "") ?: "")
@@ -143,6 +156,7 @@ class AndroidUiSettings(
         if (_homeTwentyFourHour.value == on) return
         _homeTwentyFourHour.value = on
         prefs.edit().putBoolean(KEY_HOME_24H, on).apply()
+        nudgeWidget()
     }
 
     private val _smartSearchPreferred = MutableStateFlow(
@@ -322,9 +336,9 @@ class AndroidUiSettings(
 
     private companion object {
         private const val KEY_HIDE_COMPOSER_BUTTONS = "hide_composer_buttons"
-        private const val KEY_HOME_PLACE = "home_place"
-        private const val KEY_HOME_FAHRENHEIT = "home_fahrenheit"
-        private const val KEY_HOME_24H = "home_24h"
+        private const val KEY_HOME_PLACE = HomePrefs.PLACE
+        private const val KEY_HOME_FAHRENHEIT = HomePrefs.FAHRENHEIT
+        private const val KEY_HOME_24H = HomePrefs.TWENTY_FOUR_HOUR
         private const val KEY_HOME_LAYOUT = "home_layout"
         private const val KEY_ACCENT_ENABLED = "accent_enabled"
         private const val KEY_ACCENT_MODE = "accent_mode"
@@ -345,4 +359,20 @@ private const val KEY_MIC_AGC = "mic_auto_gain"
         private const val KEY_ALWAYS_PATP = "always_patp"
 private const val KEY_MNEMONYM_NAMES = "mnemonym_names"
     }
+}
+
+/**
+ * The names the home-page settings are stored under.
+ *
+ * Shared rather than repeated, because the home-screen widget is a
+ * second reader of the same preferences and it reads them from a
+ * different process. A widget with its own spelling of the file name
+ * finds nothing and says so by showing no location at all, for ever,
+ * with nothing to suggest why.
+ */
+internal object HomePrefs {
+    const val FILE = "talon.ui"
+    const val PLACE = "home_place"
+    const val FAHRENHEIT = "home_fahrenheit"
+    const val TWENTY_FOUR_HOUR = "home_24h"
 }

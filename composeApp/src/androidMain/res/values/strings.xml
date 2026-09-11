@@ -1,4 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Talon</string>
+    <string name="widget_clock_label">Talon clock</string>
+    <string name="widget_clock_description">The day as a dial: sunrise, sunset, the moon\'s phase and the weather.</string>
 </resources>

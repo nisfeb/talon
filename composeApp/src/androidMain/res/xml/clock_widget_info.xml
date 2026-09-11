@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  updatePeriodMillis is half an hour because that is the system's
+  floor; anything smaller is silently rounded up to it. The dial can
+  live with that: the sun moves a degree every four minutes and the
+  weather is fetched on the same schedule the app uses.
+
+  resizeMode is both ways because the dial is square and somebody will
+  want it two cells or four.
+-->
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    android:minWidth="110dp"
+    android:minHeight="110dp"
+    android:targetCellWidth="2"
+    android:targetCellHeight="2"
+    android:minResizeWidth="110dp"
+    android:minResizeHeight="110dp"
+    android:maxResizeWidth="300dp"
+    android:maxResizeHeight="300dp"
+    android:updatePeriodMillis="1800000"
+    android:resizeMode="horizontal|vertical"
+    android:widgetCategory="home_screen"
+    android:initialLayout="@layout/widget_clock"
+    android:description="@string/widget_clock_description" />

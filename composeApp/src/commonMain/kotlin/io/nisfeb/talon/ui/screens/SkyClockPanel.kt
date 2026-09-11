@@ -463,40 +463,40 @@ internal val DIAL_RANGE_AT = 250.dp
 private const val SEGMENTS = 180
 private const val SEGMENT_MINUTES = SkyClock.MINUTES_IN_DAY / SEGMENTS
 
-private val SUN = Color(0xFFF5B740)
+internal val SUN = Color(0xFFF5B740)
 
 /** The sun under the earth: still on the dial, plainly not lighting it. */
-private val SUN_DOWN = Color(0xFF6B5526)
+internal val SUN_DOWN = Color(0xFF6B5526)
 
-private val MOON = Color(0xFFE8E4DA)
+internal val MOON = Color(0xFFE8E4DA)
 
 /** The unlit limb. A new moon is still there; it is simply catching
  *  nothing, and a disc that vanished entirely would read as a bug. */
-private val MOON_DARK = Color(0xFF3A3F4D)
+internal val MOON_DARK = Color(0xFF3A3F4D)
 
 // The high and low marks are tinted by the temperature they mark, but
 // from a brighter palette than the ring's own: a cold mark in the ring's
 // own blue would sit on the day band and disappear.
-private val MARK_COLD = Color(0xFF7FC4FF)
-private val MARK_MILD = Color(0xFFE6E9EE)
-private val MARK_HOT = Color(0xFFFF7A5C)
+internal val MARK_COLD = Color(0xFF7FC4FF)
+internal val MARK_MILD = Color(0xFFE6E9EE)
+internal val MARK_HOT = Color(0xFFFF7A5C)
 
-private val DAY_TEMPERATE = Color(0xFF6E9BEA)
-private val DAY_COLD = Color(0xFF86BEEC)
-private val DAY_WARM = Color(0xFF5C86D8)
-private val DAY_OVERCAST = Color(0xFF9AA4B0)
+internal val DAY_TEMPERATE = Color(0xFF6E9BEA)
+internal val DAY_COLD = Color(0xFF86BEEC)
+internal val DAY_WARM = Color(0xFF5C86D8)
+internal val DAY_OVERCAST = Color(0xFF9AA4B0)
 
 // Night is a deep blue, not black. A black ring reads as a hole in
 // the dial; the sky at two in the morning is very dark and still blue.
-private val NIGHT_BASE = Color(0xFF0C1533)
-private val NIGHT_OVERCAST = Color(0xFF232B3D)
+internal val NIGHT_BASE = Color(0xFF0C1533)
+internal val NIGHT_OVERCAST = Color(0xFF232B3D)
 
 /** What a sky under rain heads toward. Not grey: a wet sky keeps its
  *  blue, it just stops being lit. */
-private val GLOOM = Color(0xFF1E2530)
+internal val GLOOM = Color(0xFF1E2530)
 
-private val TWILIGHT_BASE = Color(0xFFF0A33C)
-private val TWILIGHT_COLD = Color(0xFFE8956B)
+internal val TWILIGHT_BASE = Color(0xFFF0A33C)
+internal val TWILIGHT_COLD = Color(0xFFE8956B)
 
 /**
  * Which icon and word say what the sky is doing, or null when it is
@@ -826,7 +826,7 @@ private fun DrawScope.drawClouds(
  * day and on past it into night, so sunrise and sunset are where the
  * ring is most coloured rather than two stripes laid over it.
  */
-private fun skyColor(
+internal fun skyColor(
     mix: Float,
     day: Color,
     horizon: Color,
@@ -840,7 +840,7 @@ private fun skyColor(
 }
 
 /** A temperature as a mark colour, cold through mild to hot. */
-private fun markColor(celsius: Double?): Color {
+internal fun markColor(celsius: Double?): Color {
     val w = SkyClock.warmth(celsius)
     return if (w >= 0f) lerp(MARK_MILD, MARK_HOT, w) else lerp(MARK_MILD, MARK_COLD, -w)
 }
@@ -856,7 +856,7 @@ private fun markColor(celsius: Double?): Color {
  * moon can sit over any part of the ring and there is no one colour to
  * cut it with.
  */
-private fun moonLitPath(c: Offset, r: Float, elongationDeg: Double): Path {
+internal fun moonLitPath(c: Offset, r: Float, elongationDeg: Double): Path {
     val e = elongationDeg * PI / 180.0
     val side = if (elongationDeg < 180.0) 1f else -1f
     val term = side * cos(e).toFloat()
@@ -890,7 +890,7 @@ private fun DrawScope.drawMoon(
     drawPath(moonLitPath(p, r, elongationDeg), color = lit)
 }
 
-private fun dayBand(sky: SkyClock.Sky): Color {
+internal fun dayBand(sky: SkyClock.Sky): Color {
     // The sky stays sky. Temperature only nudges it between a cool and
     // a warm blue: blending a blue all the way to an orange crosses
     // through purple in RGB, which is neither hot nor a sky.
@@ -901,10 +901,10 @@ private fun dayBand(sky: SkyClock.Sky): Color {
     return lerp(nudged, DAY_OVERCAST, sky.overcast * 0.8f)
 }
 
-private fun nightBand(sky: SkyClock.Sky): Color =
+internal fun nightBand(sky: SkyClock.Sky): Color =
     lerp(NIGHT_BASE, NIGHT_OVERCAST, sky.overcast * 0.7f)
 
-private fun twilightBand(sky: SkyClock.Sky): Color {
+internal fun twilightBand(sky: SkyClock.Sky): Color {
     val w = sky.warmth
     val base = if (w >= 0f) TWILIGHT_BASE else lerp(TWILIGHT_BASE, TWILIGHT_COLD, -w * 0.6f)
     return lerp(base, DAY_OVERCAST, sky.overcast * 0.5f)
