@@ -6,6 +6,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
@@ -197,8 +198,23 @@ fun SkyClockDial(
     val labelStyle = MaterialTheme.typography.labelSmall
         .copy(fontWeight = FontWeight.SemiBold, color = markColor)
 
-    Box(modifier, contentAlignment = Alignment.Center) {
-        Box(Modifier.fillMaxWidth().aspectRatio(1f).widthIn(max = maxSize)) {
+    BoxWithConstraints(modifier, contentAlignment = Alignment.Center) {
+        // The size it will actually be drawn at, which is whichever of
+        // the two bounds is the tighter. Width comes from the window
+        // and slides about continuously as it is dragged; height comes
+        // from the widget's rows and steps. What is in the middle of
+        // the dial has to suit either.
+        val side = minOf(maxWidth, maxSize)
+        val showDate = side >= DIAL_DATE_AT
+        val showWeather = side >= DIAL_WEATHER_AT
+        val showRange = side >= DIAL_RANGE_AT
+        val clockStyle = when {
+            side >= DIAL_RANGE_AT -> MaterialTheme.typography.headlineMedium
+            side >= DIAL_WEATHER_AT -> MaterialTheme.typography.titleLarge
+            side >= DIAL_DATE_AT -> MaterialTheme.typography.titleMedium
+            else -> MaterialTheme.typography.labelLarge
+        }
+        Box(Modifier.size(side)) {
             // The richest thing on the page was a bare Canvas, which
             // reads out as nothing at all. The numbers in the middle are
             // separate Text and are spoken on their own; this is for
@@ -295,47 +311,66 @@ fun SkyClockDial(
                 )
             }
 
+            // What is written across the dial thins out as the dial
+            // does, rather than the dial having a floor so the full
+            // readout always fits. A floor was a fiction: width alone
+            // takes the dial well below it whenever the window is
+            // narrow, and all a floor bought was a readout spilling
+            // over the edges at exactly those sizes.
             Column(
-                Modifier.fillMaxSize().padding(horizontal = 28.dp),
+                Modifier.fillMaxSize().padding(horizontal = side * 0.12f),
                 verticalArrangement = Arrangement.Center,
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 Text(
                     SkyClock.clockLabel(sky.minuteOfDay, twentyFourHour),
-                    style = MaterialTheme.typography.headlineMedium
-                        .copy(fontWeight = FontWeight.Medium),
+                    style = clockStyle.copy(fontWeight = FontWeight.Medium),
                     color = inkColor,
+                    maxLines = 1,
                 )
-                Text(
-                    sky.dateLabel,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = markColor,
-                )
-                conditionIcon(sky.condition)?.let { (icon, word) ->
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp),
-                        modifier = Modifier.padding(top = 2.dp),
-                    ) {
-                        Icon(
-                            icon,
-                            contentDescription = null,
-                            modifier = Modifier.size(14.dp),
-                            tint = markColor,
-                        )
-                        Text(word, style = MaterialTheme.typography.labelMedium, color = markColor)
+                if (showDate) {
+                    Text(
+                        sky.dateLabel,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = markColor,
+                        maxLines = 1,
+                    )
+                }
+                if (showWeather) {
+                    conditionIcon(sky.condition)?.let { (icon, word) ->
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            modifier = Modifier.padding(top = 2.dp),
+                        ) {
+                            Icon(
+                                icon,
+                                contentDescription = null,
+                                modifier = Modifier.size(14.dp),
+                                tint = markColor,
+                            )
+                            Text(
+                                word,
+                                style = MaterialTheme.typography.labelMedium,
+                                color = markColor,
+                                maxLines = 1,
+                            )
+                        }
                     }
                 }
-                if (sky.currentC != null) {
+                if (sky.currentC != null && showWeather) {
                     Text(
                         SkyClock.tempLabel(sky.currentC, fahrenheit),
                         style = MaterialTheme.typography.headlineSmall,
                         color = inkColor,
                         modifier = Modifier.padding(top = 6.dp),
+                        maxLines = 1,
                     )
-                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        HiLo("H", sky.highC, sky.highAtMinute, fahrenheit, twentyFourHour, markColor)
-                        HiLo("L", sky.lowC, sky.lowAtMinute, fahrenheit, twentyFourHour, markColor)
+                    if (showRange) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            HiLo("H", sky.highC, sky.highAtMinute, fahrenheit, twentyFourHour, markColor)
+                            HiLo("L", sky.lowC, sky.lowAtMinute, fahrenheit, twentyFourHour, markColor)
+                        }
                     }
                 }
             }
@@ -413,6 +448,17 @@ private fun DrawScope.graduation(
 // and the weather, through warmth and cloud. Warmth is a red/blue shift
 // applied to the lit bands only — the night does not get warmer because
 // the afternoon was hot, and tinting it would just look like a bug.
+
+/**
+ * The sizes at which each part of the readout starts fitting.
+ *
+ * Steps rather than a scale factor: the time has to stay legible, so
+ * it shrinks by typography rather than by ratio, and the rest either
+ * has room or does not.
+ */
+internal val DIAL_DATE_AT = 130.dp
+internal val DIAL_WEATHER_AT = 190.dp
+internal val DIAL_RANGE_AT = 250.dp
 
 private const val SEGMENTS = 180
 private const val SEGMENT_MINUTES = SkyClock.MINUTES_IN_DAY / SEGMENTS

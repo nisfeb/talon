@@ -1,6 +1,7 @@
 package io.nisfeb.talon.ui.screens
 
 import io.nisfeb.talon.ui.HOME_ROW_RANGE
+import io.nisfeb.talon.ui.HOME_ROW_UNIT_DP
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -13,46 +14,59 @@ import kotlin.test.assertTrue
 class DialSizeTest {
 
     @Test
-    fun `a taller widget gets a bigger dial`() {
+    fun `every row count changes the size`() {
+        // Not most of them, all of them: a clamp at either end is a run
+        // of heights that look identical while arranging, which is the
+        // fault this replaced.
         var last = dialSizeFor(HOME_ROW_RANGE.first)
-        var grew = 0
-        for (rows in HOME_ROW_RANGE) {
+        for (rows in HOME_ROW_RANGE.first + 1..HOME_ROW_RANGE.last) {
             val now = dialSizeFor(rows)
-            assertTrue(now >= last, "shrank going from ${rows - 1} to $rows rows")
-            if (now > last) grew++
+            assertTrue(now > last, "$rows rows draws the same as ${rows - 1}")
             last = now
         }
-        assertTrue(grew >= 8, "only $grew of the ${HOME_ROW_RANGE.count()} heights changed anything")
     }
 
     @Test
-    fun `no single step is a leap`() {
-        // The complaint: one row unit of drag doubled the widget.
+    fun `each step is one row unit and no more`() {
+        // The complaint that started this: one row unit of drag doubled
+        // the widget.
         for (rows in HOME_ROW_RANGE.first until HOME_ROW_RANGE.last) {
-            val step = dialSizeFor(rows + 1) - dialSizeFor(rows)
-            assertTrue(
-                step.value <= 60f,
-                "going from $rows to ${rows + 1} rows jumps the dial by $step",
+            val step = dialSizeFor(rows + 1).value - dialSizeFor(rows).value
+            assertEquals(
+                HOME_ROW_UNIT_DP.toFloat(),
+                step,
+                0.01f,
             )
         }
     }
 
     @Test
-    fun `the smallest still has room to write the time across it`() {
-        assertTrue(dialSizeFor(HOME_ROW_RANGE.first).value >= 100f)
+    fun `arranging offers the sizes a window resize can reach`() {
+        // A window dragged narrow takes the dial continuously down to
+        // nothing and back up, so a floor or a ceiling on the arranged
+        // size is a limit the app visibly does not honour elsewhere.
+        assertTrue(dialSizeFor(HOME_ROW_RANGE.first).value < 60f, "the smallest is not small")
+        assertTrue(dialSizeFor(HOME_ROW_RANGE.last).value > 500f, "the largest is not large")
     }
 
     @Test
-    fun `the largest stops before it is just a big circle`() {
-        assertEquals(dialSizeFor(HOME_ROW_RANGE.last), dialSizeFor(HOME_ROW_RANGE.last + 20))
-        assertTrue(dialSizeFor(HOME_ROW_RANGE.last).value <= 440f)
-    }
-
-    @Test
-    fun `nonsense row counts still give a drawable dial`() {
-        for (rows in listOf(-5, 0, 1, 99)) {
-            val d = dialSizeFor(rows)
-            assertTrue(d.value in 100f..440f, "$rows rows gave $d")
+    fun `a dial is never asked to be a negative size`() {
+        for (rows in listOf(-99, -1, 0, 1)) {
+            assertTrue(dialSizeFor(rows).value >= 0f, "$rows rows gave ${dialSizeFor(rows)}")
         }
+    }
+
+    @Test
+    fun `the readout thins out before the dial runs out of room`() {
+        // Each threshold has to sit inside the range arranging offers,
+        // or the tier below it is unreachable and the readout spills
+        // over the edge at the sizes it was meant to cover.
+        val smallest = dialSizeFor(HOME_ROW_RANGE.first).value
+        val largest = dialSizeFor(HOME_ROW_RANGE.last).value
+        for (at in listOf(DIAL_DATE_AT, DIAL_WEATHER_AT, DIAL_RANGE_AT)) {
+            assertTrue(at.value in smallest..largest, "$at is outside $smallest..$largest")
+        }
+        assertTrue(DIAL_DATE_AT < DIAL_WEATHER_AT, "the tiers are out of order")
+        assertTrue(DIAL_WEATHER_AT < DIAL_RANGE_AT, "the tiers are out of order")
     }
 }

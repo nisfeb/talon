@@ -447,21 +447,21 @@ private val GRID_GAP = 14.dp
  *  button, above and below the dial itself. */
 private val DIAL_CHROME = 76.dp
 
-/** The smallest dial with room for the time written across it. */
-private val DIAL_MIN = 100.dp
-
-/** And the largest worth drawing; past this it is just a big circle. */
-private val DIAL_MAX = 420.dp
-
 /**
  * How big the dial may be in a clock widget [rows] units tall.
  *
  * The dial is square, so its width is what sets the widget's height.
  * Left to fill whatever width it had, it ignored the height entirely
  * and the clock drew the same at two row units as at six.
+ *
+ * No floor and no ceiling. Both were fictions: the dial is also bound
+ * by the width the window gives it, which slides continuously as the
+ * window is dragged, so it was already being drawn at sizes arranging
+ * refused to offer. The readout inside thins out to suit whatever size
+ * it ends up at, which is what a floor was standing in for.
  */
 internal fun dialSizeFor(rows: Int): androidx.compose.ui.unit.Dp =
-    (HOME_ROW_UNIT * rows - DIAL_CHROME).coerceIn(DIAL_MIN, DIAL_MAX)
+    (HOME_ROW_UNIT * rows - DIAL_CHROME).coerceAtLeast(0.dp)
 
 /** How big a handle has to be to be hit with a thumb. */
 private val HANDLE = 26.dp
