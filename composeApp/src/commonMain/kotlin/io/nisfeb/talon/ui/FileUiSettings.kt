@@ -60,6 +60,7 @@ class FileUiSettings(
         val homePlace: String = "",
         val homeFahrenheit: Boolean = true,
         val homeTwentyFourHour: Boolean = false,
+        val homeLayout: String = "",
         val railItemOrder: List<String> = emptyList(),
         val powerFeaturesEnabled: Boolean = false,
         val density: String = Density.Comfortable.name,
@@ -170,6 +171,14 @@ class FileUiSettings(
     override fun setHomeTwentyFourHour(on: Boolean) {
         if (_homeTwentyFourHour.value == on) return
         _homeTwentyFourHour.value = on
+        persistCurrent()
+    }
+
+    private val _homeLayout = MutableStateFlow(initial.homeLayout)
+    override val homeLayout: StateFlow<String> = _homeLayout.asStateFlow()
+    override fun setHomeLayout(encoded: String) {
+        if (_homeLayout.value == encoded) return
+        _homeLayout.value = encoded
         persistCurrent()
     }
 
@@ -291,6 +300,7 @@ class FileUiSettings(
                 homePlace = _homePlace.value,
                 homeFahrenheit = _homeFahrenheit.value,
                 homeTwentyFourHour = _homeTwentyFourHour.value,
+                homeLayout = _homeLayout.value,
                 railItemOrder = _railItemOrder.value.map { it.name },
                 powerFeaturesEnabled = _powerFeaturesEnabled.value,
                 density = _density.value.name,

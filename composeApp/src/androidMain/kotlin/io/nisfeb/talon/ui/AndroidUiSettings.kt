@@ -129,6 +129,14 @@ class AndroidUiSettings(
         prefs.edit().putBoolean(KEY_HOME_FAHRENHEIT, on).apply()
     }
 
+    private val _homeLayout = MutableStateFlow(prefs.getString(KEY_HOME_LAYOUT, "") ?: "")
+    override val homeLayout: StateFlow<String> = _homeLayout.asStateFlow()
+    override fun setHomeLayout(encoded: String) {
+        if (_homeLayout.value == encoded) return
+        _homeLayout.value = encoded
+        prefs.edit().putString(KEY_HOME_LAYOUT, encoded).apply()
+    }
+
     private val _homeTwentyFourHour = MutableStateFlow(prefs.getBoolean(KEY_HOME_24H, false))
     override val homeTwentyFourHour: StateFlow<Boolean> = _homeTwentyFourHour.asStateFlow()
     override fun setHomeTwentyFourHour(on: Boolean) {
@@ -317,6 +325,7 @@ class AndroidUiSettings(
         private const val KEY_HOME_PLACE = "home_place"
         private const val KEY_HOME_FAHRENHEIT = "home_fahrenheit"
         private const val KEY_HOME_24H = "home_24h"
+        private const val KEY_HOME_LAYOUT = "home_layout"
         private const val KEY_ACCENT_ENABLED = "accent_enabled"
         private const val KEY_ACCENT_MODE = "accent_mode"
         private const val KEY_ACCENT_HEX = "accent_hex"

@@ -125,6 +125,14 @@ interface UiSettings {
     fun setHomeFahrenheit(on: Boolean)
     val homeTwentyFourHour: StateFlow<Boolean>
     fun setHomeTwentyFourHour(on: Boolean)
+
+    /**
+     * Which widgets the home page carries, in what order and at what
+     * size, as one encoded line. Empty means nobody has arranged it and
+     * the default stands.
+     */
+    val homeLayout: StateFlow<String>
+    fun setHomeLayout(encoded: String)
     fun setSmartSearchPreferred(preferred: Boolean)
 
     /**
@@ -318,6 +326,10 @@ class InMemoryUiSettings(
     private val _homeTwentyFourHour = MutableStateFlow(false)
     override val homeTwentyFourHour: StateFlow<Boolean> = _homeTwentyFourHour.asStateFlow()
     override fun setHomeTwentyFourHour(on: Boolean) { _homeTwentyFourHour.value = on }
+
+    private val _homeLayout = MutableStateFlow("")
+    override val homeLayout: StateFlow<String> = _homeLayout.asStateFlow()
+    override fun setHomeLayout(encoded: String) { _homeLayout.value = encoded }
 
     private val _smartSearchPreferred = MutableStateFlow(initialSmartSearchPreferred)
     override val smartSearchPreferred: StateFlow<Boolean> =

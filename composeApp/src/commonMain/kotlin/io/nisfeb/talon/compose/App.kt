@@ -913,6 +913,15 @@ fun App(
         val deviceLocation = io.nisfeb.talon.ui.rememberDeviceLocation()
         val weatherFor = remember(http) { io.nisfeb.talon.ui.OpenMeteoWeather(http).asLookup() }
         val homeFahrenheit by uiSettings.homeFahrenheit.collectAsState()
+        val homeLayoutRaw by uiSettings.homeLayout.collectAsState()
+        val homeLayout = remember(homeLayoutRaw) {
+            io.nisfeb.talon.ui.HomeLayoutCodec.decode(homeLayoutRaw)
+        }
+        // Collected above the navigation for the same reason the
+        // weather is: held inside the page it comes back empty and the
+        // status list flashes through "none" on every return.
+        val homeStatuses by remember(db) { db.contacts().streamStatusFeed() }
+            .collectAsState(initial = emptyList())
         val homeTwentyFourHour by uiSettings.homeTwentyFourHour.collectAsState()
 
         // Kept here rather than inside HomeScreen, which is torn down
@@ -1779,6 +1788,16 @@ fun App(
                             ship?.let { sessionStore.all().firstOrNull { it.ship == ship } }?.shipUrl
                         }
                         SettingsScreen(
+                            // Anyone who has ever posted a status, plus
+                            // whoever is already pinned so a pin can be
+                            // taken off again when they go quiet.
+                            homePinCandidates = remember(homeStatuses, homeLayout, callContacts) {
+                                val pinned = homeLayout[io.nisfeb.talon.ui.HomeWidgetKind.STATUS].pinned
+                                (homeStatuses.map { it.ship } + pinned)
+                                    .distinct()
+                                    .filter { it != ship }
+                                    .map { it to callContacts.displayName(it) }
+                            },
                             aiSettings = aiSettings,
                             themePreference = themePreference,
                             uiSettings = uiSettings,
@@ -2863,6 +2882,17 @@ fun App(
                                         weather = homeWeather,
                                         fahrenheit = homeFahrenheit,
                                         twentyFourHour = homeTwentyFourHour,
+                                        layout = homeLayout,
+                                        onLayoutChanged = { next ->
+                                            uiSettings.setHomeLayout(
+                                                io.nisfeb.talon.ui.HomeLayoutCodec.encode(next),
+                                            )
+                                        },
+                                        statuses = homeStatuses,
+                                        onOpenContact = { other -> profileSheetShip = other },
+                                        onOpenStatuses = {
+                                            uiSettings.setActiveRailTab(RailTab.Statuses)
+                                        },
                                         onPlacePicked = { p ->
                                             uiSettings.setHomePlace(
                                                 io.nisfeb.talon.ui.HomePlaceCodec.encode(p),

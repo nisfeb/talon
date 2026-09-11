@@ -112,6 +112,12 @@ fun SettingsScreen(
      *  and any host that hasn't wired RelayClient + RelaySettings
      *  + PushTokenProvider. */
     relayConfig: RelayPanelConfig? = null,
+    /**
+     * People the status widget can be told to pin, as ship to display
+     * name. Empty where the host has no contacts wired, which hides
+     * the pinning control rather than showing an empty picker.
+     */
+    homePinCandidates: List<Pair<String, String>> = emptyList(),
     onBack: () -> Unit,
     /** Optional call controller. When non-null (and the platform does
      *  calls at all) Settings grows a "Who can call you" section that
@@ -156,6 +162,13 @@ fun SettingsScreen(
     val density by uiSettings.density.collectAsState()
     val homeFahrenheit by uiSettings.homeFahrenheit.collectAsState()
     val homeTwentyFourHour by uiSettings.homeTwentyFourHour.collectAsState()
+    val homeLayoutRaw by uiSettings.homeLayout.collectAsState()
+    val homeLayout = remember(homeLayoutRaw) {
+        io.nisfeb.talon.ui.HomeLayoutCodec.decode(homeLayoutRaw)
+    }
+    fun saveHomeLayout(next: io.nisfeb.talon.ui.HomeLayout) {
+        uiSettings.setHomeLayout(io.nisfeb.talon.ui.HomeLayoutCodec.encode(next))
+    }
     val accentSettings by uiSettings.accentSettings.collectAsState()
     val groupChannelOrder by uiSettings.groupChannelOrder.collectAsState()
     val folderItemOrder by uiSettings.folderItemOrder.collectAsState()
@@ -561,6 +574,25 @@ fun SettingsScreen(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(top = 4.dp),
             )
+
+            Text(
+                "Widgets",
+                style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
+                modifier = Modifier.padding(top = 16.dp),
+            )
+            Text(
+                "What the home page carries. Order and size are set on the " +
+                    "page itself, under Arrange.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            homeLayout.widgets.forEach { widget ->
+                HomeWidgetRow(
+                    widget = widget,
+                    pinCandidates = homePinCandidates,
+                    onChange = { saveHomeLayout(homeLayout.with(it)) },
+                )
+            }
             }
             if (safeTab == SettingsTab.Chats) {
             // ── Sidebar visibility ─────────────────────────────────
@@ -2349,6 +2381,119 @@ private fun CustomThemeEditor(
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 androidx.compose.material3.Button(onClick = onSave, enabled = draft.valid) { Text("Save and use") }
                 TextButton(onClick = onCancel) { Text("Cancel") }
+            }
+        }
+    }
+}
+
+/**
+ * One widget's settings: whether it shows, how much it shows, and the
+ * handful of things only it cares about.
+ *
+ * Order and size are not here. Those are spatial decisions and belong
+ * on the page being arranged, where somebody can see what they are
+ * doing; a pair of number fields in a settings list would be a worse
+ * way to say the same thing.
+ */
+@Composable
+private fun HomeWidgetRow(
+    widget: io.nisfeb.talon.ui.HomeWidget,
+    pinCandidates: List<Pair<String, String>>,
+    onChange: (io.nisfeb.talon.ui.HomeWidget) -> Unit,
+) {
+    val kind = widget.kind
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+        shape = RoundedCornerShape(10.dp),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    io.nisfeb.talon.ui.screens.title(kind),
+                    style = MaterialTheme.typography.bodyMedium
+                        .copy(fontWeight = FontWeight.Medium),
+                    modifier = Modifier.weight(1f),
+                )
+                Switch(
+                    checked = widget.visible,
+                    onCheckedChange = { onChange(widget.copy(visible = it)) },
+                )
+            }
+
+            if (widget.visible) {
+                // The clock shows one thing and the calendar counts in
+                // time rather than in rows, so neither has a count.
+                if (kind != io.nisfeb.talon.ui.HomeWidgetKind.CLOCK &&
+                    kind != io.nisfeb.talon.ui.HomeWidgetKind.CALENDAR
+                ) {
+                    Text(
+                        "How many to show",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        io.nisfeb.talon.ui.HOME_COUNTS.forEach { n ->
+                            FilterChip(
+                                selected = widget.count == n,
+                                onClick = { onChange(widget.copy(count = n)) },
+                                label = { Text("$n") },
+                            )
+                        }
+                    }
+                }
+
+                if (kind == io.nisfeb.talon.ui.HomeWidgetKind.CALENDAR) {
+                    Text(
+                        "How far ahead to look",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    androidx.compose.foundation.layout.FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        io.nisfeb.talon.ui.CalendarRange.entries.forEach { r ->
+                            FilterChip(
+                                selected = widget.calendarRange == r,
+                                onClick = { onChange(widget.copy(calendarRange = r)) },
+                                label = { Text(r.label) },
+                            )
+                        }
+                    }
+                }
+
+                if (kind == io.nisfeb.talon.ui.HomeWidgetKind.STATUS && pinCandidates.isNotEmpty()) {
+                    Text(
+                        "Keep at the top",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Text(
+                        "Pinned people show whether or not they have said anything " +
+                            "lately. That is usually the point of pinning them.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    androidx.compose.foundation.layout.FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        pinCandidates.forEach { (shipId, name) ->
+                            val on = shipId in widget.pinned
+                            FilterChip(
+                                selected = on,
+                                onClick = {
+                                    val next = if (on) widget.pinned - shipId
+                                    else widget.pinned + shipId
+                                    onChange(widget.copy(pinned = next))
+                                },
+                                label = { Text(name) },
+                                enabled = on || widget.pinned.size < io.nisfeb.talon.ui.HOME_PINNED_MAX,
+                            )
+                        }
+                    }
+                }
             }
         }
     }

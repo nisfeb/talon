@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -19,9 +20,16 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.filled.CalendarToday
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowLeft
+import androidx.compose.material.icons.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.MailOutline
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -42,7 +50,15 @@ import io.nisfeb.talon.mail.MailRepo
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import io.nisfeb.talon.ui.CalendarRange
+import io.nisfeb.talon.ui.HOME_COUNTS
+import io.nisfeb.talon.ui.HOME_COLUMNS
+import io.nisfeb.talon.ui.HOME_ROW_RANGE
+import io.nisfeb.talon.ui.HomeLayout
 import io.nisfeb.talon.ui.HomePlace
+import io.nisfeb.talon.ui.HomeWidget
+import io.nisfeb.talon.ui.HomeWidgetKind
+import io.nisfeb.talon.ui.packRows
 import io.nisfeb.talon.ui.SkyClock
 import io.nisfeb.talon.ui.Solar
 import kotlinx.coroutines.delay
@@ -101,6 +117,14 @@ fun HomeScreen(
     /** How the dial reads out. Set in Settings, under Home. */
     fahrenheit: Boolean = true,
     twentyFourHour: Boolean = false,
+    /** Which widgets, in what order, at what size. */
+    layout: HomeLayout = HomeLayout.DEFAULT,
+    /** Called when the page is rearranged from the page itself. */
+    onLayoutChanged: (HomeLayout) -> Unit = {},
+    /** Statuses, for the status widget. */
+    statuses: List<io.nisfeb.talon.data.ContactEntity> = emptyList(),
+    onOpenContact: (ship: String) -> Unit = {},
+    onOpenStatuses: () -> Unit = {},
     onOpenConversation: (whom: String) -> Unit,
     onOpenChats: () -> Unit,
     onOpenMailThread: (threadId: String) -> Unit,
@@ -112,11 +136,18 @@ fun HomeScreen(
     val unreads by remember(db) { db.unreads().stream() }
         .collectAsState(initial = emptyList())
 
-    val recent = remember(latest) { latest.take(QUICK) }
+    val recent = remember(latest) { latest.take(HOME_COUNTS.last()) }
     val unreadBy = remember(unreads) { unreads.associateBy { it.whom } }
 
+    var editing by remember { mutableStateOf(false) }
+
     BoxWithConstraints(modifier.fillMaxSize()) {
-        val twoColumns = maxWidth >= 820.dp
+        // Two columns where there is room, one where there is not. A
+        // widget set to full width on a desktop is still full width on
+        // a phone; it just has nothing to sit beside.
+        val columns = if (maxWidth >= 820.dp) HOME_COLUMNS else 1
+        val gridRows = remember(layout, columns) { packRows(layout.shown, columns) }
+
         Column(
             Modifier
                 .fillMaxSize()
@@ -124,43 +155,195 @@ fun HomeScreen(
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
-            Text(
-                greeting(ourShip, contacts),
-                style = MaterialTheme.typography.headlineSmall
-                    .copy(fontWeight = FontWeight.SemiBold),
-            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    greeting(ourShip, contacts),
+                    style = MaterialTheme.typography.headlineSmall
+                        .copy(fontWeight = FontWeight.SemiBold),
+                    modifier = Modifier.weight(1f),
+                )
+                TextButton(onClick = { editing = !editing }) {
+                    Text(if (editing) "Done" else "Arrange")
+                }
+            }
 
-            if (twoColumns) {
-                // The dial takes its own column. It is the thing people
-                // leave this page open for, and stacking the three lists
-                // beside it keeps it whole rather than squaring it off
-                // against a panel of five rows.
+            if (layout.shown.isEmpty()) {
+                Text(
+                    "Nothing on the home page. Settings, under Home, has the list.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+
+            gridRows.forEach { gridRow ->
                 Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                    Box(Modifier.weight(1f)) {
-                        ClockWeatherPanel(
-                            place, weather, onUseDeviceLocation, placeLookup, onPlacePicked,
-                            fahrenheit, twentyFourHour,
-                        )
-                    }
-                    Column(
-                        Modifier.weight(1f),
-                        verticalArrangement = Arrangement.spacedBy(14.dp),
-                    ) {
-                        ChatsPanel(recent, unreadBy, contacts, ourShip, onOpenConversation, onOpenChats)
-                        MailPanel(mail, contacts, onOpenMailThread, onOpenMail)
-                        CalendarPanel()
+                    gridRow.forEach { widget ->
+                        Column(
+                            Modifier
+                                .weight(widget.span.coerceIn(1, columns).toFloat())
+                                // A minimum rather than a fixed height:
+                                // a list told to show ten rows in one
+                                // row-unit should outgrow its box, not
+                                // have the last four clipped off.
+                                .heightIn(min = HOME_ROW_UNIT * widget.rows),
+                            verticalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            if (editing) {
+                                ArrangeBar(
+                                    widget = widget,
+                                    columns = columns,
+                                    onChange = { onLayoutChanged(layout.with(it)) },
+                                    onMove = { by -> onLayoutChanged(layout.moved(widget.kind, by)) },
+                                )
+                            }
+                            WidgetBody(
+                                widget = widget,
+                                recent = recent,
+                                unreadBy = unreadBy,
+                                contacts = contacts,
+                                ourShip = ourShip,
+                                mail = mail,
+                                statuses = statuses,
+                                place = place,
+                                weather = weather,
+                                fahrenheit = fahrenheit,
+                                twentyFourHour = twentyFourHour,
+                                onUseDeviceLocation = onUseDeviceLocation,
+                                placeLookup = placeLookup,
+                                onPlacePicked = onPlacePicked,
+                                onOpenConversation = onOpenConversation,
+                                onOpenChats = onOpenChats,
+                                onOpenMailThread = onOpenMailThread,
+                                onOpenMail = onOpenMail,
+                                onOpenContact = onOpenContact,
+                                onOpenStatuses = onOpenStatuses,
+                            )
+                        }
                     }
                 }
-            } else {
-                ClockWeatherPanel(
-                    place, weather, onUseDeviceLocation, placeLookup, onPlacePicked,
-                    fahrenheit, twentyFourHour,
-                )
-                ChatsPanel(recent, unreadBy, contacts, ourShip, onOpenConversation, onOpenChats)
-                MailPanel(mail, contacts, onOpenMailThread, onOpenMail)
-                CalendarPanel()
             }
         }
+    }
+}
+
+/** One grid row's worth of height. Two of them is about a dial. */
+private val HOME_ROW_UNIT = 168.dp
+
+/**
+ * The controls over each widget while the page is being arranged.
+ *
+ * Buttons rather than dragging. Dragging a resizable tile is a great
+ * deal of machinery and a fiddly thing to land on a phone; four arrows
+ * and a cross say the same and can be hit with a thumb.
+ */
+@Composable
+private fun ArrangeBar(
+    widget: HomeWidget,
+    columns: Int,
+    onChange: (HomeWidget) -> Unit,
+    onMove: (Int) -> Unit,
+) {
+    Surface(
+        color = MaterialTheme.colorScheme.secondaryContainer,
+        shape = RoundedCornerShape(8.dp),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Row(
+            Modifier.padding(horizontal = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                title(widget.kind),
+                style = MaterialTheme.typography.labelMedium,
+                modifier = Modifier.weight(1f).padding(start = 8.dp),
+            )
+            IconButton(onClick = { onMove(-1) }) {
+                Icon(Icons.Filled.KeyboardArrowUp, "Move earlier", Modifier.size(18.dp))
+            }
+            IconButton(onClick = { onMove(1) }) {
+                Icon(Icons.Filled.KeyboardArrowDown, "Move later", Modifier.size(18.dp))
+            }
+            // Only worth offering where there are two columns to span.
+            if (columns > 1) {
+                IconButton(
+                    enabled = widget.span > 1,
+                    onClick = { onChange(widget.copy(span = widget.span - 1)) },
+                ) {
+                    Icon(Icons.Filled.KeyboardArrowLeft, "Narrower", Modifier.size(18.dp))
+                }
+                IconButton(
+                    enabled = widget.span < HOME_COLUMNS,
+                    onClick = { onChange(widget.copy(span = widget.span + 1)) },
+                ) {
+                    Icon(Icons.Filled.KeyboardArrowRight, "Wider", Modifier.size(18.dp))
+                }
+            }
+            IconButton(
+                enabled = widget.rows > HOME_ROW_RANGE.first,
+                onClick = { onChange(widget.copy(rows = widget.rows - 1)) },
+            ) {
+                Text("\u2013", style = MaterialTheme.typography.labelLarge)
+            }
+            Text("${widget.rows}", style = MaterialTheme.typography.labelSmall)
+            IconButton(
+                enabled = widget.rows < HOME_ROW_RANGE.last,
+                onClick = { onChange(widget.copy(rows = widget.rows + 1)) },
+            ) {
+                Text("+", style = MaterialTheme.typography.labelLarge)
+            }
+            IconButton(onClick = { onChange(widget.copy(visible = false)) }) {
+                Icon(Icons.Filled.Close, "Take off the home page", Modifier.size(18.dp))
+            }
+        }
+    }
+}
+
+/** What each widget is called, wherever one needs naming. */
+fun title(kind: HomeWidgetKind): String = when (kind) {
+    HomeWidgetKind.CLOCK -> "Clock and weather"
+    HomeWidgetKind.MESSAGES -> "Recent"
+    HomeWidgetKind.MAIL -> "Mail"
+    HomeWidgetKind.CALENDAR -> "Today"
+    HomeWidgetKind.STATUS -> "Statuses"
+}
+
+@Composable
+private fun WidgetBody(
+    widget: HomeWidget,
+    recent: List<io.nisfeb.talon.data.MessageEntity>,
+    unreadBy: Map<String, io.nisfeb.talon.data.UnreadEntity>,
+    contacts: ContactMap,
+    ourShip: String,
+    mail: MailRepo?,
+    statuses: List<io.nisfeb.talon.data.ContactEntity>,
+    place: HomePlace?,
+    weather: SkyClock.Sky?,
+    fahrenheit: Boolean,
+    twentyFourHour: Boolean,
+    onUseDeviceLocation: (suspend () -> Result<HomePlace>)?,
+    placeLookup: io.nisfeb.talon.ui.PlaceLookup?,
+    onPlacePicked: (HomePlace) -> Unit,
+    onOpenConversation: (String) -> Unit,
+    onOpenChats: () -> Unit,
+    onOpenMailThread: (String) -> Unit,
+    onOpenMail: () -> Unit,
+    onOpenContact: (String) -> Unit,
+    onOpenStatuses: () -> Unit,
+) {
+    when (widget.kind) {
+        HomeWidgetKind.CLOCK -> ClockWeatherPanel(
+            place, weather, onUseDeviceLocation, placeLookup, onPlacePicked,
+            fahrenheit, twentyFourHour,
+        )
+        HomeWidgetKind.MESSAGES -> ChatsPanel(
+            recent.take(widget.count), unreadBy, contacts, ourShip,
+            onOpenConversation, onOpenChats,
+        )
+        HomeWidgetKind.MAIL -> MailPanel(mail, contacts, widget.count, onOpenMailThread, onOpenMail)
+        HomeWidgetKind.CALENDAR -> CalendarPanel(widget.calendarRange)
+        HomeWidgetKind.STATUS -> StatusPanel(
+            statuses, contacts, ourShip, widget, onOpenContact, onOpenStatuses,
+        )
     }
 }
 
@@ -311,6 +494,7 @@ private fun preview(
 private fun MailPanel(
     mail: MailRepo?,
     contacts: ContactMap,
+    count: Int,
     onOpen: (String) -> Unit,
     onAll: () -> Unit,
 ) {
@@ -331,7 +515,7 @@ private fun MailPanel(
 
             page.threads.isEmpty() -> Empty("No mail.")
 
-            else -> page.threads.take(QUICK).forEach { row ->
+            else -> page.threads.take(count).forEach { row ->
                 QuickRow(
                     title = contacts.displayName(row.from),
                     line = row.subject.ifBlank { "(no subject)" },
@@ -509,17 +693,92 @@ internal fun dayLabel(t: LocalDateTime): String {
  * the difference between a week and a quarter.
  */
 @Composable
-private fun CalendarPanel() {
+private fun CalendarPanel(range: CalendarRange) {
     Panel("Today", Icons.Filled.CalendarToday) {
         Box(
             Modifier.fillMaxWidth().height(96.dp),
             contentAlignment = Alignment.Center,
         ) {
-            Text(
-                "Calendar is not built yet.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(
+                    "Calendar is not built yet.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                // The range is settable ahead of the feature, so the
+                // preference is waiting when there is finally something
+                // to apply it to. Naming the chosen one is the honest
+                // placeholder: it shows the setting took rather than
+                // implying the panel works.
+                Text(
+                    "Set to show: ${range.label}.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 4.dp),
+                )
+            }
         }
     }
+}
+
+/**
+ * Who is up to what.
+ *
+ * Pinned people first and always, whether or not they have said
+ * anything lately, then everyone else newest first. The pin is the
+ * point of the widget: a feed sorted purely by recency buries the
+ * three people somebody actually watches under whoever typed last.
+ */
+@Composable
+private fun StatusPanel(
+    statuses: List<io.nisfeb.talon.data.ContactEntity>,
+    contacts: ContactMap,
+    ourShip: String,
+    widget: HomeWidget,
+    onOpenContact: (String) -> Unit,
+    onAll: () -> Unit,
+) {
+    val rows = remember(statuses, widget.pinned, widget.count, ourShip) {
+        statusRows(statuses, widget.pinned, widget.count, ourShip)
+    }
+    Panel("Statuses", Icons.Filled.Star, "All" to onAll) {
+        if (rows.isEmpty()) {
+            Empty("No statuses yet.")
+        } else {
+            rows.forEach { (contact, pinned) ->
+                QuickRow(
+                    title = contacts.displayName(contact.ship),
+                    line = contact.status?.takeIf { it.isNotBlank() } ?: "No status",
+                    at = contact.statusUpdatedMs ?: 0L,
+                    strong = pinned,
+                    onClick = { onOpenContact(contact.ship) },
+                )
+            }
+        }
+    }
+}
+
+/**
+ * The status rows to show, pinned people first.
+ *
+ * A pinned person appears whether or not they have said anything,
+ * because the silence is part of what somebody pinned them for.
+ * Everybody else has to have a status to earn a row.
+ */
+internal fun statusRows(
+    statuses: List<io.nisfeb.talon.data.ContactEntity>,
+    pinned: List<String>,
+    count: Int,
+    ourShip: String,
+): List<Pair<io.nisfeb.talon.data.ContactEntity, Boolean>> {
+    val others = statuses.filter { it.ship != ourShip }
+    val byShip = others.associateBy { it.ship }
+    val pins = pinned.mapNotNull { byShip[it] }.map { it to true }
+    val pinnedShips = pins.mapTo(mutableSetOf()) { it.first.ship }
+    val rest = others
+        .filter { it.ship !in pinnedShips && !it.status.isNullOrBlank() }
+        .map { it to false }
+    // Pins are never crowded out: they take their places first and the
+    // rest fill whatever is left.
+    return (pins + rest).take(count.coerceAtLeast(pins.size))
 }
