@@ -45,7 +45,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.material3.VerticalDivider
-import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.Inbox
 import io.nisfeb.talon.mail.MailFolder
 import io.nisfeb.talon.mail.InboxEntry
 import io.nisfeb.talon.mail.MailAvailability
@@ -310,8 +310,11 @@ private fun MailToolbar(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (onFolders != null) {
+            // Not a hamburger. The app's own is one, and two identical
+            // ones stacked down the left of a mail screen is a way of
+            // asking somebody to guess which is which.
             IconButton(onClick = onFolders) {
-                Icon(Icons.Filled.Menu, contentDescription = "Mailboxes")
+                Icon(Icons.Filled.Inbox, contentDescription = "Mailboxes")
             }
         }
         var searching by remember(query.isEmpty()) { mutableStateOf(query.isNotEmpty()) }

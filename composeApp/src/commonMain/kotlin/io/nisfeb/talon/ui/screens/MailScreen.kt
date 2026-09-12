@@ -2,6 +2,8 @@ package io.nisfeb.talon.ui.screens
 
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
@@ -53,7 +55,14 @@ fun MailScreen(
         }
     }
 
-    Column(modifier.fillMaxSize()) {
+    // Its header is hand rolled rather than a TopAppBar in a
+    // Scaffold, so nothing was keeping it out from under the status
+    // bar — and the hamburger sat up there with it, out of reach.
+    Column(
+        modifier
+            .fillMaxSize()
+            .windowInsetsPadding(androidx.compose.foundation.layout.WindowInsets.safeDrawing),
+    ) {
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
