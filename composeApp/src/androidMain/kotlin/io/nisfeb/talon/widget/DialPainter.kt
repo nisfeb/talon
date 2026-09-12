@@ -132,7 +132,7 @@ object DialPainter {
         // ---- the moon, where it actually is --------------------------
         // Only when it is up, as in the app. A moon below the horizon
         // is one nobody can go outside and see.
-        sky.moonElongationDeg?.takeIf { sky.moonUp }?.let { elong ->
+        sky.moonElongationDeg?.takeIf { sky.moonVisible }?.let { elong ->
             val at = Moon.dialMinute(sky.minuteOfDay, elong)
             // Its own track, just inside the sun's, and a rim so a new
             // moon is a dark disc rather than nothing. Both for the
@@ -150,6 +150,12 @@ object DialPainter {
             paint.strokeWidth = r * 0.10f
             paint.color = MOON.copy(alpha = 0.45f).toArgb()
             c.drawCircle(p.first, p.second, r, paint)
+            // Put the brush back. One Paint is carried through the
+            // whole dial, so a style left on it is inherited by
+            // whatever draws next -- and what draws next is the sun,
+            // which came out as an empty ring on any morning the moon
+            // was still up.
+            paint.style = Paint.Style.FILL
         }
 
         // ---- the sun, which is also where now is ---------------------
