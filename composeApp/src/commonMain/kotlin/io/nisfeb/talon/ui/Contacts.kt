@@ -7,7 +7,9 @@ import io.nisfeb.talon.data.ContactEntity
 import io.nisfeb.talon.data.GroupEntity
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlin.concurrent.Volatile
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flowOn
@@ -164,6 +166,31 @@ data class ContactMap(
  * ContactProfileSheet today) read directly from
  * [io.nisfeb.talon.data.ContactDao.streamOne].
  */
+/**
+ * The last [ContactMap] anybody built, so a screen opening can start
+ * from the names it had a moment ago rather than from none at all.
+ *
+ * Built empty, a screen shows every ship as its bare @p and every
+ * avatar as a fallback for the frame it takes Room to answer, and
+ * then the whole thing lands at once -- which reads as the page
+ * assembling itself even when its actual content was never missing.
+ * Sixteen screens did that; this is the one place they all now start
+ * from.
+ *
+ * It is the signed-in ship's, and [forget] is called when that
+ * changes, because another ship's nicknames are worse than none.
+ */
+object LastContactMap {
+    @Volatile
+    var value: ContactMap = ContactMap.EMPTY
+        private set
+
+    internal fun remember(map: ContactMap) { value = map }
+
+    /** On the way out of a ship, and on the way in to another. */
+    fun forget() { value = ContactMap.EMPTY }
+}
+
 fun contactMapFlow(
     contactsFlow: Flow<List<ContactEntity>>,
     clubsFlow: Flow<List<ClubEntity>>,
@@ -191,6 +218,7 @@ fun contactMapFlow(
 ) { c, cl, g, cg, naming ->
     ContactMap(c, cl, g, cg, naming.first, naming.second, naming.third)
 }
+    .onEach(LastContactMap::remember)
     .flowOn(Dispatchers.Default)
     // Conflate so cascading bootstrap emissions (e.g. all four DAOs
     // streaming initial values within a frame of each other) collapse

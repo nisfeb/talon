@@ -76,6 +76,7 @@ import io.nisfeb.talon.data.AppDatabase
 import io.nisfeb.talon.data.MessageEntity
 import io.nisfeb.talon.data.ReactionEntity
 import io.nisfeb.talon.ui.ContactMap
+import io.nisfeb.talon.ui.LastContactMap
 import io.nisfeb.talon.ui.EmojiCatalog
 import io.nisfeb.talon.ui.ReactionPalette
 import io.nisfeb.talon.ui.StoryRenderer
@@ -163,7 +164,7 @@ fun ThreadList(
             db.groups().streamGroups(),
             db.groups().streamChannelGroups(),
         )
-    }.collectAsState(initial = ContactMap.EMPTY)
+    }.collectAsState(initial = LastContactMap.value)
 
     val listState = rememberLazyListState()
     val isPinnedToBottom by remember {

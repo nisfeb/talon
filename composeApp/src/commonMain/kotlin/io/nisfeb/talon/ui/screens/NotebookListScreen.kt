@@ -45,6 +45,7 @@ import coil3.compose.AsyncImage
 import io.nisfeb.talon.data.AppDatabase
 import io.nisfeb.talon.data.MessageEntity
 import io.nisfeb.talon.ui.ContactMap
+import io.nisfeb.talon.ui.LastContactMap
 import io.nisfeb.talon.ui.contactMapFlow
 import io.nisfeb.talon.urbit.StoryCache
 import io.nisfeb.talon.urbit.TlonChatRepo
@@ -74,7 +75,7 @@ fun NotebookListScreen(
             db.groups().streamGroups(),
             db.groups().streamChannelGroups(),
         )
-    }.collectAsState(initial = ContactMap.EMPTY)
+    }.collectAsState(initial = LastContactMap.value)
 
     // distinctUntilChanged on the upstream so unrelated messages-table
     // writes don't re-emit; flowOn(Default) keeps the reverse off main.

@@ -36,6 +36,7 @@ import io.nisfeb.talon.data.AppDatabase
 import io.nisfeb.talon.data.MessageEntity
 import io.nisfeb.talon.ui.Avatar
 import io.nisfeb.talon.ui.ContactMap
+import io.nisfeb.talon.ui.LastContactMap
 import io.nisfeb.talon.ui.contactMapFlow
 
 /**
@@ -67,7 +68,7 @@ fun ShareTargetScreen(
             db.groups().streamGroups(),
             db.groups().streamChannelGroups(),
         )
-    }.collectAsState(initial = ContactMap.EMPTY)
+    }.collectAsState(initial = LastContactMap.value)
 
     var query by remember { mutableStateOf("") }
     val filtered = remember(dedupedConversations, contactMap, query) {

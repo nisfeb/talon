@@ -85,6 +85,7 @@ import io.nisfeb.talon.data.LoopEntity
 import io.nisfeb.talon.data.newGid
 import io.nisfeb.talon.ui.ChatPaneScaffold
 import io.nisfeb.talon.ui.ContactMap
+import io.nisfeb.talon.ui.LastContactMap
 import io.nisfeb.talon.ui.DEFAULT_LIST_FRACTION
 import io.nisfeb.talon.ui.ExpandedThreshold
 import io.nisfeb.talon.ui.MarkdownText
@@ -183,7 +184,7 @@ fun AssistantScreen(
             db.groups().streamGroups(),
             db.groups().streamChannelGroups(),
         )
-    }.collectAsState(initial = ContactMap.EMPTY)
+    }.collectAsState(initial = LastContactMap.value)
     val scope = rememberCoroutineScope()
 
     val agentClient = remember(aiSettings) { AgentClient { aiSettings.state.value } }

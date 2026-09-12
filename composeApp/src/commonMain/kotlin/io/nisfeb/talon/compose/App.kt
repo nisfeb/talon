@@ -418,6 +418,11 @@ fun App(
     var loginNotice by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(loggedInShip) {
         if (loggedInShip != null) loginNotice = null
+        // Both of these are the signed-in ship's, and another ship's
+        // names are worse than no names. Screens seed from the first
+        // and would otherwise open showing the last ship's nicknames.
+        io.nisfeb.talon.ui.LastContactMap.forget()
+        io.nisfeb.talon.ui.AzimuthNames.reset()
     }
 
     // Keyboard-shortcut request flags. Hoisted outside key() so the
@@ -792,7 +797,7 @@ fun App(
                 db.groups().streamGroups(),
                 db.groups().streamChannelGroups(),
             )
-        }.collectAsState(initial = io.nisfeb.talon.ui.ContactMap.EMPTY)
+        }.collectAsState(initial = io.nisfeb.talon.ui.LastContactMap.value)
         // iOS wires CallKit here — answer/end/mute/hold in, every call
         // and line reported out; no-op on Android and desktop. After
         // the party line, which it reports too, and reading names
@@ -1350,7 +1355,7 @@ fun App(
                   db.groups().streamGroups(),
                   db.groups().streamChannelGroups(),
               )
-          }.collectAsState(initial = io.nisfeb.talon.ui.ContactMap.EMPTY)
+          }.collectAsState(initial = io.nisfeb.talon.ui.LastContactMap.value)
           val citeDisplayName: (String) -> String = remember(citeContacts) {
               { ship -> citeContacts.displayName(ship) }
           }

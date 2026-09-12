@@ -42,6 +42,7 @@ import androidx.compose.ui.unit.dp
 import io.nisfeb.talon.data.AppDatabase
 import io.nisfeb.talon.data.WatchwordHitEntity
 import io.nisfeb.talon.ui.ContactMap
+import io.nisfeb.talon.ui.LastContactMap
 import io.nisfeb.talon.ui.contactMapFlow
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.StateFlow
@@ -96,7 +97,7 @@ fun WatchwordsScreen(
             db.groups().streamGroups(),
             db.groups().streamChannelGroups(),
         )
-    }.collectAsState(initial = ContactMap.EMPTY)
+    }.collectAsState(initial = LastContactMap.value)
 
     var manageOpen by remember { mutableStateOf(false) }
 

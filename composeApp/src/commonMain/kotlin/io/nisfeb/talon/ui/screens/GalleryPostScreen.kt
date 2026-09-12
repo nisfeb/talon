@@ -48,6 +48,7 @@ import androidx.compose.ui.unit.dp
 import io.nisfeb.talon.data.AppDatabase
 import io.nisfeb.talon.ui.Avatar
 import io.nisfeb.talon.ui.ContactMap
+import io.nisfeb.talon.ui.LastContactMap
 import io.nisfeb.talon.ui.StoryRenderer
 import io.nisfeb.talon.ui.contactMapFlow
 import io.nisfeb.talon.urbit.StoryCache
@@ -109,7 +110,7 @@ fun GalleryPostScreen(
             db.groups().streamGroups(),
             db.groups().streamChannelGroups(),
         )
-    }.collectAsState(initial = ContactMap.EMPTY)
+    }.collectAsState(initial = LastContactMap.value)
 
     var replyText by remember(postId) { mutableStateOf("") }
     var sending by remember(postId) { mutableStateOf(false) }

@@ -43,6 +43,7 @@ import io.nisfeb.talon.data.ContactEntity
 import io.nisfeb.talon.data.MessageEntity
 import io.nisfeb.talon.ui.Avatar
 import io.nisfeb.talon.ui.ContactMap
+import io.nisfeb.talon.ui.LastContactMap
 import io.nisfeb.talon.ui.contactMapFlow
 import io.nisfeb.talon.urbit.StoryCache
 import kotlinx.coroutines.flow.flowOf
@@ -145,7 +146,7 @@ fun SearchScreen(
             db.groups().streamGroups(),
             db.groups().streamChannelGroups(),
         )
-    }.collectAsState(initial = ContactMap.EMPTY)
+    }.collectAsState(initial = LastContactMap.value)
 
 
     // The chip surfaces a per-search-session preference — "for my

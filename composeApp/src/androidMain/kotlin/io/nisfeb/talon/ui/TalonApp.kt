@@ -385,7 +385,7 @@ fun TalonApp(
             app.db.groups().streamGroups(),
             app.db.groups().streamChannelGroups(),
         )
-    }.let { flow -> flow.collectAsState(initial = ContactMap.EMPTY) }
+    }.let { flow -> flow.collectAsState(initial = LastContactMap.value) }
     // Story parsing runs outside composition (StoryCache, ingest), so
     // the naming policy is published to it here rather than threaded
     // through every call site. App.kt has done this since naming
@@ -727,6 +727,12 @@ fun TalonApp(
     var chatSeeded by remember(loggedInShip) { mutableStateOf(false) }
     // Seed openWhom from persisted store on first composition or ship
     // switch so we restore the user's last chat.
+    LaunchedEffect(loggedInShip) {
+        // See the matching block in App.kt: these caches belong to the
+        // ship that built them.
+        io.nisfeb.talon.ui.LastContactMap.forget()
+        io.nisfeb.talon.ui.AzimuthNames.reset()
+    }
     LaunchedEffect(loggedInShip) {
         if (loggedInShip != null) {
             if (openWhom == null) lastOpenChatState[loggedInShip]?.let { openWhom = it }
@@ -1164,7 +1170,7 @@ fun TalonApp(
             app.db.groups().streamGroups(),
             app.db.groups().streamChannelGroups(),
         )
-    }.collectAsState(initial = io.nisfeb.talon.ui.ContactMap.EMPTY)
+    }.collectAsState(initial = io.nisfeb.talon.ui.LastContactMap.value)
     val citeDisplayName: (String) -> String = remember(citeContacts) {
         { ship -> citeContacts.displayName(ship) }
     }

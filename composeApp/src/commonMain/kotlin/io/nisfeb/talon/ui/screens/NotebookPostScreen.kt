@@ -52,6 +52,7 @@ import coil3.compose.AsyncImage
 import io.nisfeb.talon.data.AppDatabase
 import io.nisfeb.talon.ui.Avatar
 import io.nisfeb.talon.ui.ContactMap
+import io.nisfeb.talon.ui.LastContactMap
 import io.nisfeb.talon.ui.StoryRenderer
 import io.nisfeb.talon.ui.contactMapFlow
 import io.nisfeb.talon.urbit.RawMarkdown
@@ -118,7 +119,7 @@ fun NotebookPostScreen(
             db.groups().streamGroups(),
             db.groups().streamChannelGroups(),
         )
-    }.collectAsState(initial = ContactMap.EMPTY)
+    }.collectAsState(initial = LastContactMap.value)
 
     var replyText by remember { mutableStateOf("") }
     var sending by remember { mutableStateOf(false) }
