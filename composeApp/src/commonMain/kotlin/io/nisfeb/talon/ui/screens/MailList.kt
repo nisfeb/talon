@@ -98,8 +98,16 @@ fun MailList(
     BoxWithConstraints(modifier.fillMaxSize()) {
         // A mail client has a mailbox column. Where there is room it is
         // simply there; where there is not, the same list arrives as a
-        // sheet rather than being crushed into chips along the top.
-        val roomForColumn = maxWidth >= 400.dp
+        // sheet from the toolbar rather than being crushed into chips
+        // along the top.
+        //
+        // Four hundred dip was not room. Most phones clear it, so they
+        // were drawing a mailbox column down the left at the same time
+        // as the app's own hamburger sat above it — two left-hand
+        // navigations for one screen, and a message list in whatever
+        // was left. This is the width at which the app considers itself
+        // to have a second column at all.
+        val roomForColumn = maxWidth >= io.nisfeb.talon.ui.ExpandedThreshold
 
         Row(Modifier.fillMaxSize()) {
             if (roomForColumn) {

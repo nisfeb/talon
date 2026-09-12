@@ -2625,6 +2625,25 @@ fun App(
                             // ANY rail item must close it (the Assistant case
                             // below re-opens it, so clicking A is a no-op).
                             showAssistant = false
+                            // And leaving whichever of the others was open.
+                            // The render is a `when` over these flags, so it
+                            // shows the first one that is true rather than the
+                            // one most recently asked for: left set, they pile
+                            // up and the earliest keeps winning. Harmless on a
+                            // rail, where people tended to come back the way
+                            // they went in; not harmless behind a drawer,
+                            // which is built for going straight from one
+                            // section to the next.
+                            showSelfProfile = false
+                            showWatchwords = false
+                            showGroupAdminList = false
+                            showInvites = false
+                            showSettings = false
+                            showLoops = false
+                            showContacts = false
+                            showDailyDigest = false
+                            showSearch = false
+                            showNewDm = false
                             // Clear the rail badge for items that show
                             // freshness signals — rail clicks were missing
                             // the markXSeen calls the kebab paths in

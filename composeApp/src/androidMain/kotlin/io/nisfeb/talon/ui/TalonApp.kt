@@ -572,6 +572,38 @@ fun TalonApp(
     // After applying, we tell MainActivity to clear the source state
     // so re-tapping the same notification (which carries the same
     // param value) re-fires the effect.
+    /**
+     * Leave whichever section is open.
+     *
+     * The render below is a `when` over these flags, so it shows the
+     * first one that happens to be true rather than the one most
+     * recently asked for. Anything that moves between sections has to
+     * put the old one down first, or they pile up and the earliest
+     * branch wins for ever.
+     */
+    fun closeSections() {
+        statusFeedOpen = false
+        mailOpen = false
+        bookmarksOpen = false
+        activityOpen = false
+        watchwordsOpen = false
+        contactsOpen = false
+        homeOpen = false
+        digestOpen = false
+        settingsOpen = false
+        sidebarSettingsOpen = false
+        adminListOpen = false
+        adminGroupFlag = null
+        invitesOpen = false
+        searchOpen = false
+        newDmOpen = false
+        editingProfile = false
+        assistantOpen = false
+        loopsOpen = false
+        groupInfoOpenFor = null
+        groupInfoDrilldown = null
+    }
+
     LaunchedEffect(
         initialOpenWhom,
         initialScrollMessageId,
@@ -588,25 +620,7 @@ fun TalonApp(
         val chatTargeted = initialOpenWhom != null ||
             initialOpenThread != null ||
             initialScrollMessageId != null
-        if (chatTargeted) {
-            statusFeedOpen = false
-            mailOpen = false
-            bookmarksOpen = false
-            activityOpen = false
-            watchwordsOpen = false
-            homeOpen = false
-            digestOpen = false
-            settingsOpen = false
-            sidebarSettingsOpen = false
-            adminListOpen = false
-            adminGroupFlag = null
-            invitesOpen = false
-            searchOpen = false
-            newDmOpen = false
-            editingProfile = false
-            groupInfoOpenFor = null
-            groupInfoDrilldown = null
-        }
+        if (chatTargeted) closeSections()
         if (initialOpenWhom != null) {
             // A group-invite notification deep-links as "group:~host/name"
             // — route it to the group screen, not openWhom (which only
@@ -1418,6 +1432,11 @@ fun TalonApp(
                     },
                     onSection = { item ->
                         close()
+                        // Put the current section down before picking
+                        // the next one up. Without this they accumulate
+                        // and the render's `when` keeps showing
+                        // whichever was opened earliest.
+                        closeSections()
                         when (item) {
                             io.nisfeb.talon.ui.RailItem.Home -> homeOpen = true
                             // Already where it goes.
