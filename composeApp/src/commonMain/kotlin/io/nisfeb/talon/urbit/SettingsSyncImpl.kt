@@ -170,14 +170,6 @@ class SettingsSyncImpl(
         )
     }
 
-    override suspend fun pushMnemonymNames(enabled: Boolean) {
-        pokePutEntry(
-            BUCKET_UI_PREFS,
-            ENTRY_MNEMONYM_NAMES,
-            buildJsonObject { put("enabled", enabled) },
-        )
-    }
-
     override suspend fun pushAlwaysPatp(enabled: Boolean) {
         pokePutEntry(
             BUCKET_UI_PREFS,
@@ -1344,11 +1336,6 @@ class SettingsSyncImpl(
                 bumpStatusesSeen(ms)
             }
             BUCKET_UI_PREFS -> {
-                entries?.get(ENTRY_MNEMONYM_NAMES)?.let { v ->
-                    (unwrap(v) as? JsonObject)?.get("enabled").asBool()?.let {
-                        io.nisfeb.talon.ui.MnemonymNames.set(it)
-                    }
-                }
                 entries?.get(ENTRY_ALWAYS_PATP)?.let { v ->
                     (unwrap(v) as? JsonObject)?.get("enabled").asBool()?.let {
                         io.nisfeb.talon.ui.ShipNames.setAlwaysPatp(it)
@@ -1517,9 +1504,6 @@ class SettingsSyncImpl(
             }
             BUCKET_UI_PREFS -> {
                 when (entry) {
-                    ENTRY_MNEMONYM_NAMES ->
-                        (unwrapped as? JsonObject)?.get("enabled").asBool()
-                            ?.let { io.nisfeb.talon.ui.MnemonymNames.set(it) }
                     ENTRY_ALWAYS_PATP ->
                         (unwrapped as? JsonObject)?.get("enabled").asBool()
                             ?.let { io.nisfeb.talon.ui.ShipNames.setAlwaysPatp(it) }
@@ -1549,7 +1533,6 @@ class SettingsSyncImpl(
             BUCKET_UI_PREFS -> {
                 // Entry deleted on the ship → back to that entry's default.
                 when (entry) {
-                    ENTRY_MNEMONYM_NAMES -> io.nisfeb.talon.ui.MnemonymNames.set(true)
                     ENTRY_ALWAYS_PATP -> io.nisfeb.talon.ui.ShipNames.setAlwaysPatp(false)
                 }
             }
@@ -1738,7 +1721,6 @@ class SettingsSyncImpl(
     internal suspend fun clearBucketLocally(bucket: String) {
         when (bucket) {
             BUCKET_UI_PREFS -> {
-                io.nisfeb.talon.ui.MnemonymNames.set(true)
                 io.nisfeb.talon.ui.ShipNames.setAlwaysPatp(false)
             }
             BUCKET_GROUP_ORDERS -> db.groupOrders().replaceAll(emptyList())

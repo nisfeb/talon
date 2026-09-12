@@ -138,8 +138,7 @@ fun suggestionsFor(
     contactMap: ContactMap,
     allShips: Collection<String>,
 ): List<Suggestion> {
-    val mnemonyms = contactMap.mnemonymNames
-    fun nymOf(ship: String) = if (mnemonyms) Mnemonym.forShip(ship) else null
+    fun nymOf(ship: String) = Mnemonym.forShip(ship)
 
     val q = query.lowercase()
     if (q.isEmpty()) {

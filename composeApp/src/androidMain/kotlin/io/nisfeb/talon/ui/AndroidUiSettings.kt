@@ -53,13 +53,6 @@ class AndroidUiSettings(
     }
 
     init {
-        // Mnemonym naming: the runtime switch lives in the shared
-        // [MnemonymNames] object (ContactMap reads it); this store just
-        // loads the persisted choice over the default and keeps writes.
-        MnemonymNames.enabled.value = prefs.getBoolean(KEY_MNEMONYM_NAMES, true)
-        MnemonymNames.persist = { v ->
-            prefs.edit().putBoolean(KEY_MNEMONYM_NAMES, v).apply()
-        }
         ShipNames.alwaysPatp.value = prefs.getBoolean(KEY_ALWAYS_PATP, false)
         ShipNames.persist = { v ->
             prefs.edit().putBoolean(KEY_ALWAYS_PATP, v).apply()
@@ -357,7 +350,6 @@ private const val KEY_MIC_AGC = "mic_auto_gain"
         private const val KEY_FONT_SCALE = "font_scale"
         private const val KEY_RAIL_ITEM_ORDER = "rail_item_order"
         private const val KEY_ALWAYS_PATP = "always_patp"
-private const val KEY_MNEMONYM_NAMES = "mnemonym_names"
     }
 }
 

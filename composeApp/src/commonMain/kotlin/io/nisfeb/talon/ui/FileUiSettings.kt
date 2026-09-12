@@ -65,7 +65,6 @@ class FileUiSettings(
         val powerFeaturesEnabled: Boolean = false,
         val density: String = Density.Comfortable.name,
         val fontScale: Float = 1.0f,
-        val mnemonymNames: Boolean = true,
         val alwaysPatp: Boolean = false,
         /** [io.nisfeb.talon.ui.theme.ThemeSettings] as JSON text. */
         val customThemes: String = "",
@@ -77,11 +76,6 @@ class FileUiSettings(
     private val initial = loadInitial()
 
     init {
-        // Mnemonym naming: the runtime switch lives in the shared
-        // [MnemonymNames] object (ContactMap reads it); this store just
-        // loads the persisted choice over the default and keeps writes.
-        MnemonymNames.enabled.value = initial.mnemonymNames
-        MnemonymNames.persist = { persistCurrent() }
         ShipNames.alwaysPatp.value = initial.alwaysPatp
         ShipNames.persist = { persistCurrent() }
     }
@@ -305,7 +299,6 @@ class FileUiSettings(
                 powerFeaturesEnabled = _powerFeaturesEnabled.value,
                 density = _density.value.name,
                 fontScale = _fontScale.value,
-                mnemonymNames = MnemonymNames.enabled.value,
                 alwaysPatp = ShipNames.alwaysPatp.value,
                 customThemes = _themeSettings.value.toJson(),
                 micNoiseSuppression = _micProcessing.value.noiseSuppression,

@@ -9,12 +9,14 @@ import kotlin.test.assertNull
  *  interchangeable ways to find the same ship. */
 class MentionPickerTest {
 
-    private val ships = listOf("~sampel-palnet", "~ricsul-bilwyt", "~marzod")
+    /** Two comets (the only ships with a nym) and a star. */
+    private val comet = "~doznec-binwes-samper-siglet--fidpen-sogdur-wacser-wissun"
+    private val other = "~racmus-mollen-fallyt-linpex--watres-sibbur-modlux-rinmex"
+    private val ships = listOf(comet, other, "~marzod")
     private val contacts = ContactMap(
         contacts = listOf(
-            ContactEntity(ship = "~sampel-palnet", nickname = "Sam Iam", bio = null, avatarUrl = null),
+            ContactEntity(ship = comet, nickname = "Sam Iam", bio = null, avatarUrl = null),
         ),
-        mnemonymNames = true,
     )
 
     private fun hits(query: String, map: ContactMap = contacts) =
@@ -22,18 +24,16 @@ class MentionPickerTest {
 
     @Test
     fun `nickname patp and mnemonym all find the same ship`() {
-        assertEquals(listOf("~sampel-palnet"), hits("sam iam")) // nick substring
-        assertEquals(listOf("~sampel-palnet"), hits("sampel")) // patp prefix
-        assertEquals(listOf("~sampel-palnet"), hits("accept")) // nym first word
-        assertEquals(listOf("~sampel-palnet"), hits(".accept.eng")) // nym with dots
-        assertEquals(listOf("~ricsul-bilwyt"), hits("misrule"))
+        assertEquals(listOf(comet), hits("sam iam")) // nick substring
+        assertEquals(listOf(comet), hits("doznec")) // patp prefix
+        assertEquals(listOf(comet), hits("admire")) // nym first word
+        assertEquals(listOf(comet), hits("..admire.ev")) // nym with dots
+        assertEquals(listOf(other), hits("portrays"))
     }
 
     @Test
-    fun `mnemonym matching is gated on the naming setting`() {
-        val off = contacts.copy(mnemonymNames = false)
-        assertEquals(emptyList(), hits("accept", off))
-        assertEquals(listOf("~sampel-palnet"), hits("sampel", off)) // patp still works
+    fun `a ship with no nym is still found by its patp`() {
+        assertEquals(listOf("~marzod"), hits("marzod"))
     }
 
     @Test

@@ -1834,11 +1834,6 @@ fun App(
                             onOpenLoops = { showLoops = true },
                             localShip = localShip,
                             startOnAccount = settingsStartOnAccount,
-                            onMnemonymNamesChanged = { on ->
-                                repo.pushScope.launch {
-                                    runCatching { settingsSync?.pushMnemonymNames(on) }
-                                }
-                            },
                             onAlwaysPatpChanged = { on ->
                                 repo.pushScope.launch {
                                     runCatching { settingsSync?.pushAlwaysPatp(on) }

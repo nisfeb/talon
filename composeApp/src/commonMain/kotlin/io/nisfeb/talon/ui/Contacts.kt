@@ -24,10 +24,6 @@ data class ContactMap(
     val clubs: List<ClubEntity> = emptyList(),
     val groups: List<GroupEntity> = emptyList(),
     val channelGroups: List<ChannelGroupEntity> = emptyList(),
-    /** Ships without a nickname fall back to their mnemonym (see
-     *  [Mnemonym]) instead of the raw @p. Synced via %settings
-     *  (ui-prefs bucket); flip off in Settings for classic naming. */
-    val mnemonymNames: Boolean = true,
     /** Ignore nicknames and mnemonyms; show the raw @p everywhere. */
     val alwaysPatp: Boolean = false,
 ) {
@@ -53,8 +49,7 @@ data class ContactMap(
      * message text.
      */
     val namesVersion: Int by lazy {
-        var h = if (mnemonymNames) 1 else 0
-        h = h * 31 + if (alwaysPatp) 1 else 0
+        var h = if (alwaysPatp) 1 else 0
         for (c in contacts) {
             h = h * 31 + c.ship.hashCode()
             h = h * 31 + (c.nickname?.hashCode() ?: 0)
@@ -77,7 +72,7 @@ data class ContactMap(
             ship
         } else {
             nickname(ship)
-                ?: (if (mnemonymNames) Mnemonym.display(ship) else null)
+                ?: Mnemonym.display(ship)
                 ?: ship
         }
     fun contact(ship: String): ContactEntity? = byShip[ship]
@@ -155,20 +150,15 @@ fun contactMapFlow(
     channelGroupsFlow: Flow<List<ChannelGroupEntity>>,
     // Defaulted to the app-wide switch so the ~17 call sites don't
     // each have to thread a UiSettings reference through; flipping
-    // the setting re-emits every ContactMap and re-renders names.
-    mnemonymNamesFlow: Flow<Boolean> = MnemonymNames.enabled,
+    // it re-emits every ContactMap and re-renders names.
     alwaysPatpFlow: Flow<Boolean> = ShipNames.alwaysPatp,
 ): Flow<ContactMap> = combine(
     contactsFlow.distinctUntilChanged(::sameContactDisplay),
     clubsFlow.distinctUntilChanged(),
     groupsFlow.distinctUntilChanged(),
     channelGroupsFlow.distinctUntilChanged(),
-    // Both naming switches ride one slot: `combine` only types five.
-    combine(
-        mnemonymNamesFlow.distinctUntilChanged(),
-        alwaysPatpFlow.distinctUntilChanged(),
-    ) { mn, patp -> mn to patp },
-) { c, cl, g, cg, naming -> ContactMap(c, cl, g, cg, naming.first, naming.second) }
+    alwaysPatpFlow.distinctUntilChanged(),
+) { c, cl, g, cg, patp -> ContactMap(c, cl, g, cg, patp) }
     .flowOn(Dispatchers.Default)
     // Conflate so cascading bootstrap emissions (e.g. all four DAOs
     // streaming initial values within a frame of each other) collapse

@@ -8,22 +8,23 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import okio.ByteString.Companion.toByteString
 
 /**
- * Mnemonym ship names — the friendlier fallback for ships without a
- * nickname, per the gwbtc/mnemonyms scheme (BIP-39-like): the ship's
- * value + a SHA-256 checksum (width/32 bits) split into 11-bit indices
- * into a 2048-word list, leading zero-index words dropped, words joined
- * with dots. `~sampel-palnet` → `.accept.engulf.relents`.
+ * Mnemonym ship names for comets, per gwbtc/mnemonyms.
  *
- * What we encode is the value the @p syllables spell directly — for
- * planets and moons that is the ob-scrambled ("tweaked") form, which is
- * exactly what the scheme's `.` prefix denotes; encoding the raw point
- * would leak sponsor adjacency in the words. So no Feistel cipher here:
- * parse syllables, hash, done.
+ * A comet's @p is not scrambled the way a planet's or a moon's is: the
+ * syllables spell its 128-bit key fingerprint directly. That is the
+ * whole reason the scheme can name one. The nym is the fingerprint
+ * plus a four-bit SHA-256 checksum, cut into 11-bit indices into a
+ * 2048-word list, leading zero-index words dropped, joined with dots
+ * and prefixed `..` -- two dots for untweaked, the scheme's mark for a
+ * value nobody had to unscramble.
  *
- * Only planets (32-bit), moons (64) and comets (128) qualify — the
- * scheme needs a multiple of 32 bits, and galaxies/stars have short
- * memorable names already. Everything else returns null and the caller
- * shows the plain @p.
+ * Only comets. Planets and moons have an ob-scrambled @p that spells
+ * no key at all, so a nym built from it would look like the real thing
+ * and mean nothing; naming one properly means fetching its public key
+ * and fingerprinting that (`cometize` in the reference), which needs
+ * the network and is not something a name lookup can do. Galaxies and
+ * stars are already short. Everything but a comet returns null and the
+ * caller shows the plain @p.
  */
 object Mnemonym {
 
@@ -35,17 +36,19 @@ object Mnemonym {
     fun forShip(ship: String): String? = synchronized(nymLock) {
         nymCache.getOrPut(ship) {
             val bytes = patpBytes(ship) ?: return@getOrPut ""
-            encode(bytes, tweaked = true)
+            encode(bytes, tweaked = false)
         }
-    }.takeIf { it.length > 1 }
+    }.takeIf { it.isNotEmpty() }
 
-    /** Display form: planets keep all three words; moon/comet nyms are
-     *  abridged to `.first...last` (the scheme's own abridge shape),
-     *  like the truncated comet @p users already know. */
+    /** Display form: the scheme's own abridgement, `..first...last`,
+     *  which is two words however long the nym is -- the same shape as
+     *  the truncated comet @p people already read. Short nyms (a value
+     *  with enough leading zeros to lose most of its words) are already
+     *  that short and are left alone. */
     fun display(ship: String): String? {
         val nym = forShip(ship) ?: return null
-        val words = nym.trimStart('.').split('.')
-        return if (words.size <= 3) nym else ".${words.first()}...${words.last()}"
+        val words = nym.removePrefix("..").split('.')
+        return if (words.size <= 2) nym else "..${words.first()}...${words.last()}"
     }
 
     private val nymLock = SynchronizedObject()
@@ -56,9 +59,10 @@ object Mnemonym {
     internal fun patpBytes(ship: String): ByteArray? {
         if (!ship.startsWith("~")) return null
         val s = ship.drop(1).replace("-", "")
-        // 4 syllables = planet, 8 = moon, 16 = comet. Galaxies (1) and
-        // stars (2) stay @p; anything else isn't a ship name.
-        if (s.length !in setOf(12, 24, 48) || s.length % 6 != 0) return null
+        // 16 syllables, and only 16: that is a comet, whose @p spells
+        // its key fingerprint. Everything shorter is a scrambled or
+        // already-short name the scheme has nothing to say about.
+        if (s.length != 48) return null
         val bytes = ByteArray(s.length / 3)
         for (i in bytes.indices) {
             val syllable = s.substring(i * 3, i * 3 + 3)
@@ -98,29 +102,6 @@ object Mnemonym {
 }
 
 /**
- * Runtime switch for the mnemonym fallback, read by [ContactMap] via
- * [contactMapFlow]'s default parameter. Default ON — the platform
- * UiSettings impl loads the persisted value over it at startup and
- * wires [persist]; %settings sync applies remote changes through
- * [set], which never pushes back (only the Settings screen pushes),
- * so there is no ping-pong.
- */
-object MnemonymNames {
-    val enabled = MutableStateFlow(true)
-
-    /** Wired by the platform UiSettings at startup; keeps the choice
-     *  across launches. */
-    var persist: (Boolean) -> Unit = {}
-
-    fun set(value: Boolean) {
-        enabled.value = value
-        // A failed disk write must not take down the caller — set() runs
-        // on the %settings apply path too. The value still applied live.
-        runCatching { persist(value) }
-    }
-}
-
-/**
  * Reader-side naming policy, in one place.
  *
  * Every surface that shows a ship — a row title, a mention inside a
@@ -130,15 +111,14 @@ object MnemonymNames {
  *
  *   1. [alwaysPatp] on  -> the raw @p, always
  *   2. a nickname the reader has for that ship
- *   3. the mnemonym, when [MnemonymNames] is on
+ *   3. the mnemonym, for a comet
  *   4. the raw @p
  */
 object ShipNames {
     /** Ignore nicknames and mnemonyms entirely; show @p everywhere. */
     val alwaysPatp = MutableStateFlow(false)
 
-    /** Wired by the platform UiSettings at startup, like
-     *  [MnemonymNames.persist]. */
+    /** Wired by the platform UiSettings at startup. */
     var persist: (Boolean) -> Unit = {}
 
     fun setAlwaysPatp(value: Boolean) {

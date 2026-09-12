@@ -146,11 +146,6 @@ fun SettingsScreen(
     localShip: io.nisfeb.talon.comet.LocalShip = io.nisfeb.talon.comet.LocalShip.Noop,
     /** Open on the Account tab, where the local ship and its dojo live. */
     startOnAccount: Boolean = false,
-    /** Fired after the user flips the mnemonym-naming toggle; hosts
-     *  push the new value to %settings (ui-prefs bucket) so the choice
-     *  follows the user across devices. Local apply + persist happen
-     *  regardless via [io.nisfeb.talon.ui.MnemonymNames.set]. */
-    onMnemonymNamesChanged: (Boolean) -> Unit = {},
     onAlwaysPatpChanged: (Boolean) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
@@ -355,25 +350,6 @@ fun SettingsScreen(
                     onAlwaysPatpChanged(on)
                 },
             )
-            val mnemonymNames by io.nisfeb.talon.ui.MnemonymNames.enabled.collectAsState()
-            FeatureToggleRow(
-                label = "Word-based ship names",
-                description = if (alwaysPatp) {
-                    "Turned off while \"Always show ~ship names\" is on."
-                } else {
-                    "Ships without a nickname show as readable words " +
-                        "(~sampel-palnet → .accept.engulf.relents) instead " +
-                        "of the raw Urbit name. Synced across your devices; " +
-                        "off restores classic ~ship naming."
-                },
-                enabled = mnemonymNames && !alwaysPatp,
-                onChange = { on ->
-                    io.nisfeb.talon.ui.MnemonymNames.set(on)
-                    onMnemonymNamesChanged(on)
-                },
-                switchEnabled = !alwaysPatp,
-            )
-
             // ── Accent color ────────────────────────────────────────
             FeatureToggleRow(
                 label = "Custom accent color",

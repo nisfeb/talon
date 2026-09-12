@@ -109,9 +109,8 @@ fun ContactProfileSheet(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.clickable(onClick = copyRow(ship)),
             )
-            val mnemonymOn by MnemonymNames.enabled.collectAsState()
             val nym = remember(ship) { Mnemonym.forShip(ship) }
-            if (mnemonymOn && nym != null) {
+            if (nym != null) {
                 Text(
                     nym,
                     style = MaterialTheme.typography.bodyMedium,
