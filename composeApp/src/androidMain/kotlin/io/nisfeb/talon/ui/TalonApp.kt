@@ -591,6 +591,13 @@ fun TalonApp(
         loopsOpen = false
         groupInfoOpenFor = null
         groupInfoDrilldown = null
+        // An open conversation is a thing to put down too. It is not a
+        // section, so it survived this and sat behind whatever section
+        // was picked -- invisible, but still holding a back handler.
+        // The first swipe out of Home spent itself closing that unseen
+        // chat and appeared to do nothing at all.
+        openWhom = null
+        openThread = null
     }
 
     LaunchedEffect(
@@ -1880,11 +1887,6 @@ fun TalonApp(
                     onOpenSidebarSettings = { sidebarSettingsOpen = true },
                     onOpenShareLoginQr = { shareLoginQrOpen = true },
                     onOpenLoops = { loopsOpen = true },
-                    onMnemonymNamesChanged = { on ->
-                        appScope.launch {
-                            runCatching { app.repo.settingsSync?.pushMnemonymNames(on) }
-                        }
-                    },
                     onAlwaysPatpChanged = { on ->
                         appScope.launch {
                             runCatching { app.repo.settingsSync?.pushAlwaysPatp(on) }

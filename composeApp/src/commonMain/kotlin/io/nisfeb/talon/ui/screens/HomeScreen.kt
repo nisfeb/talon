@@ -238,6 +238,10 @@ fun HomeScreen(
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
+                // Home had no way out but the back gesture, which is
+                // the one screen where that matters most: it is where
+                // the menu sends people first.
+                io.nisfeb.talon.ui.NavIcon(onBack = null)
                 Text(
                     greeting(ourShip, contacts, greetingMinute),
                     style = MaterialTheme.typography.headlineSmall
