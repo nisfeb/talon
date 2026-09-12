@@ -34,6 +34,7 @@ import androidx.compose.material.icons.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.MailOutline
+import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -150,6 +151,10 @@ fun HomeScreen(
     statuses: List<io.nisfeb.talon.data.ContactEntity> = emptyList(),
     onOpenContact: (ship: String) -> Unit = {},
     onOpenStatuses: () -> Unit = {},
+    /** Group flags awaiting an answer, for the things-waiting-on-you
+     *  widget. Empty where the host has not wired invitations. */
+    invites: List<String> = emptyList(),
+    onOpenInvites: () -> Unit = {},
     onOpenConversation: (whom: String) -> Unit,
     onOpenChats: () -> Unit,
     onOpenMailThread: (threadId: String) -> Unit,
@@ -337,6 +342,8 @@ fun HomeScreen(
                         onOpenMail = onOpenMail,
                         onOpenContact = onOpenContact,
                         onOpenStatuses = onOpenStatuses,
+                        invites = invites,
+                        onOpenInvites = onOpenInvites,
                         onLongPress = { editing = true },
                     )
 
@@ -653,6 +660,7 @@ private fun Grip(
 /** What each widget is called, wherever one needs naming. */
 fun title(kind: HomeWidgetKind): String = when (kind) {
     HomeWidgetKind.CLOCK -> "Clock and weather"
+    HomeWidgetKind.NEEDS -> "Needs you"
     HomeWidgetKind.MESSAGES -> "Chat"
     HomeWidgetKind.MAIL -> "Mail"
     HomeWidgetKind.CALENDAR -> "Today"
@@ -681,9 +689,15 @@ private fun WidgetBody(
     onOpenMail: () -> Unit,
     onOpenContact: (String) -> Unit,
     onOpenStatuses: () -> Unit,
+    invites: List<String>,
+    onOpenInvites: () -> Unit,
     onLongPress: () -> Unit,
 ) {
     when (widget.kind) {
+        HomeWidgetKind.NEEDS -> NeedsYouPanel(
+            recent, unreadBy, mail, invites, contacts, ourShip, widget,
+            onOpenConversation, onOpenMailThread, onOpenInvites, onLongPress,
+        )
         HomeWidgetKind.CLOCK -> ClockWeatherPanel(
             dialSizeFor(widget.rows),
             place, weather, onUseDeviceLocation, placeLookup, onPlacePicked,
@@ -1091,6 +1105,72 @@ private fun CalendarPanel(range: CalendarRange) {
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 4.dp),
+                )
+            }
+        }
+    }
+}
+
+/**
+ * The things actually waiting on you.
+ *
+ * What replaced the daily digest. Nothing here is generated or
+ * scheduled: a conversation whose last word is somebody else's and
+ * unread is a question owed an answer, and so are a mention, an
+ * unread mail thread and an invitation. All of it is already in the
+ * database and all of it is true the moment it is drawn.
+ */
+@Composable
+private fun NeedsYouPanel(
+    recent: List<io.nisfeb.talon.data.MessageEntity>,
+    unreadBy: Map<String, io.nisfeb.talon.data.UnreadEntity>,
+    mail: MailRepo?,
+    invites: List<String>,
+    contacts: ContactMap,
+    ourShip: String,
+    widget: HomeWidget,
+    onOpenConversation: (String) -> Unit,
+    onOpenMailThread: (String) -> Unit,
+    onOpenInvites: () -> Unit,
+    onLongPress: () -> Unit,
+) {
+    val page = mail?.page?.collectAsState()?.value
+    val mailNeeds = remember(page) {
+        page?.threads.orEmpty().filter { it.unread }
+            .map { io.nisfeb.talon.ui.MailNeed(it.id, it.from, it.subject, it.last) }
+    }
+    val rows = remember(recent, unreadBy, mailNeeds, invites, ourShip, widget.count) {
+        io.nisfeb.talon.ui.needsYou(
+            latest = recent,
+            unreadBy = unreadBy,
+            mail = mailNeeds,
+            invites = invites,
+            ourShip = ourShip,
+            limit = widget.count,
+            label = { contacts.conversationLabel(it) },
+            preview = { preview(it, contacts, ourShip) },
+        )
+    }
+    Panel("Needs you", Icons.Filled.Notifications) {
+        if (rows.isEmpty()) {
+            Empty("Nothing waiting on you.")
+        } else {
+            rows.forEach { row ->
+                QuickRow(
+                    title = row.title,
+                    line = row.line,
+                    at = row.atMs,
+                    // A mention is the one thing here that somebody
+                    // was addressed by name for.
+                    strong = row.kind == io.nisfeb.talon.ui.NeedKind.MENTION,
+                    onClick = {
+                        when (row.kind) {
+                            io.nisfeb.talon.ui.NeedKind.MAIL -> onOpenMailThread(row.target)
+                            io.nisfeb.talon.ui.NeedKind.INVITE -> onOpenInvites()
+                            else -> onOpenConversation(row.target)
+                        }
+                    },
+                    onLongPress = onLongPress,
                 )
             }
         }

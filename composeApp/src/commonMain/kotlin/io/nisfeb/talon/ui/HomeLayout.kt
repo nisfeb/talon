@@ -17,6 +17,8 @@ import kotlin.math.roundToInt
 enum class HomeWidgetKind {
     /** The clock and weather dial. */
     CLOCK,
+    /** What is actually waiting on you. */
+    NEEDS,
     MESSAGES,
     MAIL,
     CALENDAR,
@@ -77,7 +79,7 @@ const val HOME_ROW_UNIT_DP = 40
  * counts twelve columns in 56dp ones, and a version 1 layout read
  * without scaling would come back as a row of slivers.
  */
-const val HOME_LAYOUT_VERSION = 4
+const val HOME_LAYOUT_VERSION = 5
 
 /** How much finer version 2 is than version 1, per axis. */
 private const val V2_COLUMN_SCALE = 6
@@ -211,9 +213,10 @@ data class HomeLayout(
         val DEFAULT = HomeLayout(
             listOf(
                 HomeWidget(HomeWidgetKind.CLOCK, col = 0, row = 0, span = 5, rows = 9),
+                HomeWidget(HomeWidgetKind.NEEDS, count = 5, col = 0, row = 9, span = 5, rows = 6),
                 HomeWidget(HomeWidgetKind.MESSAGES, count = 5, col = 5, row = 0, span = 7, rows = 5),
                 HomeWidget(HomeWidgetKind.MAIL, count = 5, col = 5, row = 5, span = 7, rows = 4),
-                HomeWidget(HomeWidgetKind.CALENDAR, col = 0, row = 9, span = 5, rows = 4),
+                HomeWidget(HomeWidgetKind.CALENDAR, col = 0, row = 15, span = 5, rows = 4),
                 HomeWidget(
                     HomeWidgetKind.STATUS, visible = false, count = 5,
                     col = 5, row = 9, span = 7, rows = 4,
@@ -315,7 +318,31 @@ object HomeLayoutCodec {
             )
         }
         if (m.version < 4) m = m.copy(widgets = coordinatesFor(m.widgets), version = 4)
+        if (m.version < 5) m = m.copy(widgets = withNeeds(m.widgets), version = 5)
         return m.copy(version = HOME_LAYOUT_VERSION)
+    }
+
+    /**
+     * The things-waiting-on-you widget, on a page arranged before it
+     * existed.
+     *
+     * Switched on rather than off, unlike anything else arriving late:
+     * it replaces the daily digest, which was never on the home page
+     * at all, so leaving it hidden would mean nobody who already had a
+     * page ever saw the thing that took its place. Put below
+     * everything else, where it disturbs no arrangement.
+     */
+    private fun withNeeds(widgets: List<HomeWidget>): List<HomeWidget> {
+        if (widgets.any { it.kind == HomeWidgetKind.NEEDS }) return widgets
+        val below = widgets.filter { it.visible }.maxOfOrNull { it.bottom } ?: 0
+        return widgets + HomeWidget(
+            kind = HomeWidgetKind.NEEDS,
+            count = 5,
+            col = 0,
+            row = below,
+            span = HOME_COLUMNS,
+            rows = 6,
+        )
     }
 
     /**

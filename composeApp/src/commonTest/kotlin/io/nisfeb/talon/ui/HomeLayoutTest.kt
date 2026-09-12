@@ -468,3 +468,58 @@ class HomeNoShoveTest {
         assertEquals(4, grown[k[1]].row)
     }
 }
+
+class NeedsWidgetArrivalTest {
+
+    @Test
+    fun `it arrives switched on, unlike everything else that arrives late`() {
+        // The rule for a new widget is that it turns up hidden, so it
+        // does not rearrange a page somebody had already set up. This
+        // one is the exception: it replaces the daily digest, which
+        // was never on the home page at all, so arriving hidden would
+        // mean nobody with an existing page ever saw what took its
+        // place.
+        val v4 = """{"version":4,"widgets":[
+            {"kind":"CLOCK","col":0,"row":0,"span":5,"rows":9},
+            {"kind":"MAIL","col":5,"row":0,"span":7,"rows":5}
+        ]}"""
+        val back = HomeLayoutCodec.decode(v4)
+        assertTrue(back[HomeWidgetKind.NEEDS].visible, "it came back switched off")
+    }
+
+    @Test
+    fun `it goes below the page rather than on top of it`() {
+        val v4 = """{"version":4,"widgets":[
+            {"kind":"CLOCK","col":0,"row":0,"span":5,"rows":9},
+            {"kind":"MAIL","col":5,"row":0,"span":7,"rows":5}
+        ]}"""
+        val back = HomeLayoutCodec.decode(v4)
+        val needs = back[HomeWidgetKind.NEEDS]
+        assertEquals(9, needs.row, "it should start under the tallest thing above it")
+        for (kind in listOf(HomeWidgetKind.CLOCK, HomeWidgetKind.MAIL)) {
+            assertTrue(!overlaps(needs, back[kind]), "it landed on $kind")
+        }
+        assertEquals(0 to 0, back[HomeWidgetKind.CLOCK].col to back[HomeWidgetKind.CLOCK].row)
+    }
+
+    @Test
+    fun `a page that already has it is left alone`() {
+        val mine = HomeLayout.DEFAULT.with(
+            HomeLayout.DEFAULT[HomeWidgetKind.NEEDS].copy(visible = false, col = 3, row = 20),
+        )
+        val back = HomeLayoutCodec.decode(HomeLayoutCodec.encode(mine))
+        assertTrue(!back[HomeWidgetKind.NEEDS].visible, "it was switched back on")
+        assertEquals(3 to 20, back[HomeWidgetKind.NEEDS].col to back[HomeWidgetKind.NEEDS].row)
+    }
+
+    @Test
+    fun `the default page carries it`() {
+        assertTrue(HomeLayout.DEFAULT[HomeWidgetKind.NEEDS].visible)
+        val shown = HomeLayout.DEFAULT.complete().shown
+        for (i in shown.indices) {
+            for (j in i + 1 until shown.size) {
+                assertTrue(!overlaps(shown[i], shown[j]), "${shown[i].kind} sits on ${shown[j].kind}")
+            }
+        }
+    }
+}

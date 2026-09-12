@@ -1736,6 +1736,9 @@ fun TalonApp(
                         )
                     },
                     statuses = homeStatuses,
+                    invites = app.repo.invitesFlow.collectAsState().value
+                        ?.map { it.flag }.orEmpty(),
+                    onOpenInvites = { homeOpen = false; invitesOpen = true },
                     onOpenContact = { other -> profileSheetShip = other },
                     onOpenStatuses = { homeOpen = false; statusFeedOpen = true },
                     onOpenConversation = { whom -> homeOpen = false; openWhom = whom },

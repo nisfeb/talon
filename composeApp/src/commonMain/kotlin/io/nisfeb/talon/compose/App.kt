@@ -922,6 +922,8 @@ fun App(
         // status list flashes through "none" on every return.
         val homeStatuses by remember(db) { db.contacts().streamStatusFeed() }
             .collectAsState(initial = emptyList())
+        val homeInvites = repo.invitesFlow.collectAsState().value
+            ?.map { it.flag }.orEmpty()
         val homeTwentyFourHour by uiSettings.homeTwentyFourHour.collectAsState()
 
         // Kept here rather than inside HomeScreen, which is torn down
@@ -2926,6 +2928,8 @@ fun App(
                                             )
                                         },
                                         statuses = homeStatuses,
+                                        invites = homeInvites,
+                                        onOpenInvites = { showInvites = true },
                                         onOpenContact = { other -> profileSheetShip = other },
                                         onOpenStatuses = {
                                             uiSettings.setActiveRailTab(RailTab.Statuses)
