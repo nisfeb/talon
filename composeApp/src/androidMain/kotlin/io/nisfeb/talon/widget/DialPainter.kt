@@ -130,7 +130,9 @@ object DialPainter {
         }
 
         // ---- the moon, where it actually is --------------------------
-        sky.moonElongationDeg?.let { elong ->
+        // Only when it is up, as in the app. A moon below the horizon
+        // is one nobody can go outside and see.
+        sky.moonElongationDeg?.takeIf { sky.moonUp }?.let { elong ->
             val at = Moon.dialMinute(sky.minuteOfDay, elong)
             // Its own track, just inside the sun's, and a rim so a new
             // moon is a dark disc rather than nothing. Both for the

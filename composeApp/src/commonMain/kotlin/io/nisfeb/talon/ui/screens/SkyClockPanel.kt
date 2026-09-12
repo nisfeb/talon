@@ -288,7 +288,12 @@ fun SkyClockDial(
                 // actually is. It lags the sun by its phase, so it is
                 // only opposite the sun when it is full — drawing it
                 // wherever the sun is not was a picture of nothing.
-                if (moonMinute != null && sky.moonElongationDeg != null) {
+                // Only when it is actually up. A moon drawn below the
+                // horizon is a moon nobody can go outside and see, and
+                // a new moon keeps the sun's hours — so the night
+                // somebody looks for it is exactly the night there is
+                // none.
+                if (moonMinute != null && sky.moonElongationDeg != null && sky.moonUp) {
                     drawMoon(
                         centre = centre,
                         angleDeg = moonAngle,

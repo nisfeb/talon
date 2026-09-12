@@ -141,9 +141,30 @@ object SkyClock {
      */
     fun overcast(cloudCover: Float?): Float = (cloudCover ?: 0f).coerceIn(0f, 1f)
 
-    /** Where the sun's mark sits, or the moon's after dark. */
+    /**
+     * Whether a body at [minuteOfDay] on the dial is above the horizon.
+     *
+     * Wrap-safe, which the plain range check was not: a sunset that
+     * falls after local midnight — far north in summer, or a zone far
+     * from its own meridian — leaves sunset before sunrise, and then
+     * `rise until set` is empty and the sun is never up at all.
+     */
+    fun isUpAt(
+        minuteOfDay: Int,
+        sunriseMinute: Int,
+        sunsetMinute: Int,
+        polar: Boolean = false,
+        polarDay: Boolean = false,
+    ): Boolean {
+        if (polar) return polarDay
+        val dayLength = forward(sunriseMinute, sunsetMinute)
+        if (dayLength == 0) return false
+        return forward(sunriseMinute, minuteOfDay) < dayLength
+    }
+
+    /** Where the sun's mark sits. */
     fun markIsSun(minuteOfDay: Int, sunriseMinute: Int, sunsetMinute: Int): Boolean =
-        minuteOfDay in sunriseMinute until sunsetMinute
+        isUpAt(minuteOfDay, sunriseMinute, sunsetMinute)
 
     /**
      * A time of day as a label. Deliberately not seconds: the ring is
@@ -226,7 +247,31 @@ object SkyClock {
         val warmth: Float get() = warmth(currentC)
         val overcast: Float get() = overcast(cloudCover)
         val sunUp: Boolean
-            get() = if (polar) polarDay else markIsSun(minuteOfDay, sunriseMinute, sunsetMinute)
+            get() = isUpAt(minuteOfDay, sunriseMinute, sunsetMinute, polar, polarDay)
+
+        /**
+         * Whether the moon is above the horizon.
+         *
+         * Taken against the sun's own rising and setting, which is an
+         * approximation: the moon's path is tilted a little off the
+         * sun's, so it actually rises and sets up to about an hour
+         * either side of where this says. Near enough for a dial that
+         * is deciding whether to draw it at all, and far better than
+         * drawing one that is not there — a new moon keeps the sun's
+         * hours, so on the night somebody goes looking for it there is
+         * genuinely no moon in the sky.
+         */
+        val moonUp: Boolean
+            get() {
+                val elongation = moonElongationDeg ?: return false
+                return isUpAt(
+                    Moon.dialMinute(minuteOfDay, elongation),
+                    sunriseMinute,
+                    sunsetMinute,
+                    polar,
+                    polarDay,
+                )
+            }
 
         /** True when the high and low are far enough apart in time to
          *  mark separately; otherwise one mark would sit on the other. */

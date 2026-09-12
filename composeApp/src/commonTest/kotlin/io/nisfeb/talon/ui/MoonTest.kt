@@ -131,3 +131,64 @@ class NewMoonVisibilityTest {
         assertTrue(io.nisfeb.talon.ui.screens.MOON_TRACK_INSET < 0.5f, "and it must stay on the band")
     }
 }
+
+class MoonUpTest {
+
+    private fun sky(minute: Int, elongation: Double, rise: Int = 6 * 60, set: Int = 18 * 60) =
+        SkyClock.Sky(
+            minuteOfDay = minute,
+            sunriseMinute = rise,
+            sunsetMinute = set,
+            moonElongationDeg = elongation,
+        )
+
+    @Test
+    fun `a new moon keeps the sun's hours`() {
+        // Which is the whole of it: on the night somebody goes looking
+        // for the moon, there is none.
+        assertTrue(!sky(minute = 23 * 60, elongation = 0.0).moonUp, "up at eleven at night")
+        assertTrue(sky(minute = 12 * 60, elongation = 0.0).moonUp, "and down at midday")
+    }
+
+    @Test
+    fun `a full moon is up all night and down all day`() {
+        assertTrue(sky(minute = 0, elongation = 180.0).moonUp, "down at midnight")
+        assertTrue(sky(minute = 23 * 60, elongation = 180.0).moonUp)
+        assertTrue(!sky(minute = 12 * 60, elongation = 180.0).moonUp, "up at midday")
+    }
+
+    @Test
+    fun `a first quarter moon is up in the evening`() {
+        // It transits at sunset, so it holds the early night and has
+        // set by the small hours.
+        assertTrue(sky(minute = 20 * 60, elongation = 90.0).moonUp, "down at eight")
+        assertTrue(!sky(minute = 4 * 60, elongation = 90.0).moonUp, "still up at four")
+    }
+
+    @Test
+    fun `no phase is no moon`() {
+        assertTrue(!SkyClock.Sky(minuteOfDay = 0).moonUp)
+    }
+
+    @Test
+    fun `the polar cases follow the sun`() {
+        val night = sky(0, 180.0).copy(polar = true, polarDay = false)
+        val day = sky(0, 180.0).copy(polar = true, polarDay = true)
+        assertTrue(!night.moonUp)
+        assertTrue(day.moonUp)
+    }
+
+    @Test
+    fun `a sunset after midnight does not put everything below the horizon`() {
+        // The plain range check made `rise until set` empty whenever
+        // sunset wrapped past midnight, so nothing was ever up.
+        val s = SkyClock.Sky(
+            minuteOfDay = 23 * 60,
+            sunriseMinute = 3 * 60,
+            sunsetMinute = 1 * 60,
+            moonElongationDeg = 0.0,
+        )
+        assertTrue(s.sunUp, "the sun is down at eleven on a night it sets at one")
+        assertTrue(s.moonUp, "and so is a new moon, which keeps its hours")
+    }
+}
