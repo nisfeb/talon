@@ -1689,16 +1689,18 @@ class TlonChatRepo(
      * `#FF5050` → `ff.5050` for the JSON `tint` value.
      *
      * The hoon json-1 mark decodes a tint as `(slav %ux (cat 3 '0x' s))` —
-     * it prepends `0x` itself before parsing as @ux. So the value we send
-     * must NOT carry a `0x` prefix; the cat would otherwise produce
-     * `0x0xff.5050` and slav would fail. Dot grouping is optional but
-     * keeps roundtripped values matching the form `parseContact` reads.
+     * it prepends `0x` itself, so the value we send must not carry one.
+     *
+     * And slav wants the canonical @ux, not merely a parseable one:
+     * four-digit groups counted from the right, and no leading zero on
+     * the group at the front. `0xff.5050` is accepted and `0x0a.1b2c`
+     * is not, so padding every colour to six digits and cutting it 2+4
+     * worked for bright colours and crashed the mark for any colour
+     * whose red channel was below 0x10 -- a nack reading
+     * `gall: poke-as: cast: key=%self`, which says nothing about
+     * colours at all. Verified against slav in a dojo, both ways.
      */
-    private fun toUrbitHexColor(hex: String): String {
-        val stripped = hex.trim().removePrefix("#").lowercase()
-        val padded = stripped.padStart(6, '0').takeLast(6)
-        return padded.substring(0, 2) + "." + padded.substring(2, 6)
-    }
+    private fun toUrbitHexColor(hex: String): String = urbitHexColor(hex)
 
     /**
      * One row for the Activity feed screen. Best-effort parse of the
@@ -4215,6 +4217,40 @@ class TlonChatRepo(
     }
 
     companion object {
+        /**
+         * `#FF5050` → `ff.5050` for a profile tint.
+         *
+         * The json-1 mark decodes a tint as `(slav %ux (cat 3 '0x' s))`
+         * -- it prepends the `0x` itself, so the value must not carry
+         * one. And slav wants the canonical @ux rather than merely a
+         * parseable one: four-digit groups counted from the right, and
+         * no leading zero on the group at the front.
+         *
+         * Padding every colour to six digits and cutting it 2+4 met
+         * that for bright colours and missed it for any colour whose
+         * red channel was below 0x10: `0xff.5050` parses, `0x0a.1b2c`
+         * is refused. The mark's grab then crashed and the whole
+         * profile save nacked with `gall: poke-as: cast: key=%self`,
+         * which says nothing whatsoever about colours.
+         *
+         * Both forms checked against slav in a dojo.
+         */
+        internal fun urbitHexColor(hex: String): String {
+            val digits = hex.trim().removePrefix("#").lowercase()
+                .padStart(6, '0').takeLast(6)
+                .trimStart('0')
+            if (digits.isEmpty()) return "0"
+            val head = digits.length % 4
+            val groups = buildList {
+                if (head != 0) add(digits.substring(0, head))
+                for (i in head until digits.length step 4) add(digits.substring(i, i + 4))
+            }
+            return groups.joinToString(".")
+        }
+
+        /** Test seam for [urbitHexColor]. */
+        internal fun urbitHexColorForTest(hex: String): String = urbitHexColor(hex)
+
         private const val TAG = "TlonChatRepo"
 
         /**
