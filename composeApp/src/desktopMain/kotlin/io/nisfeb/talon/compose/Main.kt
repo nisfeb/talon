@@ -16,8 +16,6 @@ import io.nisfeb.talon.notify.Notifier
 import io.nisfeb.talon.notify.SystemNotifier
 import org.jetbrains.skia.Image as SkiaImage
 import io.nisfeb.talon.ai.AiSettingsRepository
-import io.nisfeb.talon.ai.DailyDigestSettings
-import io.nisfeb.talon.ai.DesktopDailyDigestSettings
 import io.nisfeb.talon.ai.DesktopWatchwordsSyncSettings
 import io.nisfeb.talon.ai.WatchwordsSyncSettings
 import io.nisfeb.talon.ai.createAiSettings
@@ -82,7 +80,6 @@ private class DesktopAppGraph {
     /** The comet Talon runs on this machine, if the user set one up. */
     val localShip = io.nisfeb.talon.comet.DesktopLocalShip(ktorHttp)
     val aiSettings: AiSettingsRepository = createAiSettings()
-    val dailyDigestSettings: DailyDigestSettings = DesktopDailyDigestSettings()
     val watchwordsSync: WatchwordsSyncSettings = DesktopWatchwordsSyncSettings()
     val themePreference: ThemePreference = DesktopThemePreference()
     val relaySettings: io.nisfeb.talon.notify.RelaySettings =
@@ -126,11 +123,9 @@ private class DesktopAppGraph {
         SettingsSyncImpl(
             db = db,
             aiSettings = aiSettings,
-            dailyDigestSettings = dailyDigestSettings,
             // Desktop has no AlarmManager equivalent wired, so the
             // digest doesn't actually fire here. The callback's a no-op
             // until that subsystem ports.
-            rearmDailyDigest = {},
         )
     }
 
@@ -473,7 +468,6 @@ fun main() {
                     drafts = graph.drafts,
                     updateState = graph.updateState,
                     createSettingsSync = graph.createSettingsSync,
-                    dailyDigestSettings = graph.dailyDigestSettings,
                     watchwordsSync = graph.watchwordsSync,
                     themePreference = graph.themePreference,
                     callEngineProvider = io.nisfeb.talon.call.DesktopCallEngineProvider,

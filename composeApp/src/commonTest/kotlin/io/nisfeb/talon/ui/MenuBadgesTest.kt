@@ -31,17 +31,6 @@ class MenuBadgesTest {
     }
 
     @Test
-    fun `digestFresh no longer lights anything`() {
-        // The brief lost its rail entry to the home page. The flag is
-        // still carried because the digest itself still exists; it just
-        // has nothing on the rail to put a dot on.
-        val b = MenuBadges(digestFresh = true)
-        for (item in RailItem.entries) {
-            assertFalse(b.forItem(item), "$item should not be fresh when only digest is")
-        }
-    }
-
-    @Test
     fun `invitesPending maps only to RailItem Invites`() {
         val b = MenuBadges(invitesPending = true)
         assertTrue(b.forItem(RailItem.Invites))
@@ -54,7 +43,6 @@ class MenuBadgesTest {
     fun `all three flags compose without crosstalk`() {
         val b = MenuBadges(
             statusesFresh = true,
-            digestFresh = true,
             invitesPending = true,
         )
         assertTrue(b.forItem(RailItem.Statuses))
@@ -76,9 +64,8 @@ class MenuBadgesTest {
         val combos = listOf(
             MenuBadges(),
             MenuBadges(statusesFresh = true),
-            MenuBadges(digestFresh = true),
             MenuBadges(invitesPending = true),
-            MenuBadges(true, true, true),
+            MenuBadges(true, true),
         )
         for (b in combos) {
             for (item in RailItem.entries) {

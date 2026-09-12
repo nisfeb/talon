@@ -28,7 +28,6 @@ actual abstract class AppDatabase : RoomDatabase() {
     actual abstract fun embeddings(): EmbeddingDao
     actual abstract fun bookmarkFolders(): BookmarkFolderDao
     actual abstract fun watchwords(): WatchwordsDao
-    actual abstract fun dailyDigests(): DailyDigestDao
     actual abstract fun messageMedia(): MessageMediaDao
     actual abstract fun railItemPrefs(): RailItemPrefDao
     actual abstract fun dmInvites(): DmInviteDao

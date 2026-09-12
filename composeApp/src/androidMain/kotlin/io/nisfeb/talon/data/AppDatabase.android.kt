@@ -28,7 +28,6 @@ actual abstract class AppDatabase : RoomDatabase() {
     actual abstract fun embeddings(): EmbeddingDao
     actual abstract fun bookmarkFolders(): BookmarkFolderDao
     actual abstract fun watchwords(): WatchwordsDao
-    actual abstract fun dailyDigests(): DailyDigestDao
     actual abstract fun messageMedia(): MessageMediaDao
     actual abstract fun railItemPrefs(): RailItemPrefDao
     actual abstract fun dmInvites(): DmInviteDao
@@ -60,6 +59,7 @@ fun createAppDatabase(context: Context, name: String): AppDatabase {
             MIGRATION_26_27, MIGRATION_27_28, MIGRATION_28_29,
             MIGRATION_29_30, MIGRATION_30_31, MIGRATION_34_35, MIGRATION_35_36,
             MIGRATION_36_37, MIGRATION_37_38, MIGRATION_38_39,
+            MIGRATION_40_41,
         )
         // dropAllTables = true preserves the pre-2.7 behaviour: when
         // Room can't find a migration path, drop everything and rebuild.
@@ -383,6 +383,19 @@ private val MIGRATION_38_39 = object : Migration(38, 39) {
         db.execSQL("ALTER TABLE loop ADD COLUMN scheduleKind TEXT NOT NULL DEFAULT 'interval'")
         db.execSQL("ALTER TABLE loop ADD COLUMN atMinuteOfDay INTEGER NOT NULL DEFAULT 0")
         db.execSQL("ALTER TABLE loop ADD COLUMN daysMask INTEGER NOT NULL DEFAULT 0")
+    }
+}
+
+/**
+ * The daily digest is gone, and so is the table it wrote to.
+ *
+ * Dropped rather than left behind: it held generated summaries of
+ * days that have passed, nothing else ever read it, and a table kept
+ * "just in case" is one the next reader has to work out the status of.
+ */
+private val MIGRATION_40_41 = object : Migration(40, 41) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("DROP TABLE IF EXISTS daily_digests")
     }
 }
 

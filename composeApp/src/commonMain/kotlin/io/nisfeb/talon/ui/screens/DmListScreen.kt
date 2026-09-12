@@ -97,7 +97,7 @@ import io.nisfeb.talon.ui.UpdateBanner
 import io.nisfeb.talon.ui.contactMapFlow
 import io.nisfeb.talon.ui.shortRelativeTime
 import io.nisfeb.talon.update.UpdateStatus
-import io.nisfeb.talon.ai.DailyDigestMentionMatcher
+import io.nisfeb.talon.ui.MentionMatcher
 import io.nisfeb.talon.urbit.StoryCache
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.combine
@@ -138,15 +138,10 @@ fun DmListScreen(
     /** Open the home page. Null where the host has no Home surface,
      *  which hides the entry rather than offering a dead one. */
     onOpenHome: (() -> Unit)? = null,
-    onOpenDigest: () -> Unit = {},
-    /** Hide the "Today's brief" menu entry when the digest alarm is
-     *  disabled in settings — no point routing into a screen the user
-     *  hasn't opted into yet. */
-    digestEnabled: Boolean = false,
     /** Per-ship persistent "I've seen this" timestamps for the More
-     *  menu's freshness dots. Tap-throughs on Today's brief /
-     *  Statuses / Invites mark the corresponding entry seen so the
-     *  pip clears even though the underlying data is still there.
+     *  menu's freshness dots. Tap-throughs on Statuses / Invites mark
+     *  the corresponding entry seen so the pip clears even though the
+     *  underlying data is still there.
      *  Defaults to NoopMenuSeenStore for tests / hosts that haven't
      *  wired persistence yet. */
     menuSeen: io.nisfeb.talon.ui.MenuSeenStore =
@@ -294,7 +289,7 @@ fun DmListScreen(
             } else {
                 recent.any { m ->
                     val text = StoryCache.textFor(m.id, m.contentJson)
-                    DailyDigestMentionMatcher.containsMention(text, patp)
+                    io.nisfeb.talon.ui.MentionMatcher.containsMention(text, patp)
                 }
             }
             if (include) filtered.add(u)
@@ -796,10 +791,8 @@ fun DmListScreen(
             var menuOpen by remember { mutableStateOf(false) }
             // Freshness-dot inputs. Per-feature data flows joined with
             // the menuSeen state so a tap-through actually clears the
-            // dot — leaving "Today's brief" lit 24/7 just because a
-            // digest exists for today helps no one (the user said
-            // exactly that). The marker writes happen in the per-item
-            // onClick branches below.
+            // dot. The marker writes happen in the per-item onClick
+            // branches below.
             val seenState by menuSeen.state.collectAsState()
             // Status-feed "seen" syncs across the user's devices via
             // %settings; merge that high-water mark with the local one so
@@ -811,18 +804,12 @@ fun DmListScreen(
             val syncedStatusesSeenMs by statusesSeenFlow.collectAsState()
             val pendingInvites = repo.invitesFlow.collectAsState().value
                 ?: emptyList()
-            val latestDigest by remember(db, activeShip) {
-                db.dailyDigests().streamLatestForShip(activeShip ?: "")
-            }.collectAsState(initial = null)
             val statusFeedRows by remember(db) {
                 db.contacts().streamStatusFeed()
             }.collectAsState(initial = emptyList())
             val invitesSnapshot = remember(pendingInvites) {
                 io.nisfeb.talon.ui.invitesSnapshot(pendingInvites.map { it.flag })
             }
-            val hasFreshDigest = latestDigest?.dateLocal?.let {
-                it != seenState.lastSeenDigestDate
-            } == true
             val effectiveStatusesSeenMs =
                 maxOf(seenState.lastSeenStatusesMs, syncedStatusesSeenMs)
             val hasFreshStatuses = remember(statusFeedRows, effectiveStatusesSeenMs, activeShip) {

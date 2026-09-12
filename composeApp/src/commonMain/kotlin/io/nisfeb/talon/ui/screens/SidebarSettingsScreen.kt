@@ -47,7 +47,6 @@ import sh.calvin.reorderable.rememberReorderableLazyListState
 fun SidebarSettingsScreen(
     repo: TlonChatRepo,
     uiSettings: UiSettings,
-    dailyDigestEnabled: Boolean,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -121,7 +120,6 @@ fun SidebarSettingsScreen(
                     SidebarItemRow(
                         item = item,
                         visible = railVisibility.isVisible(item),
-                        dailyDigestEnabled = dailyDigestEnabled,
                         onToggle = { newVisible ->
                             scope.launch {
                                 val sync = repo.settingsSync
@@ -151,11 +149,10 @@ fun SidebarSettingsScreen(
 private fun SidebarItemRow(
     item: RailItem,
     visible: Boolean,
-    dailyDigestEnabled: Boolean,
     onToggle: (Boolean) -> Unit,
     dragHandleModifier: Modifier,
 ) {
-    val state = sidebarRowState(item, dailyDigestEnabled)
+    val state = sidebarRowState(item)
     Row(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -209,10 +206,7 @@ private data class SidebarRowState(
     val gatedOff: Boolean,
 )
 
-private fun sidebarRowState(
-    item: RailItem,
-    dailyDigestEnabled: Boolean,
-): SidebarRowState = when (item) {
+private fun sidebarRowState(item: RailItem): SidebarRowState = when (item) {
     RailItem.Chats -> SidebarRowState(
         label = "Chats",
         subtitle = "Always on the sidebar",

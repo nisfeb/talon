@@ -16,7 +16,7 @@ import kotlinx.datetime.toLocalDateTime
  *  - `"interval"`: every N minutes since the last run — needs only the
  *    last run and the interval, no timezone.
  *  - `"weekly"`: at a time-of-day on selected weekdays, in the device's
- *    zone (like the daily digest). Empty day set = every day.
+ *    zone. Empty day set = every day.
  *
  * No side effects — same inputs, same answer. The Android alarm
  * scheduler and the desktop ticker both derive from this so their timing

@@ -46,7 +46,6 @@ import androidx.room.RoomDatabaseConstructor
         WatchwordEntity::class,
         WatchwordHitEntity::class,
         WatchwordChatExcludeEntity::class,
-        DailyDigestEntity::class,
         MessageMediaEntity::class,
         RailItemPrefEntity::class,
         DmInviteEntity::class,
@@ -58,7 +57,7 @@ import androidx.room.RoomDatabaseConstructor
         NotesFolderEntity::class,
         NotesNoteEntity::class,
     ],
-    version = 40,
+    version = 41,
     exportSchema = false,
 )
 @ConstructedBy(AppDatabaseConstructor::class)
@@ -78,7 +77,6 @@ expect abstract class AppDatabase : RoomDatabase {
     abstract fun embeddings(): EmbeddingDao
     abstract fun bookmarkFolders(): BookmarkFolderDao
     abstract fun watchwords(): WatchwordsDao
-    abstract fun dailyDigests(): DailyDigestDao
     abstract fun messageMedia(): MessageMediaDao
     abstract fun railItemPrefs(): RailItemPrefDao
     abstract fun dmInvites(): DmInviteDao

@@ -8,7 +8,6 @@ import platform.UIKit.UIDevice
 // BGTaskScheduler wiring that doesn't exist yet, so those gate off too.
 // Touch affordances (swipe-nav, tap-to-open-menu) are on.
 
-actual val isDailyDigestSupported: Boolean = false
 actual val isVoiceMessagesSupported: Boolean = false
 actual val isOnDeviceAiSupported: Boolean = false
 actual val isAssistantSupported: Boolean = true

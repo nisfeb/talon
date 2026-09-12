@@ -1,14 +1,17 @@
-package io.nisfeb.talon.ai
+package io.nisfeb.talon.ui
 
 /**
- * Patp-bounded `~ourpatp` substring detection. See spec §Generation/Mentions.
+ * Patp-bounded `~ourpatp` substring detection.
  *
  * "Patp boundary" means the character following the patp is NOT a
  * letter or `-`. So `~mister-foo` matches `hi ~mister-foo!` but NOT
  * `~mister-foo-bar` — otherwise `~mister-botter` would match every
  * one of `~mister-botter-dozzod-nisfeb`'s messages.
  */
-object DailyDigestMentionMatcher {
+object MentionMatcher {
+    // Lived in the daily digest until the digest was removed. Nothing
+    // about it was ever about digests: it is what the mentions tab
+    // uses to decide whether somebody said your name.
 
     fun containsMention(haystack: String, patp: String): Boolean {
         if (patp.isEmpty() || haystack.isEmpty()) return false

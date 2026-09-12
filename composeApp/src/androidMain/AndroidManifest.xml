@@ -156,9 +156,6 @@
             </intent-filter>
         </service>
 
-        <receiver
-            android:name="io.nisfeb.talon.DigestAlarmReceiver"
-            android:exported="false" />
 
         <!--
           The home-screen clock. Exported because the launcher is what

@@ -24,7 +24,6 @@ class DesktopMenuSeenStore(
 
     @Serializable
     private data class Persisted(
-        val lastSeenDigestDate: String? = null,
         val lastSeenStatusesMs: Long = 0L,
         val lastSeenInvitesSnapshot: String = "",
     )
@@ -32,12 +31,6 @@ class DesktopMenuSeenStore(
     private val target: File = file
     private val _state = MutableStateFlow(loadInitial())
     override val state: StateFlow<MenuSeenState> = _state.asStateFlow()
-
-    override fun markDigestSeen(dateLocal: String?) {
-        val next = _state.value.copy(lastSeenDigestDate = dateLocal)
-        _state.value = next
-        persist(next)
-    }
 
     override fun markStatusesSeenAt(ms: Long) {
         val next = _state.value.copy(lastSeenStatusesMs = ms)
@@ -56,7 +49,6 @@ class DesktopMenuSeenStore(
         return runCatching {
             val p = JSON.decodeFromString<Persisted>(target.readText())
             MenuSeenState(
-                lastSeenDigestDate = p.lastSeenDigestDate,
                 lastSeenStatusesMs = p.lastSeenStatusesMs,
                 lastSeenInvitesSnapshot = p.lastSeenInvitesSnapshot,
             )
@@ -69,7 +61,6 @@ class DesktopMenuSeenStore(
         tmp.writeText(
             JSON.encodeToString(
                 Persisted(
-                    lastSeenDigestDate = value.lastSeenDigestDate,
                     lastSeenStatusesMs = value.lastSeenStatusesMs,
                     lastSeenInvitesSnapshot = value.lastSeenInvitesSnapshot,
                 ),

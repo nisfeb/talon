@@ -6,7 +6,7 @@ package io.nisfeb.talon.ai
  * the model must answer from those alone and cite them by number so the
  * UI can link every claim back to a real message.
  *
- * Sibling to [DailyDigestPrompt] — content layer only; [AiClient] owns
+ * Content layer only; [AiClient] owns
  * the wire protocol.
  */
 object AskUrbitPrompt {

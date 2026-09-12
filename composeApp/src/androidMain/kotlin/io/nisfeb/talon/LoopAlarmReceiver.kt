@@ -18,7 +18,7 @@ import kotlinx.coroutines.launch
  * goAsync + wake-lock lifecycle.
  *
  * Android-only: no desktop analog — depends on AlarmManager. Mirrors
- * DigestAlarmReceiver.
+ * the loop scheduler.
  */
 class LoopAlarmReceiver : BroadcastReceiver() {
 

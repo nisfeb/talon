@@ -14,7 +14,6 @@ package io.nisfeb.talon.ui
  */
 data class MenuBadges(
     val statusesFresh: Boolean = false,
-    val digestFresh: Boolean = false,
     val invitesPending: Boolean = false,
 ) {
     /**

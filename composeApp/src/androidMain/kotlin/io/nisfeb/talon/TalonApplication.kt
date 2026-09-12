@@ -46,8 +46,6 @@ class TalonApplication : Application() {
         private set
     lateinit var aiSettings: io.nisfeb.talon.ai.AiSettingsRepository
         private set
-    lateinit var dailyDigestSettings: io.nisfeb.talon.ai.DailyDigestSettings
-        private set
     lateinit var uiSettings: UiSettings
         private set
     /** SharedPreferences-backed override for the app's color scheme.
@@ -62,8 +60,6 @@ class TalonApplication : Application() {
     lateinit var ai: AiFeatures
         private set
     lateinit var embedder: io.nisfeb.talon.ai.Embedder
-        private set
-    lateinit var dailyDigest: io.nisfeb.talon.ai.DailyDigest
         private set
     lateinit var loops: io.nisfeb.talon.ai.Loops
         private set
@@ -181,7 +177,6 @@ class TalonApplication : Application() {
         ktorHttp = createAppHttpClient()
         sessionStore = io.nisfeb.talon.urbit.AndroidSessionStore(this)
         aiSettings = io.nisfeb.talon.ai.AndroidAiSettings(this)
-        dailyDigestSettings = io.nisfeb.talon.ai.AndroidDailyDigestSettings(this)
         // uiSettings is constructed below once buildShipScoped has set
         // up the per-ship `db` field — AndroidUiSettings derives its
         // railVisibility flow from the rail_item_prefs Room table.
@@ -267,18 +262,6 @@ class TalonApplication : Application() {
         // The worker itself no-ops when no ship is bound.
         CatchUpWorker.schedule(this)
 
-        dailyDigest = io.nisfeb.talon.ai.DailyDigest(
-            context = this,
-            sessionStore = sessionStore,
-            activeShipFlow = activeShipFlow,
-            getDb = { db },
-            aiSettings = aiSettings,
-            aiClient = aiClient,
-            settings = dailyDigestSettings,
-            http = http,
-            scope = appScope,
-            receiverClass = io.nisfeb.talon.DigestAlarmReceiver::class.java,
-        )
 
         // User loops — headless scheduled agent runs. Ship-scoped deps
         // resolved lazily (getDb/getRepo/getEmbedder) like dailyDigest, so
@@ -339,23 +322,10 @@ class TalonApplication : Application() {
             }
         }
 
-        dailyDigestSettings.onChange = { evt, transitionedOffSync ->
-            appScope.launch {
-                runCatching {
-                    when {
-                        transitionedOffSync -> settingsSync.clearDailyDigestOnShip()
-                        else -> settingsSync.pushDailyDigest(dailyDigestSettings.state.value)
-                    }
-                }
-                // Re-arm on toggle / time change.
-                runCatching { dailyDigest.scheduleNext() }
-            }
-        }
 
         // Arm the alarm if the user has enabled it (and re-arm on every
         // app start — belt-and-suspenders against the receiver being killed
         // before it finished re-arming yesterday).
-        runCatching { dailyDigest.scheduleNext() }
         // Same for loops: re-arm the earliest due loop on every start.
         runCatching { loops.reschedule() }
     }
@@ -392,13 +362,6 @@ class TalonApplication : Application() {
         settingsSync = io.nisfeb.talon.urbit.SettingsSyncImpl(
             db = db,
             aiSettings = aiSettings,
-            dailyDigestSettings = dailyDigestSettings,
-            rearmDailyDigest = {
-                // `dailyDigest` is lateinit and built later in onCreate; this
-                // lambda only fires from inbound %settings events long after
-                // initialization, so the runtime guard is sufficient.
-                runCatching { dailyDigest.scheduleNext() }
-            },
             rearmLoops = {
                 // A loop synced in from another device may change the
                 // next-fire time; re-arm the single loop alarm. `loops` is

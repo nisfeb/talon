@@ -18,7 +18,7 @@ import java.util.concurrent.TimeUnit
 
 /**
  * Android facade for user Loops — scheduling + headless execution,
- * modeled on [DailyDigest]. An always-on (process-lifetime) singleton;
+ * An always-on (process-lifetime) singleton;
  * the ship-scoped db/repo/embedder are resolved lazily through the get*
  * lambdas so a ship switch (which rebuilds them) is picked up on the next
  * run rather than captured stale.
@@ -26,7 +26,7 @@ import java.util.concurrent.TimeUnit
  * One AlarmManager wake-up is armed at the earliest next-fire across all
  * enabled loops; on fire the receiver calls [runDueNow], which runs every
  * loop that's due and re-arms. Inexact (setAndAllowWhileIdle) like the
- * digest — loops are deferrable, which avoids the SCHEDULE_EXACT_ALARM
+ * Loops are deferrable, which avoids the SCHEDULE_EXACT_ALARM
  * permission.
  *
  * Android-only: no desktop analog — depends on AlarmManager / BootReceiver

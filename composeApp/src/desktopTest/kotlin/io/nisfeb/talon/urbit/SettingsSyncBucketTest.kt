@@ -4,7 +4,6 @@ import androidx.room.Room
 import androidx.sqlite.driver.bundled.BundledSQLiteDriver
 import io.nisfeb.talon.ai.AiSettings
 import io.nisfeb.talon.ai.AiSettingsRepository
-import io.nisfeb.talon.ai.DailyDigestSettings
 import io.nisfeb.talon.data.AppDatabase
 import io.nisfeb.talon.data.WatchwordChatExcludeEntity
 import io.nisfeb.talon.data.WatchwordEntity
@@ -59,7 +58,6 @@ class SettingsSyncBucketTest {
         sync = SettingsSyncImpl(
             db = db,
             aiSettings = FakeAiSettingsRepository(),
-            dailyDigestSettings = FakeDailyDigestSettings(),
         )
     }
 
@@ -210,7 +208,6 @@ class SettingsSyncBucketTest {
 // ──────────────────────────────────────────────────────────────────
 // Minimal in-memory test doubles. SettingsSyncImpl reads aiSettings
 // state during AI-bucket apply (gated by syncEnabled) and calls
-// applyRemote on dailyDigestSettings during the daily-digest bucket
 // path; the watchwords paths under test don't touch either, but the
 // constructor still requires non-null values.
 // ──────────────────────────────────────────────────────────────────
@@ -254,20 +251,3 @@ private class FakeAiSettingsRepository : AiSettingsRepository {
     }
 }
 
-private class FakeDailyDigestSettings : DailyDigestSettings {
-    private val _state = MutableStateFlow(DailyDigestSettings.State())
-    override val state: StateFlow<DailyDigestSettings.State> = _state.asStateFlow()
-    override var onChange: ((DailyDigestSettings.Change, Boolean) -> Unit)? = null
-    override fun setEnabled(enabled: Boolean) {
-        _state.value = _state.value.copy(enabled = enabled)
-    }
-    override fun setTime(hourOfDay: Int, minuteOfDay: Int) {
-        _state.value = _state.value.copy(
-            hourOfDay = hourOfDay, minuteOfDay = minuteOfDay,
-        )
-    }
-    override fun applyRemote(enabled: Boolean, hourOfDay: Int, minuteOfDay: Int) {
-        _state.value = DailyDigestSettings.State(enabled, hourOfDay, minuteOfDay)
-    }
-    override fun emitSyncToggledOff() {}
-}

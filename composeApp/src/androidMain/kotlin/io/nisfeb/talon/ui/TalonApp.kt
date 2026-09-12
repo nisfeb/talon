@@ -77,7 +77,6 @@ import io.nisfeb.talon.ui.screens.NotesChannelScreen
 import io.nisfeb.talon.ui.screens.NotebookListScreen
 import io.nisfeb.talon.ui.screens.NotebookPostScreen
 import io.nisfeb.talon.ui.screens.BookmarksScreen
-import io.nisfeb.talon.ui.screens.DailyDigestScreen
 import io.nisfeb.talon.ui.screens.GroupInfoScreen
 import io.nisfeb.talon.ui.screens.MediaListScreen
 import io.nisfeb.talon.ui.screens.StatusFeedScreen
@@ -132,12 +131,6 @@ fun TalonApp(
      *  [initialThreadAnchor] rather than just the chat. */
     initialOpenThread: String? = null,
     initialThreadAnchor: String? = null,
-    /** Set when a Daily Digest notification's tap-intent points at
-     *  the brief — TalonApp opens DailyDigestScreen on first
-     *  composition. The value is the ship the digest belongs to;
-     *  unused for routing today (the screen reads the active ship's
-     *  digest itself) but stashed for future per-ship routing. */
-    initialOpenDigest: String? = null,
     /** A tapped mail notification: open Mail on arrival. */
     initialOpenMail: Boolean = false,
     pendingShare: ShareIntent? = null,
@@ -147,7 +140,7 @@ fun TalonApp(
     pendingShareTarget: String? = null,
     onShareConsumed: () -> Unit = {},
     /** Called once TalonApp has consumed an `initialOpen*` /
-     *  `initialScroll*` / `initialThread*` / `initialOpenDigest`
+     *  `initialScroll*` / `initialThread*`
      *  param. MainActivity uses this to clear its source mutable
      *  state so re-tapping the same notification re-routes —
      *  without it the param value never changes on the second tap
@@ -539,10 +532,7 @@ fun TalonApp(
     // onOpenAssistant below); collected here so a toggle/key change
     // recomposes the gate live.
     val aiState by app.aiSettings.state.collectAsState()
-    // Daily Digest screen — initialOpenDigest non-null means we
-    // arrived from a notification tap, so route straight there.
     var homeOpen by remember { mutableStateOf(false) }
-    var digestOpen by remember { mutableStateOf(initialOpenDigest != null) }
     var settingsOpen by remember { mutableStateOf(false) }
     var assistantOpen by remember { mutableStateOf(false) }
     var loopsOpen by remember { mutableStateOf(false) }
@@ -589,7 +579,6 @@ fun TalonApp(
         watchwordsOpen = false
         contactsOpen = false
         homeOpen = false
-        digestOpen = false
         settingsOpen = false
         sidebarSettingsOpen = false
         adminListOpen = false
@@ -609,7 +598,6 @@ fun TalonApp(
         initialScrollMessageId,
         initialOpenThread,
         initialThreadAnchor,
-        initialOpenDigest,
     ) {
         var consumed = false
         // A chat-targeted deep-link must clear any modal pane that
@@ -642,10 +630,6 @@ fun TalonApp(
         }
         if (initialThreadAnchor != null) {
             pendingThreadAnchor = initialThreadAnchor
-            consumed = true
-        }
-        if (initialOpenDigest != null) {
-            digestOpen = true
             consumed = true
         }
         if (consumed) onDeepLinkConsumed()
@@ -1289,7 +1273,6 @@ fun TalonApp(
         BackHandler(enabled = contactsOpen) { contactsOpen = false }
         BackHandler(enabled = watchwordsOpen) { watchwordsOpen = false }
         BackHandler(enabled = homeOpen) { homeOpen = false }
-        BackHandler(enabled = digestOpen) { digestOpen = false }
         BackHandler(enabled = settingsOpen) { settingsOpen = false }
         BackHandler(enabled = assistantOpen) { assistantOpen = false }
         BackHandler(enabled = loopsOpen) { loopsOpen = false }
@@ -1372,7 +1355,6 @@ fun TalonApp(
             groupInfoOpenFor != null -> "GroupInfo"
             watchwordsOpen -> "Watchwords"
             homeOpen -> "Home"
-            digestOpen -> "Today's brief"
             adminGroupFlag != null -> "GroupAdmin($adminGroupFlag)"
             adminListOpen -> "AdminList"
             invitesOpen -> "Invites"
@@ -1749,18 +1731,6 @@ fun TalonApp(
                 )
             }
 
-            digestOpen -> DailyDigestScreen(
-                db = app.db,
-                activeShip = loggedInShip,
-                onBack = { digestOpen = false },
-                onOpenMessage = { whom, postId ->
-                    openWhom = whom
-                    pendingScrollMessageId = postId
-                    digestOpen = false
-                },
-                onGenerateNow = { app.dailyDigest.generateAndNotifyAsync("user_test") },
-            )
-
             adminGroupFlag != null -> GroupAdminScreen(
                 db = app.db,
                 repo = app.repo,
@@ -1804,8 +1774,6 @@ fun TalonApp(
                 SidebarSettingsScreen(
                     repo = app.repo,
                     uiSettings = app.uiSettings,
-                    dailyDigestEnabled = app.dailyDigestSettings.state
-                        .collectAsState().value.enabled,
                     onBack = { sidebarSettingsOpen = false },
                     modifier = mod,
                 )
@@ -1892,8 +1860,6 @@ fun TalonApp(
                         activeShipUrl = activeShipUrl,
                     ),
                     onBack = { settingsOpen = false },
-                    dailyDigestSettings = app.dailyDigestSettings,
-                    onTestDigest = { app.dailyDigest.generateAndNotifyAsync("user_test") },
                     onOpenSidebarSettings = { sidebarSettingsOpen = true },
                     onOpenShareLoginQr = { shareLoginQrOpen = true },
                     onOpenLoops = { loopsOpen = true },
@@ -2535,8 +2501,6 @@ fun TalonApp(
                 onOpenContacts = { contactsOpen = true },
                 onOpenWatchwords = { watchwordsOpen = true },
                 onOpenHome = { homeOpen = true },
-                onOpenDigest = { digestOpen = true },
-                digestEnabled = app.dailyDigestSettings.state.collectAsState().value.enabled,
                 onOpenAdministration = { adminListOpen = true },
                 onOpenInvites = { invitesOpen = true },
                 onOpenSettings = { settingsOpen = true },

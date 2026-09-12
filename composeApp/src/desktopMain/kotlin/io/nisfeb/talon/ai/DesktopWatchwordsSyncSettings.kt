@@ -13,7 +13,7 @@ import java.nio.file.StandardCopyOption
 
 /**
  * JSON-file-backed watchwords-sync toggle for desktop. Stored next
- * to daily_digest.json in the platform user-data dir. Atomic writes
+ * to a JSON file in the platform user-data dir. Atomic writes
  * (temp + ATOMIC_MOVE) so a JVM crash mid-write can't truncate the
  * file to an unparseable state.
  *

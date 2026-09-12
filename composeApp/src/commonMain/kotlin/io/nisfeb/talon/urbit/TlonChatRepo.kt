@@ -6,7 +6,7 @@
 //     Log.i because the facade omits `d` (see Log.kt KDoc).
 //
 //  2. The constructor takes (db, settingsSync: SettingsSync? = null)
-//     instead of (db, aiSettings, dailyDigestSettings, rearmDailyDigest).
+//     instead of (db, aiSettings, ...).
 //     The production class constructs SettingsSync internally from those
 //     three Android-only deps; commonMain instead receives an already-
 //     constructed SettingsSync (interface, not class) -- or null on

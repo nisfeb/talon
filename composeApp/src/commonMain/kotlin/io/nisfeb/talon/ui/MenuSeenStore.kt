@@ -7,17 +7,13 @@ import kotlinx.coroutines.flow.asStateFlow
 /**
  * Snapshot of "the user has seen X up to here" for the More-menu's
  * freshness-dot logic. Persisted per-ship by the platform leaf so the
- * dots don't flicker back to "fresh" on every relaunch — leaving the
- * brief pip on 24/7 helps no one.
+ * dots don't flicker back to "fresh" on every relaunch.
  *
  * Fields are deliberately simple values (String / Long) rather than
  * sets, so the persistence layer stays a flat JSON-ish key-value
  * shape and a future migration is free.
  */
 data class MenuSeenState(
-    /** dateLocal ("yyyy-MM-dd") of the digest the user has acknowledged.
-     *  Null until they open Today's brief at least once. */
-    val lastSeenDigestDate: String? = null,
     /** unix-ms of the last time the user opened Statuses. Status-feed
      *  rows newer than this surface a fresh-content dot. */
     val lastSeenStatusesMs: Long = 0L,
@@ -36,7 +32,6 @@ data class MenuSeenState(
  */
 interface MenuSeenStore {
     val state: StateFlow<MenuSeenState>
-    fun markDigestSeen(dateLocal: String?)
     fun markStatusesSeenAt(ms: Long)
     fun markInvitesSeen(snapshot: String)
 }
@@ -48,9 +43,7 @@ interface MenuSeenStore {
 class InMemoryMenuSeenStore : MenuSeenStore {
     private val _state = MutableStateFlow(MenuSeenState())
     override val state: StateFlow<MenuSeenState> = _state.asStateFlow()
-    override fun markDigestSeen(dateLocal: String?) {
-        _state.value = _state.value.copy(lastSeenDigestDate = dateLocal)
-    }
+
     override fun markStatusesSeenAt(ms: Long) {
         _state.value = _state.value.copy(lastSeenStatusesMs = ms)
     }

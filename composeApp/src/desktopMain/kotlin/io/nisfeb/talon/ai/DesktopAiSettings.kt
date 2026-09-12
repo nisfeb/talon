@@ -144,7 +144,6 @@ class DesktopAiSettings : AiSettingsRepository {
         val cur = _state.value
         val cfg = when (feature) {
             AiSettings.Feature.CatchMeUp -> cur.copy(catchMeUpEnabled = enabled)
-            AiSettings.Feature.DailyDigest -> cur.copy(dailyDigestEnabled = enabled)
             AiSettings.Feature.SmartFeatures -> cur.copy(smartFeaturesEnabled = enabled)
             // Unified assistant — keep the legacy askUrbit flag mirrored.
             AiSettings.Feature.Agent ->
@@ -207,7 +206,6 @@ class DesktopAiSettings : AiSettingsRepository {
         // a fresh install starts with the full feature set enabled.
         // Capability flags hide unsupported features per-platform.
         catchMeUpEnabled = true,
-        dailyDigestEnabled = true,
         smartFeaturesEnabled = true,
         askUrbitEnabled = false,
         agentEnabled = false,

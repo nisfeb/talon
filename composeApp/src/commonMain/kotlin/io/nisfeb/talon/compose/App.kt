@@ -71,7 +71,6 @@ import io.nisfeb.talon.ui.screens.DmListScreen
 import io.nisfeb.talon.ui.screens.ActivityFeedScreen
 import io.nisfeb.talon.ui.screens.BookmarksScreen
 import io.nisfeb.talon.ui.screens.StatusFeedList
-import io.nisfeb.talon.ui.screens.DailyDigestScreen
 import io.nisfeb.talon.ui.screens.GalleryComposeScreen
 import io.nisfeb.talon.ui.screens.GalleryGridScreen
 import io.nisfeb.talon.ui.screens.GalleryPostScreen
@@ -142,7 +141,6 @@ fun App(
      *  digest impl wired (Android composeApp today). When non-null,
      *  DmListScreen reveals the "Today's brief" drawer entry only
      *  if the user enabled the alarm. */
-    dailyDigestSettings: io.nisfeb.talon.ai.DailyDigestSettings? = null,
     /** Source of truth for the "mirror watchwords to %settings" toggle.
      *  Defaults to in-memory; desktop passes a JSON-backed impl so the
      *  flag survives restart. */
@@ -346,7 +344,6 @@ fun App(
     var showNewDm by remember { mutableStateOf(false) }
     var showContacts by remember { mutableStateOf(false) }
     var showWatchwords by remember { mutableStateOf(false) }
-    var showDailyDigest by remember { mutableStateOf(false) }
     var showGroupAdminList by remember { mutableStateOf(false) }
     var openGroupAdminFlag by remember { mutableStateOf<String?>(null) }
     var openGroupHomeFlag by remember { mutableStateOf<String?>(null) }
@@ -387,7 +384,6 @@ fun App(
         showNewDm = false
         showContacts = false
         showWatchwords = false
-        showDailyDigest = false
         showGroupAdminList = false
         openGroupAdminFlag = null
         openGroupHomeFlag = null
@@ -514,7 +510,6 @@ fun App(
     PlatformBackHandler(enabled = showNewDm) { showNewDm = false }
     PlatformBackHandler(enabled = showWatchwords) { showWatchwords = false }
     PlatformBackHandler(enabled = showContacts) { showContacts = false }
-    PlatformBackHandler(enabled = showDailyDigest) { showDailyDigest = false }
     PlatformBackHandler(
         enabled = openGroupAdminFlag != null,
     ) { openGroupAdminFlag = null }
@@ -1060,27 +1055,6 @@ fun App(
                 aiSettings.onStateChange = { _, _ ->
                     scope.launch {
                         runCatching { sink.pushAiSettings() }
-                    }
-                }
-            }
-
-            // Relay daily-digest schedule changes the same way. Was
-            // missing on desktop — TalonApplication wires
-            // dailyDigestSettings.onChange for Android, but desktop
-            // had no equivalent, so a desktop user changing the
-            // schedule would never push to the ship. The user
-            // reported "settings not syncing to new installs" and
-            // this was one of the gaps.
-            LaunchedEffect(settingsSync, dailyDigestSettings) {
-                val sink = settingsSync ?: return@LaunchedEffect
-                val ds = dailyDigestSettings ?: return@LaunchedEffect
-                val scope = this
-                ds.onChange = { _, transitionedOffSync ->
-                    scope.launch {
-                        runCatching {
-                            if (transitionedOffSync) sink.clearDailyDigestOnShip()
-                            else sink.pushDailyDigest(ds.state.value)
-                        }
                     }
                 }
             }
@@ -1754,15 +1728,9 @@ fun App(
                     // breadcrumb pop instead of a full unwind to the
                     // chat list.
                     showSidebarSettings -> {
-                        val dailyDigestEnabled = dailyDigestSettings
-                            ?.state
-                            ?.collectAsState()
-                            ?.value
-                            ?.enabled == true
                         SidebarSettingsScreen(
                             repo = repo,
                             uiSettings = uiSettings,
-                            dailyDigestEnabled = dailyDigestEnabled,
                             onBack = { showSidebarSettings = false },
                         )
                     }
@@ -1819,7 +1787,6 @@ fun App(
                                 showSettings = false
                                 settingsStartOnAccount = false
                             },
-                            dailyDigestSettings = dailyDigestSettings,
                             // onTestDigest stays null on desktop — Android
                             // wires it to dailyDigest.generateAndNotifyAsync
                             // when the production MainActivity migrates here.
@@ -1962,20 +1929,6 @@ fun App(
                             openChatFocusMessageId = postId
                             openChat = other
                         },
-                    )
-                    showDailyDigest -> DailyDigestScreen(
-                        db = db,
-                        activeShip = ship,
-                        onBack = { showDailyDigest = false },
-                        onOpenMessage = { whomTarget, postId ->
-                            showDailyDigest = false
-                            openChatFocusMessageId = postId
-                            openChat = whomTarget
-                        },
-                        // Desktop has no AlarmManager-equivalent
-                        // wired; the Android-side Generate-Now flow
-                        // doesn't fire here. No-op until Stage F.
-                        onGenerateNow = {},
                     )
                     openGroupAdminFlag != null -> GroupAdminScreen(
                         db = db,
@@ -2540,11 +2493,6 @@ fun App(
                         val activeRailTab by uiSettings.activeRailTab.collectAsState()
                         val railVisibility by uiSettings.railVisibility.collectAsState()
                         val railItemOrder by uiSettings.railItemOrder.collectAsState()
-                        val dailyDigestEnabled = dailyDigestSettings
-                            ?.state
-                            ?.collectAsState()
-                            ?.value
-                            ?.enabled == true
                         // Opt-in assistant: only surface its rail / kebab entry
                         // once it's supported, turned on, and has a key — the
                         // same gate the old star icon used.
@@ -2552,7 +2500,7 @@ fun App(
                             aiState.assistantOn() &&
                             aiState.hasKey()
                         val enabledItems: List<RailItem> = remember(
-                            railVisibility, railItemOrder, dailyDigestEnabled, assistantEnabled,
+                            railVisibility, railItemOrder, assistantEnabled,
                         ) {
                             railItemOrder.filter { item ->
                                 // Map.isVisible enforces the Chats always-on invariant
@@ -2593,9 +2541,6 @@ fun App(
                         val railSyncedStatusesSeenMs by railStatusesSeenFlow.collectAsState()
                         val railPendingInvites = repo.invitesFlow.collectAsState().value
                             ?: emptyList()
-                        val railLatestDigest by remember(db, ship) {
-                            db.dailyDigests().streamLatestForShip(ship ?: "")
-                        }.collectAsState(initial = null)
                         val railStatusFeed by remember(db) {
                             db.contacts().streamStatusFeed()
                         }.collectAsState(initial = emptyList())
@@ -2605,7 +2550,7 @@ fun App(
                         val railEffectiveStatusesSeenMs =
                             maxOf(menuSeenState.lastSeenStatusesMs, railSyncedStatusesSeenMs)
                         val menuBadges = remember(
-                            railLatestDigest, railStatusFeed, railPendingInvites,
+                            railStatusFeed, railPendingInvites,
                             railInvitesSnapshot, menuSeenState, railEffectiveStatusesSeenMs, ship,
                         ) {
                             MenuBadges(
@@ -2614,9 +2559,6 @@ fun App(
                                         !c.status.isNullOrBlank() &&
                                         c.ship != ship
                                 },
-                                digestFresh = railLatestDigest?.dateLocal?.let {
-                                    it != menuSeenState.lastSeenDigestDate
-                                } == true,
                                 invitesPending = railPendingInvites.isNotEmpty() &&
                                     railInvitesSnapshot != menuSeenState.lastSeenInvitesSnapshot,
                             )
@@ -2643,7 +2585,6 @@ fun App(
                             showSettings = false
                             showLoops = false
                             showContacts = false
-                            showDailyDigest = false
                             showSearch = false
                             showNewDm = false
                             // Clear the rail badge for items that show
@@ -2758,8 +2699,6 @@ fun App(
                                         onOpenActivity = onOpenActivity,
                                         onOpenContacts = { showContacts = true },
                                         onOpenWatchwords = { showWatchwords = true },
-                                        onOpenDigest = { showDailyDigest = true },
-                                        digestEnabled = dailyDigestEnabled,
                                         onOpenAdministration = { showGroupAdminList = true },
                                         onOpenSettings = { showSettings = true },
                                         activeShip = ship,

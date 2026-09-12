@@ -128,7 +128,6 @@ fun SettingsScreen(
      *  the JSON-prefs-backed impl that drives AlarmManager; desktop
      *  passes null until a desktop scheduler lands and the section
      *  hides entirely. */
-    dailyDigestSettings: io.nisfeb.talon.ai.DailyDigestSettings? = null,
     /** Optional Android-only "Test now" handler that fires the digest
      *  immediately. When null the button isn't rendered. */
     onTestDigest: (() -> Unit)? = null,
@@ -224,7 +223,7 @@ fun SettingsScreen(
             add(SettingsTab.Home)
             add(SettingsTab.Chats)
             if (notificationHealth != null || relayConfig != null ||
-                dailyDigestSettings != null) {
+                relayConfig != null) {
                 add(SettingsTab.Notifications)
             }
             add(SettingsTab.Ai)
@@ -1035,19 +1034,6 @@ fun SettingsScreen(
 
             }
             if (safeTab == SettingsTab.Notifications) {
-            // Daily digest config — only when the platform supplied
-            // a concrete settings impl (Android does today; desktop
-            // gets null until a scheduler lands).
-            if (dailyDigestSettings != null) {
-                Spacer(Modifier.height(16.dp))
-                HorizontalDivider()
-                Spacer(Modifier.height(8.dp))
-                DailyDigestSection(
-                    settings = dailyDigestSettings,
-                    onTestDigest = onTestDigest,
-                )
-            }
-
             }
             if (safeTab == SettingsTab.Calls) {
             // Who may ring this ship. The policy lives in %trunk, not
@@ -1264,110 +1250,7 @@ private fun AboutRow(label: String, value: String) {
 }
 
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
-@Composable
-private fun DailyDigestSection(
-    settings: io.nisfeb.talon.ai.DailyDigestSettings,
-    onTestDigest: (() -> Unit)?,
-) {
-    val ddState by settings.state.collectAsState()
-    var showTimePicker by remember { mutableStateOf(false) }
 
-    Text(
-        "Daily digest",
-        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
-    )
-    Text(
-        "A morning brief at your chosen time: unread, watchword hits, and @mentions. " +
-            "The AI summary toggle is in Cloud features above; this section just controls the alarm.",
-        style = MaterialTheme.typography.bodySmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-    )
-
-    Spacer(Modifier.height(8.dp))
-
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Column(Modifier.weight(1f)) {
-            Text("Enabled", style = MaterialTheme.typography.bodyLarge)
-            val sub = if (ddState.enabled) {
-                "Next: ${formatNextFire(ddState.hourOfDay, ddState.minuteOfDay)}"
-            } else "Off"
-            Text(
-                sub,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-        Switch(
-            checked = ddState.enabled,
-            onCheckedChange = { settings.setEnabled(it) },
-        )
-    }
-
-    if (ddState.enabled) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text("Fire time", Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
-            TextButton(onClick = { showTimePicker = true }) {
-                Text(
-                    "${ddState.hourOfDay.toString().padStart(2, '0')}:" +
-                        ddState.minuteOfDay.toString().padStart(2, '0'),
-                )
-            }
-        }
-
-        Spacer(Modifier.height(8.dp))
-
-        // "Test now" only when the platform supplies an immediate-
-        // fire path (Android wires DailyDigest.generateAndNotifyAsync;
-        // desktop has no equivalent yet).
-        if (onTestDigest != null) {
-            OutlinedButton(onClick = onTestDigest) { Text("Test now") }
-        }
-    }
-
-    if (showTimePicker) {
-        val state = androidx.compose.material3.rememberTimePickerState(
-            initialHour = ddState.hourOfDay,
-            initialMinute = ddState.minuteOfDay,
-            is24Hour = false,
-        )
-        androidx.compose.material3.AlertDialog(
-            onDismissRequest = { showTimePicker = false },
-            confirmButton = {
-                TextButton(onClick = {
-                    settings.setTime(state.hour, state.minute)
-                    showTimePicker = false
-                }) { Text("OK") }
-            },
-            dismissButton = {
-                TextButton(onClick = { showTimePicker = false }) { Text("Cancel") }
-            },
-            text = {
-                androidx.compose.material3.TimePicker(state = state)
-            },
-        )
-    }
-}
-
-/** Wallclock-friendly "Next: 7:30 AM" / "Tomorrow at 7:30 AM" string. */
-private fun formatNextFire(hourOfDay: Int, minuteOfDay: Int): String {
-    val zone = kotlinx.datetime.TimeZone.currentSystemDefault()
-    val now = kotlin.time.Clock.System.now()
-    // Reuse the digest scheduler's next-fire math so the label and the
-    // actual alarm never disagree.
-    val fireMs = io.nisfeb.talon.ai.DailyDigestSchedule
-        .nextFireMs(now, hourOfDay, minuteOfDay, zone)
-    val timeStr = io.nisfeb.talon.util.formatTime12(fireMs)
-    val today = now.toLocalDateTime(zone).date
-    val fireDate = kotlin.time.Instant.fromEpochMilliseconds(fireMs)
-        .toLocalDateTime(zone).date
-    return if (fireDate != today) "Tomorrow at $timeStr" else "Today at $timeStr"
-}
 
 /** Single source of truth for "is this feature toggle on?" — keeps the
  *  Settings UI's toggle state in lockstep with the gates wired across
@@ -1375,7 +1258,6 @@ private fun formatNextFire(hourOfDay: Int, minuteOfDay: Int): String {
 internal fun aiFeatureEnabled(state: AiSettings.Config, feature: AiSettings.Feature): Boolean =
     when (feature) {
         AiSettings.Feature.CatchMeUp -> state.catchMeUpEnabled
-        AiSettings.Feature.DailyDigest -> state.dailyDigestEnabled
         AiSettings.Feature.SmartFeatures -> state.smartFeaturesEnabled
         // Unified assistant: either legacy flag counts as enabled.
         AiSettings.Feature.Agent -> state.assistantOn()

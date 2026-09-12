@@ -34,7 +34,6 @@ object AiSettings {
         // the explicit value, so the new defaults only apply when the
         // SharedPreferences key is absent.
         val catchMeUpEnabled: Boolean = true,
-        val dailyDigestEnabled: Boolean = true,
         // One switch for the on-device embedder features: search-by-meaning,
         // topic clustering, and bookmark-similarity highlighting. They all
         // share the same on-device index, so they're enabled together.
@@ -131,12 +130,6 @@ object AiSettings {
             "feat_catch_me_up",
             "Catch me up",
             "When you open a chat with unread messages, offer a summary.",
-            requiresCloudKey = true,
-        ),
-        DailyDigest(
-            "feat_daily_digest",
-            "AI digest summary",
-            "Add an AI-written summary to the daily digest. The digest itself is enabled separately under \"Daily digest.\"",
             requiresCloudKey = true,
         ),
         // One toggle for the on-device embedder suite — search by meaning,
