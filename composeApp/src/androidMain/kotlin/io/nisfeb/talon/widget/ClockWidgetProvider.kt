@@ -140,17 +140,12 @@ class ClockWidgetProvider : AppWidgetProvider() {
         val place = settings.place ?: return null
         val fetched = withTimeoutOrNull(WEATHER_TIMEOUT_MS) {
             runCatching {
-                val http = HttpClient(io.nisfeb.talon.util.httpEngineFactory())
-                try {
-                    val resp = http.get(OpenMeteoWeather.requestUrl(place))
-                    if (!resp.status.isSuccess()) {
-                        Log.w(TAG, "forecast HTTP ${resp.status.value}")
-                        null
-                    } else {
-                        resp.bodyAsText()
-                    }
-                } finally {
-                    http.close()
+                val resp = http.get(OpenMeteoWeather.requestUrl(place))
+                if (!resp.status.isSuccess()) {
+                    Log.w(TAG, "forecast HTTP ${resp.status.value}")
+                    null
+                } else {
+                    resp.bodyAsText()
                 }
             }.onFailure { Log.w(TAG, "forecast failed: $it") }.getOrNull()
         }
@@ -235,6 +230,22 @@ class ClockWidgetProvider : AppWidgetProvider() {
     }
 
     companion object {
+        /**
+         * One client for the life of the process, and never closed.
+         *
+         * The platform engine factory hands Ktor a shared OkHttpClient
+         * so that every request in the app goes over one connection
+         * pool with one set of timeouts. Closing a Ktor client built
+         * on it shuts that pool's dispatcher down — for the whole
+         * process, not just for the widget — and every request the app
+         * makes afterwards fails with "executor rejected" until it is
+         * restarted. The widget updates twice an hour, so one client
+         * held open costs nothing and is the only safe shape.
+         */
+        private val http: HttpClient by lazy {
+            HttpClient(io.nisfeb.talon.util.httpEngineFactory())
+        }
+
         private const val WEATHER_TIMEOUT_MS = 8_000L
 
         /** What to draw at when the launcher will not say. */
