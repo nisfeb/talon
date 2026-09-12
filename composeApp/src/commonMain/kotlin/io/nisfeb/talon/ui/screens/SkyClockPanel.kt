@@ -293,7 +293,7 @@ fun SkyClockDial(
                 // a new moon keeps the sun's hours — so the night
                 // somebody looks for it is exactly the night there is
                 // none.
-                if (moonMinute != null && sky.moonElongationDeg != null && sky.moonUp) {
+                if (moonMinute != null && sky.moonElongationDeg != null && sky.moonVisible) {
                     drawMoon(
                         centre = centre,
                         angleDeg = moonAngle,

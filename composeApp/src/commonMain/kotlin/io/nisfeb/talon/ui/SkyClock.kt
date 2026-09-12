@@ -17,6 +17,13 @@ object SkyClock {
     const val MINUTES_IN_DAY = 24 * 60
 
     /**
+     * How far from the sun the moon has to be before the dial draws
+     * it, in degrees of elongation. Tuning knob: raise it to keep the
+     * two markers further apart, lower it to trust the sky more.
+     */
+    const val MOON_MIN_ELONGATION_DEG = 15.0
+
+    /**
      * Degrees clockwise from the top of the dial for a time of day.
      *
      * Noon is 0 and midnight is 180, so a time before noon sits on the
@@ -271,6 +278,31 @@ object SkyClock {
                     polar,
                     polarDay,
                 )
+            }
+
+        /**
+         * Whether the moon is worth drawing, which is not the same as
+         * being above the horizon.
+         *
+         * Around a new moon the moon rises and sets with the sun, so
+         * [moonUp] is perfectly true all day while there is nothing
+         * whatsoever to see: a sliver a fraction of a percent lit,
+         * a few degrees from the sun, lost in the glare. Drawing it
+         * put two markers on top of each other and claimed a moon
+         * that nobody could go outside and find.
+         *
+         * Below [MOON_MIN_ELONGATION_DEG] of the sun, no moon. The
+         * eye's own limit is lower -- a crescent under about seven
+         * degrees is never visible at all -- but a dial has a second
+         * problem the sky does not: at this separation the two
+         * markers are less than an hour apart on a twenty-four hour
+         * ring and simply collide.
+         */
+        val moonVisible: Boolean
+            get() {
+                val e = moonElongationDeg ?: return false
+                val fromSun = minOf(e, 360.0 - e)
+                return moonUp && fromSun >= MOON_MIN_ELONGATION_DEG
             }
 
         /** True when the high and low are far enough apart in time to
