@@ -93,10 +93,21 @@ class SettingsSyncImpl(
         const val BUCKET_WATCHWORD_EXCLUDES = "watchword-excludes"
         const val BUCKET_STATUS_SEEN = "status-seen"
         // Cross-device UI preferences that don't warrant a Room table.
-        // One entry per pref; today just the mnemonym-naming toggle.
+        // One entry per pref.
         const val BUCKET_UI_PREFS = "ui-prefs"
+        // Retired: it gated word names for every ship, which is no
+        // longer a question anyone is asked. Still named here so a
+        // peer that has not upgraded cannot have its stale value
+        // applied to something it never meant.
         const val ENTRY_MNEMONYM_NAMES = "mnemonym-names"
+        const val ENTRY_NON_COMET_NAMES = "non-comet-names"
         const val ENTRY_ALWAYS_PATP = "always-patp"
+
+        /** Entries this file applies by name; everything else in the
+         *  bucket goes to the generic [applyUiPref]. */
+        val HANDLED_UI_PREFS = setOf(
+            ENTRY_MNEMONYM_NAMES, ENTRY_ALWAYS_PATP, ENTRY_NON_COMET_NAMES,
+        )
         // User-shaped UI preferences. Screen-shaped ones (density,
         // fontScale, chatPaneListFraction, activeRailTab) are absent on
         // purpose — see SettingsSync.attachUiSettings.
@@ -170,6 +181,14 @@ class SettingsSyncImpl(
         )
     }
 
+    override suspend fun pushNonCometNames(enabled: Boolean) {
+        pokePutEntry(
+            BUCKET_UI_PREFS,
+            ENTRY_NON_COMET_NAMES,
+            buildJsonObject { put("enabled", enabled) },
+        )
+    }
+
     override suspend fun pushAlwaysPatp(enabled: Boolean) {
         pokePutEntry(
             BUCKET_UI_PREFS,
@@ -192,7 +211,7 @@ class SettingsSyncImpl(
         pendingUiPrefs?.let { parked ->
             pendingUiPrefs = null
             parked.forEach { (key, v) ->
-                if (key != ENTRY_MNEMONYM_NAMES && key != ENTRY_ALWAYS_PATP) {
+                if (key !in HANDLED_UI_PREFS) {
                     applyUiPref(key, unwrap(v))
                 }
             }
@@ -1341,11 +1360,16 @@ class SettingsSyncImpl(
                         io.nisfeb.talon.ui.ShipNames.setAlwaysPatp(it)
                     }
                 }
+                entries?.get(ENTRY_NON_COMET_NAMES)?.let { v ->
+                    (unwrap(v) as? JsonObject)?.get("enabled").asBool()?.let {
+                        io.nisfeb.talon.ui.AzimuthNames.setEnabled(it)
+                    }
+                }
                 if (ui == null) {
                     pendingUiPrefs = entries
                 } else {
                     entries?.forEach { (key, v) ->
-                        if (key != ENTRY_MNEMONYM_NAMES && key != ENTRY_ALWAYS_PATP) {
+                        if (key !in HANDLED_UI_PREFS) {
                             applyUiPref(key, unwrap(v))
                         }
                     }
@@ -1507,6 +1531,11 @@ class SettingsSyncImpl(
                     ENTRY_ALWAYS_PATP ->
                         (unwrapped as? JsonObject)?.get("enabled").asBool()
                             ?.let { io.nisfeb.talon.ui.ShipNames.setAlwaysPatp(it) }
+                    ENTRY_NON_COMET_NAMES ->
+                        (unwrapped as? JsonObject)?.get("enabled").asBool()
+                            ?.let { io.nisfeb.talon.ui.AzimuthNames.setEnabled(it) }
+                    // Retired; a peer still sending it is ignored.
+                    ENTRY_MNEMONYM_NAMES -> Unit
                     else -> applyUiPref(entry, unwrapped)
                 }
             }
@@ -1534,6 +1563,7 @@ class SettingsSyncImpl(
                 // Entry deleted on the ship → back to that entry's default.
                 when (entry) {
                     ENTRY_ALWAYS_PATP -> io.nisfeb.talon.ui.ShipNames.setAlwaysPatp(false)
+                    ENTRY_NON_COMET_NAMES -> io.nisfeb.talon.ui.AzimuthNames.setEnabled(true)
                 }
             }
             BUCKET_GROUP_ORDERS -> db.groupOrders().remove(entry)

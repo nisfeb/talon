@@ -26,6 +26,12 @@ data class ContactMap(
     val channelGroups: List<ChannelGroupEntity> = emptyList(),
     /** Ignore nicknames and mnemonyms; show the raw @p everywhere. */
     val alwaysPatp: Boolean = false,
+    /** Whether a planet or a moon may show a looked-up word name. A
+     *  comet's own name is never gated on this. */
+    val nonCometNames: Boolean = true,
+    /** Bumped as looked-up names arrive, so a map built before an
+     *  answer landed is not equal to one built after. */
+    val namesGeneration: Int = 0,
 ) {
     private val byShip: Map<String, ContactEntity> =
         contacts.associateBy(ContactEntity::ship)
@@ -50,6 +56,8 @@ data class ContactMap(
      */
     val namesVersion: Int by lazy {
         var h = if (alwaysPatp) 1 else 0
+        h = h * 31 + if (nonCometNames) 1 else 0
+        h = h * 31 + namesGeneration
         for (c in contacts) {
             h = h * 31 + c.ship.hashCode()
             h = h * 31 + (c.nickname?.hashCode() ?: 0)
@@ -72,7 +80,10 @@ data class ContactMap(
             ship
         } else {
             nickname(ship)
+                // A comet spells its own fingerprint, so it needs
+                // nothing fetched and nobody's permission.
                 ?: Mnemonym.display(ship)
+                ?: (if (nonCometNames) AzimuthNames.nameFor(ship) else null)
                 ?: ship
         }
     fun contact(ship: String): ContactEntity? = byShip[ship]
@@ -152,13 +163,24 @@ fun contactMapFlow(
     // each have to thread a UiSettings reference through; flipping
     // it re-emits every ContactMap and re-renders names.
     alwaysPatpFlow: Flow<Boolean> = ShipNames.alwaysPatp,
+    nonCometNamesFlow: Flow<Boolean> = AzimuthNames.enabled,
+    /** Ticks as looked-up names arrive, so a row drawn before the
+     *  answer landed is redrawn once it has. */
+    namesGenerationFlow: Flow<Int> = AzimuthNames.generation,
 ): Flow<ContactMap> = combine(
     contactsFlow.distinctUntilChanged(::sameContactDisplay),
     clubsFlow.distinctUntilChanged(),
     groupsFlow.distinctUntilChanged(),
     channelGroupsFlow.distinctUntilChanged(),
-    alwaysPatpFlow.distinctUntilChanged(),
-) { c, cl, g, cg, patp -> ContactMap(c, cl, g, cg, patp) }
+    // The three naming inputs ride one slot: `combine` only types five.
+    combine(
+        alwaysPatpFlow.distinctUntilChanged(),
+        nonCometNamesFlow.distinctUntilChanged(),
+        namesGenerationFlow.distinctUntilChanged(),
+    ) { patp, nonComet, gen -> Triple(patp, nonComet, gen) },
+) { c, cl, g, cg, naming ->
+    ContactMap(c, cl, g, cg, naming.first, naming.second, naming.third)
+}
     .flowOn(Dispatchers.Default)
     // Conflate so cascading bootstrap emissions (e.g. all four DAOs
     // streaming initial values within a frame of each other) collapse

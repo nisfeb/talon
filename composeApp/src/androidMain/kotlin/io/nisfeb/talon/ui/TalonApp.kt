@@ -1513,6 +1513,16 @@ fun TalonApp(
         val homePlace = remember(homePlaceRaw) {
             io.nisfeb.talon.ui.HomePlaceCodec.decode(homePlaceRaw)
         }
+        // Word names for planets and moons: see the matching block in
+        // App.kt. One call per host, not one per ContactMap.
+        LaunchedEffect(app.session, app.db) {
+            val url = app.session.baseUrl
+            if (url.isNullOrBlank()) return@LaunchedEffect
+            io.nisfeb.talon.ui.AzimuthNames.keepWarm(
+                app.db.contacts().stream(),
+                io.nisfeb.talon.ui.EyreAzimuthRpc(app.session.http, url),
+            )
+        }
         val homeStatuses by remember(app.db) {
             app.db.contacts().streamStatusFeed()
         }.collectAsState(initial = emptyList())
@@ -1890,6 +1900,11 @@ fun TalonApp(
                     onAlwaysPatpChanged = { on ->
                         appScope.launch {
                             runCatching { app.repo.settingsSync?.pushAlwaysPatp(on) }
+                        }
+                    },
+                    onNonCometNamesChanged = { on ->
+                        appScope.launch {
+                            runCatching { app.repo.settingsSync?.pushNonCometNames(on) }
                         }
                     },
                     modifier = mod,

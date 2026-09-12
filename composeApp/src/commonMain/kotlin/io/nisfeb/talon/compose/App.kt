@@ -882,6 +882,20 @@ fun App(
         val mailRepo = remember(session) {
             io.nisfeb.talon.mail.MailRepo(session.http, loopScope)
         }
+
+        // Word names for planets and moons, fetched once per ship and
+        // kept. One call, here rather than at each of the places a
+        // ContactMap is built: those would each ask for the same ships
+        // and the two hosts would drift apart, which is how this file
+        // and TalonApp have parted company before.
+        LaunchedEffect(session, db) {
+            val url = session.baseUrl
+            if (url.isNullOrBlank()) return@LaunchedEffect
+            io.nisfeb.talon.ui.AzimuthNames.keepWarm(
+                db.contacts().stream(),
+                io.nisfeb.talon.ui.EyreAzimuthRpc(session.http, url),
+            )
+        }
         // Mail lives in the same desk as the link handler's app, so the
         // install is one thing offered from two places.
         val grubberyInstall: (suspend () -> Result<Unit>)? = remember(session) {
@@ -1837,6 +1851,11 @@ fun App(
                             onAlwaysPatpChanged = { on ->
                                 repo.pushScope.launch {
                                     runCatching { settingsSync?.pushAlwaysPatp(on) }
+                                }
+                            },
+                            onNonCometNamesChanged = { on ->
+                                repo.pushScope.launch {
+                                    runCatching { settingsSync?.pushNonCometNames(on) }
                                 }
                             },
                         )

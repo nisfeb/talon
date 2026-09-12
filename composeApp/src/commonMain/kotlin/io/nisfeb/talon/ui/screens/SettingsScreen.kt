@@ -147,6 +147,10 @@ fun SettingsScreen(
     /** Open on the Account tab, where the local ship and its dojo live. */
     startOnAccount: Boolean = false,
     onAlwaysPatpChanged: (Boolean) -> Unit = {},
+    /** Fired after the word-names toggle flips; hosts push the new
+     *  value to %settings so the choice follows the user. Local apply
+     *  and persist happen regardless. */
+    onNonCometNamesChanged: (Boolean) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val aiState by aiSettings.state.collectAsState()
@@ -349,6 +353,25 @@ fun SettingsScreen(
                     io.nisfeb.talon.ui.ShipNames.setAlwaysPatp(on)
                     onAlwaysPatpChanged(on)
                 },
+            )
+            val nonCometNames by io.nisfeb.talon.ui.AzimuthNames.enabled.collectAsState()
+            FeatureToggleRow(
+                label = "Word names for planets and moons",
+                description = if (alwaysPatp) {
+                    "Turned off while \"Always show ~ship names\" is on."
+                } else {
+                    "Comets always show word names -- their Urbit name " +
+                        "is their key. A planet's is not, so its words " +
+                        "have to be looked up from its keys, and only " +
+                        "on a ship that can do the lookup. Off shows " +
+                        "the raw ~ship for everything but comets."
+                },
+                enabled = nonCometNames && !alwaysPatp,
+                onChange = { on ->
+                    io.nisfeb.talon.ui.AzimuthNames.setEnabled(on)
+                    onNonCometNamesChanged(on)
+                },
+                switchEnabled = !alwaysPatp,
             )
             // ── Accent color ────────────────────────────────────────
             FeatureToggleRow(

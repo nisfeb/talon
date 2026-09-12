@@ -66,6 +66,7 @@ class FileUiSettings(
         val density: String = Density.Comfortable.name,
         val fontScale: Float = 1.0f,
         val alwaysPatp: Boolean = false,
+        val nonCometNames: Boolean = true,
         /** [io.nisfeb.talon.ui.theme.ThemeSettings] as JSON text. */
         val customThemes: String = "",
         val micNoiseSuppression: Boolean = true,
@@ -78,6 +79,8 @@ class FileUiSettings(
     init {
         ShipNames.alwaysPatp.value = initial.alwaysPatp
         ShipNames.persist = { persistCurrent() }
+        AzimuthNames.enabled.value = initial.nonCometNames
+        AzimuthNames.persist = { persistCurrent() }
     }
     private val _hideComposerButtons = MutableStateFlow(initial.hideComposerButtons)
     override val hideComposerButtons: StateFlow<Boolean> =
@@ -300,6 +303,7 @@ class FileUiSettings(
                 density = _density.value.name,
                 fontScale = _fontScale.value,
                 alwaysPatp = ShipNames.alwaysPatp.value,
+                nonCometNames = AzimuthNames.enabled.value,
                 customThemes = _themeSettings.value.toJson(),
                 micNoiseSuppression = _micProcessing.value.noiseSuppression,
                 micEchoCancellation = _micProcessing.value.echoCancellation,

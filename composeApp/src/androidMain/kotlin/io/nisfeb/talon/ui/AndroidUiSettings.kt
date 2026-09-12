@@ -57,6 +57,10 @@ class AndroidUiSettings(
         ShipNames.persist = { v ->
             prefs.edit().putBoolean(KEY_ALWAYS_PATP, v).apply()
         }
+        AzimuthNames.enabled.value = prefs.getBoolean(KEY_NON_COMET_NAMES, true)
+        AzimuthNames.persist = { v ->
+            prefs.edit().putBoolean(KEY_NON_COMET_NAMES, v).apply()
+        }
     }
 
     private val _hideComposerButtons = MutableStateFlow(
@@ -349,7 +353,8 @@ private const val KEY_MIC_AGC = "mic_auto_gain"
         private const val KEY_DENSITY = "density"
         private const val KEY_FONT_SCALE = "font_scale"
         private const val KEY_RAIL_ITEM_ORDER = "rail_item_order"
-        private const val KEY_ALWAYS_PATP = "always_patp"
+        private const val KEY_NON_COMET_NAMES = "non_comet_names"
+private const val KEY_ALWAYS_PATP = "always_patp"
     }
 }
 

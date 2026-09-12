@@ -45,8 +45,27 @@ object Mnemonym {
      *  the truncated comet @p people already read. Short nyms (a value
      *  with enough leading zeros to lose most of its words) are already
      *  that short and are left alone. */
-    fun display(ship: String): String? {
-        val nym = forShip(ship) ?: return null
+    fun display(ship: String): String? = abridge(forShip(ship) ?: return null)
+
+    /**
+     * Display form for a fingerprint that was fetched rather than read
+     * out of a name -- a planet's or a moon's, looked up from its
+     * Azimuth keys.
+     *
+     * [fingerprint] is an atom's bytes, least significant first, which
+     * is the order Urbit hands one over in. The encoder reads a value
+     * the other way round, most significant first, like the syllables
+     * of a @p. Getting this seam backwards produces a name that looks
+     * entirely real, so it is spelled out rather than left to a cast.
+     */
+    fun displayFingerprint(fingerprint: ByteArray): String? {
+        if (fingerprint.size != 16) return null
+        return abridge(encode(fingerprint.reversedArray(), tweaked = false))
+    }
+
+    /** The scheme's own abridgement: two words, however many there
+     *  were. A nym already that short is left alone. */
+    private fun abridge(nym: String): String {
         val words = nym.removePrefix("..").split('.')
         return if (words.size <= 2) nym else "..${words.first()}...${words.last()}"
     }
