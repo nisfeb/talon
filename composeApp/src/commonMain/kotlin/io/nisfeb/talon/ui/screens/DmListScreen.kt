@@ -746,22 +746,11 @@ fun DmListScreen(
             modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            // Full-color brand mark — keep as `Image` (Icon would tint
-            // every non-transparent pixel with the surface color and
-            // flatten the multi-color logo into a silhouette).
-            androidx.compose.foundation.Image(
-                painter = io.nisfeb.talon.ui.talonLogoPainter(),
-                contentDescription = "Switch ship",
-                modifier = Modifier
-                    .size(32.dp)
-                    .clickable { onOpenShipSwitcher() },
-            )
-            Text(
-                "Talon",
-                style = MaterialTheme.typography.titleLarge,
-                modifier = Modifier
-                    .padding(start = 8.dp, top = 8.dp, bottom = 8.dp),
-            )
+            // The hamburger takes the left, where the logo used to be.
+            // Nothing on desktop: the rail is already the way to every
+            // section, and the name of the app is not news to anybody
+            // running it.
+            io.nisfeb.talon.ui.NavIcon(onBack = null)
             if (allShips.size > 1 && activeShip != null) {
                 // Prefer nickname, but collapse to patp when more than
                 // one logged-in ship shares the same nickname so the
@@ -859,7 +848,10 @@ fun DmListScreen(
             val anyMenuBadge =
                 (hasFreshStatuses && RailItem.Statuses in kebabItems) ||
                 (hasPendingInvites && RailItem.Invites in kebabItems)
-            Box {
+            // Desktop only. A phone reaches every section through
+            // the drawer, and two ways to one set of sections is
+            // one way too many.
+            if (!io.nisfeb.talon.ui.isDrawerNavigation) Box {
                 IconButton(onClick = { menuOpen = true }) {
                     Box {
                         Icon(Icons.Filled.MoreVert, contentDescription = "More")
@@ -1010,6 +1002,18 @@ fun DmListScreen(
                     )
                 }
             }
+            // The brand mark on the right, where the ellipsis was, and
+            // it is what opens the ship picker. Kept as an Image: an
+            // Icon would tint every non-transparent pixel and flatten a
+            // multi-colour logo into a silhouette.
+            androidx.compose.foundation.Image(
+                painter = io.nisfeb.talon.ui.talonLogoPainter(),
+                contentDescription = "Switch ship",
+                modifier = Modifier
+                    .padding(end = 4.dp)
+                    .size(32.dp)
+                    .clickable { onOpenShipSwitcher() },
+            )
         }
         HorizontalDivider()
         batteryBanner?.invoke()
@@ -2311,7 +2315,7 @@ private fun MentionPlaceholderRow(
  * than centering.
  */
 @Composable
-private fun MenuBadgeDot(modifier: Modifier = Modifier) {
+internal fun MenuBadgeDot(modifier: Modifier = Modifier) {
     Box(
         modifier = modifier
             .size(8.dp)

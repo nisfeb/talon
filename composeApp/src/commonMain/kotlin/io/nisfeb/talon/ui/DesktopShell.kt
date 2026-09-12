@@ -253,7 +253,7 @@ private fun RailIconButton(
     }
 }
 
-private fun railIcon(item: RailItem): ImageVector? = when (item) {
+internal fun railIcon(item: RailItem): ImageVector? = when (item) {
     // All icons resolve to material-icons-core (verified by
     // unzipping the core jar at plan-write time). Safe with the
     // slim-jar strip; auditIconKeepList catches any drift.
@@ -276,7 +276,7 @@ private fun railIcon(item: RailItem): ImageVector? = when (item) {
     RailItem.Settings -> Icons.Filled.Settings
 }
 
-private fun railLabel(item: RailItem): String = when (item) {
+internal fun railLabel(item: RailItem): String = when (item) {
     RailItem.Home -> "Home"
     RailItem.Chats -> "Chats"
     RailItem.Mail -> "Mail"

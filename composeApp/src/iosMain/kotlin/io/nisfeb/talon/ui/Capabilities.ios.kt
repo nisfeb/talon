@@ -52,3 +52,6 @@ actual val needsEmojiFontSpans: Boolean = false
 actual val needsManualImagePaste: Boolean = true
 actual val isImmersiveCallSupported: Boolean = true
 actual val isUrbWebViewSupported: Boolean = true
+
+/** As Android: a drawer, and the edge swipe to come back. */
+actual val isDrawerNavigation: Boolean = true

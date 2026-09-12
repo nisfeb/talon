@@ -1398,9 +1398,60 @@ fun TalonApp(
             initialValue = androidx.compose.material3.DrawerValue.Closed,
         )
         val shipNicknamesMap = app.shipProfiles.nicknames.collectAsState().value
+        val railOrder by app.uiSettings.railItemOrder.collectAsState()
+        val railVisible by app.uiSettings.railVisibility.collectAsState()
+
+        io.nisfeb.talon.ui.TalonDrawer(
+            drawer = { close ->
+                io.nisfeb.talon.ui.SectionsDrawer(
+                    order = railOrder,
+                    visibility = railVisible,
+                    // Chats is the root of this host rather than a
+                    // destination, so nothing is ever marked.
+                    active = null,
+                    canOpen = { item ->
+                        when (item) {
+                            io.nisfeb.talon.ui.RailItem.Assistant ->
+                                isAssistantSupported && aiState.assistantOn() && aiState.hasKey()
+                            else -> true
+                        }
+                    },
+                    onSection = { item ->
+                        close()
+                        when (item) {
+                            io.nisfeb.talon.ui.RailItem.Home -> homeOpen = true
+                            // Already where it goes.
+                            io.nisfeb.talon.ui.RailItem.Chats -> Unit
+                            io.nisfeb.talon.ui.RailItem.Mail -> mailOpen = true
+                            io.nisfeb.talon.ui.RailItem.Statuses -> statusFeedOpen = true
+                            io.nisfeb.talon.ui.RailItem.Bookmarks -> bookmarksOpen = true
+                            io.nisfeb.talon.ui.RailItem.Activity -> activityOpen = true
+                            io.nisfeb.talon.ui.RailItem.Assistant -> assistantOpen = true
+                            io.nisfeb.talon.ui.RailItem.Profile -> editingProfile = true
+                            io.nisfeb.talon.ui.RailItem.Watchwords -> watchwordsOpen = true
+                            io.nisfeb.talon.ui.RailItem.Administration -> adminListOpen = true
+                            io.nisfeb.talon.ui.RailItem.Invites -> invitesOpen = true
+                            io.nisfeb.talon.ui.RailItem.Settings -> settingsOpen = true
+                        }
+                    },
+                )
+            },
+        ) {
+        // The ship picker moves to the right-hand side, the logo that
+        // opens it having moved there too. Compose has no right-hand
+        // drawer, so the drawer is laid out mirrored and its contents
+        // are put back the right way round inside.
+        androidx.compose.runtime.CompositionLocalProvider(
+            androidx.compose.ui.platform.LocalLayoutDirection provides
+                androidx.compose.ui.unit.LayoutDirection.Rtl,
+        ) {
         androidx.compose.material3.ModalNavigationDrawer(
             drawerState = drawerState,
             drawerContent = {
+                androidx.compose.runtime.CompositionLocalProvider(
+                    androidx.compose.ui.platform.LocalLayoutDirection provides
+                        androidx.compose.ui.unit.LayoutDirection.Ltr,
+                ) {
                 if (allShips.isNotEmpty()) {
                     io.nisfeb.talon.ui.screens.ShipSwitcherDrawer(
                         ships = allShips,
@@ -1422,7 +1473,12 @@ fun TalonApp(
                         },
                     )
                 }
+                }
             },
+        ) {
+        androidx.compose.runtime.CompositionLocalProvider(
+            androidx.compose.ui.platform.LocalLayoutDirection provides
+                androidx.compose.ui.unit.LayoutDirection.Ltr,
         ) {
         when {
             shareLoginQrOpen -> io.nisfeb.talon.ui.screens.LoginQrShareScreen(
@@ -2537,6 +2593,9 @@ fun TalonApp(
                 },
             )
         }
+        } // CompositionLocalProvider(Ltr), inside the ship picker
+        } // CompositionLocalProvider(Rtl), which puts it on the right
+        } // TalonDrawer, the sections
         } // key(loggedInShip)
     }
     }

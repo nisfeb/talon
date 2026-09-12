@@ -199,6 +199,19 @@ expect val isCameraSwitchSupported: Boolean
 expect val isEdgeSwipeBackSupported: Boolean
 
 /**
+ * Whether sections are reached through a drawer rather than a rail.
+ *
+ * Android and iOS: true. A phone has no room for a permanent rail, so
+ * a hamburger opens a drawer and that is the one way to every section.
+ *
+ * Desktop: false. The rail is already there and already one click from
+ * anywhere; a hamburger beside it would be a second way to do the same
+ * thing, and the screens keep their back buttons because a desktop has
+ * neither an edge swipe nor a system back.
+ */
+expect val isDrawerNavigation: Boolean
+
+/**
  * Whether emoji need an explicit font span to render in colour.
  *
  * True only on desktop, where [EmojiFontFamily] resolves to a bundled

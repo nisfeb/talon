@@ -39,3 +39,6 @@ actual val needsEmojiFontSpans: Boolean = false
 actual val needsManualImagePaste: Boolean = false
 actual val isImmersiveCallSupported: Boolean = true
 actual val isUrbWebViewSupported: Boolean = true
+
+/** A phone has no room for a rail; the drawer is the way to every section. */
+actual val isDrawerNavigation: Boolean = true
