@@ -83,9 +83,7 @@ fun DailyDigestScreen(
             TopAppBar(
                 title = { Text("Today's brief") },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-                    }
+                    io.nisfeb.talon.ui.NavIcon(onBack = onBack)
                 },
             )
         },

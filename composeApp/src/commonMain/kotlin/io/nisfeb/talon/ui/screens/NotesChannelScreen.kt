@@ -117,11 +117,9 @@ fun NotesChannelScreen(
             Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            IconButton(onClick = {
+            io.nisfeb.talon.ui.NavIcon(onBack = {
                 if (stack.isNotEmpty()) stack = stack.dropLast(1) else onBack()
-            }) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-            }
+            })
             Column(Modifier.weight(1f)) {
                 Text(
                     stack.lastOrNull()?.name ?: notebook?.title ?: flag.name,

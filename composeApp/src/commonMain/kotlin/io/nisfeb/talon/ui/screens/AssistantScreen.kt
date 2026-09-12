@@ -567,9 +567,7 @@ fun AssistantScreen(
                         title = { Text("Assistant") },
                         navigationIcon = {
                             onBack?.let { back ->
-                                IconButton(onClick = back) {
-                                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-                                }
+                                io.nisfeb.talon.ui.NavIcon(onBack = back)
                             }
                         },
                         actions = {
@@ -830,9 +828,7 @@ private fun AssistantSidebar(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 if (!expanded) {
-                    IconButton(onClick = onCloseSidebar) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back to assistant")
-                    }
+                    io.nisfeb.talon.ui.NavIcon(onBack = onCloseSidebar, backLabel = "Back to assistant")
                 }
                 Text(
                     "Assistant",
