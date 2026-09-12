@@ -743,15 +743,26 @@ internal fun starOffset(noise: Float, ring: Float): Float =
     (noise - 0.5f) * STAR_SPREAD * ring
 
 /**
+ * The smallest a star may be drawn, in device pixels.
+ *
+ * Not a matter of taste. Under about this, a dot is smaller than the
+ * pixel it lands on: antialiasing spreads it across a pixel or two and
+ * scales its alpha down to match, so a speck that is already faint
+ * becomes nothing at all. A 320-pixel dial on a plain screen put every
+ * star at two thirds of a pixel across, which is exactly that.
+ */
+internal const val STAR_MIN_RADIUS_PX = 1f
+
+/**
  * A star's own size: a speck, and not quite a uniform one.
  *
- * Under a hundredth of the band's width. At that size a star is a
- * pixel or two on a sharp screen and a soft one on a blunt screen,
- * which is about right for something meant to be noticed on the
- * second look rather than the first.
+ * Under a hundredth of the band's width, floored so it survives being
+ * drawn. On a sharp screen that floor never binds and the variation
+ * shows; on a blunt one they all come out the same speck, which is
+ * better than all coming out as none.
  */
 internal fun starRadius(noise: Float, ring: Float): Float =
-    ring * (0.0066f + 0.0078f * noise)
+    (ring * (0.0066f + 0.0078f * noise)).coerceAtLeast(STAR_MIN_RADIUS_PX)
 
 private fun DrawScope.drawStars(
     centre: Offset,

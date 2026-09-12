@@ -53,13 +53,38 @@ class StarFieldTest {
     }
 
     @Test
+    fun `no star is drawn smaller than a pixel`() {
+        // A dot under a pixel across is spread over its neighbours by
+        // antialiasing and dimmed to match, so a speck that was faint
+        // to begin with comes out as nothing. A 320-pixel dial on a
+        // plain screen gives a band of about fifty pixels.
+        for (ring in listOf(20f, 51f, 144f)) {
+            for (i in 0 until STAR_COUNT) {
+                val r = starRadius(starNoise(i, 4), ring)
+                assertTrue(r >= STAR_MIN_RADIUS_PX, "star $i on a ${ring}px band has radius $r")
+            }
+        }
+    }
+
+    @Test
+    fun `the floor does not bind on a screen with pixels to spare`() {
+        // Where there is room, the variation is the point.
+        val big = (0 until STAR_COUNT).map { starRadius(starNoise(it, 4), 400f) }
+        assertTrue(big.min() > STAR_MIN_RADIUS_PX, "the floor is flattening a large dial")
+        assertTrue(big.max() / big.min() > 1.5f, "the sizes stopped varying")
+    }
+
+    @Test
     fun `a star is a speck`() {
         // Under a hundredth of the band either way. This caught an
         // order of magnitude once and is here to catch the next one.
         for (i in 0 until STAR_COUNT) {
             val r = starRadius(starNoise(i, 4), ring)
-            assertTrue(r < ring * 0.015f, "star $i has radius $r on a $ring band")
-            assertTrue(r > ring * 0.004f, "star $i at $r would not render at all")
+            // A speck in proportion, except where the pixel floor has
+            // to override it — a band this small cannot hold a
+            // proportional speck and a drawable one at once.
+            val cap = maxOf(ring * 0.015f, STAR_MIN_RADIUS_PX)
+            assertTrue(r <= cap, "star $i has radius $r on a $ring band, cap $cap")
         }
     }
 
