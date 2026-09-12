@@ -170,6 +170,22 @@ fun HomeScreen(
     val unreadBy = remember(unreads) { unreads.associateBy { it.whom } }
 
     var editing by remember { mutableStateOf(false) }
+
+    // The greeting changes four times a day, so a minute is plenty.
+    // On the place's own clock, like the dial: a page set to somewhere
+    // else should not wish you good morning at their midnight.
+    var greetingTick by remember { mutableStateOf(nowMs()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(60_000)
+            greetingTick = nowMs()
+        }
+    }
+    val greetingMinute = remember(greetingTick / 60_000, place, weather) {
+        val zone = zoneFor(place?.timeZoneId ?: weather?.zoneId)
+        val local = Instant.fromEpochMilliseconds(greetingTick).toLocalDateTime(zone)
+        local.hour * 60 + local.minute
+    }
     var dragging by remember { mutableStateOf<HomeWidgetKind?>(null) }
     var dragBy by remember { mutableStateOf(Offset.Zero) }
     // Where the widget was when the drag began. The running offset is
@@ -223,7 +239,7 @@ fun HomeScreen(
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    greeting(ourShip, contacts),
+                    greeting(ourShip, contacts, greetingMinute),
                     style = MaterialTheme.typography.headlineSmall
                         .copy(fontWeight = FontWeight.SemiBold),
                     modifier = Modifier.weight(1f),
@@ -660,7 +676,7 @@ private fun Grip(
 /** What each widget is called, wherever one needs naming. */
 fun title(kind: HomeWidgetKind): String = when (kind) {
     HomeWidgetKind.CLOCK -> "Clock and weather"
-    HomeWidgetKind.NEEDS -> "Needs you"
+    HomeWidgetKind.NEEDS -> "New"
     HomeWidgetKind.MESSAGES -> "Chat"
     HomeWidgetKind.MAIL -> "Mail"
     HomeWidgetKind.CALENDAR -> "Today"
@@ -694,7 +710,7 @@ private fun WidgetBody(
     onLongPress: () -> Unit,
 ) {
     when (widget.kind) {
-        HomeWidgetKind.NEEDS -> NeedsYouPanel(
+        HomeWidgetKind.NEEDS -> NewPanel(
             recent, unreadBy, mail, invites, contacts, ourShip, widget,
             onOpenConversation, onOpenMailThread, onOpenInvites, onLongPress,
         )
@@ -717,9 +733,29 @@ private fun WidgetBody(
     }
 }
 
-private fun greeting(ourShip: String, contacts: ContactMap): String {
+private fun greeting(ourShip: String, contacts: ContactMap, minuteOfDay: Int): String {
     val who = contacts.displayName(ourShip).takeIf { it.isNotBlank() && ourShip.isNotBlank() }
-    return if (who == null) "Talon" else "Hello, $who"
+    val hello = timeOfDayGreeting(minuteOfDay)
+    return if (who == null) hello else "$hello, $who"
+}
+
+/**
+ * Morning, afternoon, evening or night, by the clock the dial runs on.
+ *
+ * The boundaries are where people put them rather than where a quarter
+ * of the day falls: morning starts when somebody might be up and ends
+ * at noon, evening starts at five, and the small hours get their own
+ * because "good evening" at three in the morning reads as a machine
+ * that has not looked at the time.
+ */
+internal fun timeOfDayGreeting(minuteOfDay: Int): String {
+    val hour = (((minuteOfDay % 1440) + 1440) % 1440) / 60
+    return when (hour) {
+        in 5..11 -> "Good morning"
+        in 12..16 -> "Good afternoon"
+        in 17..21 -> "Good evening"
+        else -> "Good night"
+    }
 }
 
 // ---- panels ------------------------------------------------------------
@@ -1112,16 +1148,19 @@ private fun CalendarPanel(range: CalendarRange) {
 }
 
 /**
- * The things actually waiting on you.
+ * What is new, across everything.
  *
  * What replaced the daily digest. Nothing here is generated or
- * scheduled: a conversation whose last word is somebody else's and
- * unread is a question owed an answer, and so are a mention, an
- * unread mail thread and an invitation. All of it is already in the
- * database and all of it is true the moment it is drawn.
+ * scheduled: unread conversations, mentions, unread mail and pending
+ * invitations are already in the database and all of it is true the
+ * moment it is drawn.
+ *
+ * New rather than owed. Most of what arrives in a group chat is not
+ * addressed to anybody in particular, and a panel that called all of
+ * it a thing waiting on you would be wrong about most of its rows.
  */
 @Composable
-private fun NeedsYouPanel(
+private fun NewPanel(
     recent: List<io.nisfeb.talon.data.MessageEntity>,
     unreadBy: Map<String, io.nisfeb.talon.data.UnreadEntity>,
     mail: MailRepo?,
@@ -1137,10 +1176,10 @@ private fun NeedsYouPanel(
     val page = mail?.page?.collectAsState()?.value
     val mailNeeds = remember(page) {
         page?.threads.orEmpty().filter { it.unread }
-            .map { io.nisfeb.talon.ui.MailNeed(it.id, it.from, it.subject, it.last) }
+            .map { io.nisfeb.talon.ui.NewMail(it.id, it.from, it.subject, it.last) }
     }
     val rows = remember(recent, unreadBy, mailNeeds, invites, ourShip, widget.count) {
-        io.nisfeb.talon.ui.needsYou(
+        io.nisfeb.talon.ui.whatsNew(
             latest = recent,
             unreadBy = unreadBy,
             mail = mailNeeds,
@@ -1151,22 +1190,23 @@ private fun NeedsYouPanel(
             preview = { preview(it, contacts, ourShip) },
         )
     }
-    Panel("Needs you", Icons.Filled.Notifications) {
+    Panel("New", Icons.Filled.Notifications) {
         if (rows.isEmpty()) {
-            Empty("Nothing waiting on you.")
+            Empty("Nothing new.")
         } else {
             rows.forEach { row ->
                 QuickRow(
                     title = row.title,
                     line = row.line,
                     at = row.atMs,
-                    // A mention is the one thing here that somebody
-                    // was addressed by name for.
-                    strong = row.kind == io.nisfeb.talon.ui.NeedKind.MENTION,
+                    // A mention is the one row here that somebody was
+                    // addressed by name for, so it is the one that
+                    // carries any weight.
+                    strong = row.kind == io.nisfeb.talon.ui.NewKind.MENTION,
                     onClick = {
                         when (row.kind) {
-                            io.nisfeb.talon.ui.NeedKind.MAIL -> onOpenMailThread(row.target)
-                            io.nisfeb.talon.ui.NeedKind.INVITE -> onOpenInvites()
+                            io.nisfeb.talon.ui.NewKind.MAIL -> onOpenMailThread(row.target)
+                            io.nisfeb.talon.ui.NewKind.INVITE -> onOpenInvites()
                             else -> onOpenConversation(row.target)
                         }
                     },

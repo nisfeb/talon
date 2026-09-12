@@ -8,11 +8,11 @@ import kotlin.test.assertTrue
 /**
  * What replaced the daily digest, and why it is not one.
  *
- * The digest recapped a fixed day on an alarm. This is the list of
- * things actually owed, worked out from what is already in the
- * database, true at the moment it is read.
+ * The digest recapped a fixed day on an alarm. This is what is new,
+ * worked out from what is already in the database and true at the
+ * moment it is read.
  */
-class NeedsYouTest {
+class WhatsNewTest {
 
     private val us = "~wex"
 
@@ -28,14 +28,13 @@ class NeedsYouTest {
     private fun run(
         latest: List<io.nisfeb.talon.data.MessageEntity>,
         unreads: Map<String, UnreadEntity>,
-        mail: List<MailNeed> = emptyList(),
+        mail: List<NewMail> = emptyList(),
         invites: List<String> = emptyList(),
         limit: Int = 10,
-    ) = needsYou(latest, unreads, mail, invites, us, limit, { it }, { "said something" })
+    ) = whatsNew(latest, unreads, mail, invites, us, limit, { it }, { "said something" })
 
     @Test
-    fun `our own last word is not something waiting on us`() {
-        // The whole distinction between a to-do and an inbox.
+    fun `nothing is new about our own last word`() {
         val rows = run(
             listOf(msg("~dalsyd", us, 100)),
             mapOf("~dalsyd" to unread(3)),
@@ -44,17 +43,17 @@ class NeedsYouTest {
     }
 
     @Test
-    fun `somebody else's last word, unread, is`() {
+    fun `somebody else's last word, unread, is new`() {
         val rows = run(
             listOf(msg("~dalsyd", "~dalsyd", 100)),
             mapOf("~dalsyd" to unread(3)),
         )
-        assertEquals(listOf(NeedKind.REPLY), rows.map { it.kind })
+        assertEquals(listOf(NewKind.UNREAD), rows.map { it.kind })
         assertEquals("~dalsyd", rows.single().target)
     }
 
     @Test
-    fun `a conversation we have read is not owed`() {
+    fun `a conversation we have read is not new`() {
         val rows = run(
             listOf(msg("~dalsyd", "~dalsyd", 100)),
             mapOf("~dalsyd" to unread(0)),
@@ -63,7 +62,7 @@ class NeedsYouTest {
     }
 
     @Test
-    fun `a conversation with no unread row at all is not owed`() {
+    fun `a conversation with no unread row at all is not new`() {
         assertTrue(run(listOf(msg("~dalsyd", "~dalsyd", 100)), emptyMap()).isEmpty())
     }
 
@@ -79,7 +78,7 @@ class NeedsYouTest {
                 "~chatter" to unread(9),
             ),
         )
-        assertEquals(listOf(NeedKind.MENTION, NeedKind.REPLY), rows.map { it.kind })
+        assertEquals(listOf(NewKind.MENTION, NewKind.UNREAD), rows.map { it.kind })
         assertEquals("~mentions", rows.first().target)
     }
 
@@ -97,11 +96,11 @@ class NeedsYouTest {
         val rows = run(
             latest = listOf(msg("~dalsyd", "~dalsyd", 100)),
             unreads = mapOf("~dalsyd" to unread(1)),
-            mail = listOf(MailNeed("m1", "~ricsul", "Re: release", 50)),
+            mail = listOf(NewMail("m1", "~ricsul", "Re: release", 50)),
             invites = listOf("~host/group"),
         )
         assertEquals(
-            listOf(NeedKind.REPLY, NeedKind.MAIL, NeedKind.INVITE),
+            listOf(NewKind.UNREAD, NewKind.MAIL, NewKind.INVITE),
             rows.map { it.kind },
         )
     }
@@ -110,24 +109,24 @@ class NeedsYouTest {
     fun `an empty mail subject still reads as something`() {
         val rows = run(
             emptyList(), emptyMap(),
-            mail = listOf(MailNeed("m1", "~ricsul", "   ", 50)),
+            mail = listOf(NewMail("m1", "~ricsul", "   ", 50)),
         )
         assertEquals("(no subject)", rows.single().line)
     }
 
     @Test
-    fun `the limit bites, and bites the least pressing`() {
+    fun `the limit bites, and bites the least notable`() {
         val rows = run(
             latest = listOf(msg("~m", "~a", 100), msg("~r", "~b", 100)),
             unreads = mapOf("~m" to unread(1, notify = 1), "~r" to unread(1)),
-            mail = listOf(MailNeed("m1", "~x", "s", 10)),
+            mail = listOf(NewMail("m1", "~x", "s", 10)),
             limit = 2,
         )
-        assertEquals(listOf(NeedKind.MENTION, NeedKind.REPLY), rows.map { it.kind })
+        assertEquals(listOf(NewKind.MENTION, NewKind.UNREAD), rows.map { it.kind })
     }
 
     @Test
-    fun `nothing owed is an empty list, not a crash`() {
+    fun `nothing new is an empty list, not a crash`() {
         assertTrue(run(emptyList(), emptyMap()).isEmpty())
         assertTrue(run(emptyList(), emptyMap(), limit = 0).isEmpty())
     }

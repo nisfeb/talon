@@ -17,7 +17,14 @@ import kotlin.math.roundToInt
 enum class HomeWidgetKind {
     /** The clock and weather dial. */
     CLOCK,
-    /** What is actually waiting on you. */
+    /**
+     * What is new, across everything.
+     *
+     * Spelt NEEDS because that is how it was first stored and the
+     * name goes into the saved layout verbatim. Renaming the constant
+     * would make every page written so far fail to parse, and the
+     * whole arrangement would fall back to the default.
+     */
     NEEDS,
     MESSAGES,
     MAIL,
