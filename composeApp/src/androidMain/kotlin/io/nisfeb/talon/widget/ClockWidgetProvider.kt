@@ -16,7 +16,6 @@ import io.nisfeb.talon.ui.OpenMeteoWeather
 import io.nisfeb.talon.util.Log
 import io.nisfeb.talon.util.nowMs
 import io.ktor.client.HttpClient
-import io.ktor.client.engine.okhttp.OkHttp
 import io.ktor.client.request.get
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.isSuccess
@@ -72,11 +71,23 @@ class ClockWidgetProvider : AppWidgetProvider() {
             try {
                 val settings = WidgetSky.settings(context)
                 val at = nowMs()
-                val body = forecast(context, settings, at)
-                val sky = WidgetSky.skyFor(at, settings.place, body)
-                for (id in ids) {
-                    runCatching { draw(context, manager, id, sky, settings) }
-                        .onFailure { Log.w(TAG, "widget $id: ${it.message}") }
+
+                // Drawn twice on purpose. The first pass uses whatever
+                // is already to hand, so the widget is never blank
+                // while a network call is in flight — and never blank
+                // at all if that call hangs or the process is killed
+                // before it answers, which is the one failure that
+                // looks exactly like the feature not existing.
+                val known = WidgetSky.cachedForecast(context, settings.place, at)
+                    ?: WidgetSky.staleForecast(context)
+                paint(context, manager, ids, settings, at, known)
+
+                // Then a fresh one, if what we had was not current.
+                if (WidgetSky.cachedForecast(context, settings.place, at) == null) {
+                    val fetched = fetch(context, settings, at)
+                    if (fetched != null && fetched != known) {
+                        paint(context, manager, ids, settings, at, fetched)
+                    }
                 }
             } finally {
                 finish.finish()
@@ -84,40 +95,67 @@ class ClockWidgetProvider : AppWidgetProvider() {
         }
     }
 
+    private fun paint(
+        context: Context,
+        manager: AppWidgetManager,
+        ids: IntArray,
+        settings: WidgetSky.Settings,
+        atMs: Long,
+        body: String?,
+    ) {
+        val sky = WidgetSky.skyFor(atMs, settings.place, body)
+        val note = when {
+            settings.place == null -> "Set a location in Talon"
+            body == null -> "No forecast yet"
+            sky.currentC == null -> "Forecast unreadable"
+            else -> null
+        }
+        // Logged as well as drawn: the three cases look identical from
+        // a home screen and want telling apart when somebody reports a
+        // dial with no weather on it.
+        Log.i(
+            TAG,
+            "paint: place=${settings.place != null} body=${body?.length ?: -1} " +
+                "temp=${sky.currentC != null} note=$note",
+        )
+        for (id in ids) {
+            runCatching { draw(context, manager, id, sky, settings, note) }
+                .onFailure { Log.w(TAG, "widget $id: ${it.message}") }
+        }
+    }
+
     /**
-     * Today's forecast: the one already in hand if it is recent enough
-     * and for the same place, otherwise a fresh one.
+     * A fresh forecast, or null.
      *
-     * A failed fetch falls back to whatever was cached, however old.
-     * A dial that has yesterday's temperature on it is better than one
-     * that has dropped the temperature entirely because the phone was
-     * briefly on a train.
+     * The engine is the app's own rather than one named here: it is
+     * configured once, in one place, and a widget quietly speaking
+     * over a differently-built client is a difference nobody would
+     * think to look for.
      */
-    private suspend fun forecast(
+    private suspend fun fetch(
         context: Context,
         settings: WidgetSky.Settings,
         atMs: Long,
     ): String? {
         val place = settings.place ?: return null
-        WidgetSky.cachedForecast(context, place, atMs)?.let { return it }
         val fetched = withTimeoutOrNull(WEATHER_TIMEOUT_MS) {
             runCatching {
-                val http = HttpClient(OkHttp)
+                val http = HttpClient(io.nisfeb.talon.util.httpEngineFactory())
                 try {
-                    val url = OpenMeteoWeather.requestUrl(place)
-                    val resp = http.get(url)
-                    if (!resp.status.isSuccess()) null else resp.bodyAsText()
+                    val resp = http.get(OpenMeteoWeather.requestUrl(place))
+                    if (!resp.status.isSuccess()) {
+                        Log.w(TAG, "forecast HTTP ${resp.status.value}")
+                        null
+                    } else {
+                        resp.bodyAsText()
+                    }
                 } finally {
                     http.close()
                 }
-            }.getOrNull()
+            }.onFailure { Log.w(TAG, "forecast failed: $it") }.getOrNull()
         }
-        if (fetched != null) {
-            WidgetSky.rememberForecast(context, place, fetched, atMs)
-            return fetched
-        }
-        // Stale rather than nothing.
-        return WidgetSky.staleForecast(context)
+        if (fetched != null) WidgetSky.rememberForecast(context, place, fetched, atMs)
+        return fetched
     }
 
     private fun draw(
@@ -126,6 +164,7 @@ class ClockWidgetProvider : AppWidgetProvider() {
         id: Int,
         sky: io.nisfeb.talon.ui.SkyClock.Sky,
         settings: WidgetSky.Settings,
+        note: String?,
     ) {
         val options = manager.getAppWidgetOptions(id)
         // The larger of the two figures the launcher reports for each
@@ -159,6 +198,7 @@ class ClockWidgetProvider : AppWidgetProvider() {
             sky = sky,
             fahrenheit = settings.fahrenheit,
             twentyFourHour = settings.twentyFourHour,
+            note = note,
             onSurface = ink,
             onSurfaceVariant = faint,
             face = face,

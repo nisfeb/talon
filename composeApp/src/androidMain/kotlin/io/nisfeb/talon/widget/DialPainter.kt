@@ -58,6 +58,10 @@ object DialPainter {
         sky: SkyClock.Sky,
         fahrenheit: Boolean,
         twentyFourHour: Boolean,
+        /** Why there is no weather, where there is none. A blank dial
+         *  that will not say what it is waiting for is the worst of
+         *  the states it can be in. */
+        note: String?,
         onSurface: Int,
         onSurfaceVariant: Int,
         face: Int,
@@ -141,7 +145,10 @@ object DialPainter {
         c.drawCircle(sunAt.first, sunAt.second, ring * 0.36f, paint)
 
         // ---- what is written across it -------------------------------
-        readout(c, paint, sky, fahrenheit, twentyFourHour, cx, cy, side, onSurface, onSurfaceVariant)
+        readout(
+            c, paint, sky, fahrenheit, twentyFourHour, note, cx, cy, side,
+            onSurface, onSurfaceVariant,
+        )
         return bmp
     }
 
@@ -325,6 +332,7 @@ object DialPainter {
         sky: SkyClock.Sky,
         fahrenheit: Boolean,
         twentyFourHour: Boolean,
+        note: String?,
         cx: Float,
         cy: Float,
         side: Float,
@@ -346,6 +354,9 @@ object DialPainter {
             // The day's range, on one line rather than the app's two
             // columns: a widget is small and two stacked pairs would
             // cost more height than the figures are worth.
+            // Said once there is room for a second line at all, since
+            // it is the line that explains the rest of the dial.
+            if (note != null && showDate) add(note to false)
             if (showRange && sky.currentC != null) {
                 val hi = sky.highC?.let { "H " + SkyClock.tempLabel(it, fahrenheit) }
                 val lo = sky.lowC?.let { "L " + SkyClock.tempLabel(it, fahrenheit) }
