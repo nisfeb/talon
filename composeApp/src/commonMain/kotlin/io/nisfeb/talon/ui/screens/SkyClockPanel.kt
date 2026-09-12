@@ -762,7 +762,21 @@ internal const val STAR_MIN_RADIUS_PX = 1f
  * better than all coming out as none.
  */
 internal fun starRadius(noise: Float, ring: Float): Float =
-    (ring * (0.0066f + 0.0078f * noise)).coerceAtLeast(STAR_MIN_RADIUS_PX)
+    (ring * (STAR_SIZE_MIN + STAR_SIZE_SPREAD * noise)).coerceAtLeast(STAR_MIN_RADIUS_PX)
+
+/**
+ * How big a star is as a fraction of the band, at its smallest and at
+ * its largest.
+ *
+ * A fraction, so it is a constant physical size whatever the screen's
+ * density — which is the thing the pixel floor cannot help with. A
+ * dense phone has plenty of pixels and they are all very small, so a
+ * star sized to survive being drawn is still barely there to look at.
+ * About half what it was before the shrink: the first size was too
+ * loud and a third of it was too quiet.
+ */
+internal const val STAR_SIZE_MIN = 0.011f
+internal const val STAR_SIZE_SPREAD = 0.013f
 
 private fun DrawScope.drawStars(
     centre: Offset,

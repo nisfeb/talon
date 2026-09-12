@@ -67,6 +67,17 @@ class StarFieldTest {
     }
 
     @Test
+    fun `a star is big enough to see on a dense screen`() {
+        // The floor is in pixels, and a dense phone has a great many
+        // very small ones — so a star that clears the floor can still
+        // be too small to look at. This is the size in band fractions,
+        // which is a constant physical size whatever the density.
+        val phoneBand = 144f // a 300dp dial at three times density
+        val smallest = starRadius(0f, phoneBand)
+        assertTrue(smallest >= 1.4f, "the smallest star is ${smallest}px across a dense phone's band")
+    }
+
+    @Test
     fun `the floor does not bind on a screen with pixels to spare`() {
         // Where there is room, the variation is the point.
         val big = (0 until STAR_COUNT).map { starRadius(starNoise(it, 4), 400f) }
@@ -83,7 +94,7 @@ class StarFieldTest {
             // A speck in proportion, except where the pixel floor has
             // to override it — a band this small cannot hold a
             // proportional speck and a drawable one at once.
-            val cap = maxOf(ring * 0.015f, STAR_MIN_RADIUS_PX)
+            val cap = maxOf(ring * (STAR_SIZE_MIN + STAR_SIZE_SPREAD), STAR_MIN_RADIUS_PX)
             assertTrue(r <= cap, "star $i has radius $r on a $ring band, cap $cap")
         }
     }
