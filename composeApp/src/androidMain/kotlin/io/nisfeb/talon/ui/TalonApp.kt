@@ -1493,6 +1493,49 @@ fun TalonApp(
             androidx.compose.ui.platform.LocalLayoutDirection provides
                 androidx.compose.ui.unit.LayoutDirection.Ltr,
         ) {
+        // Above the navigation, not inside it.
+        //
+        // These were held in the `homeOpen` branch, which is torn down
+        // the moment somebody opens their messages and rebuilt empty on
+        // the way back: the dial redrew with no weather and popped when
+        // the answer landed, and the status list flashed through
+        // "none". A branch of a `when` is no more durable than the
+        // screen it draws. Up here they are already waiting, and the
+        // panel's own cross-fades carry whatever changed while away.
+        val homePlaceRaw by app.uiSettings.homePlace.collectAsState()
+        val homePlace = remember(homePlaceRaw) {
+            io.nisfeb.talon.ui.HomePlaceCodec.decode(homePlaceRaw)
+        }
+        val homeStatuses by remember(app.db) {
+            app.db.contacts().streamStatusFeed()
+        }.collectAsState(initial = emptyList())
+        val weatherFor = remember(app.session.http) {
+            io.nisfeb.talon.ui.OpenMeteoWeather(app.session.http).asLookup()
+        }
+        var homeWeather by remember {
+            mutableStateOf<io.nisfeb.talon.ui.SkyClock.Sky?>(null)
+        }
+        LaunchedEffect(homePlace, weatherFor) {
+            val where = homePlace
+            if (where == null) {
+                homeWeather = null
+                return@LaunchedEffect
+            }
+            var fetchedAt = 0L
+            while (true) {
+                if (io.nisfeb.talon.ui.screens.weatherIsStale(
+                        fetchedAt, io.nisfeb.talon.util.nowMs(),
+                    )
+                ) {
+                    weatherFor(where).onSuccess {
+                        homeWeather = it
+                        fetchedAt = io.nisfeb.talon.util.nowMs()
+                    }
+                }
+                kotlinx.coroutines.delay(60_000L)
+            }
+        }
+
         when {
             shareLoginQrOpen -> io.nisfeb.talon.ui.screens.LoginQrShareScreen(
                 onBack = { shareLoginQrOpen = false },
@@ -1661,54 +1704,16 @@ fun TalonApp(
             )
 
             homeOpen -> {
-                val homePlaceRaw by app.uiSettings.homePlace.collectAsState()
-                val homePlace = remember(homePlaceRaw) {
-                    io.nisfeb.talon.ui.HomePlaceCodec.decode(homePlaceRaw)
-                }
                 val homeLayoutRaw by app.uiSettings.homeLayout.collectAsState()
                 val homeLayout = remember(homeLayoutRaw) {
                     io.nisfeb.talon.ui.HomeLayoutCodec.decode(homeLayoutRaw)
                 }
                 val homeFahrenheit by app.uiSettings.homeFahrenheit.collectAsState()
                 val homeTwentyFourHour by app.uiSettings.homeTwentyFourHour.collectAsState()
-                val homeStatuses by remember(app.db) {
-                    app.db.contacts().streamStatusFeed()
-                }.collectAsState(initial = emptyList())
                 val deviceLocation = io.nisfeb.talon.ui.rememberDeviceLocation()
-                val weatherFor = remember(app.session.http) {
-                    io.nisfeb.talon.ui.OpenMeteoWeather(app.session.http).asLookup()
-                }
                 val placeLookup = remember(app.session.http) {
                     io.nisfeb.talon.ui.OpenMeteoPlaces(app.session.http).asLookup()
                 }
-                // Held here rather than inside HomeScreen for the same
-                // reason it is on desktop: the screen is torn down every
-                // time somebody looks at their messages, and weather
-                // kept inside it comes back empty and pops.
-                var homeWeather by remember {
-                    mutableStateOf<io.nisfeb.talon.ui.SkyClock.Sky?>(null)
-                }
-                LaunchedEffect(homePlace, weatherFor) {
-                    val where = homePlace
-                    if (where == null) {
-                        homeWeather = null
-                        return@LaunchedEffect
-                    }
-                    var fetchedAt = 0L
-                    while (true) {
-                        if (io.nisfeb.talon.ui.screens.weatherIsStale(
-                                fetchedAt, io.nisfeb.talon.util.nowMs(),
-                            )
-                        ) {
-                            weatherFor(where).onSuccess {
-                                homeWeather = it
-                                fetchedAt = io.nisfeb.talon.util.nowMs()
-                            }
-                        }
-                        kotlinx.coroutines.delay(60_000L)
-                    }
-                }
-
                 io.nisfeb.talon.ui.screens.HomeScreen(
                     db = app.db,
                     mail = mailRepo,
