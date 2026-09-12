@@ -386,6 +386,17 @@ fun TalonApp(
             app.db.groups().streamChannelGroups(),
         )
     }.let { flow -> flow.collectAsState(initial = ContactMap.EMPTY) }
+    // Story parsing runs outside composition (StoryCache, ingest), so
+    // the naming policy is published to it here rather than threaded
+    // through every call site. App.kt has done this since naming
+    // existed; this host never did, so every mention in a message
+    // rendered as the raw @p -- which for a comet is fifty-six
+    // characters of what the word name exists to replace.
+    LaunchedEffect(contactMap) {
+        io.nisfeb.talon.ui.ShipNames.setResolver(contactMap.namesVersion) { ship ->
+            contactMap.displayName(ship)
+        }
+    }
     // Register every call and party line with telecom for as long as
     // it lasts, and let the audio picker route through it meanwhile.
     val telecomCalls = remember(callController, partyLine) {

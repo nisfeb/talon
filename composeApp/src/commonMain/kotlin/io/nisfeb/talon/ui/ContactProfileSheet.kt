@@ -103,12 +103,11 @@ fun ContactProfileSheet(
                 clipboard.setText(AnnotatedString(text))
                 copied = text
             }
-            Text(
-                ship,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.clickable(onClick = copyRow(ship)),
-            )
+            // The word name first, because that is what the ship is
+            // called everywhere else. The @p still follows, unabridged
+            // and copyable: this sheet is the one place it is wanted,
+            // both to tell two alike-looking names apart and because
+            // it is what you paste somewhere else.
             val nym = remember(ship) { Mnemonym.forShip(ship) }
             if (nym != null) {
                 Text(
@@ -118,6 +117,12 @@ fun ContactProfileSheet(
                     modifier = Modifier.clickable(onClick = copyRow(nym)),
                 )
             }
+            Text(
+                ship,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.clickable(onClick = copyRow(ship)),
+            )
             copied?.let {
                 Text(
                     "Copied $it",

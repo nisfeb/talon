@@ -95,6 +95,13 @@ object AzimuthNames {
         return Mnemonym.displayFingerprint(fig)
     }
 
+    /** The unabridged word name, for telling two ships apart whose
+     *  short names came out the same. */
+    fun fullNameFor(ship: String): String? {
+        val fig = synchronized(lock) { cache[ship] } ?: return null
+        return Mnemonym.encodeFingerprint(fig)
+    }
+
     /** Forget everything, for a ship switch. */
     fun reset() {
         synchronized(lock) { cache.clear() }

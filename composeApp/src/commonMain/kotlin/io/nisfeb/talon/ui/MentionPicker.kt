@@ -76,10 +76,14 @@ fun MentionPicker(
                             )
                         }
                         Text(
-                            // Keep the exact @p visible next to the friendly
-                            // name — the row is how users verify WHICH ship
-                            // they're about to mention.
-                            s.mnemonym?.let { "${s.ship} · $it" } ?: s.ship,
+                            // The word name leads, and for a comet it is
+                            // the only thing shown: its @p is fifty-six
+                            // characters of exactly what the name exists
+                            // to replace. Two comets can abridge the
+                            // same, so the full nym follows when one is
+                            // ambiguous -- the longer name, not the @p,
+                            // is what tells them apart.
+                            s.label,
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -94,10 +98,18 @@ fun MentionPicker(
 data class Suggestion(
     val ship: String,
     val nickname: String?,
-    /** The abridged word name shown beside the @p -- the same string
-     *  the ship goes by everywhere else, so the row reads like the
-     *  name people are looking for. Null for anything but a comet.
-     *  Matching runs against the full nym as well; see [nymMatches]. */
+    /**
+     * The line under the nickname: what this ship is called.
+     *
+     * A comet's word name, never its @p -- fifty-six characters of
+     * exactly what the name exists to replace. Where two rows would
+     * read the same, the unabridged nym instead, since that is what
+     * tells them apart. A ship with no word name shows its @p, which
+     * is the only name it has.
+     */
+    val label: String,
+    /** The abridged word name, or null for a ship that has none.
+     *  Matching runs against the full nym too; see [nymMatches]. */
     val mnemonym: String? = null,
 )
 
@@ -143,14 +155,9 @@ fun suggestionsFor(
     fun nymOf(ship: String) = Mnemonym.forShip(ship)
 
     val q = query.lowercase()
-    if (q.isEmpty()) {
-        return allShips.asSequence()
-            .take(6)
-            .map { Suggestion(it, contactMap.nickname(it), nymOf(it)) }
-            .toList()
-    }
+    if (q.isEmpty()) return labelled(allShips.take(6), contactMap)
     val qNym = q.trimStart('.')
-    val matches = mutableListOf<Suggestion>()
+    val matches = mutableListOf<String>()
     for (ship in allShips) {
         if (matches.size >= 6) break
         val shipLower = ship.lowercase().removePrefix("~")
@@ -159,11 +166,50 @@ fun suggestionsFor(
             nick?.lowercase()?.contains(q) == true ||
             nymMatches(qNym, ship)
         ) {
-            matches += Suggestion(ship, nick, Mnemonym.display(ship))
+            matches += ship
         }
     }
-    return matches
+    return labelled(matches, contactMap)
 }
+
+/**
+ * Name each row, and lengthen only the names that need it.
+ *
+ * A comet is shown by its word name and never by its @p. Two comets
+ * can abridge to the same two words, though, and a list offering the
+ * same name twice is no use to anybody -- so when that happens the
+ * unabridged nym is shown instead, for those rows only. That is the
+ * longer name, not the @p: the @p disambiguates but tells you nothing,
+ * and the whole point of the name is that people can read it.
+ */
+private fun labelled(ships: List<String>, contactMap: ContactMap): List<Suggestion> {
+    val short = ships.associateWith { wordName(it) }
+    val clashing = short.values.filterNotNull()
+        .groupingBy { it }.eachCount()
+        .filterValues { it > 1 }.keys
+    return ships.map { ship ->
+        val name = short[ship]
+        Suggestion(
+            ship = ship,
+            nickname = contactMap.nickname(ship),
+            label = when {
+                name == null -> ship
+                name in clashing -> fullWordName(ship) ?: name
+                else -> name
+            },
+            mnemonym = name,
+        )
+    }
+}
+
+/** A ship's word name: a comet's own, or one looked up for a planet
+ *  when the reader asked for those. */
+private fun wordName(ship: String): String? =
+    Mnemonym.display(ship)
+        ?: if (AzimuthNames.enabled.value) AzimuthNames.nameFor(ship) else null
+
+private fun fullWordName(ship: String): String? =
+    Mnemonym.forShip(ship) ?: AzimuthNames.fullNameFor(ship)
 
 /**
  * Whether [qNym] (dots already stripped from the front) picks out this

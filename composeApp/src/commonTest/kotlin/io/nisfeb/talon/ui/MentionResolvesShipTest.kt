@@ -3,6 +3,7 @@ package io.nisfeb.talon.ui
 import io.nisfeb.talon.data.ContactEntity
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNotEquals
 import kotlin.test.assertTrue
 
@@ -69,11 +70,38 @@ class MentionResolvesShipTest {
     }
 
     @Test
-    fun `the row shows the exact ship, which is what gets inserted`() {
+    fun `the row inserts the exact ship whatever it shows`() {
         val s = hits("absolves", listOf(twinA, twinB)).first { it.ship == twinA }
-        // Suggestion.ship is what ChatComposer inserts verbatim.
+        // Suggestion.ship is what ChatComposer inserts verbatim, and it
+        // is never what the row displays.
         assertEquals(twinA, s.ship)
         assertTrue(s.ship.startsWith("~"), "a name is never what gets sent")
+    }
+
+    @Test
+    fun `a comet row never shows its at-p`() {
+        val s = hits("admire", listOf(comet)).single()
+        assertEquals("..admire...attune", s.label)
+        assertFalse(s.label.contains(comet), "the @p is what the name replaces")
+    }
+
+    @Test
+    fun `two comets that read the same are shown apart in full`() {
+        val out = hits("absolves", listOf(twinA, twinB))
+        assertEquals(2, out.size)
+        // The abridgements collide, so each row lengthens to the nym
+        // that actually differs -- not to the @p.
+        assertEquals(2, out.map { it.label }.toSet().size, "two rows, two names")
+        for (row in out) {
+            assertEquals(Mnemonym.forShip(row.ship), row.label)
+            assertFalse(row.label.startsWith("~"), "lengthened, not replaced by the @p")
+        }
+    }
+
+    @Test
+    fun `a ship with no word name is shown by its at-p`() {
+        val s = hits("marzod", listOf("~marzod")).single()
+        assertEquals("~marzod", s.label, "a star's @p is the only name it has")
     }
 
     @Test

@@ -58,9 +58,13 @@ object Mnemonym {
      * of a @p. Getting this seam backwards produces a name that looks
      * entirely real, so it is spelled out rather than left to a cast.
      */
-    fun displayFingerprint(fingerprint: ByteArray): String? {
+    fun displayFingerprint(fingerprint: ByteArray): String? =
+        encodeFingerprint(fingerprint)?.let(::abridge)
+
+    /** The unabridged nym for a fetched fingerprint. */
+    fun encodeFingerprint(fingerprint: ByteArray): String? {
         if (fingerprint.size != 16) return null
-        return abridge(encode(fingerprint.reversedArray(), tweaked = false))
+        return encode(fingerprint.reversedArray(), tweaked = false)
     }
 
     /** The scheme's own abridgement: two words, however many there
