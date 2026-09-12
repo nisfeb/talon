@@ -14,7 +14,7 @@ class AzimuthNamesTest {
     private val moon = "~sampel-palnet-sampel-palnet"
     private val comet = "~doznec-binwes-samper-siglet--fidpen-sogdur-wacser-wissun"
 
-    @AfterTest fun clean() { AzimuthNames.reset(); AzimuthNames.enabled.value = true }
+    @AfterTest fun clean() { AzimuthNames.reset(); AzimuthNames.enabled.value = false }
 
     /** Answers a fixed fingerprint for anything asked. */
     private fun rpc(fig: ByteArray?, seen: MutableList<String> = mutableListOf()) =
@@ -24,6 +24,14 @@ class AzimuthNamesTest {
                 return fig
             }
         }
+
+    @Test
+    fun `it is off until somebody asks for it`() {
+        // Turning it on has the client look up every planet it shows,
+        // which is not something to start doing unasked.
+        assertFalse(AzimuthNames.enabled.value)
+        assertEquals(planet, ContactMap().displayName(planet))
+    }
 
     @Test
     fun `only planets and moons are worth looking up`() {

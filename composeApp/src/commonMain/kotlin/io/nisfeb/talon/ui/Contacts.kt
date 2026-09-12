@@ -28,7 +28,7 @@ data class ContactMap(
     val alwaysPatp: Boolean = false,
     /** Whether a planet or a moon may show a looked-up word name. A
      *  comet's own name is never gated on this. */
-    val nonCometNames: Boolean = true,
+    val nonCometNames: Boolean = false,
     /** Bumped as looked-up names arrive, so a map built before an
      *  answer landed is not equal to one built after. */
     val namesGeneration: Int = 0,

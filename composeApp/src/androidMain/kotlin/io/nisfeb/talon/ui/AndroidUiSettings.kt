@@ -57,7 +57,7 @@ class AndroidUiSettings(
         ShipNames.persist = { v ->
             prefs.edit().putBoolean(KEY_ALWAYS_PATP, v).apply()
         }
-        AzimuthNames.enabled.value = prefs.getBoolean(KEY_NON_COMET_NAMES, true)
+        AzimuthNames.enabled.value = prefs.getBoolean(KEY_NON_COMET_NAMES, false)
         AzimuthNames.persist = { v ->
             prefs.edit().putBoolean(KEY_NON_COMET_NAMES, v).apply()
         }

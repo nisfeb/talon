@@ -66,7 +66,7 @@ class FileUiSettings(
         val density: String = Density.Comfortable.name,
         val fontScale: Float = 1.0f,
         val alwaysPatp: Boolean = false,
-        val nonCometNames: Boolean = true,
+        val nonCometNames: Boolean = false,
         /** [io.nisfeb.talon.ui.theme.ThemeSettings] as JSON text. */
         val customThemes: String = "",
         val micNoiseSuppression: Boolean = true,

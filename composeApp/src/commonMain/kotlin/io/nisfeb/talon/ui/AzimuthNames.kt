@@ -53,14 +53,17 @@ object AzimuthNames {
      * A comet's name is free and intrinsic, so it is never a choice.
      * This is, because it is a different thing: a name that had to be
      * fetched, for an identity that never did the work a comet did.
-     * Somebody who wants only the ships that proved themselves named,
-     * or who would rather their client not look every ship up, turns
-     * this off and gets plain @p for everything but comets.
+     *
+     * Off unless somebody asks for it. Turning it on has the client
+     * look up every planet and moon it shows, and a name nobody
+     * requested is not worth a lookup nobody expected. A reader who
+     * wants them turns it on; until then a planet is its @p, which is
+     * what it has always been.
      *
      * The platform UiSettings loads the stored value over this default
      * at startup and wires [persist].
      */
-    val enabled = MutableStateFlow(true)
+    val enabled = MutableStateFlow(false)
 
     /** Wired by the platform UiSettings at startup. */
     var persist: (Boolean) -> Unit = {}

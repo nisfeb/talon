@@ -360,11 +360,11 @@ fun SettingsScreen(
                 description = if (alwaysPatp) {
                     "Turned off while \"Always show ~ship names\" is on."
                 } else {
-                    "Comets always show word names -- their Urbit name " +
-                        "is their key. A planet's is not, so its words " +
-                        "have to be looked up from its keys, and only " +
-                        "on a ship that can do the lookup. Off shows " +
-                        "the raw ~ship for everything but comets."
+                    "Off by default. Comets always show word names -- " +
+                        "their Urbit name is their key. A planet's is " +
+                        "not, so turning this on has Talon look each " +
+                        "one up from your own ship, which only works " +
+                        "where that ship can answer."
                 },
                 enabled = nonCometNames && !alwaysPatp,
                 onChange = { on ->

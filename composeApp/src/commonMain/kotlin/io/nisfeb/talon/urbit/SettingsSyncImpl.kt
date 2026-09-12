@@ -1563,7 +1563,7 @@ class SettingsSyncImpl(
                 // Entry deleted on the ship → back to that entry's default.
                 when (entry) {
                     ENTRY_ALWAYS_PATP -> io.nisfeb.talon.ui.ShipNames.setAlwaysPatp(false)
-                    ENTRY_NON_COMET_NAMES -> io.nisfeb.talon.ui.AzimuthNames.setEnabled(true)
+                    ENTRY_NON_COMET_NAMES -> io.nisfeb.talon.ui.AzimuthNames.setEnabled(false)
                 }
             }
             BUCKET_GROUP_ORDERS -> db.groupOrders().remove(entry)
