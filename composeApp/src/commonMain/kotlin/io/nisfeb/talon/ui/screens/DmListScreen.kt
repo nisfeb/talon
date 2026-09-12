@@ -2779,13 +2779,36 @@ fun homeSnapshotZeroUnread(whom: String) {
 fun resetHomeListSnapshot() { /* no-op; per-ship snapshots replace this */ }
 
 /**
+ * Forget a conversation's unread count in the cached chat list.
+ *
+ * The cache exists so switching ships does not paint the list
+ * empty-of-unreads while Room catches up, and it is filled by the
+ * list's own flow. But the list is torn down the moment somebody
+ * opens a conversation, so the flow stops collecting and the cache
+ * freezes with the counts as they were just before. Reading the
+ * conversation clears the badge in the database at once; the cache
+ * never hears. Coming back replayed the stale counts, so the unread
+ * dots appeared for the length of one Room round trip and then went
+ * out -- for messages that had already been read.
+ *
+ * Called from the one place that marks a conversation read, so every
+ * route in (opening it, a deep link, the assistant) is covered.
+ */
+fun noteConversationRead(whom: String) {
+    val snap = HomeListSnapshot.active ?: return
+    val rows = snap.rows
+    if (rows.none { it.first.whom == whom && it.second != 0 }) return
+    snap.rows = rows.map { if (it.first.whom == whom) it.first to 0 else it }
+}
+
+/**
  * Per-ship home-list cache. Keyed on the active ship so switching
  * between accounts keeps each one's cached rows (and unread counts)
  * until the new ship's Room query round-trips. Without this, a fresh
  * switch paints the chat list empty-of-unreads for a beat while Room
  * catches up behind whatever repo.start is doing on IO.
  */
-private object HomeListSnapshot {
+internal object HomeListSnapshot {
     private val perShip = ConcurrentMap<String, ShipSnapshot>()
 
     @Volatile var active: ShipSnapshot? = null

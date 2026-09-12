@@ -3455,6 +3455,12 @@ class TlonChatRepo(
 
         // Clear the badge locally immediately so the list flips the moment
         // the user enters the conversation. The server fact will confirm.
+        //
+        // The chat list's own cache has to hear about this too: it is
+        // torn down while the conversation is open, so it cannot see
+        // the write below and would replay the old count on the way
+        // back.
+        io.nisfeb.talon.ui.screens.noteConversationRead(whom)
         db.unreads().upsert(
             UnreadEntity(
                 whom = whom,
