@@ -67,6 +67,30 @@ fun Map<RailItem, Boolean>.isVisible(item: RailItem): Boolean {
 }
 
 /**
+ * Which sections the drawer shows, and the one it may never drop.
+ *
+ * A phone has no rail and, since the sections moved into the
+ * hamburger, no kebab either. The kebab used to guarantee that every
+ * destination stayed reachable however the rail was configured --
+ * hiding an item on desktop only moved it into the overflow tray.
+ * The drawer carries no such tray, so on a phone "hidden" means
+ * "gone".
+ *
+ * That is fine for any section somebody chooses to ignore, and fatal
+ * for exactly one: hiding Settings takes away the screen that unhides
+ * it, and nothing else on a phone opens it. So Settings stays,
+ * whatever the preference says, for the same reason [isVisible] keeps
+ * Chats.
+ */
+fun drawerSections(
+    order: List<RailItem>,
+    visibility: Map<RailItem, Boolean>,
+    canOpen: (RailItem) -> Boolean = { true },
+): List<RailItem> = order.filter { item ->
+    (item == RailItem.Settings || visibility.isVisible(item)) && canOpen(item)
+}
+
+/**
  * Project a sparse `rail_item_prefs` row stream into the dense
  * `Map<RailItem, Boolean>` shape consumers expect. Pulled out of
  * [io.nisfeb.talon.ui.AndroidUiSettings] / [io.nisfeb.talon.ui.DesktopUiSettings]

@@ -93,7 +93,8 @@ fun SidebarSettingsScreen(
         Text(
             if (io.nisfeb.talon.ui.isDrawerNavigation) {
                 "Drag the handle to reorder. Toggle off to leave an item " +
-                    "out of the menu."
+                    "out of the menu. Settings stays: it is the only way " +
+                    "back here."
             } else {
                 "Drag the handle to reorder. Toggle off to hide an item " +
                     "from the sidebar (it stays available in the kebab menu)."
@@ -215,7 +216,6 @@ private fun sidebarRowState(item: RailItem): SidebarRowState = when (item) {
     )
     RailItem.Home -> SidebarRowState("Home", null, false, false)
     RailItem.Mail -> SidebarRowState("Mail", null, false, false)
-    RailItem.Mail -> SidebarRowState("Mail", null, false, false)
     RailItem.Statuses -> SidebarRowState("Statuses", null, false, false)
     RailItem.Bookmarks -> SidebarRowState("Bookmarks", null, false, false)
     RailItem.Activity -> SidebarRowState("Activity", null, false, false)
@@ -226,5 +226,18 @@ private fun sidebarRowState(item: RailItem): SidebarRowState = when (item) {
     RailItem.Watchwords -> SidebarRowState("Watchwords", null, false, false)
     RailItem.Administration -> SidebarRowState("Administration", null, false, false)
     RailItem.Invites -> SidebarRowState("Invites", null, false, false)
-    RailItem.Settings -> SidebarRowState("Settings", null, false, false)
+    // On a phone the drawer is the only thing that opens Settings,
+    // so the toggle that would hide it is not offered: turning it off
+    // would take away the screen the toggle lives on. The sidebar has
+    // the kebab to fall back on, so there it stays a choice.
+    RailItem.Settings -> SidebarRowState(
+        label = "Settings",
+        subtitle = if (io.nisfeb.talon.ui.isDrawerNavigation) {
+            "Always in the menu"
+        } else {
+            null
+        },
+        fixedAlwaysOn = io.nisfeb.talon.ui.isDrawerNavigation,
+        gatedOff = false,
+    )
 }

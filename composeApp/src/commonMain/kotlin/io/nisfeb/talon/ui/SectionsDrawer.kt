@@ -52,7 +52,7 @@ fun SectionsDrawer(
         verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {
         header?.invoke()
-        val shown = order.filter { visibility[it] != false && canOpen(it) }
+        val shown = drawerSections(order, visibility, canOpen)
         shown.forEach { item ->
             NavigationDrawerItem(
                 selected = item == active,
