@@ -335,12 +335,23 @@ object DialPainter {
         paint.textAlign = Paint.Align.CENTER
         val showDate = side >= 260f
         val showTemp = side >= 340f
+        val showRange = side >= 440f
 
         val lines = buildList {
             add(SkyClock.clockLabel(sky.minuteOfDay, twentyFourHour) to true)
             if (showDate) add(sky.dateLabel to false)
             if (showTemp && sky.currentC != null) {
                 add(SkyClock.tempLabel(sky.currentC, fahrenheit) to true)
+            }
+            // The day's range, on one line rather than the app's two
+            // columns: a widget is small and two stacked pairs would
+            // cost more height than the figures are worth.
+            if (showRange && sky.currentC != null) {
+                val hi = sky.highC?.let { "H " + SkyClock.tempLabel(it, fahrenheit) }
+                val lo = sky.lowC?.let { "L " + SkyClock.tempLabel(it, fahrenheit) }
+                listOfNotNull(hi, lo).takeIf { it.isNotEmpty() }?.let {
+                    add(it.joinToString("   ") to false)
+                }
             }
         }
         val big = side * 0.11f
