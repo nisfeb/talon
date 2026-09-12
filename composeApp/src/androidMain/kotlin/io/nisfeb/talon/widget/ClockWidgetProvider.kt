@@ -1,5 +1,6 @@
 package io.nisfeb.talon.widget
 
+import android.app.AlarmManager
 import android.app.PendingIntent
 import android.appwidget.AppWidgetManager
 import android.appwidget.AppWidgetProvider
@@ -47,8 +48,76 @@ class ClockWidgetProvider : AppWidgetProvider() {
         manager: AppWidgetManager,
         ids: IntArray,
     ) {
+        // Also the chain's way back after a reboot, which clears
+        // alarms: the half-hourly update fires, and the minute tick
+        // starts again from here.
+        scheduleTick(context)
         refresh(context, manager, ids)
     }
+
+    override fun onEnabled(context: Context) {
+        super.onEnabled(context)
+        scheduleTick(context)
+    }
+
+    override fun onDisabled(context: Context) {
+        super.onDisabled(context)
+        cancelTick(context)
+    }
+
+    override fun onReceive(context: Context, intent: Intent) {
+        super.onReceive(context, intent)
+        if (intent.action != ACTION_TICK) return
+        val manager = AppWidgetManager.getInstance(context)
+        val ids = manager.getAppWidgetIds(
+            ComponentName(context, ClockWidgetProvider::class.java),
+        )
+        if (ids.isEmpty()) {
+            cancelTick(context)
+            return
+        }
+        scheduleTick(context)
+        refresh(context, manager, ids)
+    }
+
+    /**
+     * Repaint on the next minute, and every minute after.
+     *
+     * updatePeriodMillis cannot go below half an hour -- the system
+     * rounds anything smaller up -- so left to itself the widget shows
+     * a time that can be half an hour wrong. That is fine for the dial,
+     * where the sun moves a degree every four minutes, and not fine at
+     * all for the figures under it, which are a clock.
+     *
+     * One alarm at a time, re-armed as it fires rather than repeating,
+     * so it lands on the minute instead of drifting off it. Inexact on
+     * purpose: an exact alarm needs a permission this does not deserve,
+     * and while the screen is off nobody is reading it anyway.
+     * [refresh] paints from cache and only goes to the network when the
+     * forecast has actually expired, so a tick a minute is a redraw a
+     * minute, not a request a minute.
+     */
+    private fun scheduleTick(context: Context) {
+        val alarms = context.getSystemService(Context.ALARM_SERVICE) as? AlarmManager ?: return
+        val nextMinute = (nowMs() / 60_000L + 1L) * 60_000L
+        runCatching { alarms.set(AlarmManager.RTC, nextMinute, tickIntent(context)) }
+            .onFailure { Log.w(TAG, "could not schedule the clock tick: $it") }
+    }
+
+    private fun cancelTick(context: Context) {
+        val alarms = context.getSystemService(Context.ALARM_SERVICE) as? AlarmManager ?: return
+        runCatching { alarms.cancel(tickIntent(context)) }
+    }
+
+    /** Explicit, so it reaches our own receiver without an intent
+     *  filter and without the background-broadcast restrictions. */
+    private fun tickIntent(context: Context): PendingIntent =
+        PendingIntent.getBroadcast(
+            context,
+            TICK_REQUEST,
+            Intent(context, ClockWidgetProvider::class.java).setAction(ACTION_TICK),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
 
     override fun onAppWidgetOptionsChanged(
         context: Context,
@@ -245,6 +314,10 @@ class ClockWidgetProvider : AppWidgetProvider() {
         private val http: HttpClient by lazy {
             HttpClient(io.nisfeb.talon.util.httpEngineFactory())
         }
+
+        /** Our own, so onReceive can tell a tick from a system update. */
+        private const val ACTION_TICK = "io.nisfeb.talon.widget.CLOCK_TICK"
+        private const val TICK_REQUEST = 1
 
         private const val WEATHER_TIMEOUT_MS = 8_000L
 

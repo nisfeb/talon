@@ -1,9 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
   updatePeriodMillis is half an hour because that is the system's
-  floor; anything smaller is silently rounded up to it. The dial can
-  live with that: the sun moves a degree every four minutes and the
-  weather is fetched on the same schedule the app uses.
+  floor; anything smaller is silently rounded up to it. That is the
+  slow lane: the weather, and the widget's way back after a reboot.
+
+  It is not what keeps the clock right. Half an hour of drift is
+  nothing to the dial, where the sun moves a degree every four
+  minutes, and is simply a wrong clock to the figures under it, so
+  ClockWidgetProvider re-arms a minute alarm of its own for those.
 
   No maxResize. It used to stop at 300dp, which on a tablet is a
   postage stamp, and the ceiling bought nothing: the dial is square and
