@@ -48,6 +48,25 @@ class CometsOnlyTest {
     }
 
     @Test
+    fun `a comet is never shown by its at-p`() {
+        // The rule every surface goes through: handle() is what a ship
+        // is called with nicknames set aside, and for a comet it is
+        // never the fifty-six characters the name replaces.
+        val map = ContactMap()
+        assertEquals("..admire...attune", map.handle(comet))
+        // Everything else has an @p short enough to read.
+        for (ship in notComets) assertEquals(ship, map.handle(ship))
+    }
+
+    @Test
+    fun `a nickname is what you see, but the handle underneath is the name`() {
+        val map = ContactMap(contacts = listOf(ContactEntity(comet, "Sam", null, null)))
+        assertEquals("Sam", map.displayName(comet))
+        // The line under a nickname, and still not the @p.
+        assertEquals("..admire...attune", map.handle(comet))
+    }
+
+    @Test
     fun `a nickname still wins for a comet`() {
         val map = ContactMap(
             contacts = listOf(ContactEntity(comet, "Sam", null, null)),

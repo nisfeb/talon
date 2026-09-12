@@ -79,13 +79,23 @@ data class ContactMap(
         if (alwaysPatp) {
             ship
         } else {
-            nickname(ship)
-                // A comet spells its own fingerprint, so it needs
-                // nothing fetched and nobody's permission.
-                ?: Mnemonym.display(ship)
-                ?: (if (nonCometNames) AzimuthNames.nameFor(ship) else null)
-                ?: ship
+            nickname(ship) ?: handle(ship)
         }
+    /**
+     * What a ship is called with nicknames set aside.
+     *
+     * Its word name if it has one, otherwise its @p. This is the line
+     * that goes under a nickname, and for a comet it is the only thing
+     * ever shown: a comet's @p is the fifty-six characters its name
+     * exists to replace, so no surface puts one in front of anybody.
+     */
+    fun handle(ship: String): String =
+        // A comet spells its own fingerprint, so it needs nothing
+        // fetched and nobody's permission.
+        Mnemonym.display(ship)
+            ?: (if (nonCometNames) AzimuthNames.nameFor(ship) else null)
+            ?: ship
+
     fun contact(ship: String): ContactEntity? = byShip[ship]
     fun shipColor(ship: String): String? = byShip[ship]?.color
 

@@ -758,11 +758,14 @@ private fun AdminBody(
                                 ),
                             )
                             Text(
-                                ship,
+                                contactMap.handle(ship),
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
-                        } ?: Text(ship, style = MaterialTheme.typography.bodyMedium)
+                        } ?: Text(
+                            contactMap.handle(ship),
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
                     }
                     OutlinedButton(onClick = { onUnban(ship) }) { Text("Unban") }
                 }
@@ -1314,11 +1317,11 @@ private fun ShipRow(
                     ),
                 )
                 Text(
-                    ship,
+                    contactMap.handle(ship),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-            } ?: Text(ship, style = MaterialTheme.typography.bodyMedium)
+            } ?: Text(contactMap.handle(ship), style = MaterialTheme.typography.bodyMedium)
         }
         trailing?.invoke()
     }

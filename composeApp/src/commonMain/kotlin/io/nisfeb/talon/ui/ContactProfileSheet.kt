@@ -94,34 +94,29 @@ fun ContactProfileSheet(
                         .copy(fontWeight = FontWeight.SemiBold),
                 )
             }
-            // @p and (when the naming setting is on) the full mnemonym,
-            // each tap-to-copy — the profile sheet is where you go to
-            // grab someone's exact name.
+            // The name, tap-to-copy: this sheet is where you come to
+            // read somebody's name in full and take it away with you.
             val clipboard = LocalClipboardManager.current
             var copied by remember { mutableStateOf<String?>(null) }
             fun copyRow(text: String): () -> Unit = {
                 clipboard.setText(AnnotatedString(text))
                 copied = text
             }
-            // The word name first, because that is what the ship is
-            // called everywhere else. The @p still follows, unabridged
-            // and copyable: this sheet is the one place it is wanted,
-            // both to tell two alike-looking names apart and because
-            // it is what you paste somewhere else.
+            // A comet is its word name and nothing else, here as
+            // everywhere. This is the long form of it -- every word,
+            // not the two-word short name the rest of the app shows --
+            // because telling two alike-looking comets apart is what
+            // somebody opened this sheet to do. Its @p is not shown at
+            // all: it is the fifty-six characters the name replaces.
+            //
+            // Every other ship shows its @p, which is its real name and
+            // short enough to read.
             val nym = remember(ship) { Mnemonym.forShip(ship) }
-            if (nym != null) {
-                Text(
-                    nym,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.clickable(onClick = copyRow(nym)),
-                )
-            }
             Text(
-                ship,
+                nym ?: ship,
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.clickable(onClick = copyRow(ship)),
+                modifier = Modifier.clickable(onClick = copyRow(nym ?: ship)),
             )
             copied?.let {
                 Text(
