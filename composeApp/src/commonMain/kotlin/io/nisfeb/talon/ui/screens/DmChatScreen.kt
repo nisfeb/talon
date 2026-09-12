@@ -348,14 +348,20 @@ fun DmChatScreen(
         }
     }
 
+    // Starts from the names the chat list already has, not from none.
+    // Built empty, every author in view is its bare @p and every
+    // avatar its fallback for the frame it takes Room to answer --
+    // which is the whole channel visibly assembling itself on the way
+    // in, for a conversation that was on screen a moment ago. The
+    // snapshot is per-ship, so a switch still starts clean.
     val contactMap by remember {
         contactMapFlow(
             db.contacts().stream(),
             db.clubs().stream(),
             db.groups().streamGroups(),
             db.groups().streamChannelGroups(),
-        )
-    }.collectAsState(initial = ContactMap.EMPTY)
+        ).onEach { HomeListSnapshot.active?.contactMap = it }
+    }.collectAsState(initial = HomeListSnapshot.active?.contactMap ?: ContactMap.EMPTY)
 
     // Current pinned-post id for this channel (chat channels only);
     // null for DMs / clubs / non-chat channels.
