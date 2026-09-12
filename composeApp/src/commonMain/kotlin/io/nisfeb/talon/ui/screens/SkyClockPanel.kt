@@ -292,7 +292,12 @@ fun SkyClockDial(
                     drawMoon(
                         centre = centre,
                         angleDeg = moonAngle,
-                        orbit = radius,
+                        // Its own track, just inside the sun's. At a new
+                        // moon the two are within a couple of degrees of
+                        // each other and the moon is unlit, so sharing a
+                        // track made it an invisible disc underneath a
+                        // larger marker — correct, and no use at all.
+                        orbit = radius - ring * MOON_TRACK_INSET,
                         r = ring * 0.30f,
                         elongationDeg = sky.moonElongationDeg,
                         lit = MOON,
@@ -469,6 +474,10 @@ internal val SUN = Color(0xFFF5B740)
 internal val SUN_DOWN = Color(0xFF6B5526)
 
 internal val MOON = Color(0xFFE8E4DA)
+
+/** How far inside the sun's track the moon rides, as a fraction of the
+ *  band. Enough that the two never sit on top of one another. */
+internal const val MOON_TRACK_INSET = 0.30f
 
 /** The unlit limb. A new moon is still there; it is simply catching
  *  nothing, and a disc that vanished entirely would read as a bug. */
@@ -888,6 +897,15 @@ private fun DrawScope.drawMoon(
     val p = pointOn(angleDeg, centre, orbit)
     drawCircle(color = dark, radius = r, center = p)
     drawPath(moonLitPath(p, r, elongationDeg), color = lit)
+    // A rim, so a new moon reads as a dark disc rather than as
+    // nothing. The sky does hide it completely; a dial that exists to
+    // mark where it is should not.
+    drawCircle(
+        color = lit.copy(alpha = 0.45f),
+        radius = r,
+        center = p,
+        style = Stroke(width = r * 0.10f),
+    )
 }
 
 internal fun dayBand(sky: SkyClock.Sky): Color {

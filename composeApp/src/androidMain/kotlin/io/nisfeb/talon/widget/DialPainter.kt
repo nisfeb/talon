@@ -13,6 +13,7 @@ import io.nisfeb.talon.ui.Moon
 import io.nisfeb.talon.ui.SkyClock
 import io.nisfeb.talon.ui.screens.MOON
 import io.nisfeb.talon.ui.screens.MOON_DARK
+import io.nisfeb.talon.ui.screens.MOON_TRACK_INSET
 import io.nisfeb.talon.ui.screens.SUN
 import io.nisfeb.talon.ui.screens.SUN_DOWN
 import io.nisfeb.talon.ui.screens.CLOUD_GLYPH_FILL
@@ -131,12 +132,22 @@ object DialPainter {
         // ---- the moon, where it actually is --------------------------
         sky.moonElongationDeg?.let { elong ->
             val at = Moon.dialMinute(sky.minuteOfDay, elong)
-            val p = pointOn(SkyClock.angleOf(at), cx, cy, radius)
+            // Its own track, just inside the sun's, and a rim so a new
+            // moon is a dark disc rather than nothing. Both for the
+            // same reason: at a new moon the two are a couple of
+            // degrees apart and the moon is unlit, so sharing a track
+            // put an invisible disc under a larger marker.
+            val p = pointOn(SkyClock.angleOf(at), cx, cy, radius - ring * MOON_TRACK_INSET)
+            val r = ring * 0.30f
             paint.style = Paint.Style.FILL
             paint.color = MOON_DARK.toArgb()
-            c.drawCircle(p.first, p.second, ring * 0.30f, paint)
+            c.drawCircle(p.first, p.second, r, paint)
             paint.color = MOON.toArgb()
-            c.drawPath(moonPath(p.first, p.second, ring * 0.30f, elong), paint)
+            c.drawPath(moonPath(p.first, p.second, r, elong), paint)
+            paint.style = Paint.Style.STROKE
+            paint.strokeWidth = r * 0.10f
+            paint.color = MOON.copy(alpha = 0.45f).toArgb()
+            c.drawCircle(p.first, p.second, r, paint)
         }
 
         // ---- the sun, which is also where now is ---------------------

@@ -90,3 +90,44 @@ class MoonTest {
         assertTrue(waxing.waxing && !waning.waxing)
     }
 }
+
+class NewMoonVisibilityTest {
+
+    @Test
+    fun `a new moon sits practically on top of the sun`() {
+        // Which is what made it invisible: unlit, and under a larger
+        // marker drawn after it. The arithmetic is right; the drawing
+        // had to stop sharing a track.
+        val base = 1_704_974_220_000L
+        val p = Moon.phaseAt(base)
+        val noon = 12 * 60
+        val gap = kotlin.math.abs(Moon.dialMinute(noon, p.elongationDeg) - noon)
+        assertTrue(gap < 30, "a new moon is ${gap} minutes from the sun on the dial")
+        assertTrue(p.illuminated < 0.02f, "and ${p.illuminated * 100}% lit")
+    }
+
+    @Test
+    fun `the moon and the sun share a position at some point every month`() {
+        // So the two markers cannot rely on being apart. Somewhere in
+        // the month they coincide, and that is exactly when somebody
+        // looks for the moon and reports it missing.
+        val new = 1_704_974_220_000L
+        val closest = (0..29).minOf { day ->
+            val p = Moon.phaseAt(new + day * 86_400_000L)
+            val gap = kotlin.math.abs(Moon.dialMinute(0, p.elongationDeg) - 0)
+            minOf(gap, 1440 - gap)
+        }
+        assertTrue(closest < 40, "the closest they come in a month is $closest minutes")
+    }
+
+    @Test
+    fun `the moon rides inside the sun's track`() {
+        // Not a detail: it is the whole of why both can be seen at
+        // once. Zero would put them back on one another.
+        assertTrue(
+            io.nisfeb.talon.ui.screens.MOON_TRACK_INSET > 0.2f,
+            "an inset of ${io.nisfeb.talon.ui.screens.MOON_TRACK_INSET} does not clear the sun",
+        )
+        assertTrue(io.nisfeb.talon.ui.screens.MOON_TRACK_INSET < 0.5f, "and it must stay on the band")
+    }
+}
