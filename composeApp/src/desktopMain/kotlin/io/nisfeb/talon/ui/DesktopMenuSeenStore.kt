@@ -73,8 +73,10 @@ class DesktopMenuSeenStore(
         )
     }
 
-    private companion object {
+    internal companion object {
         private val JSON = Json { ignoreUnknownKeys = true; prettyPrint = false }
+        /** Internal so the ship eraser deletes the file this names,
+         *  rather than a second guess at the same rule. */
         fun defaultFile(ship: String): File {
             val safe = ship.removePrefix("~")
                 .replace(Regex("[^a-z0-9-]"), "_")

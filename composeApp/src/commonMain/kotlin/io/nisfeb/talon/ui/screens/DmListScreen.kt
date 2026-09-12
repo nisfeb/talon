@@ -1765,7 +1765,14 @@ internal fun ShipSwitcherDrawer(
     nicknames: Map<String, String>,
     onPick: (String) -> Unit,
     onAdd: () -> Unit,
+    /** Drop a ship's saved session, keeping what it cached so signing
+     *  back in does not start from nothing. Null where unwired. */
+    onSignOut: ((String) -> Unit)? = null,
+    /** Drop the session and everything stored under it. */
+    onForget: ((String) -> Unit)? = null,
 ) {
+    var menuFor by remember { mutableStateOf<String?>(null) }
+    var confirmForget by remember { mutableStateOf<String?>(null) }
     androidx.compose.material3.ModalDrawerSheet {
         Column(
             modifier = Modifier
@@ -1791,7 +1798,7 @@ internal fun ShipSwitcherDrawer(
                             else androidx.compose.ui.graphics.Color.Transparent,
                         )
                         .clickable { onPick(ship) }
-                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                        .padding(start = 12.dp, end = 4.dp, top = 10.dp, bottom = 10.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     androidx.compose.foundation.Image(
@@ -1824,6 +1831,34 @@ internal fun ShipSwitcherDrawer(
                             )
                         }
                     }
+                    if (onSignOut != null || onForget != null) {
+                        Spacer(Modifier.weight(1f))
+                        Box {
+                            IconButton(onClick = { menuFor = ship }) {
+                                Icon(
+                                    Icons.Filled.MoreVert,
+                                    contentDescription = "What to do with $ship",
+                                )
+                            }
+                            DropdownMenu(
+                                expanded = menuFor == ship,
+                                onDismissRequest = { menuFor = null },
+                            ) {
+                                onSignOut?.let { act ->
+                                    DropdownMenuItem(
+                                        text = { Text("Sign out") },
+                                        onClick = { menuFor = null; act(ship) },
+                                    )
+                                }
+                                onForget?.let {
+                                    DropdownMenuItem(
+                                        text = { Text("Sign out and delete data") },
+                                        onClick = { menuFor = null; confirmForget = ship },
+                                    )
+                                }
+                            }
+                        }
+                    }
                 }
             }
             HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
@@ -1851,6 +1886,31 @@ internal fun ShipSwitcherDrawer(
                 )
             }
         }
+    }
+
+    // Deleting cannot be undone and the button sits next to one that
+    // can, so it asks — and says what goes and what does not.
+    confirmForget?.let { ship ->
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { confirmForget = null },
+            title = { Text("Delete $ship's data?") },
+            text = {
+                Text(
+                    "Signs out and removes everything stored on this device for " +
+                        "$ship: its chats, groups and unread marks. Nothing on the " +
+                        "ship itself is touched, and signing in again downloads it " +
+                        "afresh.",
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { confirmForget = null; onForget?.invoke(ship) }) {
+                    Text("Delete", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmForget = null }) { Text("Cancel") }
+            },
+        )
     }
 }
 

@@ -44,6 +44,8 @@ class TalonApplication : Application() {
         private set
     lateinit var sessionStore: SessionStore
         private set
+    lateinit var shipDataEraser: io.nisfeb.talon.data.ShipDataEraser
+        private set
     lateinit var aiSettings: io.nisfeb.talon.ai.AiSettingsRepository
         private set
     lateinit var uiSettings: UiSettings
@@ -175,6 +177,7 @@ class TalonApplication : Application() {
             .writeTimeout(15, TimeUnit.SECONDS)
             .build()
         ktorHttp = createAppHttpClient()
+        shipDataEraser = io.nisfeb.talon.data.AndroidShipDataEraser(this)
         sessionStore = io.nisfeb.talon.urbit.AndroidSessionStore(this)
         aiSettings = io.nisfeb.talon.ai.AndroidAiSettings(this)
         // uiSettings is constructed below once buildShipScoped has set
@@ -473,6 +476,45 @@ class TalonApplication : Application() {
             // Leave the lateinit fields pointing at the previous "none"
             // placeholder; the tree won't touch them while it renders
             // the login screen.
+            _activeShip.value = null
+        }
+    }
+
+    /**
+     * Drop [ship]'s saved session, optionally taking its cached data
+     * with it.
+     *
+     * Works for any saved ship, not only the active one: the switcher
+     * lists them all, and somebody clearing out an account they no
+     * longer use should not have to switch into it first.
+     *
+     * The database is closed before the files go. Deleting underneath
+     * an open connection leaves Room holding a handle to something
+     * that is not there any more, and the next query then fails in a
+     * way that has nothing to do with signing out.
+     */
+    fun forgetShip(ship: String, alsoData: Boolean) {
+        val wasActive = ship == _activeShip.value
+        if (wasActive) {
+            runCatching { repo.stop() }
+            runCatching { shortcuts.stop() }
+            runCatching { db.close() }
+            session.logout()
+        }
+        runCatching { sessionStore.remove(ship) }
+        if (alsoData) {
+            shipDataEraser.erase(ship)
+                .onFailure { android.util.Log.w("Talon", "erase $ship failed", it) }
+        }
+        refreshAllShips()
+        io.nisfeb.talon.ui.screens.resetHomeListSnapshot()
+        if (!wasActive) return
+        val next = sessionStore.activeShip() ?: sessionStore.all().firstOrNull()?.ship
+        if (next != null) {
+            buildShipScoped(next)
+            sessionStore.setActive(next)
+            _activeShip.value = next
+        } else {
             _activeShip.value = null
         }
     }

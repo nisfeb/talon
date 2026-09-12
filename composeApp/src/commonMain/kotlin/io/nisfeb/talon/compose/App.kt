@@ -127,6 +127,10 @@ private const val PEEK_ATTEMPTS = 3
 fun App(
     http: HttpClient,
     sessionStore: SessionStore,
+    /** Deletes a ship's cached data when somebody asks for it to go.
+     *  Noop where the host stores nothing per ship. */
+    shipDataEraser: io.nisfeb.talon.data.ShipDataEraser =
+        io.nisfeb.talon.data.ShipDataEraser.Noop,
     aiSettings: AiSettingsRepository,
     /** Builds a per-ship AppDatabase. Called inside `key(shipKey)` so each
      *  ship's data lives in its own SQLite file — without this the DM
@@ -1579,6 +1583,33 @@ fun App(
                     sessionStore.setActive(newShip)
                     loggedInShip = newShip
                 }
+                /**
+                 * Drop a ship's saved session, and optionally what it
+                 * cached. Any saved ship, not only the active one: the
+                 * switcher lists them all, and clearing out an account
+                 * somebody no longer uses should not require switching
+                 * into it first.
+                 */
+                val forgetShip: (String, Boolean) -> Unit = { gone, alsoData ->
+                    val wasActive = gone == loggedInShip
+                    if (wasActive) {
+                        openChat = null
+                        switchShipAction()
+                        viewerImageUrl = null
+                        viewerImageList = null
+                        showSelfProfile = false
+                        showSettings = false
+                        showSidebarSettings = false
+                    }
+                    runCatching { sessionStore.remove(gone) }
+                    if (alsoData) {
+                        shipDataEraser.erase(gone)
+                    }
+                    if (wasActive) {
+                        loggedInShip = sessionStore.activeShip()
+                            ?: sessionStore.all().firstOrNull()?.ship
+                    }
+                }
                 val addShip: () -> Unit = {
                     openChat = null
                     switchShipAction()
@@ -1619,6 +1650,14 @@ fun App(
                                 onAdd = {
                                     drawerScope.launch { drawerState.close() }
                                     addShip()
+                                },
+                                onSignOut = { gone ->
+                                    drawerScope.launch { drawerState.close() }
+                                    forgetShip(gone, false)
+                                },
+                                onForget = { gone ->
+                                    drawerScope.launch { drawerState.close() }
+                                    forgetShip(gone, true)
                                 },
                             )
                         }

@@ -104,6 +104,7 @@ fun MainViewController(rtc: NativeRtcFactory?): UIViewController {
         App(
             http = http,
             sessionStore = sessionStore,
+            shipDataEraser = io.nisfeb.talon.data.IosShipDataEraser(),
             aiSettings = aiSettings,
             createDb = { shipKey -> createAppDatabase(shipKey) },
             drafts = drafts,

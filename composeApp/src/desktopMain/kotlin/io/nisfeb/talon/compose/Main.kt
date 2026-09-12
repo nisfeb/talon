@@ -462,6 +462,7 @@ fun main() {
                 App(
                     http = graph.ktorHttp,
                     sessionStore = graph.sessionStore,
+                    shipDataEraser = io.nisfeb.talon.data.DesktopShipDataEraser(),
                     localShip = graph.localShip,
                     aiSettings = graph.aiSettings,
                     createDb = graph.createDb,

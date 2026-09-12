@@ -1472,6 +1472,18 @@ fun TalonApp(
                             drawerScope.launch { drawerState.close() }
                             addingAnotherShip = true
                         },
+                        onSignOut = { picked ->
+                            drawerScope.launch { drawerState.close() }
+                            openWhom = null
+                            closeSections()
+                            app.forgetShip(picked, alsoData = false)
+                        },
+                        onForget = { picked ->
+                            drawerScope.launch { drawerState.close() }
+                            openWhom = null
+                            closeSections()
+                            app.forgetShip(picked, alsoData = true)
+                        },
                     )
                 }
                 }
