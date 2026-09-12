@@ -593,13 +593,15 @@ fun SettingsScreen(
             }
             }
             if (safeTab == SettingsTab.Chats) {
-            // ── Sidebar visibility ─────────────────────────────────
-            // Drills into SidebarSettingsScreen where the user toggles
-            // which rail items show. Inline here so it sits next to
-            // the other home/rail personalisation rows. The rail only
-            // exists at expanded widths (desktop, tablet landscape);
-            // a phone has nothing this would change, so hide it there.
-            val wide = with(androidx.compose.ui.platform.LocalDensity.current) {
+            // ── Which sections show, and in what order ─────────────
+            //
+            // Drills into SidebarSettingsScreen. The same preferences
+            // drive the desktop rail and the mobile drawer, so this row
+            // is no longer hidden on a phone: it used to be, back when
+            // the rail was the only thing they drove and a phone had no
+            // rail to change.
+            val drawerNav = io.nisfeb.talon.ui.isDrawerNavigation
+            val wide = drawerNav || with(androidx.compose.ui.platform.LocalDensity.current) {
                 androidx.compose.ui.platform.LocalWindowInfo.current.containerSize.width.toDp()
             } >= io.nisfeb.talon.ui.ExpandedThreshold
             if (wide) Row(
@@ -611,9 +613,15 @@ fun SettingsScreen(
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 Column(modifier = Modifier.weight(1f)) {
-                    Text("Sidebar", style = MaterialTheme.typography.bodyLarge)
                     Text(
-                        "Choose what shows in the rail.",
+                        if (drawerNav) "Menu" else "Sidebar",
+                        style = MaterialTheme.typography.bodyLarge,
+                    )
+                    Text(
+                        // Named for the thing in front of them rather
+                        // than for the one this setting was built for.
+                        if (drawerNav) "Choose what shows in the menu, and in what order."
+                        else "Choose what shows in the rail.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )

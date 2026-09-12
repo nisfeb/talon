@@ -2848,6 +2848,24 @@ fun App(
                                 )
                             }
                         }
+                        // iOS reaches its sections through this; desktop has the
+                        // rail, and TalonDrawer is a pass-through there.
+                        io.nisfeb.talon.ui.TalonDrawer(
+                            drawer = { closeDrawer ->
+                                io.nisfeb.talon.ui.SectionsDrawer(
+                                    order = railItemOrder,
+                                    visibility = railVisibility,
+                                    active = activeRailTab?.let {
+                                        runCatching { io.nisfeb.talon.ui.RailItem.valueOf(it.name) }.getOrNull()
+                                    },
+                                    canOpen = { item -> item in enabledItems },
+                                    onSection = { item ->
+                                        closeDrawer()
+                                        onRailItemClicked(item)
+                                    },
+                                )
+                            },
+                        ) {
                         DesktopShell(
                             activeRailTab = activeRailTab,
                             // Assistant is a modal destination that keeps the
@@ -2988,6 +3006,7 @@ fun App(
                                 }
                             },
                         )
+                        }
                     }
                     }
                 }

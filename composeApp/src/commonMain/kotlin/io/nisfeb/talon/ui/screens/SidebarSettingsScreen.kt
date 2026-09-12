@@ -83,14 +83,22 @@ fun SidebarSettingsScreen(
                 Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
             }
             Text(
-                "Sidebar",
+                // One screen, two things in front of people: a rail on
+                // a desktop and a drawer on a phone, both driven by
+                // these preferences.
+                if (io.nisfeb.talon.ui.isDrawerNavigation) "Menu" else "Sidebar",
                 style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
                 modifier = Modifier.padding(start = 4.dp),
             )
         }
         Text(
-            "Drag the handle to reorder. Toggle off to hide an item " +
-                "from the sidebar (it stays available in the kebab menu).",
+            if (io.nisfeb.talon.ui.isDrawerNavigation) {
+                "Drag the handle to reorder. Toggle off to leave an item " +
+                    "out of the menu."
+            } else {
+                "Drag the handle to reorder. Toggle off to hide an item " +
+                    "from the sidebar (it stays available in the kebab menu)."
+            },
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
