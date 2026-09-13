@@ -69,8 +69,9 @@ expect val isLocalCometSupported: Boolean
  * links / reactions / buttons appear dead.
  *
  * Gates two surfaces today:
- *  - swipe-a-message-row to open its thread (DmChatScreen.MessageRow);
- *    desktop uses the reply-count pill / ⋯ menu / right-click instead.
+ *  - swipe-a-message-row to quote it or open its thread, per the
+ *    setting (DmChatScreen.MessageRow); desktop uses the ⋯ menu /
+ *    right-click instead.
  *  - edge-swipe to open the ship-switcher drawer (App.kt
  *    ModalNavigationDrawer.gesturesEnabled); desktop opens it by
  *    clicking the Talon logo.

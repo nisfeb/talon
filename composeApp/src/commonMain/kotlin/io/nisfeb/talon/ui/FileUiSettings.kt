@@ -63,6 +63,7 @@ class FileUiSettings(
         val homeLayout: String = "",
         val railItemOrder: List<String> = emptyList(),
         val powerFeaturesEnabled: Boolean = false,
+        val swipeQuotes: Boolean = true,
         val density: String = Density.Comfortable.name,
         val fontScale: Float = 1.0f,
         val alwaysPatp: Boolean = false,
@@ -187,6 +188,9 @@ class FileUiSettings(
     override val powerFeaturesEnabled: StateFlow<Boolean> =
         _powerFeaturesEnabled.asStateFlow()
 
+    private val _swipeQuotes = MutableStateFlow(initial.swipeQuotes)
+    override val swipeQuotes: StateFlow<Boolean> = _swipeQuotes.asStateFlow()
+
     private val _density = MutableStateFlow(
         runCatching { Density.valueOf(initial.density) }
             .getOrDefault(Density.Comfortable),
@@ -261,6 +265,12 @@ class FileUiSettings(
         persistCurrent()
     }
 
+    override fun setSwipeQuotes(quotes: Boolean) {
+        if (_swipeQuotes.value == quotes) return
+        _swipeQuotes.value = quotes
+        persistCurrent()
+    }
+
     override fun setDensity(mode: Density) {
         if (_density.value == mode) return
         _density.value = mode
@@ -300,6 +310,7 @@ class FileUiSettings(
                 homeLayout = _homeLayout.value,
                 railItemOrder = _railItemOrder.value.map { it.name },
                 powerFeaturesEnabled = _powerFeaturesEnabled.value,
+                swipeQuotes = _swipeQuotes.value,
                 density = _density.value.name,
                 fontScale = _fontScale.value,
                 alwaysPatp = ShipNames.alwaysPatp.value,

@@ -148,6 +148,7 @@ fun SettingsScreen(
     val themeMode by themePreference.mode.collectAsState()
     val hideComposerButtons by uiSettings.hideComposerButtons.collectAsState()
     val powerFeaturesEnabled by uiSettings.powerFeaturesEnabled.collectAsState()
+    val swipeQuotes by uiSettings.swipeQuotes.collectAsState()
     val density by uiSettings.density.collectAsState()
     val homeFahrenheit by uiSettings.homeFahrenheit.collectAsState()
     val homeTwentyFourHour by uiSettings.homeTwentyFourHour.collectAsState()
@@ -684,6 +685,29 @@ fun SettingsScreen(
                 onChange = { uiSettings.setHideComposerButtons(it) },
             )
             Spacer(Modifier.height(4.dp))
+
+            Text(
+                "Swiping a message",
+                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
+            )
+            Text(
+                "In a direct message, or on a reply, a swipe always opens the thread.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilterChip(
+                    selected = swipeQuotes,
+                    onClick = { uiSettings.setSwipeQuotes(true) },
+                    label = { Text("Quotes it") },
+                )
+                FilterChip(
+                    selected = !swipeQuotes,
+                    onClick = { uiSettings.setSwipeQuotes(false) },
+                    label = { Text("Replies in its thread") },
+                )
+            }
+            Spacer(Modifier.height(8.dp))
 
             FeatureToggleRow(
                 label = "Power features",

@@ -232,6 +232,7 @@ fun DmChatScreen(
 ) {
     val aiConfigured by aiSettings.state.collectAsState()
     val hideComposerButtons by uiSettings.hideComposerButtons.collectAsState()
+    val swipeQuotes by uiSettings.swipeQuotes.collectAsState()
     val powerFeaturesEnabled by uiSettings.powerFeaturesEnabled.collectAsState()
     val aiFeatures = remember(aiSettings) {
         AiFeatures(AiClient { aiSettings.state.value })
@@ -625,6 +626,12 @@ fun DmChatScreen(
     val onOpenThreadForMessage: (MessageEntity) -> Unit = remember {
         { m -> currentOnOpenThread(m.id) }
     }
+    val onSwipeMessage: (MessageEntity) -> Unit = remember(swipeQuotes, whom) {
+        { m ->
+            if (swipeQuotes(swipeQuotes, whom, m.parentId)) composerState.pendingQuote = m
+            else currentOnOpenThread(m.id)
+        }
+    }
     val onMentionTap: (String) -> Unit = remember {
         { patp -> profileSheetShip = patp }
     }
@@ -1015,6 +1022,7 @@ fun DmChatScreen(
                                 messageActionMenuFor(rowMsg)
                             },
                             onOpenThread = onOpenThreadForMessage,
+                            onSwipe = onSwipeMessage,
                             onReactionTap = onReactionForMessage,
                             onReactionLongPress = { reactions ->
                                 reactionDetailsTarget = reactions
@@ -1434,6 +1442,8 @@ private fun MessageRow(
      *  (bookmark flag, pin state) don't run for every row in the list. */
     actionMenu: @Composable () -> Unit,
     onOpenThread: (MessageEntity) -> Unit,
+    /** A swipe across the row: a quote or the thread, per the setting. */
+    onSwipe: (MessageEntity) -> Unit,
     onReactionTap: (MessageEntity, List<ReactionEntity>, String) -> Unit,
     /** Long-press / right-click on any reaction chip — surfaces the
      *  per-reactor breakdown so the user can see who reacted with
@@ -1507,7 +1517,7 @@ private fun MessageRow(
                 translationX = offsetX.value
                 alpha = if (isPending) 0.55f else 1f
             }
-            // Swipe-to-open-thread is a touch gesture only. On desktop
+            // The swipe is a touch gesture only. On desktop
             // the row-level horizontal-drag detector competed with
             // child clicks — a click with a few px of horizontal drift
             // got claimed as a sub-threshold swipe and the child's
@@ -1522,7 +1532,7 @@ private fun MessageRow(
                             onDragEnd = {
                                 val fired = offsetX.value < -SWIPE_REPLY_THRESHOLD_PX
                                 offsetX.value = 0f
-                                if (fired) onOpenThread(m)
+                                if (fired) onSwipe(m)
                             },
                             onDragCancel = {
                                 offsetX.value = 0f
@@ -2655,3 +2665,11 @@ private fun TypingIndicator(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 2.dp),
     )
 }
+
+/**
+ * Whether a swipe quotes the message rather than opening its thread.
+ * A quote only exists for a channel's top-level posts; anywhere else
+ * the swipe opens the thread whatever the setting says.
+ */
+internal fun swipeQuotes(setting: Boolean, whom: String, parentId: String?): Boolean =
+    setting && whom.startsWith("chat/") && parentId == null

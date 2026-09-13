@@ -164,6 +164,15 @@ interface UiSettings {
     fun setPowerFeaturesEnabled(enabled: Boolean)
 
     /**
+     * What a swipe on a message does: quote it in the composer (the
+     * default) or open its thread. A touch gesture, so a per-device
+     * preference. Where a quote cannot be sent -- a DM, a reply -- the
+     * swipe opens the thread whatever this says.
+     */
+    val swipeQuotes: StateFlow<Boolean>
+    fun setSwipeQuotes(quotes: Boolean)
+
+    /**
      * Per-device density preference for chat-list and message-row
      * surfaces. Drives [ChatDensity] via [LocalChatDensity]. Stored
      * locally; not synced via %settings (matches the accent /
@@ -348,6 +357,12 @@ class InMemoryUiSettings(
     override val powerFeaturesEnabled: StateFlow<Boolean> = _powerFeaturesEnabled.asStateFlow()
     override fun setPowerFeaturesEnabled(enabled: Boolean) {
         _powerFeaturesEnabled.value = enabled
+    }
+
+    private val _swipeQuotes = MutableStateFlow(true)
+    override val swipeQuotes: StateFlow<Boolean> = _swipeQuotes.asStateFlow()
+    override fun setSwipeQuotes(quotes: Boolean) {
+        _swipeQuotes.value = quotes
     }
 
     private val _density = MutableStateFlow(Density.Comfortable)

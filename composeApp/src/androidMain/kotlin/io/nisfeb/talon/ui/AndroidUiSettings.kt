@@ -168,6 +168,9 @@ class AndroidUiSettings(
     override val powerFeaturesEnabled: StateFlow<Boolean> =
         _powerFeaturesEnabled.asStateFlow()
 
+    private val _swipeQuotes = MutableStateFlow(prefs.getBoolean(KEY_SWIPE_QUOTES, true))
+    override val swipeQuotes: StateFlow<Boolean> = _swipeQuotes.asStateFlow()
+
     private val _density = MutableStateFlow(loadDensity())
     override val density: StateFlow<Density> = _density.asStateFlow()
 
@@ -260,6 +263,12 @@ class AndroidUiSettings(
         _powerFeaturesEnabled.value = enabled
     }
 
+    override fun setSwipeQuotes(quotes: Boolean) {
+        if (_swipeQuotes.value == quotes) return
+        prefs.edit().putBoolean(KEY_SWIPE_QUOTES, quotes).apply()
+        _swipeQuotes.value = quotes
+    }
+
     override fun setDensity(mode: Density) {
         if (_density.value == mode) return
         prefs.edit().putString(KEY_DENSITY, mode.name).apply()
@@ -350,6 +359,7 @@ private const val KEY_MIC_AGC = "mic_auto_gain"
         private const val KEY_ACTIVE_RAIL_TAB = "active_rail_tab"
         private const val KEY_SMART_SEARCH_PREFERRED = "smart_search_preferred"
         private const val KEY_POWER_FEATURES = "power_features_enabled"
+        private const val KEY_SWIPE_QUOTES = "swipe_quotes"
         private const val KEY_DENSITY = "density"
         private const val KEY_FONT_SCALE = "font_scale"
         private const val KEY_RAIL_ITEM_ORDER = "rail_item_order"
