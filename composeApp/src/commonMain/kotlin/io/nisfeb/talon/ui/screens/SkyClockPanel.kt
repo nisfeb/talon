@@ -156,7 +156,8 @@ fun SkyClockDial(
     // That step is a quarter of a degree of actual movement; snap it.
     val sunAngle by rememberSeamlessAngle(SkyClock.angleOf(sky.minuteOfDay))
 
-    val moonMinute = sky.moonElongationDeg?.let { Moon.dialMinute(sky.minuteOfDay, it) }
+    val moon = sky.moonElongationDeg?.takeIf { sky.moonVisible }
+    val moonMinute = moon?.let { Moon.dialMinute(sky.minuteOfDay, it) }
     val moonAngle by rememberSeamlessAngle(moonMinute?.let { SkyClock.angleOf(it) } ?: 0f)
 
     val dayColor by animateColorAsState(
@@ -285,7 +286,7 @@ fun SkyClockDial(
                 // a new moon keeps the sun's hours — so the night
                 // somebody looks for it is exactly the night there is
                 // none.
-                if (moonMinute != null && sky.moonVisible) {
+                if (moon != null) {
                     drawMoon(
                         centre = centre,
                         angleDeg = moonAngle,
@@ -296,7 +297,7 @@ fun SkyClockDial(
                         // larger marker — correct, and no use at all.
                         orbit = radius - ring * MOON_TRACK_INSET,
                         r = ring * 0.30f,
-                        elongationDeg = sky.moonElongationDeg!!,
+                        elongationDeg = moon,
                         lit = MOON,
                         dark = MOON_DARK,
                     )

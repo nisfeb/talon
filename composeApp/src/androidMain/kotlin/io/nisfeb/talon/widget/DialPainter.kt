@@ -15,6 +15,9 @@ import io.nisfeb.talon.ui.screens.MOON
 import androidx.compose.ui.graphics.asAndroidPath
 import io.nisfeb.talon.ui.screens.MOON_DARK
 import io.nisfeb.talon.ui.screens.moonLitPath
+import io.nisfeb.talon.ui.screens.bandPath
+import io.nisfeb.talon.ui.screens.pointOn
+import androidx.compose.ui.geometry.Offset
 import io.nisfeb.talon.ui.screens.MOON_TRACK_INSET
 import io.nisfeb.talon.ui.screens.SUN
 import io.nisfeb.talon.ui.screens.SUN_DOWN
@@ -114,7 +117,7 @@ object DialPainter {
         // Where each one goes is the app's own arithmetic, not a second
         // guess at it: the same scatter, the same hours, the same sizes.
         // Only the drawing is different, because this canvas is.
-        val band = bandPath(cx, cy, radius, ring)
+        val band = bandPath(Offset(cx, cy), radius, ring).asAndroidPath()
         val cover = sky.cloudCover ?: 0f
         c.save()
         c.clipPath(band)
@@ -138,17 +141,17 @@ object DialPainter {
             // same reason: at a new moon the two are a couple of
             // degrees apart and the moon is unlit, so sharing a track
             // put an invisible disc under a larger marker.
-            val p = pointOn(SkyClock.angleOf(at), cx, cy, radius - ring * MOON_TRACK_INSET)
+            val p = pointOn(SkyClock.angleOf(at), Offset(cx, cy), radius - ring * MOON_TRACK_INSET)
             val r = ring * 0.30f
             paint.style = Paint.Style.FILL
             paint.color = MOON_DARK.toArgb()
-            c.drawCircle(p.first, p.second, r, paint)
+            c.drawCircle(p.x, p.y, r, paint)
             paint.color = MOON.toArgb()
-            c.drawPath(moonPath(p.first, p.second, r, elong), paint)
+            c.drawPath(moonLitPath(p, r, elong).asAndroidPath(), paint)
             paint.style = Paint.Style.STROKE
             paint.strokeWidth = r * 0.10f
             paint.color = MOON.copy(alpha = 0.45f).toArgb()
-            c.drawCircle(p.first, p.second, r, paint)
+            c.drawCircle(p.x, p.y, r, paint)
             // Put the brush back. One Paint is carried through the
             // whole dial, so a style left on it is inherited by
             // whatever draws next -- and what draws next is the sun,
@@ -158,9 +161,9 @@ object DialPainter {
         }
 
         // ---- the sun, which is also where now is ---------------------
-        val sunAt = pointOn(SkyClock.angleOf(sky.minuteOfDay), cx, cy, radius)
+        val sunAt = pointOn(SkyClock.angleOf(sky.minuteOfDay), Offset(cx, cy), radius)
         paint.color = (if (sky.sunUp) SUN else SUN_DOWN).toArgb()
-        c.drawCircle(sunAt.first, sunAt.second, ring * 0.36f, paint)
+        c.drawCircle(sunAt.x, sunAt.y, ring * 0.36f, paint)
 
         // ---- what is written across it -------------------------------
         readout(
@@ -201,10 +204,9 @@ object DialPainter {
             val a = starBrightness(-mix, cover, starNoise(i, 3))
             if (a < 0.02f) continue
             paint.color = Color.argb((a * 255).toInt().coerceIn(0, 255), 255, 255, 255)
-            val p = pointOn(
-                SkyClock.angleOf(minute), cx, cy, radius + starOffset(starNoise(i, 2), ring),
+            val p = pointOn(SkyClock.angleOf(minute), Offset(cx, cy), radius + starOffset(starNoise(i, 2), ring),
             )
-            c.drawCircle(p.first, p.second, starRadius(starNoise(i, 4), ring), paint)
+            c.drawCircle(p.x, p.y, starRadius(starNoise(i, 4), ring), paint)
         }
     }
 
@@ -247,17 +249,13 @@ object DialPainter {
         val matrix = Matrix()
         at.forEachIndexed { i, (minute, coverAt) ->
             val w = box * cloudScale(coverAt)
-            val p = pointOn(
-                SkyClock.angleOf(minute),
-                cx,
-                cy,
-                radius + ring * CLOUD_OFFSETS[i % CLOUD_OFFSETS.size],
+            val p = pointOn(SkyClock.angleOf(minute), Offset(cx, cy), radius + ring * CLOUD_OFFSETS[i % CLOUD_OFFSETS.size],
             )
             // Drawn into a square of side w, the same as the app does,
             // so the glyph's own padding puts the cloud at about the
             // band's height rather than over both its edges.
             matrix.setScale(w / 24f, w / 24f)
-            matrix.postTranslate(p.first - w / 2f, p.second - w / 2f)
+            matrix.postTranslate(p.x - w / 2f, p.y - w / 2f)
             scratch.reset()
             cloudGlyph.transform(matrix, scratch)
             val a = (0.15f + 0.22f * coverAt).coerceIn(0f, 1f)
@@ -283,18 +281,18 @@ object DialPainter {
         color: Int,
     ) {
         val a = SkyClock.angleOf(minute)
-        val inner = pointOn(a, cx, cy, radius - ring * 0.5f)
-        val outer = pointOn(a, cx, cy, radius + ring * 0.5f)
+        val inner = pointOn(a, Offset(cx, cy), radius - ring * 0.5f)
+        val outer = pointOn(a, Offset(cx, cy), radius + ring * 0.5f)
         paint.style = Paint.Style.STROKE
         paint.strokeWidth = ring * 0.09f
         paint.color = color
-        c.drawLine(inner.first, inner.second, outer.first, outer.second, paint)
+        c.drawLine(inner.x, inner.y, outer.x, outer.y, paint)
 
         paint.style = Paint.Style.FILL
         paint.textSize = ring * 0.42f
         paint.textAlign = Paint.Align.CENTER
-        val at = pointOn(a, cx, cy, radius - ring * 0.5f - paint.textSize * 0.62f)
-        c.drawText(label, at.first, at.second + paint.textSize * 0.35f, paint)
+        val at = pointOn(a, Offset(cx, cy), radius - ring * 0.5f - paint.textSize * 0.62f)
+        c.drawText(label, at.x, at.y + paint.textSize * 0.35f, paint)
     }
 
     /**
@@ -361,13 +359,4 @@ object DialPainter {
         }
     }
 
-    // The dial's geometry, converted rather than retyped. These are the
-    // only three of the many things this file imports from
-    // SkyClockPanel that ever had their own copies.
-    private fun moonPath(cx: Float, cy: Float, r: Float, elongationDeg: Double): Path =
-        moonLitPath(androidx.compose.ui.geometry.Offset(cx, cy), r, elongationDeg).asAndroidPath()
-    private fun bandPath(cx: Float, cy: Float, radius: Float, ring: Float): Path =
-        io.nisfeb.talon.ui.screens.bandPath(androidx.compose.ui.geometry.Offset(cx, cy), radius, ring).asAndroidPath()
-    private fun pointOn(angleDeg: Float, cx: Float, cy: Float, radius: Float): Pair<Float, Float> =
-        io.nisfeb.talon.ui.screens.pointOn(angleDeg, androidx.compose.ui.geometry.Offset(cx, cy), radius).let { it.x to it.y }
 }

@@ -175,7 +175,6 @@ fun shipHandleLong(ship: String): String? =
  * Two comets can abridge to the same two words. Shown side by side --
  * in a picker, or as two of your own accounts -- the same name twice
  * tells nobody apart, so those rows get the unabridged name instead.
- * The rule lived in three places before it lived here.
  */
 fun shipHandles(ships: Collection<String>): Map<String, String> {
     val short = ships.associateWith { shipHandle(it) }
@@ -253,8 +252,7 @@ fun contactMapFlow(
     .onEach {
         LastContactMap.remember(it)
         // Story parsing runs outside composition (StoryCache, ingest),
-        // so the naming policy is published from here. Each host used
-        // to do this itself, and one of them forgot for a year.
+        // so the naming policy is published from here.
         ShipNames.setResolver(it.namesVersion, it::displayName)
     }
     .flowOn(Dispatchers.Default)
@@ -288,7 +286,6 @@ internal fun sameContactDisplay(a: List<ContactEntity>, b: List<ContactEntity>):
 /**
  * The contact map, as every screen wants it: built once per database,
  * starting from the last one anybody had rather than from none.
- * Twenty screens spelled this out; some kept a second cache of it.
  */
 @Composable
 fun rememberContactMap(db: AppDatabase): State<ContactMap> =

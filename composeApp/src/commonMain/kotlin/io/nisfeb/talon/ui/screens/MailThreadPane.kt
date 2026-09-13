@@ -125,6 +125,8 @@ fun MailThreadPane(
         io.nisfeb.talon.mail.flattenVisible(forest, folded.toSet())
     }
 
+    val nameFor: (String) -> String = contacts::displayName
+    fun whenAt(ms: Long) = shortRelativeTime(ms, nowMs())
     fun intent(forwarding: Boolean) = MailIntent(
         prev = answering,
         to = if (forwarding) emptyList() else thread?.participants.orEmpty().filter { it != ourShip },
@@ -142,11 +144,16 @@ fun MailThreadPane(
                 ?: repo.error.value ?: "Could not file it."
         }
     }
+    fun fileMessage(m: io.nisfeb.talon.mail.MailMessage) = file(
+        title = m.subject.ifBlank { "Mail" },
+        seed = io.nisfeb.talon.mail.MailGemtext.seedFor(threadId, m.id),
+        gemtext = io.nisfeb.talon.mail.MailGemtext.message(m, nameFor, ::whenAt),
+    )
 
     Column(modifier.fillMaxSize()) {
         MailThreadHeader(
             subject = thread?.messages?.firstOrNull()?.subject.orEmpty(),
-            participants = thread?.participants.orEmpty().map { contacts.displayName(it) },
+            participants = thread?.participants.orEmpty().map(nameFor),
             unreadable = thread?.unreadable ?: 0,
             labels = thread?.labels.orEmpty(),
             known = knownLabels,
@@ -189,11 +196,7 @@ fun MailThreadPane(
                 file(
                     title = t.messages.firstOrNull()?.subject.orEmpty().ifBlank { "Mail thread" },
                     seed = io.nisfeb.talon.mail.MailGemtext.seedFor(threadId, null),
-                    gemtext = io.nisfeb.talon.mail.MailGemtext.thread(
-                        t,
-                        nameFor = { contacts.displayName(it) },
-                        when_ = { shortRelativeTime(it, nowMs()) },
-                    ),
+                    gemtext = io.nisfeb.talon.mail.MailGemtext.thread(t, nameFor, ::whenAt),
                 )
             },
         )
@@ -241,7 +244,7 @@ fun MailThreadPane(
                     MailThreadTree(
                         messages = t.messages,
                         selected = answering,
-                        nameFor = { contacts.displayName(it) },
+                        nameFor = nameFor,
                         onSelect = { selected = it },
                         modifier = Modifier.weight(1f).fillMaxWidth(),
                     )
@@ -264,18 +267,8 @@ fun MailThreadPane(
                                 depth = 0,
                                 hidden = 0,
                                 copies = copies[shown.id] ?: 1,
-                                nameFor = { contacts.displayName(it) },
-                                onFile = {
-                                    file(
-                                        title = shown.subject.ifBlank { "Mail" },
-                                        seed = io.nisfeb.talon.mail.MailGemtext.seedFor(threadId, shown.id),
-                                        gemtext = io.nisfeb.talon.mail.MailGemtext.message(
-                                            shown,
-                                            nameFor = { contacts.displayName(it) },
-                                            when_ = { shortRelativeTime(it, nowMs()) },
-                                        ),
-                                    )
-                                },
+                                nameFor = nameFor,
+                                onFile = { fileMessage(shown) },
                                 repo = repo,
                             )
                         }
@@ -303,20 +296,9 @@ fun MailThreadPane(
                             onPath = node.message.id in travellingIds,
                             selected = node.message.id == selected,
                             selectable = node.message.verdict != Verdict.FORGED,
-                            nameFor = { contacts.displayName(it) },
+                            nameFor = nameFor,
                             onSelect = { selected = node.message.id },
-                            onFile = {
-                                val m = node.message
-                                file(
-                                    title = m.subject.ifBlank { "Mail" },
-                                    seed = io.nisfeb.talon.mail.MailGemtext.seedFor(threadId, m.id),
-                                    gemtext = io.nisfeb.talon.mail.MailGemtext.message(
-                                        m,
-                                        nameFor = { contacts.displayName(it) },
-                                        when_ = { shortRelativeTime(it, nowMs()) },
-                                    ),
-                                )
-                            },
+                            onFile = { fileMessage(node.message) },
                             repo = repo,
                         )
                         HorizontalDivider()

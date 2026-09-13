@@ -421,13 +421,7 @@ fun App(
         io.nisfeb.talon.ui.AzimuthNames.reset()
     }
 
-    // Keyboard-shortcut request flags. Hoisted outside key() so the
-    /**
-     * Everything that belongs to the ship on screen, put down: what
-     * was open, the viewer, the sheets. Run before the active ship
-     * changes so no frame renders the new ship with the old one's
-     * state.
-     */
+    /** Put down the ship on screen before the active one changes. */
     val leaveShip: () -> Unit = {
         openChat = null
         switchShipAction()
@@ -437,6 +431,8 @@ fun App(
         showSettings = false
         showSidebarSettings = false
     }
+
+    // Keyboard-shortcut request flags. Hoisted outside key() so the
     // onPreviewKeyEvent handler (on the Surface inside key()) can flip
     // them, and DmListScreen (also inside key()) can consume them.
     var focusSearchRequest by remember { mutableStateOf(false) }

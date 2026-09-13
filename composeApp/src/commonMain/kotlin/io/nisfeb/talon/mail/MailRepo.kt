@@ -366,10 +366,7 @@ class MailRepo(
         return a.uploadBlob(bytes)
     }
 
-    /**
-     * One request against the ship, or null after [onFailure]. Eleven
-     * callers used to spell this out, in three different ways.
-     */
+    /** One request against the ship, or null after [onFailure]. */
     private suspend fun <T> call(block: suspend (AuspexApi) -> T): T? {
         val a = api ?: return null
         return try {
@@ -378,6 +375,12 @@ class MailRepo(
             onFailure(e)
             null
         }
+    }
+
+    /** A write, and the re-read that shows it, unless the write failed. */
+    private suspend fun mutate(refresh: suspend () -> Unit, block: suspend (AuspexApi) -> Unit) {
+        call(block) ?: return
+        refresh()
     }
 
     private suspend fun write(block: suspend (AuspexApi) -> Unit) {
@@ -443,29 +446,17 @@ class MailRepo(
         call { _rules.value = it.rules() }
     }
 
-    suspend fun saveRule(r: Rule) {
-        call { it.saveRule(r) } ?: return
-        refreshRules()
-    }
+    suspend fun saveRule(r: Rule) = mutate(::refreshRules) { it.saveRule(r) }
 
-    suspend fun deleteRule(id: String) {
-        call { it.deleteRule(id) } ?: return
-        refreshRules()
-    }
+    suspend fun deleteRule(id: String) = mutate(::refreshRules) { it.deleteRule(id) }
 
     suspend fun refreshLists() {
         call { _lists.value = it.lists() }
     }
 
-    suspend fun saveList(l: MailingList) {
-        call { it.saveList(l) } ?: return
-        refreshLists()
-    }
+    suspend fun saveList(l: MailingList) = mutate(::refreshLists) { it.saveList(l) }
 
-    suspend fun deleteList(name: String) {
-        call { it.deleteList(name) } ?: return
-        refreshLists()
-    }
+    suspend fun deleteList(name: String) = mutate(::refreshLists) { it.deleteList(name) }
 
     // ---- drafts --------------------------------------------------------
 
@@ -478,15 +469,9 @@ class MailRepo(
 
     /** Store a draft. The id comes from the caller and stays the same
      *  across saves, so the second save overwrites the first. */
-    suspend fun saveDraft(d: Draft) {
-        call { it.saveDraft(d) } ?: return
-        refreshDrafts()
-    }
+    suspend fun saveDraft(d: Draft) = mutate(::refreshDrafts) { it.saveDraft(d) }
 
-    suspend fun deleteDraft(id: String) {
-        call { it.deleteDraft(id) } ?: return
-        refreshDrafts()
-    }
+    suspend fun deleteDraft(id: String) = mutate(::refreshDrafts) { it.deleteDraft(id) }
 
     // ---- the timer -----------------------------------------------------
 

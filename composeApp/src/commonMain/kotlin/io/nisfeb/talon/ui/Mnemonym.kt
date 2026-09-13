@@ -45,11 +45,10 @@ object Mnemonym {
      *  the truncated comet @p people already read. Short nyms (a value
      *  with enough leading zeros to lose most of its words) are already
      *  that short and are left alone. */
-    fun display(ship: String): String? {
-        forShip(ship) ?: return null
+    fun display(ship: String): String? = forShip(ship)?.let { full ->
         // Abridged beside the full name, so a row's name is a map read
-        // and not a lock plus three allocations per recomposition.
-        return synchronized(nymLock) { abridgedCache.getOrPut(ship) { abridge(nymCache.getValue(ship)) } }
+        // and not three allocations per recomposition.
+        synchronized(nymLock) { abridgedCache.getOrPut(ship) { abridge(full) } }
     }
 
     /**

@@ -545,16 +545,13 @@ private fun BoxScope.ResizeHandles(
         startCell = cellWidthPx
     }
 
-    // Width. Pointless where there is only one column to have.
-    if (HOME_COLUMNS > 1) {
-        Grip(
-            Modifier.align(Alignment.CenterEnd),
-            grip,
-            label = "Width of ${title(widget.kind)}",
-            onStart = ::freeze,
-        ) { total ->
-            resize(widget.copy(span = resizedSpan(startSpan, total.x, startCell, HOME_COLUMNS)))
-        }
+    Grip(
+        Modifier.align(Alignment.CenterEnd),
+        grip,
+        label = "Width of ${title(widget.kind)}",
+        onStart = ::freeze,
+    ) { total ->
+        resize(widget.copy(span = resizedSpan(startSpan, total.x, startCell, HOME_COLUMNS)))
     }
     Grip(
         Modifier.align(Alignment.BottomCenter),

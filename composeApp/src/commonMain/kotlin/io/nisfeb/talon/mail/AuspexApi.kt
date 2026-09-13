@@ -1,6 +1,7 @@
 package io.nisfeb.talon.mail
 
 import io.ktor.client.HttpClient
+import io.ktor.client.request.HttpRequestBuilder
 import io.ktor.client.request.request
 import io.ktor.client.request.setBody
 import io.ktor.client.statement.bodyAsText
@@ -282,7 +283,7 @@ class AuspexApi(
      * [AuspexError.Unreachable]; past here the ship answered, since
      * headers cannot come back without the request having got there.
      */
-    private suspend fun send(path: String, build: io.ktor.client.request.HttpRequestBuilder.() -> Unit) =
+    private suspend fun send(path: String, build: HttpRequestBuilder.() -> Unit) =
         try {
             http.request(root + path, build)
         } catch (c: CancellationException) {
