@@ -136,6 +136,11 @@ class TalonMessagingReceiver : MessagingReceiver() {
             context = context,
             whom = whom,
             postId = eventId?.takeIf { it.isNotBlank() },
+            // The relay has always told us which ship this is for; it
+            // was only ever used as the title. A tap now switches to
+            // that ship, because the same whom on another one is a
+            // different conversation or none.
+            forShip = patp,
             title = title,
             body = body,
             sentMs = System.currentTimeMillis(),

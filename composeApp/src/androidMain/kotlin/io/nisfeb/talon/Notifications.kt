@@ -51,6 +51,15 @@ object Notifications {
     /** One notification id for calls: only one can ring at a time. */
     private const val CALL_NOTIFICATION_ID = 0x0CA11
     private const val MISSED_CALL_NOTIFICATION_ID = 0x0CA12
+    /**
+     * Which of the user's ships this notification belongs to.
+     *
+     * Without it a tap opened the conversation under whichever ship
+     * happened to be signed in, where that whom is either somebody
+     * else's conversation or nothing at all. The relay has always sent
+     * the ship; it was only ever used as the notification's title.
+     */
+    const val EXTRA_FOR_SHIP = "for_ship"
     const val EXTRA_OPEN_WHOM = "open_whom"
     const val EXTRA_SCROLL_TO_MESSAGE = "scroll_to_message"
     /** When the notification is for a reply, the parent post id —
@@ -373,6 +382,8 @@ object Notifications {
         context: Context,
         whom: String,
         postId: String?,
+        /** The ship this arrived for. A tap switches to it first. */
+        forShip: String? = null,
         /** Non-null when this notification is for a reply — the
          *  parent's id. Tap routes into ThreadScreen anchored on
          *  [postId] (the reply itself). */
@@ -387,6 +398,7 @@ object Notifications {
         val tapIntent = Intent(context, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
             putExtra(EXTRA_OPEN_WHOM, whom)
+            if (forShip != null) putExtra(EXTRA_FOR_SHIP, forShip)
             if (parentId != null) {
                 putExtra(EXTRA_OPEN_THREAD, parentId)
                 if (postId != null) putExtra(EXTRA_THREAD_ANCHOR, postId)
@@ -396,7 +408,10 @@ object Notifications {
         }
         val pending = PendingIntent.getActivity(
             context,
-            whom.hashCode(),
+            // The ship is part of the identity: the same whom on two
+            // ships is two conversations, and one request code would
+            // let the second notification overwrite the first's target.
+            (forShip.orEmpty() + whom).hashCode(),
             tapIntent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
@@ -429,6 +444,8 @@ object Notifications {
         whom: String,
         postId: String?,
         parentId: String? = null,
+        /** The ship this arrived for. A tap switches to it first. */
+        forShip: String? = null,
         terms: List<String>,
         label: String,
         body: String,
@@ -440,6 +457,7 @@ object Notifications {
         val tapIntent = Intent(context, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
             putExtra(EXTRA_OPEN_WHOM, whom)
+            if (forShip != null) putExtra(EXTRA_FOR_SHIP, forShip)
             if (parentId != null) {
                 putExtra(EXTRA_OPEN_THREAD, parentId)
                 if (postId != null) putExtra(EXTRA_THREAD_ANCHOR, postId)

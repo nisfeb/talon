@@ -124,6 +124,16 @@ private fun resolveFileName(
 @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
 @Composable
 fun TalonApp(
+    /**
+     * The ship a tapped notification belonged to.
+     *
+     * A notification raised for one ship used to open its conversation
+     * under whichever ship happened to be signed in, where that whom is
+     * somebody else's conversation or nothing at all. Honoured before
+     * anything else in the deep link, because everything else is read
+     * out of that ship's database.
+     */
+    initialForShip: String? = null,
     initialOpenWhom: String? = null,
     initialScrollMessageId: String? = null,
     /** Set when a notification's tap-intent points at a thread reply
@@ -612,11 +622,28 @@ fun TalonApp(
     }
 
     LaunchedEffect(
+        initialForShip,
+        loggedInShip,
         initialOpenWhom,
         initialScrollMessageId,
         initialOpenThread,
         initialThreadAnchor,
     ) {
+        // Go to the ship the notification came for, and stop: switching
+        // tears down this ship's database and builds that one's, so
+        // nothing below could read the right rows yet. The switch
+        // re-keys the tree, this effect runs again with the ships
+        // agreeing, and the rest of the deep link happens then.
+        //
+        // Deliberately not consumed here -- the target has to survive
+        // the switch, which is the whole point.
+        if (initialForShip != null &&
+            initialForShip != loggedInShip &&
+            app.allShipsFlow.value.contains(initialForShip)
+        ) {
+            app.switchShip(initialForShip)
+            return@LaunchedEffect
+        }
         var consumed = false
         // A chat-targeted deep-link must clear any modal pane that
         // would render BEFORE the chat in the render-when block —
@@ -953,6 +980,7 @@ fun TalonApp(
                         Notifications.showMessage(
                             context = context,
                             whom = m.whom,
+                            forShip = loggedInShip,
                             postId = m.id,
                             parentId = m.parentId,
                             title = title,
@@ -979,6 +1007,7 @@ fun TalonApp(
                     Notifications.showWatchwordHit(
                         context = context,
                         whom = m.whom,
+                        forShip = loggedInShip,
                         postId = m.id,
                         parentId = m.parentId,
                         terms = notifiable.map { it.term.term },
@@ -997,6 +1026,7 @@ fun TalonApp(
                 Notifications.showMessage(
                     context = context,
                     whom = ship,
+                    forShip = loggedInShip,
                     postId = ship,
                     parentId = null,
                     title = contactMap.displayName(ship),
