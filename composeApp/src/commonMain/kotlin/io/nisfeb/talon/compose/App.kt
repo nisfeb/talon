@@ -395,14 +395,6 @@ fun App(
         openThreadReplyAnchor = null
         openChat = who
     }
-    // A tapped system notification (iOS) asks for a chat from outside
-    // the composition; land there the way the call strip's Message does.
-    LaunchedEffect(Unit) {
-        io.nisfeb.talon.notify.OpenChatRequests.requests.collect { r ->
-            jumpToChat(r.whom)
-            openChatFocusMessageId = r.postId
-        }
-    }
     // Watchwords-sync flag. Backed by [watchwordsSync] (caller-supplied)
     // so desktop's JSON-file impl can persist across restarts and
     // production Android can wire its SharedPreferences variant in
@@ -430,6 +422,25 @@ fun App(
         showSelfProfile = false
         showSettings = false
         showSidebarSettings = false
+    }
+    // A tapped system notification (iOS) asks for a chat from outside
+    // the composition; land there the way the call strip's Message
+    // does -- on the ship it was for, first, when that is another of
+    // ours. The state this writes is hoisted above the re-key a switch
+    // causes, so the chat opens once the new ship's tree is up.
+    LaunchedEffect(Unit) {
+        io.nisfeb.talon.notify.OpenChatRequests.requests.collect { r ->
+            val forShip = r.forShip
+            if (forShip != null && forShip != loggedInShip &&
+                sessionStore.all().any { it.ship == forShip }
+            ) {
+                leaveShip()
+                sessionStore.setActive(forShip)
+                loggedInShip = forShip
+            }
+            jumpToChat(r.whom)
+            openChatFocusMessageId = r.postId
+        }
     }
 
     // Keyboard-shortcut request flags. Hoisted outside key() so the
