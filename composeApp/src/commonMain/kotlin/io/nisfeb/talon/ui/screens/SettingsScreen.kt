@@ -130,7 +130,6 @@ fun SettingsScreen(
      *  hides entirely. */
     /** Optional Android-only "Test now" handler that fires the digest
      *  immediately. When null the button isn't rendered. */
-    onTestDigest: (() -> Unit)? = null,
     /** Opens the dedicated Sidebar visibility screen — lets the user
      *  toggle which rail items show. Defaults to no-op for callers
      *  that haven't wired the sub-screen yet. */

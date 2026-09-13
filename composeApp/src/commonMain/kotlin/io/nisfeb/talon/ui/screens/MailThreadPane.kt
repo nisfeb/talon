@@ -136,7 +136,10 @@ fun MailThreadPane(
             onLabel = { l, add ->
                 scope.launch {
                     repo.setLabel(threadId, l, add)
-                    thread = repo.loadThread(threadId)
+                    // Null is "could not load", which the when below
+                    // must never reach as thread!!.
+                    val reloaded = repo.loadThread(threadId)
+                    if (reloaded == null) gone = true else thread = reloaded
                 }
             },
             showTree = hasBranches,
@@ -251,7 +254,12 @@ fun MailThreadPane(
                         modifier = Modifier.weight(1f).fillMaxWidth(),
                     )
                     HorizontalDivider()
-                    val shown = thread!!.messages.firstOrNull {
+                    // From the collapsed copies, the same ones the tree
+                    // above was built from. The raw list can hold a
+                    // forged copy ahead of the honest one, and taking
+                    // the first would let a forger choose what the card
+                    // under a node says.
+                    val shown = io.nisfeb.talon.mail.collapse(thread!!.messages).firstOrNull {
                         it.id == (selected ?: answering)
                     }
                     if (shown != null) {

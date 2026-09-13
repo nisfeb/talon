@@ -10,15 +10,27 @@ import androidx.compose.ui.platform.LocalContext
 @Composable
 actual fun rememberDeviceLocation(): DeviceLocation? {
     val context = LocalContext.current
+    // The grant lands here, and the request below waits for it. It
+    // used to fire the prompt and return failure in the same breath, so
+    // the error sat under the dialog and tapping Allow did nothing
+    // until the person pressed the button a second time.
+    val pending = remember { java.util.concurrent.atomic.AtomicReference<kotlinx.coroutines.CompletableDeferred<Boolean>?>(null) }
     val launcher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
-    ) { /* result swallowed; the picker's button is the retry */ }
+    ) { granted -> pending.getAndSet(null)?.complete(granted) }
 
     return remember(context) {
         suspend {
-            if (!hasLocationPermission(context)) {
+            val allowed = if (hasLocationPermission(context)) {
+                true
+            } else {
+                val wait = kotlinx.coroutines.CompletableDeferred<Boolean>()
+                pending.set(wait)
                 launcher.launch(Manifest.permission.ACCESS_COARSE_LOCATION)
-                Result.failure(IllegalStateException("permission requested"))
+                wait.await()
+            }
+            if (!allowed) {
+                Result.failure(IllegalStateException("Location permission was not granted."))
             } else {
                 val loc = fetchLastKnownLocation(context)
                 if (loc == null) {

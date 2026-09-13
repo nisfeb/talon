@@ -32,6 +32,13 @@ val PATP_REGEX: Regex =
 fun isValidPatp(text: String): Boolean {
     if (!PATP_REGEX.matches(text)) return false
     val groups = text.removePrefix("~").split(Regex("--?"))
+    // Galaxy and star render as one group, planet two, moon four,
+    // comet eight. Six, ten and twelve are all even and none of them
+    // names a ship. And a three-letter group is a galaxy, which is the
+    // whole name: ~zod-zod has a legal count and two legal lengths and
+    // is still nothing @p ever renders.
+    if (groups.size !in PATP_GROUP_COUNTS) return false
+    if (groups.size > 1 && groups.any { it.length != 6 }) return false
     return groups.all { g ->
         when (g.length) {
             3 -> g in SUFFIXES
@@ -40,6 +47,8 @@ fun isValidPatp(text: String): Boolean {
         }
     }
 }
+
+private val PATP_GROUP_COUNTS = setOf(1, 2, 4, 8)
 
 // The 256 prefix and 256 suffix syllables, from `++po` in hoon.hoon.
 private val PREFIXES: Set<String> = (

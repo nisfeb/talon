@@ -57,6 +57,24 @@ class NameToShipTest {
     }
 
     @Test
+    fun `a nickname beats a word that happens to decode`() {
+        // 128 of the list's words pass the four-bit checksum on their
+        // own -- "alone" among them, decoding to a near-zero comet.
+        // Somebody nicknamed Alone must win over that, or Start would
+        // open a conversation with nobody.
+        val r = NameToShip.resolve("alone", known = listOf(comet)) { if (it == comet) "Alone" else null }
+        assertEquals(comet, one(r))
+    }
+
+    @Test
+    fun `a bare word never decodes to a stranger`() {
+        assertEquals(NameToShip.Result.None, NameToShip.resolve("alone"))
+        assertEquals(NameToShip.Result.None, NameToShip.resolve("adore"))
+        // With the prefix it is explicitly a name, and may decode.
+        assertTrue(NameToShip.resolve("..abducts") is NameToShip.Result.One)
+    }
+
+    @Test
     fun `a name that is only shaped like a ship is refused here`() {
         // ~wisdom matches the shape regex and is no ship: `dom` is no
         // suffix. It used to reach the ship, which nacked with a

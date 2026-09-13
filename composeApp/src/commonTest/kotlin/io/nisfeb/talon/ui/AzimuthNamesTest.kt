@@ -19,9 +19,18 @@ class AzimuthNamesTest {
     /** Answers a fixed fingerprint for anything asked. */
     private fun rpc(fig: ByteArray?, seen: MutableList<String> = mutableListOf()) =
         object : AzimuthRpc {
-            override suspend fun fingerprint(ship: String): ByteArray? {
+            override suspend fun fingerprint(ship: String): Result<AzimuthRpc.Answer> {
                 seen += ship
-                return fig
+                return Result.success(AzimuthRpc.Answer(fig))
+            }
+        }
+
+    /** Cannot be asked at all. */
+    private fun down(seen: MutableList<String> = mutableListOf()) =
+        object : AzimuthRpc {
+            override suspend fun fingerprint(ship: String): Result<AzimuthRpc.Answer> {
+                seen += ship
+                return Result.failure(IllegalStateException("offline"))
             }
         }
 
@@ -58,6 +67,19 @@ class AzimuthNamesTest {
         AzimuthNames.warm(listOf(planet), rpc(null))
         assertNull(AzimuthNames.nameFor(planet))
         assertTrue(AzimuthNames.known(planet), "asked and answered: do not ask again")
+    }
+
+    @Test
+    fun `a failed lookup is asked again, a miss is not`() = runTest {
+        // Offline on launch used to leave every planet nameless for
+        // the life of the process: the failure was cached as "no
+        // name" and nothing would ever ask again.
+        val seen = mutableListOf<String>()
+        AzimuthNames.warm(listOf(planet), down(seen))
+        assertFalse(AzimuthNames.known(planet), "a failure is not an answer")
+        AzimuthNames.warm(listOf(planet), rpc(ByteArray(16) { 7 }, seen))
+        assertEquals(listOf(planet, planet), seen, "asked again once it could be")
+        assertTrue(AzimuthNames.known(planet))
     }
 
     @Test

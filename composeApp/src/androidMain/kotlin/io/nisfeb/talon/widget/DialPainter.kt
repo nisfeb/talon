@@ -278,15 +278,9 @@ object DialPainter {
     }
 
     /** How dark the sky is at a minute, hour by hour where that is known. */
-    private fun gloomAt(minute: Int, sky: SkyClock.Sky): Float {
-        val hourly = sky.hourlyCondition
-        if (hourly.size != 24) return sky.condition.gloom
-        val m = ((minute % 1440) + 1440) % 1440
-        val h = m / 60
-        val next = (h + 1) % 24
-        val t = (m % 60) / 60f
-        return hourly[h].gloom + (hourly[next].gloom - hourly[h].gloom) * t
-    }
+    /** The dial's own rule, not a copy of it. */
+    private fun gloomAt(minute: Int, sky: SkyClock.Sky): Float =
+        io.nisfeb.talon.ui.screens.gloomAt(minute, sky.hourlyCondition, sky.condition)
 
     private fun graduation(
         c: Canvas,

@@ -121,7 +121,12 @@ object AzimuthNames {
         if (wanted.isEmpty()) return
         var changed = false
         for (ship in wanted) {
-            val fig = rpc.fingerprint(ship)
+            // Only an answer is remembered. "This ship has no keys" is
+            // an answer; "the request failed" is not, and caching it
+            // left every planet nameless after one offline launch,
+            // with nothing that would ever ask again.
+            val answer = rpc.fingerprint(ship).getOrNull() ?: continue
+            val fig = answer.fingerprint
             synchronized(lock) { cache[ship] = fig }
             if (fig != null) changed = true
         }
@@ -165,14 +170,19 @@ object AzimuthNames {
  *  wire [None] instead. */
 interface AzimuthRpc {
 
-    /** The ship's 128-bit key fingerprint, or null when it has none,
-     *  is unknown to Azimuth, or the ship cannot answer. */
-    suspend fun fingerprint(ship: String): ByteArray?
+    /** What a lookup said. [fingerprint] is null when the ship has no
+     *  keys or is unknown to Azimuth -- an answer, and cached. */
+    data class Answer(val fingerprint: ByteArray?)
+
+    /** A successful [Answer], or a failure when the ship could not be
+     *  asked at all -- which is not cached, and is asked again. */
+    suspend fun fingerprint(ship: String): kotlin.Result<Answer>
 
     companion object {
-        /** For hosts with no %azimuth-rpc: nothing is ever named. */
+        /** For hosts with no %azimuth-rpc: nothing can be asked. */
         val None: AzimuthRpc = object : AzimuthRpc {
-            override suspend fun fingerprint(ship: String): ByteArray? = null
+            override suspend fun fingerprint(ship: String): kotlin.Result<Answer> =
+                kotlin.Result.failure(IllegalStateException("no azimuth-rpc"))
         }
     }
 }
@@ -190,7 +200,7 @@ class EyreAzimuthRpc(
     private val baseUrl: String,
 ) : AzimuthRpc {
 
-    override suspend fun fingerprint(ship: String): ByteArray? = runCatching {
+    override suspend fun fingerprint(ship: String): kotlin.Result<AzimuthRpc.Answer> = runCatching {
         val body = buildJsonObject {
             put("jsonrpc", "2.0")
             put("id", "talon-nym")
@@ -201,14 +211,16 @@ class EyreAzimuthRpc(
             contentType(ContentType.Application.Json)
             setBody(body.toString())
         }
-        if (!resp.status.isSuccess()) return@runCatching null
+        // A 404 is the agent saying "no such point": an answer. Any
+        // other non-success is the request failing, and throws.
+        if (resp.status.value == 404) return@runCatching AzimuthRpc.Answer(null)
+        if (!resp.status.isSuccess()) error("azimuth-rpc ${resp.status.value}")
         val keys = json.parseToJsonElement(resp.bodyAsText())
             .jsonObject["result"]?.jsonObject
             ?.get("network")?.jsonObject
             ?.get("keys")?.jsonObject
-            ?: return@runCatching null
-        fingerprintOf(keys)
-    }.getOrNull()
+        AzimuthRpc.Answer(keys?.let(::fingerprintOf))
+    }
 
     internal companion object {
         private val json = Json { ignoreUnknownKeys = true }

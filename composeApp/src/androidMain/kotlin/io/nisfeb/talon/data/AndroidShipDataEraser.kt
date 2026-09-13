@@ -22,10 +22,19 @@ class AndroidShipDataEraser(context: Context) : ShipDataEraser {
 
         // Per-ship preference files, named the way their own stores
         // name them.
-        val menuSeen = "talon.menuseen." +
-            ship.removePrefix("~").replace(Regex("[^a-z0-9-]"), "_")
-        app.getSharedPreferences(menuSeen, Context.MODE_PRIVATE).edit().clear().commit()
-        deletePrefsFile(menuSeen)
+        val key = ship.removePrefix("~").replace(Regex("[^a-z0-9-]"), "_")
+        for (file in listOf("talon.menuseen.$key", "talon.drafts.$key")) {
+            app.getSharedPreferences(file, Context.MODE_PRIVATE).edit().clear().commit()
+            deletePrefsFile(file)
+        }
+        // Rows keyed by ship inside files shared across ships. Asked of
+        // the stores that write them rather than guessed at: drafts are
+        // private message bodies, and the last-open chat and profile
+        // nickname would otherwise greet the ship on its way back in.
+        io.nisfeb.talon.notify.AndroidLastOpenChatStore(app).clear(ship)
+        io.nisfeb.talon.ui.ShipProfileStore(app).setNickname(ship, null)
+        // The relay device id is dropped by forgetShip, which also
+        // tells the relay; this only ever runs after that.
 
         Log.i(TAG, "erased $ship (db=$goneDb)")
     }

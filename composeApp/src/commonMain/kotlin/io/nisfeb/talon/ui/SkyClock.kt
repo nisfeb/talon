@@ -392,7 +392,10 @@ object HomePlaceCodec {
         if (s.isBlank()) return null
         val v2 = s.startsWith("$V2,")
         val parts = if (v2) s.split(",", limit = 7).drop(1) else s.split(",", limit = 5)
-        if (parts.size < 5) return null
+        // A v2 line reads parts[5]; guarding for five let a short one
+        // through to an index error, and the widget's refresh has no
+        // catch around this, so a truncated pref crashed it every tick.
+        if (parts.size < (if (v2) 6 else 5)) return null
         val lat = parts[0].toDoubleOrNull() ?: return null
         val lon = parts[1].toDoubleOrNull() ?: return null
         // Coordinates off the globe mean a corrupt line, and a dial

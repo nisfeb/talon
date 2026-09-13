@@ -2794,6 +2794,11 @@ fun homeSnapshotZeroUnread(whom: String) {
  */
 fun resetHomeListSnapshot() { /* no-op; per-ship snapshots replace this */ }
 
+/** Drop a ship's cached rows, previews and counts. Without this a
+ *  ship whose data was just erased came back in the same process with
+ *  every row it used to have. */
+fun forgetHomeListSnapshot(ship: String) = HomeListSnapshot.forget(ship)
+
 /**
  * Forget a conversation's unread count in the cached chat list.
  *
@@ -2828,6 +2833,11 @@ internal object HomeListSnapshot {
     private val perShip = ConcurrentMap<String, ShipSnapshot>()
 
     @Volatile var active: ShipSnapshot? = null
+
+    fun forget(ship: String) {
+        val gone = perShip.remove(ship)
+        if (active === gone) active = null
+    }
 
     fun bind(ship: String?): ShipSnapshot {
         val s = if (ship == null) ShipSnapshot() else perShip.getOrPut(ship) { ShipSnapshot() }

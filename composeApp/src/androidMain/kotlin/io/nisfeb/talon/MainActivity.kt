@@ -34,8 +34,8 @@ class MainActivity : ComponentActivity() {
     private val deepLinkMessageId = mutableStateOf<String?>(null)
     private val deepLinkThreadParent = mutableStateOf<String?>(null)
     private val deepLinkThreadAnchor = mutableStateOf<String?>(null)
-    /** Holds the ship from a Daily Digest notification tap; non-null
-     *  asks TalonApp to navigate straight to DailyDigestScreen on next
+    /** Retired with the daily digest. Left so the field order in this
+     *  class does not shift; nothing sets it now. The next line's doc
      *  composition. The value is the ship the digest belongs to —
      *  stashed for completeness even though the screen reads the
      *  active ship's digest itself. */

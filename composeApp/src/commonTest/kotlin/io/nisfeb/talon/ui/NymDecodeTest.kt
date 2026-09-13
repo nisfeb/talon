@@ -36,6 +36,16 @@ class NymDecodeTest {
     }
 
     @Test
+    fun `a bare word is not a name`() {
+        // One word in sixteen passes the checksum; without the prefix
+        // that is a typed nickname, not a comet.
+        assertNull(Mnemonym.shipForNym("alone"))
+        assertNull(Mnemonym.shipForNym("abducts"))
+        // Two bare words are still not enough to be trusted.
+        assertNull(Mnemonym.shipForNym("abducts.abate"))
+    }
+
+    @Test
     fun `a wrong word fails the checksum instead of naming someone else`() {
         val words = Mnemonym.forShip(comet)!!.removePrefix("..").split('.').toMutableList()
         words[3] = "yourselves"

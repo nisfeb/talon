@@ -111,7 +111,12 @@ fun ContactProfileSheet(
             //
             // Every other ship shows its @p, which is its real name and
             // short enough to read.
-            val nym = remember(ship) { Mnemonym.forShip(ship) }
+            // Unless the reader asked for raw @p everywhere: that
+            // toggle means what it says, here as on every other screen.
+            val alwaysPatp by ShipNames.alwaysPatp.collectAsState()
+            val nym = remember(ship, alwaysPatp) {
+                if (alwaysPatp) null else Mnemonym.forShip(ship)
+            }
             Text(
                 nym ?: ship,
                 style = MaterialTheme.typography.bodyMedium,

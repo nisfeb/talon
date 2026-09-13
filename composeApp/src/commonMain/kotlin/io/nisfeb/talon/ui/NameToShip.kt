@@ -42,27 +42,34 @@ object NameToShip {
         if (text.isEmpty()) return Result.None
 
         // A @p, with the sig optional because people paste both ways.
-        // isValidPatp, not the shape regex: the regex passes ~wisper,
+        // isValidPatp, not the shape regex: the regex passes ~wisdom,
         // which the ship then refuses along with whatever it was
         // attached to. Its own doc records that bug.
         val asPatp = if (text.startsWith("~")) text else "~$text"
         if (isValidPatp(asPatp)) return Result.One(asPatp)
 
-        // The full word name decodes on its own, checksum and all.
-        Mnemonym.shipForNym(text)?.let { return Result.One(it) }
-
-        // Everything left has to be recognised rather than decoded.
+        // Somebody known, by any name the reader has for them. This
+        // comes BEFORE decoding on purpose: a four-bit checksum lets
+        // one word in sixteen decode as a near-zero comet, so a contact
+        // nicknamed "Alone" typed as "alone" would otherwise start a
+        // conversation with nobody.
         val needle = text.lowercase()
         val hits = known.distinct().filter { ship ->
             shipHandle(ship).equals(needle, ignoreCase = true) ||
                 Mnemonym.forShip(ship).equals(needle, ignoreCase = true) ||
+                AzimuthNames.fullNameFor(ship).equals(needle, ignoreCase = true) ||
                 nicknameOf(ship)?.equals(needle, ignoreCase = true) == true
         }
-        return when (hits.size) {
-            0 -> Result.None
-            1 -> Result.One(hits.first())
-            else -> Result.Several(hits)
+        when (hits.size) {
+            1 -> return Result.One(hits.first())
+            0 -> Unit
+            else -> return Result.Several(hits)
         }
+
+        // Last, a full word name for a comet nobody here has met. It
+        // decodes on its own, checksum and all.
+        Mnemonym.shipForNym(text)?.let { return Result.One(it) }
+        return Result.None
     }
 
     /**

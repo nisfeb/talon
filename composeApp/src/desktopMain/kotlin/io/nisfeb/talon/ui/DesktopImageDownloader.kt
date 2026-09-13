@@ -46,23 +46,22 @@ class DesktopImageDownloader(
         )
     }
 
-    override suspend fun saveBytes(fileName: String, bytes: ByteArray): SaveResult =
-        withContext(Dispatchers.IO) {
-            val dir = downloadsDir()
-            runCatching {
-                if (!dir.exists() && !dir.mkdirs()) throw IOException("couldn't create $dir")
-                val out = uniquify(File(dir, fileName.ifBlank { "attachment" }))
-                out.writeBytes(bytes)
-                out.absolutePath
-            }.fold(
-                onSuccess = { SaveResult.Saved(it) },
-                onFailure = { e ->
-                    Log.w(TAG, "write failed for $fileName", e)
-                    SaveResult.Failed("Couldn't save: ${e.message ?: e::class.simpleName}")
-                },
-            )
-        }
+    override val canSaveFiles: Boolean get() = true
 
+    /**
+     * The same place, name and pending-flag dance as a saved recording:
+     * one saveFile, not a second weaker copy that dropped the
+     * Downloads/Talon folder and the IS_PENDING step and called
+     * everything octet-stream.
+     */
+    override suspend fun saveBytes(fileName: String, bytes: ByteArray): SaveResult {
+        val name = fileName.ifBlank { "attachment" }
+        val ext = name.substringAfterLast('.', "").ifBlank { "bin" }
+        val stem = name.substringBeforeLast('.', name)
+        val where = io.nisfeb.talon.call.saveFile(bytes, stem, ext, mimeForName(name))
+        return if (where != null) SaveResult.Saved(where)
+        else SaveResult.Failed("Couldn't save $name.")
+    }
     private fun fetch(url: String): Pair<ByteArray, String?> {
         val req = Request.Builder().url(url).get().build()
         http.newCall(req).execute().use { resp ->

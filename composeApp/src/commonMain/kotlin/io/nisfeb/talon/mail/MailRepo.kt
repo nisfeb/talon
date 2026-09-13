@@ -409,6 +409,15 @@ class MailRepo(
         try {
             block(a)
         } catch (e: AuspexError) {
+            // A 404 on a write is the thing being written to having
+            // gone -- a thread another client deleted -- not the nexus
+            // being absent. onFailure reads every 404 as the latter and
+            // replaced the whole inbox with an install prompt. Refresh
+            // instead, which drops the vanished row.
+            if (e is AuspexError.Refused && e.status == AuspexApi.NOT_FOUND) {
+                refresh()
+                return
+            }
             onFailure(e)
             return
         }

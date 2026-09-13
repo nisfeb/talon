@@ -74,7 +74,8 @@ fun NewDmScreen(
     // A comet answers to its @p, its twelve-word name and the two-word
     // one every screen shows. Only the first used to be accepted, so
     // the name people were actually given was the one this box refused.
-    val resolved = remember(trimmedInput, contacts) {
+    val namesGen by io.nisfeb.talon.ui.AzimuthNames.generation.collectAsState()
+    val resolved = remember(trimmedInput, contacts, namesGen) {
         io.nisfeb.talon.ui.NameToShip.resolve(
             typed = trimmedInput,
             known = contacts.map { it.ship },
@@ -184,7 +185,7 @@ fun NewDmScreen(
                             )
                         }
                         Text(
-                            c.ship,
+                            io.nisfeb.talon.ui.shipHandle(c.ship),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )

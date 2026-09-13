@@ -153,18 +153,14 @@ fun SkyClockDial(
     // The sun crawls rather than ticks. A minute of dial is a quarter of
     // a degree, so without this it would visibly jump once a minute in
     // front of somebody who is not even looking at it.
-    val sunAngle by animateFloatAsState(
-        targetValue = SkyClock.angleOf(sky.minuteOfDay),
-        animationSpec = tween(durationMillis = 900),
-        label = "sun",
-    )
+    // ...except across midnight. angleOf runs -180..+180 with the seam
+    // at midnight, so the target steps from +179.75 to -180 and an
+    // animation between them sweeps the marker a full lap backwards.
+    // That step is a quarter of a degree of actual movement; snap it.
+    val sunAngle = rememberSeamlessAngle(SkyClock.angleOf(sky.minuteOfDay))
 
     val moonMinute = sky.moonElongationDeg?.let { Moon.dialMinute(sky.minuteOfDay, it) }
-    val moonAngle by animateFloatAsState(
-        targetValue = moonMinute?.let { SkyClock.angleOf(it) } ?: 0f,
-        animationSpec = tween(durationMillis = 900),
-        label = "moon",
-    )
+    val moonAngle = rememberSeamlessAngle(moonMinute?.let { SkyClock.angleOf(it) } ?: 0f)
 
     val dayColor by animateColorAsState(
         targetValue = dayBand(sky),
@@ -970,4 +966,22 @@ internal fun twilightBand(sky: SkyClock.Sky): Color {
     val w = sky.warmth
     val base = if (w >= 0f) TWILIGHT_BASE else lerp(TWILIGHT_BASE, TWILIGHT_COLD, -w * 0.6f)
     return lerp(base, DAY_OVERCAST, sky.overcast * 0.5f)
+}
+
+/**
+ * An angle that animates like animateFloatAsState but snaps rather than
+ * sweeps when the target jumps more than a half turn -- which on this
+ * dial only ever happens at the -180/+180 seam, where a quarter-degree
+ * of real movement would otherwise play as a full backwards lap.
+ */
+@Composable
+internal fun rememberSeamlessAngle(target: Float): Float {
+    val anim = androidx.compose.runtime.remember {
+        androidx.compose.animation.core.Animatable(target)
+    }
+    androidx.compose.runtime.LaunchedEffect(target) {
+        if (kotlin.math.abs(target - anim.value) > 180f) anim.snapTo(target)
+        else anim.animateTo(target, tween(durationMillis = 900))
+    }
+    return anim.value
 }

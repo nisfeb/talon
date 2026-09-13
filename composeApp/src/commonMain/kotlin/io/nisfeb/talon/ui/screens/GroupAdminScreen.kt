@@ -710,8 +710,10 @@ private fun AdminBody(
         // and saves anybody typing a twelve-word name by hand.
         val inviteSuggestions = remember(inviteText, contactMap) {
             if (inviteText.isBlank() || invitePatp != null) emptyList()
+            // The picker matches @ps with the sig stripped, so a typed
+            // one has to come off or nothing would ever match.
             else io.nisfeb.talon.ui.suggestionsFor(
-                inviteText.trim(),
+                inviteText.trim().removePrefix("~"),
                 contactMap,
                 contactMap.contacts.map { it.ship },
             )

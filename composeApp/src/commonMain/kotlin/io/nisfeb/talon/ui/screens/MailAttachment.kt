@@ -75,7 +75,7 @@ fun MailAttachmentRow(
                 Spacer(Modifier.width(8.dp))
             }
 
-            is AttachState.Held -> TextButton(
+            is AttachState.Held-> if (downloader.canSaveFiles) TextButton(
                 onClick = {
                     scope.launch {
                         state = AttachState.Working("Saving")
@@ -87,7 +87,7 @@ fun MailAttachmentRow(
                         }
                     }
                 },
-            ) { Text("Save") }
+            ) { Text("Save") } else Unit
 
             else -> TextButton(
                 onClick = {

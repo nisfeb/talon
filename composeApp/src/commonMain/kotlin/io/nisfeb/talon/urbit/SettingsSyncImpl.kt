@@ -1752,6 +1752,7 @@ class SettingsSyncImpl(
         when (bucket) {
             BUCKET_UI_PREFS -> {
                 io.nisfeb.talon.ui.ShipNames.setAlwaysPatp(false)
+                io.nisfeb.talon.ui.AzimuthNames.setEnabled(false)
             }
             BUCKET_GROUP_ORDERS -> db.groupOrders().replaceAll(emptyList())
             BUCKET_FOLDERS -> db.folders().replaceAll(emptyList())

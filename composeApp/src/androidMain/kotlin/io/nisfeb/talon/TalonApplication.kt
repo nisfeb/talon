@@ -348,7 +348,7 @@ class TalonApplication : Application() {
      * the `SQLiteConnectionPool: connection was leaked` warning that
      * fired on every ship-switch.
      */
-    private fun buildShipScoped(ship: String) {
+    private fun buildShipScoped(ship: String, afterPriorClose: (() -> Unit)? = null) {
         val priorDb = if (::db.isInitialized) db else null
         val priorIndexer = if (::embeddingIndexer.isInitialized) embeddingIndexer else null
 
@@ -409,7 +409,7 @@ class TalonApplication : Application() {
         }
 
         if (priorDb != null || priorIndexer != null) {
-            scheduleShipScopedTeardown(priorDb, priorIndexer)
+            scheduleShipScopedTeardown(priorDb, priorIndexer, afterPriorClose)
         }
     }
 
@@ -423,11 +423,15 @@ class TalonApplication : Application() {
     private fun scheduleShipScopedTeardown(
         priorDb: AppDatabase?,
         priorIndexer: io.nisfeb.talon.ai.EmbeddingIndexer?,
+        /** Runs once the database is closed -- the only safe moment to
+         *  delete its file, which forgetShip needs. */
+        afterClose: (() -> Unit)? = null,
     ) {
         appScope.launch {
             delay(2_000)
             runCatching { priorIndexer?.stop() }
             runCatching { priorDb?.close() }
+            afterClose?.let { runCatching(it) }
         }
     }
 
@@ -495,27 +499,56 @@ class TalonApplication : Application() {
      */
     fun forgetShip(ship: String, alsoData: Boolean) {
         val wasActive = ship == _activeShip.value
+        // The relay keeps pushing a ship's activity until told to stop,
+        // and a notification for a ship no longer signed in has nowhere
+        // right to land. Best effort; the device id is dropped either
+        // way so nothing tries to use it again.
+        val deviceId = relaySettings.deviceIdFor(ship)
+        if (deviceId.isNotBlank()) {
+            appScope.launch {
+                runCatching {
+                    io.nisfeb.talon.notify.RelayClient(
+                        http = ktorHttp,
+                        endpoint = { relaySettings.endpoint.value },
+                    ).unregister(deviceId)
+                }
+                relaySettings.clearDeviceIdFor(ship)
+            }
+        }
+        val erase: () -> Unit = {
+            if (alsoData) {
+                shipDataEraser.erase(ship)
+                    .onFailure { android.util.Log.w("Talon", "erase $ship failed", it) }
+            }
+        }
         if (wasActive) {
             runCatching { repo.stop() }
             runCatching { shortcuts.stop() }
-            runCatching { db.close() }
             session.logout()
         }
         runCatching { sessionStore.remove(ship) }
-        if (alsoData) {
-            shipDataEraser.erase(ship)
-                .onFailure { android.util.Log.w("Talon", "erase $ship failed", it) }
-        }
         refreshAllShips()
-        io.nisfeb.talon.ui.screens.resetHomeListSnapshot()
-        if (!wasActive) return
+        io.nisfeb.talon.ui.screens.forgetHomeListSnapshot(ship)
+        if (!wasActive) {
+            // Its database is not open. Erase now.
+            erase()
+            return
+        }
+        // The active ship's database is still being read by the mounted
+        // tree, and is closed on the same deferred path a switch uses --
+        // the file's own KDoc on buildShipScoped says why a synchronous
+        // close here crashes. Erasing has to wait for that close, or on
+        // Android the file is deleted out from under the pool.
+        val dying = db
+        val dyingIndexer = if (::embeddingIndexer.isInitialized) embeddingIndexer else null
         val next = sessionStore.activeShip() ?: sessionStore.all().firstOrNull()?.ship
         if (next != null) {
-            buildShipScoped(next)
+            buildShipScoped(next, afterPriorClose = erase)
             sessionStore.setActive(next)
             _activeShip.value = next
         } else {
             _activeShip.value = null
+            scheduleShipScopedTeardown(dying, dyingIndexer, afterClose = erase)
         }
     }
 

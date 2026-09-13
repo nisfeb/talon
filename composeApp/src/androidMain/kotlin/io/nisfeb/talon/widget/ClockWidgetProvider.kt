@@ -34,7 +34,8 @@ private const val TAG = "ClockWidget"
  * A widget is not the app: it draws through RemoteViews in the
  * launcher's process, with no Compose and no canvas of its own. So the
  * dial is rendered to a bitmap here and handed over as a picture, and
- * the time written across it is a TextClock, which the system ticks
+ * the time written across it is drawn into the bitmap and re-drawn
+ * by a minute alarm of our own (see scheduleTick), which the system
  * for free rather than us waking up once a minute to redraw a circle
  * that has barely moved.
  *
@@ -243,6 +244,11 @@ class ClockWidgetProvider : AppWidgetProvider() {
             options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT, 0),
             options.getInt(AppWidgetManager.OPTION_APPWIDGET_MAX_HEIGHT, 0),
         ).takeIf { it > 0 } ?: DEFAULT_SIDE_DP
+        // The dial is square. Drawn at width by height it came out
+        // oblong in portrait, and fitCenter then shrank the whole
+        // bitmap a quarter to fit -- with the text tiers chosen for the
+        // size it was drawn at, not the size it was shown at.
+        val sideDp = minOf(widthDp, heightDp)
         val px = { dp: Int ->
             TypedValue.applyDimension(
                 TypedValue.COMPLEX_UNIT_DIP,
@@ -257,8 +263,8 @@ class ClockWidgetProvider : AppWidgetProvider() {
         val faint = if (dark) 0xFF9AA0A8.toInt() else 0xFF5F656D.toInt()
 
         val bitmap = DialPainter.render(
-            widthPx = px(widthDp),
-            heightPx = px(heightDp),
+            widthPx = px(sideDp),
+            heightPx = px(sideDp),
             sky = sky,
             fahrenheit = settings.fahrenheit,
             twentyFourHour = settings.twentyFourHour,

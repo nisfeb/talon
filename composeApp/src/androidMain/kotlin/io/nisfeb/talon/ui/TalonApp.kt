@@ -382,6 +382,12 @@ fun TalonApp(
     val mailRepo = remember(app.session) {
         io.nisfeb.talon.mail.MailRepo(app.session.http, appScope)
     }
+    // A switch builds a new session and with it a new repo, but the old
+    // one's poller lived in appScope and kept polling the old ship every
+    // ten minutes, raising its mail as new -- one more orphan per switch.
+    DisposableEffect(mailRepo) {
+        onDispose { runCatching { mailRepo.detach() } }
+    }
     val mailShipUrl = app.sessionStore.active()?.shipUrl
     LaunchedEffect(mailRepo, mailShipUrl, loggedInShip) {
         if (mailShipUrl != null && loggedInShip != null) mailRepo.attach(mailShipUrl)
@@ -621,6 +627,17 @@ fun TalonApp(
         openThread = null
     }
 
+    // Read once above for a cold start; this is the warm one. A mail
+    // notification tapped while the app was already running set the
+    // flag and nothing looked at it, so Mail never opened.
+    LaunchedEffect(initialOpenMail) {
+        if (initialOpenMail) {
+            closeSections()
+            mailOpen = true
+            onDeepLinkConsumed()
+        }
+    }
+
     LaunchedEffect(
         initialForShip,
         loggedInShip,
@@ -637,11 +654,15 @@ fun TalonApp(
         //
         // Deliberately not consumed here -- the target has to survive
         // the switch, which is the whole point.
-        if (initialForShip != null &&
-            initialForShip != loggedInShip &&
-            app.allShipsFlow.value.contains(initialForShip)
-        ) {
-            app.switchShip(initialForShip)
+        if (initialForShip != null && initialForShip != loggedInShip) {
+            if (app.allShipsFlow.value.contains(initialForShip)) {
+                app.switchShip(initialForShip)
+            } else {
+                // A ship no longer signed in. Opening its whom on this
+                // ship is the wrong-ship bug this was added to fix, so
+                // the tap lands nowhere rather than somewhere wrong.
+                onDeepLinkConsumed()
+            }
             return@LaunchedEffect
         }
         var consumed = false

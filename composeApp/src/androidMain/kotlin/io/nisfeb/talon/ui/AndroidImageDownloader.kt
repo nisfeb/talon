@@ -72,44 +72,22 @@ class AndroidImageDownloader(
      * image collection: mail carries whatever somebody attached, and a
      * text file in Photos is a filing mistake.
      */
-    override suspend fun saveBytes(fileName: String, bytes: ByteArray): SaveResult =
-        withContext(Dispatchers.IO) {
-            runCatching {
-                val name = fileName.ifBlank { "attachment" }
-                val values = android.content.ContentValues().apply {
-                    put(MediaStore.Downloads.DISPLAY_NAME, name)
-                    put(MediaStore.Downloads.MIME_TYPE, "application/octet-stream")
-                }
-                val collection = if (android.os.Build.VERSION.SDK_INT >= 29) {
-                    MediaStore.Downloads.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
-                } else {
-                    android.net.Uri.fromFile(
-                        java.io.File(
-                            android.os.Environment.getExternalStoragePublicDirectory(
-                                android.os.Environment.DIRECTORY_DOWNLOADS,
-                            ),
-                            name,
-                        ),
-                    )
-                }
-                if (android.os.Build.VERSION.SDK_INT >= 29) {
-                    val uri = context.contentResolver.insert(collection, values)
-                        ?: error("no MediaStore row")
-                    context.contentResolver.openOutputStream(uri)?.use { it.write(bytes) }
-                        ?: error("no output stream")
-                } else {
-                    java.io.File(collection.path!!).writeBytes(bytes)
-                }
-                "Downloads"
-            }.fold(
-                onSuccess = { SaveResult.Saved(it) },
-                onFailure = { e ->
-                    Log.w(TAG, "attachment save failed", e)
-                    SaveResult.Failed("Couldn't save: ${e.message ?: e::class.simpleName}")
-                },
-            )
-        }
+    override val canSaveFiles: Boolean get() = true
 
+    /**
+     * The same place, name and pending-flag dance as a saved recording:
+     * one saveFile, not a second weaker copy that dropped the
+     * Downloads/Talon folder and the IS_PENDING step and called
+     * everything octet-stream.
+     */
+    override suspend fun saveBytes(fileName: String, bytes: ByteArray): SaveResult {
+        val name = fileName.ifBlank { "attachment" }
+        val ext = name.substringAfterLast('.', "").ifBlank { "bin" }
+        val stem = name.substringBeforeLast('.', name)
+        val where = io.nisfeb.talon.call.saveFile(bytes, stem, ext, mimeForName(name))
+        return if (where != null) SaveResult.Saved(where)
+        else SaveResult.Failed("Couldn't save $name.")
+    }
     private fun writeViaMediaStore(fileName: String, mime: String, bytes: ByteArray): String {
         val resolver = context.contentResolver
         val collection = MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)

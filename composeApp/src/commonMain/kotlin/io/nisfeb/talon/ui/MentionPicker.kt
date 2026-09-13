@@ -229,9 +229,10 @@ private fun fullWordName(ship: String): String? =
  */
 private fun nymMatches(qNym: String, ship: String): Boolean {
     if (qNym.isEmpty()) return false
-    val full = Mnemonym.forShip(ship)?.trimStart('.') ?: return false
+    val full = (Mnemonym.forShip(ship) ?: AzimuthNames.fullNameFor(ship))
+        ?.trimStart('.') ?: return false
     if (full.startsWith(qNym)) return true
-    val abridged = Mnemonym.display(ship)?.trimStart('.')
+    val abridged = (Mnemonym.display(ship) ?: AzimuthNames.nameFor(ship))?.trimStart('.')
     if (abridged != null && abridged.startsWith(qNym)) return true
     return full.split('.').any { it.startsWith(qNym) }
 }

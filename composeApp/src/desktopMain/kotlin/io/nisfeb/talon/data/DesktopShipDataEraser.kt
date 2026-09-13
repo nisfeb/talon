@@ -21,8 +21,11 @@ class DesktopShipDataEraser : ShipDataEraser {
         val db = File(dir, "talon-port-$key.db")
         // -wal and -shm hold committed pages. Left behind, they are
         // re-read into a database that was supposed to be gone.
-        val gone = listOf(db, File("${db.path}-wal"), File("${db.path}-shm"))
-            .count { it.exists() && it.delete() }
+        val files = listOf(db, File("${db.path}-wal"), File("${db.path}-shm"))
+        val gone = files.count { it.exists() && it.delete() }
+        // A database that is there and will not go is a failure, not
+        // "erased (0 files)". Windows says no while the file is open.
+        if (db.exists()) error("could not delete ${db.name}; is it still open?")
         // Asked of the store that writes it, not guessed at.
         io.nisfeb.talon.ui.DesktopMenuSeenStore.defaultFile(ship).delete()
         Log.i(TAG, "erased $ship ($gone files)")

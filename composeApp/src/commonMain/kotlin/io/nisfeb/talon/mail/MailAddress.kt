@@ -12,22 +12,7 @@ package io.nisfeb.talon.mail
  * does not carry the syllable tables and a name shaped wrong is the
  * mistake people actually make.
  */
-fun isShip(s: String): Boolean {
-    if (!s.startsWith("~")) return false
-    val body = s.substring(1)
-    if (body.isEmpty()) return false
-    val parts = body.split("-")
-    // Galaxy and star render as one group, planet two, moon four, comet
-    // eight. Nothing else names anything: six, ten and twelve are all
-    // even and none of them is a ship.
-    if (parts.size !in GROUP_COUNTS) return false
-    if (parts.any { p -> p.isEmpty() || !p.all { it in 'a'..'z' } }) return false
-    if (parts.any { it.length != 3 && it.length != 6 }) return false
-    // A three-letter group is a galaxy, and a galaxy is the WHOLE name.
-    // Without this, two groups of three passes: the count is valid and
-    // each group is a legal length, but @p never renders such a name.
-    return parts.size == 1 || parts.all { it.length == 6 }
-}
+fun isShip(s: String): Boolean = io.nisfeb.talon.urbit.isValidPatp(s)
 
 private val GROUP_COUNTS = setOf(1, 2, 4, 8)
 

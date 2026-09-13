@@ -25,6 +25,11 @@ interface ImageDownloader {
      */
     suspend fun saveBytes(fileName: String, bytes: ByteArray): SaveResult =
         SaveResult.Unsupported
+
+    /** Whether [saveBytes] can succeed here at all. A Save control is
+     *  shown only where this is true: a button that always fails is a
+     *  faked feature, and the project's rule is to gate, not fake. */
+    val canSaveFiles: Boolean get() = false
 }
 
 /** Outcome of a save attempt — drives the snackbar text in the viewer. */
@@ -54,3 +59,12 @@ object NoopImageDownloader : ImageDownloader {
  * caller. Hosts bind it once in their App composable.
  */
 val LocalImageDownloader = staticCompositionLocalOf<ImageDownloader> { NoopImageDownloader }
+
+/** A media type from a file name, for the few kinds mail attaches. */
+internal fun mimeForName(name: String): String = when (name.substringAfterLast('.', "").lowercase()) {
+    "png" -> "image/png"; "jpg", "jpeg" -> "image/jpeg"; "gif" -> "image/gif"; "webp" -> "image/webp"
+    "pdf" -> "application/pdf"; "txt" -> "text/plain"; "md" -> "text/markdown"
+    "json" -> "application/json"; "zip" -> "application/zip"; "mp3" -> "audio/mpeg"
+    "m4a" -> "audio/mp4"; "mp4" -> "video/mp4"; "ogg" -> "audio/ogg"
+    else -> "application/octet-stream"
+}

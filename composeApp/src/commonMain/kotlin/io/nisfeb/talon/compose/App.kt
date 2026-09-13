@@ -141,9 +141,8 @@ fun App(
     /** Builds a SettingsSync bound to the per-ship db. Null on platforms
      *  without %settings sync wired. */
     createSettingsSync: ((AppDatabase) -> SettingsSync)? = null,
-    /** Per-process daily-digest config. Null on platforms without a
-     *  digest impl wired (Android composeApp today). When non-null,
-     *  DmListScreen reveals the "Today's brief" drawer entry only
+    /** Retired with the daily digest; kept only so the parameter list
+     *  stays stable for callers. Always null.
      *  if the user enabled the alarm. */
     /** Source of truth for the "mirror watchwords to %settings" toggle.
      *  Defaults to in-memory; desktop passes a JSON-backed impl so the
@@ -1622,7 +1621,19 @@ fun App(
                     }
                     runCatching { sessionStore.remove(gone) }
                     if (alsoData) {
-                        shipDataEraser.erase(gone)
+                        if (wasActive) {
+                            // The key block closes this database two
+                            // seconds after it re-keys. Erasing before
+                            // that deletes a file SQLite still has
+                            // open: Windows refuses, and elsewhere the
+                            // next checkpoint writes it straight back.
+                            GlobalScope.launch(ioDispatcher) {
+                                delay(2_500)
+                                shipDataEraser.erase(gone)
+                            }
+                        } else {
+                            shipDataEraser.erase(gone)
+                        }
                     }
                     if (wasActive) {
                         loggedInShip = sessionStore.activeShip()
@@ -1845,7 +1856,6 @@ fun App(
                                 showSettings = false
                                 settingsStartOnAccount = false
                             },
-                            // onTestDigest stays null on desktop — Android
                             // wires it to dailyDigest.generateAndNotifyAsync
                             // when the production MainActivity migrates here.
                             onOpenSidebarSettings = { showSidebarSettings = true },

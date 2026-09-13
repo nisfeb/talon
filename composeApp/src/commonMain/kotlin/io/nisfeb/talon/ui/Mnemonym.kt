@@ -128,9 +128,17 @@ object Mnemonym {
      * be matched against ships already known instead.
      */
     fun shipForNym(nym: String): String? {
-        val bare = nym.trim().removePrefix("..").removePrefix(".")
+        val trimmed = nym.trim()
+        val bare = trimmed.removePrefix("..").removePrefix(".")
         if (bare.isEmpty()) return null
         val words = bare.split('.')
+        // A four-bit checksum passes one word in sixteen, so 128 of
+        // the list's 2048 words decode alone to some near-zero comet.
+        // A real full name is twelve words, or a few with the ..
+        // prefix when the value's top words were zero and dropped.
+        // Without the prefix, insist on enough words that a typed
+        // nickname cannot land here by accident.
+        if (!trimmed.startsWith("..") && words.size < 3) return null
         // 128 bits and a 4-bit checksum is twelve 11-bit words. Fewer
         // means leading zero-index words were dropped; more is not a
         // comet's nym at all.

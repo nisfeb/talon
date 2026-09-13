@@ -149,6 +149,10 @@ fun MailComposer(
                 onClick = {
                     val to = commitRecipients()
                     when {
+                        // commitRecipients leaves what it could not
+                        // parse in the draft and says so in `problem`.
+                        // Sending anyway dropped those people silently.
+                        recipientDraft.isNotBlank() -> Unit
                         to.isEmpty() -> problem = "Say who this is going to."
                         body.isBlank() -> problem = "Nothing to send."
                         else -> {
