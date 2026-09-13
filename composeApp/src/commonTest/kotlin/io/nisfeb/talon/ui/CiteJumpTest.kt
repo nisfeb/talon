@@ -97,6 +97,17 @@ class CiteJumpTest {
     }
 
     @Test
+    fun `an unresolvable channel post is still named by its number`() = runTest {
+        // The number in a channel cite is the post's id, so the chat can
+        // scroll to it even when the ship never answered for the preview.
+        val whom = "chat/~zod/f"
+        assertEquals(
+            CiteJump.Message(whom, "170141184508159052789328505661045080064", null),
+            jump(cite(whom, postDa = "170.141.184.508.159.052.789.328.505.661.045.080.064"), Fake()),
+        )
+    }
+
+    @Test
     fun `a cite with no target goes nowhere`() = runTest {
         assertNull(jump(cite(null), Fake()))
     }

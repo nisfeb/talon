@@ -71,9 +71,9 @@ sealed interface StoryPart {
         val label: String,        // human-facing "Post in #channel" / "Group ~host/name"
         val openTarget: String?,  // whom-shaped string to open on tap, if any
         /**
-         * Dotted @da suffix of the cited post, if the cite resolves to a
-         * chat-channel message. Messages in our DB are keyed on
-         * "~author/<dotted-da>" so callers can fuzzy-match by DA.
+         * The cited post's number, dotted as a scry path wants it. The
+         * database keys a channel post on the bare digits and a writ
+         * on "~author/<digits>"; strip the dots before looking one up.
          */
         val postDa: String?,
         /** Dotted @da suffix of the cited reply, for reply cites. */
