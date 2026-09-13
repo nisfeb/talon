@@ -21,7 +21,12 @@ That triggers `.github/workflows/release.yml`, which:
   `secrets.RELEASE_KEYSTORE_BASE64` and uploads them as
   `talon-VERSION.apk` (universal) plus per-ABI splits.
 - Builds the desktop matrix (`.deb` / `.dmg` / `.msi` / `.AppImage`).
-- Generates `latest.json` for the in-app updater.
+- Generates `latest.json` for the in-app updater: the universal APK
+  plus each ABI split, so a phone downloads the one for its own
+  architecture; and lists the
+  desktop installers' URLs and hashes in it once they are built, so
+  a desktop Talon can update itself (an AppImage swaps and restarts;
+  deb / dmg / msi open in the system installer).
 - Creates the GitHub Release and attaches everything via
   `softprops/action-gh-release`.
 

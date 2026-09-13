@@ -28,7 +28,7 @@ import io.nisfeb.talon.data.DatabaseOpenTimeoutException
 import io.nisfeb.talon.data.createAppDatabase
 import io.nisfeb.talon.ui.DraftStore
 import io.nisfeb.talon.ui.InMemoryDraftStore
-import io.nisfeb.talon.update.DesktopBrowserUpdateInstaller
+import io.nisfeb.talon.update.DesktopUpdateInstaller
 import io.nisfeb.talon.update.HttpUpdateChecker
 import io.nisfeb.talon.update.UpdateRuntime
 import io.nisfeb.talon.update.UpdateState
@@ -139,7 +139,16 @@ private class DesktopAppGraph {
             override fun installedVersionCode(): Int = io.nisfeb.talon.TalonBuild.versionCode
             override fun supportedSdk(): Int = Int.MAX_VALUE
         },
-        installer = DesktopBrowserUpdateInstaller(),
+        installer = DesktopUpdateInstaller(
+            http = ktorHttp,
+            updatesDir = File(AppDirs.userData, "updates"),
+            quit = {
+                Thread {
+                    runCatching { shutdown() }
+                    kotlin.system.exitProcess(0)
+                }.apply { isDaemon = true; name = "Talon-update-restart" }.start()
+            },
+        ),
     )
 
     init {

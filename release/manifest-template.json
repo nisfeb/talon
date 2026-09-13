@@ -5,5 +5,16 @@
   "sha256": "__SHA256__",
   "minSdk": 26,
   "changelog": "__CHANGELOG__",
-  "mandatory": __MANDATORY__
+  "mandatory": __MANDATORY__,
+  "android": {
+    "arm64-v8a": { "url": "https://github.com/nisfeb/talon/releases/download/v__VERSION_NAME__/talon-__VERSION_NAME__-arm64-v8a.apk", "sha256": "__SHA256__" },
+    "armeabi-v7a": { "url": "...", "sha256": "..." },
+    "x86_64": { "url": "...", "sha256": "..." }
+  },
+  "desktop": {
+    "appimage": { "url": "https://github.com/nisfeb/talon/releases/download/v__VERSION_NAME__/Talon-x86_64.AppImage", "sha256": "__SHA256__" },
+    "deb": { "url": "...", "sha256": "..." },
+    "dmg": { "url": "...", "sha256": "..." },
+    "msi": { "url": "...", "sha256": "..." }
+  }
 }

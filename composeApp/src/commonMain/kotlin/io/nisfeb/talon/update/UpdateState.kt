@@ -21,6 +21,9 @@ interface UpdateInstallerHook {
     )
 
     fun install(apkPath: String)
+
+    /** What tapping Ready will do, in a sentence for the banner. */
+    val readyHint: String
 }
 
 /** Runtime info commonMain UpdateState needs without touching Android Context. */
@@ -73,7 +76,7 @@ class UpdateState(
                     _status.value = UpdateStatus.Downloading(manifest, pct)
                 },
                 onReady = { apkPath ->
-                    _status.value = UpdateStatus.Ready(manifest, apkPath)
+                    _status.value = UpdateStatus.Ready(manifest, apkPath, installer.readyHint)
                 },
                 onFailure = { message ->
                     _status.value = UpdateStatus.Failed(manifest, message)
@@ -110,6 +113,8 @@ class NoopUpdateInstallerHook : UpdateInstallerHook {
     ) {
         onFailure("Desktop builds do not self-update yet.")
     }
+
+    override val readyHint = ""
 
     override fun install(apkPath: String) {
         // No-op.

@@ -85,6 +85,9 @@ fun MainViewController(rtc: NativeRtcFactory?): UIViewController {
             override fun install(apkPath: String) {
                 // No sideload on iOS.
             }
+
+            override val readyHint = ""
+
         },
     )
 
