@@ -671,6 +671,16 @@ private fun AdminBody(
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+        // Same resolution as NewDmScreen: a @p with or without its
+        // sig, a full word name (checksummed, so a typo fails rather
+        // than inviting somebody else), or a short name or nickname
+        // matched against people already known.
+        val invited = io.nisfeb.talon.ui.NameToShip.resolve(
+            typed = inviteText,
+            known = contactMap.contacts.map { it.ship },
+            nicknameOf = { ship -> contactMap.nickname(ship) },
+        )
+        val invitePatp = (invited as? io.nisfeb.talon.ui.NameToShip.Result.One)?.ship
         Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -678,22 +688,62 @@ private fun AdminBody(
             OutlinedTextField(
                 value = inviteText,
                 onValueChange = { inviteText = it },
-                label = { Text("~ship-name") },
+                label = { Text("~ship, or a word name") },
                 modifier = Modifier.weight(1f),
-                singleLine = true,
+                // A comet's @p is fifty-six characters and its full
+                // name twelve words; on one line you could not see
+                // what you had pasted.
+                singleLine = false,
+                maxLines = 3,
             )
-            // Same shape check + sig normalization as NewDmScreen, so
-            // a typo or a missing ~ never goes on the wire raw.
-            val inviteTrimmed = inviteText.trim()
-            val invitePatp =
-                if (inviteTrimmed.startsWith("~")) inviteTrimmed else "~$inviteTrimmed"
             Button(
-                enabled = PATP_REGEX.matches(invitePatp),
+                enabled = invitePatp != null,
                 onClick = {
-                    onInvite(invitePatp)
+                    invitePatp?.let { onInvite(it) }
                     inviteText = ""
                 },
             ) { Text("Invite") }
+        }
+        // Contacts, offered as you type. A short name keeps two words
+        // of twelve, so it is the one form that can fit two people --
+        // picking from a list settles that before the invite goes out,
+        // and saves anybody typing a twelve-word name by hand.
+        val inviteSuggestions = remember(inviteText, contactMap) {
+            if (inviteText.isBlank() || invitePatp != null) emptyList()
+            else io.nisfeb.talon.ui.suggestionsFor(
+                inviteText.trim(),
+                contactMap,
+                contactMap.contacts.map { it.ship },
+            )
+        }
+        for (s in inviteSuggestions) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { inviteText = s.ship }
+                    .padding(vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    s.nickname?.let { nick ->
+                        Text(nick, style = MaterialTheme.typography.bodyMedium)
+                    }
+                    Text(
+                        s.label,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+        io.nisfeb.talon.ui.NameToShip.hint(invited, inviteText)?.let {
+            if (inviteSuggestions.isEmpty()) {
+                Text(
+                    it,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
 
         HorizontalDivider()

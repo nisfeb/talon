@@ -20,9 +20,13 @@ val PATP_REGEX: Regex =
 /**
  * Whether [text] is a real `@p`: the right shape and every syllable
  * from Urbit's phonetic tables. [PATP_REGEX] only checks the shape, so
- * `~wisper` passes it; the ship's own parser rejects such a string and
+ * `~wisdom` passes it; the ship's own parser rejects such a string and
  * with it the whole post, as a user found when a stray `~word` in a
- * message made every send fail. A 3-letter name is a galaxy (suffix
+ * message made every send fail.
+ *
+ * (This comment used to name `~wisper` as the example, which is in
+ * fact a perfectly good star -- `wis` is a prefix and `per` a suffix.
+ * `~wisdom` really is not one: `dom` is no suffix.) A 3-letter name is a galaxy (suffix
  * only); 6-letter groups are prefix + suffix.
  */
 fun isValidPatp(text: String): Boolean {

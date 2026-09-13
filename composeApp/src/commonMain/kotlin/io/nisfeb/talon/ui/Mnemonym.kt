@@ -117,6 +117,63 @@ object Mnemonym {
         return (if (tweaked) "." else "..") + words.joinToString(".")
     }
 
+    /**
+     * The comet a full nym names, or null if it names none.
+     *
+     * The unabridged form is the 128-bit fingerprint plus its
+     * checksum, so it decodes: this is [encode] run backwards, and the
+     * checksum is what makes a typo fail rather than resolve to some
+     * other comet. The abridged `..first...last` cannot come back this
+     * way -- ten of its twelve words are gone -- so a short name has to
+     * be matched against ships already known instead.
+     */
+    fun shipForNym(nym: String): String? {
+        val bare = nym.trim().removePrefix("..").removePrefix(".")
+        if (bare.isEmpty()) return null
+        val words = bare.split('.')
+        // 128 bits and a 4-bit checksum is twelve 11-bit words. Fewer
+        // means leading zero-index words were dropped; more is not a
+        // comet's nym at all.
+        if (words.size > COMET_WORDS) return null
+        var combined = BigInteger.ZERO
+        for (w in words) {
+            val idx = wordIndex[w] ?: return null
+            combined = combined.shl(11).or(BigInteger.fromInt(idx))
+        }
+        // The dropped words were zeroes, so the value is already
+        // right-aligned; nothing to pad.
+        val checksum = combined.and(MASK_CS).intValue(exactRequired = false)
+        val value = combined.shr(CS_BITS)
+        val bytes = ByteArray(16)
+        var v = value
+        for (i in 15 downTo 0) {
+            bytes[i] = v.and(MASK_BYTE).intValue(exactRequired = false).toByte()
+            v = v.shr(8)
+        }
+        if (!v.isZero()) return null
+        val sha = bytes.toByteString().sha256().toByteArray()
+        if ((sha[0].toInt() and 0xff) ushr (8 - CS_BITS) != checksum) return null
+        return patpOf(bytes)
+    }
+
+    /** The @p whose sixteen syllables spell [bytes]. */
+    internal fun patpOf(bytes: ByteArray): String {
+        if (bytes.size != 16) return ""
+        val syllables = (0 until 16).map {
+            if (it % 2 == 0) PATP_PREFIXES[bytes[it].toInt() and 0xff]
+            else PATP_SUFFIXES[bytes[it].toInt() and 0xff]
+        }
+        val pairs = (0 until 16 step 2).map { syllables[it] + syllables[it + 1] }
+        return "~" + pairs.take(4).joinToString("-") + "--" + pairs.drop(4).joinToString("-")
+    }
+
+    private const val COMET_WORDS = 12
+    private const val CS_BITS = 4
+    private val MASK_CS = BigInteger.fromInt((1 shl CS_BITS) - 1)
+    private val MASK_BYTE = BigInteger.fromInt(0xFF)
+    private val wordIndex: Map<String, Int> =
+        MNEMONYM_WORDS.withIndex().associate { (i, w) -> w to i }
+
     private val MASK_11 = BigInteger.fromInt(0x7FF)
     private val prefixIndex: Map<String, Int> =
         PATP_PREFIXES.withIndex().associate { (i, s) -> s to i }

@@ -61,13 +61,30 @@ fun NewDmScreen(
         if (q.isEmpty()) contacts
         else contacts.filter { c ->
             c.ship.lowercase().removePrefix("~").contains(q) ||
-                (c.nickname?.lowercase()?.contains(q) == true)
+                (c.nickname?.lowercase()?.contains(q) == true) ||
+                // The name a comet actually goes by on every other
+                // screen. Leaving it out meant the list could not find
+                // somebody by the only name the reader had seen.
+                io.nisfeb.talon.ui.shipHandle(c.ship).lowercase().contains(q) ||
+                io.nisfeb.talon.ui.shipHandleLong(c.ship)?.lowercase()?.contains(q) == true
         }
     }
 
     val trimmedInput = query.trim()
-    val asPatp = if (trimmedInput.startsWith("~")) trimmedInput else "~$trimmedInput"
-    val isValidPatp = PATP_REGEX.matches(asPatp)
+    // A comet answers to its @p, its twelve-word name and the two-word
+    // one every screen shows. Only the first used to be accepted, so
+    // the name people were actually given was the one this box refused.
+    val resolved = remember(trimmedInput, contacts) {
+        io.nisfeb.talon.ui.NameToShip.resolve(
+            typed = trimmedInput,
+            known = contacts.map { it.ship },
+            nicknameOf = { ship -> contacts.firstOrNull { it.ship == ship }?.nickname },
+        )
+    }
+    val asPatp = (resolved as? io.nisfeb.talon.ui.NameToShip.Result.One)?.ship
+        ?: if (trimmedInput.startsWith("~")) trimmedInput else "~$trimmedInput"
+    val isValidPatp = resolved is io.nisfeb.talon.ui.NameToShip.Result.One
+    val resolveHint = io.nisfeb.talon.ui.NameToShip.hint(resolved, trimmedInput)
     val alreadyContact = remember(asPatp, bookContacts) { asPatp in bookContacts }
 
     Column(modifier = modifier.windowInsetsPadding(WindowInsets.safeDrawing)) {
@@ -91,14 +108,27 @@ fun NewDmScreen(
             OutlinedTextField(
                 value = query,
                 onValueChange = { query = it },
-                placeholder = { Text("~patp or name") },
-                singleLine = true,
+                placeholder = { Text("~ship, or a word name") },
+                // Not single-line: a comet's @p is fifty-six characters
+                // and its full name is twelve words, and either one
+                // scrolled off the end of a single line with no way to
+                // see what you had typed.
+                singleLine = false,
+                maxLines = 3,
                 modifier = Modifier.weight(1f),
             )
             TextButton(
                 onClick = { onPickPeer(asPatp) },
                 enabled = isValidPatp,
             ) { Text("Start") }
+        }
+        resolveHint?.let {
+            Text(
+                it,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 6.dp),
+            )
         }
         // Add-to-contacts row — only when a valid ~patp that isn't
         // already a contact is entered. Optional nickname; tracks the
