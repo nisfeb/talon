@@ -151,11 +151,8 @@ class HomeLayoutTest {
     }
 
     @Test
-    fun `every calendar range says how far it looks`() {
-        for (r in CalendarRange.entries) {
-            assertTrue(r.label.isNotBlank(), "$r has no label")
-            r.minutes?.let { assertTrue(it > 0, "$r looks $it minutes ahead") }
-        }
+    fun `every calendar range has a label`() {
+        for (r in CalendarRange.entries) assertTrue(r.label.isNotBlank(), "$r has no label")
     }
 }
 
@@ -334,13 +331,6 @@ class HomePlacementTest {
     fun `a widget cannot be dropped above the top`() {
         val l = layout(w(k[0], 0, 4))
         assertEquals(0, l.placed(k[0], col = 0, row = -3)[k[0]].row)
-    }
-
-    @Test
-    fun `the height is the lowest edge, not the widget count`() {
-        val l = layout(w(k[0], 0, 0, rows = 4), w(k[1], 6, 2, rows = 9))
-        assertEquals(11, l.heightInRows())
-        assertEquals(0, HomeLayout(emptyList()).heightInRows())
     }
 
     @Test

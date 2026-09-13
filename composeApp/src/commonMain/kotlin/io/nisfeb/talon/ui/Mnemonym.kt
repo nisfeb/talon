@@ -45,7 +45,12 @@ object Mnemonym {
      *  the truncated comet @p people already read. Short nyms (a value
      *  with enough leading zeros to lose most of its words) are already
      *  that short and are left alone. */
-    fun display(ship: String): String? = abridge(forShip(ship) ?: return null)
+    fun display(ship: String): String? {
+        forShip(ship) ?: return null
+        // Abridged beside the full name, so a row's name is a map read
+        // and not a lock plus three allocations per recomposition.
+        return synchronized(nymLock) { abridgedCache.getOrPut(ship) { abridge(nymCache.getValue(ship)) } }
+    }
 
     /**
      * Display form for a fingerprint that was fetched rather than read
@@ -76,6 +81,7 @@ object Mnemonym {
 
     private val nymLock = SynchronizedObject()
     private val nymCache = HashMap<String, String>()
+    private val abridgedCache = HashMap<String, String>()
 
     /** Big-endian bytes of the value the @p syllables encode, or null
      *  for galaxies/stars/malformed input. */

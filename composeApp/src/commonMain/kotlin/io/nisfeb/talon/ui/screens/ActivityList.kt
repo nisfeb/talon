@@ -34,8 +34,6 @@ import androidx.compose.ui.unit.dp
 import io.nisfeb.talon.data.AppDatabase
 import io.nisfeb.talon.ui.Avatar
 import io.nisfeb.talon.ui.ContactMap
-import io.nisfeb.talon.ui.LastContactMap
-import io.nisfeb.talon.ui.contactMapFlow
 import io.nisfeb.talon.urbit.StoryCache
 import io.nisfeb.talon.urbit.TlonChatRepo
 
@@ -60,14 +58,7 @@ fun ActivityList(
     onOpenPost: (whom: String, postId: String) -> Unit = { w, _ -> onOpenConversation(w) },
     modifier: Modifier = Modifier,
 ) {
-    val contactMap by remember {
-        contactMapFlow(
-            db.contacts().stream(),
-            db.clubs().stream(),
-            db.groups().streamGroups(),
-            db.groups().streamChannelGroups(),
-        )
-    }.collectAsState(initial = LastContactMap.value)
+    val contactMap by io.nisfeb.talon.ui.rememberContactMap(db)
 
     // Bind to the repo's cached StateFlow so re-mounts (rail-tab
     // switching, navigating in and out of Activity) render instantly

@@ -111,10 +111,12 @@ class AzimuthNamesTest {
     fun `the setting gates non-comets and never comets`() = runTest {
         val fig = ByteArray(16) { (it + 1).toByte() }
         AzimuthNames.warm(listOf(planet), rpc(fig))
-        val map = { on: Boolean -> ContactMap(nonCometNames = on) }
-        assertEquals(AzimuthNames.nameFor(planet), map(true).displayName(planet))
-        assertEquals(planet, map(false).displayName(planet), "off means the raw @p")
+        val map = ContactMap()
+        AzimuthNames.enabled.value = true
+        assertEquals(AzimuthNames.nameFor(planet), map.displayName(planet))
+        AzimuthNames.enabled.value = false
+        assertEquals(planet, map.displayName(planet), "off means the raw @p")
         // A comet's name is its own and is never gated.
-        assertEquals(Mnemonym.display(comet), map(false).displayName(comet))
+        assertEquals(Mnemonym.display(comet), map.displayName(comet))
     }
 }

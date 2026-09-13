@@ -1,5 +1,4 @@
 package io.nisfeb.talon.ui.screens
-import kotlinx.datetime.toLocalDateTime
 import io.nisfeb.talon.util.nowMs
 
 import androidx.compose.foundation.background
@@ -25,7 +24,6 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Visibility
@@ -124,12 +122,6 @@ fun SettingsScreen(
      *  edits the ship-level policy %trunk enforces. null hides it —
      *  tests and hosts that haven't wired calls. */
     callController: io.nisfeb.talon.call.CallController? = null,
-    /** Optional daily-digest config + alarm controls. Android wires
-     *  the JSON-prefs-backed impl that drives AlarmManager; desktop
-     *  passes null until a desktop scheduler lands and the section
-     *  hides entirely. */
-    /** Optional Android-only "Test now" handler that fires the digest
-     *  immediately. When null the button isn't rendered. */
     /** Opens the dedicated Sidebar visibility screen — lets the user
      *  toggle which rail items show. Defaults to no-op for callers
      *  that haven't wired the sub-screen yet. */
@@ -220,8 +212,7 @@ fun SettingsScreen(
             add(SettingsTab.Appearance)
             add(SettingsTab.Home)
             add(SettingsTab.Chats)
-            if (notificationHealth != null || relayConfig != null ||
-                relayConfig != null) {
+            if (notificationHealth != null || relayConfig != null) {
                 add(SettingsTab.Notifications)
             }
             add(SettingsTab.Ai)

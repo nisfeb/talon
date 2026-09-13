@@ -147,17 +147,14 @@ class MailRepoTest {
             assertEquals(MailFolder.View(MailView.INBOX), r.folder.value)
 
             r.selectFolder(MailFolder.View(MailView.ARCHIVED))
-            assertEquals(MailView.ARCHIVED, r.view.value)
-            assertNull(r.label.value)
+            assertEquals(MailFolder.View(MailView.ARCHIVED), r.folder.value)
 
-            // A label is a folder, and picking one moves both halves of
-            // the query rather than leaving them to be kept in step.
+            // A label is a folder: one value, nothing kept in step by hand.
             r.selectFolder(MailFolder.Label("work"))
-            assertEquals(MailView.LABEL, r.view.value)
-            assertEquals("work", r.label.value)
+            assertEquals(MailFolder.Label("work"), r.folder.value)
 
             r.selectFolder(MailFolder.View(MailView.INBOX))
-            assertNull(r.label.value, "leaving a label clears the filter with it")
+            assertEquals(MailFolder.View(MailView.INBOX), r.folder.value, "leaving a label clears the filter with it")
         }
 
     @Test

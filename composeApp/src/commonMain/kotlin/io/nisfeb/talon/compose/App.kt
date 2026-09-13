@@ -141,9 +141,6 @@ fun App(
     /** Builds a SettingsSync bound to the per-ship db. Null on platforms
      *  without %settings sync wired. */
     createSettingsSync: ((AppDatabase) -> SettingsSync)? = null,
-    /** Retired with the daily digest; kept only so the parameter list
-     *  stays stable for callers. Always null.
-     *  if the user enabled the alarm. */
     /** Source of truth for the "mirror watchwords to %settings" toggle.
      *  Defaults to in-memory; desktop passes a JSON-backed impl so the
      *  flag survives restart. */
@@ -425,6 +422,21 @@ fun App(
     }
 
     // Keyboard-shortcut request flags. Hoisted outside key() so the
+    /**
+     * Everything that belongs to the ship on screen, put down: what
+     * was open, the viewer, the sheets. Run before the active ship
+     * changes so no frame renders the new ship with the old one's
+     * state.
+     */
+    val leaveShip: () -> Unit = {
+        openChat = null
+        switchShipAction()
+        viewerImageUrl = null
+        viewerImageList = null
+        showSelfProfile = false
+        showSettings = false
+        showSidebarSettings = false
+    }
     // onPreviewKeyEvent handler (on the Surface inside key()) can flip
     // them, and DmListScreen (also inside key()) can consume them.
     var focusSearchRequest by remember { mutableStateOf(false) }
@@ -789,14 +801,7 @@ fun App(
         // Names for the call surface. A third collection of the same
         // local-Room flows in this function — cheap, but the three
         // (here, citeContacts, partyContacts) want hoisting into one.
-        val callContacts by remember(db) {
-            io.nisfeb.talon.ui.contactMapFlow(
-                db.contacts().stream(),
-                db.clubs().stream(),
-                db.groups().streamGroups(),
-                db.groups().streamChannelGroups(),
-            )
-        }.collectAsState(initial = io.nisfeb.talon.ui.LastContactMap.value)
+        val callContacts by io.nisfeb.talon.ui.rememberContactMap(db)
         // iOS wires CallKit here — answer/end/mute/hold in, every call
         // and line reported out; no-op on Android and desktop. After
         // the party line, which it reports too, and reading names
@@ -903,21 +908,8 @@ fun App(
         // Mail lives in the same desk as the link handler's app, so the
         // install is one thing offered from two places.
         val grubberyInstall: (suspend () -> Result<Unit>)? = remember(session) {
-            {
-                val url = sessionStore.active()?.shipUrl
-                if (url == null) {
-                    Result.failure(IllegalStateException("Not signed in to a ship."))
-                } else {
-                    io.nisfeb.talon.urbit.LatticeInstall.installAndWait(
-                        http = http,
-                        shipUrl = url,
-                        // Named, not trailing: the last parameter is the
-                        // wait, so a trailing lambda binds to that.
-                        poke = { app, mark, body ->
-                            runCatching { repo.pokeRaw(app, mark, body) }.isSuccess
-                        },
-                    )
-                }
+            io.nisfeb.talon.urbit.LatticeInstall.installer(http, { sessionStore.active()?.shipUrl }) {
+                app, mark, body -> runCatching { repo.pokeRaw(app, mark, body) }.isSuccess
             }
         }
         val homePlaceRaw by uiSettings.homePlace.collectAsState()
@@ -984,8 +976,7 @@ fun App(
         // One decision in common, delivered through the interface that
         // already exists. Chat notifies twice on this codebase; mail has
         // no reason to inherit that.
-        LaunchedEffect(mailRepo, notifier, callContacts) {
-            mailRepo.nameFor = { callContacts.displayName(it) }
+        LaunchedEffect(mailRepo, notifier) {
             mailRepo.onNewMail = { news ->
                 news.forEach { notifier.notify(it.title, it.body) }
             }
@@ -1347,27 +1338,12 @@ fun App(
           // Root contact map so a quoted post's author resolves to the
           // same nickname / mnemonym the rest of the app shows, rather
           // than the bare @p the renderer would emit on its own.
-          val citeContacts by remember(db) {
-              io.nisfeb.talon.ui.contactMapFlow(
-                  db.contacts().stream(),
-                  db.clubs().stream(),
-                  db.groups().streamGroups(),
-                  db.groups().streamChannelGroups(),
-              )
-          }.collectAsState(initial = io.nisfeb.talon.ui.LastContactMap.value)
+          val citeContacts by io.nisfeb.talon.ui.rememberContactMap(db)
           val citeDisplayName: (String) -> String = remember(citeContacts) {
               { ship -> citeContacts.displayName(ship) }
           }
           val citePlaceName: (String) -> String? = remember(citeContacts) {
               { whom -> citeContacts.conversationLabel(whom) }
-          }
-          // Story parsing runs outside composition (StoryCache, ingest),
-          // so the naming policy is published to it here rather than
-          // threaded through every call site.
-          LaunchedEffect(citeContacts) {
-              io.nisfeb.talon.ui.ShipNames.setResolver(citeContacts.namesVersion) { ship ->
-                  citeContacts.displayName(ship)
-              }
           }
           androidx.compose.runtime.CompositionLocalProvider(
               io.nisfeb.talon.ui.LocalImageDownloader provides imageDownloader,
@@ -1535,16 +1511,7 @@ fun App(
                                 uiSettings.setFontScale(1.0f)
                             is io.nisfeb.talon.ui.ShortcutAction.SwitchShip -> {
                                 sessionStore.all().getOrNull(action.index)?.ship?.let { targetShip ->
-                                    // Clear the previous ship's open chat before
-                                    // sessionStore.setActive so no frame renders with
-                                    // the new active ship but stale chat state.
-                                    openChat = null
-                                    switchShipAction()
-                                    viewerImageUrl = null
-                                    viewerImageList = null
-                                    showSelfProfile = false
-                                    showSettings = false
-                                    showSidebarSettings = false
+                                    leaveShip()
                                     sessionStore.setActive(targetShip)
                                     loggedInShip = targetShip
                                 }
@@ -1591,13 +1558,7 @@ fun App(
                     nicknames.value
                 }
                 val switchShip: (String) -> Unit = { newShip ->
-                    openChat = null
-                    switchShipAction()
-                    viewerImageUrl = null
-                    viewerImageList = null
-                    showSelfProfile = false
-                    showSettings = false
-                    showSidebarSettings = false
+                    leaveShip()
                     sessionStore.setActive(newShip)
                     loggedInShip = newShip
                 }
@@ -1611,13 +1572,7 @@ fun App(
                 val forgetShip: (String, Boolean) -> Unit = { gone, alsoData ->
                     val wasActive = gone == loggedInShip
                     if (wasActive) {
-                        openChat = null
-                        switchShipAction()
-                        viewerImageUrl = null
-                        viewerImageList = null
-                        showSelfProfile = false
-                        showSettings = false
-                        showSidebarSettings = false
+                        leaveShip()
                     }
                     runCatching { sessionStore.remove(gone) }
                     if (alsoData) {
@@ -1641,13 +1596,7 @@ fun App(
                     }
                 }
                 val addShip: () -> Unit = {
-                    openChat = null
-                    switchShipAction()
-                    viewerImageUrl = null
-                    viewerImageList = null
-                    showSelfProfile = false
-                    showSettings = false
-                    showSidebarSettings = false
+                    leaveShip()
                     loggedInShip = null
                 }
                 // Modal / full-screen branches short-circuit first so they
@@ -2238,16 +2187,7 @@ fun App(
                                 // Nicknames for the party-line roster:
                                 // the @p is the identity, the nickname
                                 // is what a reader actually recognises.
-                                val partyContacts by remember(db) {
-                                    io.nisfeb.talon.ui.contactMapFlow(
-                                        db.contacts().stream(),
-                                        db.clubs().stream(),
-                                        db.groups().streamGroups(),
-                                        db.groups().streamChannelGroups(),
-                                    )
-                                }.collectAsState(
-                                    initial = io.nisfeb.talon.ui.ContactMap.EMPTY,
-                                )
+                                val partyContacts by io.nisfeb.talon.ui.rememberContactMap(db)
                                 // Ask the host once per group whether a
                                 // line exists, when we hold no invite.
                                 // A member whose ship had no %trunk when
@@ -2731,16 +2671,7 @@ fun App(
                                             // which is wrong for multi-ship setups
                                             // and only worked under Path A by accident.
                                             session.logout()
-                                            // Reset every navigation-state var so the
-                                            // next sign-in lands on DmList instead of
-                                            // a stale chat from the prior ship.
-                                            openChat = null
-                                            switchShipAction()
-                                            viewerImageUrl = null
-                                            viewerImageList = null
-                                            showSelfProfile = false
-                                            showSettings = false
-                                            showSidebarSettings = false
+                                            leaveShip()
                                             loggedInShip = null
                                         },
                                         onOpenSelfProfile = { showSelfProfile = true },
@@ -2794,33 +2725,8 @@ fun App(
                                             }
                                             nicknames.value
                                         },
-                                        onSwitchShip = { newShip ->
-                                            // Clear the previous ship's open chat before
-                                            // sessionStore.setActive so no frame renders with
-                                            // the new active ship but stale chat state.
-                                            openChat = null
-                                            switchShipAction()
-                                            viewerImageUrl = null
-                                            viewerImageList = null
-                                            showSelfProfile = false
-                                            showSettings = false
-                                            showSidebarSettings = false
-                                            sessionStore.setActive(newShip)
-                                            loggedInShip = newShip
-                                        },
-                                        onAddShip = {
-                                            // Drop to LoginScreen without signing the current
-                                            // ship out — its session entry stays in sessionStore
-                                            // so the drawer can switch back after the new login.
-                                            openChat = null
-                                            switchShipAction()
-                                            viewerImageUrl = null
-                                            viewerImageList = null
-                                            showSelfProfile = false
-                                            showSettings = false
-                                            showSidebarSettings = false
-                                            loggedInShip = null
-                                        },
+                                        onSwitchShip = switchShip,
+                                        onAddShip = addShip,
                                         onOpenShipSwitcher = {
                                             drawerScope.launch { drawerState.open() }
                                         },

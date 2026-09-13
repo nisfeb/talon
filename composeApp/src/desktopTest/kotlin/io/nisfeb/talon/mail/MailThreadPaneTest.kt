@@ -160,7 +160,7 @@ class MailThreadPaneTest {
     fun `sizes and unreadable counts read as sentences`() {
         assertEquals("unknown size", sizeLabel(0))
         assertEquals("512 B", sizeLabel(512))
-        assertEquals("2 KB", sizeLabel(2048))
+        assertEquals("2.0 KB", sizeLabel(2048))
         assertTrue(unreadableThreadLine(1).startsWith("1 copy here is"))
         assertTrue(unreadableThreadLine(3).startsWith("3 copies here are"))
     }

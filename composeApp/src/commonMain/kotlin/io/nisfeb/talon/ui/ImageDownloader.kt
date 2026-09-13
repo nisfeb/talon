@@ -60,9 +60,10 @@ object NoopImageDownloader : ImageDownloader {
  */
 val LocalImageDownloader = staticCompositionLocalOf<ImageDownloader> { NoopImageDownloader }
 
-/** A media type from a file name, for the few kinds mail attaches. */
+/** A media type from a file name, for the kinds people attach or pick. */
 internal fun mimeForName(name: String): String = when (name.substringAfterLast('.', "").lowercase()) {
     "png" -> "image/png"; "jpg", "jpeg" -> "image/jpeg"; "gif" -> "image/gif"; "webp" -> "image/webp"
+    "bmp" -> "image/bmp"
     "pdf" -> "application/pdf"; "txt" -> "text/plain"; "md" -> "text/markdown"
     "json" -> "application/json"; "zip" -> "application/zip"; "mp3" -> "audio/mpeg"
     "m4a" -> "audio/mp4"; "mp4" -> "video/mp4"; "ogg" -> "audio/ogg"

@@ -12,9 +12,10 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -30,7 +31,6 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -48,14 +48,11 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import io.nisfeb.talon.mail.Attachment
-import io.nisfeb.talon.mail.MailMessage
 import io.nisfeb.talon.mail.MailNode
 import io.nisfeb.talon.mail.MailRepo
 import io.nisfeb.talon.mail.MailThread
 import io.nisfeb.talon.mail.Verdict
 import io.nisfeb.talon.mail.branches
-import io.nisfeb.talon.mail.flatten
 import io.nisfeb.talon.mail.newestAnswerable
 import io.nisfeb.talon.mail.pathTo
 import io.nisfeb.talon.mail.threadTree
@@ -90,7 +87,6 @@ fun MailThreadPane(
 ) {
     val scope = rememberCoroutineScope()
     var thread by remember(threadId) { mutableStateOf<MailThread?>(null) }
-    var gone by remember(threadId) { mutableStateOf(false) }
     var loading by remember(threadId) { mutableStateOf(true) }
     var drawn by remember(threadId) { mutableStateOf(false) }
     // Folded subtrees, and messages read down to their header line.
@@ -103,7 +99,6 @@ fun MailThreadPane(
         loading = true
         val t = repo.loadThread(threadId)
         thread = t
-        gone = t == null
         loading = false
         // Reading it is what marks it read, and the mark is invisible to
         // every other client, so nothing else would ever do it.
@@ -125,6 +120,28 @@ fun MailThreadPane(
     val travelling = remember(forest, answering) {
         answering?.let { pathTo(forest, it) }.orEmpty()
     }
+    val travellingIds = remember(travelling) { travelling.mapTo(HashSet()) { it.id } }
+    val visible = remember(forest, folded.toList()) {
+        io.nisfeb.talon.mail.flattenVisible(forest, folded.toSet())
+    }
+
+    fun intent(forwarding: Boolean) = MailIntent(
+        prev = answering,
+        to = if (forwarding) emptyList() else thread?.participants.orEmpty().filter { it != ourShip },
+        subject = thread?.messages?.firstOrNull()?.subject.orEmpty(),
+        travels = travelling.size,
+        forwarding = forwarding,
+    )
+
+    // Filing is the same three lines whatever is being filed.
+    fun file(title: String, seed: String, gemtext: String) {
+        scope.launch {
+            filed = "Filing…"
+            filed = repo.publishToLattice(title = title, seed = seed, gemtext = gemtext)
+                ?.let { "Filed to Lattice at $it" }
+                ?: repo.error.value ?: "Could not file it."
+        }
+    }
 
     Column(modifier.fillMaxSize()) {
         MailThreadHeader(
@@ -138,8 +155,7 @@ fun MailThreadPane(
                     repo.setLabel(threadId, l, add)
                     // Null is "could not load", which the when below
                     // must never reach as thread!!.
-                    val reloaded = repo.loadThread(threadId)
-                    if (reloaded == null) gone = true else thread = reloaded
+                    thread = repo.loadThread(threadId)
                 }
             },
             showTree = hasBranches,
@@ -170,21 +186,15 @@ fun MailThreadPane(
             },
             onFile = {
                 val t = thread ?: return@MailThreadHeader
-                scope.launch {
-                    filed = "Filing…"
-                    val url = repo.publishToLattice(
-                        title = t.messages.firstOrNull()?.subject.orEmpty()
-                            .ifBlank { "Mail thread" },
-                        seed = io.nisfeb.talon.mail.MailGemtext.seedFor(threadId, null),
-                        gemtext = io.nisfeb.talon.mail.MailGemtext.thread(
-                            t,
-                            nameFor = { contacts.displayName(it) },
-                            when_ = { shortRelativeTime(it, nowMs()) },
-                        ),
-                    )
-                    filed = url?.let { "Filed to Lattice at $it" }
-                        ?: repo.error.value ?: "Could not file it."
-                }
+                file(
+                    title = t.messages.firstOrNull()?.subject.orEmpty().ifBlank { "Mail thread" },
+                    seed = io.nisfeb.talon.mail.MailGemtext.seedFor(threadId, null),
+                    gemtext = io.nisfeb.talon.mail.MailGemtext.thread(
+                        t,
+                        nameFor = { contacts.displayName(it) },
+                        when_ = { shortRelativeTime(it, nowMs()) },
+                    ),
+                )
             },
         )
         HorizontalDivider()
@@ -199,15 +209,16 @@ fun MailThreadPane(
             )
         }
 
+        val t = thread
         when {
             loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator()
             }
 
-            gone -> MailAbsentLine("This thread is no longer on the ship.")
+            t == null -> MailAbsent("This thread is no longer on the ship.")
 
-            thread!!.messages.isEmpty() -> MailAbsentLine(
-                if (thread!!.unreadable > 0) {
+            t.messages.isEmpty() -> MailAbsent(
+                if (t.unreadable > 0) {
                     "Every copy of this thread is in a form this build cannot read."
                 } else {
                     "Nothing in this thread."
@@ -221,34 +232,15 @@ fun MailThreadPane(
                     // A forged copy cannot be answered, so a thread of
                     // nothing else has nothing to reply to.
                     enabled = answering != null,
-                    onReply = {
-                        onCompose(
-                            MailIntent(
-                                prev = answering,
-                                to = thread!!.participants.filter { it != ourShip },
-                                subject = thread!!.messages.firstOrNull()?.subject.orEmpty(),
-                                travels = travelling.size,
-                            ),
-                        )
-                    },
-                    onForward = {
-                        onCompose(
-                            MailIntent(
-                                prev = answering,
-                                to = emptyList(),
-                                subject = thread!!.messages.firstOrNull()?.subject.orEmpty(),
-                                travels = travelling.size,
-                                forwarding = true,
-                            ),
-                        )
-                    },
+                    onReply = { onCompose(intent(forwarding = false)) },
+                    onForward = { onCompose(intent(forwarding = true)) },
                 )
                 HorizontalDivider()
                 if (drawn) {
                     // The picture, and under it the message it selects.
                     MailThreadTree(
-                        messages = thread!!.messages,
-                        selected = selected ?: answering,
+                        messages = t.messages,
+                        selected = answering,
                         nameFor = { contacts.displayName(it) },
                         onSelect = { selected = it },
                         modifier = Modifier.weight(1f).fillMaxWidth(),
@@ -259,52 +251,38 @@ fun MailThreadPane(
                     // forged copy ahead of the honest one, and taking
                     // the first would let a forger choose what the card
                     // under a node says.
-                    val shown = io.nisfeb.talon.mail.collapse(thread!!.messages).firstOrNull {
-                        it.id == (selected ?: answering)
+                    val shown = remember(t) { io.nisfeb.talon.mail.collapse(t.messages) }.firstOrNull {
+                        it.id == answering
                     }
                     if (shown != null) {
-                        LazyColumn(Modifier.weight(1f).fillMaxWidth()) {
-                            item(key = shown.id) {
-                                MailMessageCard(
-                                    node = io.nisfeb.talon.mail.MailNode(shown),
-                                    depth = 0,
-                                    onPath = false,
-                                    selected = false,
-                                    selectable = false,
-                                    hidden = 0,
-                                    copies = copies[shown.id] ?: 1,
-                                    foldable = false,
-                                    folded = false,
-                                    onFold = {},
-                                    shut = false,
-                                    onShut = {},
-                                    nameFor = { contacts.displayName(it) },
-                                    onSelect = {},
-                                    onFile = {
-                                        scope.launch {
-                                            filed = "Filing…"
-                                            val url = repo.publishToLattice(
-                                                title = shown.subject.ifBlank { "Mail" },
-                                                seed = io.nisfeb.talon.mail.MailGemtext
-                                                    .seedFor(threadId, shown.id),
-                                                gemtext = io.nisfeb.talon.mail.MailGemtext.message(
-                                                    shown,
-                                                    nameFor = { contacts.displayName(it) },
-                                                    when_ = { shortRelativeTime(it, nowMs()) },
-                                                ),
-                                            )
-                                            filed = url?.let { "Filed to Lattice at $it" }
-                                                ?: repo.error.value ?: "Could not file it."
-                                        }
-                                    },
-                                    repo = repo,
-                                )
-                            }
+                        Column(
+                            Modifier.weight(1f).fillMaxWidth()
+                                .verticalScroll(rememberScrollState()),
+                        ) {
+                            MailMessageCard(
+                                node = io.nisfeb.talon.mail.MailNode(shown),
+                                depth = 0,
+                                hidden = 0,
+                                copies = copies[shown.id] ?: 1,
+                                nameFor = { contacts.displayName(it) },
+                                onFile = {
+                                    file(
+                                        title = shown.subject.ifBlank { "Mail" },
+                                        seed = io.nisfeb.talon.mail.MailGemtext.seedFor(threadId, shown.id),
+                                        gemtext = io.nisfeb.talon.mail.MailGemtext.message(
+                                            shown,
+                                            nameFor = { contacts.displayName(it) },
+                                            when_ = { shortRelativeTime(it, nowMs()) },
+                                        ),
+                                    )
+                                },
+                                repo = repo,
+                            )
                         }
                     }
                 } else LazyColumn(Modifier.fillMaxSize()) {
                     items(
-                        io.nisfeb.talon.mail.flattenVisible(forest, folded.toSet()),
+                        visible,
                         key = { it.node.message.id },
                     ) { v ->
                         val node = v.node
@@ -322,28 +300,22 @@ fun MailThreadPane(
                             onShut = {
                                 if (!shut.remove(node.message.id)) shut.add(node.message.id)
                             },
-                            onPath = node.message.id in travelling.map { it.id },
+                            onPath = node.message.id in travellingIds,
                             selected = node.message.id == selected,
                             selectable = node.message.verdict != Verdict.FORGED,
                             nameFor = { contacts.displayName(it) },
                             onSelect = { selected = node.message.id },
                             onFile = {
-                                scope.launch {
-                                    filed = "Filing…"
-                                    val m = node.message
-                                    val url = repo.publishToLattice(
-                                        title = m.subject.ifBlank { "Mail" },
-                                        seed = io.nisfeb.talon.mail.MailGemtext
-                                            .seedFor(threadId, m.id),
-                                        gemtext = io.nisfeb.talon.mail.MailGemtext.message(
-                                            m,
-                                            nameFor = { contacts.displayName(it) },
-                                            when_ = { shortRelativeTime(it, nowMs()) },
-                                        ),
-                                    )
-                                    filed = url?.let { "Filed to Lattice at $it" }
-                                        ?: repo.error.value ?: "Could not file it."
-                                }
+                                val m = node.message
+                                file(
+                                    title = m.subject.ifBlank { "Mail" },
+                                    seed = io.nisfeb.talon.mail.MailGemtext.seedFor(threadId, m.id),
+                                    gemtext = io.nisfeb.talon.mail.MailGemtext.message(
+                                        m,
+                                        nameFor = { contacts.displayName(it) },
+                                        when_ = { shortRelativeTime(it, nowMs()) },
+                                    ),
+                                )
                             },
                             repo = repo,
                         )
@@ -529,32 +501,21 @@ private fun TravelLine(count: Int) {
 }
 
 @Composable
-private fun MailAbsentLine(text: String) {
-    Box(Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
-        Text(
-            text,
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-    }
-}
-
-@Composable
 private fun MailMessageCard(
     node: MailNode,
     depth: Int,
     hidden: Int,
     copies: Int,
-    foldable: Boolean,
-    folded: Boolean,
-    onFold: () -> Unit,
-    shut: Boolean,
-    onShut: () -> Unit,
-    onPath: Boolean,
-    selected: Boolean,
-    selectable: Boolean,
     nameFor: (String) -> String,
-    onSelect: () -> Unit,
+    foldable: Boolean = false,
+    folded: Boolean = false,
+    onFold: () -> Unit = {},
+    shut: Boolean = false,
+    onShut: () -> Unit = {},
+    onPath: Boolean = false,
+    selected: Boolean = false,
+    selectable: Boolean = false,
+    onSelect: () -> Unit = {},
     onFile: () -> Unit,
     repo: MailRepo,
 ) {
@@ -597,8 +558,8 @@ private fun MailMessageCard(
             )
             Spacer(Modifier.width(8.dp))
             when (m.verdict) {
-                Verdict.FORGED -> Tag("FORGED", MaterialTheme.colorScheme.error)
-                Verdict.UNVERIFIED -> Tag("UNVERIFIED", MaterialTheme.colorScheme.onSurfaceVariant)
+                Verdict.FORGED -> VerdictTag("FORGED", MaterialTheme.colorScheme.error)
+                Verdict.UNVERIFIED -> VerdictTag("UNVERIFIED", MaterialTheme.colorScheme.onSurfaceVariant)
                 Verdict.VERIFIED -> Unit
             }
             Spacer(Modifier.weight(1f))
@@ -689,21 +650,6 @@ private fun MailMessageCard(
     }
 }
 
-internal fun sizeLabel(bytes: Long): String = when {
-    bytes <= 0 -> "unknown size"
-    bytes < 1024 -> "$bytes B"
-    bytes < 1024 * 1024 -> "${bytes / 1024} KB"
-    else -> "${bytes / (1024 * 1024)} MB"
-}
+internal fun sizeLabel(bytes: Long): String =
+    if (bytes <= 0) "unknown size" else io.nisfeb.talon.util.humanFileSize(bytes)
 
-@Composable
-private fun Tag(text: String, color: Color) {
-    Surface(color = color.copy(alpha = 0.14f), shape = RoundedCornerShape(3.dp)) {
-        Text(
-            text,
-            style = MaterialTheme.typography.labelSmall,
-            color = color,
-            modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp),
-        )
-    }
-}

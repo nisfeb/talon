@@ -34,13 +34,13 @@ enum class HomeWidgetKind {
 
 /** How far ahead the calendar looks. */
 @Serializable
-enum class CalendarRange(val label: String, val minutes: Int?) {
+enum class CalendarRange(val label: String) {
     /** Just the next thing, whenever it is. */
-    NEXT_ONLY("Next only", null),
-    NEXT_3_HOURS("Next 3 hours", 3 * 60),
-    NEXT_6_HOURS("Next 6 hours", 6 * 60),
-    REST_OF_DAY("Rest of today", null),
-    NEXT_DAY("Next 24 hours", 24 * 60),
+    NEXT_ONLY("Next only"),
+    NEXT_3_HOURS("Next 3 hours"),
+    NEXT_6_HOURS("Next 6 hours"),
+    REST_OF_DAY("Rest of today"),
+    NEXT_DAY("Next 24 hours"),
 }
 
 /** The counts a list widget can be set to. */
@@ -81,10 +81,9 @@ const val HOME_ROW_UNIT_DP = 40
 /**
  * What the layout's numbers currently mean.
  *
- * Bumped when a stored span or row count would be read as the wrong
- * size. Version 1 counted a two-column grid in 168dp rows; version 2
- * counts twelve columns in 56dp ones, and a version 1 layout read
- * without scaling would come back as a row of slivers.
+ * Bumped whenever a stored span or row would read as the wrong size;
+ * `migrate` rescales each older version. Read unscaled, a layout from
+ * before the grid came back as a row of slivers.
  */
 const val HOME_LAYOUT_VERSION = 5
 
@@ -185,9 +184,6 @@ data class HomeLayout(
         val put = moving.copy(col = col, row = row).sane()
         return copy(widgets = widgets.map { if (it.kind == kind) put else it })
     }
-
-    /** How many row units tall the whole arrangement is. */
-    fun heightInRows(): Int = shown.maxOfOrNull { it.bottom } ?: 0
 
     /**
      * Every kind present exactly once, clamped, with anything the

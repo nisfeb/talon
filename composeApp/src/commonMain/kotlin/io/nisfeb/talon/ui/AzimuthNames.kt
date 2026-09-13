@@ -45,7 +45,10 @@ import kotlinx.serialization.json.put
 object AzimuthNames {
 
     private val lock = SynchronizedObject()
-    private val cache = HashMap<String, ByteArray?>()
+    /** Full and abridged name per ship, or null for "asked; has none".
+     *  Encoded once at warm time: a name is read per row and per
+     *  keystroke, and each encode is a SHA-256 and a bignum fold. */
+    private val cache = HashMap<String, Pair<String, String>?>()
 
     /**
      * Whether ships that are not comets get a word name at all.
@@ -90,17 +93,11 @@ object AzimuthNames {
      * yet, has no keys, or the ship cannot be looked up. Pure: never
      * fetches, never blocks.
      */
-    fun nameFor(ship: String): String? {
-        val fig = synchronized(lock) { cache[ship] } ?: return null
-        return Mnemonym.displayFingerprint(fig)
-    }
+    fun nameFor(ship: String): String? = synchronized(lock) { cache[ship] }?.second
 
     /** The unabridged word name, for telling two ships apart whose
      *  short names came out the same. */
-    fun fullNameFor(ship: String): String? {
-        val fig = synchronized(lock) { cache[ship] } ?: return null
-        return Mnemonym.encodeFingerprint(fig)
-    }
+    fun fullNameFor(ship: String): String? = synchronized(lock) { cache[ship] }?.first
 
     /** Forget everything, for a ship switch. */
     fun reset() {
@@ -119,18 +116,21 @@ object AzimuthNames {
             ships.filter { it !in cache && wantsLookup(it) }.distinct()
         }
         if (wanted.isEmpty()) return
-        var changed = false
         for (ship in wanted) {
             // Only an answer is remembered. "This ship has no keys" is
             // an answer; "the request failed" is not, and caching it
             // left every planet nameless after one offline launch,
             // with nothing that would ever ask again.
             val answer = rpc.fingerprint(ship).getOrNull() ?: continue
-            val fig = answer.fingerprint
-            synchronized(lock) { cache[ship] = fig }
-            if (fig != null) changed = true
+            val names = answer.fingerprint?.let { fig ->
+                val full = Mnemonym.encodeFingerprint(fig) ?: return@let null
+                full to (Mnemonym.displayFingerprint(fig) ?: full)
+            }
+            synchronized(lock) { cache[ship] = names }
+            // Each name redraws the rows as it lands, rather than every
+            // planet staying nameless until the last of them answers.
+            if (names != null) generation.value = generation.value + 1
         }
-        if (changed) generation.value = generation.value + 1
     }
 
     /**

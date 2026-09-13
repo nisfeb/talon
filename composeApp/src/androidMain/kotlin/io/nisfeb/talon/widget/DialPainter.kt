@@ -12,7 +12,9 @@ import androidx.compose.ui.graphics.toArgb
 import io.nisfeb.talon.ui.Moon
 import io.nisfeb.talon.ui.SkyClock
 import io.nisfeb.talon.ui.screens.MOON
+import androidx.compose.ui.graphics.asAndroidPath
 import io.nisfeb.talon.ui.screens.MOON_DARK
+import io.nisfeb.talon.ui.screens.moonLitPath
 import io.nisfeb.talon.ui.screens.MOON_TRACK_INSET
 import io.nisfeb.talon.ui.screens.SUN
 import io.nisfeb.talon.ui.screens.SUN_DOWN
@@ -31,10 +33,7 @@ import io.nisfeb.talon.ui.screens.markColor
 import io.nisfeb.talon.ui.screens.nightBand
 import io.nisfeb.talon.ui.screens.skyColor
 import io.nisfeb.talon.ui.screens.twilightBand
-import kotlin.math.PI
-import kotlin.math.cos
 import kotlin.math.roundToInt
-import kotlin.math.sin
 
 /**
  * The dial, drawn to a bitmap for the home-screen widget.
@@ -172,16 +171,6 @@ object DialPainter {
     }
 
     /** The ring itself, for cutting things off at its edges. */
-    private fun bandPath(cx: Float, cy: Float, radius: Float, ring: Float): Path {
-        val p = Path()
-        // Even-odd, so the inner circle punches a hole rather than
-        // filling the middle back in.
-        p.fillType = Path.FillType.EVEN_ODD
-        p.addCircle(cx, cy, radius + ring / 2f, Path.Direction.CW)
-        p.addCircle(cx, cy, radius - ring / 2f, Path.Direction.CW)
-        return p
-    }
-
     private fun stars(
         c: Canvas,
         paint: Paint,
@@ -313,26 +302,6 @@ object DialPainter {
      * half circle squashed by the phase. Signed, so it bulges into the
      * lit side for a crescent and away for a gibbous.
      */
-    private fun moonPath(cx: Float, cy: Float, r: Float, elongationDeg: Double): Path {
-        val e = elongationDeg * PI / 180.0
-        val side = if (elongationDeg < 180.0) 1f else -1f
-        val term = side * cos(e).toFloat()
-        val path = Path()
-        val steps = 32
-        for (i in 0..steps) {
-            val t = PI * i / steps
-            val x = cx + side * r * sin(t).toFloat()
-            val y = cy - r * cos(t).toFloat()
-            if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
-        }
-        for (i in steps downTo 0) {
-            val t = PI * i / steps
-            path.lineTo(cx + term * r * sin(t).toFloat(), cy - r * cos(t).toFloat())
-        }
-        path.close()
-        return path
-    }
-
     /**
      * Time, date and temperature, thinning out as the dial does — the
      * same tiers the app's dial uses, because a widget is small and a
@@ -392,9 +361,13 @@ object DialPainter {
         }
     }
 
-    private fun pointOn(angleDeg: Float, cx: Float, cy: Float, radius: Float): Pair<Float, Float> {
-        val rad = (angleDeg - 90f) * PI.toFloat() / 180f
-        return (cx + radius * cos(rad)) to (cy + radius * sin(rad))
-    }
-
+    // The dial's geometry, converted rather than retyped. These are the
+    // only three of the many things this file imports from
+    // SkyClockPanel that ever had their own copies.
+    private fun moonPath(cx: Float, cy: Float, r: Float, elongationDeg: Double): Path =
+        moonLitPath(androidx.compose.ui.geometry.Offset(cx, cy), r, elongationDeg).asAndroidPath()
+    private fun bandPath(cx: Float, cy: Float, radius: Float, ring: Float): Path =
+        io.nisfeb.talon.ui.screens.bandPath(androidx.compose.ui.geometry.Offset(cx, cy), radius, ring).asAndroidPath()
+    private fun pointOn(angleDeg: Float, cx: Float, cy: Float, radius: Float): Pair<Float, Float> =
+        io.nisfeb.talon.ui.screens.pointOn(angleDeg, androidx.compose.ui.geometry.Offset(cx, cy), radius).let { it.x to it.y }
 }

@@ -108,17 +108,17 @@ object SkyClock {
      * carry. [gloom] is how much the light goes out of the day — rain
      * darkens a sky, snow rather less, and a thunderstorm most of all.
      */
-    enum class Weather(val gloom: Float, val precipitating: Boolean) {
-        CLEAR(0f, false),
-        CLOUD(0f, false),
-        FOG(0.26f, false),
-        DRIZZLE(0.20f, true),
-        RAIN(0.38f, true),
-        SLEET(0.36f, true),
+    enum class Weather(val gloom: Float) {
+        CLEAR(0f),
+        CLOUD(0f),
+        FOG(0.26f),
+        DRIZZLE(0.20f),
+        RAIN(0.38f),
+        SLEET(0.36f),
         // Snow falls out of a bright sky more often than a black one,
         // and the ground throws light back up into it.
-        SNOW(0.20f, true),
-        THUNDER(0.55f, true),
+        SNOW(0.20f),
+        THUNDER(0.55f),
     }
 
     /**
@@ -168,10 +168,6 @@ object SkyClock {
         if (dayLength == 0) return false
         return forward(sunriseMinute, minuteOfDay) < dayLength
     }
-
-    /** Where the sun's mark sits. */
-    fun markIsSun(minuteOfDay: Int, sunriseMinute: Int, sunsetMinute: Int): Boolean =
-        isUpAt(minuteOfDay, sunriseMinute, sunsetMinute)
 
     /**
      * A time of day as a label. Deliberately not seconds: the ring is

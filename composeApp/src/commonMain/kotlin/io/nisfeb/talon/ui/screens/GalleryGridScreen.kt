@@ -17,7 +17,6 @@ import androidx.compose.foundation.lazy.staggeredgrid.StaggeredGridCells
 import androidx.compose.foundation.lazy.staggeredgrid.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.BrokenImage
 import androidx.compose.ui.graphics.vector.rememberVectorPainter
@@ -46,8 +45,6 @@ import coil3.compose.AsyncImage
 import io.nisfeb.talon.data.AppDatabase
 import io.nisfeb.talon.data.MessageEntity
 import io.nisfeb.talon.ui.ContactMap
-import io.nisfeb.talon.ui.LastContactMap
-import io.nisfeb.talon.ui.contactMapFlow
 import io.nisfeb.talon.urbit.StoryCache
 import io.nisfeb.talon.urbit.StoryPart
 import io.nisfeb.talon.urbit.TlonChatRepo
@@ -72,14 +69,7 @@ fun GalleryGridScreen(
     onCompose: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val contactMap by remember {
-        contactMapFlow(
-            db.contacts().stream(),
-            db.clubs().stream(),
-            db.groups().streamGroups(),
-            db.groups().streamChannelGroups(),
-        )
-    }.collectAsState(initial = LastContactMap.value)
+    val contactMap by io.nisfeb.talon.ui.rememberContactMap(db)
 
     // distinctUntilChanged on the upstream so unrelated messages-table
     // writes don't re-emit; flowOn(Default) keeps the reverse off main.

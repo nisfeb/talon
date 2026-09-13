@@ -133,6 +133,15 @@ object Notifications {
                 }
             )
         }
+        if (mgr.getNotificationChannel(CHANNEL_MAIL) == null) {
+            mgr.createNotificationChannel(
+                NotificationChannel(
+                    CHANNEL_MAIL,
+                    "Mail",
+                    NotificationManager.IMPORTANCE_DEFAULT,
+                ).apply { description = "New signed mail" },
+            )
+        }
         if (mgr.getNotificationChannel(CHANNEL_WATCHWORDS) == null) {
             mgr.createNotificationChannel(
                 NotificationChannel(
@@ -505,17 +514,7 @@ object Notifications {
     fun showMail(context: Context, threadId: String, title: String, body: String) {
         val mgr = ContextCompat.getSystemService(context, NotificationManager::class.java)
             ?: return
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
-            mgr.getNotificationChannel(CHANNEL_MAIL) == null
-        ) {
-            mgr.createNotificationChannel(
-                NotificationChannel(
-                    CHANNEL_MAIL,
-                    "Mail",
-                    NotificationManager.IMPORTANCE_DEFAULT,
-                ).apply { description = "New signed mail" },
-            )
-        }
+        ensureChannel(context)
         val tapIntent = Intent(context, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
             putExtra(EXTRA_OPEN_MAIL, true)

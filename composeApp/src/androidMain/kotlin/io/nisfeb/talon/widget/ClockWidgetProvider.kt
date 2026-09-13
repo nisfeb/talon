@@ -34,10 +34,8 @@ private const val TAG = "ClockWidget"
  * A widget is not the app: it draws through RemoteViews in the
  * launcher's process, with no Compose and no canvas of its own. So the
  * dial is rendered to a bitmap here and handed over as a picture, and
- * the time written across it is drawn into the bitmap and re-drawn
- * by a minute alarm of our own (see scheduleTick), which the system
- * for free rather than us waking up once a minute to redraw a circle
- * that has barely moved.
+ * the time under it is redrawn by a minute alarm of our own (see
+ * scheduleTick).
  *
  * Android-only: no desktop analogue, and iOS widgets are a separate
  * extension target with their own language and their own build.
@@ -148,12 +146,12 @@ class ClockWidgetProvider : AppWidgetProvider() {
                 // at all if that call hangs or the process is killed
                 // before it answers, which is the one failure that
                 // looks exactly like the feature not existing.
-                val known = WidgetSky.cachedForecast(context, settings.place, at)
-                    ?: WidgetSky.staleForecast(context)
+                val cached = WidgetSky.cachedForecast(context, settings.place, at)
+                val known = cached ?: WidgetSky.staleForecast(context)
                 paint(context, manager, ids, settings, at, known)
 
                 // Then a fresh one, if what we had was not current.
-                if (WidgetSky.cachedForecast(context, settings.place, at) == null) {
+                if (cached == null) {
                     val fetched = fetch(context, settings, at)
                     if (fetched != null && fetched != known) {
                         paint(context, manager, ids, settings, at, fetched)

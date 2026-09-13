@@ -183,33 +183,16 @@ fun suggestionsFor(
  * and the whole point of the name is that people can read it.
  */
 private fun labelled(ships: List<String>, contactMap: ContactMap): List<Suggestion> {
-    val short = ships.associateWith { wordName(it) }
-    val clashing = short.values.filterNotNull()
-        .groupingBy { it }.eachCount()
-        .filterValues { it > 1 }.keys
+    val labels = shipHandles(ships)
     return ships.map { ship ->
-        val name = short[ship]
         Suggestion(
             ship = ship,
             nickname = contactMap.nickname(ship),
-            label = when {
-                name == null -> ship
-                name in clashing -> fullWordName(ship) ?: name
-                else -> name
-            },
-            mnemonym = name,
+            label = labels.getValue(ship),
+            mnemonym = shipHandle(ship).takeIf { it != ship },
         )
     }
 }
-
-/** A ship's word name: a comet's own, or one looked up for a planet
- *  when the reader asked for those. */
-private fun wordName(ship: String): String? =
-    Mnemonym.display(ship)
-        ?: if (AzimuthNames.enabled.value) AzimuthNames.nameFor(ship) else null
-
-private fun fullWordName(ship: String): String? =
-    Mnemonym.forShip(ship) ?: AzimuthNames.fullNameFor(ship)
 
 /**
  * Whether [qNym] (dots already stripped from the front) picks out this
@@ -229,10 +212,9 @@ private fun fullWordName(ship: String): String? =
  */
 private fun nymMatches(qNym: String, ship: String): Boolean {
     if (qNym.isEmpty()) return false
-    val full = (Mnemonym.forShip(ship) ?: AzimuthNames.fullNameFor(ship))
-        ?.trimStart('.') ?: return false
+    val full = shipHandleLong(ship)?.trimStart('.') ?: return false
     if (full.startsWith(qNym)) return true
-    val abridged = (Mnemonym.display(ship) ?: AzimuthNames.nameFor(ship))?.trimStart('.')
+    val abridged = shipHandle(ship).takeIf { it != ship }?.trimStart('.')
     if (abridged != null && abridged.startsWith(qNym)) return true
     return full.split('.').any { it.startsWith(qNym) }
 }

@@ -97,22 +97,6 @@ class MailTreeTest {
     }
 
     @Test
-    fun `flatten walks depth first and reports depth`() {
-        val forest = threadTree(
-            listOf(
-                msg("root", sent = 1),
-                msg("a", prev = "root", sent = 2),
-                msg("a1", prev = "a", sent = 3),
-                msg("b", prev = "root", sent = 4),
-            ),
-        )
-        assertEquals(
-            listOf("root" to 0, "a" to 1, "a1" to 2, "b" to 1),
-            flatten(forest).map { (n, d) -> n.message.id to d },
-        )
-    }
-
-    @Test
     fun `the tip to answer is the newest honest message`() {
         val messages = listOf(
             msg("root", sent = 1),
@@ -230,12 +214,6 @@ class MailTreeTest {
         assertEquals(3, v.single().hidden, "a fold that does not count is just an ending")
     }
 
-    @Test
-    fun `only a message with replies can be folded`() {
-        val forest = threadTree(listOf(msg("root", sent = 1), msg("a", prev = "root", sent = 2)))
-        assertEquals(setOf("root"), foldableIds(forest))
-    }
-
     // ---- copies of one message -----------------------------------------
     //
     // Several grubs can share an id and differ only in signature. Each
@@ -299,13 +277,6 @@ class MailTreeTest {
     }
 
     @Test
-    fun `an all-forged node is not a reply target`() {
-        val ms = listOf(copy("m", Verdict.FORGED, sent = 1), copy("m", Verdict.FORGED, sent = 2))
-        assertTrue(allForged(ms, "m"))
-        assertEquals(null, newestAnswerable(ms))
-    }
-
-    @Test
     fun `the reader and the drawing cannot disagree about a node`() {
         // The bug this replaces: one kept the last copy of an id and the
         // other kept the first, so the two views could show different
@@ -315,10 +286,10 @@ class MailTreeTest {
             copy("m", Verdict.VERIFIED, sent = 2, prev = "root"),
             copy("m", Verdict.FORGED, sent = 3, prev = "root"),
         )
-        val inList = flatten(threadTree(ms)).single { it.first.message.id == "m" }
+        val inList = flattenVisible(threadTree(ms), emptySet()).single { it.node.message.id == "m" }
         val inTree = layoutTree(ms).nodes.single { it.message.id == "m" }
-        assertEquals(Verdict.FORGED, inList.first.message.verdict)
-        assertEquals(inList.first.message.verdict, inTree.message.verdict)
+        assertEquals(Verdict.FORGED, inList.node.message.verdict)
+        assertEquals(inList.node.message.verdict, inTree.message.verdict)
     }
 
     @Test

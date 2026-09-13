@@ -4,14 +4,8 @@ import android.content.Context
 import io.nisfeb.talon.ui.HomePlace
 import io.nisfeb.talon.ui.HomePrefs
 import io.nisfeb.talon.ui.HomePlaceCodec
-import io.nisfeb.talon.ui.Moon
 import io.nisfeb.talon.ui.SkyClock
-import io.nisfeb.talon.ui.Solar
 import io.nisfeb.talon.ui.parseForecast
-import kotlinx.datetime.Instant
-import kotlinx.datetime.TimeZone
-import kotlinx.datetime.offsetAt
-import kotlinx.datetime.toLocalDateTime
 
 /**
  * What the home-screen widget needs to draw, read from where the app
@@ -95,51 +89,7 @@ object WidgetSky {
      * The dial's state, from a place, a moment and whatever weather is
      * to hand. The same arithmetic the app's own home page does.
      */
-    fun skyFor(atMs: Long, place: HomePlace?, forecastBody: String?): SkyClock.Sky {
-        val weather = forecastBody?.let { parseForecast(it) }
-        val zone = place?.timeZoneId?.let { runCatching { TimeZone.of(it) }.getOrNull() }
-            ?: weather?.zoneId?.let { runCatching { TimeZone.of(it) }.getOrNull() }
-            ?: TimeZone.currentSystemDefault()
-        val instant = Instant.fromEpochMilliseconds(atMs)
-        val local = instant.toLocalDateTime(zone)
-        val minuteOfDay = local.hour * 60 + local.minute
-        val offsetMinutes = zone.offsetAt(instant).totalSeconds / 60
-
-        val sun = place?.let {
-            Solar.sunTimes(
-                latitude = it.lat,
-                longitude = it.lon,
-                dayOfYear = local.date.dayOfYear,
-                zoneOffsetMinutes = offsetMinutes,
-                elevationMetres = it.elevationMetres ?: 0.0,
-            )
-        }
-        val base = weather ?: SkyClock.Sky(minuteOfDay = minuteOfDay)
-        return base.copy(
-            minuteOfDay = minuteOfDay,
-            dateLabel = dayLabel(local.dayOfMonth, local.monthNumber),
-            sunriseMinute = sun?.sunriseMinute ?: base.sunriseMinute,
-            sunsetMinute = sun?.sunsetMinute ?: base.sunsetMinute,
-            twilight = place?.let { Solar.twilightMinutes(it.lat) } ?: base.twilight,
-            polar = sun?.polar ?: false,
-            polarDay = sun?.polarDay ?: false,
-            moonElongationDeg = Moon.phaseAt(atMs).elongationDeg,
-        )
-    }
-
-    private val MONTHS = listOf(
-        "Jan", "Feb", "Mar", "Apr", "May", "Jun",
-        "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
-    )
-
-    internal fun dayLabel(day: Int, month: Int): String {
-        val suffix = when {
-            day % 100 in 11..13 -> "th"
-            day % 10 == 1 -> "st"
-            day % 10 == 2 -> "nd"
-            day % 10 == 3 -> "rd"
-            else -> "th"
-        }
-        return "${MONTHS[(month - 1).coerceIn(0, 11)]} $day$suffix"
-    }
+    /** The dial's own arithmetic, not a copy of it. */
+    fun skyFor(atMs: Long, place: HomePlace?, forecastBody: String?): SkyClock.Sky =
+        io.nisfeb.talon.ui.screens.skyFor(atMs, place, forecastBody?.let { parseForecast(it) })
 }

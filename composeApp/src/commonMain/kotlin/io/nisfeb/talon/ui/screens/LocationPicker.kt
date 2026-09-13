@@ -1,9 +1,9 @@
 package io.nisfeb.talon.ui.screens
 
+import io.nisfeb.talon.util.formatDecimals
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
@@ -183,15 +183,7 @@ internal fun coordLabel(p: HomePlace): String = coordText(p.lat, p.lon) +
     (p.elevationMetres?.let { ", ${it.toInt()} m" } ?: "")
 
 private fun coordText(lat: Double, lon: Double): String {
-    fun one(v: Double, pos: String, neg: String): String {
-        val d = if (v < 0) -v else v
-        // Rounded as one number, so 42.36 echoes as 42.36 and not,
-        // after the floating-point subtraction, as 42.35.
-        val hundredths = kotlin.math.round(d * 100).toLong()
-        val whole = hundredths / 100
-        val frac = (hundredths % 100).toInt()
-        val f = if (frac < 10) "0$frac" else "$frac"
-        return "$whole.$f${if (v < 0) neg else pos}"
-    }
+    fun one(v: Double, pos: String, neg: String) =
+        kotlin.math.abs(v).formatDecimals(2) + if (v < 0) neg else pos
     return "${one(lat, "N", "S")} ${one(lon, "E", "W")}"
 }

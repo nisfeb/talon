@@ -23,7 +23,6 @@ import androidx.compose.foundation.hoverable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.ui.draw.alpha
-import androidx.compose.foundation.combinedClickable
 import io.nisfeb.talon.ui.combinedClickableWithSecondary
 import io.nisfeb.talon.ui.onSecondaryClick
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
@@ -56,14 +55,8 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.KeyboardArrowDown
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
-import androidx.compose.foundation.layout.IntrinsicSize
-import androidx.compose.foundation.layout.fillMaxHeight
-import androidx.compose.material.icons.filled.AttachFile
-import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ErrorOutline
-import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.Groups
@@ -115,12 +108,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.input.key.Key
-import androidx.compose.ui.input.key.KeyEventType
-import androidx.compose.ui.input.key.isShiftPressed
 import androidx.compose.ui.input.key.key
-import androidx.compose.ui.input.key.onPreviewKeyEvent
-import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.style.TextOverflow
@@ -136,33 +124,19 @@ import io.nisfeb.talon.data.AppDatabase
 import io.nisfeb.talon.data.MessageEntity
 import io.nisfeb.talon.data.NotifyLevel
 import io.nisfeb.talon.data.ReactionEntity
-import io.nisfeb.talon.data.ReactionUsageEntity
 import io.nisfeb.talon.data.ReplyCount
 import io.nisfeb.talon.ui.Avatar
-import io.nisfeb.talon.ui.CommandResult
 import io.nisfeb.talon.ui.ContactMap
 import io.nisfeb.talon.ui.ContactProfileSheet
 import io.nisfeb.talon.ui.DraftStore
 import io.nisfeb.talon.ui.EmojiCatalog
-import io.nisfeb.talon.ui.EmojiPickerDropdown
 import io.nisfeb.talon.ui.LinkPreviewCard
 import io.nisfeb.talon.ui.firstLinkUrl
-import io.nisfeb.talon.ui.MentionPicker
 import io.nisfeb.talon.ui.ReactionPalette
-import io.nisfeb.talon.ui.SlashPicker
 import io.nisfeb.talon.ui.StoryRenderer
-import io.nisfeb.talon.ui.contactMapFlow
-import io.nisfeb.talon.ui.detectEmojiQuery
-import io.nisfeb.talon.ui.detectMentionQuery
-import io.nisfeb.talon.ui.detectSlashTrigger
-import io.nisfeb.talon.ui.filterSlashCommands
-import io.nisfeb.talon.ui.runCommand
-import io.nisfeb.talon.ui.suggestionsFor
 import io.nisfeb.talon.urbit.StoryCache
 import io.nisfeb.talon.urbit.TlonChatRepo
 import io.nisfeb.talon.util.Log
-import io.nisfeb.talon.util.decodeImageDimensions
-import io.nisfeb.talon.util.rememberImagePicker
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -354,14 +328,7 @@ fun DmChatScreen(
     // which is the whole channel visibly assembling itself on the way
     // in, for a conversation that was on screen a moment ago. The
     // snapshot is per-ship, so a switch still starts clean.
-    val contactMap by remember {
-        contactMapFlow(
-            db.contacts().stream(),
-            db.clubs().stream(),
-            db.groups().streamGroups(),
-            db.groups().streamChannelGroups(),
-        ).onEach { HomeListSnapshot.active?.contactMap = it }
-    }.collectAsState(initial = HomeListSnapshot.active?.contactMap ?: ContactMap.EMPTY)
+    val contactMap by io.nisfeb.talon.ui.rememberContactMap(db)
 
     // Current pinned-post id for this channel (chat channels only);
     // null for DMs / clubs / non-chat channels.

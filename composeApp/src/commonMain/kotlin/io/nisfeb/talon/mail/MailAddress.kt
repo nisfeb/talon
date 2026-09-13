@@ -14,7 +14,6 @@ package io.nisfeb.talon.mail
  */
 fun isShip(s: String): Boolean = io.nisfeb.talon.urbit.isValidPatp(s)
 
-private val GROUP_COUNTS = setOf(1, 2, 4, 8)
 
 /**
  * Split a recipient field into ships, keeping what could not be read as

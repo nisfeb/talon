@@ -9,13 +9,10 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AcUnit
 import androidx.compose.material.icons.filled.Air
@@ -157,10 +154,10 @@ fun SkyClockDial(
     // at midnight, so the target steps from +179.75 to -180 and an
     // animation between them sweeps the marker a full lap backwards.
     // That step is a quarter of a degree of actual movement; snap it.
-    val sunAngle = rememberSeamlessAngle(SkyClock.angleOf(sky.minuteOfDay))
+    val sunAngle by rememberSeamlessAngle(SkyClock.angleOf(sky.minuteOfDay))
 
     val moonMinute = sky.moonElongationDeg?.let { Moon.dialMinute(sky.minuteOfDay, it) }
-    val moonAngle = rememberSeamlessAngle(moonMinute?.let { SkyClock.angleOf(it) } ?: 0f)
+    val moonAngle by rememberSeamlessAngle(moonMinute?.let { SkyClock.angleOf(it) } ?: 0f)
 
     val dayColor by animateColorAsState(
         targetValue = dayBand(sky),
@@ -220,6 +217,7 @@ fun SkyClockDial(
                 Modifier.fillMaxSize().semantics { contentDescription = spoken },
             ) {
                 val ring = size.minDimension * 0.16f
+                val stroke = Stroke(width = ring)
                 val inset = ring / 2f
                 val box = Size(size.minDimension - ring, size.minDimension - ring)
                 val topLeft = Offset(
@@ -242,23 +240,21 @@ fun SkyClockDial(
                         useCenter = false,
                         topLeft = topLeft,
                         size = box,
-                        style = Stroke(width = ring),
+                        style = stroke,
                     )
                 }
 
                 val radius = box.minDimension / 2f
                 val centre = Offset(size.width / 2f, size.height / 2f)
+                val band = bandPath(centre, radius, ring)
 
                 // Cloud, drawn rather than only drained out of the
                 // colour. A flat grey ring says "overcast" to somebody
                 // who already knows that is what it means; puffs say it
                 // to everybody, and they say it at night too, where a
                 // drained night band looks the same as a clear one.
-                drawStars(
-                    centre, radius, ring, sky, cloudiness,
-                    bandPath(centre, radius, ring),
-                )
-                drawClouds(centre, radius, ring, cloudAt, cloudPainter)
+                drawStars(centre, radius, ring, sky, cloudiness, band)
+                drawClouds(centre, radius, ring, cloudAt, cloudPainter, band)
                 // Laid down before anything that sits inside the sky
                 // ring, or it paints over them.
                 drawCircle(color = faceColor, radius = radius - ring / 2f, center = centre)
@@ -289,7 +285,7 @@ fun SkyClockDial(
                 // a new moon keeps the sun's hours — so the night
                 // somebody looks for it is exactly the night there is
                 // none.
-                if (moonMinute != null && sky.moonElongationDeg != null && sky.moonVisible) {
+                if (moonMinute != null && sky.moonVisible) {
                     drawMoon(
                         centre = centre,
                         angleDeg = moonAngle,
@@ -300,7 +296,7 @@ fun SkyClockDial(
                         // larger marker — correct, and no use at all.
                         orbit = radius - ring * MOON_TRACK_INSET,
                         r = ring * 0.30f,
-                        elongationDeg = sky.moonElongationDeg,
+                        elongationDeg = sky.moonElongationDeg!!,
                         lit = MOON,
                         dark = MOON_DARK,
                     )
@@ -317,12 +313,8 @@ fun SkyClockDial(
                 )
             }
 
-            // What is written across the dial thins out as the dial
-            // does, rather than the dial having a floor so the full
-            // readout always fits. A floor was a fiction: width alone
-            // takes the dial well below it whenever the window is
-            // narrow, and all a floor bought was a readout spilling
-            // over the edges at exactly those sizes.
+            // The readout thins out with the dial; a size floor only
+            // ever bought text spilling over the edge on narrow windows.
             Column(
                 Modifier.fillMaxSize().padding(horizontal = side * 0.12f),
                 verticalArrangement = Arrangement.Center,
@@ -410,7 +402,7 @@ private fun HiLo(
     }
 }
 
-private fun pointOn(angleDeg: Float, centre: Offset, radius: Float): Offset {
+internal fun pointOn(angleDeg: Float, centre: Offset, radius: Float): Offset {
     val rad = (angleDeg - 90f) * PI.toFloat() / 180f
     return Offset(centre.x + radius * cos(rad), centre.y + radius * sin(rad))
 }
@@ -471,21 +463,9 @@ private const val SEGMENT_MINUTES = SkyClock.MINUTES_IN_DAY / SEGMENTS
 
 internal val SUN = Color(0xFFF5B740)
 
-/**
- * The sun under the earth: still on the dial, plainly not lighting it.
- *
- * An ember rather than a dimmed daytime sun. The old value was the
- * day's amber with the life taken out of it, which at hue 41 and that
- * little chroma is olive -- and olive on the ring's deep indigo goes
- * muddy, which is most of what anybody saw on a night with no moon to
- * look at instead.
- *
- * Warmer and more saturated instead, which is what survives being dark
- * on a blue ground. It reads about a third as present as the daytime
- * sun (contrast 3.7 against the night ring, against the day sun's 10)
- * and stays well under a lit moon's 14, so the three are never
- * mistaken for one another.
- */
+/** The sun under the earth. An ember, not a dimmed daytime sun: olive
+ *  on indigo goes muddy. DialPaletteTest pins how it sits against the
+ *  ring, the day sun and the moon. */
 internal val SUN_DOWN = Color(0xFFA85F35)
 
 internal val MOON = Color(0xFFE8E4DA)
@@ -538,15 +518,6 @@ private fun conditionIcon(w: SkyClock.Weather): Pair<ImageVector, String>? = whe
     SkyClock.Weather.THUNDER -> Icons.Filled.Thunderstorm to "Storm"
 }
 
-/**
- * Where the clouds go, in the order they appear.
- *
- * Fixed angles rather than anything random: the drawing is recomposed
- * every few seconds, and clouds that jumped to new places each time
- * would be the most distracting thing on the page. Ordered so each new
- * one lands away from those already there, which keeps four clouds
- * looking scattered rather than bunched.
- */
 /** The most cloud the ring will carry at once. */
 internal const val CLOUD_MAX = 4
 
@@ -603,7 +574,7 @@ internal fun cloudMinutes(
 
     val lit = (0 until 24).mapNotNull { h ->
         val minute = h * 60
-        val since = ((minute - sunriseMinute) % 1440 + 1440) % 1440
+        val since = (minute - sunriseMinute).mod(1440)
         // Kept off the very ends, where half a cloud would hang into a
         // night that has no weather drawn in it at all.
         if (since < 45 || since > dayMinutes - 45) null
@@ -645,7 +616,7 @@ internal fun gloomAt(
     fallback: SkyClock.Weather,
 ): Float {
     if (hourly.size != 24) return fallback.gloom
-    val m = ((minute % 1440) + 1440) % 1440
+    val m = minute.mod(1440)
     val h = m / 60
     val next = (h + 1) % 24
     val t = (m % 60) / 60f
@@ -703,7 +674,7 @@ internal fun dialDescription(
 }
 
 /** The ring itself, as a path, for cutting things off at its edges. */
-private fun bandPath(centre: Offset, radius: Float, ring: Float): Path {
+internal fun bandPath(centre: Offset, radius: Float, ring: Float): Path {
     val outer = Path().apply { addOval(Rect(centre, radius + ring / 2f)) }
     val inner = Path().apply { addOval(Rect(centre, radius - ring / 2f)) }
     return Path().apply { op(outer, inner, PathOperation.Difference) }
@@ -782,8 +753,6 @@ internal fun starRadius(noise: Float, ring: Float): Float =
  * density — which is the thing the pixel floor cannot help with. A
  * dense phone has plenty of pixels and they are all very small, so a
  * star sized to survive being drawn is still barely there to look at.
- * About half what it was before the shrink: the first size was too
- * loud and a third of it was too quiet.
  */
 internal const val STAR_SIZE_MIN = 0.011f
 internal const val STAR_SIZE_SPREAD = 0.013f
@@ -836,14 +805,13 @@ private fun DrawScope.drawClouds(
     ring: Float,
     at: List<Pair<Int, Float>>,
     painter: VectorPainter,
-) {
-    if (at.isEmpty()) return
-    val box = cloudBox(ring)
-
     // The clip is the shape. Each cloud is drawn far larger than the
     // band and cut off by both its edges, which is what gives a bank of
     // cloud rather than a sticker sitting in a slot.
-    val band = bandPath(centre, radius, ring)
+    band: Path,
+) {
+    if (at.isEmpty()) return
+    val box = cloudBox(ring)
 
     // Cloud seen from underneath is not opaque. The sky has to keep
     // reading through it, or the ring stops being a clock.
@@ -975,7 +943,7 @@ internal fun twilightBand(sky: SkyClock.Sky): Color {
  * of real movement would otherwise play as a full backwards lap.
  */
 @Composable
-internal fun rememberSeamlessAngle(target: Float): Float {
+internal fun rememberSeamlessAngle(target: Float): androidx.compose.runtime.State<Float> {
     val anim = androidx.compose.runtime.remember {
         androidx.compose.animation.core.Animatable(target)
     }
@@ -983,5 +951,7 @@ internal fun rememberSeamlessAngle(target: Float): Float {
         if (kotlin.math.abs(target - anim.value) > 180f) anim.snapTo(target)
         else anim.animateTo(target, tween(durationMillis = 900))
     }
-    return anim.value
+    // A State, not a Float: read inside the Canvas, each frame of the
+    // sweep redraws the dial rather than recomposing the panel.
+    return anim.asState()
 }

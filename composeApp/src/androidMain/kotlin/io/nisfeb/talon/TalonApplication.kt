@@ -3,7 +3,6 @@ package io.nisfeb.talon
 import android.app.Application
 import io.nisfeb.talon.ai.AiClient
 import io.nisfeb.talon.ai.AiFeatures
-import io.nisfeb.talon.ai.AiSettings
 import io.nisfeb.talon.data.AppDatabase
 import io.nisfeb.talon.ui.DraftStore
 import io.nisfeb.talon.ui.ShipProfileStore
@@ -352,7 +351,7 @@ class TalonApplication : Application() {
         val priorDb = if (::db.isInitialized) db else null
         val priorIndexer = if (::embeddingIndexer.isInitialized) embeddingIndexer else null
 
-        db = io.nisfeb.talon.data.createAppDatabase(this, "talon-${ship}.db")
+        db = io.nisfeb.talon.data.createAppDatabase(this, io.nisfeb.talon.data.shipDbName(ship))
         session = UrbitSession(ktorHttp, sessionStore)
         // Re-hydrate the cookie jar + baseUrl from the stored session
         // for this ship (if any). Skips silently for the placeholder

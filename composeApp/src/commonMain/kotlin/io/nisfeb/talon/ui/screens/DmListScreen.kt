@@ -8,7 +8,6 @@ import io.nisfeb.talon.util.nowMs
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.combinedClickable
 import io.nisfeb.talon.ui.combinedClickableWithSecondary
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -26,7 +25,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
@@ -41,12 +39,10 @@ import androidx.compose.material.icons.filled.Done
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.DragHandle
 import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
@@ -94,7 +90,6 @@ import io.nisfeb.talon.ui.applyEmojiSpans
 import io.nisfeb.talon.ui.FolderAssignmentSheet
 import io.nisfeb.talon.ui.RailItem
 import io.nisfeb.talon.ui.UpdateBanner
-import io.nisfeb.talon.ui.contactMapFlow
 import io.nisfeb.talon.ui.shortRelativeTime
 import io.nisfeb.talon.update.UpdateStatus
 import io.nisfeb.talon.ui.MentionMatcher
@@ -302,14 +297,7 @@ fun DmListScreen(
         out
     }
 
-    val contactMap by remember {
-        contactMapFlow(
-            db.contacts().stream(),
-            db.clubs().stream(),
-            db.groups().streamGroups(),
-            db.groups().streamChannelGroups(),
-        ).onEach { snap.contactMap = it }
-    }.collectAsState(initial = snap.contactMap)
+    val contactMap by io.nisfeb.talon.ui.rememberContactMap(db)
 
     val drafts by drafts.state.collectAsState()
     val updateStatus by updateState.status.collectAsState()
@@ -761,14 +749,7 @@ fun DmListScreen(
                 // thing this branch exists to avoid.
                 val label = when {
                     activeNick != null && !collision -> activeNick
-                    else -> {
-                        val short = io.nisfeb.talon.ui.shipHandle(activeShip)
-                        val alike = allShips.count {
-                            io.nisfeb.talon.ui.shipHandle(it) == short
-                        } > 1
-                        if (alike) io.nisfeb.talon.ui.shipHandleLong(activeShip) ?: short
-                        else short
-                    }
+                    else -> io.nisfeb.talon.ui.shipHandles(allShips).getValue(activeShip)
                 }
                 // Colored dot in the user's chosen accent — same
                 // value as `colorScheme.primary` since App.kt's
@@ -2868,7 +2849,6 @@ private fun ChannelTypeBadge(whom: String) {
 
 internal class ShipSnapshot {
     @Volatile var rows: List<Pair<MessageEntity, Int>> = emptyList()
-    @Volatile var contactMap: ContactMap = ContactMap.EMPTY
     @Volatile var expandedGroups: Set<String> = emptySet()
     @Volatile var groupOrders: List<io.nisfeb.talon.data.GroupOrderEntity> = emptyList()
     @Volatile var folders: List<FolderEntity> = emptyList()

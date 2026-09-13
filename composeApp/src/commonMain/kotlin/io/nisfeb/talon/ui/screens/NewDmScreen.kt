@@ -15,11 +15,7 @@ import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -36,7 +32,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import io.nisfeb.talon.data.AppDatabase
 import io.nisfeb.talon.ui.Avatar
-import io.nisfeb.talon.urbit.PATP_REGEX
 
 @Composable
 fun NewDmScreen(
@@ -75,11 +70,12 @@ fun NewDmScreen(
     // one every screen shows. Only the first used to be accepted, so
     // the name people were actually given was the one this box refused.
     val namesGen by io.nisfeb.talon.ui.AzimuthNames.generation.collectAsState()
-    val resolved = remember(trimmedInput, contacts, namesGen) {
+    val byShip = remember(contacts) { contacts.associateBy { it.ship } }
+    val resolved = remember(trimmedInput, byShip, namesGen) {
         io.nisfeb.talon.ui.NameToShip.resolve(
             typed = trimmedInput,
-            known = contacts.map { it.ship },
-            nicknameOf = { ship -> contacts.firstOrNull { it.ship == ship }?.nickname },
+            known = byShip.keys,
+            nicknameOf = { ship -> byShip[ship]?.nickname },
         )
     }
     val asPatp = (resolved as? io.nisfeb.talon.ui.NameToShip.Result.One)?.ship

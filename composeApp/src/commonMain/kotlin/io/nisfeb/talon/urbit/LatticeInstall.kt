@@ -64,6 +64,17 @@ object LatticeInstall {
         )
     }
 
+    /** The install as one call, for the hosts that offer it from a menu. */
+    fun installer(
+        http: HttpClient,
+        shipUrl: () -> String?,
+        poke: suspend (String, String, JsonElement) -> Boolean,
+    ): suspend () -> Result<Unit> = {
+        val url = shipUrl()
+        if (url == null) Result.failure(IllegalStateException("Not signed in to a ship."))
+        else installAndWait(http, url, poke)
+    }
+
     private const val POLL_MS = 3_000L
     const val DEFAULT_TIMEOUT_MS = 90_000L
 

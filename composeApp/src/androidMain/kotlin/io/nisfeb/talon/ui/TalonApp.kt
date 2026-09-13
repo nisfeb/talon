@@ -394,25 +394,7 @@ fun TalonApp(
         else mailRepo.detach()
     }
 
-    val contactMap by remember {
-        contactMapFlow(
-            app.db.contacts().stream(),
-            app.db.clubs().stream(),
-            app.db.groups().streamGroups(),
-            app.db.groups().streamChannelGroups(),
-        )
-    }.let { flow -> flow.collectAsState(initial = LastContactMap.value) }
-    // Story parsing runs outside composition (StoryCache, ingest), so
-    // the naming policy is published to it here rather than threaded
-    // through every call site. App.kt has done this since naming
-    // existed; this host never did, so every mention in a message
-    // rendered as the raw @p -- which for a comet is fifty-six
-    // characters of what the word name exists to replace.
-    LaunchedEffect(contactMap) {
-        io.nisfeb.talon.ui.ShipNames.setResolver(contactMap.namesVersion) { ship ->
-            contactMap.displayName(ship)
-        }
-    }
+    val contactMap by io.nisfeb.talon.ui.rememberContactMap(app.db)
     // Register every call and party line with telecom for as long as
     // it lasts, and let the audio picker route through it meanwhile.
     val telecomCalls = remember(callController, partyLine) {
@@ -535,8 +517,7 @@ fun TalonApp(
         mailAvailabilityState.value == io.nisfeb.talon.mail.MailAvailability.PRESENT
 
     val mailContext = LocalContext.current
-    LaunchedEffect(mailRepo, contactMap) {
-        mailRepo.nameFor = { contactMap.displayName(it) }
+    LaunchedEffect(mailRepo) {
         mailRepo.onNewMail = { news ->
             news.forEach {
                 io.nisfeb.talon.Notifications.showMail(
@@ -1214,14 +1195,7 @@ fun TalonApp(
         }
     // Root contact map so a quoted post's author resolves to the same
     // nickname / mnemonym the rest of the app shows, not the bare @p.
-    val citeContacts by remember(app) {
-        io.nisfeb.talon.ui.contactMapFlow(
-            app.db.contacts().stream(),
-            app.db.clubs().stream(),
-            app.db.groups().streamGroups(),
-            app.db.groups().streamChannelGroups(),
-        )
-    }.collectAsState(initial = io.nisfeb.talon.ui.LastContactMap.value)
+    val citeContacts by io.nisfeb.talon.ui.rememberContactMap(app.db)
     val citeDisplayName: (String) -> String = remember(citeContacts) {
         { ship -> citeContacts.displayName(ship) }
     }
@@ -1230,20 +1204,10 @@ fun TalonApp(
         // that has none.
         // Mail lives in the same desk as the link handler's app, so the
         // install is one thing offered from two places.
-        io.nisfeb.talon.mail.LocalGrubberyInstall provides {
-            val url = app.sessionStore.active()?.shipUrl
-            if (url == null) {
-                Result.failure(IllegalStateException("Not signed in to a ship."))
-            } else {
-                io.nisfeb.talon.urbit.LatticeInstall.installAndWait(
-                    http = app.ktorHttp,
-                    shipUrl = url,
-                    poke = { a, mark, body ->
-                        runCatching { app.repo.pokeRaw(a, mark, body) }.isSuccess
-                    },
-                )
-            }
-        },
+        io.nisfeb.talon.mail.LocalGrubberyInstall provides
+            io.nisfeb.talon.urbit.LatticeInstall.installer(app.ktorHttp, { app.sessionStore.active()?.shipUrl }) {
+                a, mark, body -> runCatching { app.repo.pokeRaw(a, mark, body) }.isSuccess
+            },
         io.nisfeb.talon.mail.LocalMailTo provides
             if (mailAvailable) {
                 { peer: String ->

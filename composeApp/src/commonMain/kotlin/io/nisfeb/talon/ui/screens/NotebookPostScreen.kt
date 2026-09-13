@@ -52,9 +52,7 @@ import coil3.compose.AsyncImage
 import io.nisfeb.talon.data.AppDatabase
 import io.nisfeb.talon.ui.Avatar
 import io.nisfeb.talon.ui.ContactMap
-import io.nisfeb.talon.ui.LastContactMap
 import io.nisfeb.talon.ui.StoryRenderer
-import io.nisfeb.talon.ui.contactMapFlow
 import io.nisfeb.talon.urbit.RawMarkdown
 import io.nisfeb.talon.urbit.Story
 import io.nisfeb.talon.urbit.StoryCache
@@ -65,7 +63,6 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonArray
 
 /**
@@ -112,14 +109,7 @@ fun NotebookPostScreen(
         db.messages().streamReplies(whom, postId).distinctUntilChanged()
     }.collectAsState(initial = emptyList())
 
-    val contactMap by remember {
-        contactMapFlow(
-            db.contacts().stream(),
-            db.clubs().stream(),
-            db.groups().streamGroups(),
-            db.groups().streamChannelGroups(),
-        )
-    }.collectAsState(initial = LastContactMap.value)
+    val contactMap by io.nisfeb.talon.ui.rememberContactMap(db)
 
     var replyText by remember { mutableStateOf("") }
     var sending by remember { mutableStateOf(false) }

@@ -1,7 +1,6 @@
 package io.nisfeb.talon.ui.screens
 
 import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.combinedClickable
 import io.nisfeb.talon.ui.combinedClickableWithSecondary
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -55,11 +54,8 @@ import androidx.compose.ui.unit.dp
 import io.nisfeb.talon.data.AppDatabase
 import io.nisfeb.talon.ui.Avatar
 import io.nisfeb.talon.ui.ContactMap
-import io.nisfeb.talon.ui.LastContactMap
-import io.nisfeb.talon.ui.contactMapFlow
 import io.nisfeb.talon.urbit.AdminGroup
 import io.nisfeb.talon.urbit.AdminMember
-import io.nisfeb.talon.urbit.PATP_REGEX
 import io.nisfeb.talon.urbit.TlonChatRepo
 import io.nisfeb.talon.util.decodeImageDimensions
 import io.nisfeb.talon.util.rememberImagePicker
@@ -96,14 +92,7 @@ fun GroupAdminScreen(
 
     // Contact map for nicknames on member rows. Updates live as
     // %contacts events come in.
-    val contactMap by remember {
-        contactMapFlow(
-            db.contacts().stream(),
-            db.clubs().stream(),
-            db.groups().streamGroups(),
-            db.groups().streamChannelGroups(),
-        )
-    }.collectAsState(initial = LastContactMap.value)
+    val contactMap by io.nisfeb.talon.ui.rememberContactMap(db)
 
     suspend fun refresh() {
         runCatching { repo.fetchGroupAdmin(flag) }
@@ -675,11 +664,13 @@ private fun AdminBody(
         // sig, a full word name (checksummed, so a typo fails rather
         // than inviting somebody else), or a short name or nickname
         // matched against people already known.
-        val invited = io.nisfeb.talon.ui.NameToShip.resolve(
-            typed = inviteText,
-            known = contactMap.contacts.map { it.ship },
-            nicknameOf = { ship -> contactMap.nickname(ship) },
-        )
+        val invited = remember(inviteText, contactMap) {
+            io.nisfeb.talon.ui.NameToShip.resolve(
+                typed = inviteText,
+                known = contactMap.contacts.map { it.ship },
+                nicknameOf = { ship -> contactMap.nickname(ship) },
+            )
+        }
         val invitePatp = (invited as? io.nisfeb.talon.ui.NameToShip.Result.One)?.ship
         Row(
             verticalAlignment = Alignment.CenterVertically,

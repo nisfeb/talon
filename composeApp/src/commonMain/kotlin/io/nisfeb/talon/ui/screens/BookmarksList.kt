@@ -31,9 +31,6 @@ import androidx.compose.ui.unit.dp
 import io.nisfeb.talon.data.AppDatabase
 import io.nisfeb.talon.data.BookmarkFolderEntity
 import io.nisfeb.talon.data.BookmarkedMessage
-import io.nisfeb.talon.ui.ContactMap
-import io.nisfeb.talon.ui.LastContactMap
-import io.nisfeb.talon.ui.contactMapFlow
 import io.nisfeb.talon.urbit.TlonChatRepo
 import kotlinx.coroutines.launch
 
@@ -62,14 +59,7 @@ fun BookmarksList(
         db.bookmarkFolders().streamMembers()
     }.collectAsState(initial = emptyList())
 
-    val contactMap by remember {
-        contactMapFlow(
-            db.contacts().stream(),
-            db.clubs().stream(),
-            db.groups().streamGroups(),
-            db.groups().streamChannelGroups(),
-        )
-    }.collectAsState(initial = LastContactMap.value)
+    val contactMap by io.nisfeb.talon.ui.rememberContactMap(db)
 
     /** null = "All" filter; non-null = a specific folder id. */
     var selectedFolderId by remember { mutableStateOf<Long?>(null) }

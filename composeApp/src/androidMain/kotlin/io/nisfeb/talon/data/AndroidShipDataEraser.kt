@@ -16,13 +16,11 @@ class AndroidShipDataEraser(context: Context) : ShipDataEraser {
     private val app = context.applicationContext
 
     override fun erase(ship: String): Result<Unit> = runCatching {
-        // The same name buildShipScoped passes to createAppDatabase.
-        val db = "talon-$ship.db"
-        val goneDb = app.deleteDatabase(db)
+        val goneDb = app.deleteDatabase(shipDbName(ship))
 
         // Per-ship preference files, named the way their own stores
         // name them.
-        val key = ship.removePrefix("~").replace(Regex("[^a-z0-9-]"), "_")
+        val key = io.nisfeb.talon.ui.prefsKey(ship)
         for (file in listOf("talon.menuseen.$key", "talon.drafts.$key")) {
             app.getSharedPreferences(file, Context.MODE_PRIVATE).edit().clear().commit()
             deletePrefsFile(file)
@@ -52,3 +50,6 @@ class AndroidShipDataEraser(context: Context) : ShipDataEraser {
         }
     }
 }
+
+/** The one name both the builder and the eraser use for a ship's database. */
+internal fun shipDbName(ship: String) = "talon-$ship.db"

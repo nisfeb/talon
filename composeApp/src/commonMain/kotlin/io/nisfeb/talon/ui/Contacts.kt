@@ -1,5 +1,10 @@
 package io.nisfeb.talon.ui
 
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.State
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.remember
+import io.nisfeb.talon.data.AppDatabase
 import androidx.compose.runtime.Immutable
 import io.nisfeb.talon.data.ChannelGroupEntity
 import io.nisfeb.talon.data.ClubEntity
@@ -28,11 +33,8 @@ data class ContactMap(
     val channelGroups: List<ChannelGroupEntity> = emptyList(),
     /** Ignore nicknames and mnemonyms; show the raw @p everywhere. */
     val alwaysPatp: Boolean = false,
-    /** Whether a planet or a moon may show a looked-up word name. A
-     *  comet's own name is never gated on this. */
-    val nonCometNames: Boolean = false,
-    /** Bumped as looked-up names arrive, so a map built before an
-     *  answer landed is not equal to one built after. */
+    /** Bumped as looked-up names arrive or the setting for them flips,
+     *  so a map built before is not equal to one built after. */
     val namesGeneration: Int = 0,
 ) {
     private val byShip: Map<String, ContactEntity> =
@@ -58,7 +60,6 @@ data class ContactMap(
      */
     val namesVersion: Int by lazy {
         var h = if (alwaysPatp) 1 else 0
-        h = h * 31 + if (nonCometNames) 1 else 0
         h = h * 31 + namesGeneration
         for (c in contacts) {
             h = h * 31 + c.ship.hashCode()
@@ -91,7 +92,7 @@ data class ContactMap(
      * ever shown: a comet's @p is the fifty-six characters its name
      * exists to replace, so no surface puts one in front of anybody.
      */
-    fun handle(ship: String): String = shipHandle(ship, nonCometNames)
+    fun handle(ship: String): String = shipHandle(ship)
 
     fun contact(ship: String): ContactEntity? = byShip[ship]
     fun shipColor(ship: String): String? = byShip[ship]?.color
@@ -145,23 +146,6 @@ data class ContactMap(
 }
 
 /**
- * Combine every directory DAO flow into one ContactMap flow.
- *
- * Status updates land via %contacts /v1/news roughly every minute on
- * an active network. They change `status` + `statusUpdatedMs` but
- * none of the fields ContactMap actually uses (ship, nickname,
- * avatarUrl, color). The default `distinctUntilChanged()` would still
- * pass those re-emissions through because the entity equals differs,
- * which then rebuilds ContactMap and recomposes every consumer
- * (DmListScreen, every chat row's avatar/label, etc.) for nothing.
- *
- * The custom equivalence below treats two contact lists as equal
- * when their *display* projection matches — status / bio / mod-at
- * differences pass silently. Consumers that need fresh status (only
- * ContactProfileSheet today) read directly from
- * [io.nisfeb.talon.data.ContactDao.streamOne].
- */
-/**
  * What a ship is called with nobody's nicknames involved: its word
  * name if it has one, otherwise its @p.
  *
@@ -184,6 +168,22 @@ fun shipHandle(ship: String, nonCometNames: Boolean = AzimuthNames.enabled.value
  */
 fun shipHandleLong(ship: String): String? =
     Mnemonym.forShip(ship) ?: AzimuthNames.fullNameFor(ship)
+
+/**
+ * A handle for each of [ships], lengthened only where it has to be.
+ *
+ * Two comets can abridge to the same two words. Shown side by side --
+ * in a picker, or as two of your own accounts -- the same name twice
+ * tells nobody apart, so those rows get the unabridged name instead.
+ * The rule lived in three places before it lived here.
+ */
+fun shipHandles(ships: Collection<String>): Map<String, String> {
+    val short = ships.associateWith { shipHandle(it) }
+    val clashing = short.values.groupingBy { it }.eachCount().filterValues { it > 1 }.keys
+    return short.mapValues { (ship, name) ->
+        if (name in clashing) shipHandleLong(ship) ?: name else name
+    }
+}
 
 /**
  * The last [ContactMap] anybody built, so a screen opening can start
@@ -210,6 +210,23 @@ object LastContactMap {
     fun forget() { value = ContactMap.EMPTY }
 }
 
+/**
+ * Combine every directory DAO flow into one ContactMap flow.
+ *
+ * Status updates land via %contacts /v1/news roughly every minute on
+ * an active network. They change `status` + `statusUpdatedMs` but
+ * none of the fields ContactMap actually uses (ship, nickname,
+ * avatarUrl, color). The default `distinctUntilChanged()` would still
+ * pass those re-emissions through because the entity equals differs,
+ * which then rebuilds ContactMap and recomposes every consumer
+ * (DmListScreen, every chat row's avatar/label, etc.) for nothing.
+ *
+ * The custom equivalence below treats two contact lists as equal
+ * when their *display* projection matches — status / bio / mod-at
+ * differences pass silently. Consumers that need fresh status (only
+ * ContactProfileSheet today) read directly from
+ * [io.nisfeb.talon.data.ContactDao.streamOne].
+ */
 fun contactMapFlow(
     contactsFlow: Flow<List<ContactEntity>>,
     clubsFlow: Flow<List<ClubEntity>>,
@@ -219,7 +236,6 @@ fun contactMapFlow(
     // each have to thread a UiSettings reference through; flipping
     // it re-emits every ContactMap and re-renders names.
     alwaysPatpFlow: Flow<Boolean> = ShipNames.alwaysPatp,
-    nonCometNamesFlow: Flow<Boolean> = AzimuthNames.enabled,
     /** Ticks as looked-up names arrive, so a row drawn before the
      *  answer landed is redrawn once it has. */
     namesGenerationFlow: Flow<Int> = AzimuthNames.generation,
@@ -228,16 +244,19 @@ fun contactMapFlow(
     clubsFlow.distinctUntilChanged(),
     groupsFlow.distinctUntilChanged(),
     channelGroupsFlow.distinctUntilChanged(),
-    // The three naming inputs ride one slot: `combine` only types five.
+    // Two naming inputs ride one slot: `combine` only types five.
     combine(
         alwaysPatpFlow.distinctUntilChanged(),
-        nonCometNamesFlow.distinctUntilChanged(),
         namesGenerationFlow.distinctUntilChanged(),
-    ) { patp, nonComet, gen -> Triple(patp, nonComet, gen) },
-) { c, cl, g, cg, naming ->
-    ContactMap(c, cl, g, cg, naming.first, naming.second, naming.third)
-}
-    .onEach(LastContactMap::remember)
+    ) { patp, gen -> patp to gen },
+) { c, cl, g, cg, (patp, gen) -> ContactMap(c, cl, g, cg, patp, gen) }
+    .onEach {
+        LastContactMap.remember(it)
+        // Story parsing runs outside composition (StoryCache, ingest),
+        // so the naming policy is published from here. Each host used
+        // to do this itself, and one of them forgot for a year.
+        ShipNames.setResolver(it.namesVersion, it::displayName)
+    }
     .flowOn(Dispatchers.Default)
     // Conflate so cascading bootstrap emissions (e.g. all four DAOs
     // streaming initial values within a frame of each other) collapse
@@ -265,3 +284,19 @@ internal fun sameContactDisplay(a: List<ContactEntity>, b: List<ContactEntity>):
     }
     return true
 }
+
+/**
+ * The contact map, as every screen wants it: built once per database,
+ * starting from the last one anybody had rather than from none.
+ * Twenty screens spelled this out; some kept a second cache of it.
+ */
+@Composable
+fun rememberContactMap(db: AppDatabase): State<ContactMap> =
+    remember(db) {
+        contactMapFlow(
+            db.contacts().stream(),
+            db.clubs().stream(),
+            db.groups().streamGroups(),
+            db.groups().streamChannelGroups(),
+        )
+    }.collectAsState(LastContactMap.value)

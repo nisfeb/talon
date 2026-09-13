@@ -116,24 +116,12 @@ class AuspexApi(
      * progress it would report would not be true.
      */
     suspend fun uploadBlob(bytes: ByteArray): String {
-        val resp = try {
-            http.request(root + "/api/blob") {
-                this.method = HttpMethod.Post
-                contentType(ContentType.Application.OctetStream)
-                setBody(bytes)
-            }
-        } catch (c: CancellationException) {
-            throw c
-        } catch (t: Throwable) {
-            throw AuspexError.Unreachable(t)
+        val resp = send("/api/blob") {
+            this.method = HttpMethod.Post
+            contentType(ContentType.Application.OctetStream)
+            setBody(bytes)
         }
-        val text = try {
-            resp.bodyAsText()
-        } catch (c: CancellationException) {
-            throw c
-        } catch (t: Throwable) {
-            throw AuspexError.Garbled(t)
-        }
+        val text = reading { resp.bodyAsText() }
         if (!resp.status.isSuccess()) throw AuspexError.Refused(resp.status.value, reasonOf(text))
         return decode<Uploaded>(text).hash
     }
@@ -242,26 +230,14 @@ class AuspexApi(
      * sanitiser is what makes it a filename, and it runs on that header.
      */
     suspend fun blob(hash: String, name: String, mime: String): Blob? {
-        val url = root + "/api/blob/" + hash.encodeURLParameter() +
+        val path = "/api/blob/" + hash.encodeURLParameter() +
             "?name=" + name.encodeURLParameter() + "&mime=" + mime.encodeURLParameter()
-        val resp = try {
-            http.request(url) { this.method = HttpMethod.Get }
-        } catch (c: CancellationException) {
-            throw c
-        } catch (t: Throwable) {
-            throw AuspexError.Unreachable(t)
-        }
+        val resp = send(path) { this.method = HttpMethod.Get }
         if (resp.status.value == NOT_FETCHED) return null
         if (!resp.status.isSuccess()) {
             throw AuspexError.Refused(resp.status.value, reasonOf(runCatching { resp.bodyAsText() }.getOrDefault("")))
         }
-        val bytes = try {
-            resp.readRawBytes()
-        } catch (c: CancellationException) {
-            throw c
-        } catch (t: Throwable) {
-            throw AuspexError.Garbled(t)
-        }
+        val bytes = reading { resp.readRawBytes() }
         return Blob(bytes, dispositionName(resp.headers["content-disposition"]) ?: hash)
     }
 
@@ -289,30 +265,40 @@ class AuspexApi(
         path: String,
         body: String? = null,
     ): String {
-        val resp = try {
-            http.request(root + path) {
-                this.method = method
-                if (body != null) {
-                    contentType(ContentType.Application.Json)
-                    setBody(body)
-                }
+        val resp = send(path) {
+            this.method = method
+            if (body != null) {
+                contentType(ContentType.Application.Json)
+                setBody(body)
             }
+        }
+        val text = reading { resp.bodyAsText() }
+        if (!resp.status.isSuccess()) throw AuspexError.Refused(resp.status.value, reasonOf(text))
+        return text
+    }
+
+    /**
+     * One request to the ship. Anything that stops it arriving is
+     * [AuspexError.Unreachable]; past here the ship answered, since
+     * headers cannot come back without the request having got there.
+     */
+    private suspend fun send(path: String, build: io.ktor.client.request.HttpRequestBuilder.() -> Unit) =
+        try {
+            http.request(root + path, build)
         } catch (c: CancellationException) {
             throw c
         } catch (t: Throwable) {
             throw AuspexError.Unreachable(t)
         }
-        // Past here the ship answered: headers arrived, which it could not
-        // have sent without receiving the request.
-        val text = try {
-            resp.bodyAsText()
-        } catch (c: CancellationException) {
-            throw c
-        } catch (t: Throwable) {
-            throw AuspexError.Garbled(t)
-        }
-        if (!resp.status.isSuccess()) throw AuspexError.Refused(resp.status.value, reasonOf(text))
-        return text
+
+    /** Reading an answer that did arrive. A failure here is the body,
+     *  not the ship, so it is [AuspexError.Garbled]. */
+    private inline fun <T> reading(block: () -> T): T = try {
+        block()
+    } catch (c: CancellationException) {
+        throw c
+    } catch (t: Throwable) {
+        throw AuspexError.Garbled(t)
     }
 
     /** The ship's own words for a refusal. Every route answers JSON,
@@ -321,13 +307,7 @@ class AuspexApi(
         (json.parseToJsonElement(text) as JsonObject)["error"]?.jsonPrimitive?.content
     }.getOrNull() ?: text.take(200).ifBlank { "no reason given" }
 
-    private inline fun <reified T> decode(text: String): T = try {
-        json.decodeFromString<T>(text)
-    } catch (c: CancellationException) {
-        throw c
-    } catch (t: Throwable) {
-        throw AuspexError.Garbled(t)
-    }
+    private inline fun <reified T> decode(text: String): T = reading { json.decodeFromString<T>(text) }
 
     companion object {
         /** Where grubbery binds the nexus. */
@@ -350,9 +330,6 @@ class AuspexApi(
          *  attachments are never pushed, so this is the ordinary state of
          *  an inbound one until it is asked for. */
         const val NOT_FETCHED = 409
-
-        /** A blob over the ship's cap. */
-        const val TOO_LARGE = 413
 
         /**
          * `explicitNulls` matters here: the ship's decoders require every
@@ -539,7 +516,7 @@ data class AttachRef(
 private data class Whoami(val ship: String = "")
 
 @Serializable
-private data class Uploaded(val hash: String = "", val size: Long = 0)
+private data class Uploaded(val hash: String = "")
 
 @Serializable
 private data class SendReq(
@@ -623,13 +600,6 @@ class Blob(val bytes: ByteArray, val name: String)
  * absent or not the shape auspex sends. The ship's sanitiser has
  * already run on this value; the message's own name has not.
  */
-internal fun dispositionName(header: String?): String? {
-    val h = header ?: return null
-    val marker = "filename=\""
-    val start = h.indexOf(marker)
-    if (start < 0) return null
-    val from = start + marker.length
-    val end = h.indexOf('"', from)
-    if (end < 0) return null
-    return h.substring(from, end).ifBlank { null }
-}
+internal fun dispositionName(header: String?): String? =
+    header?.let { runCatching { io.ktor.http.ContentDisposition.parse(it).parameter("filename") }.getOrNull() }
+        ?.ifBlank { null }

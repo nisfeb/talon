@@ -21,7 +21,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -85,12 +84,10 @@ import io.nisfeb.talon.data.LoopEntity
 import io.nisfeb.talon.data.newGid
 import io.nisfeb.talon.ui.ChatPaneScaffold
 import io.nisfeb.talon.ui.ContactMap
-import io.nisfeb.talon.ui.LastContactMap
 import io.nisfeb.talon.ui.DEFAULT_LIST_FRACTION
 import io.nisfeb.talon.ui.ExpandedThreshold
 import io.nisfeb.talon.ui.MarkdownText
 import io.nisfeb.talon.ui.MentionPicker
-import io.nisfeb.talon.ui.contactMapFlow
 import io.nisfeb.talon.ui.detectMentionQuery
 import io.nisfeb.talon.ui.isLoopsSupported
 import io.nisfeb.talon.ui.shortRelativeTime
@@ -177,14 +174,7 @@ fun AssistantScreen(
     modifier: Modifier = Modifier,
 ) {
     val aiState by aiSettings.state.collectAsState()
-    val contactMap by remember {
-        contactMapFlow(
-            db.contacts().stream(),
-            db.clubs().stream(),
-            db.groups().streamGroups(),
-            db.groups().streamChannelGroups(),
-        )
-    }.collectAsState(initial = LastContactMap.value)
+    val contactMap by io.nisfeb.talon.ui.rememberContactMap(db)
     val scope = rememberCoroutineScope()
 
     val agentClient = remember(aiSettings) { AgentClient { aiSettings.state.value } }

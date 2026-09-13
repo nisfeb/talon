@@ -65,14 +65,6 @@ fun collapse(messages: List<MailMessage>): List<MailMessage> {
 fun copyCounts(messages: List<MailMessage>): Map<String, Int> =
     messages.groupingBy { it.id }.eachCount()
 
-/** Every copy of one id failed its signature. Such a node is not a
- *  reply target: the new message's whole travelling path would point at
- *  something nobody wrote. */
-fun allForged(messages: List<MailMessage>, id: String): Boolean {
-    val copies = messages.filter { it.id == id }
-    return copies.isNotEmpty() && copies.all { it.verdict == Verdict.FORGED }
-}
-
 /**
  * The thread's messages as a forest. Roots first, siblings oldest
  * first, ties broken by id so the order is stable across reads.
@@ -142,11 +134,6 @@ fun pathTo(forest: List<MailNode>, id: String): List<MailMessage> {
     return emptyList()
 }
 
-/** Flatten the forest depth-first, carrying each node's depth, for a
- *  reader that draws indentation rather than a separate tree pane. */
-fun flatten(forest: List<MailNode>, depth: Int = 0): List<Pair<MailNode, Int>> =
-    forest.flatMap { listOf(it to depth) + flatten(it.children, depth + 1) }
-
 /**
  * Flatten, hiding what sits under a collapsed node.
  *
@@ -170,18 +157,6 @@ data class VisibleNode(val node: MailNode, val depth: Int, val hidden: Int)
 
 fun countDescendants(n: MailNode): Int =
     n.children.size + n.children.sumOf { countDescendants(it) }
-
-/** Every node that has anything under it, so a reader can offer "fold
- *  all" without offering it on leaves. */
-fun foldableIds(forest: List<MailNode>): Set<String> {
-    val out = mutableSetOf<String>()
-    fun walk(n: MailNode) {
-        if (n.children.isNotEmpty()) out += n.message.id
-        n.children.forEach { walk(it) }
-    }
-    forest.forEach { walk(it) }
-    return out
-}
 
 /** Does this thread actually branch? A reader can offer the tree only
  *  where there is one, and say nothing where the thread is a line. */

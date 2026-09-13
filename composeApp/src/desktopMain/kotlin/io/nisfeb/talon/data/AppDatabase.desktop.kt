@@ -66,11 +66,12 @@ actual abstract class AppDatabase : RoomDatabase() {
  * once. If the second build also fails, throw — at startup the
  * crash is loud and easy to debug, vs the silent backoff loop.
  */
+/** Where a ship's database lives; the eraser deletes what this names. */
+internal fun shipDbFile(shipKey: String): File =
+    File(io.nisfeb.talon.util.AppDirs.userData, "talon-port-${sanitizeShipKey(shipKey)}.db")
+
 fun createAppDatabase(shipKey: String): AppDatabase {
-    val dbFile = File(
-        io.nisfeb.talon.util.AppDirs.userData,
-        "talon-port-${sanitizeShipKey(shipKey)}.db",
-    )
+    val dbFile = shipDbFile(shipKey)
     sweepOldOrphans(dbFile.parentFile)
     return try {
         buildAndPing(dbFile)

@@ -56,8 +56,7 @@ object NameToShip {
         val needle = text.lowercase()
         val hits = known.distinct().filter { ship ->
             shipHandle(ship).equals(needle, ignoreCase = true) ||
-                Mnemonym.forShip(ship).equals(needle, ignoreCase = true) ||
-                AzimuthNames.fullNameFor(ship).equals(needle, ignoreCase = true) ||
+                shipHandleLong(ship).equals(needle, ignoreCase = true) ||
                 nicknameOf(ship)?.equals(needle, ignoreCase = true) == true
         }
         when (hits.size) {

@@ -12,7 +12,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -20,19 +19,16 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
-import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -194,7 +190,7 @@ private fun MailBody(
 ) {
     when {
         folder is MailFolder.Drafts -> if (drafts.isEmpty()) {
-            MailAbsent("Nothing half-written.", actionLabel = null, onAction = null)
+            MailAbsent("Nothing half-written.")
         } else {
             LazyColumn(Modifier.fillMaxSize()) {
                 items(drafts, key = { it.id }) { d ->
@@ -236,7 +232,7 @@ private fun MailBody(
             }
 
         page?.threads.isNullOrEmpty() && availability == MailAvailability.PRESENT ->
-            MailAbsent(emptyLineFor(folder), actionLabel = null, onAction = null)
+            MailAbsent(emptyLineFor(folder))
 
         else -> LazyColumn(Modifier.fillMaxSize()) {
             items(page?.threads.orEmpty(), key = { it.id }) { row ->
@@ -384,7 +380,7 @@ private fun MailNotice(text: String) {
 }
 
 @Composable
-internal fun MailAbsent(text: String, actionLabel: String?, onAction: (() -> Unit)?) {
+internal fun MailAbsent(text: String, actionLabel: String? = null, onAction: (() -> Unit)? = null) {
     Box(Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Text(
@@ -482,7 +478,7 @@ internal fun unreadableLine(row: InboxEntry): String {
 }
 
 @Composable
-private fun VerdictTag(text: String, color: androidx.compose.ui.graphics.Color) {
+internal fun VerdictTag(text: String, color: androidx.compose.ui.graphics.Color) {
     Surface(
         color = color.copy(alpha = 0.14f),
         shape = RoundedCornerShape(3.dp),

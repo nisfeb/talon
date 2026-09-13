@@ -51,14 +51,9 @@ class DialClockTest {
         // length and in the wrong half of the ring.
         for (place in listOf(wellington, jacksonville)) {
             val sky = skyFor(noonUtc, place, null)
-            assertTrue(
-                SkyClock.markIsSun(12 * 60, sky.sunriseMinute, sky.sunsetMinute),
-                "${place.label}: the sun is down at noon",
-            )
-            assertTrue(
-                !SkyClock.markIsSun(0, sky.sunriseMinute, sky.sunsetMinute),
-                "${place.label}: the sun is up at midnight",
-            )
+            val day = sky.sunriseMinute until sky.sunsetMinute
+            assertTrue(12 * 60 in day, "${place.label}: the sun is down at noon")
+            assertTrue(0 !in day, "${place.label}: the sun is up at midnight")
         }
     }
 

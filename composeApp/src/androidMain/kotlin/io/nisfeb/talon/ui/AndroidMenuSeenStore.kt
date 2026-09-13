@@ -14,8 +14,7 @@ import kotlinx.coroutines.flow.asStateFlow
  * %contacts and %groups). Mirrors the [AndroidDraftStore] pattern.
  */
 class AndroidMenuSeenStore(context: Context, ship: String) : MenuSeenStore {
-    private val prefsName: String = "talon.menuseen." +
-        ship.removePrefix("~").replace(Regex("[^a-z0-9-]"), "_")
+    private val prefsName: String = "talon.menuseen." + prefsKey(ship)
     private val prefs: SharedPreferences = context.applicationContext
         .getSharedPreferences(prefsName, Context.MODE_PRIVATE)
 

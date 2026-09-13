@@ -3,7 +3,6 @@ package io.nisfeb.talon.ui
 import io.nisfeb.talon.ui.SkyClock.Weather
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class WeatherCodeTest {
@@ -30,15 +29,6 @@ class WeatherCodeTest {
         assertEquals(Weather.CLEAR, SkyClock.weatherOf(7))
         assertEquals(Weather.CLEAR, SkyClock.weatherOf(-1))
         assertEquals(Weather.CLEAR, SkyClock.weatherOf(1000))
-    }
-
-    @Test
-    fun `only falling weather counts as precipitation`() {
-        assertFalse(Weather.CLEAR.precipitating)
-        assertFalse(Weather.CLOUD.precipitating)
-        assertFalse(Weather.FOG.precipitating, "fog sits, it does not fall")
-        assertTrue(Weather.RAIN.precipitating)
-        assertTrue(Weather.SNOW.precipitating)
     }
 
     @Test

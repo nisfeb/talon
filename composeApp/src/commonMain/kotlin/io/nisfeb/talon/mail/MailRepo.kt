@@ -8,6 +8,9 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
@@ -92,17 +95,10 @@ class MailRepo(
      */
     var onNewMail: ((List<MailNotification>) -> Unit)? = null
 
-    /** How a ship is shown to a person. The host knows contacts; this
-     *  does not, and should not learn. */
-    var nameFor: (String) -> String = { it }
-
     /** Threads that were unread when we last looked. Null until the
      *  first read seeds it, which is what stops a launch from replaying
      *  a backlog somebody has had for days. */
     private var seenUnread: Set<String>? = null
-
-    private val _view = MutableStateFlow(MailView.INBOX)
-    val view: StateFlow<MailView> = _view.asStateFlow()
 
     /**
      * Which mailbox is open. One value rather than a view, a label and a
@@ -116,21 +112,19 @@ class MailRepo(
         if (_folder.value == f && _query.value.isEmpty()) return
         _query.value = ""
         _folder.value = f
-        when (f) {
-            is MailFolder.View -> {
-                _view.value = f.view
-                _label.value = null
-                _page.value = null
-                scope.launch { refresh() }
-            }
-            is MailFolder.Label -> {
-                _view.value = MailView.LABEL
-                _label.value = f.name
-                _page.value = null
-                scope.launch { refresh() }
-            }
-            MailFolder.Drafts -> scope.launch { refreshDrafts() }
+        if (f == MailFolder.Drafts) {
+            scope.launch { refreshDrafts() }
+        } else {
+            _page.value = null
+            scope.launch { refresh() }
         }
+    }
+
+    /** What the ship is asked for, read off the one folder value. */
+    private fun viewAndLabel(): Pair<MailView, String?> = when (val f = _folder.value) {
+        is MailFolder.View -> f.view to null
+        is MailFolder.Label -> MailView.LABEL to f.name
+        MailFolder.Drafts -> MailView.INBOX to null
     }
 
     // ---- lifecycle -----------------------------------------------------
@@ -182,27 +176,33 @@ class MailRepo(
      */
     suspend fun refresh() = gate.withLock {
         val a = api ?: return@withLock
+        // Re-read everything already on screen, not just the first page:
+        // a refresh that threw away what somebody had paged into would
+        // look like mail disappearing.
+        val p = read(a, maxOf(_page.value?.threads?.size ?: 0, AuspexApi.DEFAULT_PAGE))
+            ?: return@withLock
+        _availability.value = MailAvailability.PRESENT
+        if (ourShip == null) ourShip = runCatching { a.whoami() }.getOrNull()
+        announce(p)
+    }
+
+    /** One listing read for the open folder, or null after [onFailure]. */
+    private suspend fun read(a: AuspexApi, limit: Int): InboxPage? {
         _loading.value = true
         try {
-            // Re-read everything already on screen, not just the first
-            // page: a refresh that silently threw away what somebody had
-            // paged into would look like mail disappearing.
-            val want = maxOf(_page.value?.threads?.size ?: 0, AuspexApi.DEFAULT_PAGE)
+            val (view, label) = viewAndLabel()
             val p = a.inbox(
-                view = _view.value,
-                label = _label.value,
+                view = view,
+                label = label,
                 query = _query.value.takeIf { it.isNotEmpty() },
-                limit = want.coerceAtMost(MAX_PAGE),
+                limit = limit.coerceAtMost(MAX_PAGE),
             )
             _page.value = p
             _error.value = null
-            _availability.value = MailAvailability.PRESENT
-            if (ourShip == null) {
-                ourShip = runCatching { a.whoami() }.getOrNull()
-            }
-            announce(p)
+            return p
         } catch (e: AuspexError) {
             onFailure(e)
+            return null
         } finally {
             _loading.value = false
         }
@@ -217,13 +217,13 @@ class MailRepo(
      * session only seeds the baseline.
      */
     private fun announce(p: InboxPage) {
-        if (_view.value != MailView.INBOX || _query.value.isNotEmpty()) return
+        if (viewAndLabel().first != MailView.INBOX || _query.value.isNotEmpty()) return
         val before = seenUnread
         if (before == null) {
             seenUnread = seedMailBaseline(p.threads)
             return
         }
-        val (fired, now) = diffMailNotifications(p.threads, before, nameFor)
+        val (fired, now) = diffMailNotifications(p.threads, before, io.nisfeb.talon.ui.ShipNames.resolve)
         seenUnread = now
         if (fired.isNotEmpty()) onNewMail?.invoke(fired)
     }
@@ -263,14 +263,9 @@ class MailRepo(
     }
 
     /** True while there is more of this view than we have asked for. */
-    val hasMore: StateFlow<Boolean> = MutableStateFlow(false).also { out ->
-        scope.launch {
-            _page.collect { p ->
-                out.value = p != null && p.threads.size < p.total &&
-                    p.threads.size < MAX_PAGE
-            }
-        }
-    }
+    val hasMore: StateFlow<Boolean> = _page
+        .map { p -> p != null && p.threads.size < p.total && p.threads.size < MAX_PAGE }
+        .stateIn(scope, SharingStarted.Eagerly, false)
 
     /**
      * Ask for more of the same view.
@@ -283,20 +278,7 @@ class MailRepo(
         val a = api ?: return@withLock
         val have = _page.value?.threads?.size ?: return@withLock
         if (have >= MAX_PAGE) return@withLock
-        _loading.value = true
-        try {
-            _page.value = a.inbox(
-                view = _view.value,
-                label = _label.value,
-                query = _query.value.takeIf { it.isNotEmpty() },
-                limit = (have + AuspexApi.DEFAULT_PAGE).coerceAtMost(MAX_PAGE),
-            )
-            _error.value = null
-        } catch (e: AuspexError) {
-            onFailure(e)
-        } finally {
-            _loading.value = false
-        }
+        read(a, have + AuspexApi.DEFAULT_PAGE)
     }
 
     // ---- filing to Lattice ---------------------------------------------
@@ -329,13 +311,7 @@ class MailRepo(
     /** Read one thread. Null when it is gone, which the reader shows
      *  differently from a thread that failed to load. */
     suspend fun loadThread(id: String): MailThread? {
-        val a = api ?: return null
-        return try {
-            a.thread(id).also { _error.value = null }
-        } catch (e: AuspexError) {
-            onFailure(e)
-            null
-        }
+        return call { it.thread(id).also { _error.value = null } }
     }
 
     /**
@@ -359,20 +335,12 @@ class MailRepo(
 
     /** Ask the network for an attachment we do not hold. */
     suspend fun fetchBlob(hash: String, from: String) {
-        val a = api ?: return
-        runCatching { a.fetchBlob(hash, from) }
-            .onFailure { if (it is AuspexError) onFailure(it) else throw it }
+        call { it.fetchBlob(hash, from) }
     }
 
     /** An attachment's bytes, or null while this ship holds no copy. */
     suspend fun blob(hash: String, name: String, mime: String): Blob? {
-        val a = api ?: return null
-        return try {
-            a.blob(hash, name, mime)
-        } catch (e: AuspexError) {
-            onFailure(e)
-            null
-        }
+        return call { it.blob(hash, name, mime) }
     }
 
     /**
@@ -387,13 +355,7 @@ class MailRepo(
         prev: String?,
         attachments: List<AttachRef>,
     ): Boolean {
-        val a = api ?: return false
-        try {
-            a.send(to, subject, body, prev, attachments)
-        } catch (e: AuspexError) {
-            onFailure(e)
-            return false
-        }
+        call { it.send(to, subject, body, prev, attachments) } ?: return false
         refresh()
         return true
     }
@@ -402,6 +364,20 @@ class MailRepo(
     suspend fun uploadBlob(bytes: ByteArray): String {
         val a = api ?: error("not signed in")
         return a.uploadBlob(bytes)
+    }
+
+    /**
+     * One request against the ship, or null after [onFailure]. Eleven
+     * callers used to spell this out, in three different ways.
+     */
+    private suspend fun <T> call(block: suspend (AuspexApi) -> T): T? {
+        val a = api ?: return null
+        return try {
+            block(a)
+        } catch (e: AuspexError) {
+            onFailure(e)
+            null
+        }
     }
 
     private suspend fun write(block: suspend (AuspexApi) -> Unit) {
@@ -443,19 +419,10 @@ class MailRepo(
         val trimmed = q.trim()
         if (_query.value == trimmed) return
         _query.value = trimmed
-        if (trimmed.isNotEmpty()) {
-            _folder.value = MailFolder.View(MailView.ALL)
-            _view.value = MailView.ALL
-            _label.value = null
-        }
+        if (trimmed.isNotEmpty()) _folder.value = MailFolder.View(MailView.ALL)
         _page.value = null
         scope.launch { refresh() }
     }
-
-    private val _label = MutableStateFlow<String?>(null)
-
-    /** The label the listing is filtered to, or null for none. */
-    val label: StateFlow<String?> = _label.asStateFlow()
 
     private val _rules = MutableStateFlow<List<Rule>>(emptyList())
     val rules: StateFlow<List<Rule>> = _rules.asStateFlow()
@@ -465,53 +432,38 @@ class MailRepo(
 
     /** Every label the current page mentions. The ship keeps no index
      *  of them, so the listing is where they come from. */
-    val knownLabels: StateFlow<List<String>> = _page.let { p ->
-        MutableStateFlow<List<String>>(emptyList()).also { out ->
-            scope.launch {
-                p.collect { page ->
-                    out.value = page?.threads.orEmpty()
-                        .flatMap { it.labels }.distinct().sorted()
-                }
-            }
-        }
-    }
+    val knownLabels: StateFlow<List<String>> = _page
+        .map { page -> page?.threads.orEmpty().flatMap { it.labels }.distinct().sorted() }
+        .stateIn(scope, SharingStarted.Eagerly, emptyList())
 
     suspend fun setLabel(threadId: String, label: String, add: Boolean) =
         write { it.setLabel(threadId, label, add) }
 
     suspend fun refreshRules() {
-        val a = api ?: return
-        runCatching { _rules.value = a.rules() }
-            .onFailure { if (it is AuspexError) onFailure(it) }
+        call { _rules.value = it.rules() }
     }
 
     suspend fun saveRule(r: Rule) {
-        val a = api ?: return
-        runCatching { a.saveRule(r) }.onFailure { if (it is AuspexError) onFailure(it); return }
+        call { it.saveRule(r) } ?: return
         refreshRules()
     }
 
     suspend fun deleteRule(id: String) {
-        val a = api ?: return
-        runCatching { a.deleteRule(id) }.onFailure { if (it is AuspexError) onFailure(it); return }
+        call { it.deleteRule(id) } ?: return
         refreshRules()
     }
 
     suspend fun refreshLists() {
-        val a = api ?: return
-        runCatching { _lists.value = a.lists() }
-            .onFailure { if (it is AuspexError) onFailure(it) }
+        call { _lists.value = it.lists() }
     }
 
     suspend fun saveList(l: MailingList) {
-        val a = api ?: return
-        runCatching { a.saveList(l) }.onFailure { if (it is AuspexError) onFailure(it); return }
+        call { it.saveList(l) } ?: return
         refreshLists()
     }
 
     suspend fun deleteList(name: String) {
-        val a = api ?: return
-        runCatching { a.deleteList(name) }.onFailure { if (it is AuspexError) onFailure(it); return }
+        call { it.deleteList(name) } ?: return
         refreshLists()
     }
 
@@ -521,35 +473,18 @@ class MailRepo(
     val drafts: StateFlow<List<Draft>> = _drafts.asStateFlow()
 
     suspend fun refreshDrafts() {
-        val a = api ?: return
-        try {
-            _drafts.value = a.drafts()
-        } catch (e: AuspexError) {
-            onFailure(e)
-        }
+        call { _drafts.value = it.drafts() }
     }
 
     /** Store a draft. The id comes from the caller and stays the same
      *  across saves, so the second save overwrites the first. */
     suspend fun saveDraft(d: Draft) {
-        val a = api ?: return
-        try {
-            a.saveDraft(d)
-        } catch (e: AuspexError) {
-            onFailure(e)
-            return
-        }
+        call { it.saveDraft(d) } ?: return
         refreshDrafts()
     }
 
     suspend fun deleteDraft(id: String) {
-        val a = api ?: return
-        try {
-            a.deleteDraft(id)
-        } catch (e: AuspexError) {
-            onFailure(e)
-            return
-        }
+        call { it.deleteDraft(id) } ?: return
         refreshDrafts()
     }
 

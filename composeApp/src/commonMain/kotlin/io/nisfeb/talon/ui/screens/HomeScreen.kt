@@ -18,7 +18,6 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -29,10 +28,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.filled.CalendarToday
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.KeyboardArrowDown
-import androidx.compose.material.icons.filled.KeyboardArrowLeft
-import androidx.compose.material.icons.filled.KeyboardArrowRight
-import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.MailOutline
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Star
@@ -45,7 +40,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.remember
@@ -53,12 +47,9 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.layout.boundsInWindow
-import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -71,13 +62,11 @@ import io.nisfeb.talon.data.AppDatabase
 import io.nisfeb.talon.mail.MailAvailability
 import io.nisfeb.talon.mail.MailRepo
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import io.nisfeb.talon.ui.CalendarRange
 import io.nisfeb.talon.ui.HOME_COUNTS
 import io.nisfeb.talon.ui.HOME_COLUMNS
-import io.nisfeb.talon.ui.HOME_ROW_RANGE
 import io.nisfeb.talon.ui.HomeLayout
 import io.nisfeb.talon.ui.HomePlace
 import io.nisfeb.talon.ui.HomeWidget
@@ -92,6 +81,7 @@ import kotlinx.coroutines.delay
 import kotlinx.datetime.Instant
 import kotlinx.datetime.LocalDateTime
 import kotlinx.datetime.TimeZone
+import kotlinx.datetime.format.MonthNames
 import kotlinx.datetime.offsetAt
 import kotlinx.datetime.toLocalDateTime
 import io.nisfeb.talon.ui.ContactMap
@@ -186,11 +176,7 @@ fun HomeScreen(
         val local = Instant.fromEpochMilliseconds(greetingTick).toLocalDateTime(zone)
         local.hour * 60 + local.minute
     }
-    var dragging by remember { mutableStateOf<HomeWidgetKind?>(null) }
-    var dragBy by remember { mutableStateOf(Offset.Zero) }
-    // Where the widget was when the drag began. The running offset is
-    // measured from there, so it has to be added to there.
-    var dragFrom by remember { mutableStateOf(0 to 0) }
+    var drag by remember { mutableStateOf<Drag?>(null) }
 
     // Gesture modifiers keep whatever lambda they were made with. Keyed
     // on the layout they would restart on every change and drop the
@@ -203,13 +189,6 @@ fun HomeScreen(
     }
 
     BoxWithConstraints(modifier.fillMaxSize()) {
-        // The same twelve columns at every width. Collapsing a narrow
-        // window to a single column took the columns away from the one
-        // device most likely to want them arranged — and with no
-        // columns there was nothing for the width grip to do, so it
-        // was hidden, so a phone could not make anything narrower at
-        // all. Twelve columns of a phone's width is a small column,
-        // which is what a small screen is.
         val placedWidgets = remember(layout) {
             layout.shown.sortedWith(compareBy({ it.row }, { it.col }))
         }
@@ -266,8 +245,6 @@ fun HomeScreen(
 
             HomeGrid(
                 widgets = placedWidgets,
-                columns = HOME_COLUMNS,
-                rowUnit = HOME_ROW_UNIT,
                 gap = GRID_GAP,
                 modifier = Modifier
                     .fillMaxWidth()
@@ -305,7 +282,7 @@ fun HomeScreen(
                 // to write to what is stored or a phone would flatten
                 // the arrangement made on a desktop.
                 val real by rememberUpdatedState(layout[widget.kind])
-                val held = dragging == widget.kind
+                val held = drag?.kind == widget.kind
                 // Overlapping is allowed, so it has to be visible.
                 // Nothing gets moved out of the way any more, and two
                 // widgets silently stacked would read as one missing.
@@ -317,9 +294,9 @@ fun HomeScreen(
                         .fillMaxSize()
                         .zIndex(if (held) 1f else 0f)
                         .graphicsLayer {
-                            if (held) {
-                                translationX = dragBy.x
-                                translationY = dragBy.y
+                            drag?.takeIf { it.kind == widget.kind }?.let {
+                                translationX = it.by.x
+                                translationY = it.by.y
                                 scaleX = 1.02f
                                 scaleY = 1.02f
                             }
@@ -383,33 +360,29 @@ fun HomeScreen(
                                 // every step that worked.
                                 .pointerInput(widget.kind) {
                                     detectDragGestures(
-                                        onDragStart = {
-                                            dragging = widget.kind
-                                            dragBy = Offset.Zero
-                                            dragFrom = real.col to real.row
-                                        },
-                                        onDragEnd = { dragging = null; dragBy = Offset.Zero },
-                                        onDragCancel = { dragging = null; dragBy = Offset.Zero },
+                                        onDragStart = { drag = Drag(widget.kind, real.col, real.row) },
+                                        onDragEnd = { drag = null },
+                                        onDragCancel = { drag = null },
                                     ) { change, delta ->
                                         change.consume()
-                                        dragBy += delta
+                                        val d = drag?.let { it.copy(by = it.by + delta) }
+                                            ?: return@detectDragGestures
+                                        drag = d
                                         val (c, r) = droppedAt(
-                                            startCol = dragFrom.first,
-                                            startRow = dragFrom.second,
-                                            dragXPx = dragBy.x,
-                                            dragYPx = dragBy.y,
+                                            startCol = d.col,
+                                            startRow = d.row,
+                                            dragXPx = d.by.x,
+                                            dragYPx = d.by.y,
                                             colPitchPx = pitch.value.first,
                                             rowPitchPx = pitch.value.second,
                                         )
-                                        val col = c
-                                        if (col != real.col || r != real.row) {
-                                            put(widget.kind, col, r)
+                                        if (c != real.col || r != real.row) {
+                                            put(widget.kind, c, r)
                                             // It has just been moved to
                                             // where the pointer is, so
                                             // the offset and the origin
                                             // both start again there.
-                                            dragFrom = col to r
-                                            dragBy = Offset.Zero
+                                            drag = Drag(widget.kind, c, r)
                                         }
                                     }
                                 },
@@ -417,7 +390,6 @@ fun HomeScreen(
                         if (!held) {
                             ResizeHandles(
                                 widget = real,
-                                columns = HOME_COLUMNS,
                                 cellWidthPx = colPitch,
                                 onResize = resizeTo,
                                 onRemove = { resizeTo(real.copy(visible = false)) },
@@ -433,17 +405,12 @@ fun HomeScreen(
 /**
  * The widgets, each at its own coordinates.
  *
- * A plain layout rather than rows of weights. Rows were the whole
- * trouble: a widget's row was worked out from the order and its width,
- * so the page could not be told where to put anything, and the loose
- * packing that made dragging bearable drew an arrangement that
- * rearranged itself the moment dragging stopped.
+ * A plain layout rather than rows of weights, so the page can be told
+ * where to put a widget and it stays put.
  */
 @Composable
 private fun HomeGrid(
     widgets: List<HomeWidget>,
-    columns: Int,
-    rowUnit: androidx.compose.ui.unit.Dp,
     gap: androidx.compose.ui.unit.Dp,
     modifier: Modifier = Modifier,
     cell: @Composable (HomeWidget) -> Unit,
@@ -453,9 +420,9 @@ private fun HomeGrid(
         content = { widgets.forEach { w -> key(w.kind) { cell(w) } } },
     ) { measurables, constraints ->
         val gapPx = gap.roundToPx()
-        val unitPx = rowUnit.roundToPx()
+        val unitPx = HOME_ROW_UNIT.roundToPx()
         val width = constraints.maxWidth
-        val colWidth = (width - gapPx * (columns - 1)).toFloat() / columns
+        val colWidth = (width - gapPx * (HOME_COLUMNS - 1)).toFloat() / HOME_COLUMNS
 
         val placeables = measurables.mapIndexed { i, m ->
             val w = widgets[i]
@@ -548,13 +515,15 @@ private val HANDLE = 26.dp
 @Composable
 private fun BoxScope.ResizeHandles(
     widget: HomeWidget,
-    columns: Int,
     cellWidthPx: Float,
     onResize: (HomeWidget) -> Unit,
     onRemove: () -> Unit,
 ) {
     val rowUnitPx = with(LocalDensity.current) { HOME_ROW_UNIT.toPx() }
     val grip = MaterialTheme.colorScheme.primary
+    // Every pixel of drag reports a size; most of them the size it
+    // already is, which is not worth a layout write.
+    fun resize(w: HomeWidget) { if (w != widget) onResize(w) }
 
     // The size the widget was when this drag began.
     //
@@ -577,14 +546,14 @@ private fun BoxScope.ResizeHandles(
     }
 
     // Width. Pointless where there is only one column to have.
-    if (columns > 1) {
+    if (HOME_COLUMNS > 1) {
         Grip(
             Modifier.align(Alignment.CenterEnd),
             grip,
             label = "Width of ${title(widget.kind)}",
             onStart = ::freeze,
         ) { total ->
-            onResize(widget.copy(span = resizedSpan(startSpan, total.x, startCell, columns)))
+            resize(widget.copy(span = resizedSpan(startSpan, total.x, startCell, HOME_COLUMNS)))
         }
     }
     Grip(
@@ -593,7 +562,7 @@ private fun BoxScope.ResizeHandles(
         label = "Height of ${title(widget.kind)}",
         onStart = ::freeze,
     ) { total ->
-        onResize(widget.copy(rows = resizedRows(startRows, total.y, rowUnitPx)))
+        resize(widget.copy(rows = resizedRows(startRows, total.y, rowUnitPx)))
     }
     Grip(
         Modifier.align(Alignment.BottomEnd),
@@ -602,9 +571,9 @@ private fun BoxScope.ResizeHandles(
         label = "Size of ${title(widget.kind)}",
         onStart = ::freeze,
     ) { total ->
-        onResize(
+        resize(
             widget.copy(
-                span = resizedSpan(startSpan, total.x, startCell, columns),
+                span = resizedSpan(startSpan, total.x, startCell, HOME_COLUMNS),
                 rows = resizedRows(startRows, total.y, rowUnitPx),
             ),
         )
@@ -622,6 +591,18 @@ private fun BoxScope.ResizeHandles(
         )
     }
 }
+
+/**
+ * A widget on the move: which, where it was when the pointer went
+ * down, and how far the pointer has gone since. The offset is measured
+ * from where it started, so the two travel together.
+ */
+private data class Drag(
+    val kind: HomeWidgetKind,
+    val col: Int,
+    val row: Int,
+    val by: Offset = Offset.Zero,
+)
 
 /**
  * One grip.
@@ -753,7 +734,7 @@ private fun greeting(ourShip: String, contacts: ContactMap, minuteOfDay: Int): S
  * that has not looked at the time.
  */
 internal fun timeOfDayGreeting(minuteOfDay: Int): String {
-    val hour = (((minuteOfDay % 1440) + 1440) % 1440) / 60
+    val hour = minuteOfDay.mod(1440) / 60
     return when (hour) {
         in 5..11 -> "Good morning"
         in 12..16 -> "Good afternoon"
@@ -1098,11 +1079,6 @@ internal fun weatherIsStale(fetchedAtMs: Long, nowMs: Long): Boolean =
 internal fun zoneFor(id: String?): TimeZone =
     id?.let { runCatching { TimeZone.of(it) }.getOrNull() } ?: TimeZone.currentSystemDefault()
 
-private val MONTHS = listOf(
-    "Jan", "Feb", "Mar", "Apr", "May", "Jun",
-    "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
-)
-
 internal fun dayLabel(t: LocalDateTime): String {
     val d = t.dayOfMonth
     val suffix = when {
@@ -1112,7 +1088,7 @@ internal fun dayLabel(t: LocalDateTime): String {
         d % 10 == 3 -> "rd"
         else -> "th"
     }
-    return "${MONTHS[t.monthNumber - 1]} $d$suffix"
+    return "${MonthNames.ENGLISH_ABBREVIATED.names[t.monthNumber - 1]} $d$suffix"
 }
 
 /**
