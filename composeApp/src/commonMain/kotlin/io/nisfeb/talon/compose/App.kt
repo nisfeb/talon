@@ -2700,6 +2700,11 @@ fun App(
                                         onOpenWatchwords = { showWatchwords = true },
                                         onOpenAdministration = { showGroupAdminList = true },
                                         onOpenSettings = { showSettings = true },
+                                        onOpenSidebarSettings = {
+                                            // Settings underneath, so Back lands there.
+                                            showSettings = true
+                                            showSidebarSettings = true
+                                        },
                                         activeShip = ship,
                                         allShips = remember(loggedInShip) {
                                             sessionStore.all().map { it.ship }

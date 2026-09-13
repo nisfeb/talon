@@ -144,6 +144,10 @@ fun DmListScreen(
     onOpenAdministration: () -> Unit = {},
     onOpenInvites: () -> Unit = {},
     onOpenSettings: () -> Unit,
+    /** Opens the screen that chooses the sidebar's and kebab's
+     *  contents; offered from the kebab, where a missing section is
+     *  noticed. Null where the host has no such screen. */
+    onOpenSidebarSettings: (() -> Unit)? = null,
     /**
      * Items the kebab dropdown should show. App.kt computes this:
      *  - On wide windows: items NOT on the rail (the rail is the
@@ -972,6 +976,15 @@ fun DmListScreen(
                             onClick = {
                                 menuOpen = false
                                 onOpenSettings()
+                            },
+                        )
+                    }
+                    if (onOpenSidebarSettings != null) {
+                        DropdownMenuItem(
+                            text = { Text(if (io.nisfeb.talon.ui.isDrawerNavigation) "Edit menu" else "Edit sidebar") },
+                            onClick = {
+                                menuOpen = false
+                                onOpenSidebarSettings()
                             },
                         )
                     }

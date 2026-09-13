@@ -2577,6 +2577,11 @@ fun TalonApp(
                 onOpenAdministration = { adminListOpen = true },
                 onOpenInvites = { invitesOpen = true },
                 onOpenSettings = { settingsOpen = true },
+                onOpenSidebarSettings = {
+                    closeSections()
+                    settingsOpen = true
+                    sidebarSettingsOpen = true
+                },
                 onSignOut = {
                     app.signOutActive()
                     TalonSyncService.stop(context)

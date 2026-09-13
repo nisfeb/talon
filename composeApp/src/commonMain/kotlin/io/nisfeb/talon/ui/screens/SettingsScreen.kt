@@ -240,12 +240,13 @@ fun SettingsScreen(
             //
             // Drills into SidebarSettingsScreen. First thing on the
             // first tab: it lived under Chats, where nobody looking for
-            // the menu's contents thought to look.
+            // the menu's contents thought to look. Shown at every
+            // width: it used to hide in a desktop window too narrow
+            // for the rail, though the same preference decides what
+            // the kebab holds there, and a setting that vanishes with
+            // the window is one nobody finds.
             val drawerNav = io.nisfeb.talon.ui.isDrawerNavigation
-            val wide = drawerNav || with(androidx.compose.ui.platform.LocalDensity.current) {
-                androidx.compose.ui.platform.LocalWindowInfo.current.containerSize.width.toDp()
-            } >= io.nisfeb.talon.ui.ExpandedThreshold
-            if (wide) Row(
+            Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clickable(onClick = onOpenSidebarSettings)
@@ -262,7 +263,7 @@ fun SettingsScreen(
                         // Named for the thing in front of them rather
                         // than for the one this setting was built for.
                         if (drawerNav) "Choose what shows in the menu, and in what order."
-                        else "Choose what shows in the rail.",
+                        else "Choose what shows in the sidebar and its menu, and in what order.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -273,7 +274,7 @@ fun SettingsScreen(
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            if (wide) Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(12.dp))
             Text(
                 "Appearance",
                 style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
