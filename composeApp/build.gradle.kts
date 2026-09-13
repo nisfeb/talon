@@ -69,6 +69,13 @@ kotlin {
             // (it warns and falls back to the framework name). Set it
             // explicitly so the release archive step doesn't print the warning.
             binaryOption("bundleId", "io.nisfeb.talon.ComposeApp")
+            // The release link is whole-program optimised, and its escape
+            // analysis wants more heap than a 7 GB macOS runner has: the
+            // ios-compile gate thrashed for half an hour when it passed
+            // and died at nine minutes when it did not. Stack-allocating
+            // a few short-lived objects is not worth a build that cannot
+            // finish. The TestFlight archive takes the same flag.
+            freeCompilerArgs += "-Xdisable-phases=EscapeAnalysis"
         }
     }
     // Force the default source-set hierarchy now (it's applied at the end
