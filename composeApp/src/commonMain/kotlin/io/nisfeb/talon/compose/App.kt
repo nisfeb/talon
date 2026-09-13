@@ -2797,6 +2797,12 @@ fun App(
                                         closeDrawer()
                                         onRailItemClicked(item)
                                     },
+                                    onEditMenu = {
+                                        closeDrawer()
+                                        // Settings underneath, so Back lands there.
+                                        onRailItemClicked(io.nisfeb.talon.ui.RailItem.Settings)
+                                        showSidebarSettings = true
+                                    },
                                 )
                             },
                         ) {

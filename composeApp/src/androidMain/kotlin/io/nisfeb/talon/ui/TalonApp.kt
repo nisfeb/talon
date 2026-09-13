@@ -1474,6 +1474,13 @@ fun TalonApp(
                             io.nisfeb.talon.ui.RailItem.Settings -> settingsOpen = true
                         }
                     },
+                    onEditMenu = {
+                        close()
+                        closeSections()
+                        // Settings underneath, so Back lands there.
+                        settingsOpen = true
+                        sidebarSettingsOpen = true
+                    },
                 )
             },
         ) {

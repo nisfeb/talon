@@ -9,6 +9,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -44,8 +46,10 @@ fun SectionsDrawer(
     onSection: (RailItem) -> Unit,
     canOpen: (RailItem) -> Boolean = { true },
     badges: Map<RailItem, Boolean> = emptyMap(),
+    /** Opens the screen that chooses and orders these. Offered here
+     *  because here is where somebody notices a section missing. */
+    onEditMenu: (() -> Unit)? = null,
     header: @Composable (() -> Unit)? = null,
-    footer: @Composable (() -> Unit)? = null,
 ) {
     Column(
         Modifier.verticalScroll(rememberScrollState()).padding(vertical = 12.dp),
@@ -81,11 +85,17 @@ fun SectionsDrawer(
                 modifier = Modifier.padding(horizontal = 12.dp),
             )
         }
-        if (footer != null) {
+        if (onEditMenu != null) {
             Spacer(Modifier.height(8.dp))
             HorizontalDivider(Modifier.padding(horizontal = 16.dp))
             Spacer(Modifier.height(8.dp))
-            footer()
+            NavigationDrawerItem(
+                selected = false,
+                label = { Text("Edit menu") },
+                icon = { Icon(Icons.Filled.Tune, contentDescription = null, modifier = Modifier.size(22.dp)) },
+                onClick = onEditMenu,
+                modifier = Modifier.padding(horizontal = 12.dp),
+            )
         }
     }
 }

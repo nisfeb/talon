@@ -235,6 +235,44 @@ fun SettingsScreen(
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
             if (safeTab == SettingsTab.Appearance) {
+            // ── Which sections show, and in what order ─────────────
+            //
+            // Drills into SidebarSettingsScreen. First thing on the
+            // first tab: it lived under Chats, where nobody looking for
+            // the menu's contents thought to look.
+            val drawerNav = io.nisfeb.talon.ui.isDrawerNavigation
+            val wide = drawerNav || with(androidx.compose.ui.platform.LocalDensity.current) {
+                androidx.compose.ui.platform.LocalWindowInfo.current.containerSize.width.toDp()
+            } >= io.nisfeb.talon.ui.ExpandedThreshold
+            if (wide) Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable(onClick = onOpenSidebarSettings)
+                    .padding(vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        if (drawerNav) "Menu" else "Sidebar",
+                        style = MaterialTheme.typography.bodyLarge,
+                    )
+                    Text(
+                        // Named for the thing in front of them rather
+                        // than for the one this setting was built for.
+                        if (drawerNav) "Choose what shows in the menu, and in what order."
+                        else "Choose what shows in the rail.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Icon(
+                    Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            if (wide) Spacer(Modifier.height(12.dp))
             Text(
                 "Appearance",
                 style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
@@ -581,46 +619,6 @@ fun SettingsScreen(
             }
             }
             if (safeTab == SettingsTab.Chats) {
-            // ── Which sections show, and in what order ─────────────
-            //
-            // Drills into SidebarSettingsScreen. The same preferences
-            // drive the desktop rail and the mobile drawer, so this row
-            // is no longer hidden on a phone: it used to be, back when
-            // the rail was the only thing they drove and a phone had no
-            // rail to change.
-            val drawerNav = io.nisfeb.talon.ui.isDrawerNavigation
-            val wide = drawerNav || with(androidx.compose.ui.platform.LocalDensity.current) {
-                androidx.compose.ui.platform.LocalWindowInfo.current.containerSize.width.toDp()
-            } >= io.nisfeb.talon.ui.ExpandedThreshold
-            if (wide) Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable(onClick = onOpenSidebarSettings)
-                    .padding(vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        if (drawerNav) "Menu" else "Sidebar",
-                        style = MaterialTheme.typography.bodyLarge,
-                    )
-                    Text(
-                        // Named for the thing in front of them rather
-                        // than for the one this setting was built for.
-                        if (drawerNav) "Choose what shows in the menu, and in what order."
-                        else "Choose what shows in the rail.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                Icon(
-                    Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            if (wide) Spacer(Modifier.height(4.dp))
 
             }
             if (safeTab == SettingsTab.Account) {
