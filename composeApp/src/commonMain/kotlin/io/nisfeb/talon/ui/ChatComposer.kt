@@ -202,6 +202,10 @@ fun ChatComposer(
     allShips: List<String>,
     canSend: Boolean,
     hideComposerButtons: Boolean,
+    /** Take the cursor as soon as this composer appears. Off where a
+     *  keyboard would pop up over the conversation; a thread opened by
+     *  Reply turns it on regardless, since typing is why it opened. */
+    focusOnOpen: Boolean = !hasSoftKeyboard,
     /** Commit an in-place edit. Default no-op so surfaces that don't
      *  support editing need not pass one. */
     onSaveEdit: (EditTarget, String) -> Unit = { _, _ -> },
@@ -241,15 +245,16 @@ fun ChatComposer(
     strategy: ChatSendStrategy,
 ) {
     val scope = rememberCoroutineScope()
-    // Focus the composer when an edit begins, which brings the soft
-    // keyboard up on touch. Keyed on the post id so starting an edit
-    // (or switching to a different one) fires; ending an edit (-> null)
-    // does not.
-    val editFocusRequester = remember { FocusRequester() }
-    LaunchedEffect(state.editing?.postId) {
-        if (state.editing != null) {
-            runCatching { editFocusRequester.requestFocus() }
-        }
+    // The cursor goes to the field whenever the next thing to do is
+    // type: the composer opened with a keyboard in hand, an edit
+    // began, a quote or an attachment was picked. Keyed on what began
+    // rather than on the flag, so switching to a different edit fires
+    // and ending one (-> null) does not bring the keyboard back.
+    val fieldFocus = remember { FocusRequester() }
+    LaunchedEffect(state, state.editing?.postId, state.pendingQuote?.id, state.pendingAttachment) {
+        val typingNext = focusOnOpen || state.editing != null ||
+            state.pendingQuote != null || state.pendingAttachment != null
+        if (typingNext) runCatching { fieldFocus.requestFocus() }
     }
     val pickImage = rememberImagePicker()
     val pickAnyFile = io.nisfeb.talon.util.rememberAnyFilePicker()
@@ -864,7 +869,7 @@ fun ChatComposer(
                 visualTransformation = EmojiVisualTransformation,
                 modifier = Modifier
                     .weight(1f)
-                    .focusRequester(editFocusRequester)
+                    .focusRequester(fieldFocus)
                     // Android paste-image route (no-op on desktop, which
                     // uses the Ctrl+V intercept below). Same upload+send
                     // path as drag-drop and the picker.

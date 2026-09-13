@@ -628,8 +628,12 @@ fun DmChatScreen(
     }
     val onSwipeMessage: (MessageEntity) -> Unit = remember(swipeQuotes, whom) {
         { m ->
-            if (swipeQuotes(swipeQuotes, whom, m.parentId)) composerState.pendingQuote = m
-            else currentOnOpenThread(m.id)
+            if (swipeQuotes(swipeQuotes, whom, m.parentId)) {
+                composerState.pendingQuote = m
+            } else {
+                io.nisfeb.talon.ui.screens.ThreadOpenIntent.reply()
+                currentOnOpenThread(m.id)
+            }
         }
     }
     val onMentionTap: (String) -> Unit = remember {
@@ -899,6 +903,7 @@ fun DmChatScreen(
                 },
                 onReply = {
                     actionTarget = null
+                    io.nisfeb.talon.ui.screens.ThreadOpenIntent.reply()
                     onOpenThread(target.id)
                 },
                 onQuote = {

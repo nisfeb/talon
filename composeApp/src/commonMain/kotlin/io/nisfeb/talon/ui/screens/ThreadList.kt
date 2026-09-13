@@ -118,6 +118,8 @@ fun ThreadList(
     powerFeaturesEnabled: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
+    // Taken once per thread: set by whatever opened it to reply.
+    val openedToReply = remember(parentId) { ThreadOpenIntent.take() }
     val parent by remember(whom, parentId) {
         db.messages().streamOne(whom, parentId).distinctUntilChanged()
     }.collectAsState(initial = null)
@@ -488,6 +490,7 @@ fun ThreadList(
             repo = repo,
             http = http,
             drafts = drafts,
+            focusOnOpen = !io.nisfeb.talon.ui.hasSoftKeyboard || openedToReply,
             whom = threadDraftKey,
             contactMap = contactMap,
             allShips = allShips,
@@ -1023,3 +1026,16 @@ private fun ThreadActionMenu(
  *  thread screen serves all three. */
 private fun isChannelNest(whom: String): Boolean =
     whom.startsWith("chat/") || whom.startsWith("heap/") || whom.startsWith("diary/")
+
+/**
+ * Whether the thread about to open was opened in order to reply --
+ * the action sheet's Reply, or a swipe -- as opposed to being opened
+ * to read. Set just before the host is asked to open it, taken once
+ * by the thread as it composes. A flag passed hand to hand through
+ * two hosts and a screen would say the same thing in four places.
+ */
+internal object ThreadOpenIntent {
+    private var reply = false
+    fun reply() { reply = true }
+    fun take(): Boolean = reply.also { reply = false }
+}

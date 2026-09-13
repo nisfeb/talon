@@ -8,6 +8,7 @@ actual val isBackgroundSchedulingSupported: Boolean = true
 actual val isQrLoginScanSupported: Boolean = true
 actual val isLocalCometSupported: Boolean = false
 actual val isTouchSwipeNavSupported: Boolean = true
+actual val hasSoftKeyboard: Boolean = true
 actual val isTapToOpenMenuSupported: Boolean = true
 
 actual val platformLabel: String = "Android ${android.os.Build.VERSION.RELEASE}"

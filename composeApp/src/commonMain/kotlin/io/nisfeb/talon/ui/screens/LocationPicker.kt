@@ -1,5 +1,8 @@
 package io.nisfeb.talon.ui.screens
 
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.runtime.LaunchedEffect
 import io.nisfeb.talon.util.formatDecimals
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -53,6 +56,8 @@ fun LocationPicker(
     onPick: (HomePlace) -> Unit,
     onDismiss: () -> Unit,
 ) {
+    val fieldFocus = remember { FocusRequester() }
+    LaunchedEffect(Unit) { runCatching { fieldFocus.requestFocus() } }
     val scope = rememberCoroutineScope()
     var query by remember { mutableStateOf("") }
     var results by remember { mutableStateOf<List<HomePlace>>(emptyList()) }
@@ -103,7 +108,7 @@ fun LocationPicker(
                     label = { Text(if (lookup != null) "Town, city or postcode" else "Latitude, longitude") },
                     placeholder = { Text(if (lookup != null) "Boston" else "42.36, -71.06") },
                     singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.fillMaxWidth().focusRequester(fieldFocus),
                 )
                 TextButton(
                     enabled = !busy && query.isNotBlank(),

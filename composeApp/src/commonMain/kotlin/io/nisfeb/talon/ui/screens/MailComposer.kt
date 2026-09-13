@@ -1,5 +1,8 @@
 package io.nisfeb.talon.ui.screens
 
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -87,6 +90,13 @@ fun MailComposer(
     androidx.compose.runtime.LaunchedEffect(repo) { repo.refreshLists() }
 
     val recipients = remember(intent) { mutableStateListOf(*intent.to.toTypedArray()) }
+    // A fresh mail starts at To; a reply already has one, so it starts
+    // at the message.
+    val toFocus = remember { FocusRequester() }
+    val bodyFocus = remember { FocusRequester() }
+    LaunchedEffect(intent) {
+        runCatching { (if (intent.to.isEmpty()) toFocus else bodyFocus).requestFocus() }
+    }
     var recipientDraft by remember(intent) { mutableStateOf("") }
     var subject by remember(intent) { mutableStateOf(intent.subject) }
     var body by remember(intent) { mutableStateOf(intent.body) }
@@ -223,7 +233,7 @@ fun MailComposer(
                 label = { Text("To") },
                 placeholder = { Text("~sampel-palnet") },
                 singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth().focusRequester(toFocus),
             )
             Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 TextButton(onClick = { commitRecipients() }) { Text("Add recipient") }
@@ -252,7 +262,7 @@ fun MailComposer(
                 onValueChange = { body = it },
                 label = { Text("Message") },
                 minLines = 8,
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth().focusRequester(bodyFocus),
             )
 
             if (files.isNotEmpty()) {

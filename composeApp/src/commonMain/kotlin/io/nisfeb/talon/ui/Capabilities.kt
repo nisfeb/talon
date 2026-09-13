@@ -79,6 +79,15 @@ expect val isLocalCometSupported: Boolean
 expect val isTouchSwipeNavSupported: Boolean
 
 /**
+ * Whether focusing a text field raises a keyboard over the screen.
+ * Android, iOS: true. Desktop: false. Decides whether a composer may
+ * take focus the moment its screen opens: with a keyboard in hand
+ * that is what a person wants; with one that pops up over the thing
+ * they came to read, it is not.
+ */
+expect val hasSoftKeyboard: Boolean
+
+/**
  * Whether a plain left-tap on a message opens its action menu.
  * Android: true — tap-anywhere is the menu affordance (no right mouse
  * button, and long-press is reserved for text selection). Desktop:

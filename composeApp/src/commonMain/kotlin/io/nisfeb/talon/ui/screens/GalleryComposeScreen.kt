@@ -1,5 +1,8 @@
 package io.nisfeb.talon.ui.screens
 
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -80,6 +83,11 @@ fun GalleryComposeScreen(
     }
 
     var tab by remember { mutableStateOf(GalleryTab.Image) }
+    // The link and text tabs are a field; the image tab is a picker.
+    val fieldFocus = remember { FocusRequester() }
+    LaunchedEffect(tab) {
+        if (tab != GalleryTab.Image) runCatching { fieldFocus.requestFocus() }
+    }
 
     // Image state
     var imageSrc by remember { mutableStateOf<String?>(null) }
@@ -273,7 +281,7 @@ fun GalleryComposeScreen(
                         label = { Text("URL") },
                         placeholder = { Text("https://...") },
                         singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier.fillMaxWidth().focusRequester(fieldFocus),
                     )
                     Text(
                         "Talon fetches the page's title and preview when you post.",
@@ -288,7 +296,8 @@ fun GalleryComposeScreen(
                         label = { Text("Text") },
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(200.dp),
+                            .height(200.dp)
+                            .focusRequester(fieldFocus),
                     )
                 }
             }

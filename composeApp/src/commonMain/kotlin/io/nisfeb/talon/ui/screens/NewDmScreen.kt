@@ -1,5 +1,8 @@
 package io.nisfeb.talon.ui.screens
 
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -47,6 +50,8 @@ fun NewDmScreen(
     bookContacts: Set<String> = emptySet(),
     modifier: Modifier = Modifier,
 ) {
+    val fieldFocus = remember { FocusRequester() }
+    LaunchedEffect(Unit) { runCatching { fieldFocus.requestFocus() } }
     var query by remember { mutableStateOf("") }
     var newContactName by remember { mutableStateOf("") }
     val contacts by remember { db.contacts().stream() }.collectAsState(initial = emptyList())
@@ -112,7 +117,7 @@ fun NewDmScreen(
                 // see what you had typed.
                 singleLine = false,
                 maxLines = 3,
-                modifier = Modifier.weight(1f),
+                modifier = Modifier.weight(1f).focusRequester(fieldFocus),
             )
             TextButton(
                 onClick = { onPickPeer(asPatp) },
