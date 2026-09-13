@@ -1096,6 +1096,10 @@ fun DmListScreen(
                 .sortedByDescending { it.recencyMs }
                 .map { u -> u to rowsByWhom[u.whom] }
         }
+        // The list and the chips that point at unread rows beyond its
+        // edges share a box, so the chips sit against the list's own top
+        // and bottom rather than a guessed distance from the screen's.
+        Box(Modifier.weight(1f).fillMaxWidth()) {
         // The party tab is a different list, not a slice of the home
         // rows, so it stands in for the whole LazyColumn. Guarded on the
         // view selectors too: selectedHomeTab survives a switch to a
@@ -1561,20 +1565,10 @@ fun DmListScreen(
                 }
             }
         }
-    }
-        FloatingActionButton(
-            onClick = onNewMessage,
-            modifier = Modifier
-                .align(Alignment.BottomEnd)
-                .padding(16.dp),
-        ) { Icon(Icons.Filled.Add, contentDescription = "New message") }
-
-        // Subtle off-screen unread indicators. Only valid for the All
-        // tab — the Unread / Mentions tabs render a different flat
-        // list, so unreadIndices (built from homeRows) wouldn't line
-        // up with listState's visibleItemsInfo and we'd flash a stale
-        // "scroll for more" chip on top of an already-fully-visible
-        // list. Folder views are short enough not to need the hint.
+        // Only valid for the All tab: the Unread / Mentions tabs render
+        // a different flat list, so unreadIndices (built from homeRows)
+        // would not line up with listState. Folder views are short
+        // enough not to need the hint.
         if (selectedFolderId == null && selectedSpecial == SpecialTab.All) {
             UnreadOffscreenIndicators(
                 homeRows = visibleHomeRows,
@@ -1584,6 +1578,15 @@ fun DmListScreen(
                 },
             )
         }
+        }
+    }
+        FloatingActionButton(
+            onClick = onNewMessage,
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(16.dp),
+        ) { Icon(Icons.Filled.Add, contentDescription = "New message") }
+
     }
 
     folderSheetWhom?.let { whom ->
@@ -2703,10 +2706,7 @@ private fun androidx.compose.foundation.layout.BoxScope.UnreadOffscreenIndicator
             onClick = { onScrollTo(above.max()) },
             modifier = Modifier
                 .align(Alignment.TopCenter)
-                // Clears the title row + tab strip above the LazyColumn
-                // (~56 + ~52 + status-bar inset on most devices). 72dp
-                // overlapped the tab chips on tall-status-bar phones.
-                .padding(top = 140.dp),
+                .padding(top = 12.dp),
         )
     }
     if (below.isNotEmpty()) {

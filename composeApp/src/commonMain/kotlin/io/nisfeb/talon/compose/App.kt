@@ -1607,8 +1607,12 @@ fun App(
                     // On iOS the same edge belongs to the back gesture,
                     // which users reach for far more often; the switcher
                     // keeps its logo tap.
-                    gesturesEnabled = io.nisfeb.talon.ui.isTouchSwipeNavSupported &&
-                        !io.nisfeb.talon.ui.isEdgeSwipeBackSupported,
+                    // Material gates the scrim tap on this flag too, so an
+                    // open drawer keeps it on: the ambiguity is only in the
+                    // swipe that opens, never in the tap that closes.
+                    gesturesEnabled = drawerState.isOpen ||
+                        (io.nisfeb.talon.ui.isTouchSwipeNavSupported &&
+                            !io.nisfeb.talon.ui.isEdgeSwipeBackSupported),
                     drawerContent = {
                         // Empty drawer content when no ships are logged in
                         // (LoginScreen path). The drawer trigger isn't
