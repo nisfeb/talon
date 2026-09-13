@@ -35,7 +35,12 @@ import kotlin.math.roundToInt
  * converter rather than a smarter loop here.
  */
 @Composable
-actual fun VideoSurface(engine: CallEngine, local: Boolean, modifier: Modifier) {
+actual fun VideoSurface(
+    engine: CallEngine,
+    local: Boolean,
+    modifier: Modifier,
+    onFrameAspect: ((Float) -> Unit)?,
+) {
     val desktop = engine as? DesktopCallEngine ?: return
     val video by desktop.video.collectAsState()
     VideoTrackCanvas(
@@ -43,6 +48,7 @@ actual fun VideoSurface(engine: CallEngine, local: Boolean, modifier: Modifier) 
         on = if (local) video.localOn else video.remoteOn,
         mirror = local,
         modifier = modifier,
+        onFrameAspect = onFrameAspect,
     )
 }
 
@@ -51,6 +57,7 @@ actual fun VideoSurface(
     link: io.nisfeb.talon.call.PeerLink,
     local: Boolean,
     modifier: Modifier,
+    onFrameAspect: ((Float) -> Unit)?,
 ) {
     val d = link as? io.nisfeb.talon.call.DesktopPeerLink ?: return
     val video by d.video.collectAsState()
@@ -59,6 +66,7 @@ actual fun VideoSurface(
         on = if (local) video.localOn else video.remoteOn,
         mirror = local,
         modifier = modifier,
+        onFrameAspect = onFrameAspect,
     )
 }
 
@@ -69,6 +77,7 @@ private fun VideoTrackCanvas(
     on: Boolean,
     mirror: Boolean,
     modifier: Modifier,
+    onFrameAspect: ((Float) -> Unit)?,
 ) {
     if (track == null || !on) return
 
@@ -80,6 +89,7 @@ private fun VideoTrackCanvas(
     val failures = remember(track) { java.util.concurrent.atomic.AtomicLong(0) }
     DisposableEffect(track) {
         val converter = FrameConverter()
+        var lastAspect = 0f
         val sink = VideoTrackSink { frame: VideoFrame ->
             // The frame is reference-counted and recycled the moment
             // this returns, so it must be converted here rather than
@@ -87,6 +97,10 @@ private fun VideoTrackCanvas(
             runCatching {
                 bitmap = converter.toBitmap(frame)
                 rotation = frame.rotation
+                val turned = frame.rotation == 90 || frame.rotation == 270
+                val w = frame.buffer.width; val h = frame.buffer.height
+                val aspect = if (turned) h.toFloat() / w else w.toFloat() / h
+                if (aspect != lastAspect) { lastAspect = aspect; onFrameAspect?.invoke(aspect) }
                 lastFrameMs.set(System.currentTimeMillis())
                 if (frames.getAndIncrement() == 0L) {
                     io.nisfeb.talon.util.Log.i(

@@ -7,6 +7,9 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -447,10 +450,11 @@ private fun liveDuration(startMs: Long): String {
 /**
  * The two pictures on a 1:1 call: them large, us inset.
  *
- * A fixed height rather than a fraction of the window — the strip
- * this sits above can be rendered inside a chat pane or floated over
- * the whole app, and a pane that resized depending on which would
- * look like a bug. 16:9-ish at the width a chat column tends to be.
+ * The pane takes the shape of their picture once the renderer says
+ * what it is -- a phone's portrait camera gets a portrait pane -- and
+ * 16:9 until then. A fixed 220dp landscape pane used to show a
+ * portrait caller as a band across the forehead. Whatever the shape,
+ * the renderers fit rather than fill, so the whole picture is there.
  */
 @Composable
 private fun CallVideoPane(
@@ -458,14 +462,22 @@ private fun CallVideoPane(
     video: VideoState,
     modifier: Modifier = Modifier,
 ) {
+    var remoteAspect by remember { mutableStateOf<Float?>(null) }
     Surface(
-        modifier = modifier.height(220.dp),
+        modifier = modifier
+            .heightIn(max = 480.dp)
+            .aspectRatio(remoteAspect ?: (16f / 9f)),
         color = Color.Black,
         shape = RoundedCornerShape(12.dp),
     ) {
         Box(Modifier.fillMaxSize()) {
             if (video.remoteOn) {
-                VideoSurface(engine, local = false, modifier = Modifier.fillMaxSize())
+                VideoSurface(
+                    engine,
+                    local = false,
+                    modifier = Modifier.fillMaxSize(),
+                    onFrameAspect = { remoteAspect = it },
+                )
             } else {
                 // Our own camera on, theirs off: say so rather than
                 // showing a black rectangle that reads as broken.
