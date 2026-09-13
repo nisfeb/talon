@@ -475,8 +475,22 @@ private const val SEGMENT_MINUTES = SkyClock.MINUTES_IN_DAY / SEGMENTS
 
 internal val SUN = Color(0xFFF5B740)
 
-/** The sun under the earth: still on the dial, plainly not lighting it. */
-internal val SUN_DOWN = Color(0xFF6B5526)
+/**
+ * The sun under the earth: still on the dial, plainly not lighting it.
+ *
+ * An ember rather than a dimmed daytime sun. The old value was the
+ * day's amber with the life taken out of it, which at hue 41 and that
+ * little chroma is olive -- and olive on the ring's deep indigo goes
+ * muddy, which is most of what anybody saw on a night with no moon to
+ * look at instead.
+ *
+ * Warmer and more saturated instead, which is what survives being dark
+ * on a blue ground. It reads about a third as present as the daytime
+ * sun (contrast 3.7 against the night ring, against the day sun's 10)
+ * and stays well under a lit moon's 14, so the three are never
+ * mistaken for one another.
+ */
+internal val SUN_DOWN = Color(0xFFA85F35)
 
 internal val MOON = Color(0xFFE8E4DA)
 
