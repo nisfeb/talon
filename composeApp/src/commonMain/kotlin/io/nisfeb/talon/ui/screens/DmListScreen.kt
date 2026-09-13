@@ -1,4 +1,5 @@
 package io.nisfeb.talon.ui.screens
+import io.nisfeb.talon.ui.reorderHandle
 import kotlin.concurrent.Volatile
 import io.nisfeb.talon.util.ConcurrentMap
 import io.nisfeb.talon.util.formatMonthDay
@@ -1313,7 +1314,7 @@ fun DmListScreen(
                                             },
                                             onLongClick = if (editMode) null else onGroupHeadLongPress,
                                             editMode = editMode,
-                                            dragHandleModifier = if (!canReorder) null else Modifier.longPressDraggableHandle(
+                                            dragHandleModifier = if (!canReorder) null else reorderHandle(
                                                 onDragStarted = {
                                                     hapticRoot.performHapticFeedback(HapticFeedbackType.LongPress)
                                                     expandedGroups = expandedGroups - row.flag
@@ -1395,7 +1396,7 @@ fun DmListScreen(
                                         onClick = onRowOpen,
                                         onLongClick = onRowLongPress,
                                         editMode = editMode,
-                                        dragHandleModifier = if (!canReorder) null else Modifier.longPressDraggableHandle(
+                                        dragHandleModifier = if (!canReorder) null else reorderHandle(
                                             onDragStarted = {
                                                 hapticRoot.performHapticFeedback(HapticFeedbackType.LongPress)
                                             },
@@ -1500,7 +1501,7 @@ fun DmListScreen(
                                             },
                                             onLongClick = if (editMode) null else onGroupHeadLongPress,
                                             editMode = editMode,
-                                            dragHandleModifier = if (!canReorder) null else Modifier.longPressDraggableHandle(
+                                            dragHandleModifier = if (!canReorder) null else reorderHandle(
                                                 onDragStarted = {
                                                     hapticRoot.performHapticFeedback(
                                                         HapticFeedbackType.LongPress,

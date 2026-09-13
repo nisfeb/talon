@@ -1,5 +1,6 @@
 package io.nisfeb.talon.ui.screens
 
+import io.nisfeb.talon.ui.reorderHandle
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -133,7 +134,7 @@ fun SidebarSettingsScreen(
                                 }
                             }
                         },
-                        dragHandleModifier = Modifier.longPressDraggableHandle(
+                        dragHandleModifier = reorderHandle(
                             onDragStarted = {
                                 haptics.performHapticFeedback(HapticFeedbackType.LongPress)
                             },
@@ -159,7 +160,7 @@ private fun SidebarItemRow(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        // Drag handle. Long-press anywhere on the icon to start a drag.
+        // Drag handle: a long press on touch, at once with a mouse.
         Icon(
             Icons.Filled.Menu,
             contentDescription = "Drag to reorder",
