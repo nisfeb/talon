@@ -91,12 +91,7 @@ data class ContactMap(
      * ever shown: a comet's @p is the fifty-six characters its name
      * exists to replace, so no surface puts one in front of anybody.
      */
-    fun handle(ship: String): String =
-        // A comet spells its own fingerprint, so it needs nothing
-        // fetched and nobody's permission.
-        Mnemonym.display(ship)
-            ?: (if (nonCometNames) AzimuthNames.nameFor(ship) else null)
-            ?: ship
+    fun handle(ship: String): String = shipHandle(ship, nonCometNames)
 
     fun contact(ship: String): ContactEntity? = byShip[ship]
     fun shipColor(ship: String): String? = byShip[ship]?.color
@@ -166,6 +161,30 @@ data class ContactMap(
  * ContactProfileSheet today) read directly from
  * [io.nisfeb.talon.data.ContactDao.streamOne].
  */
+/**
+ * What a ship is called with nobody's nicknames involved: its word
+ * name if it has one, otherwise its @p.
+ *
+ * The same rule as [ContactMap.handle] and the same one definition,
+ * but reachable without a ContactMap -- the ship switcher lists the
+ * accounts you are signed in to, where there is no such thing as
+ * somebody else's name for them, and it was printing a comet's full
+ * @p because it had no contact data to consult.
+ */
+fun shipHandle(ship: String, nonCometNames: Boolean = AzimuthNames.enabled.value): String =
+    // A comet spells its own fingerprint, so it needs nothing fetched
+    // and nobody's permission.
+    Mnemonym.display(ship)
+        ?: (if (nonCometNames) AzimuthNames.nameFor(ship) else null)
+        ?: ship
+
+/**
+ * The unabridged word name, for telling apart two ships whose short
+ * names came out the same.
+ */
+fun shipHandleLong(ship: String): String? =
+    Mnemonym.forShip(ship) ?: AzimuthNames.fullNameFor(ship)
+
 /**
  * The last [ContactMap] anybody built, so a screen opening can start
  * from the names it had a moment ago rather than from none at all.

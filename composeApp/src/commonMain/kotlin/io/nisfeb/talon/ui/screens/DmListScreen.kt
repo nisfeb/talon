@@ -753,7 +753,23 @@ fun DmListScreen(
                 val activeNick = shipNicknames[activeShip]
                 val collision = activeNick != null &&
                     allShips.count { shipNicknames[it] == activeNick } > 1
-                val label = if (activeNick != null && !collision) activeNick else activeShip
+                // Falling back to the @p made this the one place a
+                // comet still showed its fifty-six characters. It falls
+                // back to the word name now, and to the unabridged one
+                // where two signed-in ships would otherwise read alike,
+                // since a label that cannot tell them apart is the
+                // thing this branch exists to avoid.
+                val label = when {
+                    activeNick != null && !collision -> activeNick
+                    else -> {
+                        val short = io.nisfeb.talon.ui.shipHandle(activeShip)
+                        val alike = allShips.count {
+                            io.nisfeb.talon.ui.shipHandle(it) == short
+                        } > 1
+                        if (alike) io.nisfeb.talon.ui.shipHandleLong(activeShip) ?: short
+                        else short
+                    }
+                }
                 // Colored dot in the user's chosen accent — same
                 // value as `colorScheme.primary` since App.kt's
                 // TalonTheme override drives the theme primary
@@ -1817,13 +1833,13 @@ internal fun ShipSwitcherDrawer(
                                 ),
                             )
                             Text(
-                                ship,
+                                io.nisfeb.talon.ui.shipHandle(ship),
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         } else {
                             Text(
-                                ship,
+                                io.nisfeb.talon.ui.shipHandle(ship),
                                 style = MaterialTheme.typography.bodyLarge.copy(
                                     fontWeight = if (selected) FontWeight.SemiBold
                                     else FontWeight.Normal,
