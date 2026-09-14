@@ -40,7 +40,19 @@ enum class Repeat(val kind: String, val label: String) {
     DAILY("daily", "Daily"),
     WEEKLY("weekly", "Weekly"),
     MONTHLY("monthly", "Monthly"),
+    MONTHLY_NTH("monthly-nth", "Monthly, a weekday"),
     YEARLY("yearly", "Yearly"),
+    EVERY("every", "Every so many minutes"),
+}
+
+/** The ordinals monthly-nth takes, in the calendar's words. */
+val ORDINALS = listOf("first", "second", "third", "fourth", "last")
+
+/** How an edit of a repeating event applies. */
+enum class EditScope(val label: String) {
+    ALL("Every occurrence"),
+    ONLY("This one only"),
+    FOLLOWING("This and following"),
 }
 
 /** What the editor holds; [eventBody] turns it into what the calendar takes. */
@@ -63,7 +75,22 @@ data class EventDraft(
     val zone: String? = null,
     /** iCalendar CATEGORIES; other clients show them as categories. */
     val tags: List<String> = emptyList(),
-)
+    /** monthly-nth: which weekday of the month, and which one. */
+    val ordinal: String = "first",
+    val nthDay: DayOfWeek? = null,
+    /** every: the period, in minutes. */
+    val periodMin: Int = 60,
+    /**
+     * A rule the editor does not model (an imported rrule or cron): the
+     * kind, its arguments and its anchor are kept verbatim, so the rest
+     * of the event can still be edited without rewriting the rule.
+     */
+    val rawKind: String? = null,
+    val rawArgs: JsonObject? = null,
+    val rawStartMs: Long? = null,
+) {
+    val repeats: Boolean get() = rawKind != null || repeat != Repeat.ONCE
+}
 
 /** "work, family" -> ["work", "family"]: trimmed, blanks and repeats dropped. */
 fun parseTags(text: String): List<String> =
@@ -93,17 +120,31 @@ fun eventBody(d: EventDraft, id: String? = null): JsonObject = buildJsonObject {
         put("day", d.date.dayOfMonth)
         return@buildJsonObject
     }
-    put("kind", d.repeat.kind)
-    val wall = d.date.atTime(LocalTime(d.minuteOfDay / 60, d.minuteOfDay % 60))
-    val anchorsOnTime = d.cat == EventCat.TIMED && d.repeat == Repeat.ONCE
-    put("start_ms", (if (anchorsOnTime) wall else d.date.atTime(0, 0)).toInstant(TimeZone.UTC).toEpochMilliseconds())
-    putJsonObject("args") {
-        if (d.cat == EventCat.TIMED && d.repeat != Repeat.ONCE) put("at", d.minuteOfDay)
-        when (d.repeat) {
-            Repeat.WEEKLY -> put("days", JsonArray(d.weekdays.sortedBy { it.isoDayNumber }.map { JsonPrimitive(WIRE_DAYS[it.isoDayNumber - 1]) }))
-            Repeat.MONTHLY -> put("day", d.date.dayOfMonth)
-            Repeat.YEARLY -> { put("month", d.date.monthNumber); put("day", d.date.dayOfMonth) }
-            else -> Unit
+    if (d.rawKind != null) {
+        // An imported rule, sent back as it came.
+        put("kind", d.rawKind)
+        put("start_ms", d.rawStartMs ?: d.date.atTime(0, 0).toInstant(TimeZone.UTC).toEpochMilliseconds())
+        put("args", d.rawArgs ?: JsonObject(emptyMap()))
+    } else {
+        put("kind", d.repeat.kind)
+        val wall = d.date.atTime(LocalTime(d.minuteOfDay / 60, d.minuteOfDay % 60))
+        // once and every anchor on the moment; the grid kinds on the day,
+        // with the time in their arguments.
+        val anchorsOnTime = d.cat == EventCat.TIMED && (d.repeat == Repeat.ONCE || d.repeat == Repeat.EVERY)
+        put("start_ms", (if (anchorsOnTime) wall else d.date.atTime(0, 0)).toInstant(TimeZone.UTC).toEpochMilliseconds())
+        putJsonObject("args") {
+            if (d.cat == EventCat.TIMED && d.repeat != Repeat.ONCE && d.repeat != Repeat.EVERY) put("at", d.minuteOfDay)
+            when (d.repeat) {
+                Repeat.WEEKLY -> put("days", JsonArray(d.weekdays.sortedBy { it.isoDayNumber }.map { JsonPrimitive(WIRE_DAYS[it.isoDayNumber - 1]) }))
+                Repeat.MONTHLY -> put("day", d.date.dayOfMonth)
+                Repeat.MONTHLY_NTH -> {
+                    put("ord", d.ordinal.takeIf { it in ORDINALS } ?: "first")
+                    put("day", WIRE_DAYS[(d.nthDay ?: d.date.dayOfWeek).isoDayNumber - 1])
+                }
+                Repeat.YEARLY -> { put("month", d.date.monthNumber); put("day", d.date.dayOfMonth) }
+                Repeat.EVERY -> put("period", d.periodMin.coerceAtLeast(1))
+                else -> Unit
+            }
         }
     }
     if (d.cat == EventCat.TIMED) {
@@ -113,11 +154,29 @@ fun eventBody(d: EventDraft, id: String? = null): JsonObject = buildJsonObject {
     } else {
         put("span_days", d.spanDays.coerceAtLeast(1))
     }
-    if (d.repeat != Repeat.ONCE) {
+    if (d.rawKind == null && d.repeat != Repeat.ONCE) {
         if (d.count > 0) put("count", d.count)
         else d.until?.let { put("until_ms", it.plus(1, DateTimeUnit.DAY).atTime(0, 0).toInstant(TimeZone.UTC).toEpochMilliseconds()) }
     }
 }
+
+/**
+ * The event this occurrence becomes on its own: a one-off at the
+ * occurrence's own day and time, the rest as edited. Sent after a
+ * skip-event for the occurrence, the way the calendar's page does it.
+ */
+fun onlyBody(d: EventDraft, occurrence: LocalDateTime): JsonObject = eventBody(
+    d.copy(
+        repeat = Repeat.ONCE, rawKind = null, rawArgs = null, rawStartMs = null, count = 0, until = null,
+        date = occurrence.date,
+        minuteOfDay = if (d.cat == EventCat.TIMED) occurrence.hour * 60 + occurrence.minute else d.minuteOfDay,
+    ),
+)
+
+/** The series as edited, restarted from the occurrence's day. Sent
+ *  after a cap-event that ends the old series before it. */
+fun followingBody(d: EventDraft, occurrence: LocalDateTime): JsonObject =
+    eventBody(d.copy(date = occurrence.date, rawStartMs = d.rawStartMs?.let { occurrence.date.atTime(0, 0).toInstant(TimeZone.UTC).toEpochMilliseconds() }))
 
 /** The editor's draft for an event.json answer, or null for a shape it cannot edit. */
 fun draftFromEvent(e: JsonObject, today: LocalDate): EventDraft? {
@@ -136,24 +195,34 @@ fun draftFromEvent(e: JsonObject, today: LocalDate): EventDraft? {
         val d = num("day") ?: return null
         return base.copy(date = runCatching { LocalDate(today.year, m, d) }.getOrElse { return null })
     }
-    val repeat = Repeat.entries.firstOrNull { it.kind == str("kind") } ?: return null
+    val kind = str("kind") ?: return null
     val startMs = e["start_ms"]?.jsonPrimitive?.longOrNull ?: return null
     val wall = Instant.fromEpochMilliseconds(startMs).toLocalDateTime(TimeZone.UTC)
     val args = e["args"] as? JsonObject
+    val zone = str("zone")?.takeIf { it != "none" }
+    val common = base.copy(
+        date = wall.date,
+        durMin = num("dur_min") ?: 60,
+        spanDays = num("span_days") ?: 1,
+        count = num("count") ?: 0,
+        zone = zone,
+    )
+    val repeat = Repeat.entries.firstOrNull { it.kind == kind }
+        // A rule the form does not model is kept whole: the rest of the
+        // event stays editable.
+        ?: return common.copy(rawKind = kind, rawArgs = args, rawStartMs = startMs, minuteOfDay = wall.hour * 60 + wall.minute)
     val at = args?.get("at")?.jsonPrimitive?.intOrNull
     val days = (args?.get("days") as? JsonArray)?.mapNotNull { j ->
         WIRE_DAYS.indexOf(j.jsonPrimitive.contentOrNull).takeIf { it >= 0 }?.let { DayOfWeek(it + 1) }
     }.orEmpty().toSet()
-    val zone = str("zone")?.takeIf { it != "none" }
-    return base.copy(
-        date = wall.date,
-        minuteOfDay = if (cat == EventCat.TIMED && repeat == Repeat.ONCE) wall.hour * 60 + wall.minute else at ?: 0,
-        durMin = num("dur_min") ?: 60,
-        spanDays = num("span_days") ?: 1,
+    val anchorsOnTime = cat == EventCat.TIMED && (repeat == Repeat.ONCE || repeat == Repeat.EVERY)
+    return common.copy(
+        minuteOfDay = if (anchorsOnTime) wall.hour * 60 + wall.minute else at ?: 0,
         repeat = repeat,
         weekdays = days,
-        count = num("count") ?: 0,
-        zone = zone,
+        ordinal = args?.get("ord")?.jsonPrimitive?.contentOrNull?.takeIf { it in ORDINALS } ?: "first",
+        nthDay = WIRE_DAYS.indexOf(args?.get("day")?.jsonPrimitive?.contentOrNull).takeIf { it >= 0 }?.let { DayOfWeek(it + 1) },
+        periodMin = args?.get("period")?.jsonPrimitive?.intOrNull ?: 60,
     )
 }
 

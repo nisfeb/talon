@@ -76,6 +76,9 @@ class CalendarApi(private val http: HttpClient, baseUrl: String) {
 
     suspend fun config(): CalendarConfig = decode(get("/config.json"))
 
+    /** Every zone name the calendar knows, for the editor. */
+    suspend fun zones(): List<String> = decode(get("/zones.json"))
+
     /** Every tag in use, with how many events carry it. */
     suspend fun tags(): List<TagCount> = decode(get("/tags.json"))
 

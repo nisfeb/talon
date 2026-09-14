@@ -69,7 +69,11 @@ import io.nisfeb.talon.calendar.CalendarRepo
 import io.nisfeb.talon.calendar.CalendarRow
 import io.nisfeb.talon.calendar.EventCat
 import io.nisfeb.talon.calendar.EventDraft
+import io.nisfeb.talon.calendar.EditScope
+import io.nisfeb.talon.calendar.ORDINALS
 import io.nisfeb.talon.calendar.Repeat
+import io.nisfeb.talon.calendar.followingBody
+import io.nisfeb.talon.calendar.onlyBody
 import io.nisfeb.talon.calendar.daysOf
 import io.nisfeb.talon.calendar.draftFromEvent
 import io.nisfeb.talon.calendar.eventBody
@@ -129,6 +133,9 @@ fun CalendarScreen(
     var selected by remember { mutableStateOf(today) }
     var editing by remember { mutableStateOf<Pair<String?, EventDraft>?>(null) }
     var editingIdx by remember { mutableStateOf<Int?>(null) }
+    var editingStartMs by remember { mutableStateOf<Long?>(null) }
+    var zones by remember { mutableStateOf<List<String>>(emptyList()) }
+    LaunchedEffect(availability) { if (availability == CalendarAvailability.PRESENT) zones = repo.zones() }
     var managing by remember { mutableStateOf(false) }
     var status by remember { mutableStateOf<String?>(null) }
 
@@ -153,14 +160,16 @@ fun CalendarScreen(
     fun openNew() {
         editing = null to EventDraft(date = selected, cal = calendars.firstOrNull { it.id !in hidden }?.id)
         editingIdx = null
+        editingStartMs = null
     }
     fun openExisting(r: CalendarRow) {
         scope.launch {
             val json = repo.eventDetail(r.id)
             val d = json?.let { draftFromEvent(it, selected) }
-            if (d == null) { status = "That event's shape is not one this editor knows; the calendar's page can change it."; return@launch }
+            if (d == null) { status = "That event could not be read for editing."; return@launch }
             editing = r.id to d
             editingIdx = r.idx
+            editingStartMs = r.l
         }
     }
 
@@ -339,13 +348,26 @@ fun CalendarScreen(
         EventEditor(
             initial = draft,
             existing = id != null,
-            recurringOccurrence = id != null && draft.repeat != Repeat.ONCE && editingIdx != null,
+            recurringOccurrence = id != null && draft.repeats && editingIdx != null,
             calendars = calendars,
+            zones = zones,
             twentyFourHour = twentyFourHour,
             onDismiss = { editing = null },
-            onSave = { d ->
+            onSave = { d, editScope ->
                 scope.launch {
-                    val ok = repo.poke(eventBody(d, id))
+                    val idx = editingIdx
+                    val occurrence = editingStartMs?.let { Instant.fromEpochMilliseconds(it).toLocalDateTime(zone) }
+                    val ok = when {
+                        id == null || editScope == EditScope.ALL || idx == null || occurrence == null ->
+                            repo.poke(eventBody(d, id))
+                        // The page's own two steps: end or skip the old, then add.
+                        editScope == EditScope.FOLLOWING ->
+                            repo.poke(buildJsonObject { put("action", "cap-event"); put("id", id); put("dom", idx) }) &&
+                                repo.poke(followingBody(d, occurrence))
+                        else ->
+                            repo.poke(buildJsonObject { put("action", "skip-event"); put("id", id); put("idx", idx) }) &&
+                                repo.poke(onlyBody(d, occurrence))
+                    }
                     if (ok) { editing = null; status = null } else status = "The ship did not take the change."
                 }
             },
@@ -404,20 +426,23 @@ private fun spanLabel(r: CalendarRow, day: LocalDate, zone: TimeZone, twentyFour
 }
 
 /** The event form. Saves the whole series; a single occurrence can be skipped. */
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 private fun EventEditor(
     initial: EventDraft,
     existing: Boolean,
     recurringOccurrence: Boolean,
     calendars: List<CalendarInfo>,
+    zones: List<String>,
     twentyFourHour: Boolean,
     onDismiss: () -> Unit,
-    onSave: (EventDraft) -> Unit,
+    onSave: (EventDraft, EditScope) -> Unit,
     onDelete: (() -> Unit)?,
     onSkip: (() -> Unit)?,
 ) {
     var d by remember { mutableStateOf(initial) }
+    var editScope by remember { mutableStateOf(EditScope.ALL) }
+    var zoneText by remember { mutableStateOf(initial.zone.orEmpty()) }
     var pickingDate by remember { mutableStateOf(false) }
     var pickingUntil by remember { mutableStateOf(false) }
     var problem by remember { mutableStateOf<String?>(null) }
@@ -463,12 +488,54 @@ private fun EventEditor(
                         label = { Text("Days") }, singleLine = true,
                     )
                 }
-                if (d.cat != EventCat.DATE) {
+                if (d.cat == EventCat.TIMED) {
+                    // The zone the times are in: the calendar's unless named.
+                    OutlinedTextField(
+                        value = zoneText,
+                        onValueChange = { zoneText = it; d = d.copy(zone = it.trim().takeIf { z -> z.isNotEmpty() && z in zones }) },
+                        label = { Text("Zone") }, placeholder = { Text("the calendar's own") }, singleLine = true,
+                        isError = zoneText.isNotBlank() && zoneText.trim() !in zones,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    val q = zoneText.trim()
+                    if (q.length >= 2 && q !in zones) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
+                            zones.filter { it.contains(q, ignoreCase = true) }.take(3).forEach { z ->
+                                FilterChip(selected = false, onClick = { zoneText = z; d = d.copy(zone = z) }, label = { Text(z) })
+                            }
+                        }
+                    }
+                }
+                if (d.cat != EventCat.DATE && d.rawKind != null) {
+                    Text(
+                        "Repeats by an imported rule (${d.rawKind}), kept as it is. Everything else here can change.",
+                        style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                if (d.cat != EventCat.DATE && d.rawKind == null) {
                     Text("Repeats", style = MaterialTheme.typography.labelMedium)
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
+                    androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
                         Repeat.entries.forEach { r ->
                             FilterChip(selected = d.repeat == r, onClick = { d = d.copy(repeat = r) }, label = { Text(r.label) })
                         }
+                    }
+                    if (d.repeat == Repeat.MONTHLY_NTH) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            ORDINALS.forEach { o ->
+                                FilterChip(selected = d.ordinal == o, onClick = { d = d.copy(ordinal = o) }, label = { Text(o) })
+                            }
+                        }
+                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            DayOfWeek.entries.forEach { w ->
+                                FilterChip(selected = (d.nthDay ?: d.date.dayOfWeek) == w, onClick = { d = d.copy(nthDay = w) }, label = { Text(d3(w).take(2)) })
+                            }
+                        }
+                    }
+                    if (d.repeat == Repeat.EVERY) {
+                        OutlinedTextField(
+                            value = d.periodMin.toString(), onValueChange = { v -> v.toIntOrNull()?.let { d = d.copy(periodMin = it) } },
+                            label = { Text("Every, in minutes") }, singleLine = true,
+                        )
                     }
                     if (d.repeat == Repeat.WEEKLY) {
                         Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -503,6 +570,14 @@ private fun EventEditor(
                     onValueChange = { tagText = it; d = d.copy(tags = io.nisfeb.talon.calendar.parseTags(it)) },
                     label = { Text("Tags, comma separated") }, singleLine = true, modifier = Modifier.fillMaxWidth(),
                 )
+                if (recurringOccurrence) {
+                    Text("This change applies to", style = MaterialTheme.typography.labelMedium)
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        EditScope.entries.forEach { s ->
+                            FilterChip(selected = editScope == s, onClick = { editScope = s }, label = { Text(s.label) })
+                        }
+                    }
+                }
                 problem?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
                 if (onDelete != null || onSkip != null) {
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -517,10 +592,11 @@ private fun EventEditor(
                 val ready = d.copy(minuteOfDay = time.hour * 60 + time.minute)
                 problem = when {
                     ready.name.isBlank() -> "A name is needed."
-                    ready.cat != EventCat.DATE && ready.repeat == Repeat.WEEKLY && ready.weekdays.isEmpty() -> "Pick the weekdays."
+                    ready.cat != EventCat.DATE && ready.rawKind == null && ready.repeat == Repeat.WEEKLY && ready.weekdays.isEmpty() -> "Pick the weekdays."
+                    ready.cat == EventCat.TIMED && zoneText.isNotBlank() && zoneText.trim() !in zones -> "That zone is not one the calendar knows."
                     else -> null
                 }
-                if (problem == null) onSave(ready)
+                if (problem == null) onSave(ready, editScope)
             }) { Text("Save") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },

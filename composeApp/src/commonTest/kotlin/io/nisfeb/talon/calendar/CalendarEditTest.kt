@@ -3,6 +3,8 @@ package io.nisfeb.talon.calendar
 import kotlinx.datetime.DayOfWeek
 import kotlinx.datetime.LocalDate
 import kotlinx.datetime.TimeZone
+import kotlinx.datetime.atTime
+import kotlinx.datetime.toInstant
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -74,5 +76,42 @@ class CalendarEditTest {
         assertEquals(listOf("work", "lunch"), b["meta"]!!.jsonObject["tags"]!!.jsonArray.map { it.jsonPrimitive.content })
         assertEquals(listOf("work", "lunch"), draftFromEvent(eventBody(d, "e1"), day)!!.tags)
         assertNull(eventBody(EventDraft(name = "Plain", date = day))["meta"]!!.jsonObject["tags"], "no tags, no key")
+    }
+
+    @Test fun `monthly-nth and every carry their own arguments`() {
+        val nth = eventBody(EventDraft(name = "Board", date = day, minuteOfDay = 10 * 60, repeat = Repeat.MONTHLY_NTH, ordinal = "second", nthDay = DayOfWeek.TUESDAY))
+        val a = nth["args"]!!.jsonObject
+        assertEquals("second", a["ord"]!!.jsonPrimitive.content)
+        assertEquals("tue", a["day"]!!.jsonPrimitive.content)
+        assertEquals("600", a["at"]!!.jsonPrimitive.content)
+        val every = eventBody(EventDraft(name = "Pills", date = day, minuteOfDay = 8 * 60, repeat = Repeat.EVERY, periodMin = 720))
+        assertEquals("720", every["args"]!!.jsonObject["period"]!!.jsonPrimitive.content)
+        assertEquals(1_789_372_800_000L, every["start_ms"]!!.jsonPrimitive.content.toLong(), "every anchors on the moment, like once")
+        assertNull(every["args"]!!.jsonObject["at"])
+    }
+
+    @Test fun `an imported rule is kept whole through an edit`() {
+        val imported = io.nisfeb.talon.mail.AuspexApi.json.parseToJsonElement(
+            """{"id":"x","cat":"timed","meta":{"name":"Standup"},"kind":"rrule","start_ms":1789372800000,"args":{"rrule":"FREQ=WEEKLY;BYDAY=MO"},"zone":"none","count":0,"fin":"dur","dur_min":15}""",
+        ).jsonObject
+        val d = draftFromEvent(imported, day)!!
+        assertEquals("rrule", d.rawKind)
+        val b = eventBody(d.copy(name = "Standup, renamed"), "x")
+        assertEquals("rrule", b["kind"]!!.jsonPrimitive.content)
+        assertEquals("FREQ=WEEKLY;BYDAY=MO", b["args"]!!.jsonObject["rrule"]!!.jsonPrimitive.content)
+        assertEquals("1789372800000", b["start_ms"]!!.jsonPrimitive.content)
+        assertEquals("Standup, renamed", b["meta"]!!.jsonObject["name"]!!.jsonPrimitive.content)
+    }
+
+    @Test fun `this one only becomes a one-off at the occurrence, this and following restarts the series there`() {
+        val d = EventDraft(name = "Gym", date = LocalDate(2026, 9, 1), minuteOfDay = 7 * 60, repeat = Repeat.DAILY)
+        val occurrence = kotlinx.datetime.LocalDateTime(2026, 9, 20, 7, 0)
+        val only = onlyBody(d, occurrence)
+        assertEquals("once", only["kind"]!!.jsonPrimitive.content)
+        assertEquals("add-event", only["action"]!!.jsonPrimitive.content)
+        assertEquals(LocalDate(2026, 9, 20).let { it.atTime(7, 0).toInstant(TimeZone.UTC).toEpochMilliseconds() }, only["start_ms"]!!.jsonPrimitive.content.toLong())
+        val following = followingBody(d, occurrence)
+        assertEquals("daily", following["kind"]!!.jsonPrimitive.content)
+        assertEquals(LocalDate(2026, 9, 20).atTime(0, 0).toInstant(TimeZone.UTC).toEpochMilliseconds(), following["start_ms"]!!.jsonPrimitive.content.toLong())
     }
 }

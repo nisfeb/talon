@@ -76,6 +76,15 @@ class CalendarRepo(
             .onFailure { if (it !is AuspexError) throw it; _error.value = it.message }
     }
 
+    private var zoneNames: List<String>? = null
+    /** The zone names the editor can offer; read once. */
+    suspend fun zones(): List<String> {
+        zoneNames?.let { return it }
+        val got = api?.let { a -> runCatching { a.zones() }.getOrNull() } ?: return emptyList()
+        zoneNames = got
+        return got
+    }
+
     /** Make a followed or Google calendar local; false when refused. */
     suspend fun makeLocal(calId: String): Boolean {
         val a = api ?: return false
