@@ -102,6 +102,7 @@ fun MainViewController(rtc: NativeRtcFactory?): UIViewController {
     // Built once, like the factories above: anything constructed inside
     // the composable lambda is rebuilt on recomposition.
     val drafts = IosDraftStore()
+    IosAppLifecycle.observe()
     return ComposeUIViewController {
         Box(Modifier.fillMaxSize()) {
         App(
@@ -135,6 +136,7 @@ fun MainViewController(rtc: NativeRtcFactory?): UIViewController {
             // gets an APNs VoIP ring. The token itself arrives from
             // CallPush.swift via IosVoipBridge.
             pushTokenProvider = io.nisfeb.talon.notify.IosPushTokenProvider(),
+            appForeground = IosAppLifecycle.foreground,
         )
         // Back gesture. A Compose view controller gets none of UIKit's
         // navigation edge-swipe, so we draw our own: a narrow strip on

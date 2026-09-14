@@ -138,6 +138,13 @@ fun App(
     createDb: (shipKey: String) -> AppDatabase,
     drafts: DraftStore,
     updateState: UpdateState,
+    /**
+     * Whether the app is in front, where the host knows better than
+     * the window does. iOS: UIKit's notifications, since a phone's one
+     * window never loses focus while the process is suspended and its
+     * sockets die. Null means window focus is the signal (desktop).
+     */
+    appForeground: kotlinx.coroutines.flow.Flow<Boolean>? = null,
     /** Builds a SettingsSync bound to the per-ship db. Null on platforms
      *  without %settings sync wired. */
     createSettingsSync: ((AppDatabase) -> SettingsSync)? = null,
@@ -1120,15 +1127,31 @@ fun App(
             // below. Without this, a DM open in a background window got
             // neither an unread badge nor a notification.
             val windowInfo = LocalWindowInfo.current
-            LaunchedEffect(repo, windowInfo) {
-                snapshotFlow { windowInfo.isWindowFocused }
-                    .collect { focused ->
-                        repo.setForeground(focused)
-                        // Coming back to the window is one of the four
-                        // things that makes the mailbox ask again.
-                        mailRepo.setForeground(focused)
-                        calendarRepo.setForeground(focused)
+            LaunchedEffect(repo, windowInfo, appForeground) {
+                if (appForeground != null) {
+                    // A process that was suspended comes back with a
+                    // dead event stream and no way to know it short of
+                    // the ninety-second watchdog; reconnecting at once
+                    // is what Android does on ON_START, and it is why
+                    // new messages were slow to show on iOS.
+                    var was = true
+                    appForeground.collect { front ->
+                        repo.setForeground(front)
+                        mailRepo.setForeground(front)
+                        calendarRepo.setForeground(front)
+                        if (front && !was) repo.forceReconnect()
+                        was = front
                     }
+                } else {
+                    snapshotFlow { windowInfo.isWindowFocused }
+                        .collect { focused ->
+                            repo.setForeground(focused)
+                            // Coming back to the window is one of the four
+                            // things that makes the mailbox ask again.
+                            mailRepo.setForeground(focused)
+                            calendarRepo.setForeground(focused)
+                        }
+                }
             }
 
             // New pending DM request → tray notification. Always fires
