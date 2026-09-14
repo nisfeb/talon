@@ -42,6 +42,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material.icons.filled.Mic
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -177,6 +178,9 @@ fun AssistantScreen(
     mail: io.nisfeb.talon.mail.MailRepo? = null,
     calendar: io.nisfeb.talon.calendar.CalendarRepo? = null,
     calls: io.nisfeb.talon.call.CallController? = null,
+    /** Start listening as the screen opens (the home widget's tap);
+     *  where nothing can listen, the field takes the cursor instead. */
+    listenOnOpen: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     val aiState by aiSettings.state.collectAsState()
@@ -614,10 +618,24 @@ fun AssistantScreen(
                 questionField = TextFieldValue(spoken, TextRange(spoken.length))
                 submit()
             }
+            // One listen per opening: the flag is consumed the first time
+            // the loop is ready, so a recomposition does not listen twice.
+            var wantListen by remember { mutableStateOf(listenOnOpen) }
+            val fieldFocus = remember { androidx.compose.ui.focus.FocusRequester() }
+            LaunchedEffect(ready, dictate) {
+                if (!ready) return@LaunchedEffect
+                if (wantListen && dictate != null && io.nisfeb.talon.ui.isDictationSupported) {
+                    wantListen = false
+                    dictate()
+                } else if (wantListen || !io.nisfeb.talon.ui.hasSoftKeyboard) {
+                    wantListen = false
+                    runCatching { fieldFocus.requestFocus() }
+                }
+            }
             OutlinedTextField(
                 value = questionField,
                 onValueChange = { questionField = it },
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth().focusRequester(fieldFocus),
                 label = { Text("Ask or tell your assistant…") },
                 enabled = ready && !busy,
                 trailingIcon = if (dictate != null && io.nisfeb.talon.ui.isDictationSupported) {

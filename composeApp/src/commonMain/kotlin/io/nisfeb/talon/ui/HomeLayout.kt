@@ -30,6 +30,9 @@ enum class HomeWidgetKind {
     MAIL,
     CALENDAR,
     STATUS,
+    /** Tap to tell the assistant something, aloud where the
+     *  platform can listen. */
+    ASSISTANT,
 }
 
 /** How far ahead the calendar looks. */
@@ -220,6 +223,7 @@ data class HomeLayout(
                 HomeWidget(HomeWidgetKind.MESSAGES, count = 5, col = 5, row = 0, span = 7, rows = 5),
                 HomeWidget(HomeWidgetKind.MAIL, count = 5, col = 5, row = 5, span = 7, rows = 4),
                 HomeWidget(HomeWidgetKind.CALENDAR, col = 0, row = 15, span = 5, rows = 4),
+                HomeWidget(HomeWidgetKind.ASSISTANT, col = 5, row = 9, span = 7, rows = 3),
                 HomeWidget(
                     HomeWidgetKind.STATUS, visible = false, count = 5,
                     col = 5, row = 9, span = 7, rows = 4,

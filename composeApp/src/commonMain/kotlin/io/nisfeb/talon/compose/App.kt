@@ -340,6 +340,7 @@ fun App(
     var showInvites by remember { mutableStateOf(false) }
     var showBookmarks by remember { mutableStateOf(false) }
     var showCalendar by remember { mutableStateOf(false) }
+    var assistantListen by remember { mutableStateOf(false) }
     var showActivity by remember { mutableStateOf(false) }
     var showSearch by remember { mutableStateOf(false) }
     var showAssistant by remember { mutableStateOf(false) }
@@ -2911,6 +2912,9 @@ fun App(
                                         calendar = calendarRepo,
                                         onOpenCalendar = onOpenCalendar,
                                         onInstallCalendar = calendarInstall,
+                                        onOpenAssistant = if (assistantEnabled) {
+                                            { listen -> assistantListen = listen; openAssistantAction() }
+                                        } else null,
                                         contacts = callContacts,
                                         ourShip = ship,
                                         place = homePlace,
@@ -2970,9 +2974,10 @@ fun App(
                                         mail = mailRepo,
                                         calendar = calendarRepo,
                                         calls = callController,
+                                        listenOnOpen = assistantListen,
                                         scheduler = io.nisfeb.talon.ai.LoopScheduler.Noop,
                                         onRunLoop = runLoopNow,
-                                        onBack = if (expanded) null else ({ showAssistant = false }),
+                                        onBack = if (expanded) null else ({ showAssistant = false; assistantListen = false }),
                                         // Rail is showing → force the two-pane
                                         // layout so the 64dp rail can't trip the
                                         // stacked/hamburger fallback.

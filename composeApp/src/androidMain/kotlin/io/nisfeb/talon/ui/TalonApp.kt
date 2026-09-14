@@ -555,6 +555,8 @@ fun TalonApp(
     }
     var bookmarksOpen by remember { mutableStateOf(false) }
     var calendarOpen by remember { mutableStateOf(false) }
+    /** The home widget asked the assistant to listen as it opens. */
+    var assistantListen by remember { mutableStateOf(false) }
     var activityOpen by remember { mutableStateOf(false) }
     var contactsOpen by remember { mutableStateOf(false) }
     var watchwordsOpen by remember { mutableStateOf(false) }
@@ -1817,6 +1819,9 @@ fun TalonApp(
                     mail = mailRepo,
                     calendar = calendarRepo,
                     onOpenCalendar = { homeOpen = false; calendarOpen = true },
+                    onOpenAssistant = if (isAssistantSupported && aiState.assistantOn() && aiState.hasKey()) {
+                        { listen -> homeOpen = false; assistantListen = listen; assistantOpen = true }
+                    } else null,
                     onInstallCalendar = calendarInstall,
                     contacts = contactMap,
                     ourShip = loggedInShip.orEmpty(),
@@ -1905,11 +1910,12 @@ fun TalonApp(
                 mail = mailRepo,
                 calendar = calendarRepo,
                 calls = callController,
+                listenOnOpen = assistantListen,
                 scheduler = app.loops,
                 onRunLoop = { app.loops.runOneNow(it) },
-                onBack = { assistantOpen = false },
+                onBack = { assistantOpen = false; assistantListen = false },
                 onOpenMessage = { whom, postId, parentId ->
-                    assistantOpen = false
+                    assistantOpen = false; assistantListen = false
                     openWhom = whom
                     if (parentId != null) {
                         pendingThreadAnchor = postId

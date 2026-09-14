@@ -61,6 +61,8 @@ import androidx.compose.ui.unit.dp
 import io.nisfeb.talon.data.AppDatabase
 import io.nisfeb.talon.mail.MailAvailability
 import io.nisfeb.talon.mail.MailRepo
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Mic
 import kotlinx.coroutines.launch
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.draw.clip
@@ -125,6 +127,9 @@ fun HomeScreen(
     onOpenCalendar: (() -> Unit)? = null,
     /** Installs the calendar desk on the ship, where it is missing. */
     onInstallCalendar: (suspend () -> Result<Unit>)? = null,
+    /** Opens the assistant; true asks it to start listening. Null
+     *  where the assistant is off, and the widget says how to turn it on. */
+    onOpenAssistant: ((listen: Boolean) -> Unit)? = null,
     contacts: ContactMap,
     ourShip: String,
     /** Where the dial thinks you are, or null before anyone has said. */
@@ -343,6 +348,7 @@ fun HomeScreen(
                         calendar = calendar,
                         onOpenCalendar = onOpenCalendar,
                         onInstallCalendar = onInstallCalendar,
+                        onOpenAssistant = onOpenAssistant,
                         statuses = statuses,
                         place = place,
                         weather = weather,
@@ -681,6 +687,7 @@ fun title(kind: HomeWidgetKind): String = when (kind) {
     HomeWidgetKind.MAIL -> "Mail"
     HomeWidgetKind.CALENDAR -> "Today"
     HomeWidgetKind.STATUS -> "Statuses"
+    HomeWidgetKind.ASSISTANT -> "Assistant"
 }
 
 @Composable
@@ -694,6 +701,7 @@ private fun WidgetBody(
     calendar: CalendarRepo?,
     onOpenCalendar: (() -> Unit)?,
     onInstallCalendar: (suspend () -> Result<Unit>)?,
+    onOpenAssistant: ((Boolean) -> Unit)?,
     statuses: List<io.nisfeb.talon.data.ContactEntity>,
     place: HomePlace?,
     weather: SkyClock.Sky?,
@@ -732,6 +740,7 @@ private fun WidgetBody(
         HomeWidgetKind.CALENDAR -> CalendarPanel(
             calendar, widget.calendarRange, twentyFourHour, onOpenCalendar, onInstallCalendar, onLongPress,
         )
+        HomeWidgetKind.ASSISTANT -> AssistantPanel(onOpenAssistant, onLongPress)
         HomeWidgetKind.STATUS -> StatusPanel(
             statuses, contacts, ourShip, widget, onOpenContact, onOpenStatuses, onLongPress,
         )
@@ -1148,6 +1157,63 @@ internal fun dayLabel(t: LocalDateTime): String {
  * that is waiting on a design and one waiting on a feature would hide
  * the difference between a week and a quarter.
  */
+/**
+ * A big button, really: tap it and the assistant is listening (or, on
+ * a platform that cannot listen, ready to be typed to). The widget
+ * exists so an instruction is one tap from the page that opens first.
+ */
+@Composable
+private fun AssistantPanel(onOpen: ((Boolean) -> Unit)?, onLongPress: () -> Unit) {
+    val listens = io.nisfeb.talon.ui.isDictationSupported
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.30f),
+        shape = RoundedCornerShape(10.dp),
+        modifier = Modifier.fillMaxSize(),
+    ) {
+        Row(
+            Modifier
+                .fillMaxSize()
+                .combinedClickable(onClick = { onOpen?.invoke(listens) }, onLongClick = onLongPress)
+                .padding(horizontal = 16.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            Box(
+                Modifier.size(44.dp).clip(CircleShape)
+                    .background(if (onOpen != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    if (listens) Icons.Filled.Mic else Icons.Filled.Edit,
+                    contentDescription = null,
+                    tint = if (onOpen != null) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Column(Modifier.weight(1f)) {
+                Text(
+                    when {
+                        onOpen == null -> "Assistant is off"
+                        listens -> "Tell your assistant"
+                        else -> "Ask your assistant"
+                    },
+                    style = MaterialTheme.typography.titleSmall,
+                )
+                Text(
+                    when {
+                        onOpen == null -> "Turn it on under Settings, AI."
+                        listens -> "Tap, then say what you need: mail, a meeting, a message, a call."
+                        else -> "Tap and type what you need: mail, a meeting, a message, a call."
+                    },
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+    }
+}
+
 /**
  * What is on the calendar for the widget's range: whatever is under
  * way or starts before the range ends. Read from the ship's calendar;
