@@ -115,6 +115,11 @@ class AndroidUiSettings(
     override val chatPaneListFraction: StateFlow<Float> =
         _chatPaneListFraction.asStateFlow()
 
+    private val _rightPaneWidthDp = MutableStateFlow(
+        prefs.getFloat(KEY_RIGHT_PANE_WIDTH_DP, 360f).coerceIn(280f, 900f),
+    )
+    override val rightPaneWidthDp: StateFlow<Float> = _rightPaneWidthDp.asStateFlow()
+
     private val _activeRailTab = MutableStateFlow(
         railTabOrDefault(prefs.getString(KEY_ACTIVE_RAIL_TAB, null)),
     )
@@ -251,6 +256,13 @@ class AndroidUiSettings(
         _chatPaneListFraction.value = clamped
     }
 
+    override fun setRightPaneWidthDp(value: Float) {
+        val clamped = value.coerceIn(280f, 900f)
+        if (_rightPaneWidthDp.value == clamped) return
+        prefs.edit().putFloat(KEY_RIGHT_PANE_WIDTH_DP, clamped).apply()
+        _rightPaneWidthDp.value = clamped
+    }
+
     override fun setActiveRailTab(tab: RailTab) {
         if (_activeRailTab.value == tab) return
         prefs.edit().putString(KEY_ACTIVE_RAIL_TAB, tab.name).apply()
@@ -356,6 +368,7 @@ private const val KEY_MIC_AGC = "mic_auto_gain"
         private const val KEY_GROUP_CHANNEL_ORDER = "group_channel_order"
         private const val KEY_FOLDER_ITEM_ORDER = "folder_item_order"
         private const val KEY_CHAT_PANE_LIST_FRACTION = "chat_pane_list_fraction"
+        private const val KEY_RIGHT_PANE_WIDTH_DP = "right_pane_width_dp"
         private const val KEY_ACTIVE_RAIL_TAB = "active_rail_tab"
         private const val KEY_SMART_SEARCH_PREFERRED = "smart_search_preferred"
         private const val KEY_POWER_FEATURES = "power_features_enabled"

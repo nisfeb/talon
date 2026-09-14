@@ -69,6 +69,10 @@ interface UiSettings {
     val chatPaneListFraction: StateFlow<Float>
     fun setChatPaneListFraction(value: Float)
 
+    /** Width, in dp, of the thread / info pane on wide windows. */
+    val rightPaneWidthDp: StateFlow<Float>
+    fun setRightPaneWidthDp(value: Float)
+
     /**
      * Which surface the desktop / tablet-landscape rail has selected for
      * the left pane. Default [RailTab.Chats]. Persists per ship across
@@ -302,6 +306,9 @@ class InMemoryUiSettings(
     override fun setChatPaneListFraction(value: Float) {
         _chatPaneListFraction.value = value.coerceIn(0.20f, 0.50f)
     }
+    private val _rightPaneWidthDp = MutableStateFlow(360f)
+    override val rightPaneWidthDp: StateFlow<Float> = _rightPaneWidthDp.asStateFlow()
+    override fun setRightPaneWidthDp(value: Float) { _rightPaneWidthDp.value = value.coerceIn(280f, 900f) }
 
     private val _activeRailTab = MutableStateFlow(initialActiveRailTab)
     override val activeRailTab: StateFlow<RailTab> =

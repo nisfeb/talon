@@ -55,6 +55,7 @@ class FileUiSettings(
         val folderItemOrder: String = FolderItemOrder.Manual.name,
         // Fraction of total width given to the chat-list pane on wide windows.
         val chatPaneListFraction: Float = 0.30f,
+        val rightPaneWidthDp: Float = 360f,
         val activeRailTab: String = RailTab.Chats.name,
         val smartSearchPreferred: Boolean = false,
         val homePlace: String = "",
@@ -141,6 +142,9 @@ class FileUiSettings(
     )
     override val chatPaneListFraction: StateFlow<Float> =
         _chatPaneListFraction.asStateFlow()
+
+    private val _rightPaneWidthDp = MutableStateFlow(initial.rightPaneWidthDp.coerceIn(280f, 900f))
+    override val rightPaneWidthDp: StateFlow<Float> = _rightPaneWidthDp.asStateFlow()
 
     private val _activeRailTab = MutableStateFlow(
         railTabOrDefault(initial.activeRailTab),
@@ -247,6 +251,13 @@ class FileUiSettings(
         persistCurrent()
     }
 
+    override fun setRightPaneWidthDp(value: Float) {
+        val clamped = value.coerceIn(280f, 900f)
+        if (_rightPaneWidthDp.value == clamped) return
+        _rightPaneWidthDp.value = clamped
+        persistCurrent()
+    }
+
     override fun setActiveRailTab(tab: RailTab) {
         if (_activeRailTab.value == tab) return
         _activeRailTab.value = tab
@@ -302,6 +313,7 @@ class FileUiSettings(
                 groupChannelOrder = _groupChannelOrder.value.name,
                 folderItemOrder = _folderItemOrder.value.name,
                 chatPaneListFraction = _chatPaneListFraction.value,
+                rightPaneWidthDp = _rightPaneWidthDp.value,
                 activeRailTab = _activeRailTab.value.name,
                 smartSearchPreferred = _smartSearchPreferred.value,
                 homePlace = _homePlace.value,

@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material3.Surface
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.input.key.onPreviewKeyEvent
@@ -2588,6 +2589,7 @@ fun App(
                             else -> null
                         }
                         val listFraction by uiSettings.chatPaneListFraction.collectAsState()
+                        val rightPaneWidthDp by uiSettings.rightPaneWidthDp.collectAsState()
                         val activeRailTab by uiSettings.activeRailTab.collectAsState()
                         val railVisibility by uiSettings.railVisibility.collectAsState()
                         val railItemOrder by uiSettings.railItemOrder.collectAsState()
@@ -2921,6 +2923,8 @@ fun App(
                             detail = detailSlot,
                             listFraction = listFraction,
                             onListFractionChange = { uiSettings.setChatPaneListFraction(it) },
+                            rightPaneWidth = rightPaneWidthDp.dp,
+                            onRightPaneWidthChange = { uiSettings.setRightPaneWidthDp(it.value) },
                             menuBadges = menuBadges,
                             // The assistant takes over the whole area beside the
                             // rail and manages its OWN panes (conversations/jobs

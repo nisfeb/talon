@@ -46,6 +46,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
@@ -78,6 +80,9 @@ fun DesktopShell(
     listFraction: Float,
     onListFractionChange: (Float) -> Unit,
     rightSidebar: (@Composable () -> Unit)? = null,
+    // The right pane's width; dragged at its left edge like the list pane.
+    rightPaneWidth: Dp = DEFAULT_RIGHT_PANE_WIDTH,
+    onRightPaneWidthChange: (Dp) -> Unit = {},
     menuBadges: MenuBadges = MenuBadges(),
     // Full-width content that takes over the whole area beside the rail,
     // bypassing the list/detail split — for a screen that manages its own
@@ -135,8 +140,15 @@ fun DesktopShell(
             // sent content here that was silently dropped on the floor
             // until 0.10.0-rc4.
             if (rightSidebar != null) {
-                androidx.compose.material3.VerticalDivider()
-                Box(modifier = Modifier.width(RIGHT_SIDEBAR_WIDTH).fillMaxHeight()) {
+                // Never wider than leaves the chat its minimum.
+                val cap = (this@BoxWithConstraints.maxWidth - RAIL_WIDTH - MIN_MAIN_WIDTH).coerceAtLeast(MIN_RIGHT_PANE_WIDTH)
+                val width = rightPaneWidth.coerceIn(MIN_RIGHT_PANE_WIDTH, cap)
+                val density = LocalDensity.current
+                PaneDragHandle(onDragDelta = { deltaPx ->
+                    val delta = with(density) { deltaPx.toDp() }
+                    onRightPaneWidthChange((width - delta).coerceIn(MIN_RIGHT_PANE_WIDTH, cap))
+                })
+                Box(modifier = Modifier.width(width).fillMaxHeight()) {
                     rightSidebar()
                 }
             }
@@ -294,4 +306,8 @@ internal fun railLabel(item: RailItem): String = when (item) {
 }
 
 private val RAIL_WIDTH = 64.dp
-private val RIGHT_SIDEBAR_WIDTH = 360.dp
+val DEFAULT_RIGHT_PANE_WIDTH = 360.dp
+val MIN_RIGHT_PANE_WIDTH = 280.dp
+val MAX_RIGHT_PANE_WIDTH = 900.dp
+/** What the list and chat keep between them however wide the right pane gets. */
+private val MIN_MAIN_WIDTH = 520.dp
