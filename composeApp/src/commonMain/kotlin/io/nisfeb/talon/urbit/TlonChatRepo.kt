@@ -3117,15 +3117,10 @@ class TlonChatRepo(
         db.messageMedia().reapLocalTwinMedia(whom, ourPatp, sentMs)
         if (reaped > 0) {
             // Round-trip: sentMs is stamped at poke time, so this is the
-            // full send→echo→grey-clears latency. Investigation showed
-            // this is dominated by the ship's poke-processing time (a
-            // heavy ship is slow to accept a channel post), not our
-            // ingest/reap. Only warn when it's actually slow, so a normal
-            // send doesn't spam the log but a laggy ship is self-evident.
+            // full send→echo→grey-clears latency, which investigation
+            // showed is the ship's poke-processing time, not our wire.
             val latencyMs = nowMs() - sentMs
-            if (latencyMs > 1_000) {
-                Log.w(TAG, "slow send whom=$whom latencyMs=$latencyMs (ship poke-processing)")
-            }
+            Log.i(TAG, "echo reaped twin whom=$whom latencyMs=$latencyMs")
         } else if (nowMs() - sentMs < 60_000) {
             val fallback = db.messages().reapOldestLocalTwin(whom, ourPatp)
             if (fallback > 0) {
