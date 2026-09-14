@@ -1,5 +1,6 @@
 package io.nisfeb.talon.calendar
 
+import io.nisfeb.talon.util.nowMs
 import kotlinx.datetime.DateTimeUnit
 import kotlinx.datetime.DayOfWeek
 import kotlinx.datetime.Instant
@@ -27,11 +28,12 @@ import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonObject
 
-/** The three shapes an event can have, in the calendar's own words. */
+/** The four shapes an event can have, in the calendar's own words. */
 enum class EventCat(val wire: String, val label: String) {
     TIMED("timed", "At a time"),
     ALLDAY("allday", "All day"),
     DATE("date", "A date each year"),
+    TODO("todo", "Task"),
 }
 
 /** The recurrence kinds the editor offers; the calendar has more. */
@@ -88,8 +90,22 @@ data class EventDraft(
     val rawKind: String? = null,
     val rawArgs: JsonObject? = null,
     val rawStartMs: Long? = null,
+    /** A task: when it is due, if ever, and whether it is done. The
+     *  done moment is kept across an edit rather than reset to now. */
+    val due: LocalDate? = null,
+    val done: Boolean = false,
+    val doneMs: Long? = null,
 ) {
-    val repeats: Boolean get() = rawKind != null || repeat != Repeat.ONCE
+    val repeats: Boolean get() = cat != EventCat.TODO && cat != EventCat.DATE && (rawKind != null || repeat != Repeat.ONCE)
+}
+
+private fun LocalDate.utcMidnightMs() = atTime(0, 0).toInstant(TimeZone.UTC).toEpochMilliseconds()
+
+/** The tick poke: done-event, the way the calendar's page sends it. */
+fun doneBody(id: String, done: Boolean): JsonObject = buildJsonObject {
+    put("action", "done-event")
+    put("id", id)
+    put("done", done)
 }
 
 /** "work, family" -> ["work", "family"]: trimmed, blanks and repeats dropped. */
@@ -115,6 +131,11 @@ fun eventBody(d: EventDraft, id: String? = null): JsonObject = buildJsonObject {
         if (d.tags.isNotEmpty()) put("tags", JsonArray(d.tags.map { JsonPrimitive(it) }))
     }
     d.cal?.let { put("cal", it) }
+    if (d.cat == EventCat.TODO) {
+        d.due?.let { put("due_ms", it.utcMidnightMs()) }
+        if (d.done) put("done_ms", d.doneMs ?: nowMs())
+        return@buildJsonObject
+    }
     if (d.cat == EventCat.DATE) {
         put("month", d.date.monthNumber)
         put("day", d.date.dayOfMonth)
@@ -190,6 +211,14 @@ fun draftFromEvent(e: JsonObject, today: LocalDate): EventDraft? {
         cal = str("cal"), cat = cat, date = today,
         tags = (meta?.get("tags") as? JsonArray)?.mapNotNull { it.jsonPrimitive.contentOrNull }.orEmpty(),
     )
+    if (cat == EventCat.TODO) {
+        val due = e["due_ms"]?.jsonPrimitive?.longOrNull?.let { Instant.fromEpochMilliseconds(it).toLocalDateTime(TimeZone.UTC).date }
+        return base.copy(
+            date = due ?: today, due = due,
+            done = e["done"]?.jsonPrimitive?.booleanOrNull ?: false,
+            doneMs = e["done_ms"]?.jsonPrimitive?.longOrNull,
+        )
+    }
     if (cat == EventCat.DATE) {
         val m = num("month") ?: return null
         val d = num("day") ?: return null

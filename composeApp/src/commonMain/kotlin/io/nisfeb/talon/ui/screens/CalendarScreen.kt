@@ -26,11 +26,14 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Checklist
+import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -61,12 +64,16 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.nisfeb.talon.calendar.CalendarAvailability
 import io.nisfeb.talon.calendar.CalendarInfo
 import io.nisfeb.talon.calendar.CalendarRepo
 import io.nisfeb.talon.calendar.CalendarRow
+import io.nisfeb.talon.calendar.CalendarTask
+import io.nisfeb.talon.calendar.dueDate
+import io.nisfeb.talon.calendar.taskOrder
 import io.nisfeb.talon.calendar.EventCat
 import io.nisfeb.talon.calendar.EventDraft
 import io.nisfeb.talon.calendar.EditScope
@@ -120,6 +127,8 @@ fun CalendarScreen(
     val allTags by repo.tags.collectAsState()
     var tagFilter by remember { mutableStateOf<String?>(null) }
     val rows by repo.rangeRows.collectAsState()
+    val tasks by repo.tasks.collectAsState()
+    var showTasks by remember { mutableStateOf(false) }
     val calendars by repo.calendars.collectAsState()
     val hidden by repo.hidden.collectAsState()
     val zoneId by repo.zone.collectAsState()
@@ -162,15 +171,19 @@ fun CalendarScreen(
         editingIdx = null
         editingStartMs = null
     }
-    fun openExisting(r: CalendarRow) {
+    fun openById(id: String, idx: Int?, startMs: Long?) {
         scope.launch {
-            val json = repo.eventDetail(r.id)
+            val json = repo.eventDetail(id)
             val d = json?.let { draftFromEvent(it, selected) }
             if (d == null) { status = "That event could not be read for editing."; return@launch }
-            editing = r.id to d
-            editingIdx = r.idx
-            editingStartMs = r.l
+            editing = id to d
+            editingIdx = idx
+            editingStartMs = startMs
         }
+    }
+    fun openExisting(r: CalendarRow) = openById(r.id, r.idx, r.l)
+    fun tick(id: String, done: Boolean) {
+        scope.launch { if (!repo.setDone(id, done)) status = "The ship did not take the change." }
     }
 
     Column(modifier.windowInsetsPadding(WindowInsets.safeDrawing)) {
@@ -180,16 +193,22 @@ fun CalendarScreen(
         ) {
             io.nisfeb.talon.ui.NavIcon(onBack = onBack)
             Text(
-                "${MonthNames.ENGLISH_FULL.names[month - 1]} $year",
+                if (showTasks) "Tasks" else "${MonthNames.ENGLISH_FULL.names[month - 1]} $year",
                 style = MaterialTheme.typography.titleLarge,
                 modifier = Modifier.weight(1f),
             )
-            IconButton(onClick = { if (month == 1) { month = 12; year -= 1 } else month -= 1 }) {
-                Icon(Icons.Filled.KeyboardArrowLeft, contentDescription = "Previous month")
+            if (!showTasks) {
+                IconButton(onClick = { if (month == 1) { month = 12; year -= 1 } else month -= 1 }) {
+                    Icon(Icons.Filled.KeyboardArrowLeft, contentDescription = "Previous month")
+                }
+                TextButton(onClick = { year = today.year; month = today.monthNumber; selected = today }) { Text("Today") }
+                IconButton(onClick = { if (month == 12) { month = 1; year += 1 } else month += 1 }) {
+                    Icon(Icons.Filled.KeyboardArrowRight, contentDescription = "Next month")
+                }
             }
-            TextButton(onClick = { year = today.year; month = today.monthNumber; selected = today }) { Text("Today") }
-            IconButton(onClick = { if (month == 12) { month = 1; year += 1 } else month += 1 }) {
-                Icon(Icons.Filled.KeyboardArrowRight, contentDescription = "Next month")
+            IconButton(onClick = { showTasks = !showTasks }) {
+                if (showTasks) Icon(Icons.Filled.CalendarMonth, contentDescription = "Month")
+                else Icon(Icons.Filled.Checklist, contentDescription = "Tasks")
             }
             IconButton(onClick = { managing = true }) {
                 Icon(Icons.Filled.Tune, contentDescription = "Calendars")
@@ -239,6 +258,25 @@ fun CalendarScreen(
                 }
             }
             Spacer(Modifier.height(4.dp))
+        }
+        if (showTasks) {
+            TasksView(
+                tasks = tasks?.filter { it.cal !in hidden && (tagFilter == null || tagFilter in it.tags) },
+                today = today,
+                calendars = calendars.filter { it.id !in hidden },
+                colourOf = { t -> calendarHexColor(t.color ?: calColors[t.cal]) },
+                status = status ?: error,
+                onTick = ::tick,
+                onOpen = { t -> openById(t.id, null, null) },
+                onAdd = { name, due, cal ->
+                    scope.launch {
+                        val d = EventDraft(name = name, cat = EventCat.TODO, date = due ?: today, due = due, cal = cal, tags = listOfNotNull(tagFilter))
+                        if (!repo.poke(eventBody(d))) status = "The ship did not take the task."
+                    }
+                },
+                modifier = Modifier.weight(1f).fillMaxWidth(),
+            )
+            return@Column
         }
         Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp)) {
             listOf("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun").forEach {
@@ -325,9 +363,15 @@ fun CalendarScreen(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(10.dp),
                         ) {
+                            if (r.isTask) {
+                                Checkbox(checked = r.done, onCheckedChange = { tick(r.id, it) }, modifier = Modifier.size(24.dp))
+                            }
                             Box(Modifier.size(10.dp).clip(CircleShape).background(colourOf(r) ?: MaterialTheme.colorScheme.primary))
                             Column(Modifier.weight(1f)) {
-                                Text(r.name.ifBlank { "(untitled)" }, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text(
+                                    r.name.ifBlank { "(untitled)" }, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                    textDecoration = if (r.done) TextDecoration.LineThrough else null,
+                                )
                                 val line = listOf(r.location.ifBlank { r.note }, r.tags.joinToString(" ") { "#$it" })
                                     .filter { it.isNotBlank() }.joinToString(" · ")
                                 if (line.isNotBlank()) Text(line, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -413,6 +457,7 @@ private fun d3(d: DayOfWeek) = listOf("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", 
 
 /** When a row is, on the day being looked at. */
 private fun spanLabel(r: CalendarRow, day: LocalDate, zone: TimeZone, twentyFourHour: Boolean): String {
+    if (r.isTask) return if (r.done) "Done" else "Due"
     if (r.all) return "All day"
     val s = Instant.fromEpochMilliseconds(r.l).toLocalDateTime(zone)
     val e = Instant.fromEpochMilliseconds(r.r).toLocalDateTime(zone)
@@ -452,7 +497,7 @@ private fun EventEditor(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(if (existing) "Edit event" else "New event") },
+        title = { Text(if (d.cat == EventCat.TODO) (if (existing) "Edit task" else "New task") else if (existing) "Edit event" else "New event") },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedTextField(
@@ -471,9 +516,18 @@ private fun EventEditor(
                         FilterChip(selected = d.cat == c, onClick = { d = d.copy(cat = c) }, label = { Text(c.label) })
                     }
                 }
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(if (d.cat == EventCat.DATE) "Date (the year is ignored)" else "Date", style = MaterialTheme.typography.labelMedium)
-                    TextButton(onClick = { pickingDate = true }) { Text(d.date.toString()) }
+                if (d.cat == EventCat.TODO) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("Due", style = MaterialTheme.typography.labelMedium)
+                        TextButton(onClick = { pickingDate = true }) { Text(d.due?.toString() ?: "no date") }
+                        if (d.due != null) TextButton(onClick = { d = d.copy(due = null) }) { Text("clear") }
+                    }
+                    FilterChip(selected = d.done, onClick = { d = d.copy(done = !d.done) }, label = { Text(if (d.done) "Done" else "To do") })
+                } else {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(if (d.cat == EventCat.DATE) "Date (the year is ignored)" else "Date", style = MaterialTheme.typography.labelMedium)
+                        TextButton(onClick = { pickingDate = true }) { Text(d.date.toString()) }
+                    }
                 }
                 if (d.cat == EventCat.TIMED) {
                     TimeInput(state = time)
@@ -506,13 +560,13 @@ private fun EventEditor(
                         }
                     }
                 }
-                if (d.cat != EventCat.DATE && d.rawKind != null) {
+                if (d.cat == EventCat.TIMED || d.cat == EventCat.ALLDAY) if (d.rawKind != null) {
                     Text(
                         "Repeats by an imported rule (${d.rawKind}), kept as it is. Everything else here can change.",
                         style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
-                if (d.cat != EventCat.DATE && d.rawKind == null) {
+                if ((d.cat == EventCat.TIMED || d.cat == EventCat.ALLDAY) && d.rawKind == null) {
                     Text("Repeats", style = MaterialTheme.typography.labelMedium)
                     androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
                         Repeat.entries.forEach { r ->
@@ -592,7 +646,7 @@ private fun EventEditor(
                 val ready = d.copy(minuteOfDay = time.hour * 60 + time.minute)
                 problem = when {
                     ready.name.isBlank() -> "A name is needed."
-                    ready.cat != EventCat.DATE && ready.rawKind == null && ready.repeat == Repeat.WEEKLY && ready.weekdays.isEmpty() -> "Pick the weekdays."
+                    ready.repeats && ready.rawKind == null && ready.repeat == Repeat.WEEKLY && ready.weekdays.isEmpty() -> "Pick the weekdays."
                     ready.cat == EventCat.TIMED && zoneText.isNotBlank() && zoneText.trim() !in zones -> "That zone is not one the calendar knows."
                     else -> null
                 }
@@ -603,7 +657,7 @@ private fun EventEditor(
     )
     if (pickingDate || pickingUntil) {
         val forUntil = pickingUntil
-        val start = (if (forUntil) d.until else d.date) ?: d.date
+        val start = (if (forUntil) d.until else if (d.cat == EventCat.TODO) d.due else d.date) ?: d.date
         val state = rememberDatePickerState(initialSelectedDateMillis = start.atTime(0, 0).toInstant(TimeZone.UTC).toEpochMilliseconds())
         DatePickerDialog(
             onDismissRequest = { pickingDate = false; pickingUntil = false },
@@ -611,7 +665,11 @@ private fun EventEditor(
                 TextButton(onClick = {
                     state.selectedDateMillis?.let { ms ->
                         val picked = Instant.fromEpochMilliseconds(ms).toLocalDateTime(TimeZone.UTC).date
-                        d = if (forUntil) d.copy(until = picked, count = 0) else d.copy(date = picked)
+                        d = when {
+                            forUntil -> d.copy(until = picked, count = 0)
+                            d.cat == EventCat.TODO -> d.copy(due = picked, date = picked)
+                            else -> d.copy(date = picked)
+                        }
                     }
                     pickingDate = false; pickingUntil = false
                 }) { Text("OK") }
@@ -688,4 +746,115 @@ private fun CalendarsDialog(
         },
         confirmButton = { TextButton(onClick = onDismiss) { Text("Done") } },
     )
+}
+
+/**
+ * What is to do, soonest due first and undated last, the done ones
+ * folded under; a line at the top adds one. Mirrors the calendar's
+ * own Tasks view.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun TasksView(
+    tasks: List<CalendarTask>?,
+    today: LocalDate,
+    calendars: List<CalendarInfo>,
+    colourOf: (CalendarTask) -> Color?,
+    status: String?,
+    onTick: (id: String, done: Boolean) -> Unit,
+    onOpen: (CalendarTask) -> Unit,
+    onAdd: (name: String, due: LocalDate?, cal: String?) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var name by remember { mutableStateOf("") }
+    var due by remember { mutableStateOf<LocalDate?>(null) }
+    var cal by remember(calendars) { mutableStateOf(calendars.firstOrNull()?.id) }
+    var picking by remember { mutableStateOf(false) }
+    var showDone by remember { mutableStateOf(false) }
+    fun add() {
+        val n = name.trim()
+        if (n.isEmpty()) return
+        onAdd(n, due, cal)
+        name = ""; due = null
+    }
+    Column(modifier) {
+        Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            OutlinedTextField(
+                value = name, onValueChange = { name = it }, placeholder = { Text("New task") }, singleLine = true,
+                modifier = Modifier.weight(1f),
+                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Done),
+                keyboardActions = androidx.compose.foundation.text.KeyboardActions(onDone = { add() }),
+            )
+            TextButton(onClick = { picking = true }) { Text(due?.let { "${it.dayOfMonth} ${MonthNames.ENGLISH_ABBREVIATED.names[it.monthNumber - 1]}" } ?: "Due") }
+            IconButton(onClick = ::add, enabled = name.isNotBlank()) { Icon(Icons.Filled.Add, contentDescription = "Add task") }
+        }
+        if (calendars.size > 1) {
+            LazyRow(contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                items(calendars, key = { it.id }) { c ->
+                    FilterChip(selected = cal == c.id, onClick = { cal = c.id }, label = { Text(c.name.ifBlank { c.id }) })
+                }
+            }
+        }
+        status?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(horizontal = 16.dp)) }
+        if (tasks == null) {
+            Text("Looking…", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(16.dp))
+            return@Column
+        }
+        val open = taskOrder(tasks.filter { !it.done })
+        val done = taskOrder(tasks.filter { it.done })
+        LazyColumn(Modifier.fillMaxSize()) {
+            if (open.isEmpty()) item { Text("Nothing to do.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(16.dp)) }
+            items(open, key = { it.id }) { t -> TaskLine(t, today, colourOf(t), onTick, onOpen) }
+            if (done.isNotEmpty()) {
+                item {
+                    TextButton(onClick = { showDone = !showDone }, modifier = Modifier.padding(horizontal = 8.dp)) {
+                        Text(if (showDone) "Hide done (${done.size})" else "Done (${done.size})")
+                    }
+                }
+                if (showDone) items(done, key = { it.id }) { t -> TaskLine(t, today, colourOf(t), onTick, onOpen) }
+            }
+        }
+    }
+    if (picking) {
+        val state = rememberDatePickerState(initialSelectedDateMillis = (due ?: today).atTime(0, 0).toInstant(TimeZone.UTC).toEpochMilliseconds())
+        DatePickerDialog(
+            onDismissRequest = { picking = false },
+            confirmButton = {
+                TextButton(onClick = {
+                    due = state.selectedDateMillis?.let { Instant.fromEpochMilliseconds(it).toLocalDateTime(TimeZone.UTC).date }
+                    picking = false
+                }) { Text("OK") }
+            },
+            dismissButton = { TextButton(onClick = { due = null; picking = false }) { Text("No date") } },
+        ) { DatePicker(state = state) }
+    }
+}
+
+@Composable
+private fun TaskLine(t: CalendarTask, today: LocalDate, colour: Color?, onTick: (String, Boolean) -> Unit, onOpen: (CalendarTask) -> Unit) {
+    val dueDay = t.dueDate()
+    val late = !t.done && dueDay != null && dueDay < today
+    Row(
+        Modifier.fillMaxWidth().clickable { onOpen(t) }.padding(start = 8.dp, end = 16.dp, top = 2.dp, bottom = 2.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Checkbox(checked = t.done, onCheckedChange = { onTick(t.id, it) })
+        Box(Modifier.size(10.dp).clip(CircleShape).background(colour ?: MaterialTheme.colorScheme.primary))
+        Column(Modifier.weight(1f)) {
+            Text(
+                t.name.ifBlank { "(untitled)" }, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                textDecoration = if (t.done) TextDecoration.LineThrough else null,
+            )
+            val line = listOf(t.note, t.tags.joinToString(" ") { "#$it" }).filter { it.isNotBlank() }.joinToString(" · ")
+            if (line.isNotBlank()) Text(line, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+        if (dueDay != null) {
+            Text(
+                "${dueDay.dayOfMonth} ${MonthNames.ENGLISH_ABBREVIATED.names[dueDay.monthNumber - 1]}" + if (late) " · overdue" else "",
+                style = MaterialTheme.typography.labelSmall,
+                color = if (late) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+    HorizontalDivider(Modifier.padding(start = 48.dp))
 }

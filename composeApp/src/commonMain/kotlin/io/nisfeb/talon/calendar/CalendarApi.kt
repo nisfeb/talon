@@ -12,6 +12,7 @@ import io.ktor.http.isSuccess
 import io.nisfeb.talon.mail.AuspexApi
 import io.nisfeb.talon.mail.AuspexError
 import kotlinx.coroutines.CancellationException
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.put
@@ -35,14 +36,40 @@ data class CalendarRow(
     val all: Boolean = false,
     val l: Long,
     val r: Long,
+    /** A task's tick; false for events. */
+    val done: Boolean = false,
 ) {
-    val name: String get() = meta["name"]?.jsonPrimitive?.contentOrNull.orEmpty()
-    val note: String get() = meta["note"]?.jsonPrimitive?.contentOrNull.orEmpty()
-    val location: String get() = meta["location"]?.jsonPrimitive?.contentOrNull.orEmpty()
-    val color: String? get() = meta["color"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }
+    val name: String get() = meta.metaStr("name")
+    val note: String get() = meta.metaStr("note")
+    val location: String get() = meta.metaStr("location")
+    val color: String? get() = meta.metaStr("color").takeIf { it.isNotBlank() }
     /** iCalendar CATEGORIES, as the calendar keeps them: `meta.tags`. */
-    val tags: List<String> get() = (meta["tags"] as? JsonArray)?.mapNotNull { it.jsonPrimitive.contentOrNull }.orEmpty()
+    val tags: List<String> get() = meta.metaTags()
+    val isTask: Boolean get() = cat == "todo"
 }
+
+/**
+ * One entry of the calendar's full listing (events.json): every event,
+ * dated or not. The window feed places dated ones; this is where an
+ * undated task lives. [dueMs] is midnight UTC of the due day.
+ */
+@Serializable
+data class CalendarTask(
+    val id: String,
+    val cal: String = "default",
+    val meta: JsonObject = JsonObject(emptyMap()),
+    val cat: String = "timed",
+    @SerialName("due_ms") val dueMs: Long? = null,
+    val done: Boolean = false,
+) {
+    val name: String get() = meta.metaStr("name")
+    val note: String get() = meta.metaStr("note")
+    val color: String? get() = meta.metaStr("color").takeIf { it.isNotBlank() }
+    val tags: List<String> get() = meta.metaTags()
+}
+
+internal fun JsonObject.metaStr(k: String): String = this[k]?.jsonPrimitive?.contentOrNull.orEmpty()
+internal fun JsonObject.metaTags(): List<String> = (this["tags"] as? JsonArray)?.mapNotNull { it.jsonPrimitive.contentOrNull }.orEmpty()
 
 @Serializable
 data class TagCount(val tag: String, val count: Int = 0)
@@ -73,6 +100,9 @@ class CalendarApi(private val http: HttpClient, baseUrl: String) {
         decode(get("/window.json?from=$fromMs&to=$toMs"))
 
     suspend fun calendars(): List<CalendarInfo> = decode(get("/calendars.json"))
+
+    /** The tasks, dated or not: the full listing, kept to `cat == todo`. */
+    suspend fun tasks(): List<CalendarTask> = decode<List<CalendarTask>>(get("/events.json")).filter { it.cat == "todo" }
 
     suspend fun config(): CalendarConfig = decode(get("/config.json"))
 

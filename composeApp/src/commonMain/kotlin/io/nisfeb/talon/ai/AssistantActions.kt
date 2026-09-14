@@ -5,6 +5,8 @@ import io.nisfeb.talon.calendar.EventCat
 import io.nisfeb.talon.calendar.EventDraft
 import io.nisfeb.talon.calendar.Repeat
 import io.nisfeb.talon.calendar.eventBody
+import io.nisfeb.talon.calendar.dueDate
+import io.nisfeb.talon.calendar.taskOrder
 import io.nisfeb.talon.call.CallController
 import io.nisfeb.talon.call.PartyLineHost
 import io.nisfeb.talon.data.AppDatabase
@@ -221,6 +223,60 @@ fun actionTools(a: AssistantActions): List<Tool> = buildList {
             else rows.joinToString("\n") { r ->
                 val s = Instant.fromEpochMilliseconds(r.l).toLocalDateTime(zone)
                 "event=${r.id} ${s.date} ${if (r.all) "all day" else "${s.hour.toString().padStart(2, '0')}:${s.minute.toString().padStart(2, '0')}"} ${r.name}${if (r.location.isNotBlank()) " @ ${r.location}" else ""} (calendar ${r.cal})"
+            }
+        })
+        add(Tool(
+            spec = ToolSpec(
+                "create_task",
+                "Put a task (a to-do) on the user's calendar, with a due date if one was given.",
+                toolSchema(
+                    "name" to ("string" to "What is to be done."),
+                    "due" to ("string" to "YYYY-MM-DD, optional; omit for no due date."),
+                    "note" to ("string" to "A note, optional."),
+                    "calendar" to ("string" to "Calendar id, optional; the default calendar otherwise."),
+                    "tags" to ("string" to "Comma-separated tags, optional."),
+                    required = listOf("name"),
+                ),
+            ),
+            write = true,
+        ) { args ->
+            val name = args.text("name")?.takeIf { it.isNotBlank() } ?: return@Tool "Error: name is required."
+            val dueText = args.text("due")?.takeIf { it.isNotBlank() }
+            val due = if (dueText == null) null else parseDate(dueText) ?: return@Tool "Error: due must be YYYY-MM-DD."
+            val today = Instant.fromEpochMilliseconds(nowMs()).toLocalDateTime(a.zone()).date
+            val draft = EventDraft(
+                name = name, note = args.text("note").orEmpty(), cal = args.text("calendar")?.takeIf { it.isNotBlank() },
+                cat = EventCat.TODO, date = due ?: today, due = due,
+                tags = io.nisfeb.talon.calendar.parseTags(args.text("tags").orEmpty()),
+            )
+            if (cal.poke(eventBody(draft))) "Added task \"$name\"${if (due != null) " due $due" else ""}." else "The calendar did not take it."
+        })
+        add(Tool(
+            spec = ToolSpec(
+                "list_tasks",
+                "The user's open tasks, soonest due first, undated last.",
+                toolSchema(required = emptyList()),
+            ),
+            write = false,
+        ) { _ ->
+            val open = taskOrder(cal.tasks.value.orEmpty().filter { !it.done })
+            if (open.isEmpty()) "No open tasks." else open.joinToString("\n") { t -> "task=${t.id} ${t.dueDate()?.let { "due $it " } ?: ""}${t.name} (calendar ${t.cal})" }
+        })
+        add(Tool(
+            spec = ToolSpec(
+                "complete_task",
+                "Tick a task off. Name it by its id from list_tasks or by (part of) its name.",
+                toolSchema("task" to ("string" to "The task id, or words from its name."), required = listOf("task")),
+            ),
+            write = true,
+        ) { args ->
+            val q = args.text("task")?.trim()?.takeIf { it.isNotEmpty() } ?: return@Tool "Error: task is required."
+            val open = cal.tasks.value.orEmpty().filter { !it.done }
+            val hits = open.filter { it.id == q }.ifEmpty { open.filter { it.name.contains(q, ignoreCase = true) } }
+            when {
+                hits.isEmpty() -> "No open task matches \"$q\"."
+                hits.size > 1 -> "Several match; which one?\n" + hits.joinToString("\n") { "task=${it.id} ${it.name}" }
+                else -> if (cal.setDone(hits[0].id, true)) "Done: ${hits[0].name}." else "The calendar did not take it."
             }
         })
     }

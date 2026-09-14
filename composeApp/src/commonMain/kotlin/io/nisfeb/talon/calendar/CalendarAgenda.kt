@@ -2,6 +2,7 @@ package io.nisfeb.talon.calendar
 
 import io.nisfeb.talon.ui.CalendarRange
 import kotlinx.datetime.Instant
+import kotlinx.datetime.LocalDate
 import kotlinx.datetime.LocalTime
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.atTime
@@ -32,3 +33,14 @@ fun agenda(rows: List<CalendarRow>, range: CalendarRange, nowMs: Long, zone: Tim
 }
 
 private const val HOUR_MS = 60 * 60 * 1000L
+
+/** The tasks list's order: open ones soonest due first, undated last, then by name. */
+fun taskOrder(tasks: List<CalendarTask>): List<CalendarTask> =
+    tasks.sortedWith(compareBy({ it.dueMs ?: Long.MAX_VALUE }, { it.name.lowercase() }))
+
+/** The task's due day, as the calendar's page reads it: the UTC date of due_ms. */
+fun CalendarTask.dueDate(): LocalDate? = dueMs?.let { Instant.fromEpochMilliseconds(it).toLocalDateTime(TimeZone.UTC).date }
+
+/** Open and due today or earlier: what the home widget nags about. */
+fun tasksDueBy(tasks: List<CalendarTask>, today: LocalDate): List<CalendarTask> =
+    taskOrder(tasks.filter { !it.done && (it.dueDate()?.let { d -> d <= today } ?: false) })

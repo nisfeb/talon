@@ -46,4 +46,17 @@ class CalendarAgendaTest {
         assertEquals("#abc", r.color)
         assertEquals(false, r.all)
     }
+
+    private fun task(id: String, due: Long?, done: Boolean = false) =
+        CalendarTask(id = id, cat = "todo", dueMs = due, done = done, meta = kotlinx.serialization.json.buildJsonObject { put("name", kotlinx.serialization.json.JsonPrimitive(id)) })
+
+    @Test fun `tasks go soonest due first, undated last, and only open ones due by today nag`() {
+        val day = 24 * h
+        val today = kotlinx.datetime.LocalDate(2026, 9, 14)
+        val tomorrow = 1_789_430_400_000L
+        val ts = listOf(task("b-undated", null), task("a-undated", null), task("late", tomorrow - 3 * day), task("today", tomorrow - day), task("soon", tomorrow), task("done-late", tomorrow - day, done = true))
+        assertEquals(listOf("late", "done-late", "today", "soon", "a-undated", "b-undated"), taskOrder(ts).map { it.id }, "same day: by name")
+        assertEquals(listOf("late", "today"), tasksDueBy(ts, today).map { it.id })
+        assertEquals(today, task("today", tomorrow - day).dueDate())
+    }
 }

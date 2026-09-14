@@ -114,4 +114,36 @@ class CalendarEditTest {
         assertEquals("daily", following["kind"]!!.jsonPrimitive.content)
         assertEquals(LocalDate(2026, 9, 20).atTime(0, 0).toInstant(TimeZone.UTC).toEpochMilliseconds(), following["start_ms"]!!.jsonPrimitive.content.toLong())
     }
+
+    @Test fun `a task carries its due day at utc midnight and keeps its done moment`() {
+        val open = eventBody(EventDraft(name = "Bins", cat = EventCat.TODO, date = day, due = day, cal = "home"))
+        assertEquals("todo", open["cat"]!!.jsonPrimitive.content)
+        assertEquals(1_789_344_000_000L, open["due_ms"]!!.jsonPrimitive.content.toLong())
+        assertNull(open["done_ms"]); assertNull(open["kind"]); assertNull(open["start_ms"])
+        val undated = eventBody(EventDraft(name = "Call mum", cat = EventCat.TODO, date = day))
+        assertNull(undated["due_ms"])
+        val done = eventBody(EventDraft(name = "Bins", cat = EventCat.TODO, date = day, done = true, doneMs = 1_789_300_000_000L), "t1")
+        assertEquals("1789300000000", done["done_ms"]!!.jsonPrimitive.content, "an edit does not move the done moment")
+        assertEquals("edit-event", done["action"]!!.jsonPrimitive.content)
+        val tick = doneBody("t1", false)
+        assertEquals("done-event", tick["action"]!!.jsonPrimitive.content)
+        assertEquals("false", tick["done"]!!.jsonPrimitive.content)
+    }
+
+    @Test fun `a task read back keeps due, done and its moment`() {
+        val e = io.nisfeb.talon.mail.AuspexApi.json.parseToJsonElement(
+            """{"id":"t1","cal":"home","cat":"todo","meta":{"name":"Bins","tags":["chores"]},"due_ms":1789344000000,"done_ms":1789300000000,"done":true}""",
+        ).jsonObject
+        val d = draftFromEvent(e, LocalDate(2026, 1, 1))!!
+        assertEquals(EventCat.TODO, d.cat)
+        assertEquals(day, d.due)
+        assertEquals(day, d.date)
+        assertEquals(true, d.done)
+        assertEquals(1_789_300_000_000L, d.doneMs)
+        assertEquals(listOf("chores"), d.tags)
+        assertEquals(false, d.repeats)
+        val none = draftFromEvent(io.nisfeb.talon.mail.AuspexApi.json.parseToJsonElement("""{"id":"t2","cat":"todo","meta":{"name":"x"},"done":false}""").jsonObject, day)!!
+        assertNull(none.due)
+        assertEquals(day, none.date)
+    }
 }

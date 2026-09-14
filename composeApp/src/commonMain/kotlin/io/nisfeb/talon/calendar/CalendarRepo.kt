@@ -46,6 +46,9 @@ class CalendarRepo(
     val rows: StateFlow<List<CalendarRow>?> = _rows.asStateFlow()
     private val _calendars = MutableStateFlow<List<CalendarInfo>>(emptyList())
     val calendars: StateFlow<List<CalendarInfo>> = _calendars.asStateFlow()
+    private val _tasks = MutableStateFlow<List<CalendarTask>?>(null)
+    /** Every task, open or done, dated or not; null before the first answer. */
+    val tasks: StateFlow<List<CalendarTask>?> = _tasks.asStateFlow()
     private val _tags = MutableStateFlow<List<String>>(emptyList())
     /** Every tag in use on the ship's calendar, for a filter. */
     val tags: StateFlow<List<String>> = _tags.asStateFlow()
@@ -92,6 +95,9 @@ class CalendarRepo(
         if (ok) refresh()
         return ok
     }
+
+    /** Tick or untick a task. */
+    suspend fun setDone(id: String, done: Boolean): Boolean = poke(doneBody(id, done))
 
     suspend fun eventDetail(id: String): JsonObject? =
         api?.let { a -> runCatching { a.event(id) }.getOrNull() }
@@ -151,6 +157,7 @@ class CalendarRepo(
             val w = a.window(now - BEHIND_MS, now + AHEAD_MS)
             _rows.value = w.rows.sortedWith(compareBy({ it.l }, { it.r }))
             _calendars.value = runCatching { a.calendars() }.getOrDefault(emptyList())
+            _tasks.value = runCatching { a.tasks() }.getOrNull() ?: _tasks.value
             _tags.value = runCatching { a.tags() }.getOrDefault(emptyList()).map { it.tag }
             runCatching { a.config() }.getOrNull()?.let { _zone.value = it.zone; ball = it.ball }
             _availability.value = CalendarAvailability.PRESENT

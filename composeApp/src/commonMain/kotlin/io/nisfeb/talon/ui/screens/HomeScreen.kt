@@ -72,6 +72,8 @@ import io.nisfeb.talon.calendar.CalendarAvailability
 import io.nisfeb.talon.calendar.CalendarRepo
 import io.nisfeb.talon.calendar.CalendarRow
 import io.nisfeb.talon.calendar.agenda
+import io.nisfeb.talon.calendar.tasksDueBy
+import io.nisfeb.talon.calendar.dueDate
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -1232,6 +1234,7 @@ private fun CalendarPanel(
     val rows = calendar?.rows?.collectAsState()?.value
     val zoneId = calendar?.zone?.collectAsState()?.value
     val calendars = calendar?.calendars?.collectAsState()?.value.orEmpty()
+    val tasks = calendar?.tasks?.collectAsState()?.value.orEmpty()
     val scope = rememberCoroutineScope()
     var installing by remember { mutableStateOf(false) }
     var installError by remember { mutableStateOf<String?>(null) }
@@ -1273,11 +1276,34 @@ private fun CalendarPanel(
 
             else -> {
                 val zone = zoneFor(zoneId)
-                val shown = remember(rows, range, tick, zoneId) { agenda(rows, range, tick, zone) }
-                if (shown.isEmpty()) {
+                // Tasks have their own lines below; the window's copy of a
+                // dated one would say the same thing twice.
+                val shown = remember(rows, range, tick, zoneId) { agenda(rows.filter { !it.isTask }, range, tick, zone) }
+                val today = Instant.fromEpochMilliseconds(tick).toLocalDateTime(zone).date
+                val due = remember(tasks, today) { tasksDueBy(tasks, today) }
+                if (shown.isEmpty() && due.isEmpty()) {
                     Empty(if (range == CalendarRange.NEXT_ONLY) "Nothing coming up." else "Nothing scheduled.")
                 } else {
                     val calColors = calendars.associate { it.id to it.color }
+                    due.take(4).forEach { t ->
+                        val late = t.dueDate()?.let { it < today } ?: false
+                        Row(
+                            Modifier.fillMaxWidth().combinedClickable(onClick = onOpen ?: {}, onLongClick = onLongPress).padding(start = 6.dp, end = 14.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            androidx.compose.material3.Checkbox(
+                                checked = false,
+                                onCheckedChange = { scope.launch { calendar!!.setDone(t.id, true) } },
+                                modifier = Modifier.size(32.dp),
+                            )
+                            Text(t.name.ifBlank { "(untitled)" }, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                            Text(
+                                if (late) "overdue" else "today",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = if (late) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
                     shown.take(8).forEach { row ->
                         EventRow(
                             row = row,
