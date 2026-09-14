@@ -61,6 +61,15 @@ import androidx.compose.ui.unit.dp
 import io.nisfeb.talon.data.AppDatabase
 import io.nisfeb.talon.mail.MailAvailability
 import io.nisfeb.talon.mail.MailRepo
+import kotlinx.coroutines.launch
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.draw.clip
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.foundation.shape.CircleShape
+import io.nisfeb.talon.calendar.CalendarAvailability
+import io.nisfeb.talon.calendar.CalendarRepo
+import io.nisfeb.talon.calendar.CalendarRow
+import io.nisfeb.talon.calendar.agenda
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -110,6 +119,12 @@ import io.nisfeb.talon.util.nowMs
 fun HomeScreen(
     db: AppDatabase,
     mail: MailRepo?,
+    /** The ship's calendar, or null where the host wires none. */
+    calendar: CalendarRepo? = null,
+    /** Opens the calendar's own page, where events are made. */
+    onOpenCalendar: (() -> Unit)? = null,
+    /** Installs the calendar desk on the ship, where it is missing. */
+    onInstallCalendar: (suspend () -> Result<Unit>)? = null,
     contacts: ContactMap,
     ourShip: String,
     /** Where the dial thinks you are, or null before anyone has said. */
@@ -325,6 +340,9 @@ fun HomeScreen(
                         contacts = contacts,
                         ourShip = ourShip,
                         mail = mail,
+                        calendar = calendar,
+                        onOpenCalendar = onOpenCalendar,
+                        onInstallCalendar = onInstallCalendar,
                         statuses = statuses,
                         place = place,
                         weather = weather,
@@ -673,6 +691,9 @@ private fun WidgetBody(
     contacts: ContactMap,
     ourShip: String,
     mail: MailRepo?,
+    calendar: CalendarRepo?,
+    onOpenCalendar: (() -> Unit)?,
+    onInstallCalendar: (suspend () -> Result<Unit>)?,
     statuses: List<io.nisfeb.talon.data.ContactEntity>,
     place: HomePlace?,
     weather: SkyClock.Sky?,
@@ -708,7 +729,9 @@ private fun WidgetBody(
         HomeWidgetKind.MAIL -> MailPanel(
             mail, contacts, widget.count, onOpenMailThread, onOpenMail, onLongPress,
         )
-        HomeWidgetKind.CALENDAR -> CalendarPanel(widget.calendarRange)
+        HomeWidgetKind.CALENDAR -> CalendarPanel(
+            calendar, widget.calendarRange, twentyFourHour, onOpenCalendar, onInstallCalendar, onLongPress,
+        )
         HomeWidgetKind.STATUS -> StatusPanel(
             statuses, contacts, ourShip, widget, onOpenContact, onOpenStatuses, onLongPress,
         )
@@ -1125,33 +1148,156 @@ internal fun dayLabel(t: LocalDateTime): String {
  * that is waiting on a design and one waiting on a feature would hide
  * the difference between a week and a quarter.
  */
+/**
+ * What is on the calendar for the widget's range: whatever is under
+ * way or starts before the range ends. Read from the ship's calendar;
+ * a tap opens the calendar's own page, which is where events are made.
+ */
 @Composable
-private fun CalendarPanel(range: CalendarRange) {
-    Panel("Today", Icons.Filled.CalendarToday) {
-        Box(
-            Modifier.fillMaxWidth().height(96.dp),
-            contentAlignment = Alignment.Center,
-        ) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text(
-                    "Calendar is not built yet.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                // The range is settable ahead of the feature, so the
-                // preference is waiting when there is finally something
-                // to apply it to. Naming the chosen one is the honest
-                // placeholder: it shows the setting took rather than
-                // implying the panel works.
-                Text(
-                    "Set to show: ${range.label}.",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(top = 4.dp),
-                )
+private fun CalendarPanel(
+    calendar: CalendarRepo?,
+    range: CalendarRange,
+    twentyFourHour: Boolean,
+    onOpen: (() -> Unit)?,
+    onInstall: (suspend () -> Result<Unit>)?,
+    onLongPress: () -> Unit,
+) {
+    val availability = calendar?.availability?.collectAsState()?.value
+    val rows = calendar?.rows?.collectAsState()?.value
+    val zoneId = calendar?.zone?.collectAsState()?.value
+    val calendars = calendar?.calendars?.collectAsState()?.value.orEmpty()
+    val scope = rememberCoroutineScope()
+    var installing by remember { mutableStateOf(false) }
+    var installError by remember { mutableStateOf<String?>(null) }
+    // The minute decides what is "now" and what is "today".
+    var tick by remember { mutableStateOf(nowMs()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(60_000)
+            tick = nowMs()
+        }
+    }
+    val action = onOpen?.takeIf { availability == CalendarAvailability.PRESENT }?.let { "Calendar" to it }
+    Panel("Today", Icons.Filled.CalendarToday, action) {
+        when {
+            calendar == null -> Empty("This host has no calendar.")
+
+            availability == CalendarAvailability.ABSENT -> {
+                Empty("This ship has no calendar yet.")
+                if (onInstall != null) {
+                    TextButton(
+                        enabled = !installing,
+                        onClick = {
+                            installing = true
+                            installError = null
+                            scope.launch {
+                                onInstall().onFailure { installError = it.message }
+                                installing = false
+                            }
+                        },
+                        modifier = Modifier.padding(horizontal = 6.dp),
+                    ) { Text(if (installing) "Installing…" else "Install the calendar") }
+                    installError?.let { Empty(it) }
+                }
+            }
+
+            availability == CalendarAvailability.SIGNED_OUT -> Empty("Signed out of the ship.")
+
+            rows == null -> Empty("Looking…")
+
+            else -> {
+                val zone = zoneFor(zoneId)
+                val shown = remember(rows, range, tick, zoneId) { agenda(rows, range, tick, zone) }
+                if (shown.isEmpty()) {
+                    Empty(if (range == CalendarRange.NEXT_ONLY) "Nothing coming up." else "Nothing scheduled.")
+                } else {
+                    val calColors = calendars.associate { it.id to it.color }
+                    shown.take(8).forEach { row ->
+                        EventRow(
+                            row = row,
+                            whenLabel = whenLabel(row, tick, zone, twentyFourHour),
+                            colour = hexColor(row.color ?: calColors[row.cal]),
+                            ongoing = row.l <= tick,
+                            onClick = onOpen ?: {},
+                            onLongPress = onLongPress,
+                        )
+                    }
+                }
             }
         }
     }
+}
+
+@Composable
+private fun EventRow(
+    row: CalendarRow,
+    whenLabel: String,
+    colour: Color?,
+    ongoing: Boolean,
+    onClick: () -> Unit,
+    onLongPress: () -> Unit,
+) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .combinedClickable(onClick = onClick, onLongClick = onLongPress)
+            .padding(horizontal = 14.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Box(
+            Modifier.size(8.dp).clip(CircleShape)
+                .background(colour ?: MaterialTheme.colorScheme.primary),
+        )
+        Column(Modifier.weight(1f)) {
+            Text(
+                row.name.ifBlank { "(untitled)" },
+                style = MaterialTheme.typography.bodySmall.copy(
+                    fontWeight = if (ongoing) FontWeight.SemiBold else FontWeight.Normal,
+                ),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            val line = row.location.ifBlank { row.note }
+            if (line.isNotBlank()) {
+                Text(
+                    line,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+        Text(
+            whenLabel,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+        )
+    }
+}
+
+/** When a row is, said the way somebody glancing at it needs. */
+internal fun whenLabel(row: CalendarRow, nowMs: Long, zone: TimeZone, twentyFourHour: Boolean): String {
+    if (row.all) return "All day"
+    fun at(ms: Long) = Instant.fromEpochMilliseconds(ms).toLocalDateTime(zone)
+    fun clock(t: LocalDateTime) = SkyClock.clockLabel(t.hour * 60 + t.minute, twentyFourHour)
+    val start = at(row.l)
+    val end = at(row.r)
+    return when {
+        row.l <= nowMs -> "Now · until ${clock(end)}"
+        start.date == at(nowMs).date -> "${clock(start)}–${clock(end)}"
+        else -> "${dayLabel(start)} · ${clock(start)}"
+    }
+}
+
+/** A calendar's "#rrggbb", or null for anything else. */
+private fun hexColor(s: String?): Color? {
+    val hex = s?.trim()?.removePrefix("#") ?: return null
+    if (hex.length != 6) return null
+    val v = hex.toLongOrNull(16) ?: return null
+    return Color(0xFF000000L or v)
 }
 
 /**

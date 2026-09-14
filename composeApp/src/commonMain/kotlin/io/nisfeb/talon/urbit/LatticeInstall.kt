@@ -47,15 +47,19 @@ object LatticeInstall {
         timeoutMs: Long = DEFAULT_TIMEOUT_MS,
         nowMs: () -> Long = { io.nisfeb.talon.util.nowMs() },
         wait: suspend (Long) -> Unit = { kotlinx.coroutines.delay(it) },
+        /** Which of ~ricsul-bilwyt's desks; each has its own way of
+         *  showing it has arrived. */
+        desk: String = DESK,
+        installed: suspend () -> Boolean = { isInstalled(http, shipUrl) },
     ): Result<Unit> {
-        val (app, mark, body) = installPoke()
+        val (app, mark, body) = installPoke(desk)
         if (!poke(app, mark, body)) {
             return Result.failure(IllegalStateException("Your ship refused the install."))
         }
         val deadline = nowMs() + timeoutMs
         while (nowMs() < deadline) {
             wait(POLL_MS)
-            if (isInstalled(http, shipUrl)) return Result.success(Unit)
+            if (installed()) return Result.success(Unit)
         }
         return Result.failure(
             IllegalStateException(
@@ -68,11 +72,16 @@ object LatticeInstall {
     fun installer(
         http: HttpClient,
         shipUrl: () -> String?,
+        desk: String = DESK,
+        installed: (suspend (String) -> Boolean)? = null,
         poke: suspend (String, String, JsonElement) -> Boolean,
     ): suspend () -> Result<Unit> = {
         val url = shipUrl()
         if (url == null) Result.failure(IllegalStateException("Not signed in to a ship."))
-        else installAndWait(http, url, poke)
+        else installAndWait(
+            http, url, poke, desk = desk,
+            installed = { installed?.invoke(url) ?: isInstalled(http, url) },
+        )
     }
 
     private const val POLL_MS = 3_000L
@@ -83,13 +92,13 @@ object LatticeInstall {
      * same action as `|install ~ricsul-bilwyt %grubbery`. kiln-install
      * takes json, so no dojo is needed. Returns (app, mark, body).
      */
-    fun installPoke(): Triple<String, String, JsonElement> = Triple(
+    fun installPoke(desk: String = DESK): Triple<String, String, JsonElement> = Triple(
         "hood",
         "kiln-install",
         buildJsonObject {
-            put("local", DESK)
+            put("local", desk)
             put("ship", PUBLISHER)
-            put("desk", DESK)
+            put("desk", desk)
         },
     )
 }

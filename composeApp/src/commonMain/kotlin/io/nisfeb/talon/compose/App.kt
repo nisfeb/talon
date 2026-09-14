@@ -980,6 +980,26 @@ fun App(
         LaunchedEffect(mailRepo, mailShipUrl) {
             if (mailShipUrl != null) mailRepo.attach(mailShipUrl) else mailRepo.detach()
         }
+        // The calendar rides the same surface as mail.
+        val calendarRepo = remember(session) {
+            io.nisfeb.talon.calendar.CalendarRepo(session.http, loopScope)
+        }
+        LaunchedEffect(calendarRepo, mailShipUrl) {
+            if (mailShipUrl != null) calendarRepo.attach(mailShipUrl) else calendarRepo.detach()
+        }
+        var calendarPageOpen by remember { mutableStateOf(false) }
+        val calendarInstall: suspend () -> Result<Unit> = remember(session, calendarRepo) {
+            val install = io.nisfeb.talon.urbit.LatticeInstall.installer(
+                http,
+                { sessionStore.active()?.shipUrl },
+                desk = "calendar",
+                installed = { url ->
+                    runCatching { io.nisfeb.talon.calendar.CalendarApi(session.http, url).config() }.isSuccess
+                },
+            ) { app, mark, body -> runCatching { repo.pokeRaw(app, mark, body) }.isSuccess }
+            val thenRefresh: suspend () -> Result<Unit> = { install().also { calendarRepo.refresh() } }
+            thenRefresh
+        }
         // One decision in common, delivered through the interface that
         // already exists. Chat notifies twice on this codebase; mail has
         // no reason to inherit that.
@@ -1107,6 +1127,7 @@ fun App(
                         // Coming back to the window is one of the four
                         // things that makes the mailbox ask again.
                         mailRepo.setForeground(focused)
+                        calendarRepo.setForeground(focused)
                     }
             }
 
@@ -2843,9 +2864,32 @@ fun App(
                             // only on narrow (where DesktopShell stacks it).
                             content = if (activeRailTab == RailTab.Home) {
                                 {
+                                    val pageOpener = androidx.compose.ui.platform.LocalUriHandler.current
+                                    if (calendarPageOpen) {
+                                        val active = sessionStore.active()
+                                        if (active != null) {
+                                            io.nisfeb.talon.ui.ShipPageSheet(
+                                                title = "Calendar",
+                                                pageUrl = active.shipUrl.trimEnd('/') + io.nisfeb.talon.calendar.CalendarApi.APP_PATH,
+                                                shipUrl = active.shipUrl,
+                                                cookie = "${active.cookieName}=${active.cookieValue}",
+                                                onDismiss = { calendarPageOpen = false; loopScope.launch { calendarRepo.refresh() } },
+                                            )
+                                        }
+                                    }
                                     io.nisfeb.talon.ui.screens.HomeScreen(
                                         db = db,
                                         mail = mailRepo,
+                                        calendar = calendarRepo,
+                                        // In-app where there is a webview; the browser
+                                        // on desktop, which has none.
+                                        onOpenCalendar = {
+                                            val s = sessionStore.active()?.shipUrl
+                                            if (s == null) Unit
+                                            else if (io.nisfeb.talon.ui.isUrbWebViewSupported) calendarPageOpen = true
+                                            else runCatching { pageOpener.openUri(s.trimEnd('/') + io.nisfeb.talon.calendar.CalendarApi.APP_PATH) }
+                                        },
+                                        onInstallCalendar = calendarInstall,
                                         contacts = callContacts,
                                         ourShip = ship,
                                         place = homePlace,

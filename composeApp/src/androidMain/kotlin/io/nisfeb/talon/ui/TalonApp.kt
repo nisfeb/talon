@@ -393,6 +393,31 @@ fun TalonApp(
         if (mailShipUrl != null && loggedInShip != null) mailRepo.attach(mailShipUrl)
         else mailRepo.detach()
     }
+    // The calendar rides the same surface as mail: the ship's own HTTP,
+    // the session's cookie, a poll and a refresh on coming back.
+    val calendarRepo = remember(app.session) {
+        io.nisfeb.talon.calendar.CalendarRepo(app.session.http, appScope)
+    }
+    DisposableEffect(calendarRepo) {
+        onDispose { runCatching { calendarRepo.detach() } }
+    }
+    LaunchedEffect(calendarRepo, mailShipUrl, loggedInShip) {
+        if (mailShipUrl != null && loggedInShip != null) calendarRepo.attach(mailShipUrl)
+        else calendarRepo.detach()
+    }
+    var calendarPageOpen by remember { mutableStateOf(false) }
+    val calendarInstall: suspend () -> Result<Unit> = remember(app, calendarRepo) {
+        val install = io.nisfeb.talon.urbit.LatticeInstall.installer(
+            app.ktorHttp,
+            { app.sessionStore.active()?.shipUrl },
+            desk = "calendar",
+            installed = { url ->
+                runCatching { io.nisfeb.talon.calendar.CalendarApi(app.session.http, url).config() }.isSuccess
+            },
+        ) { a, mark, body -> runCatching { app.repo.pokeRaw(a, mark, body) }.isSuccess }
+        val thenRefresh: suspend () -> Result<Unit> = { install().also { calendarRepo.refresh() } }
+        thenRefresh
+    }
 
     val contactMap by io.nisfeb.talon.ui.rememberContactMap(app.db)
     // Register every call and party line with telecom for as long as
@@ -1085,12 +1110,14 @@ fun TalonApp(
                     // mailbox ask again; a ten-minute timer alone cannot
                     // cover the moment somebody actually looks at it.
                     mailRepo.setForeground(true)
+                    calendarRepo.setForeground(true)
                 }
                 // Background: stop treating the open chat as read so DMs
                 // arriving while away still badge + notify.
                 Lifecycle.Event.ON_STOP -> {
                     app.repo.setForeground(false)
                     mailRepo.setForeground(false)
+                    calendarRepo.setForeground(false)
                 }
                 else -> {}
             }
@@ -1770,9 +1797,24 @@ fun TalonApp(
                 val placeLookup = remember(app.session.http) {
                     io.nisfeb.talon.ui.OpenMeteoPlaces(app.session.http).asLookup()
                 }
+                if (calendarPageOpen) {
+                    val active = app.sessionStore.active()
+                    if (active != null) {
+                        io.nisfeb.talon.ui.ShipPageSheet(
+                            title = "Calendar",
+                            pageUrl = active.shipUrl.trimEnd('/') + io.nisfeb.talon.calendar.CalendarApi.APP_PATH,
+                            shipUrl = active.shipUrl,
+                            cookie = "${active.cookieName}=${active.cookieValue}",
+                            onDismiss = { calendarPageOpen = false; appScope.launch { calendarRepo.refresh() } },
+                        )
+                    }
+                }
                 io.nisfeb.talon.ui.screens.HomeScreen(
                     db = app.db,
                     mail = mailRepo,
+                    calendar = calendarRepo,
+                    onOpenCalendar = { calendarPageOpen = true },
+                    onInstallCalendar = calendarInstall,
                     contacts = contactMap,
                     ourShip = loggedInShip.orEmpty(),
                     place = homePlace,
