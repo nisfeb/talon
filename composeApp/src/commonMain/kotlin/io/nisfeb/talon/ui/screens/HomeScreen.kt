@@ -960,10 +960,30 @@ private fun ClockWeatherPanel(
     Surface(
         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.30f),
         shape = RoundedCornerShape(10.dp),
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxSize(),
     ) {
+        BoxWithConstraints(Modifier.padding(vertical = 6.dp)) {
+        // The dial is square and the cell is not. Width-bound in a
+        // narrow cell, it thins its readout to what fits inside, while
+        // the cell's height goes spare below it: so whatever the dial
+        // could not hold is written under it, a line at a time, as far
+        // as that spare height allows. A small dial in a tall cell now
+        // says everything a big one does.
+        val side = minOf(maxWidth - 24.dp, maxDial)
+        val below = buildList {
+            if (side < DIAL_DATE_AT && sky.dateLabel.isNotBlank()) add(sky.dateLabel)
+            if (side < DIAL_WEATHER_AT) {
+                val word = conditionIcon(sky.condition)?.second
+                val temp = sky.currentC?.let { SkyClock.tempLabel(it, fahrenheit) }
+                listOfNotNull(word, temp).takeIf { it.isNotEmpty() }?.let { add(it.joinToString(" · ")) }
+            }
+            if (side < DIAL_RANGE_AT && sky.highC != null && sky.lowC != null) {
+                add("H ${SkyClock.tempLabel(sky.highC, fahrenheit)} · L ${SkyClock.tempLabel(sky.lowC, fahrenheit)}")
+            }
+        }.take(((maxDial - side) / 18.dp).toInt().coerceAtLeast(0))
         Column(
-            Modifier.padding(vertical = 6.dp),
+            Modifier.fillMaxSize(),
+            verticalArrangement = Arrangement.Center,
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             SkyClockDial(
@@ -973,6 +993,15 @@ private fun ClockWeatherPanel(
                 maxSize = maxDial,
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp),
             )
+            below.forEach { line ->
+                Text(
+                    line,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
             // A line of text rather than a button. A Material button
             // carries a forty-eight dip touch target, and on the
             // shortest clock that was more of the widget than the dial
@@ -995,6 +1024,7 @@ private fun ClockWeatherPanel(
                     modifier = Modifier.padding(horizontal = 24.dp),
                 )
             }
+        }
         }
     }
 

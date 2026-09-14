@@ -508,7 +508,7 @@ internal val TWILIGHT_COLD = Color(0xFFE8956B)
  * doing nothing worth a line. A clear day should not have to carry a
  * label saying so.
  */
-private fun conditionIcon(w: SkyClock.Weather): Pair<ImageVector, String>? = when (w) {
+internal fun conditionIcon(w: SkyClock.Weather): Pair<ImageVector, String>? = when (w) {
     SkyClock.Weather.CLEAR -> null
     SkyClock.Weather.CLOUD -> Icons.Filled.Cloud to "Cloudy"
     SkyClock.Weather.FOG -> Icons.Filled.Air to "Fog"
