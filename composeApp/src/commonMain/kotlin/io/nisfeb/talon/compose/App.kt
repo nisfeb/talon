@@ -339,6 +339,7 @@ fun App(
     var showStatusFeed by remember { mutableStateOf(false) }
     var showInvites by remember { mutableStateOf(false) }
     var showBookmarks by remember { mutableStateOf(false) }
+    var showCalendar by remember { mutableStateOf(false) }
     var showActivity by remember { mutableStateOf(false) }
     var showSearch by remember { mutableStateOf(false) }
     var showAssistant by remember { mutableStateOf(false) }
@@ -385,6 +386,7 @@ fun App(
         showStatusFeed = false
         showInvites = false
         showBookmarks = false
+        showCalendar = false
         showActivity = false
         showSearch = false
         showAssistant = false
@@ -538,6 +540,7 @@ fun App(
         profileSheetShip = null
     }
     PlatformBackHandler(enabled = showBookmarks) { showBookmarks = false }
+    PlatformBackHandler(enabled = showCalendar) { showCalendar = false }
     PlatformBackHandler(enabled = showActivity) { showActivity = false }
     PlatformBackHandler(enabled = showAssistant) { showAssistant = false }
     PlatformBackHandler(enabled = showSearch) { showSearch = false }
@@ -994,7 +997,6 @@ fun App(
         LaunchedEffect(calendarRepo, mailShipUrl) {
             if (mailShipUrl != null) calendarRepo.attach(mailShipUrl) else calendarRepo.detach()
         }
-        var calendarPageOpen by remember { mutableStateOf(false) }
         val calendarInstall: suspend () -> Result<Unit> = remember(session, calendarRepo) {
             val install = io.nisfeb.talon.urbit.LatticeInstall.installer(
                 http,
@@ -1726,6 +1728,10 @@ fun App(
                         if (expanded) uiSettings.setActiveRailTab(RailTab.Activity)
                         else showActivity = true
                     }
+                    val onOpenCalendar: () -> Unit = {
+                        if (expanded) uiSettings.setActiveRailTab(RailTab.Calendar)
+                        else showCalendar = true
+                    }
                     // Right-pane content. Computed at render time from the
                     // flat state vars; mutual exclusion is enforced at the
                     // write sites (thread-open clears group-info and vice
@@ -1895,6 +1901,11 @@ fun App(
                     showInvites -> GroupInvitesScreen(
                         repo = repo,
                         onBack = { showInvites = false },
+                    )
+                    showCalendar -> io.nisfeb.talon.ui.screens.CalendarScreen(
+                        repo = calendarRepo,
+                        twentyFourHour = homeTwentyFourHour,
+                        onBack = { showCalendar = false },
                     )
                     showBookmarks -> BookmarksScreen(
                         db = db,
@@ -2650,6 +2661,7 @@ fun App(
                             showContacts = false
                             showSearch = false
                             showNewDm = false
+                            showCalendar = false
                             // Clear the rail badge for items that show
                             // freshness signals — rail clicks were missing
                             // the markXSeen calls the kebab paths in
@@ -2682,8 +2694,8 @@ fun App(
                                 RailItem.Invites -> showInvites = true
                                 RailItem.Settings -> showSettings = true
                                 // pane tabs handled above; never reaches here
-                                RailItem.Home, RailItem.Chats, RailItem.Mail, RailItem.Statuses,
-                                RailItem.Bookmarks, RailItem.Activity -> Unit
+                                RailItem.Home, RailItem.Chats, RailItem.Mail, RailItem.Calendar,
+                                RailItem.Statuses, RailItem.Bookmarks, RailItem.Activity -> Unit
                             }
                         }
                         val railListSlot: @Composable () -> Unit = {
@@ -2751,6 +2763,7 @@ fun App(
                                         onOpenInvites = { showInvites = true },
                                         onOpenBookmarks = onOpenBookmarks,
                                         onOpenActivity = onOpenActivity,
+                                        onOpenCalendar = onOpenCalendar,
                                         onOpenContacts = { showContacts = true },
                                         onOpenWatchwords = { showWatchwords = true },
                                         onOpenAdministration = { showGroupAdminList = true },
@@ -2810,6 +2823,11 @@ fun App(
                                     repo = repo,
                                     ourPatp = ship,
                                     onOpenContact = { other -> profileSheetShip = other },
+                                )
+                                RailTab.Calendar -> io.nisfeb.talon.ui.screens.CalendarScreen(
+                                    repo = calendarRepo,
+                                    twentyFourHour = homeTwentyFourHour,
+                                    onBack = null,
                                 )
                                 RailTab.Bookmarks -> BookmarksList(
                                     db = db,
@@ -2887,31 +2905,11 @@ fun App(
                             // only on narrow (where DesktopShell stacks it).
                             content = if (activeRailTab == RailTab.Home) {
                                 {
-                                    val pageOpener = androidx.compose.ui.platform.LocalUriHandler.current
-                                    if (calendarPageOpen) {
-                                        val active = sessionStore.active()
-                                        if (active != null) {
-                                            io.nisfeb.talon.ui.ShipPageSheet(
-                                                title = "Calendar",
-                                                pageUrl = active.shipUrl.trimEnd('/') + io.nisfeb.talon.calendar.CalendarApi.APP_PATH,
-                                                shipUrl = active.shipUrl,
-                                                cookie = "${active.cookieName}=${active.cookieValue}",
-                                                onDismiss = { calendarPageOpen = false; loopScope.launch { calendarRepo.refresh() } },
-                                            )
-                                        }
-                                    }
                                     io.nisfeb.talon.ui.screens.HomeScreen(
                                         db = db,
                                         mail = mailRepo,
                                         calendar = calendarRepo,
-                                        // In-app where there is a webview; the browser
-                                        // on desktop, which has none.
-                                        onOpenCalendar = {
-                                            val s = sessionStore.active()?.shipUrl
-                                            if (s == null) Unit
-                                            else if (io.nisfeb.talon.ui.isUrbWebViewSupported) calendarPageOpen = true
-                                            else runCatching { pageOpener.openUri(s.trimEnd('/') + io.nisfeb.talon.calendar.CalendarApi.APP_PATH) }
-                                        },
+                                        onOpenCalendar = onOpenCalendar,
                                         onInstallCalendar = calendarInstall,
                                         contacts = callContacts,
                                         ourShip = ship,

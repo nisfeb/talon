@@ -16,6 +16,7 @@ enum class RailItem(val isPaneTab: Boolean) {
     Home(true),
     Chats(true),
     Mail(true),
+    Calendar(true),
     Statuses(true),
     Bookmarks(true),
     Activity(true),

@@ -1216,7 +1216,7 @@ private fun CalendarPanel(
                         EventRow(
                             row = row,
                             whenLabel = whenLabel(row, tick, zone, twentyFourHour),
-                            colour = hexColor(row.color ?: calColors[row.cal]),
+                            colour = calendarHexColor(row.color ?: calColors[row.cal]),
                             ongoing = row.l <= tick,
                             onClick = onOpen ?: {},
                             onLongPress = onLongPress,
@@ -1293,7 +1293,7 @@ internal fun whenLabel(row: CalendarRow, nowMs: Long, zone: TimeZone, twentyFour
 }
 
 /** A calendar's "#rrggbb", or null for anything else. */
-private fun hexColor(s: String?): Color? {
+internal fun calendarHexColor(s: String?): Color? {
     val hex = s?.trim()?.removePrefix("#") ?: return null
     if (hex.length != 6) return null
     val v = hex.toLongOrNull(16) ?: return null

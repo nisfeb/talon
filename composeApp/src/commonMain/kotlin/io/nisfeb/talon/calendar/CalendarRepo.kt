@@ -16,6 +16,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.serialization.json.JsonObject
 
 enum class CalendarAvailability { UNKNOWN, PRESENT, ABSENT, SIGNED_OUT }
 
@@ -50,6 +51,44 @@ class CalendarRepo(
     val zone: StateFlow<String?> = _zone.asStateFlow()
     private val _error = MutableStateFlow<String?>(null)
     val error: StateFlow<String?> = _error.asStateFlow()
+    /** What config.json named as the poke target; empty until read. */
+    private var ball: String = ""
+    /** Calendars the reader has switched off on this device. */
+    private val _hidden = MutableStateFlow<Set<String>>(emptySet())
+    val hidden: StateFlow<Set<String>> = _hidden.asStateFlow()
+    fun setHidden(id: String, off: Boolean) {
+        _hidden.value = if (off) _hidden.value + id else _hidden.value - id
+    }
+    /** The calendar screen's own window (a month at a time), apart
+     *  from the widget's; null before the first answer. */
+    private val _rangeRows = MutableStateFlow<List<CalendarRow>?>(null)
+    val rangeRows: StateFlow<List<CalendarRow>?> = _rangeRows.asStateFlow()
+    private var range: Pair<Long, Long>? = null
+
+    suspend fun loadRange(fromMs: Long, toMs: Long) {
+        range = fromMs to toMs
+        val a = api ?: return
+        runCatching { a.window(fromMs, toMs) }
+            .onSuccess { w -> _rangeRows.value = w.rows.sortedWith(compareBy({ it.l }, { it.r })) }
+            .onFailure { if (it !is AuspexError) throw it; _error.value = it.message }
+    }
+
+    suspend fun eventDetail(id: String): JsonObject? =
+        api?.let { a -> runCatching { a.event(id) }.getOrNull() }
+
+    /** A write, then the reads that show it. False when refused. */
+    suspend fun poke(body: JsonObject): Boolean {
+        val a = api ?: return false
+        if (ball.isEmpty()) ball = runCatching { a.config().ball }.getOrDefault("")
+        val ok = runCatching { a.poke(ball, body) }.getOrDefault(false)
+        if (ok) {
+            // The nexus applies a poke after it answers; give it a beat.
+            delay(400)
+            refresh()
+            range?.let { (f, t) -> loadRange(f, t) }
+        }
+        return ok
+    }
 
     fun attach(baseUrl: String) {
         if (api != null && api?.let { true } == true && shipUrl == baseUrl) return
@@ -92,7 +131,7 @@ class CalendarRepo(
             val w = a.window(now - BEHIND_MS, now + AHEAD_MS)
             _rows.value = w.rows.sortedWith(compareBy({ it.l }, { it.r }))
             _calendars.value = runCatching { a.calendars() }.getOrDefault(emptyList())
-            _zone.value = runCatching { a.config().zone }.getOrNull()
+            runCatching { a.config() }.getOrNull()?.let { _zone.value = it.zone; ball = it.ball }
             _availability.value = CalendarAvailability.PRESENT
             _error.value = null
         } catch (e: AuspexError) {

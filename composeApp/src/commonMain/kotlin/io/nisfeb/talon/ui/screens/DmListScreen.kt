@@ -127,6 +127,7 @@ fun DmListScreen(
     partyLinesOccupied: Boolean = false,
     onOpenBookmarks: () -> Unit,
     onOpenActivity: () -> Unit,
+    onOpenCalendar: () -> Unit = {},
     /** Open the curated Contacts (book) screen. Always shown in the
      *  overflow menu (not a rail item). */
     onOpenContacts: () -> Unit = {},
@@ -930,6 +931,15 @@ fun DmListScreen(
                             onClick = {
                                 menuOpen = false
                                 onOpenActivity()
+                            },
+                        )
+                    }
+                    if (RailItem.Calendar in kebabItems) {
+                        DropdownMenuItem(
+                            text = { Text("Calendar") },
+                            onClick = {
+                                menuOpen = false
+                                onOpenCalendar()
                             },
                         )
                     }

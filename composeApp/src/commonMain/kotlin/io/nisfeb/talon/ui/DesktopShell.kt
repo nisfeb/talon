@@ -264,6 +264,7 @@ internal fun railIcon(item: RailItem): ImageVector? = when (item) {
     // MailOutline is in material-icons-core, so it survives the slim
     // strip; Email is already spent on Invites.
     RailItem.Mail -> Icons.Filled.MailOutline
+    RailItem.Calendar -> Icons.Filled.DateRange
     RailItem.Statuses -> Icons.Filled.Person
     RailItem.Bookmarks -> Icons.Filled.Star
     RailItem.Activity -> Icons.Filled.Notifications
@@ -280,6 +281,7 @@ internal fun railLabel(item: RailItem): String = when (item) {
     RailItem.Home -> "Home"
     RailItem.Chats -> "Chats"
     RailItem.Mail -> "Mail"
+    RailItem.Calendar -> "Calendar"
     RailItem.Statuses -> "Statuses"
     RailItem.Bookmarks -> "Bookmarks"
     RailItem.Activity -> "Activity"

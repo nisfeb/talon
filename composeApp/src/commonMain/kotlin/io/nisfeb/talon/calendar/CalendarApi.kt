@@ -2,6 +2,11 @@ package io.nisfeb.talon.calendar
 
 import io.ktor.client.HttpClient
 import io.ktor.client.request.get
+import io.ktor.client.request.post
+import io.ktor.client.request.setBody
+import io.ktor.http.ContentType
+import io.ktor.http.contentType
+import io.ktor.http.encodeURLParameter
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.isSuccess
 import io.nisfeb.talon.mail.AuspexApi
@@ -41,7 +46,7 @@ data class CalendarWindow(val rows: List<CalendarRow> = emptyList())
 data class CalendarInfo(val id: String, val name: String = "", val color: String = "", val kind: String = "local")
 
 @Serializable
-data class CalendarConfig(val title: String = "", val zone: String? = null)
+data class CalendarConfig(val title: String = "", val zone: String? = null, val ball: String = "")
 
 /**
  * The calendar nexus on the user's ship, at /apps/calendar, over the
@@ -52,7 +57,8 @@ data class CalendarConfig(val title: String = "", val zone: String? = null)
  * are the same whichever nexus it is.
  */
 class CalendarApi(private val http: HttpClient, baseUrl: String) {
-    private val root = baseUrl.trimEnd('/') + APP_PATH
+    private val base = baseUrl.trimEnd('/')
+    private val root = base + APP_PATH
 
     /** Every occurrence between [fromMs] and [toMs]. */
     suspend fun window(fromMs: Long, toMs: Long): CalendarWindow =
@@ -61,6 +67,29 @@ class CalendarApi(private val http: HttpClient, baseUrl: String) {
     suspend fun calendars(): List<CalendarInfo> = decode(get("/calendars.json"))
 
     suspend fun config(): CalendarConfig = decode(get("/config.json"))
+
+    /** One event's full rule breakdown, for the editor. */
+    suspend fun event(id: String): JsonObject =
+        decode(get("/event.json?id=" + id.encodeURLParameter()))
+
+    /**
+     * A write. The calendar takes them as pokes on its ball through
+     * the grubbery shell, the way its own page sends them; [ball] is
+     * what config.json named. True when the shell accepted it.
+     */
+    suspend fun poke(ball: String, body: JsonObject): Boolean {
+        val resp = try {
+            http.post("$base/grubbery/api/poke/$ball/calendar.calendar?blot=/json") {
+                contentType(ContentType.Application.Json)
+                setBody(body.toString())
+            }
+        } catch (c: CancellationException) {
+            throw c
+        } catch (t: Throwable) {
+            throw AuspexError.Unreachable(t)
+        }
+        return resp.status.isSuccess()
+    }
 
     private suspend fun get(path: String): String {
         val resp = try {

@@ -405,7 +405,6 @@ fun TalonApp(
         if (mailShipUrl != null && loggedInShip != null) calendarRepo.attach(mailShipUrl)
         else calendarRepo.detach()
     }
-    var calendarPageOpen by remember { mutableStateOf(false) }
     val calendarInstall: suspend () -> Result<Unit> = remember(app, calendarRepo) {
         val install = io.nisfeb.talon.urbit.LatticeInstall.installer(
             app.ktorHttp,
@@ -555,6 +554,7 @@ fun TalonApp(
         }
     }
     var bookmarksOpen by remember { mutableStateOf(false) }
+    var calendarOpen by remember { mutableStateOf(false) }
     var activityOpen by remember { mutableStateOf(false) }
     var contactsOpen by remember { mutableStateOf(false) }
     var watchwordsOpen by remember { mutableStateOf(false) }
@@ -608,6 +608,7 @@ fun TalonApp(
         statusFeedOpen = false
         mailOpen = false
         bookmarksOpen = false
+        calendarOpen = false
         activityOpen = false
         watchwordsOpen = false
         contactsOpen = false
@@ -1335,6 +1336,7 @@ fun TalonApp(
         BackHandler(enabled = statusFeedOpen) { statusFeedOpen = false }
         BackHandler(enabled = mailOpen) { mailOpen = false }
         BackHandler(enabled = bookmarksOpen) { bookmarksOpen = false }
+        BackHandler(enabled = calendarOpen) { calendarOpen = false }
         BackHandler(enabled = activityOpen) { activityOpen = false }
         BackHandler(enabled = contactsOpen) { contactsOpen = false }
         BackHandler(enabled = watchwordsOpen) { watchwordsOpen = false }
@@ -1416,6 +1418,7 @@ fun TalonApp(
             statusFeedOpen -> "StatusFeed"
             mailOpen -> "Mail"
             bookmarksOpen -> "Bookmarks"
+            calendarOpen -> "Calendar"
             activityOpen -> "Activity"
             groupInfoDrilldown != null -> "MediaList"
             groupInfoOpenFor != null -> "GroupInfo"
@@ -1492,6 +1495,7 @@ fun TalonApp(
                             io.nisfeb.talon.ui.RailItem.Mail -> mailOpen = true
                             io.nisfeb.talon.ui.RailItem.Statuses -> statusFeedOpen = true
                             io.nisfeb.talon.ui.RailItem.Bookmarks -> bookmarksOpen = true
+                            io.nisfeb.talon.ui.RailItem.Calendar -> calendarOpen = true
                             io.nisfeb.talon.ui.RailItem.Activity -> activityOpen = true
                             io.nisfeb.talon.ui.RailItem.Assistant -> assistantOpen = true
                             io.nisfeb.talon.ui.RailItem.Profile -> editingProfile = true
@@ -1721,6 +1725,13 @@ fun TalonApp(
                 modifier = mod,
             )
 
+            calendarOpen -> io.nisfeb.talon.ui.screens.CalendarScreen(
+                repo = calendarRepo,
+                twentyFourHour = app.uiSettings.homeTwentyFourHour.collectAsState().value,
+                onBack = { calendarOpen = false },
+                modifier = mod,
+            )
+
             bookmarksOpen -> BookmarksScreen(
                 db = app.db,
                 repo = app.repo,
@@ -1797,23 +1808,11 @@ fun TalonApp(
                 val placeLookup = remember(app.session.http) {
                     io.nisfeb.talon.ui.OpenMeteoPlaces(app.session.http).asLookup()
                 }
-                if (calendarPageOpen) {
-                    val active = app.sessionStore.active()
-                    if (active != null) {
-                        io.nisfeb.talon.ui.ShipPageSheet(
-                            title = "Calendar",
-                            pageUrl = active.shipUrl.trimEnd('/') + io.nisfeb.talon.calendar.CalendarApi.APP_PATH,
-                            shipUrl = active.shipUrl,
-                            cookie = "${active.cookieName}=${active.cookieValue}",
-                            onDismiss = { calendarPageOpen = false; appScope.launch { calendarRepo.refresh() } },
-                        )
-                    }
-                }
                 io.nisfeb.talon.ui.screens.HomeScreen(
                     db = app.db,
                     mail = mailRepo,
                     calendar = calendarRepo,
-                    onOpenCalendar = { calendarPageOpen = true },
+                    onOpenCalendar = { homeOpen = false; calendarOpen = true },
                     onInstallCalendar = calendarInstall,
                     contacts = contactMap,
                     ourShip = loggedInShip.orEmpty(),
@@ -2613,6 +2612,7 @@ fun TalonApp(
                 },
                 onOpenBookmarks = { bookmarksOpen = true },
                 onOpenActivity = { activityOpen = true },
+                onOpenCalendar = { calendarOpen = true },
                 onOpenContacts = { contactsOpen = true },
                 onOpenWatchwords = { watchwordsOpen = true },
                 onOpenHome = { homeOpen = true },

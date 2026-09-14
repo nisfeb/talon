@@ -86,6 +86,7 @@ class RailItemTest {
             RailItem.Home,
             RailItem.Mail,
             RailItem.Profile,
+            RailItem.Calendar,
             RailItem.Statuses,
             RailItem.Bookmarks,
             RailItem.Activity,
