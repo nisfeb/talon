@@ -2649,11 +2649,13 @@ fun App(
                         }
                         val railEffectiveStatusesSeenMs =
                             maxOf(menuSeenState.lastSeenStatusesMs, railSyncedStatusesSeenMs)
+                        val calendarShares by calendarRepo.shares.collectAsState()
                         val menuBadges = remember(
                             railStatusFeed, railPendingInvites,
-                            railInvitesSnapshot, menuSeenState, railEffectiveStatusesSeenMs, ship,
+                            railInvitesSnapshot, menuSeenState, railEffectiveStatusesSeenMs, ship, calendarShares,
                         ) {
                             MenuBadges(
+                                calendarOffers = !calendarShares?.offers.isNullOrEmpty(),
                                 statusesFresh = railStatusFeed.any { c ->
                                     (c.statusUpdatedMs ?: 0L) > railEffectiveStatusesSeenMs &&
                                         !c.status.isNullOrBlank() &&

@@ -18,6 +18,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonPrimitive
 
@@ -80,6 +81,31 @@ data class CalendarWindow(val rows: List<CalendarRow> = emptyList())
 @Serializable
 data class CalendarInfo(val id: String, val name: String = "", val color: String = "", val kind: String = "local")
 
+/** A calendar another ship offers this one, waiting under Settings. */
+@Serializable
+data class ShareOffer(val host: String = "", val cal: String = "", val name: String = "", val color: String = "", val mode: String = "read")
+
+/** A share this ship accepted: its calendar's sync row. */
+@Serializable
+data class AcceptedShare(val key: String = "", val mode: String = "read", @SerialName("last_ms") val lastMs: Long = 0, val error: String = "") {
+    val host: String get() = key.substringBefore('/')
+}
+
+/**
+ * shares.json: [shares] is what this ship shares out, calendar id to
+ * ship to mode; [offers] what waits for us, by key "~host/cal";
+ * [accepted] the shared-with-us calendars, by their id here.
+ */
+@Serializable
+data class Shares(
+    val shares: Map<String, Map<String, String>> = emptyMap(),
+    val offers: Map<String, ShareOffer> = emptyMap(),
+    val accepted: Map<String, AcceptedShare> = emptyMap(),
+) {
+    /** Calendars whose host lets us look but not touch. */
+    val readOnly: Set<String> get() = accepted.filterValues { it.mode != "edit" }.keys
+}
+
 @Serializable
 data class CalendarConfig(val title: String = "", val zone: String? = null, val ball: String = "")
 
@@ -117,6 +143,24 @@ class CalendarApi(private val http: HttpClient, baseUrl: String) {
     suspend fun migrate(calId: String): Boolean =
         postJson("$root/migrate", buildJsonObject { put("id", calId) })
 
+    /** Sharing with ships; a 404 means a calendar too old to have it. */
+    suspend fun shares(): Shares = decode(get("/share/shares.json"))
+
+    /** Share a local calendar with [ship]. Returns whether the ship was
+     *  told; null when the calendar refused. The share is recorded either
+     *  way; a ship that was down gets the offer on the next share. */
+    suspend fun share(calId: String, ship: String, edit: Boolean): Boolean? =
+        postForJson("$root/share/share", buildJsonObject { put("id", calId); put("ship", ship); put("mode", if (edit) "edit" else "read") })
+            ?.get("notified")?.jsonPrimitive?.booleanOrNull
+
+    suspend fun revoke(calId: String, ship: String): Boolean =
+        postJson("$root/share/revoke", buildJsonObject { put("id", calId); put("ship", ship) })
+
+    suspend fun accept(key: String): Boolean = postJson("$root/share/accept", buildJsonObject { put("key", key) })
+    suspend fun decline(key: String): Boolean = postJson("$root/share/decline", buildJsonObject { put("key", key) })
+    /** Pull every accepted share now rather than on the next pass. */
+    suspend fun syncShares(): Boolean = postJson("$root/share/sync", JsonObject(emptyMap()))
+
     /** One event's full rule breakdown, for the editor. */
     suspend fun event(id: String): JsonObject =
         decode(get("/event.json?id=" + id.encodeURLParameter()))
@@ -128,6 +172,21 @@ class CalendarApi(private val http: HttpClient, baseUrl: String) {
      */
     suspend fun poke(ball: String, body: JsonObject): Boolean =
         postJson("$base/grubbery/api/poke/$ball/calendar.calendar?blot=/json", body)
+
+    private suspend fun postForJson(url: String, body: JsonObject): JsonObject? {
+        val resp = try {
+            http.post(url) {
+                contentType(ContentType.Application.Json)
+                setBody(body.toString())
+            }
+        } catch (c: CancellationException) {
+            throw c
+        } catch (t: Throwable) {
+            throw AuspexError.Unreachable(t)
+        }
+        if (!resp.status.isSuccess()) return null
+        return runCatching { AuspexApi.json.parseToJsonElement(resp.bodyAsText()) as? JsonObject }.getOrNull()
+    }
 
     private suspend fun postJson(url: String, body: JsonObject): Boolean {
         val resp = try {

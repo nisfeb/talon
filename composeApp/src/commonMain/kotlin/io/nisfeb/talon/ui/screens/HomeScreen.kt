@@ -1235,6 +1235,7 @@ private fun CalendarPanel(
     val zoneId = calendar?.zone?.collectAsState()?.value
     val calendars = calendar?.calendars?.collectAsState()?.value.orEmpty()
     val tasks = calendar?.tasks?.collectAsState()?.value.orEmpty()
+    val offers = calendar?.shares?.collectAsState()?.value?.offers?.size ?: 0
     val scope = rememberCoroutineScope()
     var installing by remember { mutableStateOf(false) }
     var installError by remember { mutableStateOf<String?>(null) }
@@ -1281,8 +1282,15 @@ private fun CalendarPanel(
                 val shown = remember(rows, range, tick, zoneId) { agenda(rows.filter { !it.isTask }, range, tick, zone) }
                 val today = Instant.fromEpochMilliseconds(tick).toLocalDateTime(zone).date
                 val due = remember(tasks, today) { tasksDueBy(tasks, today) }
+                if (offers > 0) {
+                    Text(
+                        if (offers == 1) "A calendar was shared with you." else "$offers calendars were shared with you.",
+                        style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.fillMaxWidth().clickable { onOpen?.invoke() }.padding(horizontal = 14.dp, vertical = 4.dp),
+                    )
+                }
                 if (shown.isEmpty() && due.isEmpty()) {
-                    Empty(if (range == CalendarRange.NEXT_ONLY) "Nothing coming up." else "Nothing scheduled.")
+                    if (offers == 0) Empty(if (range == CalendarRange.NEXT_ONLY) "Nothing coming up." else "Nothing scheduled.")
                 } else {
                     val calColors = calendars.associate { it.id to it.color }
                     due.take(4).forEach { t ->

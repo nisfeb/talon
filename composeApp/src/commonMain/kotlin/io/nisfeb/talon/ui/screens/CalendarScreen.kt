@@ -72,6 +72,8 @@ import io.nisfeb.talon.calendar.CalendarInfo
 import io.nisfeb.talon.calendar.CalendarRepo
 import io.nisfeb.talon.calendar.CalendarRow
 import io.nisfeb.talon.calendar.CalendarTask
+import io.nisfeb.talon.calendar.Shares
+import io.nisfeb.talon.urbit.isValidPatp
 import io.nisfeb.talon.calendar.dueDate
 import io.nisfeb.talon.calendar.taskOrder
 import io.nisfeb.talon.calendar.EventCat
@@ -130,6 +132,8 @@ fun CalendarScreen(
     val tasks by repo.tasks.collectAsState()
     var showTasks by remember { mutableStateOf(false) }
     val calendars by repo.calendars.collectAsState()
+    val shares by repo.shares.collectAsState()
+    val readOnly = shares?.readOnly.orEmpty()
     val hidden by repo.hidden.collectAsState()
     val zoneId by repo.zone.collectAsState()
     val error by repo.error.collectAsState()
@@ -166,8 +170,9 @@ fun CalendarScreen(
     val calColors = remember(calendars) { calendars.associate { it.id to it.color } }
     fun colourOf(r: CalendarRow) = calendarHexColor(r.color ?: calColors[r.cal])
 
+    val readOnlyNote = "That calendar is shared with you read-only; its host makes the changes."
     fun openNew() {
-        editing = null to EventDraft(date = selected, cal = calendars.firstOrNull { it.id !in hidden }?.id)
+        editing = null to EventDraft(date = selected, cal = calendars.firstOrNull { it.id !in hidden && it.id !in readOnly }?.id)
         editingIdx = null
         editingStartMs = null
     }
@@ -181,7 +186,7 @@ fun CalendarScreen(
             editingStartMs = startMs
         }
     }
-    fun openExisting(r: CalendarRow) = openById(r.id, r.idx, r.l)
+    fun openExisting(r: CalendarRow) { if (r.cal in readOnly) status = readOnlyNote else openById(r.id, r.idx, r.l) }
     fun tick(id: String, done: Boolean) {
         scope.launch { if (!repo.setDone(id, done)) status = "The ship did not take the change." }
     }
@@ -263,11 +268,12 @@ fun CalendarScreen(
             TasksView(
                 tasks = tasks?.filter { it.cal !in hidden && (tagFilter == null || tagFilter in it.tags) },
                 today = today,
-                calendars = calendars.filter { it.id !in hidden },
+                calendars = calendars.filter { it.id !in hidden && it.id !in readOnly },
+                readOnly = readOnly,
                 colourOf = { t -> calendarHexColor(t.color ?: calColors[t.cal]) },
                 status = status ?: error,
                 onTick = ::tick,
-                onOpen = { t -> openById(t.id, null, null) },
+                onOpen = { t -> if (t.cal in readOnly) status = readOnlyNote else openById(t.id, null, null) },
                 onAdd = { name, due, cal ->
                     scope.launch {
                         val d = EventDraft(name = name, cat = EventCat.TODO, date = due ?: today, due = due, cal = cal, tags = listOfNotNull(tagFilter))
@@ -364,7 +370,7 @@ fun CalendarScreen(
                             horizontalArrangement = Arrangement.spacedBy(10.dp),
                         ) {
                             if (r.isTask) {
-                                Checkbox(checked = r.done, onCheckedChange = { tick(r.id, it) }, modifier = Modifier.size(24.dp))
+                                Checkbox(checked = r.done, onCheckedChange = { tick(r.id, it) }, enabled = r.cal !in readOnly, modifier = Modifier.size(24.dp))
                             }
                             Box(Modifier.size(10.dp).clip(CircleShape).background(colourOf(r) ?: MaterialTheme.colorScheme.primary))
                             Column(Modifier.weight(1f)) {
@@ -393,7 +399,7 @@ fun CalendarScreen(
             initial = draft,
             existing = id != null,
             recurringOccurrence = id != null && draft.repeats && editingIdx != null,
-            calendars = calendars,
+            calendars = calendars.filter { it.id !in readOnly },
             zones = zones,
             twentyFourHour = twentyFourHour,
             onDismiss = { editing = null },
@@ -436,9 +442,23 @@ fun CalendarScreen(
     if (managing) {
         CalendarsDialog(
             calendars = calendars,
+            shares = shares,
             onDismiss = { managing = false },
             onMakeLocal = { id -> scope.launch { if (!repo.makeLocal(id)) status = "The ship would not make that calendar local." } },
             onOpenWebSettings = onOpenWebSettings,
+            onShare = { id, ship, edit ->
+                scope.launch {
+                    status = when (repo.share(id, ship, edit)) {
+                        null -> "The ship would not share that calendar."
+                        false -> "$ship could not be reached (down, or no calendar there yet). The share is recorded; share again once it is up to send the offer."
+                        true -> null
+                    }
+                }
+            },
+            onRevoke = { id, ship -> scope.launch { repo.revoke(id, ship) } },
+            onAccept = { key -> scope.launch { if (!repo.accept(key)) status = "The ship would not accept that offer." } },
+            onDecline = { key -> scope.launch { repo.decline(key) } },
+            onSync = { scope.launch { repo.syncShares() } },
             onAdd = { name, colour ->
                 scope.launch {
                     val id = name.lowercase().replace(Regex("[^a-z0-9]+"), "-").trim('-').ifBlank { "cal" }
@@ -682,9 +702,16 @@ private fun EventEditor(
 @Composable
 private fun CalendarsDialog(
     calendars: List<CalendarInfo>,
+    /** Null on a calendar too old to share with ships. */
+    shares: Shares?,
     onDismiss: () -> Unit,
     onMakeLocal: (id: String) -> Unit,
     onOpenWebSettings: (() -> Unit)?,
+    onShare: (id: String, ship: String, edit: Boolean) -> Unit,
+    onRevoke: (id: String, ship: String) -> Unit,
+    onAccept: (key: String) -> Unit,
+    onDecline: (key: String) -> Unit,
+    onSync: () -> Unit,
     onAdd: (name: String, colour: String) -> Unit,
     onEdit: (id: String, name: String, colour: String) -> Unit,
     onDelete: (id: String) -> Unit,
@@ -694,11 +721,28 @@ private fun CalendarsDialog(
     var editingId by remember { mutableStateOf<String?>(null) }
     var editName by remember { mutableStateOf("") }
     var editColour by remember { mutableStateOf("") }
+    var shareShip by remember { mutableStateOf("") }
+    var shareEdit by remember { mutableStateOf(false) }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Calendars") },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (!shares?.offers.isNullOrEmpty()) {
+                    Text("Offered to you", style = MaterialTheme.typography.labelMedium)
+                    shares!!.offers.forEach { (key, o) ->
+                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Box(Modifier.size(12.dp).clip(CircleShape).background(calendarHexColor(o.color) ?: MaterialTheme.colorScheme.primary))
+                            Column(Modifier.weight(1f)) {
+                                Text(o.name.ifBlank { o.cal }, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text("from ${o.host} · ${if (o.mode == "edit") "read and edit" else "read only"}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            TextButton(onClick = { onAccept(key) }) { Text("Accept") }
+                            TextButton(onClick = { onDecline(key) }) { Text("Decline") }
+                        }
+                    }
+                    HorizontalDivider()
+                }
                 calendars.forEach { c ->
                     if (editingId == c.id) {
                         OutlinedTextField(value = editName, onValueChange = { editName = it }, label = { Text("Name") }, singleLine = true)
@@ -706,14 +750,34 @@ private fun CalendarsDialog(
                         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                             TextButton(onClick = { onEdit(c.id, editName, editColour); editingId = null }) { Text("Save") }
                             TextButton(onClick = { editingId = null }) { Text("Cancel") }
-                            if (c.id != "default") TextButton(onClick = { onDelete(c.id); editingId = null }) { Text("Delete") }
+                            if (c.id != "default" && c.kind == "local") TextButton(onClick = { onDelete(c.id); editingId = null }) { Text("Delete") }
                         }
                         if (c.kind != "local") {
                             Text(
-                                "Followed calendars sync both ways. Make local stops the sync and keeps everything in it; the source is left alone.",
+                                if (c.kind == "ship") "Shared with you by its host; it is pulled every few minutes. Make local keeps a copy of your own and stops the sync."
+                                else "Followed calendars sync both ways. Make local stops the sync and keeps everything in it; the source is left alone.",
                                 style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                             TextButton(onClick = { onMakeLocal(c.id); editingId = null }) { Text("Make local") }
+                        }
+                        if (c.kind == "local" && shares != null) {
+                            // Who sees this calendar, and a line to add a ship.
+                            shares.shares[c.id].orEmpty().forEach { (ship, mode) ->
+                                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                    Text("$ship · ${if (mode == "edit") "can edit" else "read only"}", style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
+                                    TextButton(onClick = { onRevoke(c.id, ship) }) { Text("Revoke") }
+                                }
+                            }
+                            OutlinedTextField(
+                                value = shareShip, onValueChange = { shareShip = it }, label = { Text("Share with a ship") }, placeholder = { Text("~sampel-palnet") }, singleLine = true,
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                            val ship = shareShip.trim().let { if (it.isNotEmpty() && !it.startsWith("~")) "~$it" else it }
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                FilterChip(selected = !shareEdit, onClick = { shareEdit = false }, label = { Text("Read only") })
+                                FilterChip(selected = shareEdit, onClick = { shareEdit = true }, label = { Text("Read and edit") })
+                                TextButton(enabled = isValidPatp(ship), onClick = { onShare(c.id, ship, shareEdit); shareShip = "" }) { Text("Share") }
+                            }
                         }
                     } else {
                         Row(
@@ -722,12 +786,26 @@ private fun CalendarsDialog(
                         ) {
                             Box(Modifier.size(12.dp).clip(CircleShape).background(calendarHexColor(c.color) ?: MaterialTheme.colorScheme.primary))
                             Text(c.name.ifBlank { c.id }, modifier = Modifier.weight(1f))
+                            val acc = shares?.accepted?.get(c.id)
                             Text(
-                                when (c.kind) { "google" -> "Google"; "caldav" -> "Followed"; else -> "" },
-                                style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                when (c.kind) {
+                                    "google" -> "Google"
+                                    "caldav" -> "Followed"
+                                    "ship" -> when {
+                                        acc == null -> "Shared with you"
+                                        acc.error.isNotBlank() -> "Shared with you · ${acc.error}"
+                                        else -> "Shared with you by ${acc.host}" + if (acc.mode == "edit") "" else " · read only"
+                                    }
+                                    else -> if (shares?.shares?.get(c.id).isNullOrEmpty()) "" else "Shared with ${shares!!.shares[c.id]!!.size}"
+                                },
+                                style = MaterialTheme.typography.labelSmall,
+                                color = if (acc?.error?.isNotBlank() == true) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
                     }
+                }
+                if (!shares?.accepted.isNullOrEmpty()) {
+                    TextButton(onClick = onSync) { Text("Pull shared calendars now") }
                 }
                 HorizontalDivider()
                 Text("New calendar", style = MaterialTheme.typography.labelMedium)
@@ -759,6 +837,7 @@ private fun TasksView(
     tasks: List<CalendarTask>?,
     today: LocalDate,
     calendars: List<CalendarInfo>,
+    readOnly: Set<String>,
     colourOf: (CalendarTask) -> Color?,
     status: String?,
     onTick: (id: String, done: Boolean) -> Unit,
@@ -804,14 +883,14 @@ private fun TasksView(
         val done = taskOrder(tasks.filter { it.done })
         LazyColumn(Modifier.fillMaxSize()) {
             if (open.isEmpty()) item { Text("Nothing to do.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(16.dp)) }
-            items(open, key = { it.id }) { t -> TaskLine(t, today, colourOf(t), onTick, onOpen) }
+            items(open, key = { it.id }) { t -> TaskLine(t, today, colourOf(t), t.cal !in readOnly, onTick, onOpen) }
             if (done.isNotEmpty()) {
                 item {
                     TextButton(onClick = { showDone = !showDone }, modifier = Modifier.padding(horizontal = 8.dp)) {
                         Text(if (showDone) "Hide done (${done.size})" else "Done (${done.size})")
                     }
                 }
-                if (showDone) items(done, key = { it.id }) { t -> TaskLine(t, today, colourOf(t), onTick, onOpen) }
+                if (showDone) items(done, key = { it.id }) { t -> TaskLine(t, today, colourOf(t), t.cal !in readOnly, onTick, onOpen) }
             }
         }
     }
@@ -831,14 +910,14 @@ private fun TasksView(
 }
 
 @Composable
-private fun TaskLine(t: CalendarTask, today: LocalDate, colour: Color?, onTick: (String, Boolean) -> Unit, onOpen: (CalendarTask) -> Unit) {
+private fun TaskLine(t: CalendarTask, today: LocalDate, colour: Color?, editable: Boolean, onTick: (String, Boolean) -> Unit, onOpen: (CalendarTask) -> Unit) {
     val dueDay = t.dueDate()
     val late = !t.done && dueDay != null && dueDay < today
     Row(
         Modifier.fillMaxWidth().clickable { onOpen(t) }.padding(start = 8.dp, end = 16.dp, top = 2.dp, bottom = 2.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        Checkbox(checked = t.done, onCheckedChange = { onTick(t.id, it) })
+        Checkbox(checked = t.done, onCheckedChange = { onTick(t.id, it) }, enabled = editable)
         Box(Modifier.size(10.dp).clip(CircleShape).background(colour ?: MaterialTheme.colorScheme.primary))
         Column(Modifier.weight(1f)) {
             Text(

@@ -49,6 +49,12 @@ class CalendarRepo(
     private val _tasks = MutableStateFlow<List<CalendarTask>?>(null)
     /** Every task, open or done, dated or not; null before the first answer. */
     val tasks: StateFlow<List<CalendarTask>?> = _tasks.asStateFlow()
+    private val _shares = MutableStateFlow<Shares?>(null)
+    /** Sharing with ships; null on a calendar too old to have it. */
+    val shares: StateFlow<Shares?> = _shares.asStateFlow()
+    /** Calendars shared with us read-only: the host silently drops
+     *  every edit poke to them, so the client must not offer one. */
+    val readOnly: Set<String> get() = _shares.value?.readOnly.orEmpty()
     private val _tags = MutableStateFlow<List<String>>(emptyList())
     /** Every tag in use on the ship's calendar, for a filter. */
     val tags: StateFlow<List<String>> = _tags.asStateFlow()
@@ -93,6 +99,26 @@ class CalendarRepo(
         val a = api ?: return false
         val ok = runCatching { a.migrate(calId) }.getOrDefault(false)
         if (ok) refresh()
+        return ok
+    }
+
+    /** Share a local calendar with a ship. Null: refused. False: recorded,
+     *  but the ship could not be told (down, or no calendar yet). */
+    suspend fun share(calId: String, ship: String, edit: Boolean): Boolean? {
+        val a = api ?: return null
+        val told = runCatching { a.share(calId, ship, edit) }.getOrNull()
+        refresh()
+        return told
+    }
+    suspend fun revoke(calId: String, ship: String): Boolean = after { it.revoke(calId, ship) }
+    suspend fun decline(key: String): Boolean = after { it.decline(key) }
+    suspend fun accept(key: String): Boolean = after(settleMs = 1500) { it.accept(key) }
+    suspend fun syncShares(): Boolean = after(settleMs = 1500) { it.syncShares() }
+
+    private suspend fun after(settleMs: Long = 0, call: suspend (CalendarApi) -> Boolean): Boolean {
+        val a = api ?: return false
+        val ok = runCatching { call(a) }.getOrDefault(false)
+        if (ok) { if (settleMs > 0) delay(settleMs); refresh() }
         return ok
     }
 
@@ -147,7 +173,8 @@ class CalendarRepo(
     fun setForeground(on: Boolean) {
         val was = foreground
         foreground = on
-        if (on && !was) scope.launch { refresh() }
+        // Coming back: a shared calendar is pulled now, not on the next pass.
+        if (on && !was) scope.launch { if (_shares.value?.accepted.orEmpty().isNotEmpty()) syncShares() else refresh() }
     }
 
     suspend fun refresh() = gate.withLock {
@@ -158,6 +185,7 @@ class CalendarRepo(
             _rows.value = w.rows.sortedWith(compareBy({ it.l }, { it.r }))
             _calendars.value = runCatching { a.calendars() }.getOrDefault(emptyList())
             _tasks.value = runCatching { a.tasks() }.getOrNull() ?: _tasks.value
+            _shares.value = runCatching { a.shares() }.getOrNull()
             _tags.value = runCatching { a.tags() }.getOrDefault(emptyList()).map { it.tag }
             runCatching { a.config() }.getOrNull()?.let { _zone.value = it.zone; ball = it.ball }
             _availability.value = CalendarAvailability.PRESENT
