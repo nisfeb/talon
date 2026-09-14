@@ -88,6 +88,14 @@ expect val isTouchSwipeNavSupported: Boolean
 expect val hasSoftKeyboard: Boolean
 
 /**
+ * Whether the assistant can take an instruction by voice. Android and
+ * iOS: true (the platform's own speech recogniser). Desktop: false, no
+ * recogniser to call; the JVM has no speech API and the cloud path is
+ * built for recorded calls, not a microphone.
+ */
+expect val isDictationSupported: Boolean
+
+/**
  * Whether a plain left-tap on a message opens its action menu.
  * Android: true — tap-anywhere is the menu affordance (no right mouse
  * button, and long-press is reserved for text selection). Desktop:

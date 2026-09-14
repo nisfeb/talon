@@ -16,6 +16,7 @@ actual val isBackgroundSchedulingSupported: Boolean = false
 // ship drawer is meaningless with a mouse (the logo opens it).
 actual val isTouchSwipeNavSupported: Boolean = false
 actual val hasSoftKeyboard: Boolean = false
+actual val isDictationSupported: Boolean = false
 // Off on desktop: left-press-drag selects message text (SelectionContainer);
 // the action menu opens on right-click instead. A left-tap-to-open clickable
 // here swallows the selection drag and pops the menu on mouse-up.

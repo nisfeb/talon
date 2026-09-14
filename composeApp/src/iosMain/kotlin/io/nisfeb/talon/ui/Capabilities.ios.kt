@@ -17,6 +17,7 @@ actual val isQrLoginScanSupported: Boolean = false
 actual val isLocalCometSupported: Boolean = false
 actual val isTouchSwipeNavSupported: Boolean = true
 actual val hasSoftKeyboard: Boolean = true
+actual val isDictationSupported: Boolean = true
 actual val isTapToOpenMenuSupported: Boolean = true
 
 actual val platformLabel: String = "iOS ${UIDevice.currentDevice.systemVersion}"

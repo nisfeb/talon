@@ -41,6 +41,7 @@ import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material.icons.filled.Mic
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -171,6 +172,11 @@ fun AssistantScreen(
     // rail's 64dp can't push the content below the threshold and fall back to
     // the stacked/hamburger layout.
     forceExpanded: Boolean = false,
+    // What the assistant can act on beyond chat; each null where the
+    // host has none, and the agent simply gets fewer tools.
+    mail: io.nisfeb.talon.mail.MailRepo? = null,
+    calendar: io.nisfeb.talon.calendar.CalendarRepo? = null,
+    calls: io.nisfeb.talon.call.CallController? = null,
     modifier: Modifier = Modifier,
 ) {
     val aiState by aiSettings.state.collectAsState()
@@ -249,17 +255,26 @@ fun AssistantScreen(
     val systemPrompt = remember(aiState.urbitKnowledgePrompt, aiState.assistantPrompt) {
         AgentPrompt.forAssistant(aiState)
     }
-    val agentLoop = remember(aiSettings, embedder, repo, contactMap, mcpTools, braveKeyPresent, systemPrompt) {
+    val calendarZone by (calendar?.zone ?: remember { kotlinx.coroutines.flow.MutableStateFlow<String?>(null) }).collectAsState()
+    val agentLoop = remember(aiSettings, embedder, repo, contactMap, mcpTools, braveKeyPresent, systemPrompt, mail, calendar, calls, calendarZone) {
         // Needs a ship session for its tools; the embedder is optional
         // (search_history degrades to keyword-only, grouping to flat).
         if (repo != null) {
+            val actions = io.nisfeb.talon.ai.AssistantActions(
+                db = db, contacts = { contactMap }, mail = mail, calendar = calendar, calls = calls,
+                zone = { zoneFor(calendarZone) },
+            )
             AgentLoop(
-                completer = { sys, msgs, tools -> agentClient.completeWithTools(sys, msgs, tools) },
+                // The time is appended per call rather than baked in, so a
+                // conversation that runs past midnight still says today.
+                completer = { sys, msgs, tools ->
+                    agentClient.completeWithTools(sys + "\n\n" + io.nisfeb.talon.ai.nowLine(zoneFor(calendarZone)), msgs, tools)
+                },
                 tools = ToolCatalog.default(
                     repo, db, embedder,
                     braveSearch = if (braveKeyPresent) braveSearch else null,
                     urlFetcher = urlFetcher,
-                ) { contactMap.displayName(it) } + mcpTools,
+                ) { contactMap.displayName(it) } + io.nisfeb.talon.ai.actionTools(actions) + mcpTools,
                 systemPrompt = systemPrompt,
             )
         } else null
@@ -593,12 +608,28 @@ fun AssistantScreen(
             }
 
             val ready = agentLoop != null
+            // A spoken instruction is typed in and sent, so it reads back
+            // in the transcript the way a typed one would.
+            val dictate = io.nisfeb.talon.ui.rememberDictation { spoken ->
+                questionField = TextFieldValue(spoken, TextRange(spoken.length))
+                submit()
+            }
             OutlinedTextField(
                 value = questionField,
                 onValueChange = { questionField = it },
                 modifier = Modifier.fillMaxWidth(),
                 label = { Text("Ask or tell your assistant…") },
                 enabled = ready && !busy,
+                trailingIcon = if (dictate != null && io.nisfeb.talon.ui.isDictationSupported) {
+                    {
+                        androidx.compose.material3.IconButton(onClick = dictate, enabled = ready && !busy) {
+                            androidx.compose.material3.Icon(
+                                androidx.compose.material.icons.Icons.Filled.Mic,
+                                contentDescription = "Speak to your assistant",
+                            )
+                        }
+                    }
+                } else null,
                 keyboardActions = androidx.compose.foundation.text.KeyboardActions(onSend = { submit() }),
                 keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = ImeAction.Send),
             )
