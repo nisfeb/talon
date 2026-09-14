@@ -199,9 +199,16 @@ data class HomeLayout(
     fun complete(): HomeLayout {
         val seen = mutableSetOf<HomeWidgetKind>()
         val kept = widgets.filter { seen.add(it.kind) }.map { it.sane() }
+        // The assistant's tile is the exception: its point is being one
+        // tap away, so it arrives switched on, in a row of its own
+        // under everything the page already shows.
+        val bottom = kept.filter { it.visible }.maxOfOrNull { it.row + it.rows } ?: 0
         val missing = HomeWidgetKind.entries
             .filterNot { it in seen }
-            .map { HomeWidget(kind = it, visible = false) }
+            .map {
+                if (it == HomeWidgetKind.ASSISTANT) HomeWidget(kind = it, col = 0, row = bottom, span = HOME_COLUMNS, rows = 3)
+                else HomeWidget(kind = it, visible = false)
+            }
         // Not untangled. An arrangement is whatever somebody made of
         // it, overlaps included: they put it there, they can see it,
         // and nothing here knows better than they do.

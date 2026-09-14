@@ -512,4 +512,13 @@ class NeedsWidgetArrivalTest {
             }
         }
     }
+
+    @Test
+    fun `the assistant tile arrives shown, under a page arranged before it`() {
+        val old = HomeLayout(listOf(HomeWidget(HomeWidgetKind.CLOCK, col = 0, row = 0, span = 5, rows = 9))).complete()
+        val tile = old[HomeWidgetKind.ASSISTANT]
+        assertTrue(tile.visible, "shown, not hidden like the other newcomers")
+        assertEquals(9, tile.row, "in a row of its own under what was there")
+        assertTrue(old[HomeWidgetKind.MAIL].visible.not(), "the others still arrive hidden")
+    }
 }
