@@ -2904,7 +2904,9 @@ fun App(
                             // width here instead of being crammed into the 30%
                             // list slot. Rail stays for navigation; back arrow
                             // only on narrow (where DesktopShell stacks it).
-                            content = if (activeRailTab == RailTab.Home) {
+                            // The assistant outranks the two tabs that take the
+                            // whole area; opened over either, it used to show nothing.
+                            content = if (activeRailTab == RailTab.Home && !showAssistant) {
                                 {
                                     io.nisfeb.talon.ui.screens.HomeScreen(
                                         db = db,
@@ -2957,7 +2959,7 @@ fun App(
                                         onOpenMail = { uiSettings.setActiveRailTab(RailTab.Mail) },
                                     )
                                 }
-                            } else if (activeRailTab == RailTab.Mail) {
+                            } else if (activeRailTab == RailTab.Mail && !showAssistant) {
                                 {
                                     io.nisfeb.talon.ui.screens.MailWorkspace(
                                         repo = mailRepo,
