@@ -14,6 +14,9 @@ import io.nisfeb.talon.mail.AuspexError
 import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.put
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonPrimitive
 
@@ -37,7 +40,12 @@ data class CalendarRow(
     val note: String get() = meta["note"]?.jsonPrimitive?.contentOrNull.orEmpty()
     val location: String get() = meta["location"]?.jsonPrimitive?.contentOrNull.orEmpty()
     val color: String? get() = meta["color"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }
+    /** iCalendar CATEGORIES, as the calendar keeps them: `meta.tags`. */
+    val tags: List<String> get() = (meta["tags"] as? JsonArray)?.mapNotNull { it.jsonPrimitive.contentOrNull }.orEmpty()
 }
+
+@Serializable
+data class TagCount(val tag: String, val count: Int = 0)
 
 @Serializable
 data class CalendarWindow(val rows: List<CalendarRow> = emptyList())
@@ -68,6 +76,14 @@ class CalendarApi(private val http: HttpClient, baseUrl: String) {
 
     suspend fun config(): CalendarConfig = decode(get("/config.json"))
 
+    /** Every tag in use, with how many events carry it. */
+    suspend fun tags(): List<TagCount> = decode(get("/tags.json"))
+
+    /** Turn a followed or Google calendar into a plain local one: one
+     *  last pull, then the sync row goes. The source is left alone. */
+    suspend fun migrate(calId: String): Boolean =
+        postJson("$root/migrate", buildJsonObject { put("id", calId) })
+
     /** One event's full rule breakdown, for the editor. */
     suspend fun event(id: String): JsonObject =
         decode(get("/event.json?id=" + id.encodeURLParameter()))
@@ -77,9 +93,12 @@ class CalendarApi(private val http: HttpClient, baseUrl: String) {
      * the grubbery shell, the way its own page sends them; [ball] is
      * what config.json named. True when the shell accepted it.
      */
-    suspend fun poke(ball: String, body: JsonObject): Boolean {
+    suspend fun poke(ball: String, body: JsonObject): Boolean =
+        postJson("$base/grubbery/api/poke/$ball/calendar.calendar?blot=/json", body)
+
+    private suspend fun postJson(url: String, body: JsonObject): Boolean {
         val resp = try {
-            http.post("$base/grubbery/api/poke/$ball/calendar.calendar?blot=/json") {
+            http.post(url) {
                 contentType(ContentType.Application.Json)
                 setBody(body.toString())
             }

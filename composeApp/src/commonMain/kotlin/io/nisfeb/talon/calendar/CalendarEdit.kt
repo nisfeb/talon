@@ -61,7 +61,13 @@ data class EventDraft(
     val until: LocalDate? = null,
     /** A zone name, or null for the calendar's own. */
     val zone: String? = null,
+    /** iCalendar CATEGORIES; other clients show them as categories. */
+    val tags: List<String> = emptyList(),
 )
+
+/** "work, family" -> ["work", "family"]: trimmed, blanks and repeats dropped. */
+fun parseTags(text: String): List<String> =
+    text.split(',').map { it.trim().trimStart('#') }.filter { it.isNotEmpty() }.distinct()
 
 private val WIRE_DAYS = listOf("mon", "tue", "wed", "thu", "fri", "sat", "sun")
 
@@ -79,6 +85,7 @@ fun eventBody(d: EventDraft, id: String? = null): JsonObject = buildJsonObject {
         put("name", d.name.trim())
         if (d.note.isNotBlank()) put("note", d.note.trim())
         if (d.location.isNotBlank()) put("location", d.location.trim())
+        if (d.tags.isNotEmpty()) put("tags", JsonArray(d.tags.map { JsonPrimitive(it) }))
     }
     d.cal?.let { put("cal", it) }
     if (d.cat == EventCat.DATE) {
@@ -122,6 +129,7 @@ fun draftFromEvent(e: JsonObject, today: LocalDate): EventDraft? {
     val base = EventDraft(
         name = metaStr("name"), note = metaStr("note"), location = metaStr("location"),
         cal = str("cal"), cat = cat, date = today,
+        tags = (meta?.get("tags") as? JsonArray)?.mapNotNull { it.jsonPrimitive.contentOrNull }.orEmpty(),
     )
     if (cat == EventCat.DATE) {
         val m = num("month") ?: return null

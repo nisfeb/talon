@@ -177,6 +177,7 @@ fun actionTools(a: AssistantActions): List<Tool> = buildList {
                     "repeat" to ("string" to "once (default), daily, weekly, monthly or yearly."),
                     "weekdays" to ("string" to "For weekly: comma-separated mon,tue,... (default: the date's weekday)."),
                     "count" to ("integer" to "For a repeat: how many times, optional."),
+                    "tags" to ("string" to "Comma-separated tags, optional (the calendar's categories)."),
                     required = listOf("name", "date"),
                 ),
             ),
@@ -196,6 +197,7 @@ fun actionTools(a: AssistantActions): List<Tool> = buildList {
                 date = date, minuteOfDay = minute ?: 0,
                 durMin = args.int("duration_min") ?: 60, spanDays = args.int("days") ?: 1,
                 repeat = repeat, weekdays = weekdays, count = args.int("count") ?: 0,
+                tags = io.nisfeb.talon.calendar.parseTags(args.text("tags").orEmpty()),
             )
             if (cal.poke(eventBody(draft))) "Added \"$name\" on $date${if (time != null) " at $time" else ""}." else "The calendar did not take it."
         })

@@ -106,9 +106,15 @@ fun CalendarScreen(
     repo: CalendarRepo,
     twentyFourHour: Boolean,
     onBack: (() -> Unit)?,
+    /** Opens the calendar's own page, for what only it has: sharing
+     *  over CalDAV, following, Google, ICS feeds. Null where the host
+     *  cannot show it. */
+    onOpenWebSettings: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val availability by repo.availability.collectAsState()
+    val allTags by repo.tags.collectAsState()
+    var tagFilter by remember { mutableStateOf<String?>(null) }
     val rows by repo.rangeRows.collectAsState()
     val calendars by repo.calendars.collectAsState()
     val hidden by repo.hidden.collectAsState()
@@ -133,7 +139,9 @@ fun CalendarScreen(
         val to = grid.last().plus(1, DateTimeUnit.DAY).atTime(0, 0).toInstant(zone).toEpochMilliseconds()
         repo.loadRange(from, to)
     }
-    val visible = remember(rows, hidden) { rows.orEmpty().filter { it.cal !in hidden } }
+    val visible = remember(rows, hidden, tagFilter) {
+        rows.orEmpty().filter { it.cal !in hidden && (tagFilter == null || tagFilter in it.tags) }
+    }
     val byDay = remember(visible, zoneId) {
         val m = HashMap<LocalDate, MutableList<CalendarRow>>()
         visible.forEach { r -> daysOf(r, zone).forEach { d -> m.getOrPut(d) { mutableListOf() }.add(r) } }
@@ -207,6 +215,18 @@ fun CalendarScreen(
                             Box(Modifier.size(10.dp).clip(CircleShape).background(calendarHexColor(c.color) ?: MaterialTheme.colorScheme.primary))
                         },
                     )
+                }
+            }
+            Spacer(Modifier.height(4.dp))
+        }
+        if (allTags.isNotEmpty()) {
+            LazyRow(
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                item { FilterChip(selected = tagFilter == null, onClick = { tagFilter = null }, label = { Text("All tags") }) }
+                items(allTags, key = { it }) { t ->
+                    FilterChip(selected = tagFilter == t, onClick = { tagFilter = if (tagFilter == t) null else t }, label = { Text("#$t") })
                 }
             }
             Spacer(Modifier.height(4.dp))
@@ -299,7 +319,8 @@ fun CalendarScreen(
                             Box(Modifier.size(10.dp).clip(CircleShape).background(colourOf(r) ?: MaterialTheme.colorScheme.primary))
                             Column(Modifier.weight(1f)) {
                                 Text(r.name.ifBlank { "(untitled)" }, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                val line = r.location.ifBlank { r.note }
+                                val line = listOf(r.location.ifBlank { r.note }, r.tags.joinToString(" ") { "#$it" })
+                                    .filter { it.isNotBlank() }.joinToString(" · ")
                                 if (line.isNotBlank()) Text(line, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             }
                             Text(spanLabel(r, selected, zone, twentyFourHour), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -350,6 +371,8 @@ fun CalendarScreen(
         CalendarsDialog(
             calendars = calendars,
             onDismiss = { managing = false },
+            onMakeLocal = { id -> scope.launch { if (!repo.makeLocal(id)) status = "The ship would not make that calendar local." } },
+            onOpenWebSettings = onOpenWebSettings,
             onAdd = { name, colour ->
                 scope.launch {
                     val id = name.lowercase().replace(Regex("[^a-z0-9]+"), "-").trim('-').ifBlank { "cal" }
@@ -474,6 +497,12 @@ private fun EventEditor(
                 }
                 OutlinedTextField(value = d.location, onValueChange = { d = d.copy(location = it) }, label = { Text("Place") }, singleLine = true, modifier = Modifier.fillMaxWidth())
                 OutlinedTextField(value = d.note, onValueChange = { d = d.copy(note = it) }, label = { Text("Note") }, modifier = Modifier.fillMaxWidth(), minLines = 2)
+                var tagText by remember { mutableStateOf(d.tags.joinToString(", ")) }
+                OutlinedTextField(
+                    value = tagText,
+                    onValueChange = { tagText = it; d = d.copy(tags = io.nisfeb.talon.calendar.parseTags(it)) },
+                    label = { Text("Tags, comma separated") }, singleLine = true, modifier = Modifier.fillMaxWidth(),
+                )
                 problem?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
                 if (onDelete != null || onSkip != null) {
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -520,6 +549,8 @@ private fun EventEditor(
 private fun CalendarsDialog(
     calendars: List<CalendarInfo>,
     onDismiss: () -> Unit,
+    onMakeLocal: (id: String) -> Unit,
+    onOpenWebSettings: (() -> Unit)?,
     onAdd: (name: String, colour: String) -> Unit,
     onEdit: (id: String, name: String, colour: String) -> Unit,
     onDelete: (id: String) -> Unit,
@@ -543,6 +574,13 @@ private fun CalendarsDialog(
                             TextButton(onClick = { editingId = null }) { Text("Cancel") }
                             if (c.id != "default") TextButton(onClick = { onDelete(c.id); editingId = null }) { Text("Delete") }
                         }
+                        if (c.kind != "local") {
+                            Text(
+                                "Followed calendars sync both ways. Make local stops the sync and keeps everything in it; the source is left alone.",
+                                style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            TextButton(onClick = { onMakeLocal(c.id); editingId = null }) { Text("Make local") }
+                        }
                     } else {
                         Row(
                             Modifier.fillMaxWidth().clickable { editingId = c.id; editName = c.name; editColour = c.color }.padding(vertical = 6.dp),
@@ -550,7 +588,10 @@ private fun CalendarsDialog(
                         ) {
                             Box(Modifier.size(12.dp).clip(CircleShape).background(calendarHexColor(c.color) ?: MaterialTheme.colorScheme.primary))
                             Text(c.name.ifBlank { c.id }, modifier = Modifier.weight(1f))
-                            Text(if (c.kind == "google") "Google" else "", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(
+                                when (c.kind) { "google" -> "Google"; "caldav" -> "Followed"; else -> "" },
+                                style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
                         }
                     }
                 }
@@ -559,6 +600,14 @@ private fun CalendarsDialog(
                 OutlinedTextField(value = newName, onValueChange = { newName = it }, label = { Text("Name") }, singleLine = true)
                 OutlinedTextField(value = newColour, onValueChange = { newColour = it }, label = { Text("Colour, #rrggbb") }, singleLine = true)
                 TextButton(enabled = newName.isNotBlank(), onClick = { onAdd(newName.trim(), newColour.trim()); newName = "" }) { Text("Add") }
+                if (onOpenWebSettings != null) {
+                    HorizontalDivider()
+                    Text(
+                        "Sharing over CalDAV, following another calendar, Google and ICS feeds are set up on the calendar's own page.",
+                        style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    TextButton(onClick = { onOpenWebSettings(); onDismiss() }) { Text("Open the calendar's page") }
+                }
             }
         },
         confirmButton = { TextButton(onClick = onDismiss) { Text("Done") } },

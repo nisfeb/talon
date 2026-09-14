@@ -1324,7 +1324,8 @@ private fun EventRow(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
-            val line = row.location.ifBlank { row.note }
+            val line = listOf(row.location.ifBlank { row.note }, row.tags.joinToString(" ") { "#$it" })
+                .filter { it.isNotBlank() }.joinToString(" · ")
             if (line.isNotBlank()) {
                 Text(
                     line,

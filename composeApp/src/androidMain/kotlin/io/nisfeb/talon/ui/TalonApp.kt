@@ -555,6 +555,7 @@ fun TalonApp(
     }
     var bookmarksOpen by remember { mutableStateOf(false) }
     var calendarOpen by remember { mutableStateOf(false) }
+    var calendarPageOpen by remember { mutableStateOf(false) }
     /** The mail thread a tap outside mail asked for. */
     var pendingMailThread by remember { mutableStateOf<String?>(null) }
     /** The home widget asked the assistant to listen as it opens. */
@@ -1734,12 +1735,26 @@ fun TalonApp(
                 modifier = mod,
             )
 
-            calendarOpen -> io.nisfeb.talon.ui.screens.CalendarScreen(
-                repo = calendarRepo,
-                twentyFourHour = app.uiSettings.homeTwentyFourHour.collectAsState().value,
-                onBack = { calendarOpen = false },
-                modifier = mod,
-            )
+            calendarOpen -> {
+                if (calendarPageOpen) {
+                    app.sessionStore.active()?.let { active ->
+                        io.nisfeb.talon.ui.ShipPageSheet(
+                            title = "Calendar settings",
+                            pageUrl = active.shipUrl.trimEnd('/') + io.nisfeb.talon.calendar.CalendarApi.APP_PATH,
+                            shipUrl = active.shipUrl,
+                            cookie = "${active.cookieName}=${active.cookieValue}",
+                            onDismiss = { calendarPageOpen = false; appScope.launch { calendarRepo.refresh() } },
+                        )
+                    }
+                }
+                io.nisfeb.talon.ui.screens.CalendarScreen(
+                    repo = calendarRepo,
+                    twentyFourHour = app.uiSettings.homeTwentyFourHour.collectAsState().value,
+                    onBack = { calendarOpen = false },
+                    onOpenWebSettings = { calendarPageOpen = true },
+                    modifier = mod,
+                )
+            }
 
             bookmarksOpen -> BookmarksScreen(
                 db = app.db,

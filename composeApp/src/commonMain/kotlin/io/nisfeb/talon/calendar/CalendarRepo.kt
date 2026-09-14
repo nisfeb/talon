@@ -46,6 +46,9 @@ class CalendarRepo(
     val rows: StateFlow<List<CalendarRow>?> = _rows.asStateFlow()
     private val _calendars = MutableStateFlow<List<CalendarInfo>>(emptyList())
     val calendars: StateFlow<List<CalendarInfo>> = _calendars.asStateFlow()
+    private val _tags = MutableStateFlow<List<String>>(emptyList())
+    /** Every tag in use on the ship's calendar, for a filter. */
+    val tags: StateFlow<List<String>> = _tags.asStateFlow()
     private val _zone = MutableStateFlow<String?>(null)
     /** The calendar's display zone, or null for the device's. */
     val zone: StateFlow<String?> = _zone.asStateFlow()
@@ -71,6 +74,14 @@ class CalendarRepo(
         runCatching { a.window(fromMs, toMs) }
             .onSuccess { w -> _rangeRows.value = w.rows.sortedWith(compareBy({ it.l }, { it.r })) }
             .onFailure { if (it !is AuspexError) throw it; _error.value = it.message }
+    }
+
+    /** Make a followed or Google calendar local; false when refused. */
+    suspend fun makeLocal(calId: String): Boolean {
+        val a = api ?: return false
+        val ok = runCatching { a.migrate(calId) }.getOrDefault(false)
+        if (ok) refresh()
+        return ok
     }
 
     suspend fun eventDetail(id: String): JsonObject? =
@@ -131,6 +142,7 @@ class CalendarRepo(
             val w = a.window(now - BEHIND_MS, now + AHEAD_MS)
             _rows.value = w.rows.sortedWith(compareBy({ it.l }, { it.r }))
             _calendars.value = runCatching { a.calendars() }.getOrDefault(emptyList())
+            _tags.value = runCatching { a.tags() }.getOrDefault(emptyList()).map { it.tag }
             runCatching { a.config() }.getOrNull()?.let { _zone.value = it.zone; ball = it.ball }
             _availability.value = CalendarAvailability.PRESENT
             _error.value = null

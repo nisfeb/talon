@@ -340,6 +340,7 @@ fun App(
     var showInvites by remember { mutableStateOf(false) }
     var showBookmarks by remember { mutableStateOf(false) }
     var showCalendar by remember { mutableStateOf(false) }
+    var calendarPageOpen by remember { mutableStateOf(false) }
     var assistantListen by remember { mutableStateOf(false) }
     var showActivity by remember { mutableStateOf(false) }
     var showSearch by remember { mutableStateOf(false) }
@@ -1733,6 +1734,27 @@ fun App(
                         if (expanded) uiSettings.setActiveRailTab(RailTab.Calendar)
                         else showCalendar = true
                     }
+                    // The calendar's own page: in-app where there is a
+                    // webview, the browser on desktop, which has none.
+                    val calendarPageOpener = androidx.compose.ui.platform.LocalUriHandler.current
+                    val onOpenCalendarPage: () -> Unit = {
+                        val s = sessionStore.active()?.shipUrl
+                        if (s != null) {
+                            if (io.nisfeb.talon.ui.isUrbWebViewSupported) calendarPageOpen = true
+                            else runCatching { calendarPageOpener.openUri(s.trimEnd('/') + io.nisfeb.talon.calendar.CalendarApi.APP_PATH) }
+                        }
+                    }
+                    if (calendarPageOpen) {
+                        sessionStore.active()?.let { active ->
+                            io.nisfeb.talon.ui.ShipPageSheet(
+                                title = "Calendar settings",
+                                pageUrl = active.shipUrl.trimEnd('/') + io.nisfeb.talon.calendar.CalendarApi.APP_PATH,
+                                shipUrl = active.shipUrl,
+                                cookie = "${active.cookieName}=${active.cookieValue}",
+                                onDismiss = { calendarPageOpen = false; loopScope.launch { calendarRepo.refresh() } },
+                            )
+                        }
+                    }
                     // Right-pane content. Computed at render time from the
                     // flat state vars; mutual exclusion is enforced at the
                     // write sites (thread-open clears group-info and vice
@@ -1907,6 +1929,7 @@ fun App(
                         repo = calendarRepo,
                         twentyFourHour = homeTwentyFourHour,
                         onBack = { showCalendar = false },
+                        onOpenWebSettings = onOpenCalendarPage,
                     )
                     showBookmarks -> BookmarksScreen(
                         db = db,
@@ -2829,6 +2852,7 @@ fun App(
                                     repo = calendarRepo,
                                     twentyFourHour = homeTwentyFourHour,
                                     onBack = null,
+                                    onOpenWebSettings = onOpenCalendarPage,
                                 )
                                 RailTab.Bookmarks -> BookmarksList(
                                     db = db,

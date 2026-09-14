@@ -66,4 +66,13 @@ class CalendarEditTest {
         val row = CalendarRow(id = "t", all = true, l = 1_789_344_000_000L, r = 1_789_344_000_000L + 2 * 86_400_000L)
         assertEquals(listOf(LocalDate(2026, 9, 14), LocalDate(2026, 9, 15)), daysOf(row, TimeZone.UTC))
     }
+
+    @Test fun `tags ride in meta as an array and come back`() {
+        assertEquals(listOf("work", "lunch"), parseTags(" work, #lunch,, work "))
+        val d = EventDraft(name = "Lunch", date = day, tags = listOf("work", "lunch"))
+        val b = eventBody(d)
+        assertEquals(listOf("work", "lunch"), b["meta"]!!.jsonObject["tags"]!!.jsonArray.map { it.jsonPrimitive.content })
+        assertEquals(listOf("work", "lunch"), draftFromEvent(eventBody(d, "e1"), day)!!.tags)
+        assertNull(eventBody(EventDraft(name = "Plain", date = day))["meta"]!!.jsonObject["tags"], "no tags, no key")
+    }
 }
