@@ -277,7 +277,7 @@ fun CalendarScreen(
                 onAdd = { name, due, cal ->
                     scope.launch {
                         val d = EventDraft(name = name, cat = EventCat.TODO, date = due ?: today, due = due, cal = cal, tags = listOfNotNull(tagFilter))
-                        if (!repo.poke(eventBody(d))) status = "The ship did not take the task."
+                        status = if (repo.poke(eventBody(d))) null else "The ship did not take the task."
                     }
                 },
                 modifier = Modifier.weight(1f).fillMaxWidth(),
@@ -723,6 +723,8 @@ private fun CalendarsDialog(
     var editColour by remember { mutableStateOf("") }
     var shareShip by remember { mutableStateOf("") }
     var shareEdit by remember { mutableStateOf(false) }
+    // The share whose Revoke was tapped once; a second tap revokes.
+    var revoking by remember { mutableStateOf<Pair<String, String>?>(null) }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Calendars") },
@@ -765,7 +767,13 @@ private fun CalendarsDialog(
                             shares.shares[c.id].orEmpty().forEach { (ship, mode) ->
                                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                                     Text("$ship · ${if (mode == "edit") "can edit" else "read only"}", style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
-                                    TextButton(onClick = { onRevoke(c.id, ship) }) { Text("Revoke") }
+                                    if (revoking == c.id to ship) {
+                                        Text("Their copy stays with them; it just stops syncing.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
+                                        TextButton(onClick = { onRevoke(c.id, ship); revoking = null }) { Text("Revoke", color = MaterialTheme.colorScheme.error) }
+                                        TextButton(onClick = { revoking = null }) { Text("Keep") }
+                                    } else {
+                                        TextButton(onClick = { revoking = c.id to ship }) { Text("Revoke") }
+                                    }
                                 }
                             }
                             OutlinedTextField(

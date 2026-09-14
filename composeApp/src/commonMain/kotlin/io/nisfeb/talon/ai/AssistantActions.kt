@@ -192,9 +192,11 @@ fun actionTools(a: AssistantActions): List<Tool> = buildList {
             val repeat = Repeat.entries.firstOrNull { it.kind == (args.text("repeat") ?: "once").lowercase() } ?: return@Tool "Error: repeat must be once, daily, weekly, monthly or yearly."
             val weekdays = args.text("weekdays")?.split(',')?.mapNotNull { WEEKDAYS[it.trim().lowercase().take(3)] }?.toSet()
                 ?.takeIf { it.isNotEmpty() } ?: setOf(date.dayOfWeek)
+            val calId = args.text("calendar")?.takeIf { it.isNotBlank() }
+            if (calId != null && calId in cal.readOnly) return@Tool "Error: calendar $calId is shared with the user read-only; its host makes the changes."
             val draft = EventDraft(
                 name = name, note = args.text("note").orEmpty(), location = args.text("location").orEmpty(),
-                cal = args.text("calendar")?.takeIf { it.isNotBlank() },
+                cal = calId,
                 cat = if (minute == null) EventCat.ALLDAY else EventCat.TIMED,
                 date = date, minuteOfDay = minute ?: 0,
                 durMin = args.int("duration_min") ?: 60, spanDays = args.int("days") ?: 1,
@@ -222,7 +224,7 @@ fun actionTools(a: AssistantActions): List<Tool> = buildList {
             if (rows.isEmpty()) "Nothing between $from and $to."
             else rows.joinToString("\n") { r ->
                 val s = Instant.fromEpochMilliseconds(r.l).toLocalDateTime(zone)
-                "event=${r.id} ${s.date} ${if (r.all) "all day" else "${s.hour.toString().padStart(2, '0')}:${s.minute.toString().padStart(2, '0')}"} ${r.name}${if (r.location.isNotBlank()) " @ ${r.location}" else ""} (calendar ${r.cal})"
+                "${if (r.isTask) "task" else "event"}=${r.id} ${s.date} ${if (r.isTask) (if (r.done) "done" else "due") else if (r.all) "all day" else "${s.hour.toString().padStart(2, '0')}:${s.minute.toString().padStart(2, '0')}"} ${r.name}${if (r.location.isNotBlank()) " @ ${r.location}" else ""} (calendar ${r.cal})"
             }
         })
         add(Tool(
@@ -244,8 +246,10 @@ fun actionTools(a: AssistantActions): List<Tool> = buildList {
             val dueText = args.text("due")?.takeIf { it.isNotBlank() }
             val due = if (dueText == null) null else parseDate(dueText) ?: return@Tool "Error: due must be YYYY-MM-DD."
             val today = Instant.fromEpochMilliseconds(nowMs()).toLocalDateTime(a.zone()).date
+            val calId = args.text("calendar")?.takeIf { it.isNotBlank() }
+            if (calId != null && calId in cal.readOnly) return@Tool "Error: calendar $calId is shared with the user read-only; its host makes the changes."
             val draft = EventDraft(
-                name = name, note = args.text("note").orEmpty(), cal = args.text("calendar")?.takeIf { it.isNotBlank() },
+                name = name, note = args.text("note").orEmpty(), cal = calId,
                 cat = EventCat.TODO, date = due ?: today, due = due,
                 tags = io.nisfeb.talon.calendar.parseTags(args.text("tags").orEmpty()),
             )
@@ -275,6 +279,7 @@ fun actionTools(a: AssistantActions): List<Tool> = buildList {
             val hits = open.filter { it.id == q }.ifEmpty { open.filter { it.name.contains(q, ignoreCase = true) } }
             when {
                 hits.isEmpty() -> "No open task matches \"$q\"."
+                hits.size == 1 && hits[0].cal in cal.readOnly -> "That task is on a calendar shared with the user read-only; its host ticks it."
                 hits.size > 1 -> "Several match; which one?\n" + hits.joinToString("\n") { "task=${it.id} ${it.name}" }
                 else -> if (cal.setDone(hits[0].id, true)) "Done: ${hits[0].name}." else "The calendar did not take it."
             }

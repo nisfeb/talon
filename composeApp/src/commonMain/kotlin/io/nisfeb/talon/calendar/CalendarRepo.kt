@@ -113,7 +113,7 @@ class CalendarRepo(
     suspend fun revoke(calId: String, ship: String): Boolean = after { it.revoke(calId, ship) }
     suspend fun decline(key: String): Boolean = after { it.decline(key) }
     suspend fun accept(key: String): Boolean = after(settleMs = 1500) { it.accept(key) }
-    suspend fun syncShares(): Boolean = after(settleMs = 1500) { it.syncShares() }
+    suspend fun syncShares(): Boolean { lastShareSyncMs = nowMs(); return after(settleMs = 1500) { it.syncShares() } }
 
     private suspend fun after(settleMs: Long = 0, call: suspend (CalendarApi) -> Boolean): Boolean {
         val a = api ?: return false
@@ -170,11 +170,23 @@ class CalendarRepo(
         _error.value = null
     }
 
+    private var lastShareSyncMs = 0L
+
     fun setForeground(on: Boolean) {
         val was = foreground
         foreground = on
-        // Coming back: a shared calendar is pulled now, not on the next pass.
-        if (on && !was) scope.launch { if (_shares.value?.accepted.orEmpty().isNotEmpty()) syncShares() else refresh() }
+        if (on && !was) scope.launch {
+            // Coming back: a shared calendar is pulled now rather than on
+            // the next pass, but not more than every few minutes; the
+            // route prods the whole sync fiber. The refresh runs either way.
+            val now = nowMs()
+            if (_shares.value?.accepted.orEmpty().isNotEmpty() && now - lastShareSyncMs > SHARE_SYNC_GAP_MS) {
+                lastShareSyncMs = now
+                api?.let { a -> runCatching { a.syncShares() } }
+                delay(1500)
+            }
+            refresh()
+        }
     }
 
     suspend fun refresh() = gate.withLock {
@@ -185,7 +197,11 @@ class CalendarRepo(
             _rows.value = w.rows.sortedWith(compareBy({ it.l }, { it.r }))
             _calendars.value = runCatching { a.calendars() }.getOrDefault(emptyList())
             _tasks.value = runCatching { a.tasks() }.getOrNull() ?: _tasks.value
-            _shares.value = runCatching { a.shares() }.getOrNull()
+            // Null only when the calendar has no sharing (404); a hiccup
+            // keeps the last answer, and with it the read-only guard.
+            _shares.value = runCatching { a.shares() }.getOrElse { e ->
+                if (e is AuspexError.Refused && e.status == AuspexApi.NOT_FOUND) null else _shares.value
+            }
             _tags.value = runCatching { a.tags() }.getOrDefault(emptyList()).map { it.tag }
             runCatching { a.config() }.getOrNull()?.let { _zone.value = it.zone; ball = it.ball }
             _availability.value = CalendarAvailability.PRESENT
@@ -210,5 +226,6 @@ class CalendarRepo(
         private const val TAG = "CalendarRepo"
         const val BEHIND_MS = 6 * 60 * 60 * 1000L
         const val AHEAD_MS = 30L * 24 * 60 * 60 * 1000L
+        const val SHARE_SYNC_GAP_MS = 5 * 60 * 1000L
     }
 }

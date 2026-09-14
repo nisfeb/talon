@@ -1235,7 +1235,9 @@ private fun CalendarPanel(
     val zoneId = calendar?.zone?.collectAsState()?.value
     val calendars = calendar?.calendars?.collectAsState()?.value.orEmpty()
     val tasks = calendar?.tasks?.collectAsState()?.value.orEmpty()
-    val offers = calendar?.shares?.collectAsState()?.value?.offers?.size ?: 0
+    val shares = calendar?.shares?.collectAsState()?.value
+    val offers = shares?.offers?.size ?: 0
+    val readOnly = shares?.readOnly.orEmpty()
     val scope = rememberCoroutineScope()
     var installing by remember { mutableStateOf(false) }
     var installError by remember { mutableStateOf<String?>(null) }
@@ -1302,6 +1304,7 @@ private fun CalendarPanel(
                             androidx.compose.material3.Checkbox(
                                 checked = false,
                                 onCheckedChange = { scope.launch { calendar!!.setDone(t.id, true) } },
+                                enabled = t.cal !in readOnly,
                                 modifier = Modifier.size(32.dp),
                             )
                             Text(t.name.ifBlank { "(untitled)" }, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
@@ -1312,7 +1315,7 @@ private fun CalendarPanel(
                             )
                         }
                     }
-                    shown.take(8).forEach { row ->
+                    shown.take(8 - due.size.coerceAtMost(4)).forEach { row ->
                         EventRow(
                             row = row,
                             whenLabel = whenLabel(row, tick, zone, twentyFourHour),
