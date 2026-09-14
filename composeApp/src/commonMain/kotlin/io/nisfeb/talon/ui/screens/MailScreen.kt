@@ -43,10 +43,13 @@ fun MailScreen(
      *  the profile sheet's Mail button. */
     composeTo: String? = null,
     onComposeToConsumed: () -> Unit = {},
+    /** A thread to open on arrival, from somewhere outside mail. */
+    initialThread: String? = null,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    var openThread by remember { mutableStateOf<String?>(null) }
+    var openThread by remember { mutableStateOf(initialThread) }
+    androidx.compose.runtime.LaunchedEffect(initialThread) { if (initialThread != null) openThread = initialThread }
     var composing by remember { mutableStateOf<MailIntent?>(null) }
     androidx.compose.runtime.LaunchedEffect(composeTo) {
         if (composeTo != null) {

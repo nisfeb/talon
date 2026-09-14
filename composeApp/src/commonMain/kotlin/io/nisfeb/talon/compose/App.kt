@@ -2943,7 +2943,12 @@ fun App(
                                                 io.nisfeb.talon.ui.HomePlaceCodec.encode(p),
                                             )
                                         },
-                                        onOpenConversation = { whom -> jumpToChat(whom) },
+                                        // Home keeps the whole content area, so the
+                                        // chat has to be on a tab that shows one.
+                                        onOpenConversation = { whom ->
+                                            uiSettings.setActiveRailTab(RailTab.Chats)
+                                            jumpToChat(whom)
+                                        },
                                         onOpenChats = { uiSettings.setActiveRailTab(RailTab.Chats) },
                                         onOpenMailThread = { id ->
                                             openMailThread = id

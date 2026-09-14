@@ -555,6 +555,8 @@ fun TalonApp(
     }
     var bookmarksOpen by remember { mutableStateOf(false) }
     var calendarOpen by remember { mutableStateOf(false) }
+    /** The mail thread a tap outside mail asked for. */
+    var pendingMailThread by remember { mutableStateOf<String?>(null) }
     /** The home widget asked the assistant to listen as it opens. */
     var assistantListen by remember { mutableStateOf(false) }
     var activityOpen by remember { mutableStateOf(false) }
@@ -1716,7 +1718,8 @@ fun TalonApp(
                 ourShip = loggedInShip ?: "",
                 composeTo = mailTo,
                 onComposeToConsumed = { mailTo = null },
-                onBack = { mailOpen = false },
+                initialThread = pendingMailThread,
+                onBack = { mailOpen = false; pendingMailThread = null },
                 modifier = mod,
             )
 
@@ -1848,7 +1851,7 @@ fun TalonApp(
                     onOpenStatuses = { homeOpen = false; statusFeedOpen = true },
                     onOpenConversation = { whom -> homeOpen = false; openWhom = whom },
                     onOpenChats = { homeOpen = false },
-                    onOpenMailThread = { homeOpen = false; mailOpen = true },
+                    onOpenMailThread = { id -> homeOpen = false; pendingMailThread = id; mailOpen = true },
                     onOpenMail = { homeOpen = false; mailOpen = true },
                     modifier = Modifier.windowInsetsPadding(WindowInsets.safeDrawing),
                 )
