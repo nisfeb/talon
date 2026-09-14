@@ -1189,7 +1189,11 @@ fun TalonApp(
                 else io.nisfeb.talon.urbit.UrbUnfurlCache.await(app.ktorHttp, s, c, urbUrl)
             }
         }
-    val citeResolver = remember(app) { io.nisfeb.talon.ui.TalonCiteResolver(app.db, app.repo) }
+    // Keyed on the ship: the database and repo are rebuilt on a switch,
+    // and a resolver remembered on the app alone kept the old ones.
+    val citeResolver = remember(loggedInShip, app.db, app.repo) {
+        io.nisfeb.talon.ui.TalonCiteResolver(app.db, app.repo)
+    }
     val openCitation: (io.nisfeb.talon.urbit.StoryPart.Citation) -> Unit =
         remember(citeResolver) {
             { cite ->
