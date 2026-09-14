@@ -51,6 +51,9 @@ fun RightPaneHost(
     onOpenImage: (url: String) -> Unit,
     onOpenImageList: (urls: List<String>, initialIndex: Int) -> Unit,
     onOpenMembers: (whom: String) -> Unit,
+    voiceComposer: (@Composable (enabled: Boolean, onRecorded: (path: String, durationMs: Long) -> Unit) -> Unit)? = null,
+    voicePlayer: (@Composable (path: String, sending: Boolean) -> Unit)? = null,
+    onSlashMic: (() -> Unit)? = null,
     powerFeaturesEnabled: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
@@ -90,6 +93,9 @@ fun RightPaneHost(
                     initialScrollReplyId = content.replyAnchor,
                     onOpenConversation = onOpenConversation,
                     onOpenImage = onOpenImage,
+                    voiceComposer = voiceComposer,
+                    voicePlayer = voicePlayer,
+                    onSlashMic = onSlashMic,
                     powerFeaturesEnabled = powerFeaturesEnabled,
                 )
                 is RightPaneContent.GroupInfo -> GroupInfoPane(

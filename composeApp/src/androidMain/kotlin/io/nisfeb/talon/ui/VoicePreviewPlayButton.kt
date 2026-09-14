@@ -32,7 +32,7 @@ import java.io.File
  * scrubber here would dominate the row.
  */
 @Composable
-fun VoicePreviewPlayButton(path: String, enabled: Boolean) {
+actual fun VoicePreviewPlayButton(path: String, enabled: Boolean) {
     val context = LocalContext.current
     val player = remember(path) {
         ExoPlayer.Builder(context).build().apply {

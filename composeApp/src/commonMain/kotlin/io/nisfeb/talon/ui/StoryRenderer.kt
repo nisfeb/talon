@@ -448,7 +448,7 @@ private fun StoryTableRow(
 }
 
 @Composable
-private fun FallbackInlineMediaRow(url: String, kind: MediaKind) {
+internal fun FallbackInlineMediaRow(url: String, kind: MediaKind) {
     val uriHandler = androidx.compose.ui.platform.LocalUriHandler.current
     val label = when (kind) {
         MediaKind.AUDIO -> "🔊 Play $url"

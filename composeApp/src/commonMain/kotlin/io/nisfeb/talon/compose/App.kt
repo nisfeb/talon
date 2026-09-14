@@ -1403,6 +1403,7 @@ fun App(
           }
           androidx.compose.runtime.CompositionLocalProvider(
               io.nisfeb.talon.ui.LocalImageDownloader provides imageDownloader,
+              io.nisfeb.talon.ui.LocalInlineMediaPlayer provides io.nisfeb.talon.ui.platformInlineMediaPlayer(),
               io.nisfeb.talon.mail.LocalMailTo provides mailTarget,
               io.nisfeb.talon.mail.LocalGrubberyInstall provides grubberyInstall,
               io.nisfeb.talon.ui.LocalChatDensity provides chatDensity,
@@ -1815,11 +1816,13 @@ fun App(
                         } else {
                             null
                         },
-                        // Desktop has no QR scanner (no camera to assume,
-                        // keyboard is already the fast path) but the
-                        // generator works — Compose Desktop can paint the
-                        // QR matrix and the user shows their screen to
-                        // someone scanning from a phone.
+                        // iOS scans with the camera; desktop has none to
+                        // assume and the keyboard is already the fast path.
+                        // The generator works everywhere: the QR matrix is
+                        // painted and shown to a phone.
+                        qrScanIntegration = if (io.nisfeb.talon.ui.isQrLoginScanSupported) {
+                            { onResult -> io.nisfeb.talon.ui.rememberQrLoginScanLauncher(onResult) }
+                        } else null,
                         onOpenShareQr = { shareLoginQrOpen = true },
                     )
                     // Sidebar settings drills out of Settings; both flags
@@ -2116,6 +2119,7 @@ fun App(
                     // in the right pane next to the chat. Replaces the
                     // detailSlot thread branch that lived here in Phase 2.
                     openThreadParent != null && openChat != null && !expanded -> {
+                        val threadMicTrigger = remember(openChat, openThreadParent) { kotlinx.coroutines.flow.MutableSharedFlow<Unit>(extraBufferCapacity = 1) }
                         ThreadScreen(
                             db = db,
                             repo = repo,
@@ -2132,6 +2136,9 @@ fun App(
                                 openChat = other
                             },
                             onOpenImage = { url -> viewerImageUrl = url },
+                            voiceComposer = voiceComposerFor(threadMicTrigger),
+                            onSlashMic = if (io.nisfeb.talon.ui.isVoiceMessagesSupported) { { threadMicTrigger.tryEmit(Unit) } } else null,
+                            voicePlayer = voicePreviewPlayer,
                             powerFeaturesEnabled = powerFeaturesEnabled,
                         )
                     }
@@ -2393,6 +2400,7 @@ fun App(
                                 val recordingNow = recordingControls.recording
                                 val recordedBy = recordingControls.recordedBy
                                 val onToggleRecord = recordingControls.onToggleRecord
+                                val micTrigger = remember(openChat) { kotlinx.coroutines.flow.MutableSharedFlow<Unit>(extraBufferCapacity = 1) }
                                 DmChatScreen(
                                     db = db,
                                     repo = repo,
@@ -2455,6 +2463,9 @@ fun App(
                                         } else {
                                             null
                                         },
+                                    voiceComposer = voiceComposerFor(micTrigger),
+                                    onSlashMic = if (io.nisfeb.talon.ui.isVoiceMessagesSupported) { { micTrigger.tryEmit(Unit) } } else null,
+                                    voicePlayer = voicePreviewPlayer,
                                     partyPresent = partyShown,
                                     partyStatus = partyStatus,
                                     onSlashParty = {
@@ -3036,6 +3047,7 @@ fun App(
                             } else null,
                             rightSidebar = rightPaneContent?.let { content ->
                                 {
+                                    val paneMicTrigger = remember(content) { kotlinx.coroutines.flow.MutableSharedFlow<Unit>(extraBufferCapacity = 1) }
                                     RightPaneHost(
                                         content = content,
                                         db = db,
@@ -3055,6 +3067,9 @@ fun App(
                                             viewerImageList = io.nisfeb.talon.ui.screens
                                                 .ViewerImageList(urls, idx)
                                         },
+                                        voiceComposer = voiceComposerFor(paneMicTrigger),
+                                        onSlashMic = if (io.nisfeb.talon.ui.isVoiceMessagesSupported) { { paneMicTrigger.tryEmit(Unit) } } else null,
+                                        voicePlayer = voicePreviewPlayer,
                                         onOpenMembers = { whom ->
                                             // Resolve channel-nest → group-flag
                                             // because GroupAdminScreen takes a
@@ -3125,3 +3140,14 @@ fun App(
         }
     }
 }
+
+/** The mic button slot, where the platform records; null elsewhere. */
+private fun voiceComposerFor(trigger: kotlinx.coroutines.flow.Flow<Unit>): (@Composable (enabled: Boolean, onRecorded: (String, Long) -> Unit) -> Unit)? =
+    if (!io.nisfeb.talon.ui.isVoiceMessagesSupported) null else { enabled, onRecorded ->
+        io.nisfeb.talon.ui.VoiceRecordButton(enabled = enabled, onRecorded = onRecorded, externalTrigger = trigger)
+    }
+
+private val voicePreviewPlayer: (@Composable (path: String, sending: Boolean) -> Unit)? =
+    if (!io.nisfeb.talon.ui.isVoiceMessagesSupported) null else { path, sending ->
+        io.nisfeb.talon.ui.VoicePreviewPlayButton(path = path, enabled = !sending)
+    }

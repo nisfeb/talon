@@ -23,9 +23,9 @@ import io.nisfeb.talon.login.TalonLoginUri
  * permission prompt the first time they tap Scan.
  */
 @Composable
-fun rememberQrLoginScanLauncher(
+actual fun rememberQrLoginScanLauncher(
     onResult: (TalonLoginUri.Payload?) -> Unit,
-): () -> Unit {
+): (() -> Unit)? {
     val launcher = rememberLauncherForActivityResult(ScanContract()) { result ->
         val raw = result.contents
         val payload = raw?.let(TalonLoginUri::decode)

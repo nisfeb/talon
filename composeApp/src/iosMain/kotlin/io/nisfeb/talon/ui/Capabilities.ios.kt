@@ -8,12 +8,12 @@ import platform.UIKit.UIDevice
 // BGTaskScheduler wiring that doesn't exist yet, so those gate off too.
 // Touch affordances (swipe-nav, tap-to-open-menu) are on.
 
-actual val isVoiceMessagesSupported: Boolean = false
+actual val isVoiceMessagesSupported: Boolean = true
 actual val isOnDeviceAiSupported: Boolean = false
 actual val isAssistantSupported: Boolean = true
-actual val isLoopsSupported: Boolean = false
+actual val isLoopsSupported: Boolean = true
 actual val isBackgroundSchedulingSupported: Boolean = false
-actual val isQrLoginScanSupported: Boolean = false
+actual val isQrLoginScanSupported: Boolean = true
 actual val isLocalCometSupported: Boolean = false
 actual val isTouchSwipeNavSupported: Boolean = true
 actual val hasSoftKeyboard: Boolean = true

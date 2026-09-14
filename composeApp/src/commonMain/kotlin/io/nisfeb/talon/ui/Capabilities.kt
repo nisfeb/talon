@@ -31,6 +31,7 @@ expect val isAssistantSupported: Boolean
  * a coroutine ticker (App.kt) runs due loops while the window is open;
  * loops only advance with the app running, which the screen's copy
  * states (CLAUDE.md §3: an honest ceiling, not a faked schedule).
+ * iOS: true, the same while-open ticker as desktop (App.kt is shared).
  * Gates the Loops screen + nav entry (which also require an LLM key).
  */
 expect val isLoopsSupported: Boolean
@@ -47,8 +48,9 @@ expect val isBackgroundSchedulingSupported: Boolean
 /**
  * Whether the platform can launch an in-app QR scanner for login
  * handoff (see [io.nisfeb.talon.login.TalonLoginUri]). Android: true
- * via ML Kit's GoogleCodeScanner (Play Services). Desktop: false —
- * desktops have keyboards, the manual form is already the fast path.
+ * via ZXing-android-embedded. iOS: true, AVFoundation's own reader
+ * (QrLoginScanner.ios.kt). Desktop: false — desktops have keyboards,
+ * the manual form is already the fast path.
  */
 expect val isQrLoginScanSupported: Boolean
 
