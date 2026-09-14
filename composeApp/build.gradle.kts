@@ -622,6 +622,8 @@ val iconsExtendedKeep = setOf(
     // and a calendar for the day's panel.
     "androidx/compose/material/icons/automirrored/filled/ChatKt.class",
     "androidx/compose/material/icons/filled/CalendarTodayKt.class",
+    "androidx/compose/material/icons/filled/CalendarMonthKt.class",
+    "androidx/compose/material/icons/filled/ChecklistKt.class",
     // The home dial's weather: what the sky is doing, in one glyph.
     "androidx/compose/material/icons/filled/CloudKt.class",
     "androidx/compose/material/icons/filled/WaterDropKt.class",
