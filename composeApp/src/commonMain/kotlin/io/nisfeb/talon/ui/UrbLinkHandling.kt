@@ -38,10 +38,16 @@ val LocalUrbLinkHandler = staticCompositionLocalOf<(String) -> Unit> { {} }
  */
 class UrbAwareUriHandler(
     private val delegate: UriHandler,
+    /** A talon:// address: true when it was taken to its thing. */
+    private val onTalon: ((String) -> Boolean)? = null,
     private val onUrb: (String) -> Unit,
 ) : UriHandler {
     override fun openUri(uri: String) {
-        if (UrbLink.isUrbUrl(uri)) onUrb(uri) else delegate.openUri(uri)
+        when {
+            io.nisfeb.talon.urbit.TalonLink.isTalonUrl(uri) -> if (onTalon?.invoke(uri) != true) delegate.openUri(uri)
+            UrbLink.isUrbUrl(uri) -> onUrb(uri)
+            else -> delegate.openUri(uri)
+        }
     }
 }
 

@@ -921,6 +921,10 @@ fun DmChatScreen(
                         .fromStoryJson(target.contentJson)
                     clipboardManager.setText(AnnotatedString(md))
                 },
+                onCopyLink = {
+                    actionTarget = null
+                    clipboardManager.setText(AnnotatedString(io.nisfeb.talon.urbit.TalonLink.forMessage(target.whom, target.id, target.parentId)))
+                },
                 onToggleBookmark = {
                     actionTarget = null
                     scope.launch {
@@ -2149,6 +2153,8 @@ private fun MessageActionMenu(
      *  use; this one is for forwarding / archiving / quoting where
      *  formatting matters. */
     onCopyMarkdown: () -> Unit,
+    /** Copy a talon:// address for the message, to paste anywhere. */
+    onCopyLink: () -> Unit,
     onToggleBookmark: () -> Unit,
     onEdit: () -> Unit,
     onDelete: () -> Unit,
@@ -2304,6 +2310,7 @@ private fun MessageActionMenu(
             }
             ActionRow(onClick = onCopy, label = "Copy text")
             ActionRow(onClick = onCopyMarkdown, label = "Copy as Markdown")
+            ActionRow(onClick = onCopyLink, label = "Copy link")
             if (canBookmark) {
                 ActionRow(
                     onClick = onToggleBookmark,

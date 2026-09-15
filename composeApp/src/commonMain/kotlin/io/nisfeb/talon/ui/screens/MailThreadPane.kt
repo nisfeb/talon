@@ -92,6 +92,7 @@ fun MailThreadPane(
 ) {
     val scope = rememberCoroutineScope()
     var thread by remember(threadId) { mutableStateOf<MailThread?>(null) }
+    val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
     var loading by remember(threadId) { mutableStateOf(true) }
     var drawn by remember(threadId) { mutableStateOf(false) }
     // Folded subtrees, and messages read down to their header line.
@@ -242,6 +243,7 @@ fun MailThreadPane(
                     enabled = answering != null,
                     onReply = { onCompose(intent(forwarding = false)) },
                     onForward = { onCompose(intent(forwarding = true)) },
+                    onCopyLink = { clipboard.setText(androidx.compose.ui.text.AnnotatedString(io.nisfeb.talon.urbit.TalonLink.forMail(threadId))) },
                 )
                 HorizontalDivider()
                 if (drawn) {
@@ -384,13 +386,14 @@ private fun ThreadActions(
  * than a surprise.
  */
 @Composable
-private fun MailThreadActions(enabled: Boolean, onReply: () -> Unit, onForward: () -> Unit) {
+private fun MailThreadActions(enabled: Boolean, onReply: () -> Unit, onForward: () -> Unit, onCopyLink: () -> Unit) {
     Row(
         Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
         horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         TextButton(onClick = onReply, enabled = enabled) { Text("Reply") }
         TextButton(onClick = onForward, enabled = enabled) { Text("Forward") }
+        TextButton(onClick = onCopyLink) { Text("Copy link") }
     }
 }
 

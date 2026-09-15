@@ -1186,7 +1186,28 @@ fun TalonApp(
         },
     )
     val urbAwareUriHandler = remember(platformUriHandler, urbLinkHandler) {
-        io.nisfeb.talon.ui.UrbAwareUriHandler(platformUriHandler, urbLinkHandler)
+        io.nisfeb.talon.ui.UrbAwareUriHandler(
+            delegate = platformUriHandler,
+            // A talon:// address lands on its message or mail thread.
+            onTalon = { uri ->
+                when (val link = io.nisfeb.talon.urbit.TalonLink.parse(uri)) {
+                    is io.nisfeb.talon.urbit.TalonLink.Message -> {
+                        calendarOpen = false; homeOpen = false; mailOpen = false
+                        openWhom = link.whom
+                        if (link.parentId != null) { pendingThreadAnchor = link.id; openThread = link.parentId }
+                        else pendingScrollMessageId = link.id
+                        true
+                    }
+                    is io.nisfeb.talon.urbit.TalonLink.Mail -> {
+                        calendarOpen = false; homeOpen = false
+                        pendingMailThread = link.threadId; mailOpen = true
+                        true
+                    }
+                    null -> false
+                }
+            },
+            onUrb = urbLinkHandler,
+        )
     }
     val urbFetcher: suspend (String) -> io.nisfeb.talon.urbit.UrbUnfurlCache.Unfurl? =
         remember(app) {
@@ -1756,6 +1777,7 @@ fun TalonApp(
                     twentyFourHour = app.uiSettings.homeTwentyFourHour.collectAsState().value,
                     onBack = { calendarOpen = false },
                     onOpenWebSettings = { calendarPageOpen = true },
+                    db = app.db, chat = app.repo, mail = mailRepo, ourShip = loggedInShip,
                     modifier = mod,
                 )
             }

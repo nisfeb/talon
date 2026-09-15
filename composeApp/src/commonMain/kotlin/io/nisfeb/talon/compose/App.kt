@@ -1346,7 +1346,30 @@ fun App(
           // Compose's built-in LinkAnnotation handling (statuses, bios)
           // also route here, not just the chat screens' onLinkTap.
           val urbAwareUriHandler = remember(platformUriHandler, urbLinkHandler) {
-              io.nisfeb.talon.ui.UrbAwareUriHandler(platformUriHandler, urbLinkHandler)
+              io.nisfeb.talon.ui.UrbAwareUriHandler(
+                  delegate = platformUriHandler,
+                  // A talon:// address lands on its message or mail thread.
+                  onTalon = { uri ->
+                      when (val link = io.nisfeb.talon.urbit.TalonLink.parse(uri)) {
+                          is io.nisfeb.talon.urbit.TalonLink.Message -> {
+                              showCalendar = false; showBookmarks = false
+                              uiSettings.setActiveRailTab(RailTab.Chats)
+                              jumpToChat(link.whom)
+                              if (link.parentId != null) { openThreadParent = link.parentId; openThreadReplyAnchor = link.id }
+                              else openChatFocusMessageId = link.id
+                              true
+                          }
+                          is io.nisfeb.talon.urbit.TalonLink.Mail -> {
+                              showCalendar = false; showBookmarks = false
+                              openMailThread = link.threadId
+                              uiSettings.setActiveRailTab(RailTab.Mail)
+                              true
+                          }
+                          null -> false
+                      }
+                  },
+                  onUrb = urbLinkHandler,
+              )
           }
           // Resolves a urb:// address to title+snippet for the inline
           // unfurl card, against the active ship over the authenticated
@@ -1939,6 +1962,7 @@ fun App(
                         twentyFourHour = homeTwentyFourHour,
                         onBack = { showCalendar = false },
                         onOpenWebSettings = onOpenCalendarPage,
+                        db = db, chat = repo, mail = mailRepo, ourShip = ship,
                     )
                     showBookmarks -> BookmarksScreen(
                         db = db,
@@ -2873,6 +2897,7 @@ fun App(
                                     twentyFourHour = homeTwentyFourHour,
                                     onBack = null,
                                     onOpenWebSettings = onOpenCalendarPage,
+                                    db = db, chat = repo, mail = mailRepo, ourShip = ship,
                                 )
                                 RailTab.Bookmarks -> BookmarksList(
                                     db = db,

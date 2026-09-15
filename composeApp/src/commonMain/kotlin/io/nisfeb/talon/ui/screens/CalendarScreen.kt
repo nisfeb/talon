@@ -86,6 +86,7 @@ import io.nisfeb.talon.calendar.CalendarRow
 import io.nisfeb.talon.calendar.CalendarTask
 import io.nisfeb.talon.calendar.Shares
 import io.nisfeb.talon.urbit.isValidPatp
+import io.nisfeb.talon.ui.PickConversationDialog
 import io.nisfeb.talon.ui.mapsSearchUri
 import io.nisfeb.talon.ui.openableUrl
 import io.nisfeb.talon.ui.urlsIn
@@ -140,6 +141,11 @@ fun CalendarScreen(
      *  over CalDAV, following, Google, ICS feeds. Null where the host
      *  cannot show it. */
     onOpenWebSettings: (() -> Unit)? = null,
+    /** For sending an event on: the chats, the mail, and who we are. Null keeps those actions off. */
+    db: io.nisfeb.talon.data.AppDatabase? = null,
+    chat: io.nisfeb.talon.urbit.TlonChatRepo? = null,
+    mail: io.nisfeb.talon.mail.MailRepo? = null,
+    ourShip: String? = null,
     modifier: Modifier = Modifier,
 ) {
     val availability by repo.availability.collectAsState()
@@ -263,6 +269,45 @@ fun CalendarScreen(
     fun act(doing: String, failed: String, body: suspend () -> Boolean) {
         editing = null
         say(doing, failed, body)
+    }
+    // Sending an event on: to a chat as a message, by mail with an
+    // invite file, or to a group, which is its channel and every ship
+    // in it at the time.
+    var sharingRow by remember { mutableStateOf<CalendarRow?>(null) }
+    var sharingToGroup by remember { mutableStateOf(false) }
+    var mailingRow by remember { mutableStateOf<CalendarRow?>(null) }
+    var postTo by remember { mutableStateOf<String?>(null) }
+    var pickingPostTo by remember { mutableStateOf(false) }
+    val contactMap = db?.let { io.nisfeb.talon.ui.rememberContactMap(it).value }
+    fun labelOf(whom: String) = contactMap?.conversationLabel(whom) ?: whom
+    fun whenLineOf(r: CalendarRow): String {
+        val day = daysOf(r, zone).first()
+        val d = "${d3(day.dayOfWeek)} ${day.dayOfMonth} ${MonthNames.ENGLISH_ABBREVIATED.names[day.monthNumber - 1]} ${day.year}"
+        return if (r.isTask) (r.dueLabel(zone)?.let { "$it" } ?: "No due date") else "$d · ${spanLabel(r, day, zone, twentyFourHour)}"
+    }
+    fun textOf(r: CalendarRow) = io.nisfeb.talon.calendar.eventShareText(r.name, whenLineOf(r), r.location, r.note, r.tags)
+    fun icsOf(r: CalendarRow) = io.nisfeb.talon.calendar.eventIcs(r.id, r.name, r.location, r.note, r.l, r.r, r.all)
+    suspend fun mailEvent(r: CalendarRow, to: List<String>): Boolean {
+        val m = mail ?: return false
+        val hash = runCatching { m.uploadBlob(icsOf(r).encodeToByteArray()) }.getOrNull()
+        val refs = hash?.let { listOf(io.nisfeb.talon.mail.AttachRef("event.ics", "text/calendar", it)) }.orEmpty()
+        return m.send(to, r.name.ifBlank { "An event" }, textOf(r), null, refs)
+    }
+    fun shareToChat(r: CalendarRow, whom: String) {
+        val c = chat ?: return
+        say("Sending to ${labelOf(whom)}…", "The message did not go.") { runCatching { c.send(whom, textOf(r)) }.isSuccess }
+    }
+    fun shareToGroup(r: CalendarRow, whom: String) {
+        val c = chat ?: return
+        val d = db ?: return
+        say("Sharing with ${labelOf(whom)}…", "The group could not be reached.") {
+            val flag = d.groups().channelGroupFor(whom)?.groupFlag ?: return@say false
+            val members = runCatching { c.fetchGroupAdmin(flag)?.members?.map { it.ship } }.getOrNull().orEmpty().filter { it != ourShip }
+            val posted = runCatching { c.send(whom, textOf(r)) }.isSuccess
+            val mailed = members.isEmpty() || mailEvent(r, members)
+            if (posted && mailed) status = "Posted to ${labelOf(whom)} and mailed the invite to ${members.size} ship${if (members.size == 1) "" else "s"}."
+            posted && mailed
+        }
     }
     // A task shows the moment it is typed, greyed, until the calendar's
     // own copy arrives with the refresh after the poke.
@@ -587,6 +632,13 @@ fun CalendarScreen(
                             style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
+                    if (chat != null && db != null) {
+                        androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            TextButton(onClick = { sharingRow = r; sharingToGroup = false; viewing = null }) { Text("Send to a chat") }
+                            if (mail != null) TextButton(onClick = { mailingRow = r; viewing = null }) { Text("Mail") }
+                            if (mail != null) TextButton(onClick = { sharingRow = r; sharingToGroup = true; viewing = null }) { Text("Share with a group") }
+                        }
+                    }
                     if (!readOnlyHere) {
                         Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                             if (r.isTask) TextButton(onClick = { tick(r.id, !r.done); viewing = null }) { Text(if (r.done) "Reopen" else "Done") }
@@ -618,6 +670,39 @@ fun CalendarScreen(
             dismissButton = { TextButton(onClick = { viewing = null }) { Text("Close") } },
         )
     }
+    sharingRow?.let { r ->
+        if (db != null) PickConversationDialog(
+            db = db,
+            title = if (sharingToGroup) "Share with which group?" else "Send to which chat?",
+            onlyGroups = sharingToGroup,
+            onDismiss = { sharingRow = null },
+            onPick = { whom -> if (sharingToGroup) shareToGroup(r, whom) else shareToChat(r, whom); sharingRow = null },
+        )
+    }
+    if (pickingPostTo && db != null) {
+        PickConversationDialog(db = db, title = "Post the event to which chat?", onDismiss = { pickingPostTo = false }, onPick = { postTo = it; pickingPostTo = false })
+    }
+    mailingRow?.let { r ->
+        var to by remember(r.id) { mutableStateOf("") }
+        val ships = to.split(',', ' ').map { it.trim() }.filter { it.isNotEmpty() }.map { if (it.startsWith("~")) it else "~$it" }
+        AlertDialog(
+            onDismissRequest = { mailingRow = null },
+            title = { Text("Mail the event") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("The invite goes as text with an .ics file any calendar imports.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    OutlinedTextField(value = to, onValueChange = { to = it }, label = { Text("To, ships separated by commas") }, placeholder = { Text("~sampel-palnet, ~zod") }, modifier = Modifier.fillMaxWidth())
+                }
+            },
+            confirmButton = {
+                TextButton(enabled = ships.isNotEmpty() && ships.all { isValidPatp(it) }, onClick = {
+                    mailingRow = null
+                    say("Mailing the invite…", "The mail did not go.") { mailEvent(r, ships) }
+                }) { Text("Send") }
+            },
+            dismissButton = { TextButton(onClick = { mailingRow = null }) { Text("Cancel") } },
+        )
+    }
     editing?.let { (id, draft) ->
         EventEditor(
             initial = draft,
@@ -627,7 +712,10 @@ fun CalendarScreen(
             zones = zones,
             allTags = allTags,
             twentyFourHour = twentyFourHour,
-            onDismiss = { editing = null },
+            postToLabel = if (id == null && chat != null && db != null) (postTo?.let { labelOf(it) } ?: "") else null,
+            onChoosePostTo = { pickingPostTo = true },
+            onClearPostTo = { postTo = null },
+            onDismiss = { editing = null; postTo = null },
             onSave = { d, editScope ->
                 val idx = editingIdx
                 val occurrence = editingStartMs?.let { Instant.fromEpochMilliseconds(it).toLocalDateTime(zone) }
@@ -648,6 +736,12 @@ fun CalendarScreen(
                     }
                     if (ghost != null) pendingRows = pendingRows - ghost
                     if (id != null) pendingEdits = pendingEdits - id
+                    // A new event, posted where it was asked to go.
+                    val target = postTo
+                    if (ok && id == null && target != null && chat != null && ghost != null) {
+                        runCatching { chat.send(target, textOf(ghost)) }
+                        postTo = null
+                    }
                     ok
                 }
             },
@@ -746,6 +840,10 @@ private fun EventEditor(
     /** Every tag in use, offered as the field is typed in. */
     allTags: List<String>,
     twentyFourHour: Boolean,
+    /** For a new event: the chat it will be posted to, "" for none yet, null when posting is off. */
+    postToLabel: String? = null,
+    onChoosePostTo: () -> Unit = {},
+    onClearPostTo: () -> Unit = {},
     onDismiss: () -> Unit,
     onSave: (EventDraft, EditScope) -> Unit,
     onDelete: (() -> Unit)?,
@@ -903,6 +1001,12 @@ private fun EventEditor(
                                 d = d.copy(tags = kept + t)
                             }, label = { Text("#$t") })
                         }
+                    }
+                }
+                if (postToLabel != null) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        TextButton(onClick = onChoosePostTo) { Text(if (postToLabel.isEmpty()) "Also post to a chat…" else "Posts to ${postToLabel}") }
+                        if (postToLabel.isNotEmpty()) TextButton(onClick = onClearPostTo) { Text("clear") }
                     }
                 }
                 if (recurringOccurrence) {

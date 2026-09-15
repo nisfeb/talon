@@ -18,7 +18,7 @@ fun phoneNumbersIn(text: String): List<String> =
         .filter { p -> p.count { it.isDigit() } in 7..15 && !DATE_LIKE.matches(p) }
         .distinct().toList()
 
-private val URL = Regex("""(?i)(?<![\w@])(?:https?://|urb://|www\.)[^\s<>()"']+""")
+private val URL = Regex("""(?i)(?<![\w@])(?:https?://|urb://|talon://|www\.)[^\s<>()"']+""")
 private val IMAGE_EXT = Regex("""(?i)\.(png|jpe?g|gif|webp|avif|bmp)(?:[?#].*)?$""")
 
 /** Web links in [text], trailing punctuation dropped. */
@@ -27,7 +27,7 @@ fun urlsIn(text: String): List<String> =
 
 /** The links in [text] that name an image file, ready to load. */
 fun imageUrlsIn(text: String): List<String> =
-    urlsIn(text).filter { !it.startsWith("urb://", ignoreCase = true) && IMAGE_EXT.containsMatchIn(it) }.map { openableUrl(it) }
+    urlsIn(text).filter { !it.startsWith("urb://", ignoreCase = true) && !it.startsWith("talon://", ignoreCase = true) && IMAGE_EXT.containsMatchIn(it) }.map { openableUrl(it) }
 
 /** [url] as something a browser opens: a bare www. gets its scheme. */
 fun openableUrl(url: String): String = if (url.startsWith("www.", ignoreCase = true)) "https://$url" else url
