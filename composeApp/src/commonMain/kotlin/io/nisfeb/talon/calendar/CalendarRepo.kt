@@ -16,7 +16,10 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.datetime.TimeZone
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 
 enum class CalendarAvailability { UNKNOWN, PRESENT, ABSENT, SIGNED_OUT }
 
@@ -61,6 +64,41 @@ class CalendarRepo(
     private val _zone = MutableStateFlow<String?>(null)
     /** The calendar's display zone, or null for the device's. */
     val zone: StateFlow<String?> = _zone.asStateFlow()
+    private val _notice = MutableStateFlow<String?>(null)
+    /** Something done on the reader's behalf, said once. */
+    val notice: StateFlow<String?> = _notice.asStateFlow()
+    fun clearNotice() { _notice.value = null }
+    private var zoneAdopted = false
+
+    /** The device's zone, in the calendar's words, or null if unknown to it. */
+    suspend fun deviceZone(): String? {
+        val id = TimeZone.currentSystemDefault().id
+        return id.takeIf { it in zones() }
+    }
+
+    /** Set the calendar's own zone: the one its times are read in. */
+    suspend fun setZone(zone: String): Boolean = poke(buildJsonObject { put("action", "config"); put("zone", zone) })
+
+    /**
+     * A calendar with no zone reads every wall clock as UTC, so an
+     * event made for 4pm shows at 4pm UTC on every clock but the
+     * editor's. Done once per attach: the device's zone becomes the
+     * calendar's, and the reader is told.
+     */
+    private suspend fun adoptZoneIfNone() {
+        if (zoneAdopted || _zone.value != null) return
+        zoneAdopted = true
+        val z = deviceZone() ?: return
+        val a = api ?: return
+        if (ball.isEmpty()) ball = runCatching { a.config().ball }.getOrDefault("")
+        if (!runCatching { a.poke(ball, buildJsonObject { put("action", "config"); put("zone", z) }) }.getOrDefault(false)) return
+        delay(400)
+        runCatching { a.config() }.getOrNull()?.let { _zone.value = it.zone }
+        if (_zone.value == z) {
+            _notice.value = "The calendar had no zone, so its times were read as UTC. It is now $z. An event made before this keeps its old time until it is saved again."
+            Log.i(TAG, "calendar zone was unset; adopted $z")
+        }
+    }
     private val _error = MutableStateFlow<String?>(null)
     val error: StateFlow<String?> = _error.asStateFlow()
     /** What config.json named as the poke target; empty until read. */
@@ -145,6 +183,8 @@ class CalendarRepo(
     fun attach(baseUrl: String) {
         if (api != null && api?.let { true } == true && shipUrl == baseUrl) return
         shipUrl = baseUrl
+        zoneAdopted = false
+        zoneNames = null
         api = CalendarApi(http, baseUrl)
         _availability.value = CalendarAvailability.UNKNOWN
         _rows.value = null
@@ -206,6 +246,7 @@ class CalendarRepo(
             runCatching { a.config() }.getOrNull()?.let { _zone.value = it.zone; ball = it.ball }
             _availability.value = CalendarAvailability.PRESENT
             _error.value = null
+            adoptZoneIfNone()
         } catch (e: AuspexError) {
             when {
                 e.isSignedOut -> {

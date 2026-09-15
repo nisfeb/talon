@@ -137,6 +137,7 @@ fun CalendarScreen(
     val hidden by repo.hidden.collectAsState()
     val zoneId by repo.zone.collectAsState()
     val error by repo.error.collectAsState()
+    val notice by repo.notice.collectAsState()
     val zone = zoneFor(zoneId)
     val scope = rememberCoroutineScope()
 
@@ -380,6 +381,12 @@ fun CalendarScreen(
         error?.let {
             Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(horizontal = 16.dp))
         }
+        notice?.let {
+            Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
+                TextButton(onClick = { repo.clearNotice() }) { Text("OK") }
+            }
+        }
         val dayRows = byDay[selected].orEmpty()
         Box(Modifier.weight(1f).fillMaxWidth()) {
             if (rows == null) {
@@ -520,9 +527,14 @@ fun CalendarScreen(
         )
     }
     if (managing) {
+        var deviceZone by remember { mutableStateOf<String?>(null) }
+        LaunchedEffect(Unit) { deviceZone = repo.deviceZone() }
         CalendarsDialog(
             calendars = calendars,
             shares = shares,
+            zone = zoneId,
+            deviceZone = deviceZone,
+            onSetZone = { z -> act("Setting the zone…", "The ship did not take the zone.") { repo.setZone(z) } },
             onDismiss = { managing = false },
             onMakeLocal = { id -> scope.launch { if (!repo.makeLocal(id)) status = "The ship would not make that calendar local." } },
             onOpenWebSettings = onOpenWebSettings,
@@ -791,6 +803,10 @@ private fun CalendarsDialog(
     calendars: List<CalendarInfo>,
     /** Null on a calendar too old to share with ships. */
     shares: Shares?,
+    /** The calendar's own zone, null for none; the device's, if the calendar knows it. */
+    zone: String?,
+    deviceZone: String?,
+    onSetZone: (String) -> Unit,
     onDismiss: () -> Unit,
     onMakeLocal: (id: String) -> Unit,
     onOpenWebSettings: (() -> Unit)?,
@@ -901,6 +917,14 @@ private fun CalendarsDialog(
                 }
                 if (!shares?.accepted.isNullOrEmpty()) {
                     TextButton(onClick = onSync) { Text("Pull shared calendars now") }
+                }
+                HorizontalDivider()
+                Text(
+                    if (zone == null) "Times are read as UTC: the calendar has no zone." else "Times are in $zone.",
+                    style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                if (deviceZone != null && deviceZone != zone) {
+                    TextButton(onClick = { onSetZone(deviceZone); onDismiss() }) { Text("Use this device's zone ($deviceZone)") }
                 }
                 HorizontalDivider()
                 Text("New calendar", style = MaterialTheme.typography.labelMedium)
