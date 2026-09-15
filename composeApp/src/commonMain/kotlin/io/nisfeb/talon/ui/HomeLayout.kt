@@ -200,13 +200,13 @@ data class HomeLayout(
         val seen = mutableSetOf<HomeWidgetKind>()
         val kept = widgets.filter { seen.add(it.kind) }.map { it.sane() }
         // The assistant's tile is the exception: its point is being one
-        // tap away, so it arrives switched on, in a row of its own
-        // under everything the page already shows.
+        // tap away, so it arrives switched on, a small square at the
+        // right under everything the page already shows.
         val bottom = kept.filter { it.visible }.maxOfOrNull { it.row + it.rows } ?: 0
         val missing = HomeWidgetKind.entries
             .filterNot { it in seen }
             .map {
-                if (it == HomeWidgetKind.ASSISTANT) HomeWidget(kind = it, col = 0, row = bottom, span = HOME_COLUMNS, rows = 3)
+                if (it == HomeWidgetKind.ASSISTANT) HomeWidget(kind = it, col = HOME_COLUMNS - 3, row = bottom, span = 3, rows = 3)
                 else HomeWidget(kind = it, visible = false)
             }
         // Not untangled. An arrangement is whatever somebody made of
@@ -230,7 +230,7 @@ data class HomeLayout(
                 HomeWidget(HomeWidgetKind.MESSAGES, count = 5, col = 5, row = 0, span = 7, rows = 5),
                 HomeWidget(HomeWidgetKind.MAIL, count = 5, col = 5, row = 5, span = 7, rows = 4),
                 HomeWidget(HomeWidgetKind.CALENDAR, col = 0, row = 15, span = 5, rows = 4),
-                HomeWidget(HomeWidgetKind.ASSISTANT, col = 5, row = 9, span = 7, rows = 3),
+                HomeWidget(HomeWidgetKind.ASSISTANT, col = 9, row = 9, span = 3, rows = 3),
                 HomeWidget(
                     HomeWidgetKind.STATUS, visible = false, count = 5,
                     col = 5, row = 9, span = 7, rows = 4,

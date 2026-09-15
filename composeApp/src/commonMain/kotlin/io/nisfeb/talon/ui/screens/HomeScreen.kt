@@ -1160,56 +1160,34 @@ internal fun dayLabel(t: LocalDateTime): String {
  * the difference between a week and a quarter.
  */
 /**
- * A big button, really: tap it and the assistant is listening (or, on
- * a platform that cannot listen, ready to be typed to). The widget
- * exists so an instruction is one tap from the page that opens first.
+ * A button, really: tap it and the assistant is listening (or, on a
+ * platform that cannot listen, ready to be typed to). A square the
+ * size of the tile's shorter side, the icon alone; the widget exists
+ * so an instruction is one tap from the page that opens first.
  */
 @Composable
 private fun AssistantPanel(onOpen: ((Boolean) -> Unit)?, onLongPress: () -> Unit) {
     val listens = io.nisfeb.talon.ui.isDictationSupported
-    Surface(
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.30f),
-        shape = RoundedCornerShape(10.dp),
-        modifier = Modifier.fillMaxSize(),
-    ) {
-        Row(
-            Modifier
-                .fillMaxSize()
-                .combinedClickable(onClick = { onOpen?.invoke(listens) }, onLongClick = onLongPress)
-                .padding(horizontal = 16.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(14.dp),
+    androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        val side = minOf(maxWidth, maxHeight)
+        Surface(
+            color = if (onOpen != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.30f),
+            shape = RoundedCornerShape(side / 5),
+            modifier = Modifier.size(side),
         ) {
             Box(
-                Modifier.size(44.dp).clip(CircleShape)
-                    .background(if (onOpen != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant),
+                Modifier.fillMaxSize().combinedClickable(onClick = { onOpen?.invoke(listens) }, onLongClick = onLongPress),
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(
                     if (listens) Icons.Filled.Mic else Icons.Filled.Edit,
-                    contentDescription = null,
-                    tint = if (onOpen != null) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            Column(Modifier.weight(1f)) {
-                Text(
-                    when {
+                    contentDescription = when {
                         onOpen == null -> "Assistant is off"
                         listens -> "Tell your assistant"
                         else -> "Ask your assistant"
                     },
-                    style = MaterialTheme.typography.titleSmall,
-                )
-                Text(
-                    when {
-                        onOpen == null -> "Turn it on under Settings, AI."
-                        listens -> "Tap, then say what you need: mail, a meeting, a message, a call."
-                        else -> "Tap and type what you need: mail, a meeting, a message, a call."
-                    },
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
+                    tint = if (onOpen != null) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(side * 0.45f),
                 )
             }
         }
@@ -1238,6 +1216,8 @@ private fun CalendarPanel(
     val shares = calendar?.shares?.collectAsState()?.value
     val offers = shares?.offers?.size ?: 0
     val readOnly = shares?.readOnly.orEmpty()
+    // Ticked here, until the refresh after the poke drops the line.
+    var ticked by remember { mutableStateOf(setOf<String>()) }
     val scope = rememberCoroutineScope()
     var installing by remember { mutableStateOf(false) }
     var installError by remember { mutableStateOf<String?>(null) }
@@ -1302,8 +1282,11 @@ private fun CalendarPanel(
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             androidx.compose.material3.Checkbox(
-                                checked = false,
-                                onCheckedChange = { scope.launch { calendar!!.setDone(t.id, true) } },
+                                checked = t.id in ticked,
+                                onCheckedChange = {
+                                    ticked = ticked + t.id
+                                    scope.launch { if (!calendar!!.setDone(t.id, true)) ticked = ticked - t.id }
+                                },
                                 enabled = t.cal !in readOnly,
                                 modifier = Modifier.size(32.dp),
                             )
