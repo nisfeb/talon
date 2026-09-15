@@ -52,6 +52,9 @@ class CalendarRepo(
     private val _tasks = MutableStateFlow<List<CalendarTask>?>(null)
     /** Every task, open or done, dated or not; null before the first answer. */
     val tasks: StateFlow<List<CalendarTask>?> = _tasks.asStateFlow()
+    /** Every synced calendar's last pull and error, by id: Google, followed, and shared with us. */
+    private val _sync = MutableStateFlow<Map<String, SyncRow>>(emptyMap())
+    val sync: StateFlow<Map<String, SyncRow>> = _sync.asStateFlow()
     private val _shares = MutableStateFlow<Shares?>(null)
     /** Sharing with ships; null on a calendar too old to have it. */
     val shares: StateFlow<Shares?> = _shares.asStateFlow()
@@ -161,6 +164,19 @@ class CalendarRepo(
     suspend fun accept(key: String): Boolean = after(settleMs = 1500) { it.accept(key) }
     suspend fun syncShares(): Boolean { lastShareSyncMs = nowMs(); return after(settleMs = 1500) { it.syncShares() } }
 
+    /** Every sync this calendar has, prodded now: Google, followed, shared. */
+    suspend fun syncNow(): Boolean {
+        val a = api ?: return false
+        val kinds = _calendars.value.map { it.kind }.toSet()
+        var ok = true
+        if ("google" in kinds) ok = runCatching { a.syncGoogle() }.getOrDefault(false) && ok
+        if ("caldav" in kinds) ok = runCatching { a.syncCaldav() }.getOrDefault(false) && ok
+        if (_shares.value?.accepted.orEmpty().isNotEmpty()) { lastShareSyncMs = nowMs(); ok = runCatching { a.syncShares() }.getOrDefault(false) && ok }
+        delay(1500)
+        refresh()
+        return ok
+    }
+
     private suspend fun after(settleMs: Long = 0, call: suspend (CalendarApi) -> Boolean): Boolean {
         val a = api ?: return false
         val ok = runCatching { call(a) }.getOrDefault(false)
@@ -250,6 +266,11 @@ class CalendarRepo(
             _shares.value = runCatching { a.shares() }.getOrElse { e ->
                 if (e is AuspexError.Refused && e.status == AuspexApi.NOT_FOUND) null else _shares.value
             }
+            _sync.value = buildMap {
+                runCatching { a.google() }.getOrNull()?.linked?.forEach { (id, row) -> put(id, row) }
+                runCatching { a.caldavSubscriptions() }.getOrNull()?.forEach { put(it.id, SyncRow(it.lastMs, it.error)) }
+                _shares.value?.accepted?.forEach { (id, acc) -> put(id, SyncRow(acc.lastMs, acc.error)) }
+            }.ifEmpty { if (_calendars.value.any { it.kind != "local" }) _sync.value else emptyMap() }
             _tags.value = runCatching { a.tags() }.getOrDefault(emptyList()).map { it.tag }
             runCatching { a.config() }.getOrNull()?.let { _zone.value = it.zone; ball = it.ball }
             _availability.value = CalendarAvailability.PRESENT

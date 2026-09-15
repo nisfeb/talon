@@ -85,6 +85,7 @@ import io.nisfeb.talon.calendar.CalendarRepo
 import io.nisfeb.talon.calendar.CalendarRow
 import io.nisfeb.talon.calendar.CalendarTask
 import io.nisfeb.talon.calendar.Shares
+import io.nisfeb.talon.calendar.SyncRow
 import io.nisfeb.talon.urbit.isValidPatp
 import io.nisfeb.talon.ui.PickConversationDialog
 import io.nisfeb.talon.ui.mapsSearchUri
@@ -158,6 +159,7 @@ fun CalendarScreen(
     var weekView by remember { mutableStateOf(false) }
     val calendars by repo.calendars.collectAsState()
     val shares by repo.shares.collectAsState()
+    val syncRows by repo.sync.collectAsState()
     val readOnly = shares?.readOnly.orEmpty()
     val hidden by repo.hidden.collectAsState()
     val zoneId by repo.zone.collectAsState()
@@ -770,6 +772,7 @@ fun CalendarScreen(
             shares = shares,
             zone = zoneId,
             zones = zones,
+            sync = syncRows,
             deviceZone = deviceZone,
             onSetZone = { z -> act("Setting the zone…", "The ship did not take the zone.") { repo.setZone(z) } },
             onDismiss = { managing = false },
@@ -789,7 +792,7 @@ fun CalendarScreen(
             onRevoke = { id, ship -> say("Revoking…", "The ship did not revoke it.") { repo.revoke(id, ship) } },
             onAccept = { key -> say("Accepting…", "The ship would not accept that offer.") { repo.accept(key) } },
             onDecline = { key -> say("Declining…", "The ship did not decline it.") { repo.decline(key) } },
-            onSync = { say("Pulling shared calendars…", "The ship did not pull them.") { repo.syncShares() } },
+            onSync = { say("Syncing…", "A sync did not start; the rows say which.") { repo.syncNow() } },
             onAdd = { name, colour ->
                 val id = name.lowercase().replace(Regex("[^a-z0-9]+"), "-").trim('-').ifBlank { "cal" }
                 say("Adding \"$name\"…", "The ship did not add the calendar.") {
@@ -1073,6 +1076,8 @@ private fun CalendarsDialog(
     /** The calendar's own zone, null for none; every zone it knows; the device's, if among them. */
     zone: String?,
     zones: List<String>,
+    /** Each synced calendar's last pull and error, by id. */
+    sync: Map<String, SyncRow>,
     deviceZone: String?,
     onSetZone: (String) -> Unit,
     onDismiss: () -> Unit,
@@ -1187,25 +1192,35 @@ private fun CalendarsDialog(
                                 Text("${c.count} event${if (c.count == 1) "" else "s"}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                             val acc = shares?.accepted?.get(c.id)
-                            Text(
-                                when (c.kind) {
-                                    "google" -> "Google"
-                                    "caldav" -> "Followed"
-                                    "ship" -> when {
-                                        acc == null -> "Shared with you"
-                                        acc.error.isNotBlank() -> "Shared with you · ${acc.error}"
-                                        else -> "Shared with you by ${acc.host}" + if (acc.mode == "edit") "" else " · read only"
-                                    }
-                                    else -> if (shares?.shares?.get(c.id).isNullOrEmpty()) "" else "Shared with ${shares!!.shares[c.id]!!.size}"
-                                },
-                                style = MaterialTheme.typography.labelSmall,
-                                color = if (acc?.error?.isNotBlank() == true) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
+                            val row = sync[c.id]
+                            val synced = when {
+                                c.kind == "local" -> null
+                                row == null -> "not synced yet"
+                                row.lastMs == 0L -> "not synced yet"
+                                else -> "synced ${agoLabel(row.lastMs)}"
+                            }
+                            val error = row?.error?.takeIf { it.isNotBlank() }
+                            Column(horizontalAlignment = Alignment.End) {
+                                Text(
+                                    when (c.kind) {
+                                        "google" -> "Google"
+                                        "caldav" -> "Followed"
+                                        "ship" -> "Shared with you" + (acc?.let { " by ${it.host}" + if (it.mode == "edit") "" else " · read only" } ?: "")
+                                        else -> if (shares?.shares?.get(c.id).isNullOrEmpty()) "" else "Shared with ${shares!!.shares[c.id]!!.size}"
+                                    } + (synced?.let { " · $it" } ?: ""),
+                                    style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                                if (error != null) Text(error, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                            }
                         }
                     }
                 }
-                if (!shares?.accepted.isNullOrEmpty()) {
-                    TextButton(onClick = onSync) { Text("Pull shared calendars now") }
+                if (calendars.any { it.kind != "local" }) {
+                    Text(
+                        "Synced calendars are pulled every few minutes; a change made elsewhere shows after the next pull, and one shared onward from a Google or followed calendar takes two.",
+                        style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    TextButton(onClick = onSync) { Text("Sync now") }
                 }
                 HorizontalDivider()
                 Text(
@@ -1511,5 +1526,17 @@ private fun WeekGrid(
                 }
             }
         }
+    }
+}
+
+/** "3 min ago", "2 h ago", "yesterday": for a sync's last pull. */
+private fun agoLabel(ms: Long): String {
+    val d = (nowMs() - ms).coerceAtLeast(0) / 60_000
+    return when {
+        d < 1 -> "just now"
+        d < 60 -> "$d min ago"
+        d < 24 * 60 -> "${d / 60} h ago"
+        d < 48 * 60 -> "yesterday"
+        else -> "${d / (24 * 60)} days ago"
     }
 }

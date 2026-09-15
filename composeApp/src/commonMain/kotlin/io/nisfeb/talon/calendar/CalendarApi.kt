@@ -110,6 +110,18 @@ data class Shares(
     val readOnly: Set<String> get() = accepted.filterValues { it.mode != "edit" }.keys
 }
 
+/** How a synced calendar last fared: when it was pulled, and what went wrong if anything. */
+@Serializable
+data class SyncRow(@SerialName("last_ms") val lastMs: Long = 0, val error: String = "")
+
+/** google.json: whether an account is connected, and each linked calendar's sync row by its id here. */
+@Serializable
+data class GoogleStatus(val connected: Boolean = false, val linked: Map<String, SyncRow> = emptyMap())
+
+/** One followed CalDAV calendar, keyed by its id here. */
+@Serializable
+data class CaldavSubscription(val id: String, val url: String = "", @SerialName("last_ms") val lastMs: Long = 0, val error: String = "")
+
 @Serializable
 data class CalendarConfig(val title: String = "", val zone: String? = null, val ball: String = "")
 
@@ -146,6 +158,12 @@ class CalendarApi(private val http: HttpClient, baseUrl: String) {
      *  last pull, then the sync row goes. The source is left alone. */
     suspend fun migrate(calId: String): Boolean =
         postJson("$root/migrate", buildJsonObject { put("id", calId) })
+
+    suspend fun google(): GoogleStatus = decode(get("/google.json"))
+    suspend fun caldavSubscriptions(): List<CaldavSubscription> = decode(get("/caldav/subscriptions.json"))
+    /** Pull and push now rather than on the next tick. */
+    suspend fun syncGoogle(): Boolean = postJson("$root/google/sync", JsonObject(emptyMap()))
+    suspend fun syncCaldav(): Boolean = postJson("$root/caldav/sync", JsonObject(emptyMap()))
 
     /** Sharing with ships; a 404 means a calendar too old to have it. */
     suspend fun shares(): Shares = decode(get("/share/shares.json"))
