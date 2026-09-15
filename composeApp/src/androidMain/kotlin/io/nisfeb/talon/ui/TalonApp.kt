@@ -521,14 +521,8 @@ fun TalonApp(
         floatingPartyState !is io.nisfeb.talon.call.PartyState.Idle &&
         !inlineCallUiShown.value
 
-    /** A ship whose invite-me code was scanned or tapped: pick a group to invite it to. */
+    /** A ship whose invite-me code was scanned or tapped: message it, or invite it to a group. */
     var inviteShipFromCode by remember { mutableStateOf<String?>(null) }
-    inviteShipFromCode?.let { ship ->
-        io.nisfeb.talon.ui.InviteToGroupDialog(
-            db = app.db, repo = app.repo, ship = ship, shipName = io.nisfeb.talon.ui.shipHandle(ship),
-            onDismiss = { inviteShipFromCode = null },
-        )
-    }
     var openGroupFlag by remember {
         mutableStateOf(initialOpenWhom?.takeIf { it.startsWith("group:") }?.removePrefix("group:"))
     }
@@ -597,6 +591,18 @@ fun TalonApp(
     var homeOpen by remember { mutableStateOf(false) }
     var settingsOpen by remember { mutableStateOf(false) }
     var assistantOpen by remember { mutableStateOf(false) }
+    inviteShipFromCode?.let { ship ->
+        io.nisfeb.talon.ui.InviteToGroupDialog(
+            db = app.db, repo = app.repo, ship = ship, shipName = io.nisfeb.talon.ui.shipHandle(ship),
+            onDismiss = { inviteShipFromCode = null },
+            onMessage = {
+                inviteShipFromCode = null
+                calendarOpen = false; homeOpen = false; assistantOpen = false; assistantListen = false; mailOpen = false
+                newDmOpen = false; openGroupFlag = null
+                openWhom = ship
+            },
+        )
+    }
     var loopsOpen by remember { mutableStateOf(false) }
     var sidebarSettingsOpen by remember { mutableStateOf(false) }
     var adminListOpen by remember { mutableStateOf(false) }

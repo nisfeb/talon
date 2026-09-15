@@ -41,9 +41,9 @@ import io.nisfeb.talon.urbit.TlonChatRepo
 import kotlinx.coroutines.launch
 
 /**
- * Invite [ship] to one of our groups: what a scanned "invite me" code
- * opens. Groups we administer come first. A member of any other group
- * may still try; its host decides, and a refusal says so here.
+ * What a scanned "invite me" code opens: message [ship], or invite it to
+ * one of our groups. Groups we administer come first. A member of any
+ * other group may still try; its host decides, and a refusal says so.
  */
 @Composable
 fun InviteToGroupDialog(
@@ -52,6 +52,8 @@ fun InviteToGroupDialog(
     ship: String,
     shipName: String,
     onDismiss: () -> Unit,
+    /** Open a DM with [ship]. Null hides the button. */
+    onMessage: (() -> Unit)? = null,
 ) {
     val scope = rememberCoroutineScope()
     val groups by remember(db) { db.groups().streamGroups() }.collectAsState(initial = emptyList())
@@ -66,13 +68,13 @@ fun InviteToGroupDialog(
     }
     AlertDialog(
         onDismissRequest = { if (busy == null) onDismiss() },
-        title = { Text("Invite $shipName") },
+        title = { Text(shipName) },
         text = {
             Column {
                 OutlinedTextField(
                     value = query,
                     onValueChange = { query = it },
-                    placeholder = { Text("Find a group") },
+                    placeholder = { Text("Invite to a group") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
@@ -120,6 +122,9 @@ fun InviteToGroupDialog(
             }
         },
         confirmButton = { TextButton(onClick = onDismiss, enabled = busy == null) { Text("Done") } },
+        dismissButton = if (onMessage != null) {
+            { TextButton(onClick = onMessage, enabled = busy == null) { Text("Message") } }
+        } else null,
     )
 }
 

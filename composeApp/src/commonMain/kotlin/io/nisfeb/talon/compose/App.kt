@@ -358,7 +358,7 @@ fun App(
     var showGroupAdminList by remember { mutableStateOf(false) }
     var openGroupAdminFlag by remember { mutableStateOf<String?>(null) }
     var openGroupHomeFlag by remember { mutableStateOf<String?>(null) }
-    /** A ship whose invite-me code was scanned or tapped: pick a group to invite it to. */
+    /** A ship whose invite-me code was scanned or tapped: message it, or invite it to a group. */
     var inviteShipFromCode by remember { mutableStateOf<String?>(null) }
     // Notebook overlay state. notebookComposeOpen + notebookEdit*
     // mirror production's edit flow: tap Edit on a post → close
@@ -1031,6 +1031,12 @@ fun App(
             io.nisfeb.talon.ui.InviteToGroupDialog(
                 db = db, repo = repo, ship = ship, shipName = io.nisfeb.talon.ui.shipHandle(ship),
                 onDismiss = { inviteShipFromCode = null },
+                onMessage = {
+                    inviteShipFromCode = null
+                    showCalendar = false; showBookmarks = false; showAssistant = false
+                    uiSettings.setActiveRailTab(RailTab.Chats)
+                    jumpToChat(ship)
+                },
             )
         }
         val calendarInstall: suspend () -> Result<Unit> = remember(session, calendarRepo) {
