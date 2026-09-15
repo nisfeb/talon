@@ -178,6 +178,14 @@ interface AzimuthRpc {
      *  asked at all -- which is not cached, and is asked again. */
     suspend fun fingerprint(ship: String): kotlin.Result<Answer>
 
+    /** A ship's public keys, as Azimuth holds them. */
+    data class Keys(val auth: String, val crypt: String, val suite: Int)
+
+    /** [Keys] for a ship, or null where Azimuth holds none. Failure is
+     *  the lookup itself not happening. */
+    suspend fun keys(ship: String): kotlin.Result<Keys?> =
+        kotlin.Result.failure(IllegalStateException("no azimuth-rpc"))
+
     companion object {
         /** For hosts with no %azimuth-rpc: nothing can be asked. */
         val None: AzimuthRpc = object : AzimuthRpc {
@@ -201,6 +209,21 @@ class EyreAzimuthRpc(
 ) : AzimuthRpc {
 
     override suspend fun fingerprint(ship: String): kotlin.Result<AzimuthRpc.Answer> = runCatching {
+        AzimuthRpc.Answer(keysObject(ship)?.let(::fingerprintOf))
+    }
+
+    override suspend fun keys(ship: String): kotlin.Result<AzimuthRpc.Keys?> = runCatching {
+        val k = keysObject(ship) ?: return@runCatching null
+        val suite = k["suite"]?.jsonPrimitive?.content?.toIntOrNull() ?: return@runCatching null
+        val auth = hex32(k["auth"]?.jsonPrimitive?.content) ?: return@runCatching null
+        val crypt = hex32(k["crypt"]?.jsonPrimitive?.content) ?: return@runCatching null
+        // All-zero keys are a ship that has never set any.
+        if (auth.all { it == 0.toByte() } && crypt.all { it == 0.toByte() }) return@runCatching null
+        AzimuthRpc.Keys(auth = hex(auth), crypt = hex(crypt), suite = suite)
+    }
+
+    /** The `keys` object out of one getPoint, or null when the point has none. */
+    private suspend fun keysObject(ship: String): JsonObject? {
         val body = buildJsonObject {
             put("jsonrpc", "2.0")
             put("id", "talon-nym")
@@ -213,13 +236,12 @@ class EyreAzimuthRpc(
         }
         // A 404 is the agent saying "no such point": an answer. Any
         // other non-success is the request failing, and throws.
-        if (resp.status.value == 404) return@runCatching AzimuthRpc.Answer(null)
+        if (resp.status.value == 404) return null
         if (!resp.status.isSuccess()) error("azimuth-rpc ${resp.status.value}")
-        val keys = json.parseToJsonElement(resp.bodyAsText())
+        return json.parseToJsonElement(resp.bodyAsText())
             .jsonObject["result"]?.jsonObject
             ?.get("network")?.jsonObject
             ?.get("keys")?.jsonObject
-        AzimuthRpc.Answer(keys?.let(::fingerprintOf))
     }
 
     internal companion object {
@@ -235,6 +257,10 @@ class EyreAzimuthRpc(
             return AzimuthFingerprint.of(auth, crypt, suite)
         }
 
+        /** A key back as hex, the way Azimuth renders one. */
+        internal fun hex(bytes: ByteArray): String =
+            "0x" + bytes.joinToString("") { b -> (b.toInt() and 0xFF).toString(16).padStart(2, '0') }
+
         /** A 32-byte key from hex, left-padded: a key with leading
          *  zero bytes is still a 32-byte key. */
         internal fun hex32(s: String?): ByteArray? {
@@ -244,4 +270,16 @@ class EyreAzimuthRpc(
             return ByteArray(32) { padded.substring(it * 2, it * 2 + 2).toInt(16).toByte() }
         }
     }
+}
+
+/**
+ * A ship's public keys as one block to hand to somebody: who they
+ * belong to, and both keys. Azimuth already publishes these; this is
+ * the copy a person can paste into a message.
+ */
+fun shipKeyBlock(ship: String, keys: AzimuthRpc.Keys): String = buildString {
+    append(ship).append('\n')
+    append("signing: ").append(keys.auth).append('\n')
+    append("encryption: ").append(keys.crypt).append('\n')
+    append("suite: ").append(keys.suite)
 }

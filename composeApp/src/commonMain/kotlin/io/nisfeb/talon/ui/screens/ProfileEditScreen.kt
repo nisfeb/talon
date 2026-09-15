@@ -58,6 +58,8 @@ fun ProfileEditScreen(
     repo: TlonChatRepo,
     ourPatp: String,
     onBack: () -> Unit,
+    /** Reads this ship's public keys out of Azimuth, for showing and copying. */
+    keys: io.nisfeb.talon.ui.AzimuthRpc = io.nisfeb.talon.ui.AzimuthRpc.None,
     modifier: Modifier = Modifier,
 ) {
     val scope = rememberCoroutineScope()
@@ -70,6 +72,21 @@ fun ProfileEditScreen(
     var saving by remember { mutableStateOf(false) }
     var uploading by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
+    var shipKeys by remember(ourPatp) { mutableStateOf<io.nisfeb.talon.ui.AzimuthRpc.Keys?>(null) }
+    var keysProblem by remember(ourPatp) { mutableStateOf<String?>(null) }
+    val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
+    var copied by remember(ourPatp) { mutableStateOf(false) }
+
+    LaunchedEffect(ourPatp, keys) {
+        if (ourPatp.isBlank()) return@LaunchedEffect
+        keys.keys(ourPatp).fold(
+            onSuccess = { k ->
+                shipKeys = k
+                keysProblem = if (k == null) "Azimuth holds no keys for this ship." else null
+            },
+            onFailure = { keysProblem = "Could not read your keys from your ship's Azimuth." },
+        )
+    }
 
     LaunchedEffect(ourPatp) {
         val c = db.contacts().get(ourPatp) ?: return@LaunchedEffect
@@ -232,6 +249,38 @@ fun ProfileEditScreen(
             ) { Text(if (saving) "Saving…" else "Save") }
 
             HorizontalDivider()
+            // The ship's own networking keys, which are public: Azimuth
+            // holds them, so anyone can already read them. Shown here so
+            // they can be handed to someone who asks for them.
+            Column(modifier = Modifier.fillMaxWidth()) {
+                Text(
+                    "Public keys",
+                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
+                )
+                val k = shipKeys
+                if (k == null) {
+                    Text(
+                        keysProblem ?: "Reading your keys…",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                } else {
+                    Text(
+                        "Your ship's networking keys, as Azimuth holds them.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    KeyLine("Signing", k.auth)
+                    KeyLine("Encryption", k.crypt)
+                    TextButton(onClick = {
+                        clipboard.setText(androidx.compose.ui.text.AnnotatedString(io.nisfeb.talon.ui.shipKeyBlock(ourPatp, k)))
+                        copied = true
+                    }) { Text(if (copied) "Copied" else "Copy keys") }
+                }
+            }
+
+            HorizontalDivider()
             // A code to post where people will see it. Someone who runs a
             // group scans it from Talon's + screen and invites this ship.
             io.nisfeb.talon.ui.ShareQr(
@@ -306,4 +355,13 @@ private fun parseSwatch(hex: String): Color {
     val g = h.substring(2, 4).toInt(16)
     val b = h.substring(4, 6).toInt(16)
     return Color(r, g, b)
+}
+
+/** One key, labelled, wrapping rather than trailing off the screen. */
+@Composable
+private fun KeyLine(label: String, key: String) {
+    Column(modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp)) {
+        Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(key, style = MaterialTheme.typography.bodySmall)
+    }
 }
