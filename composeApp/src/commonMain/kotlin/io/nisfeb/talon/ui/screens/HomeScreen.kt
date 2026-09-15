@@ -805,6 +805,10 @@ private fun Panel(
     title: String,
     icon: ImageVector,
     action: Pair<String, () -> Unit>? = null,
+    /** Let the rows run past the widget's height and be scrolled to.
+     *  The grid measures every widget at a fixed height, so the body is
+     *  bounded and its scroll nests inside the page's own. */
+    scrollable: Boolean = false,
     content: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit,
 ) {
     Surface(
@@ -840,7 +844,14 @@ private fun Panel(
                 Modifier.padding(horizontal = 14.dp),
                 color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
             )
-            Column(Modifier.padding(top = 2.dp)) { content() }
+            val body = if (!scrollable) {
+                Modifier.padding(top = 2.dp)
+            } else {
+                // fill = false so a short list still sits at the top
+                // rather than being stretched down the whole widget.
+                Modifier.weight(1f, fill = false).padding(top = 2.dp).verticalScroll(rememberScrollState())
+            }
+            Column(body) { content() }
         }
     }
 }
@@ -1256,7 +1267,7 @@ private fun CalendarPanel(
         }
     }
     val action = onOpen?.takeIf { availability == CalendarAvailability.PRESENT }?.let { "Calendar" to it }
-    Panel("Today", Icons.Filled.CalendarToday, action) {
+    Panel("Today", Icons.Filled.CalendarToday, action, scrollable = true) {
         when {
             calendar == null -> Empty("This host has no calendar.")
 
@@ -1301,7 +1312,7 @@ private fun CalendarPanel(
                     if (offers == 0) Empty(if (range == CalendarRange.NEXT_ONLY) "Nothing coming up." else "Nothing scheduled.")
                 } else {
                     val calColors = calendars.associate { it.id to it.color }
-                    due.take(4).forEach { t ->
+                    due.forEach { t ->
                         val dueDay = t.dueDate()
                         val late = dueDay != null && dueDay < today
                         Row(
@@ -1330,7 +1341,7 @@ private fun CalendarPanel(
                             )
                         }
                     }
-                    shown.take(8 - due.size.coerceAtMost(4)).forEach { row ->
+                    shown.forEach { row ->
                         EventRow(
                             row = row,
                             whenLabel = whenLabel(row, tick, zone, twentyFourHour),
