@@ -85,6 +85,7 @@ import io.nisfeb.talon.calendar.CalendarRepo
 import io.nisfeb.talon.calendar.CalendarRow
 import io.nisfeb.talon.calendar.CalendarTask
 import io.nisfeb.talon.calendar.Shares
+import io.nisfeb.talon.calendar.SyncConflict
 import io.nisfeb.talon.calendar.SyncRow
 import io.nisfeb.talon.urbit.isValidPatp
 import io.nisfeb.talon.ui.PickConversationDialog
@@ -160,8 +161,14 @@ fun CalendarScreen(
     val calendars by repo.calendars.collectAsState()
     val shares by repo.shares.collectAsState()
     val syncRows by repo.sync.collectAsState()
+    val conflicts by repo.conflicts.collectAsState()
+    val defaultCalendar by repo.defaultCalendar.collectAsState()
     val readOnly = shares?.readOnly.orEmpty()
     val hidden by repo.hidden.collectAsState()
+    /** Where a new event goes: the chosen calendar if it is still usable, else the first that is. */
+    fun newEventCalendar(): String? =
+        defaultCalendar.takeIf { d -> calendars.any { it.id == d && it.id !in hidden && it.id !in readOnly } }
+            ?: calendars.firstOrNull { it.id !in hidden && it.id !in readOnly }?.id
     val zoneId by repo.zone.collectAsState()
     val error by repo.error.collectAsState()
     val notice by repo.notice.collectAsState()
@@ -239,7 +246,7 @@ fun CalendarScreen(
     fun openNew() {
         val nowHere = Instant.fromEpochMilliseconds(nowMs()).toLocalDateTime(zone)
         val minute = if (selected == nowHere.date && nowHere.hour < 23) (nowHere.hour + 1) * 60 else 9 * 60
-        editing = null to EventDraft(date = selected, minuteOfDay = minute, cal = calendars.firstOrNull { it.id !in hidden && it.id !in readOnly }?.id)
+        editing = null to EventDraft(date = selected, minuteOfDay = minute, cal = newEventCalendar())
         editingIdx = null
         editingStartMs = null
     }
@@ -416,6 +423,7 @@ fun CalendarScreen(
                     ?.map { t -> pendingTicks[t.id]?.let { t.copy(done = it) } ?: t },
                 today = today,
                 calendars = calendars.filter { it.id !in hidden && it.id !in readOnly },
+                defaultCal = newEventCalendar(),
                 readOnly = readOnly,
                 colourOf = { t -> calendarHexColor(t.color ?: calColors[t.cal]) },
                 status = status ?: error,
@@ -773,6 +781,10 @@ fun CalendarScreen(
             zone = zoneId,
             zones = zones,
             sync = syncRows,
+            conflicts = conflicts,
+            onClearConflicts = { say("Clearing…", "The ship did not clear them.") { repo.clearConflicts() } },
+            defaultCalendar = defaultCalendar,
+            onSetDefaultCalendar = { repo.defaultCalendar.value = it },
             deviceZone = deviceZone,
             onSetZone = { z -> act("Setting the zone…", "The ship did not take the zone.") { repo.setZone(z) } },
             onDismiss = { managing = false },
@@ -1078,6 +1090,12 @@ private fun CalendarsDialog(
     zones: List<String>,
     /** Each synced calendar's last pull and error, by id. */
     sync: Map<String, SyncRow>,
+    /** What a sync refused or found changed on both sides. */
+    conflicts: List<SyncConflict>,
+    onClearConflicts: () -> Unit,
+    /** The calendar new events go to; "" for the first one. */
+    defaultCalendar: String,
+    onSetDefaultCalendar: (String) -> Unit,
     deviceZone: String?,
     onSetZone: (String) -> Unit,
     onDismiss: () -> Unit,
@@ -1222,6 +1240,25 @@ private fun CalendarsDialog(
                     )
                     TextButton(onClick = onSync) { Text("Sync now") }
                 }
+                if (conflicts.isNotEmpty()) {
+                    // What the remote would not take, or changed under us: the
+                    // one place a push that never arrived leaves a trace.
+                    Text("${conflicts.size} sync ${if (conflicts.size == 1) "refusal" else "refusals"} logged", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.error)
+                    conflicts.take(8).forEach { k ->
+                        val calName = calendars.firstOrNull { it.id == k.cal }?.name?.ifBlank { k.cal } ?: k.cal
+                        Text("$calName · ${k.why} · ${agoLabel(k.atMs)}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    }
+                    TextButton(onClick = onClearConflicts) { Text("Clear the log") }
+                }
+                if (calendars.size > 1) {
+                    HorizontalDivider()
+                    Text("New events go to", style = MaterialTheme.typography.labelMedium)
+                    androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        calendars.forEach { c ->
+                            FilterChip(selected = defaultCalendar == c.id, onClick = { onSetDefaultCalendar(if (defaultCalendar == c.id) "" else c.id) }, label = { Text(c.name.ifBlank { c.id }) })
+                        }
+                    }
+                }
                 HorizontalDivider()
                 Text(
                     if (zone == null) "Times are read as UTC: the calendar has no zone." else "Times are in $zone.",
@@ -1277,6 +1314,7 @@ private fun TasksView(
     tasks: List<CalendarTask>?,
     today: LocalDate,
     calendars: List<CalendarInfo>,
+    defaultCal: String?,
     readOnly: Set<String>,
     /** Added here and not yet answered; shown first, greyed. */
     pending: List<CalendarTask>,
@@ -1289,7 +1327,7 @@ private fun TasksView(
 ) {
     var name by remember { mutableStateOf("") }
     var due by remember { mutableStateOf<LocalDate?>(null) }
-    var cal by remember(calendars) { mutableStateOf(calendars.firstOrNull()?.id) }
+    var cal by remember(calendars, defaultCal) { mutableStateOf(defaultCal ?: calendars.firstOrNull()?.id) }
     var picking by remember { mutableStateOf(false) }
     var showDone by remember { mutableStateOf(false) }
     fun add() {

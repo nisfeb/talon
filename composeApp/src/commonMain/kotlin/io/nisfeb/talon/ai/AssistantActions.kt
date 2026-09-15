@@ -164,6 +164,25 @@ fun actionTools(a: AssistantActions): List<Tool> = buildList {
         })
     }
     a.calendar?.let { cal ->
+        // A calendar named by id or by name, else the one new events go to.
+        fun resolveCalendar(arg: String?): String? {
+            val q = arg?.trim()?.takeIf { it.isNotBlank() }
+            val all = cal.calendars.value
+            if (q == null) return cal.defaultCalendar.value.takeIf { d -> all.any { it.id == d } } ?: all.firstOrNull()?.id
+            return all.firstOrNull { it.id == q }?.id ?: all.firstOrNull { it.name.equals(q, ignoreCase = true) }?.id
+                ?: all.firstOrNull { it.name.contains(q, ignoreCase = true) }?.id
+        }
+        add(Tool(
+            spec = ToolSpec(
+                "list_calendars",
+                "The user's calendars: id, name and kind (local, google, caldav = followed, ship = shared with the user), and which one new events go to.",
+                toolSchema(required = emptyList()),
+            ),
+            write = false,
+        ) { _ ->
+            val d = cal.defaultCalendar.value
+            cal.calendars.value.joinToString("\n") { c -> "calendar=${c.id} name=${c.name.ifBlank { c.id }} kind=${c.kind}${if (c.id == d) " (default for new events)" else ""}" }.ifBlank { "No calendars." }
+        })
         add(Tool(
             spec = ToolSpec(
                 "create_event",
@@ -176,7 +195,7 @@ fun actionTools(a: AssistantActions): List<Tool> = buildList {
                     "days" to ("integer" to "Length in days (default 1) for an all-day event."),
                     "location" to ("string" to "Where, optional."),
                     "note" to ("string" to "A note, optional."),
-                    "calendar" to ("string" to "Calendar id, optional; the default calendar otherwise."),
+                    "calendar" to ("string" to "Calendar id or name (e.g. \"family\"), optional; the calendar new events go to otherwise. See list_calendars."),
                     "repeat" to ("string" to "once (default), daily, weekly, monthly or yearly."),
                     "weekdays" to ("string" to "For weekly: comma-separated mon,tue,... (default: the date's weekday)."),
                     "count" to ("integer" to "For a repeat: how many times, optional."),
@@ -193,7 +212,9 @@ fun actionTools(a: AssistantActions): List<Tool> = buildList {
             val repeat = Repeat.entries.firstOrNull { it.kind == (args.text("repeat") ?: "once").lowercase() } ?: return@Tool "Error: repeat must be once, daily, weekly, monthly or yearly."
             val weekdays = args.text("weekdays")?.split(',')?.mapNotNull { WEEKDAYS[it.trim().lowercase().take(3)] }?.toSet()
                 ?.takeIf { it.isNotEmpty() } ?: setOf(date.dayOfWeek)
-            val calId = args.text("calendar")?.takeIf { it.isNotBlank() }
+            val calArg = args.text("calendar")?.takeIf { it.isNotBlank() }
+            val calId = resolveCalendar(calArg)
+            if (calArg != null && calId == null) return@Tool "Error: no calendar called \"$calArg\"; see list_calendars."
             if (calId != null && calId in cal.readOnly) return@Tool "Error: calendar $calId is shared with the user read-only; its host makes the changes."
             val draft = EventDraft(
                 name = name, note = args.text("note").orEmpty(), location = args.text("location").orEmpty(),
@@ -204,7 +225,7 @@ fun actionTools(a: AssistantActions): List<Tool> = buildList {
                 repeat = repeat, weekdays = weekdays, count = args.int("count") ?: 0,
                 tags = io.nisfeb.talon.calendar.parseTags(args.text("tags").orEmpty()),
             )
-            if (cal.poke(eventBody(draft))) "Added \"$name\" on $date${if (time != null) " at $time" else ""}." else "The calendar did not take it."
+            if (cal.poke(eventBody(draft))) "Added \"$name\" on $date${if (time != null) " at $time" else ""} to calendar ${calId ?: "default"}." else "The calendar did not take it."
         })
         add(Tool(
             spec = ToolSpec(
@@ -236,7 +257,7 @@ fun actionTools(a: AssistantActions): List<Tool> = buildList {
                     "name" to ("string" to "What is to be done."),
                     "due" to ("string" to "YYYY-MM-DD, optional; omit for no due date."),
                     "note" to ("string" to "A note, optional."),
-                    "calendar" to ("string" to "Calendar id, optional; the default calendar otherwise."),
+                    "calendar" to ("string" to "Calendar id or name, optional; the calendar new events go to otherwise. See list_calendars."),
                     "tags" to ("string" to "Comma-separated tags, optional."),
                     required = listOf("name"),
                 ),
@@ -247,7 +268,9 @@ fun actionTools(a: AssistantActions): List<Tool> = buildList {
             val dueText = args.text("due")?.takeIf { it.isNotBlank() }
             val due = if (dueText == null) null else parseDate(dueText) ?: return@Tool "Error: due must be YYYY-MM-DD."
             val today = Instant.fromEpochMilliseconds(nowMs()).toLocalDateTime(a.zone()).date
-            val calId = args.text("calendar")?.takeIf { it.isNotBlank() }
+            val calArg = args.text("calendar")?.takeIf { it.isNotBlank() }
+            val calId = resolveCalendar(calArg)
+            if (calArg != null && calId == null) return@Tool "Error: no calendar called \"$calArg\"; see list_calendars."
             if (calId != null && calId in cal.readOnly) return@Tool "Error: calendar $calId is shared with the user read-only; its host makes the changes."
             val draft = EventDraft(
                 name = name, note = args.text("note").orEmpty(), cal = calId,

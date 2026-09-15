@@ -55,6 +55,12 @@ class CalendarRepo(
     /** Every synced calendar's last pull and error, by id: Google, followed, and shared with us. */
     private val _sync = MutableStateFlow<Map<String, SyncRow>>(emptyMap())
     val sync: StateFlow<Map<String, SyncRow>> = _sync.asStateFlow()
+    /** Pushes the remote refused and changes made on both sides, as the calendar logged them. */
+    private val _conflicts = MutableStateFlow<List<SyncConflict>>(emptyList())
+    val conflicts: StateFlow<List<SyncConflict>> = _conflicts.asStateFlow()
+    suspend fun clearConflicts(): Boolean = after { it.clearConflicts() }
+    /** The calendar a new event goes to unless another is picked; "" for the first one. Seeded by the shell. */
+    val defaultCalendar = MutableStateFlow("")
     private val _shares = MutableStateFlow<Shares?>(null)
     /** Sharing with ships; null on a calendar too old to have it. */
     val shares: StateFlow<Shares?> = _shares.asStateFlow()
@@ -266,6 +272,7 @@ class CalendarRepo(
             _shares.value = runCatching { a.shares() }.getOrElse { e ->
                 if (e is AuspexError.Refused && e.status == AuspexApi.NOT_FOUND) null else _shares.value
             }
+            _conflicts.value = runCatching { a.conflicts() }.getOrElse { _conflicts.value }
             _sync.value = buildMap {
                 runCatching { a.google() }.getOrNull()?.linked?.forEach { (id, row) -> put(id, row) }
                 runCatching { a.caldavSubscriptions() }.getOrNull()?.forEach { put(it.id, SyncRow(it.lastMs, it.error)) }

@@ -136,6 +136,14 @@ class AndroidUiSettings(
         _hiddenCalendars.value = ids
     }
 
+    private val _defaultCalendar = MutableStateFlow(prefs.getString(KEY_DEFAULT_CALENDAR, "") ?: "")
+    override val defaultCalendar: StateFlow<String> = _defaultCalendar.asStateFlow()
+    override fun setDefaultCalendar(id: String) {
+        if (_defaultCalendar.value == id) return
+        prefs.edit().putString(KEY_DEFAULT_CALENDAR, id).apply()
+        _defaultCalendar.value = id
+    }
+
     override fun setHomePlace(encoded: String) {
         if (_homePlace.value == encoded) return
         _homePlace.value = encoded
@@ -364,6 +372,7 @@ class AndroidUiSettings(
         private const val KEY_HIDE_COMPOSER_BUTTONS = "hide_composer_buttons"
         private const val KEY_HOME_PLACE = HomePrefs.PLACE
         private const val KEY_HIDDEN_CALENDARS = "hidden_calendars"
+        private const val KEY_DEFAULT_CALENDAR = "default_calendar"
         private const val KEY_HOME_FAHRENHEIT = HomePrefs.FAHRENHEIT
         private const val KEY_HOME_24H = HomePrefs.TWENTY_FOUR_HOUR
         private const val KEY_HOME_LAYOUT = "home_layout"

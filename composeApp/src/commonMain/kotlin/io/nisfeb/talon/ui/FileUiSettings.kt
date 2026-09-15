@@ -60,6 +60,7 @@ class FileUiSettings(
         val smartSearchPreferred: Boolean = false,
         val homePlace: String = "",
         val hiddenCalendars: List<String> = emptyList(),
+        val defaultCalendar: String = "",
         val homeFahrenheit: Boolean = true,
         val homeTwentyFourHour: Boolean = false,
         val homeLayout: String = "",
@@ -166,6 +167,14 @@ class FileUiSettings(
     override fun setHiddenCalendars(ids: Set<String>) {
         if (_hiddenCalendars.value == ids) return
         _hiddenCalendars.value = ids
+        persistCurrent()
+    }
+
+    private val _defaultCalendar = MutableStateFlow(initial.defaultCalendar)
+    override val defaultCalendar: StateFlow<String> = _defaultCalendar.asStateFlow()
+    override fun setDefaultCalendar(id: String) {
+        if (_defaultCalendar.value == id) return
+        _defaultCalendar.value = id
         persistCurrent()
     }
 
@@ -327,6 +336,7 @@ class FileUiSettings(
                 smartSearchPreferred = _smartSearchPreferred.value,
                 homePlace = _homePlace.value,
                 hiddenCalendars = _hiddenCalendars.value.toList(),
+                defaultCalendar = _defaultCalendar.value,
                 homeFahrenheit = _homeFahrenheit.value,
                 homeTwentyFourHour = _homeTwentyFourHour.value,
                 homeLayout = _homeLayout.value,

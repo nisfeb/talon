@@ -1005,6 +1005,10 @@ fun App(
             calendarRepo.seedHidden(uiSettings.hiddenCalendars.value)
             calendarRepo.hidden.collect { uiSettings.setHiddenCalendars(it) }
         }
+        LaunchedEffect(calendarRepo, uiSettings) {
+            calendarRepo.defaultCalendar.value = uiSettings.defaultCalendar.value
+            calendarRepo.defaultCalendar.collect { uiSettings.setDefaultCalendar(it) }
+        }
         val calendarInstall: suspend () -> Result<Unit> = remember(session, calendarRepo) {
             val install = io.nisfeb.talon.urbit.LatticeInstall.installer(
                 http,

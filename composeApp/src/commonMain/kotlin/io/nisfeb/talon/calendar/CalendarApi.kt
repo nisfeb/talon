@@ -110,6 +110,10 @@ data class Shares(
     val readOnly: Set<String> get() = accepted.filterValues { it.mode != "edit" }.keys
 }
 
+/** A push the remote refused, or a change made on both sides; the calendar keeps the local copy here. */
+@Serializable
+data class SyncConflict(val uid: String = "", val cal: String = "", @SerialName("at_ms") val atMs: Long = 0, val why: String = "")
+
 /** How a synced calendar last fared: when it was pulled, and what went wrong if anything. */
 @Serializable
 data class SyncRow(@SerialName("last_ms") val lastMs: Long = 0, val error: String = "")
@@ -160,6 +164,9 @@ class CalendarApi(private val http: HttpClient, baseUrl: String) {
         postJson("$root/migrate", buildJsonObject { put("id", calId) })
 
     suspend fun google(): GoogleStatus = decode(get("/google.json"))
+    /** Every refusal and conflict logged by the Google and CalDAV syncs. */
+    suspend fun conflicts(): List<SyncConflict> = decode(get("/google/conflicts.json"))
+    suspend fun clearConflicts(): Boolean = postJson("$root/google/conflicts/clear", JsonObject(emptyMap()))
     suspend fun caldavSubscriptions(): List<CaldavSubscription> = decode(get("/caldav/subscriptions.json"))
     /** Pull and push now rather than on the next tick. */
     suspend fun syncGoogle(): Boolean = postJson("$root/google/sync", JsonObject(emptyMap()))

@@ -103,6 +103,9 @@ object AgentPrompt {
           user's behalf is written in the user's voice, short and warm,
           with the day, time and place in it; do not ask the user to
           dictate it unless they have to decide something.
+        - A calendar named in the request ("the family calendar") is
+          passed to create_event as its name; list_calendars says what
+          there is. Unnamed, the event goes to the user's default.
         - A to-do ("remind me to", "add a task", "I need to") is
           create_task, with a due date when one was said; "done with X"
           or "finished X" is complete_task. An appointment with a time is

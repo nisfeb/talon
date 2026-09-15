@@ -402,6 +402,10 @@ fun TalonApp(
         calendarRepo.seedHidden(app.uiSettings.hiddenCalendars.value)
         calendarRepo.hidden.collect { app.uiSettings.setHiddenCalendars(it) }
     }
+    LaunchedEffect(calendarRepo) {
+        calendarRepo.defaultCalendar.value = app.uiSettings.defaultCalendar.value
+        calendarRepo.defaultCalendar.collect { app.uiSettings.setDefaultCalendar(it) }
+    }
     DisposableEffect(calendarRepo) {
         onDispose { runCatching { calendarRepo.detach() } }
     }

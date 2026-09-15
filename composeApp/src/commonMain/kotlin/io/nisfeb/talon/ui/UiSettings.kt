@@ -120,6 +120,10 @@ interface UiSettings {
     val hiddenCalendars: StateFlow<Set<String>>
     fun setHiddenCalendars(ids: Set<String>)
 
+    /** The calendar a new event goes to unless another is picked; "" for the first one. */
+    val defaultCalendar: StateFlow<String>
+    fun setDefaultCalendar(id: String)
+
     /**
      * How the home dial reads out temperature and the hour.
      *
@@ -341,6 +345,9 @@ class InMemoryUiSettings(
     private val _hiddenCalendars = MutableStateFlow<Set<String>>(emptySet())
     override val hiddenCalendars: StateFlow<Set<String>> = _hiddenCalendars.asStateFlow()
     override fun setHiddenCalendars(ids: Set<String>) { _hiddenCalendars.value = ids }
+    private val _defaultCalendar = MutableStateFlow("")
+    override val defaultCalendar: StateFlow<String> = _defaultCalendar.asStateFlow()
+    override fun setDefaultCalendar(id: String) { _defaultCalendar.value = id }
 
     private val _homeFahrenheit = MutableStateFlow(true)
     override val homeFahrenheit: StateFlow<Boolean> = _homeFahrenheit.asStateFlow()
