@@ -4,6 +4,7 @@ import io.nisfeb.talon.calendar.CalendarRepo
 import io.nisfeb.talon.calendar.EventCat
 import io.nisfeb.talon.calendar.EventDraft
 import io.nisfeb.talon.calendar.Repeat
+import io.nisfeb.talon.calendar.bounds
 import io.nisfeb.talon.calendar.eventBody
 import io.nisfeb.talon.calendar.dueDate
 import io.nisfeb.talon.calendar.taskOrder
@@ -218,12 +219,12 @@ fun actionTools(a: AssistantActions): List<Tool> = buildList {
             val from = parseDate(args.text("from")) ?: today
             val to = parseDate(args.text("to")) ?: LocalDate.fromEpochDays(from.toEpochDays() + 7)
             val rows = cal.rows.value.orEmpty().filter { r ->
-                val d = Instant.fromEpochMilliseconds(r.l).toLocalDateTime(zone).date
+                val d = Instant.fromEpochMilliseconds(r.bounds(zone).first).toLocalDateTime(zone).date
                 d >= from && d <= to
             }
             if (rows.isEmpty()) "Nothing between $from and $to."
             else rows.joinToString("\n") { r ->
-                val s = Instant.fromEpochMilliseconds(r.l).toLocalDateTime(zone)
+                val s = Instant.fromEpochMilliseconds(r.bounds(zone).first).toLocalDateTime(zone)
                 "${if (r.isTask) "task" else "event"}=${r.id} ${s.date} ${if (r.isTask) (if (r.done) "done" else "due") else if (r.all) "all day" else "${s.hour.toString().padStart(2, '0')}:${s.minute.toString().padStart(2, '0')}"} ${r.name}${if (r.location.isNotBlank()) " @ ${r.location}" else ""} (calendar ${r.cal})"
             }
         })

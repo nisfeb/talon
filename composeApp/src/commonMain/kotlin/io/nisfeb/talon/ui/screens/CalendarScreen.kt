@@ -549,6 +549,7 @@ fun CalendarScreen(
             calendars = calendars,
             shares = shares,
             zone = zoneId,
+            zones = zones,
             deviceZone = deviceZone,
             onSetZone = { z -> act("Setting the zone…", "The ship did not take the zone.") { repo.setZone(z) } },
             onDismiss = { managing = false },
@@ -814,13 +815,15 @@ private fun EventEditor(
 }
 
 /** The calendars themselves: add one, rename or recolour, delete. */
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 private fun CalendarsDialog(
     calendars: List<CalendarInfo>,
     /** Null on a calendar too old to share with ships. */
     shares: Shares?,
-    /** The calendar's own zone, null for none; the device's, if the calendar knows it. */
+    /** The calendar's own zone, null for none; every zone it knows; the device's, if among them. */
     zone: String?,
+    zones: List<String>,
     deviceZone: String?,
     onSetZone: (String) -> Unit,
     onDismiss: () -> Unit,
@@ -939,8 +942,25 @@ private fun CalendarsDialog(
                     if (zone == null) "Times are read as UTC: the calendar has no zone." else "Times are in $zone.",
                     style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                if (deviceZone != null && deviceZone != zone) {
-                    TextButton(onClick = { onSetZone(deviceZone); onDismiss() }) { Text("Use this device's zone ($deviceZone)") }
+                var zoneText by remember(zone) { mutableStateOf(zone.orEmpty()) }
+                val wanted = zoneText.trim()
+                OutlinedTextField(
+                    value = zoneText, onValueChange = { zoneText = it }, label = { Text("Zone") }, placeholder = { Text("Europe/London") },
+                    singleLine = true, modifier = Modifier.fillMaxWidth(),
+                    isError = wanted.isNotEmpty() && wanted !in zones,
+                )
+                if (wanted.length >= 2 && wanted !in zones) {
+                    androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
+                        zones.filter { it.contains(wanted, ignoreCase = true) }.take(6).forEach { z ->
+                            FilterChip(selected = false, onClick = { zoneText = z }, label = { Text(z) })
+                        }
+                    }
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                    if (deviceZone != null && deviceZone != wanted) {
+                        FilterChip(selected = false, onClick = { zoneText = deviceZone }, label = { Text("This device: $deviceZone") })
+                    }
+                    TextButton(enabled = wanted in zones && wanted != zone, onClick = { onSetZone(wanted); onDismiss() }) { Text("Set zone") }
                 }
                 HorizontalDivider()
                 Text("New calendar", style = MaterialTheme.typography.labelMedium)

@@ -255,6 +255,19 @@ fun draftFromEvent(e: JsonObject, today: LocalDate): EventDraft? {
     )
 }
 
+/**
+ * When a row starts and ends as moments in [zone]: a timed row's own,
+ * an all-day row's days translated from date-space to the zone's
+ * midnights, so "under way" and "today" mean the reader's day.
+ */
+fun CalendarRow.bounds(zone: TimeZone): Pair<Long, Long> {
+    if (!all) return l to r
+    val days = daysOf(this, zone)
+    val start = days.first().atTime(0, 0).toInstant(zone).toEpochMilliseconds()
+    val end = days.last().plus(1, DateTimeUnit.DAY).atTime(0, 0).toInstant(zone).toEpochMilliseconds()
+    return start to end
+}
+
 /** The six weeks a month view shows, Monday first, 42 days. */
 fun monthGrid(year: Int, month: Int): List<LocalDate> {
     val first = LocalDate(year, month, 1)
@@ -262,10 +275,16 @@ fun monthGrid(year: Int, month: Int): List<LocalDate> {
     return List(42) { start.plus(it, DateTimeUnit.DAY) }
 }
 
-/** Every day a row touches, in [zone]; an all-day row ends before [CalendarRow.r]. */
+/**
+ * Every day a row touches. A timed row's moments are read in [zone];
+ * an all-day row (a date, a task's due day, a span of days) is kept
+ * by the calendar in date-space, midnight UTC to midnight UTC, and
+ * is read as UTC whatever the zone, as the calendar's page does.
+ */
 fun daysOf(row: CalendarRow, zone: TimeZone): List<LocalDate> {
-    val first = Instant.fromEpochMilliseconds(row.l).toLocalDateTime(zone).date
-    val last = Instant.fromEpochMilliseconds(row.r - 1).toLocalDateTime(zone).date
+    val z = if (row.all) TimeZone.UTC else zone
+    val first = Instant.fromEpochMilliseconds(row.l).toLocalDateTime(z).date
+    val last = Instant.fromEpochMilliseconds(row.r - 1).toLocalDateTime(z).date
     if (last < first) return listOf(first)
     return generateSequence(first) { d -> d.plus(1, DateTimeUnit.DAY).takeIf { it <= last } }.take(62).toList()
 }

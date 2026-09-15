@@ -4,6 +4,8 @@ import kotlinx.datetime.DayOfWeek
 import kotlinx.datetime.LocalDate
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.atTime
+import kotlinx.datetime.minus
+import kotlinx.datetime.plus
 import kotlinx.datetime.toInstant
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
@@ -145,5 +147,18 @@ class CalendarEditTest {
         val none = draftFromEvent(io.nisfeb.talon.mail.AuspexApi.json.parseToJsonElement("""{"id":"t2","cat":"todo","meta":{"name":"x"},"done":false}""").jsonObject, day)!!
         assertNull(none.due)
         assertEquals(day, none.date)
+    }
+
+    @Test fun `an all-day row is a utc day whatever the zone, a timed row is not`() {
+        val ny = TimeZone.of("America/New_York")
+        val utcMidnight = day.atTime(0, 0).toInstant(TimeZone.UTC).toEpochMilliseconds()
+        val allDay = CalendarRow(id = "a", all = true, l = utcMidnight, r = utcMidnight + 86_400_000L)
+        assertEquals(listOf(day), daysOf(allDay, ny), "not the evening before")
+        val (s, e) = allDay.bounds(ny)
+        assertEquals(day.atTime(0, 0).toInstant(ny).toEpochMilliseconds(), s, "starts at the zone's midnight")
+        assertEquals(day.plus(1, kotlinx.datetime.DateTimeUnit.DAY).atTime(0, 0).toInstant(ny).toEpochMilliseconds(), e)
+        val timed = CalendarRow(id = "t", l = utcMidnight + 3_600_000L, r = utcMidnight + 7_200_000L)
+        assertEquals(listOf(day.minus(1, kotlinx.datetime.DateTimeUnit.DAY)), daysOf(timed, ny), "01:00 utc is the evening before in new york")
+        assertEquals(timed.l to timed.r, timed.bounds(ny))
     }
 }

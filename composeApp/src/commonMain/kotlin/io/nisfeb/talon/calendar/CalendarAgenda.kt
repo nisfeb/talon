@@ -18,9 +18,10 @@ import kotlinx.datetime.toLocalDateTime
  * to midnight in [zone].
  */
 fun agenda(rows: List<CalendarRow>, range: CalendarRange, nowMs: Long, zone: TimeZone): List<CalendarRow> {
-    val live = rows.filter { it.r > nowMs }.sortedWith(compareBy({ it.l }, { it.r }))
-    val until = rangeEnd(range, nowMs, zone) ?: return live.take(1)
-    return live.filter { it.l < until }
+    val live = rows.map { it to it.bounds(zone) }.filter { (_, b) -> b.second > nowMs }
+        .sortedWith(compareBy({ it.second.first }, { it.second.second }))
+    val until = rangeEnd(range, nowMs, zone) ?: return live.take(1).map { it.first }
+    return live.filter { (_, b) -> b.first < until }.map { it.first }
 }
 
 /** Where the widget's window ends, in unix ms; null for "next only", which has no end. */

@@ -72,6 +72,7 @@ import io.nisfeb.talon.calendar.CalendarAvailability
 import io.nisfeb.talon.calendar.CalendarRepo
 import io.nisfeb.talon.calendar.CalendarRow
 import io.nisfeb.talon.calendar.agenda
+import io.nisfeb.talon.calendar.bounds
 import io.nisfeb.talon.calendar.tasksInRange
 import io.nisfeb.talon.calendar.dueDate
 import androidx.compose.runtime.LaunchedEffect
@@ -1312,7 +1313,7 @@ private fun CalendarPanel(
                             row = row,
                             whenLabel = whenLabel(row, tick, zone, twentyFourHour),
                             colour = calendarHexColor(row.color ?: calColors[row.cal]),
-                            ongoing = row.l <= tick,
+                            ongoing = row.bounds(zone).first <= tick,
                             onClick = onOpen ?: {},
                             onLongPress = onLongPress,
                         )
