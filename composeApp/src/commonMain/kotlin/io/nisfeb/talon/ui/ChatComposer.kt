@@ -404,7 +404,9 @@ fun ChatComposer(
 
     val updateDraft: (TextFieldValue) -> Unit = { next ->
         state.draft = next
-        drafts.save(whom, next.text)
+        // An edit is not a draft: saving it would bring it back as a new
+        // message. The draft it displaced stays saved underneath.
+        if (state.editing == null) drafts.save(whom, next.text)
     }
 
     // Typing presence. Keying on the draft text means a keystroke
@@ -439,7 +441,8 @@ fun ChatComposer(
     // the next mount agree.
     DisposableEffect(whom) {
         onDispose {
-            drafts.save(whom, state.draft.text)
+            // Leaving mid-edit abandons the edit and keeps the real draft.
+            drafts.save(whom, state.editing?.priorDraftText ?: state.draft.text)
             // Leaving the screen mid-draft must not leave us announcing
             // forever on the peer's side.
             repo.retractPresenceNow(whom)
