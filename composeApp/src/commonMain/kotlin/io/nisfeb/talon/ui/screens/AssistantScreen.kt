@@ -267,6 +267,7 @@ fun AssistantScreen(
             val actions = io.nisfeb.talon.ai.AssistantActions(
                 db = db, contacts = { contactMap }, mail = mail, calendar = calendar, calls = calls,
                 zone = { zoneFor(calendarZone) },
+                send = { whom, text -> repo.send(whom, text) },
             )
             AgentLoop(
                 // The time is appended per call rather than baked in, so a

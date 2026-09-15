@@ -41,3 +41,12 @@ fun eventIcs(id: String, name: String, location: String, note: String, startMs: 
     lines += "END:VEVENT"; lines += "END:VCALENDAR"
     return lines.joinToString("\r\n") + "\r\n"
 }
+
+/**
+ * The message an event goes out as: what, when, where, and the card
+ * tag, so everyone who sees it gets Add. An event with no length gets
+ * an hour on the card.
+ */
+fun eventCardMessage(name: String, whenLine: String, location: String, note: String, tags: List<String>, startMs: Long, endMs: Long): String =
+    eventShareText(name, whenLine, location, note, tags) + "\n" +
+        io.nisfeb.talon.ui.encodeCalTag(startMs, if (endMs > startMs) endMs else startMs + 3_600_000L, name.ifBlank { "Event" })

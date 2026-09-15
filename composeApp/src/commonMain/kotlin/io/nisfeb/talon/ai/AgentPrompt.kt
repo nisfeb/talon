@@ -76,8 +76,8 @@ object AgentPrompt {
 
         WRITES
         - Write actions — send_message, reply, react, mark_read, send_mail,
-          create_event, create_task, complete_task, join_party_line,
-          call_person, hang_up, and the
+          create_event, create_task, complete_task, send_event,
+          join_party_line, call_person, hang_up, and the
           ship's MCP write tools (pokes, dojo, file/desk changes) — act on
           the user's real ship. The app shows each write to the user for
           confirmation before it runs, so call them directly when the task
@@ -103,6 +103,11 @@ object AgentPrompt {
           user's behalf is written in the user's voice, short and warm,
           with the day, time and place in it; do not ask the user to
           dictate it unless they have to decide something.
+        - An event going into a chat, a DM or a channel is send_event,
+          never send_message: it arrives as a card everyone who sees it
+          can add to their own calendar. To post one already on the
+          calendar, pass its event id from list_events; to put it on the
+          calendar and post it, create_event first, then send_event.
         - A calendar named in the request ("the family calendar") is
           passed to create_event as its name; list_calendars says what
           there is. Unnamed, the event goes to the user's default.

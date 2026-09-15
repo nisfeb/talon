@@ -23,6 +23,8 @@ import kotlinx.datetime.DayOfWeek
 import kotlinx.datetime.Instant
 import kotlinx.datetime.LocalDate
 import kotlinx.datetime.TimeZone
+import kotlinx.datetime.atTime
+import kotlinx.datetime.toInstant
 import kotlinx.datetime.toLocalDateTime
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -44,7 +46,26 @@ class AssistantActions(
     val calendar: CalendarRepo? = null,
     val calls: CallController? = null,
     val zone: () -> TimeZone = { TimeZone.currentSystemDefault() },
+    /** Sends a chat message; null where there is no ship session to send with. */
+    val send: (suspend (whom: String, text: String) -> Unit)? = null,
 )
+
+/**
+ * The line under an event's name: a timed event in [zone], a day event
+ * as its UTC day, which is how the calendar keeps one.
+ */
+internal fun eventWhenLine(startMs: Long, endMs: Long, allDay: Boolean, zone: TimeZone): String {
+    fun day(d: LocalDate) = "${d.dayOfWeek.name.take(3).lowercase().replaceFirstChar { it.uppercase() }} ${d.dayOfMonth} ${MONTHS[d.monthNumber - 1]} ${d.year}"
+    if (allDay) {
+        val first = Instant.fromEpochMilliseconds(startMs).toLocalDateTime(TimeZone.UTC).date
+        val days = ((endMs - startMs) / 86_400_000L).toInt()
+        return day(first) + if (days > 1) " · $days days" else " · all day"
+    }
+    val s = Instant.fromEpochMilliseconds(startMs).toLocalDateTime(zone)
+    return "${day(s.date)} · ${io.nisfeb.talon.util.formatTime12(startMs, zone)}–${io.nisfeb.talon.util.formatTime12(endMs, zone)}"
+}
+
+private val MONTHS = listOf("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
 
 /** A person the assistant can address: the ship and the names it goes by. */
 data class PersonMatch(val ship: String, val names: List<String>)
@@ -307,6 +328,56 @@ fun actionTools(a: AssistantActions): List<Tool> = buildList {
                 hits.size > 1 -> "Several match; which one?\n" + hits.joinToString("\n") { "task=${it.id} ${it.name}" }
                 else -> if (cal.setDone(hits[0].id, true)) "Done: ${hits[0].name}." else "The calendar did not take it."
             }
+        })
+    }
+    a.send?.let { send ->
+        add(Tool(
+            spec = ToolSpec(
+                "send_event",
+                "Post an event into a chat, DM or channel as an event card everyone who sees it can add to their own calendar. Use this, not send_message, for any event. Name one already on the calendar by its event id from list_events, or give its details.",
+                toolSchema(
+                    "whom" to ("string" to "Where it goes: a conversation id from find_conversation, or a ship for a DM."),
+                    "event" to ("string" to "An event id from list_events, to post one already on the calendar."),
+                    "name" to ("string" to "What the event is, when not posting one from the calendar."),
+                    "date" to ("string" to "YYYY-MM-DD."),
+                    "time" to ("string" to "HH:MM in the user's zone; omit for an all-day event."),
+                    "duration_min" to ("integer" to "Length in minutes (default 60) for a timed event."),
+                    "days" to ("integer" to "Length in days (default 1) for an all-day event."),
+                    "location" to ("string" to "Where, optional."),
+                    "note" to ("string" to "A note, optional."),
+                    required = listOf("whom"),
+                ),
+            ),
+            write = true,
+        ) { args ->
+            val whom = args.text("whom")?.takeIf { it.isNotBlank() } ?: return@Tool "Error: whom is required."
+            val zone = a.zone()
+            val eventId = args.text("event")?.takeIf { it.isNotBlank() }
+            val card = if (eventId != null) {
+                val row = a.calendar?.rows?.value.orEmpty().firstOrNull { it.id == eventId }
+                    ?: return@Tool "Error: no event $eventId in the next thirty days; see list_events."
+                io.nisfeb.talon.calendar.eventCardMessage(row.name, eventWhenLine(row.l, row.r, row.all, zone), row.location, row.note, row.tags, row.l, row.r)
+            } else {
+                val name = args.text("name")?.takeIf { it.isNotBlank() } ?: return@Tool "Error: give an event id or a name."
+                val date = parseDate(args.text("date")) ?: return@Tool "Error: date must be YYYY-MM-DD."
+                val time = args.text("time")?.takeIf { it.isNotBlank() }
+                val span = if (time == null) {
+                    val start = date.atTime(0, 0).toInstant(TimeZone.UTC).toEpochMilliseconds()
+                    Triple(start, start + (args.int("days") ?: 1).coerceAtLeast(1) * 86_400_000L, true)
+                } else {
+                    val minute = parseClock(time) ?: return@Tool "Error: time must be HH:MM."
+                    val start = date.atTime(minute / 60, minute % 60).toInstant(zone).toEpochMilliseconds()
+                    Triple(start, start + (args.int("duration_min") ?: 60).coerceAtLeast(0) * 60_000L, false)
+                }
+                io.nisfeb.talon.calendar.eventCardMessage(
+                    name, eventWhenLine(span.first, span.second, span.third, zone),
+                    args.text("location").orEmpty(), args.text("note").orEmpty(), emptyList(), span.first, span.second,
+                )
+            }
+            runCatching { send(whom, card) }.fold(
+                { "Posted the event to ${a.contacts().conversationLabel(whom)} as a card." },
+                { "Error: the message did not go: ${it.message}" },
+            )
         })
     }
     a.calls?.let { calls ->

@@ -31,4 +31,16 @@ class AssistantActionsTest {
         val line = nowLine(TimeZone.UTC, 1_789_380_000_000L)
         assertTrue(line.startsWith("NOW: 2026-09-14 (Monday) 10:00, zone UTC"), line)
     }
+
+    @Test fun `an event posted by the assistant carries a card that decodes back`() {
+        // 2026-09-19 00:00 UTC, a Saturday.
+        val sat = 1_789_776_000_000L
+        assertEquals("Sat 19 Sep 2026 · all day", eventWhenLine(sat, sat + 86_400_000L, allDay = true, zone = TimeZone.of("America/New_York")))
+        assertEquals("Sat 19 Sep 2026 · 3 days", eventWhenLine(sat, sat + 3 * 86_400_000L, allDay = true, zone = TimeZone.UTC))
+        val lunch = sat + 12 * 3_600_000L + 30 * 60_000L
+        assertTrue(eventWhenLine(lunch, lunch + 3_600_000L, allDay = false, zone = TimeZone.UTC).startsWith("Sat 19 Sep 2026 · 12:30"))
+        val msg = io.nisfeb.talon.calendar.eventCardMessage("Lunch", "Sat 19 Sep 2026 · 12:30 PM–1:30 PM", "The Oak", "", emptyList(), lunch, lunch + 3_600_000L)
+        assertEquals(io.nisfeb.talon.ui.DecodedCal(lunch, lunch + 3_600_000L, "Lunch"), io.nisfeb.talon.ui.decodeCalTag(msg))
+        assertTrue(msg.startsWith("📅 Lunch\n"), msg)
+    }
 }
