@@ -32,6 +32,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.foundation.focusable
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.runtime.DisposableEffect
@@ -1086,16 +1087,31 @@ private fun QuotePreviewRow(
 }
 
 @Composable
-private fun AttachmentPreviewRow(
+internal fun AttachmentPreviewRow(
     pending: PendingAttachment,
     sending: Boolean,
     sendAccent: Color,
     onCancel: () -> Unit,
     onSend: () -> Unit,
 ) {
+    // The text field, and the Enter handler on it, leave while this
+    // shows, so a paste followed by Enter went nowhere. The row takes
+    // the keys itself: Enter sends, Escape discards.
+    val keys = remember { FocusRequester() }
+    LaunchedEffect(Unit) { runCatching { keys.requestFocus() } }
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .focusRequester(keys)
+            .onPreviewKeyEvent { e ->
+                if (e.type != KeyEventType.KeyDown || sending) return@onPreviewKeyEvent false
+                when (e.key) {
+                    Key.Enter, Key.NumPadEnter -> { onSend(); true }
+                    Key.Escape -> { onCancel(); true }
+                    else -> false
+                }
+            }
+            .focusable()
             .padding(horizontal = 8.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -1137,7 +1153,8 @@ private fun AttachmentPreviewRow(
                 maxLines = 1,
             )
             Text(
-                if (pending.isImage) "Image · tap send to post" else "File · tap send to post",
+                (if (pending.isImage) "Image · " else "File · ") +
+                    if (isTouchPrimary) "tap send to post" else "Enter to post, Esc to discard",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
