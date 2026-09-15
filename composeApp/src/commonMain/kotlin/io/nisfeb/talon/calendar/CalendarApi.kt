@@ -164,6 +164,21 @@ class CalendarApi(private val http: HttpClient, baseUrl: String) {
         postJson("$root/migrate", buildJsonObject { put("id", calId) })
 
     suspend fun google(): GoogleStatus = decode(get("/google.json"))
+
+    /** Every event in an .ics onto calendar [calId]; true when the calendar took it. */
+    suspend fun importIcs(calId: String, ics: String): Boolean {
+        val resp = try {
+            http.post("$root/import?cal=" + calId.encodeURLParameter()) {
+                contentType(ContentType.parse("text/calendar"))
+                setBody(ics)
+            }
+        } catch (c: CancellationException) {
+            throw c
+        } catch (t: Throwable) {
+            throw AuspexError.Unreachable(t)
+        }
+        return resp.status.isSuccess()
+    }
     /** Every refusal and conflict logged by the Google and CalDAV syncs. */
     suspend fun conflicts(): List<SyncConflict> = decode(get("/google/conflicts.json"))
     suspend fun clearConflicts(): Boolean = postJson("$root/google/conflicts/clear", JsonObject(emptyMap()))

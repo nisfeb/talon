@@ -55,6 +55,10 @@ fun MailAttachmentRow(
     val downloader = LocalImageDownloader.current
     var state by remember(attachment.hash) { mutableStateOf<AttachState>(AttachState.Idle) }
     val isImage = attachment.mime.startsWith("image/", ignoreCase = true)
+    val isInvite = attachment.mime.startsWith("text/calendar", ignoreCase = true) || attachment.name.endsWith(".ics", ignoreCase = true)
+    val shipCalendar = io.nisfeb.talon.calendar.LocalCalendarRepo.current
+    var inviteMenu by remember { mutableStateOf(false) }
+    var invited by remember(attachment.hash) { mutableStateOf<String?>(null) }
     // A small picture is worth fetching unasked; it is what the
     // message is about, and the row still says where it stands.
     LaunchedEffect(attachment.hash) {
@@ -120,6 +124,35 @@ fun MailAttachmentRow(
                     }
                 },
             ) { Text(if (state is AttachState.Failed) "Try again" else "Get") }
+        }
+        // An invite goes straight into one of the ship's calendars, fetched first if need be.
+        if (isInvite && shipCalendar != null && state !is AttachState.Working) {
+            androidx.compose.foundation.layout.Box {
+                TextButton(onClick = { inviteMenu = true }) { Text(invited ?: "Add to calendar") }
+                androidx.compose.material3.DropdownMenu(expanded = inviteMenu, onDismissRequest = { inviteMenu = false }) {
+                    shipCalendar.writable().forEach { c ->
+                        androidx.compose.material3.DropdownMenuItem(
+                            text = { Text(c.name.ifBlank { c.id }) },
+                            onClick = {
+                                inviteMenu = false
+                                scope.launch {
+                                    invited = "Adding…"
+                                    val bytes = (state as? AttachState.Held)?.bytes ?: run {
+                                        state = AttachState.Working("Looking for it")
+                                        state = pull(repo, attachment, from) { state = AttachState.Working(it) }
+                                        (state as? AttachState.Held)?.bytes
+                                    }
+                                    invited = when {
+                                        bytes == null -> "Could not fetch it"
+                                        shipCalendar.importIcs(c.id, bytes.decodeToString()) -> "Added to ${c.name.ifBlank { c.id }}"
+                                        else -> "Not added"
+                                    }
+                                }
+                            },
+                        )
+                    }
+                }
+            }
         }
     }
     }

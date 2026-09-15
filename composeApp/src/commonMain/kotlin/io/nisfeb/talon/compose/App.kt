@@ -1437,6 +1437,7 @@ fun App(
               io.nisfeb.talon.ui.LocalImageDownloader provides imageDownloader,
               io.nisfeb.talon.ui.LocalInlineMediaPlayer provides io.nisfeb.talon.ui.platformInlineMediaPlayer(),
               io.nisfeb.talon.notify.LocalNotificationClearer provides remember(notifier) { { key: String -> notifier.clear(key) } },
+              io.nisfeb.talon.calendar.LocalCalendarRepo provides calendarRepo,
               io.nisfeb.talon.mail.LocalMailTo provides mailTarget,
               io.nisfeb.talon.mail.LocalGrubberyInstall provides grubberyInstall,
               io.nisfeb.talon.ui.LocalChatDensity provides chatDensity,

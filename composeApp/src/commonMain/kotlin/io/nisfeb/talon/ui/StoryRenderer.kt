@@ -30,6 +30,8 @@ import androidx.compose.material3.VerticalDivider
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import kotlinx.coroutines.launch
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
@@ -789,20 +791,44 @@ private fun CalWidgetBlock(
             }
             val uriHandlerCal = androidx.compose.ui.platform.LocalUriHandler.current
             val calendarLauncher = LocalCalendarLauncher.current
-            androidx.compose.material3.TextButton(onClick = {
-                runCatching {
-                    // Android: Intent.ACTION_INSERT pops the system
-                    // create-event sheet pre-filled. Desktop / unset:
-                    // ICS tempfile + URI-handler handoff (browsers /
-                    // mail clients on most OSes attach the file).
-                    if (calendarLauncher != null) {
-                        calendarLauncher.launch(startEpochMs, endEpochMs, title)
-                    } else {
-                        val ics = buildIcs(startEpochMs, endEpochMs, title)
-                        uriHandlerCal.openUri(createTempFileUri("talon-event-", ".ics", ics))
-                    }
+            val shipCalendar = io.nisfeb.talon.calendar.LocalCalendarRepo.current
+            val shipCalendars = shipCalendar?.calendars?.collectAsState()?.value.orEmpty()
+            val addScope = androidx.compose.runtime.rememberCoroutineScope()
+            var menuOpen by remember { mutableStateOf(false) }
+            var added by remember { mutableStateOf<String?>(null) }
+            fun toAnotherApp() = runCatching {
+                // Android: Intent.ACTION_INSERT pops the system
+                // create-event sheet pre-filled. Desktop / unset:
+                // ICS tempfile + URI-handler handoff (browsers /
+                // mail clients on most OSes attach the file).
+                if (calendarLauncher != null) {
+                    calendarLauncher.launch(startEpochMs, endEpochMs, title)
+                } else {
+                    val ics = buildIcs(startEpochMs, endEpochMs, title)
+                    uriHandlerCal.openUri(createTempFileUri("talon-event-", ".ics", ics))
                 }
-            }) { Text("Add") }
+            }
+            androidx.compose.foundation.layout.Box {
+                // The ship's own calendars first; another calendar app after.
+                androidx.compose.material3.TextButton(onClick = {
+                    if (shipCalendar != null && shipCalendars.isNotEmpty()) menuOpen = true else toAnotherApp()
+                }) { Text(added ?: "Add") }
+                androidx.compose.material3.DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                    shipCalendar?.writable().orEmpty().forEach { c ->
+                        androidx.compose.material3.DropdownMenuItem(
+                            text = { Text(c.name.ifBlank { c.id }) },
+                            onClick = {
+                                menuOpen = false
+                                added = "Adding…"
+                                addScope.launch {
+                                    added = if (shipCalendar!!.addShared(c.id, title, startEpochMs, endEpochMs)) "Added to ${c.name.ifBlank { c.id }}" else "Not added"
+                                }
+                            },
+                        )
+                    }
+                    androidx.compose.material3.DropdownMenuItem(text = { Text("Another calendar app…") }, onClick = { menuOpen = false; toAnotherApp() })
+                }
+            }
         }
     }
 }

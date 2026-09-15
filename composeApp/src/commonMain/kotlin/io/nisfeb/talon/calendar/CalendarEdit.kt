@@ -268,6 +268,30 @@ fun CalendarRow.bounds(zone: TimeZone): Pair<Long, Long> {
     return start to end
 }
 
+/**
+ * A shared event, given as moments, as a draft for this ship's calendar.
+ * A range of whole UTC days is a day event, the calendar's date-space;
+ * anything else is timed, read in [zone] and named as [zoneId] so the
+ * calendar reads the wall clock the same way.
+ */
+fun sharedDraft(title: String, startMs: Long, endMs: Long, cal: String?, zone: TimeZone, zoneId: String?): EventDraft {
+    val day = 86_400_000L
+    if (endMs > startMs && startMs % day == 0L && endMs % day == 0L) {
+        return EventDraft(
+            name = title, cal = cal, cat = EventCat.ALLDAY,
+            date = Instant.fromEpochMilliseconds(startMs).toLocalDateTime(TimeZone.UTC).date,
+            spanDays = ((endMs - startMs) / day).toInt(),
+        )
+    }
+    val wall = Instant.fromEpochMilliseconds(startMs).toLocalDateTime(zone)
+    return EventDraft(
+        name = title, cal = cal, cat = EventCat.TIMED, date = wall.date,
+        minuteOfDay = wall.hour * 60 + wall.minute,
+        durMin = ((endMs - startMs) / 60_000L).toInt().coerceAtLeast(0),
+        zone = zoneId,
+    )
+}
+
 /** The six weeks a month view shows, Monday first, 42 days. */
 fun monthGrid(year: Int, month: Int): List<LocalDate> {
     val first = LocalDate(year, month, 1)

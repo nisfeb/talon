@@ -190,6 +190,26 @@ class CalendarRepo(
         return ok
     }
 
+    /** The calendars an event can be added to: all but those shared with us read-only. */
+    fun writable(): List<CalendarInfo> = _calendars.value.filter { it.id !in readOnly }
+    private fun writableDefault(): String? =
+        defaultCalendar.value.takeIf { d -> writable().any { it.id == d } } ?: writable().firstOrNull()?.id
+
+    /** An event someone shared, as moments, onto [calId] (else the calendar new events go to). False when refused. */
+    suspend fun addShared(calId: String?, title: String, startMs: Long, endMs: Long): Boolean {
+        val zoneId = _zone.value ?: TimeZone.currentSystemDefault().id
+        val zone = runCatching { TimeZone.of(zoneId) }.getOrElse { TimeZone.currentSystemDefault() }
+        return poke(eventBody(sharedDraft(title, startMs, endMs, calId ?: writableDefault(), zone, zoneId)))
+    }
+
+    /** Every event in an .ics onto [calId] (else the calendar new events go to). False when refused. */
+    suspend fun importIcs(calId: String?, ics: String): Boolean {
+        val a = api ?: return false
+        val ok = runCatching { a.importIcs(calId ?: writableDefault() ?: "default", ics) }.getOrDefault(false)
+        if (ok) refreshAll()
+        return ok
+    }
+
     /** Tick or untick a task. */
     suspend fun setDone(id: String, done: Boolean): Boolean = poke(doneBody(id, done))
 

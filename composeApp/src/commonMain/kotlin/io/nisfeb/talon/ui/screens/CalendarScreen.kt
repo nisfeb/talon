@@ -294,7 +294,12 @@ fun CalendarScreen(
         val d = "${d3(day.dayOfWeek)} ${day.dayOfMonth} ${MonthNames.ENGLISH_ABBREVIATED.names[day.monthNumber - 1]} ${day.year}"
         return if (r.isTask) (r.dueLabel(zone)?.let { "$it" } ?: "No due date") else "$d · ${spanLabel(r, day, zone, twentyFourHour)}"
     }
-    fun textOf(r: CalendarRow) = io.nisfeb.talon.calendar.eventShareText(r.name, whenLineOf(r), r.location, r.note, r.tags)
+    fun textOf(r: CalendarRow): String {
+        val base = io.nisfeb.talon.calendar.eventShareText(r.name, whenLineOf(r), r.location, r.note, r.tags)
+        // A card with Add on it, for whoever sees it. A task is not an event to add.
+        if (r.isTask) return base
+        return base + "\n" + io.nisfeb.talon.ui.encodeCalTag(r.l, if (r.r > r.l) r.r else r.l + 3_600_000L, r.name.ifBlank { "Event" })
+    }
     fun icsOf(r: CalendarRow) = io.nisfeb.talon.calendar.eventIcs(r.id, r.name, r.location, r.note, r.l, r.r, r.all)
     suspend fun mailEvent(r: CalendarRow, to: List<String>): Boolean {
         val m = mail ?: return false

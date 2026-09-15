@@ -161,4 +161,20 @@ class CalendarEditTest {
         assertEquals(listOf(day.minus(1, kotlinx.datetime.DateTimeUnit.DAY)), daysOf(timed, ny), "01:00 utc is the evening before in new york")
         assertEquals(timed.l to timed.r, timed.bounds(ny))
     }
+
+    @Test fun `a shared event is a day event over whole utc days and timed otherwise`() {
+        val ny = TimeZone.of("America/New_York")
+        val d0 = day.atTime(0, 0).toInstant(TimeZone.UTC).toEpochMilliseconds()
+        val allDay = sharedDraft("Fair", d0, d0 + 2 * 86_400_000L, "home", ny, "America/New_York")
+        assertEquals(EventCat.ALLDAY, allDay.cat)
+        assertEquals(day, allDay.date, "the utc day, not the evening before in new york")
+        assertEquals(2, allDay.spanDays)
+        val start = day.atTime(16, 0).toInstant(ny).toEpochMilliseconds()
+        val timed = sharedDraft("Lunch", start, start + 90 * 60_000L, null, ny, "America/New_York")
+        assertEquals(EventCat.TIMED, timed.cat)
+        assertEquals(day, timed.date)
+        assertEquals(16 * 60, timed.minuteOfDay)
+        assertEquals(90, timed.durMin)
+        assertEquals("America/New_York", timed.zone)
+    }
 }

@@ -1292,6 +1292,7 @@ fun TalonApp(
             }
         },
         io.nisfeb.talon.notify.LocalNotificationClearer provides remember(context) { { key: String -> Notifications.cancelAllForChat(context, key) } },
+        io.nisfeb.talon.calendar.LocalCalendarRepo provides calendarRepo,
         LocalCalendarLauncher provides calendarLauncher,
         LocalMapsLauncher provides mapsLauncher,
         io.nisfeb.talon.ui.LocalUrbLinkHandler provides urbLinkHandler,
