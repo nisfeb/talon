@@ -186,6 +186,14 @@ class MailRepo(
         announce(p)
     }
 
+    /**
+     * One listing read that leaves the screen alone: a view, a search,
+     * or both, for the assistant, which must not move what the reader
+     * has open. Null when the ship refused or is out of reach.
+     */
+    suspend fun listing(view: MailView = MailView.INBOX, query: String? = null, limit: Int = AuspexApi.DEFAULT_PAGE): InboxPage? =
+        call { it.inbox(view = view, query = query?.takeIf { q -> q.isNotBlank() }, limit = limit.coerceAtMost(MAX_PAGE)) }
+
     /** One listing read for the open folder, or null after [onFailure]. */
     private suspend fun read(a: AuspexApi, limit: Int): InboxPage? {
         _loading.value = true

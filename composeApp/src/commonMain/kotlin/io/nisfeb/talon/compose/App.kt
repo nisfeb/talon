@@ -862,48 +862,6 @@ fun App(
 
         val aiState by aiSettings.state.collectAsState()
 
-        // Desktop loop runner. No AlarmManager on desktop, so loops run
-        // via a while-open ticker (below, inside the logged-in guard) plus
-        // the "Run now" button. Built here so both the ticker and the
-        // LoopsScreen branch share one instance. Full tool catalog —
-        // LoopRunner keeps write tools only for loops that opted in.
-        // Web access belongs to the assistant: with it off both web tools
-        // hard-refuse, so gate their PRESENCE (as AssistantScreen does)
-        // rather than hand a scheduled run a tool it can only fail with.
-        val loopWebOn = aiState.assistantOn()
-        val loopBraveOn = loopWebOn && aiState.braveApiKey.isNotBlank()
-        val loopRunner = remember(db, repo, searchEmbedderClient, loopWebOn, loopBraveOn) {
-            val agentClient = io.nisfeb.talon.ai.AgentClient { aiSettings.state.value }
-            io.nisfeb.talon.ai.LoopRunner(
-                loops = db.loops(),
-                runs = db.loopRuns(),
-                tools = io.nisfeb.talon.ai.ToolCatalog.default(
-                    repo, db, searchEmbedderClient,
-                    braveSearch = if (loopBraveOn) {
-                        io.nisfeb.talon.ai.BraveSearchClient { aiSettings.state.value }
-                    } else {
-                        null
-                    },
-                    urlFetcher = if (loopWebOn) {
-                        io.nisfeb.talon.ai.UrlFetcher { aiSettings.state.value }
-                    } else {
-                        null
-                    },
-                ) { it },
-                completer = { sys, msgs, t -> agentClient.completeWithTools(sys, msgs, t) },
-                aiConfig = { aiSettings.state.value },
-                // One device runs a scheduled write fire — the %settings lease
-                // (SettingsSyncImpl implements LoopWriteCoordinator). Noop when
-                // there's no sync channel (a write loop needs the ship anyway).
-                coordinator = settingsSync ?: io.nisfeb.talon.ai.LoopWriteCoordinator.Noop,
-                // loopId is dropped: the desktop Notifier (tray balloon /
-                // notify-send) has no per-notification tag, so loops can't
-                // group/replace like Android's id-tagged notifications. A
-                // tag param on Notifier.notify is the upgrade path if it
-                // matters; for now each loop run is a standalone toast.
-                notify = { _, title, body -> notifier.notify(title, body) },
-            )
-        }
         val loopScope = rememberCoroutineScope()
 
         // Mail lives on the ship's own HTTP surface, not the eyre
@@ -999,6 +957,56 @@ fun App(
         }
         LaunchedEffect(calendarRepo, mailShipUrl) {
             if (mailShipUrl != null) calendarRepo.attach(mailShipUrl) else calendarRepo.detach()
+        }
+        // Desktop loop runner. No AlarmManager on desktop, so loops run
+        // via a while-open ticker (below, inside the logged-in guard) plus
+        // the "Run now" button. Built here so both the ticker and the
+        // LoopsScreen branch share one instance. Full tool catalog —
+        // LoopRunner keeps write tools only for loops that opted in.
+        // Web access belongs to the assistant: with it off both web tools
+        // hard-refuse, so gate their PRESENCE (as AssistantScreen does)
+        // rather than hand a scheduled run a tool it can only fail with.
+        val loopWebOn = aiState.assistantOn()
+        val loopBraveOn = loopWebOn && aiState.braveApiKey.isNotBlank()
+        val loopRunner = remember(db, repo, searchEmbedderClient, loopWebOn, loopBraveOn, mailRepo, calendarRepo) {
+            val agentClient = io.nisfeb.talon.ai.AgentClient { aiSettings.state.value }
+            io.nisfeb.talon.ai.LoopRunner(
+                loops = db.loops(),
+                runs = db.loopRuns(),
+                tools = io.nisfeb.talon.ai.ToolCatalog.default(
+                    repo, db, searchEmbedderClient,
+                    braveSearch = if (loopBraveOn) {
+                        io.nisfeb.talon.ai.BraveSearchClient { aiSettings.state.value }
+                    } else {
+                        null
+                    },
+                    urlFetcher = if (loopWebOn) {
+                        io.nisfeb.talon.ai.UrlFetcher { aiSettings.state.value }
+                    } else {
+                        null
+                    },
+                ) { it } + io.nisfeb.talon.ai.actionTools(
+                    // The mail, calendar, task and event tools, as the assistant has them;
+                    // no calls, since no one is there to talk.
+                    io.nisfeb.talon.ai.AssistantActions(
+                        db = db, contacts = { callContacts }, mail = mailRepo, calendar = calendarRepo,
+                        zone = { io.nisfeb.talon.ui.screens.zoneFor(calendarRepo.zone.value) },
+                        send = { whom, text -> repo.send(whom, text) },
+                    ),
+                ),
+                completer = { sys, msgs, t -> agentClient.completeWithTools(sys, msgs, t) },
+                aiConfig = { aiSettings.state.value },
+                // One device runs a scheduled write fire — the %settings lease
+                // (SettingsSyncImpl implements LoopWriteCoordinator). Noop when
+                // there's no sync channel (a write loop needs the ship anyway).
+                coordinator = settingsSync ?: io.nisfeb.talon.ai.LoopWriteCoordinator.Noop,
+                // loopId is dropped: the desktop Notifier (tray balloon /
+                // notify-send) has no per-notification tag, so loops can't
+                // group/replace like Android's id-tagged notifications. A
+                // tag param on Notifier.notify is the upgrade path if it
+                // matters; for now each loop run is a standalone toast.
+                notify = { _, title, body -> notifier.notify(title, body) },
+            )
         }
         // Which calendars this device keeps off survives a restart.
         LaunchedEffect(calendarRepo, uiSettings) {
@@ -1356,7 +1364,7 @@ fun App(
                   onTalon = { uri ->
                       when (val link = io.nisfeb.talon.urbit.TalonLink.parse(uri)) {
                           is io.nisfeb.talon.urbit.TalonLink.Message -> {
-                              showCalendar = false; showBookmarks = false
+                              showCalendar = false; showBookmarks = false; showAssistant = false
                               uiSettings.setActiveRailTab(RailTab.Chats)
                               jumpToChat(link.whom)
                               if (link.parentId != null) { openThreadParent = link.parentId; openThreadReplyAnchor = link.id }
@@ -1364,7 +1372,7 @@ fun App(
                               true
                           }
                           is io.nisfeb.talon.urbit.TalonLink.Mail -> {
-                              showCalendar = false; showBookmarks = false
+                              showCalendar = false; showBookmarks = false; showAssistant = false
                               openMailThread = link.threadId
                               uiSettings.setActiveRailTab(RailTab.Mail)
                               true

@@ -53,7 +53,7 @@ object ToolCatalog {
         Tool(
             spec = ToolSpec(
                 "search_history",
-                "Search the user's whole chat history (semantic + keyword). Returns the most relevant messages with their whom (conversation id), post (message id), author, and text.",
+                "Search the user's whole chat history (semantic + keyword). Returns the most relevant messages with their whom (conversation id), post (message id), a link that opens the message, author, and text.",
                 schema(
                     "query" to ("string" to "What to search for, in natural language."),
                     "k" to ("integer" to "Max results (default 10)."),
@@ -211,7 +211,7 @@ object ToolCatalog {
         if (messages.isEmpty()) return "No messages found."
         return messages.joinToString("\n") { m ->
             val text = StoryCache.textFor(m.id, m.contentJson).replace('\n', ' ').take(300)
-            "whom=${m.whom} post=${m.id} from=${displayName(m.author)}: $text"
+            "whom=${m.whom} post=${m.id} link=${io.nisfeb.talon.urbit.TalonLink.forMessage(m.whom, m.id, m.parentId)} from=${displayName(m.author)}: $text"
         }
     }
 }

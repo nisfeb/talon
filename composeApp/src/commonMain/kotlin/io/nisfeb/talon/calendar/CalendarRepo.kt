@@ -190,6 +190,10 @@ class CalendarRepo(
         return ok
     }
 
+    /** Occurrences between two moments, read without moving the screen's month or the widget's window. */
+    suspend fun windowRows(fromMs: Long, toMs: Long): List<CalendarRow>? =
+        api?.let { a -> runCatching { a.window(fromMs, toMs).rows.sortedWith(compareBy({ it.l }, { it.r })) }.getOrNull() }
+
     /** The calendars an event can be added to: all but those shared with us read-only. */
     fun writable(): List<CalendarInfo> = _calendars.value.filter { it.id !in readOnly }
     private fun writableDefault(): String? =

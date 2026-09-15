@@ -1196,14 +1196,14 @@ fun TalonApp(
             onTalon = { uri ->
                 when (val link = io.nisfeb.talon.urbit.TalonLink.parse(uri)) {
                     is io.nisfeb.talon.urbit.TalonLink.Message -> {
-                        calendarOpen = false; homeOpen = false; mailOpen = false
+                        calendarOpen = false; homeOpen = false; assistantOpen = false; assistantListen = false; mailOpen = false
                         openWhom = link.whom
                         if (link.parentId != null) { pendingThreadAnchor = link.id; openThread = link.parentId }
                         else pendingScrollMessageId = link.id
                         true
                     }
                     is io.nisfeb.talon.urbit.TalonLink.Mail -> {
-                        calendarOpen = false; homeOpen = false
+                        calendarOpen = false; homeOpen = false; assistantOpen = false; assistantListen = false
                         pendingMailThread = link.threadId; mailOpen = true
                         true
                     }

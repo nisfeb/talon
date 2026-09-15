@@ -43,4 +43,20 @@ class AssistantActionsTest {
         assertEquals(io.nisfeb.talon.ui.DecodedCal(lunch, lunch + 3_600_000L, "Lunch"), io.nisfeb.talon.ui.decodeCalTag(msg))
         assertTrue(msg.startsWith("📅 Lunch\n"), msg)
     }
+
+    @Test fun `an event line says when, what, repeats, where, tags and calendar by name`() {
+        val sat = 1_789_776_000_000L
+        val lunch = sat + 12 * 3_600_000L + 30 * 60_000L
+        val p = { v: String -> kotlinx.serialization.json.JsonPrimitive(v) }
+        val row = io.nisfeb.talon.calendar.CalendarRow(
+            id = "e1", cal = "fam", cat = "timed", kind = "weekly", l = lunch, r = lunch + 3_600_000L,
+            meta = kotlinx.serialization.json.JsonObject(mapOf("name" to p("Lunch"), "location" to p("The Oak"), "tags" to kotlinx.serialization.json.JsonArray(listOf(p("food"))))),
+        )
+        assertEquals("event=e1 2026-09-19 12:30–13:30 Lunch (repeats weekly) @ The Oak #food (calendar Family)", describeRow(row, TimeZone.UTC, mapOf("fam" to "Family")))
+        val fair = io.nisfeb.talon.calendar.CalendarRow(
+            id = "e2", cat = "allday", all = true, l = sat, r = sat + 2 * 86_400_000L,
+            meta = kotlinx.serialization.json.JsonObject(mapOf("name" to p("Fair"))),
+        )
+        assertEquals("event=e2 2026-09-19 all day (2 days) Fair (calendar default)", describeRow(fair, TimeZone.of("America/New_York"), emptyMap()))
+    }
 }

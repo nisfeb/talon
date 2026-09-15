@@ -1,5 +1,7 @@
 package io.nisfeb.talon.ai
 
+import kotlinx.coroutines.flow.first
+
 import android.app.AlarmManager
 import android.app.PendingIntent
 import android.content.Context
@@ -90,7 +92,7 @@ class Loops(
                     while (!sync.canCoordinate()) kotlinx.coroutines.delay(500)
                 }
             }
-            withTimeoutOrNull(RUN_BUDGET_MS) { runner().runDue() }
+            withTimeoutOrNull(RUN_BUDGET_MS) { withRunner { it.runDue() } }
         } finally {
             runCatching { rearm() }
         }
@@ -104,7 +106,7 @@ class Loops(
             runCatching {
                 if (sessionStore.activeShip() == null) return@launch
                 val loop = getDb().loops().get(loopId) ?: return@launch
-                runner().runLoop(loop)
+                withRunner { it.runLoop(loop) }
             }.onFailure { if (it is CancellationException) throw it }
             runCatching { rearm() }
         }
@@ -138,7 +140,42 @@ class Loops(
     private val braveClient by lazy { BraveSearchClient { aiSettings.state.value } }
     private val urlFetcher by lazy { UrlFetcher { aiSettings.state.value } }
 
-    private fun runner(): LoopRunner {
+    /**
+     * A runner with the mail, calendar, task and event tools, over
+     * connections made for this run and closed after it. A loop fires from
+     * an alarm, where the app's own mail and calendar, built by the UI, may
+     * not exist.
+     */
+    private suspend fun <T> withRunner(block: suspend (LoopRunner) -> T): T {
+        val url = sessionStore.active()?.shipUrl
+        val http = runCatching { getSession().http }.getOrNull()
+        val mail = if (url != null && http != null) io.nisfeb.talon.mail.MailRepo(http, scope).also { it.attach(url) } else null
+        val calendar = if (url != null && http != null) io.nisfeb.talon.calendar.CalendarRepo(http, scope).also { it.attach(url) } else null
+        try {
+            // The calendar tools read its calendars, tasks and window; have them first.
+            calendar?.refresh()
+            val db = getDb()
+            val contacts = runCatching {
+                io.nisfeb.talon.ui.ContactMap(
+                    contacts = db.contacts().stream().first(),
+                    clubs = db.clubs().stream().first(),
+                    groups = db.groups().streamGroups().first(),
+                    channelGroups = db.groups().streamChannelGroups().first(),
+                )
+            }.getOrElse { io.nisfeb.talon.ui.ContactMap() }
+            val actions = AssistantActions(
+                db = db, contacts = { contacts }, mail = mail, calendar = calendar,
+                zone = { io.nisfeb.talon.ui.screens.zoneFor(calendar?.zone?.value) },
+                send = { whom, text -> getRepo().send(whom, text) },
+            )
+            return block(runner(actions))
+        } finally {
+            mail?.detach()
+            calendar?.detach()
+        }
+    }
+
+    private fun runner(actions: AssistantActions): LoopRunner {
         val db = getDb()
         // Full catalog (reads + writes); LoopRunner keeps write tools only
         // for loops with writesAuthorized set. displayName is the raw patp —
@@ -156,7 +193,7 @@ class Loops(
         return LoopRunner(
             loops = db.loops(),
             runs = db.loopRuns(),
-            tools = tools,
+            tools = tools + actionTools(actions),
             completer = { sys, msgs, t -> agentClient.completeWithTools(sys, msgs, t) },
             aiConfig = { aiSettings.state.value },
             // One device runs a scheduled write fire — the %settings lease.

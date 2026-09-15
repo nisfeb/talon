@@ -1,6 +1,11 @@
 package io.nisfeb.talon.ai
 
 import io.nisfeb.talon.calendar.CalendarRepo
+import io.nisfeb.talon.calendar.CalendarRow
+import io.nisfeb.talon.calendar.daysOf
+import io.nisfeb.talon.calendar.draftFromEvent
+import kotlinx.datetime.DateTimeUnit
+import kotlinx.datetime.plus
 import io.nisfeb.talon.calendar.EventCat
 import io.nisfeb.talon.calendar.EventDraft
 import io.nisfeb.talon.calendar.Repeat
@@ -153,12 +158,15 @@ fun actionTools(a: AssistantActions): List<Tool> = buildList {
         add(Tool(
             spec = ToolSpec(
                 "send_mail",
-                "Send a signed mail from the user. Recipients are ships (@p); resolve names with find_person first.",
+                "Send a signed mail from the user. Recipients are ships (@p); resolve names with find_person first. To answer a thread, give thread and write to its other participants. To mail an invitation, give event: the invite goes along as an .ics file the recipient can add to their calendar.",
                 toolSchema(
                     "to" to ("string" to "Recipient ships, comma-separated."),
-                    "subject" to ("string" to "The subject line."),
+                    "subject" to ("string" to "The subject line; for a reply, the thread's own subject is used when this is blank."),
                     "body" to ("string" to "The message, plain text."),
-                    required = listOf("to", "subject", "body"),
+                    "thread" to ("string" to "The thread id being answered, from list_mail, search_mail or read_mail; optional."),
+                    "event" to ("string" to "An event id from list_events to attach as an invite; optional."),
+                    "occurrence" to ("string" to "YYYY-MM-DD of the occurrence to attach, when the event repeats."),
+                    required = listOf("to", "body"),
                 ),
             ),
             write = true,
@@ -167,21 +175,87 @@ fun actionTools(a: AssistantActions): List<Tool> = buildList {
             if (to.isEmpty()) return@Tool "Error: to is required."
             val bad = to.filterNot { isValidPatp(it) }
             if (bad.isNotEmpty()) return@Tool "Error: not ships: ${bad.joinToString()}. Use find_person to get @p ids."
-            val subject = args.text("subject").orEmpty()
             val body = args.text("body")?.takeIf { it.isNotBlank() } ?: return@Tool "Error: body is required."
-            if (mail.send(to, subject, body, null, emptyList())) "Mailed ${to.joinToString()}." else "The ship did not send it: ${mail.error.value ?: "unknown reason"}."
+            val threadId = args.text("thread")?.trim()?.takeIf { it.isNotEmpty() }
+            val thread = if (threadId == null) null else mail.loadThread(threadId) ?: return@Tool "Error: no thread $threadId; see list_mail."
+            val subject = args.text("subject")?.takeIf { it.isNotBlank() }
+                ?: thread?.messages?.firstOrNull()?.subject?.let { if (it.startsWith("Re:", ignoreCase = true)) it else "Re: $it" }.orEmpty()
+            val attachments = mutableListOf<io.nisfeb.talon.mail.AttachRef>()
+            val eventId = args.text("event")?.trim()?.takeIf { it.isNotEmpty() }
+            if (eventId != null) {
+                val cal = a.calendar ?: return@Tool "Error: there is no calendar to take the event from."
+                val row = findOccurrence(cal, eventId, parseDate(args.text("occurrence")), a.zone())
+                    ?: return@Tool "Error: no event $eventId coming up; see list_events."
+                val ics = io.nisfeb.talon.calendar.eventIcs(row.id, row.name, row.location, row.note, row.l, row.r, row.all)
+                val hash = runCatching { mail.uploadBlob(ics.encodeToByteArray()) }
+                    .getOrElse { return@Tool "Error: the invite could not be stored: ${it.message}" }
+                attachments += io.nisfeb.talon.mail.AttachRef("event.ics", "text/calendar", hash)
+            }
+            if (mail.send(to, subject, body, thread?.messages?.lastOrNull()?.id, attachments)) {
+                "Mailed ${to.joinToString()}${if (attachments.isNotEmpty()) " with the invite attached" else ""}."
+            } else {
+                "The ship did not send it: ${mail.error.value ?: "unknown reason"}."
+            }
         })
         add(Tool(
             spec = ToolSpec(
                 "list_mail",
-                "The user's inbox, newest first: who it is from, the subject, whether it is unread.",
-                toolSchema("count" to ("integer" to "How many threads (default 15)."), required = emptyList()),
+                "The user's mail, newest first: who it is from, the subject, whether it is unread, the thread id and a link that opens it. The inbox unless another view is asked for.",
+                toolSchema(
+                    "view" to ("string" to "inbox (default), sent, archived or all."),
+                    "count" to ("integer" to "How many threads (default 15)."),
+                    required = emptyList(),
+                ),
             ),
             write = false,
         ) { args ->
+            val wanted = (args.text("view") ?: "inbox").trim().lowercase()
+            val view = io.nisfeb.talon.mail.MailView.entries.firstOrNull { it.wire == wanted && it != io.nisfeb.talon.mail.MailView.LABEL }
+                ?: return@Tool "Error: view must be inbox, sent, archived or all."
             val n = (args.int("count") ?: 15).coerceIn(1, 50)
-            val threads = mail.page.value?.threads.orEmpty().take(n)
-            if (threads.isEmpty()) "No mail." else threads.joinToString("\n") { "thread=${it.id} from=${it.from} subject=${it.subject.ifBlank { "(no subject)" }}${if (it.unread) " unread" else ""}" }
+            val page = mail.listing(view, null, n) ?: return@Tool "The mail app did not answer${mail.error.value?.let { ": $it" } ?: ""}."
+            mailLines(page.threads.take(n)).ifBlank { "No mail." }
+        })
+        add(Tool(
+            spec = ToolSpec(
+                "search_mail",
+                "Search all of the user's mail, sent and archived included, by words in the subject, the body or the sender.",
+                toolSchema(
+                    "query" to ("string" to "What to look for."),
+                    "count" to ("integer" to "How many threads (default 15)."),
+                    required = listOf("query"),
+                ),
+            ),
+            write = false,
+        ) { args ->
+            val q = args.text("query")?.trim()?.takeIf { it.isNotEmpty() } ?: return@Tool "Error: query is required."
+            val n = (args.int("count") ?: 15).coerceIn(1, 50)
+            val page = mail.listing(io.nisfeb.talon.mail.MailView.ALL, q, n)
+                ?: return@Tool "The mail app did not answer${mail.error.value?.let { ": $it" } ?: ""}."
+            mailLines(page.threads.take(n)).ifBlank { "No mail matches \"$q\"." }
+        })
+        add(Tool(
+            spec = ToolSpec(
+                "read_mail",
+                "Read one mail thread: each message with who sent it to whom, when, the subject, the body and its attachments, plus the thread's participants and a link that opens it.",
+                toolSchema("thread" to ("string" to "The thread id from list_mail or search_mail."), required = listOf("thread")),
+            ),
+            write = false,
+        ) { args ->
+            val id = args.text("thread")?.trim()?.takeIf { it.isNotEmpty() } ?: return@Tool "Error: thread is required."
+            val t = mail.loadThread(id) ?: return@Tool "No thread $id${mail.error.value?.let { ": $it" } ?: ""}."
+            val zone = a.zone()
+            fun two(n: Int) = n.toString().padStart(2, '0')
+            buildString {
+                append("thread=${t.id} link=${io.nisfeb.talon.urbit.TalonLink.forMail(t.id)} participants=${t.participants.joinToString(", ")}")
+                if (t.labels.isNotEmpty()) append(" labels=${t.labels.joinToString(", ")}")
+                t.messages.forEach { m ->
+                    val at = Instant.fromEpochMilliseconds(m.sent).toLocalDateTime(zone)
+                    append("\n\nmessage=${m.id} from=${m.from} to=${m.to.joinToString(", ")} sent=${at.date} ${two(at.hour)}:${two(at.minute)} subject=${m.subject.ifBlank { "(no subject)" }}\n")
+                    append(m.body.take(4000))
+                    if (m.attachments.isNotEmpty()) append("\nattachments: " + m.attachments.joinToString(", ") { "${it.name} (${it.mime})" })
+                }
+            }
         })
     }
     a.calendar?.let { cal ->
@@ -207,18 +281,22 @@ fun actionTools(a: AssistantActions): List<Tool> = buildList {
         add(Tool(
             spec = ToolSpec(
                 "create_event",
-                "Put an event on the user's calendar. Dates are YYYY-MM-DD, times HH:MM in the user's zone; work them out from NOW in the system prompt.",
+                "Put an event on the user's calendar. Dates are YYYY-MM-DD and times HH:MM in the user's zone unless zone is given; work them out from NOW in the system prompt.",
                 toolSchema(
                     "name" to ("string" to "What the event is."),
                     "date" to ("string" to "YYYY-MM-DD."),
                     "time" to ("string" to "HH:MM; omit for an all-day event."),
+                    "zone" to ("string" to "The zone the time is given in, e.g. Europe/London, when it is not the user's own; optional."),
                     "duration_min" to ("integer" to "Length in minutes (default 60) for a timed event."),
                     "days" to ("integer" to "Length in days (default 1) for an all-day event."),
                     "location" to ("string" to "Where, optional."),
                     "note" to ("string" to "A note, optional."),
                     "calendar" to ("string" to "Calendar id or name (e.g. \"family\"), optional; the calendar new events go to otherwise. See list_calendars."),
-                    "repeat" to ("string" to "once (default), daily, weekly, monthly or yearly."),
+                    "repeat" to ("string" to "once (default), daily, weekly, monthly, monthly-nth (a weekday of the month, e.g. the second Tuesday), yearly, or every (every so many minutes)."),
                     "weekdays" to ("string" to "For weekly: comma-separated mon,tue,... (default: the date's weekday)."),
+                    "ordinal" to ("string" to "For monthly-nth: first, second, third, fourth or last."),
+                    "weekday" to ("string" to "For monthly-nth: mon..sun (default: the date's weekday)."),
+                    "every_min" to ("integer" to "For every: the period in minutes."),
                     "count" to ("integer" to "For a repeat: how many times, optional."),
                     "tags" to ("string" to "Comma-separated tags, optional (the calendar's categories)."),
                     required = listOf("name", "date"),
@@ -230,9 +308,17 @@ fun actionTools(a: AssistantActions): List<Tool> = buildList {
             val date = parseDate(args.text("date")) ?: return@Tool "Error: date must be YYYY-MM-DD."
             val time = args.text("time")?.takeIf { it.isNotBlank() }
             val minute = if (time == null) null else parseClock(time) ?: return@Tool "Error: time must be HH:MM."
-            val repeat = Repeat.entries.firstOrNull { it.kind == (args.text("repeat") ?: "once").lowercase() } ?: return@Tool "Error: repeat must be once, daily, weekly, monthly or yearly."
+            val repeat = Repeat.entries.firstOrNull { it.kind == (args.text("repeat") ?: "once").trim().lowercase() }
+                ?: return@Tool "Error: repeat must be once, daily, weekly, monthly, monthly-nth, yearly or every."
+            if (repeat == Repeat.EVERY && minute == null) return@Tool "Error: an every-so-many-minutes event needs a time."
             val weekdays = args.text("weekdays")?.split(',')?.mapNotNull { WEEKDAYS[it.trim().lowercase().take(3)] }?.toSet()
                 ?.takeIf { it.isNotEmpty() } ?: setOf(date.dayOfWeek)
+            val ordinal = args.text("ordinal")?.trim()?.lowercase()?.takeIf { it.isNotEmpty() }
+            if (ordinal != null && ordinal !in io.nisfeb.talon.calendar.ORDINALS) return@Tool "Error: ordinal must be first, second, third, fourth or last."
+            val weekdayText = args.text("weekday")?.trim()?.takeIf { it.isNotEmpty() }
+            val nthDay = if (weekdayText == null) null else WEEKDAYS[weekdayText.lowercase().take(3)] ?: return@Tool "Error: weekday must be mon..sun."
+            val zoneArg = args.text("zone")?.trim()?.takeIf { it.isNotEmpty() }
+            if (zoneArg != null && runCatching { TimeZone.of(zoneArg) }.isFailure) return@Tool "Error: $zoneArg is not a zone name; use one like Europe/London."
             val calArg = args.text("calendar")?.takeIf { it.isNotBlank() }
             val calId = resolveCalendar(calArg)
             if (calArg != null && calId == null) return@Tool "Error: no calendar called \"$calArg\"; see list_calendars."
@@ -244,30 +330,132 @@ fun actionTools(a: AssistantActions): List<Tool> = buildList {
                 date = date, minuteOfDay = minute ?: 0,
                 durMin = args.int("duration_min") ?: 60, spanDays = args.int("days") ?: 1,
                 repeat = repeat, weekdays = weekdays, count = args.int("count") ?: 0,
+                ordinal = ordinal ?: "first", nthDay = nthDay, periodMin = (args.int("every_min") ?: 60).coerceAtLeast(1),
+                zone = if (minute != null) zoneArg else null,
                 tags = io.nisfeb.talon.calendar.parseTags(args.text("tags").orEmpty()),
             )
-            if (cal.poke(eventBody(draft))) "Added \"$name\" on $date${if (time != null) " at $time" else ""} to calendar ${calId ?: "default"}." else "The calendar did not take it."
+            if (cal.poke(eventBody(draft))) {
+                "Added \"$name\" on $date${if (time != null) " at $time${zoneArg?.let { " $it" } ?: ""}" else ""} to calendar ${calId ?: "default"}."
+            } else {
+                "The calendar did not take it."
+            }
         })
         add(Tool(
             spec = ToolSpec(
                 "list_events",
-                "What is on the user's calendar between two dates (within the next thirty days), in time order.",
-                toolSchema("from" to ("string" to "YYYY-MM-DD (default today)."), "to" to ("string" to "YYYY-MM-DD inclusive (default a week out)."), required = emptyList()),
+                "What is on the user's calendar between two dates, in time order: each event's id, day and time, name, whether it repeats, place, tags, note and calendar. Any range; a week from today by default.",
+                toolSchema("from" to ("string" to "YYYY-MM-DD (default today)."), "to" to ("string" to "YYYY-MM-DD inclusive (default a week after from)."), required = emptyList()),
             ),
             write = false,
         ) { args ->
             val zone = a.zone()
             val today = Instant.fromEpochMilliseconds(nowMs()).toLocalDateTime(zone).date
             val from = parseDate(args.text("from")) ?: today
-            val to = parseDate(args.text("to")) ?: LocalDate.fromEpochDays(from.toEpochDays() + 7)
-            val rows = cal.rows.value.orEmpty().filter { r ->
-                val d = Instant.fromEpochMilliseconds(r.bounds(zone).first).toLocalDateTime(zone).date
-                d >= from && d <= to
+            val to = parseDate(args.text("to")) ?: from.plus(7, DateTimeUnit.DAY)
+            if (to < from) return@Tool "Error: to is before from."
+            val fromMs = from.atTime(0, 0).toInstant(zone).toEpochMilliseconds()
+            val toMs = to.plus(1, DateTimeUnit.DAY).atTime(0, 0).toInstant(zone).toEpochMilliseconds()
+            val rows = cal.windowRows(fromMs, toMs) ?: return@Tool "The calendar did not answer."
+            val names = cal.calendars.value.associate { it.id to it.name.ifBlank { it.id } }
+            val shown = rows.filter { r -> daysOf(r, zone).any { it in from..to } }
+            if (shown.isEmpty()) "Nothing between $from and $to."
+            else shown.take(100).joinToString("\n") { describeRow(it, zone, names) }
+        })
+        add(Tool(
+            spec = ToolSpec(
+                "update_event",
+                "Change an event or task already on the calendar: move it, rename it, change its length, place, note, tags or calendar. Give only what changes. For one occurrence of a repeating event give occurrence; without it the whole series changes.",
+                toolSchema(
+                    "event" to ("string" to "The event or task id from list_events or list_tasks."),
+                    "occurrence" to ("string" to "YYYY-MM-DD of the one occurrence to change, for a repeating event."),
+                    "name" to ("string" to "A new name."),
+                    "date" to ("string" to "A new date, YYYY-MM-DD (a task's due date)."),
+                    "time" to ("string" to "A new start time, HH:MM."),
+                    "duration_min" to ("integer" to "A new length in minutes."),
+                    "days" to ("integer" to "A new length in days, for an all-day event."),
+                    "location" to ("string" to "A new place; empty to clear it."),
+                    "note" to ("string" to "A new note; empty to clear it."),
+                    "calendar" to ("string" to "Move it to this calendar, by id or name."),
+                    "tags" to ("string" to "Comma-separated; replaces the tags."),
+                    required = listOf("event"),
+                ),
+            ),
+            write = true,
+        ) { args ->
+            val id = args.text("event")?.trim()?.takeIf { it.isNotEmpty() } ?: return@Tool "Error: event is required."
+            val zone = a.zone()
+            val today = Instant.fromEpochMilliseconds(nowMs()).toLocalDateTime(zone).date
+            val detail = cal.eventDetail(id) ?: return@Tool "Error: no event $id; see list_events."
+            val d0 = draftFromEvent(detail, today) ?: return@Tool "Error: that event could not be read."
+            if (d0.cal != null && d0.cal in cal.readOnly) return@Tool "Error: that calendar is shared with the user read-only; its host makes the changes."
+            val dateText = args.text("date")?.trim()?.takeIf { it.isNotEmpty() }
+            val newDate = if (dateText == null) null else parseDate(dateText) ?: return@Tool "Error: date must be YYYY-MM-DD."
+            val timeText = args.text("time")?.trim()?.takeIf { it.isNotEmpty() }
+            val newMinute = if (timeText == null) null else parseClock(timeText) ?: return@Tool "Error: time must be HH:MM."
+            val calArg = args.text("calendar")?.trim()?.takeIf { it.isNotEmpty() }
+            val calId = if (calArg == null) d0.cal else resolveCalendar(calArg) ?: return@Tool "Error: no calendar called \"$calArg\"; see list_calendars."
+            if (calId != null && calId in cal.readOnly) return@Tool "Error: calendar $calId is shared with the user read-only; its host makes the changes."
+            var d = d0.copy(
+                name = args.text("name")?.takeIf { it.isNotBlank() } ?: d0.name,
+                location = args.text("location") ?: d0.location,
+                note = args.text("note") ?: d0.note,
+                tags = args.text("tags")?.let { io.nisfeb.talon.calendar.parseTags(it) } ?: d0.tags,
+                cal = calId,
+                durMin = args.int("duration_min") ?: d0.durMin,
+                spanDays = args.int("days") ?: d0.spanDays,
+            )
+            if (d.cat == EventCat.TODO) {
+                if (newDate != null) d = d.copy(due = newDate, date = newDate)
+            } else {
+                if (newDate != null) d = d.copy(date = newDate)
+                if (newMinute != null && d.cat != EventCat.DATE) d = d.copy(cat = EventCat.TIMED, minuteOfDay = newMinute)
             }
-            if (rows.isEmpty()) "Nothing between $from and $to."
-            else rows.joinToString("\n") { r ->
-                val s = Instant.fromEpochMilliseconds(r.bounds(zone).first).toLocalDateTime(zone)
-                "${if (r.isTask) "task" else "event"}=${r.id} ${s.date} ${if (r.isTask) (if (r.done) "done" else "due") else if (r.all) "all day" else "${s.hour.toString().padStart(2, '0')}:${s.minute.toString().padStart(2, '0')}"} ${r.name}${if (r.location.isNotBlank()) " @ ${r.location}" else ""} (calendar ${r.cal})"
+            val occText = args.text("occurrence")?.trim()?.takeIf { it.isNotEmpty() }
+            val oneOnly = occText != null && d0.repeats
+            val ok = if (oneOnly) {
+                val occ = parseDate(occText) ?: return@Tool "Error: occurrence must be YYYY-MM-DD."
+                val row = findOccurrence(cal, id, occ, zone) ?: return@Tool "Error: \"${d0.name}\" has no occurrence on $occ."
+                val evZone = d0.zone?.let { z -> runCatching { TimeZone.of(z) }.getOrNull() } ?: zone
+                val at = Instant.fromEpochMilliseconds(row.l).toLocalDateTime(if (row.all) TimeZone.UTC else evZone)
+                // The calendar page's own two steps: skip the old, add a one-off.
+                val one = d.copy(
+                    repeat = Repeat.ONCE, rawKind = null, rawArgs = null, rawStartMs = null, count = 0, until = null,
+                    date = newDate ?: at.date,
+                    minuteOfDay = newMinute ?: (at.hour * 60 + at.minute),
+                )
+                cal.poke(buildJsonObject { put("action", "skip-event"); put("id", id); put("idx", row.idx) }) && cal.poke(eventBody(one))
+            } else {
+                cal.poke(eventBody(d, id))
+            }
+            if (ok) "Updated \"${d.name}\"${if (oneOnly) " for that occurrence" else ""}." else "The calendar did not take it."
+        })
+        add(Tool(
+            spec = ToolSpec(
+                "delete_event",
+                "Remove an event or task from the calendar. For a repeating event give occurrence to skip only that date; without it the whole series is deleted.",
+                toolSchema(
+                    "event" to ("string" to "The event or task id from list_events or list_tasks."),
+                    "occurrence" to ("string" to "YYYY-MM-DD of the one occurrence to skip, for a repeating event."),
+                    required = listOf("event"),
+                ),
+            ),
+            write = true,
+        ) { args ->
+            val id = args.text("event")?.trim()?.takeIf { it.isNotEmpty() } ?: return@Tool "Error: event is required."
+            val detail = cal.eventDetail(id) ?: return@Tool "Error: no event $id; see list_events."
+            val d = draftFromEvent(detail, Instant.fromEpochMilliseconds(nowMs()).toLocalDateTime(a.zone()).date)
+            val name = d?.name?.takeIf { it.isNotBlank() } ?: id
+            if (d?.cal != null && d.cal in cal.readOnly) return@Tool "Error: that calendar is shared with the user read-only; its host makes the changes."
+            val occText = args.text("occurrence")?.trim()?.takeIf { it.isNotEmpty() }
+            if (occText != null && d?.repeats == true) {
+                val occ = parseDate(occText) ?: return@Tool "Error: occurrence must be YYYY-MM-DD."
+                val row = findOccurrence(cal, id, occ, a.zone()) ?: return@Tool "Error: \"$name\" has no occurrence on $occ."
+                return@Tool if (cal.poke(buildJsonObject { put("action", "skip-event"); put("id", id); put("idx", row.idx) })) "Skipped \"$name\" on $occ." else "The calendar did not take it."
+            }
+            if (cal.poke(buildJsonObject { put("action", "del-event"); put("id", id) })) {
+                "Deleted \"$name\"${if (d?.repeats == true) " and every occurrence" else ""}."
+            } else {
+                "The calendar did not take it."
             }
         })
         add(Tool(
@@ -303,31 +491,117 @@ fun actionTools(a: AssistantActions): List<Tool> = buildList {
         add(Tool(
             spec = ToolSpec(
                 "list_tasks",
-                "The user's open tasks, soonest due first, undated last.",
-                toolSchema(required = emptyList()),
+                "The user's tasks, soonest due first, undated last: open ones, or done ones too when asked.",
+                toolSchema("include_done" to ("boolean" to "true to list done tasks as well."), required = emptyList()),
             ),
             write = false,
-        ) { _ ->
-            val open = taskOrder(cal.tasks.value.orEmpty().filter { !it.done })
-            if (open.isEmpty()) "No open tasks." else open.joinToString("\n") { t -> "task=${t.id} ${t.dueDate()?.let { "due $it " } ?: ""}${t.name} (calendar ${t.cal})" }
+        ) { args ->
+            val withDone = args.text("include_done") == "true"
+            val all = taskOrder(cal.tasks.value.orEmpty().filter { withDone || !it.done })
+            if (all.isEmpty()) (if (withDone) "No tasks." else "No open tasks.")
+            else all.joinToString("\n") { t -> "task=${t.id} ${t.dueDate()?.let { "due $it " } ?: ""}${t.name}${if (t.done) " (done)" else ""} (calendar ${t.cal})" }
         })
         add(Tool(
             spec = ToolSpec(
                 "complete_task",
-                "Tick a task off. Name it by its id from list_tasks or by (part of) its name.",
-                toolSchema("task" to ("string" to "The task id, or words from its name."), required = listOf("task")),
+                "Tick a task off, or reopen a done one. Name it by its id from list_tasks or by (part of) its name.",
+                toolSchema(
+                    "task" to ("string" to "The task id, or words from its name."),
+                    "reopen" to ("boolean" to "true to reopen a done task instead."),
+                    required = listOf("task"),
+                ),
             ),
             write = true,
         ) { args ->
             val q = args.text("task")?.trim()?.takeIf { it.isNotEmpty() } ?: return@Tool "Error: task is required."
-            val open = cal.tasks.value.orEmpty().filter { !it.done }
-            val hits = open.filter { it.id == q }.ifEmpty { open.filter { it.name.contains(q, ignoreCase = true) } }
+            val reopen = args.text("reopen") == "true"
+            val pool = cal.tasks.value.orEmpty().filter { it.done == reopen }
+            val hits = pool.filter { it.id == q }.ifEmpty { pool.filter { it.name.contains(q, ignoreCase = true) } }
             when {
-                hits.isEmpty() -> "No open task matches \"$q\"."
+                hits.isEmpty() -> "No ${if (reopen) "done" else "open"} task matches \"$q\"."
                 hits.size == 1 && hits[0].cal in cal.readOnly -> "That task is on a calendar shared with the user read-only; its host ticks it."
                 hits.size > 1 -> "Several match; which one?\n" + hits.joinToString("\n") { "task=${it.id} ${it.name}" }
-                else -> if (cal.setDone(hits[0].id, true)) "Done: ${hits[0].name}." else "The calendar did not take it."
+                else -> if (cal.setDone(hits[0].id, !reopen)) "${if (reopen) "Reopened" else "Done"}: ${hits[0].name}." else "The calendar did not take it."
             }
+        })
+        add(Tool(
+            spec = ToolSpec(
+                "calendar_sharing",
+                "How the user's calendars are shared and synced: calendars other ships offered the user (with the key to answer them), calendars the user shares out and with whom, calendars shared with the user, when each synced calendar was last pulled and what went wrong, and recent sync refusals.",
+                toolSchema(required = emptyList()),
+            ),
+            write = false,
+        ) { _ ->
+            val names = cal.calendars.value.associate { it.id to it.name.ifBlank { it.id } }
+            val zone = a.zone()
+            val s = cal.shares.value
+            buildList {
+                if (s == null) add("Sharing with ships: this calendar app is too old to have it.")
+                s?.offers?.forEach { (key, o) -> add("offer=$key from=${o.host} calendar=${o.name.ifBlank { o.cal }} mode=${o.mode}") }
+                s?.shares?.forEach { (id, ships) -> ships.forEach { (ship, mode) -> add("shared_out calendar=${names[id] ?: id} with=$ship mode=$mode") } }
+                s?.accepted?.forEach { (id, acc) -> add("shared_with_user calendar=${names[id] ?: id} from=${acc.host} mode=${acc.mode}") }
+                cal.calendars.value.filter { it.kind != "local" }.forEach { c ->
+                    val row = cal.sync.value[c.id]
+                    val last = row?.lastMs?.takeIf { it > 0 }?.let { Instant.fromEpochMilliseconds(it).toLocalDateTime(zone).toString() } ?: "never"
+                    add("sync calendar=${names[c.id]} kind=${c.kind} last_pull=$last${row?.error?.takeIf { it.isNotBlank() }?.let { " error=$it" } ?: ""}")
+                }
+                cal.conflicts.value.take(10).forEach { k -> add("refusal calendar=${names[k.cal] ?: k.cal} why=${k.why}") }
+            }.joinToString("\n").ifBlank { "Nothing shared, offered or synced." }
+        })
+        add(Tool(
+            spec = ToolSpec(
+                "share_calendar",
+                "Share one of the user's calendars with another ship, to read or also to edit. They get an offer to accept.",
+                toolSchema(
+                    "calendar" to ("string" to "Calendar id or name."),
+                    "ship" to ("string" to "Their @p, from find_person."),
+                    "edit" to ("boolean" to "true to let them edit it too; read-only otherwise."),
+                    required = listOf("calendar", "ship"),
+                ),
+            ),
+            write = true,
+        ) { args ->
+            val calArg = args.text("calendar")?.trim()?.takeIf { it.isNotEmpty() } ?: return@Tool "Error: calendar is required."
+            val calId = resolveCalendar(calArg) ?: return@Tool "Error: no calendar called \"$calArg\"; see list_calendars."
+            val ship = args.text("ship")?.trim()?.let { if (it.startsWith("~")) it else "~$it" }?.takeIf { isValidPatp(it) }
+                ?: return@Tool "Error: ship must be an @p; use find_person."
+            val edit = args.text("edit") == "true"
+            val calName = cal.calendars.value.firstOrNull { it.id == calId }?.name?.ifBlank { calId } ?: calId
+            when (cal.share(calId, ship, edit)) {
+                null -> "The calendar would not share \"$calName\"."
+                false -> "Shared \"$calName\", but $ship could not be told (down, or no calendar app there yet); share again later to send the offer."
+                true -> "Offered \"$calName\" to $ship to read${if (edit) " and edit" else ""}."
+            }
+        })
+        add(Tool(
+            spec = ToolSpec(
+                "answer_calendar_offer",
+                "Accept or decline a calendar another ship offered the user; the key comes from calendar_sharing.",
+                toolSchema(
+                    "offer" to ("string" to "The offer key from calendar_sharing."),
+                    "accept" to ("boolean" to "true to accept, false to decline."),
+                    required = listOf("offer", "accept"),
+                ),
+            ),
+            write = true,
+        ) { args ->
+            val key = args.text("offer")?.trim()?.takeIf { it.isNotEmpty() } ?: return@Tool "Error: offer is required."
+            if (cal.shares.value?.offers?.containsKey(key) != true) return@Tool "Error: no offer $key; see calendar_sharing."
+            if (args.text("accept") == "true") {
+                if (cal.accept(key)) "Accepted; the calendar fills in over the next pull." else "The calendar did not accept it."
+            } else {
+                if (cal.decline(key)) "Declined." else "The calendar did not decline it."
+            }
+        })
+        add(Tool(
+            spec = ToolSpec(
+                "sync_calendars",
+                "Pull and push every synced calendar now (Google, followed and shared with the user) rather than waiting for the next pass.",
+                toolSchema(required = emptyList()),
+            ),
+            write = false,
+        ) { _ ->
+            if (cal.syncNow()) "Synced; calendar_sharing shows how each fared." else "A sync did not start; calendar_sharing shows which."
         })
     }
     a.send?.let { send ->
@@ -337,7 +611,7 @@ fun actionTools(a: AssistantActions): List<Tool> = buildList {
                 "Post an event into a chat, DM or channel as an event card everyone who sees it can add to their own calendar. Use this, not send_message, for any event. Name one already on the calendar by its event id from list_events, or give its details.",
                 toolSchema(
                     "whom" to ("string" to "Where it goes: a conversation id from find_conversation, or a ship for a DM."),
-                    "event" to ("string" to "An event id from list_events, to post one already on the calendar."),
+                    "event" to ("string" to "An event id from list_events, to post one already on the calendar; give date too for one occurrence of a repeating event."),
                     "name" to ("string" to "What the event is, when not posting one from the calendar."),
                     "date" to ("string" to "YYYY-MM-DD."),
                     "time" to ("string" to "HH:MM in the user's zone; omit for an all-day event."),
@@ -352,28 +626,11 @@ fun actionTools(a: AssistantActions): List<Tool> = buildList {
         ) { args ->
             val whom = args.text("whom")?.takeIf { it.isNotBlank() } ?: return@Tool "Error: whom is required."
             val zone = a.zone()
-            val eventId = args.text("event")?.takeIf { it.isNotBlank() }
-            val card = if (eventId != null) {
-                val row = a.calendar?.rows?.value.orEmpty().firstOrNull { it.id == eventId }
-                    ?: return@Tool "Error: no event $eventId in the next thirty days; see list_events."
-                io.nisfeb.talon.calendar.eventCardMessage(row.name, eventWhenLine(row.l, row.r, row.all, zone), row.location, row.note, row.tags, row.l, row.r)
-            } else {
-                val name = args.text("name")?.takeIf { it.isNotBlank() } ?: return@Tool "Error: give an event id or a name."
-                val date = parseDate(args.text("date")) ?: return@Tool "Error: date must be YYYY-MM-DD."
-                val time = args.text("time")?.takeIf { it.isNotBlank() }
-                val span = if (time == null) {
-                    val start = date.atTime(0, 0).toInstant(TimeZone.UTC).toEpochMilliseconds()
-                    Triple(start, start + (args.int("days") ?: 1).coerceAtLeast(1) * 86_400_000L, true)
-                } else {
-                    val minute = parseClock(time) ?: return@Tool "Error: time must be HH:MM."
-                    val start = date.atTime(minute / 60, minute % 60).toInstant(zone).toEpochMilliseconds()
-                    Triple(start, start + (args.int("duration_min") ?: 60).coerceAtLeast(0) * 60_000L, false)
-                }
-                io.nisfeb.talon.calendar.eventCardMessage(
-                    name, eventWhenLine(span.first, span.second, span.third, zone),
-                    args.text("location").orEmpty(), args.text("note").orEmpty(), emptyList(), span.first, span.second,
-                )
-            }
+            val (ev, err) = eventFrom(args, a, zone)
+            if (ev == null) return@Tool err ?: "Error: no event."
+            val card = io.nisfeb.talon.calendar.eventCardMessage(
+                ev.name, eventWhenLine(ev.l, ev.r, ev.all, zone), ev.location, ev.note, ev.tags, ev.l, ev.r,
+            )
             runCatching { send(whom, card) }.fold(
                 { "Posted the event to ${a.contacts().conversationLabel(whom)} as a card." },
                 { "Error: the message did not go: ${it.message}" },
@@ -419,4 +676,74 @@ internal fun toolSchema(vararg props: Pair<String, Pair<String, String>>, requir
         props.forEach { (name, td) -> put(name, buildJsonObject { put("type", td.first); put("description", td.second) }) }
     })
     putJsonArray("required") { required.forEach { add(JsonPrimitive(it)) } }
+}
+
+private const val DAY_MS = 86_400_000L
+
+private fun mailLines(threads: List<io.nisfeb.talon.mail.InboxEntry>): String = threads.joinToString("\n") {
+    "thread=${it.id} link=${io.nisfeb.talon.urbit.TalonLink.forMail(it.id)} from=${it.from} subject=${it.subject.ifBlank { "(no subject)" }}${if (it.unread) " unread" else ""}"
+}
+
+/** One calendar row as the model reads it: id, when, what, repeats, where, tags, note, calendar by name. */
+internal fun describeRow(r: CalendarRow, zone: TimeZone, calNames: Map<String, String>): String {
+    fun hm(ms: Long) = Instant.fromEpochMilliseconds(ms).toLocalDateTime(zone).let { "${it.hour.toString().padStart(2, '0')}:${it.minute.toString().padStart(2, '0')}" }
+    val days = daysOf(r, zone)
+    val whenPart = when {
+        r.isTask -> "${days.first()} due${if (r.done) " done" else ""}"
+        r.all -> "${days.first()} all day${if (days.size > 1) " (${days.size} days)" else ""}"
+        else -> "${days.first()} ${hm(r.l)}–${hm(r.r)}"
+    }
+    return buildString {
+        append(if (r.isTask) "task=" else "event=").append(r.id).append(' ').append(whenPart).append(' ').append(r.name.ifBlank { "(untitled)" })
+        if (r.repeats) append(" (repeats ").append(r.kind).append(')')
+        if (r.location.isNotBlank()) append(" @ ").append(r.location)
+        if (r.tags.isNotEmpty()) append(' ').append(r.tags.joinToString(" ") { "#$it" })
+        if (r.note.isNotBlank()) append(" note: ").append(r.note.replace('\n', ' ').take(160))
+        append(" (calendar ").append(calNames[r.cal] ?: r.cal).append(')')
+    }
+}
+
+/** The occurrence of [id] on [on], or else its next one, reading past the widget's window when need be. */
+private suspend fun findOccurrence(cal: CalendarRepo, id: String, on: LocalDate?, zone: TimeZone): CalendarRow? {
+    fun fits(r: CalendarRow) = r.id == id && (on == null || on in daysOf(r, zone))
+    val now = nowMs()
+    cal.rows.value.orEmpty().firstOrNull { fits(it) && (on != null || it.r > now) }?.let { return it }
+    val span = if (on != null) {
+        val d = on.atTime(0, 0).toInstant(zone).toEpochMilliseconds()
+        (d - DAY_MS) to (d + 2 * DAY_MS)
+    } else {
+        (now - 180 * DAY_MS) to (now + 365 * DAY_MS)
+    }
+    val rows = cal.windowRows(span.first, span.second).orEmpty().filter { fits(it) }
+    return rows.firstOrNull { on != null || it.r > now } ?: rows.lastOrNull()
+}
+
+/** The event a tool was pointed at: from the calendar by id, or from its details. Else the error to answer with. */
+private suspend fun eventFrom(args: JsonObject, a: AssistantActions, zone: TimeZone): Pair<CalendarRow?, String?> {
+    val eventId = args.text("event")?.trim()?.takeIf { it.isNotEmpty() }
+    if (eventId != null) {
+        val cal = a.calendar ?: return null to "Error: there is no calendar to take the event from."
+        val on = parseDate(args.text("date"))
+        val row = findOccurrence(cal, eventId, on, zone) ?: return null to "Error: no event $eventId${on?.let { " on $it" } ?: " coming up"}; see list_events."
+        return row to null
+    }
+    val name = args.text("name")?.takeIf { it.isNotBlank() } ?: return null to "Error: give an event id or a name."
+    val date = parseDate(args.text("date")) ?: return null to "Error: date must be YYYY-MM-DD."
+    val time = args.text("time")?.takeIf { it.isNotBlank() }
+    val start: Long
+    val end: Long
+    if (time == null) {
+        start = date.atTime(0, 0).toInstant(TimeZone.UTC).toEpochMilliseconds()
+        end = start + (args.int("days") ?: 1).coerceAtLeast(1) * DAY_MS
+    } else {
+        val minute = parseClock(time) ?: return null to "Error: time must be HH:MM."
+        start = date.atTime(minute / 60, minute % 60).toInstant(zone).toEpochMilliseconds()
+        end = start + (args.int("duration_min") ?: 60).coerceAtLeast(0) * 60_000L
+    }
+    val meta = buildJsonObject {
+        put("name", name)
+        args.text("location")?.takeIf { it.isNotBlank() }?.let { put("location", it) }
+        args.text("note")?.takeIf { it.isNotBlank() }?.let { put("note", it) }
+    }
+    return CalendarRow(id = "", meta = meta, cat = if (time == null) "allday" else "timed", all = time == null, l = start, r = end) to null
 }
