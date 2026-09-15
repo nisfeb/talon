@@ -109,6 +109,14 @@ class CalendarRepo(
     fun setHidden(id: String, off: Boolean) {
         _hidden.value = if (off) _hidden.value + id else _hidden.value - id
     }
+    /** What this device had switched off last time. */
+    fun seedHidden(ids: Set<String>) { _hidden.value = ids }
+
+    /** Everything again: the widget's window, the screen's month, and the rest. */
+    suspend fun refreshAll() {
+        refresh()
+        range?.let { (f, t) -> loadRange(f, t) }
+    }
     /** The calendar screen's own window (a month at a time), apart
      *  from the widget's; null before the first answer. */
     private val _rangeRows = MutableStateFlow<List<CalendarRow>?>(null)

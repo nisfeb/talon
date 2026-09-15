@@ -1000,6 +1000,11 @@ fun App(
         LaunchedEffect(calendarRepo, mailShipUrl) {
             if (mailShipUrl != null) calendarRepo.attach(mailShipUrl) else calendarRepo.detach()
         }
+        // Which calendars this device keeps off survives a restart.
+        LaunchedEffect(calendarRepo, uiSettings) {
+            calendarRepo.seedHidden(uiSettings.hiddenCalendars.value)
+            calendarRepo.hidden.collect { uiSettings.setHiddenCalendars(it) }
+        }
         val calendarInstall: suspend () -> Result<Unit> = remember(session, calendarRepo) {
             val install = io.nisfeb.talon.urbit.LatticeInstall.installer(
                 http,

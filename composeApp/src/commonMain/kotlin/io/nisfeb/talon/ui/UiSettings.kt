@@ -116,6 +116,10 @@ interface UiSettings {
     val homePlace: StateFlow<String>
     fun setHomePlace(encoded: String)
 
+    /** Calendars switched off on this device, by id. */
+    val hiddenCalendars: StateFlow<Set<String>>
+    fun setHiddenCalendars(ids: Set<String>)
+
     /**
      * How the home dial reads out temperature and the hour.
      *
@@ -334,6 +338,9 @@ class InMemoryUiSettings(
     private val _homePlace = MutableStateFlow("")
     override val homePlace: StateFlow<String> = _homePlace.asStateFlow()
     override fun setHomePlace(encoded: String) { _homePlace.value = encoded }
+    private val _hiddenCalendars = MutableStateFlow<Set<String>>(emptySet())
+    override val hiddenCalendars: StateFlow<Set<String>> = _hiddenCalendars.asStateFlow()
+    override fun setHiddenCalendars(ids: Set<String>) { _hiddenCalendars.value = ids }
 
     private val _homeFahrenheit = MutableStateFlow(true)
     override val homeFahrenheit: StateFlow<Boolean> = _homeFahrenheit.asStateFlow()

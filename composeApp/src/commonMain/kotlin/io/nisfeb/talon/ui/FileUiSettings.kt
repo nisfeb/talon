@@ -59,6 +59,7 @@ class FileUiSettings(
         val activeRailTab: String = RailTab.Chats.name,
         val smartSearchPreferred: Boolean = false,
         val homePlace: String = "",
+        val hiddenCalendars: List<String> = emptyList(),
         val homeFahrenheit: Boolean = true,
         val homeTwentyFourHour: Boolean = false,
         val homeLayout: String = "",
@@ -157,6 +158,14 @@ class FileUiSettings(
     override fun setHomePlace(encoded: String) {
         if (_homePlace.value == encoded) return
         _homePlace.value = encoded
+        persistCurrent()
+    }
+
+    private val _hiddenCalendars = MutableStateFlow(initial.hiddenCalendars.toSet())
+    override val hiddenCalendars: StateFlow<Set<String>> = _hiddenCalendars.asStateFlow()
+    override fun setHiddenCalendars(ids: Set<String>) {
+        if (_hiddenCalendars.value == ids) return
+        _hiddenCalendars.value = ids
         persistCurrent()
     }
 
@@ -317,6 +326,7 @@ class FileUiSettings(
                 activeRailTab = _activeRailTab.value.name,
                 smartSearchPreferred = _smartSearchPreferred.value,
                 homePlace = _homePlace.value,
+                hiddenCalendars = _hiddenCalendars.value.toList(),
                 homeFahrenheit = _homeFahrenheit.value,
                 homeTwentyFourHour = _homeTwentyFourHour.value,
                 homeLayout = _homeLayout.value,

@@ -83,7 +83,7 @@ data class TagCount(val tag: String, val count: Int = 0)
 data class CalendarWindow(val rows: List<CalendarRow> = emptyList())
 
 @Serializable
-data class CalendarInfo(val id: String, val name: String = "", val color: String = "", val kind: String = "local")
+data class CalendarInfo(val id: String, val name: String = "", val color: String = "", val kind: String = "local", val count: Int = 0)
 
 /** A calendar another ship offers this one, waiting under Settings. */
 @Serializable

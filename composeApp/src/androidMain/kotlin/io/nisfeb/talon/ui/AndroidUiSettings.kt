@@ -128,6 +128,14 @@ class AndroidUiSettings(
 
     private val _homePlace = MutableStateFlow(prefs.getString(KEY_HOME_PLACE, "") ?: "")
     override val homePlace: StateFlow<String> = _homePlace.asStateFlow()
+    private val _hiddenCalendars = MutableStateFlow<Set<String>>(prefs.getStringSet(KEY_HIDDEN_CALENDARS, emptySet()).orEmpty().toSet())
+    override val hiddenCalendars: StateFlow<Set<String>> = _hiddenCalendars.asStateFlow()
+    override fun setHiddenCalendars(ids: Set<String>) {
+        if (_hiddenCalendars.value == ids) return
+        prefs.edit().putStringSet(KEY_HIDDEN_CALENDARS, ids).apply()
+        _hiddenCalendars.value = ids
+    }
+
     override fun setHomePlace(encoded: String) {
         if (_homePlace.value == encoded) return
         _homePlace.value = encoded
@@ -355,6 +363,7 @@ class AndroidUiSettings(
     private companion object {
         private const val KEY_HIDE_COMPOSER_BUTTONS = "hide_composer_buttons"
         private const val KEY_HOME_PLACE = HomePrefs.PLACE
+        private const val KEY_HIDDEN_CALENDARS = "hidden_calendars"
         private const val KEY_HOME_FAHRENHEIT = HomePrefs.FAHRENHEIT
         private const val KEY_HOME_24H = HomePrefs.TWENTY_FOUR_HOUR
         private const val KEY_HOME_LAYOUT = "home_layout"

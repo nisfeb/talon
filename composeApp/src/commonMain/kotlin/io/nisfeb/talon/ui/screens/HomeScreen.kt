@@ -1213,10 +1213,11 @@ private fun CalendarPanel(
     onLongPress: () -> Unit,
 ) {
     val availability = calendar?.availability?.collectAsState()?.value
-    val rows = calendar?.rows?.collectAsState()?.value
+    val hidden = calendar?.hidden?.collectAsState()?.value.orEmpty()
+    val rows = calendar?.rows?.collectAsState()?.value?.filter { it.cal !in hidden }
     val zoneId = calendar?.zone?.collectAsState()?.value
     val calendars = calendar?.calendars?.collectAsState()?.value.orEmpty()
-    val tasks = calendar?.tasks?.collectAsState()?.value.orEmpty()
+    val tasks = calendar?.tasks?.collectAsState()?.value.orEmpty().filter { it.cal !in hidden }
     val shares = calendar?.shares?.collectAsState()?.value
     val offers = shares?.offers?.size ?: 0
     val readOnly = shares?.readOnly.orEmpty()

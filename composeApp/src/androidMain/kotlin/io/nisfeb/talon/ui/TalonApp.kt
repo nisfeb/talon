@@ -398,6 +398,10 @@ fun TalonApp(
     val calendarRepo = remember(app.session) {
         io.nisfeb.talon.calendar.CalendarRepo(app.session.http, appScope)
     }
+    LaunchedEffect(calendarRepo) {
+        calendarRepo.seedHidden(app.uiSettings.hiddenCalendars.value)
+        calendarRepo.hidden.collect { app.uiSettings.setHiddenCalendars(it) }
+    }
     DisposableEffect(calendarRepo) {
         onDispose { runCatching { calendarRepo.detach() } }
     }
