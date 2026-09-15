@@ -72,7 +72,7 @@ import io.nisfeb.talon.calendar.CalendarAvailability
 import io.nisfeb.talon.calendar.CalendarRepo
 import io.nisfeb.talon.calendar.CalendarRow
 import io.nisfeb.talon.calendar.agenda
-import io.nisfeb.talon.calendar.tasksDueBy
+import io.nisfeb.talon.calendar.tasksInRange
 import io.nisfeb.talon.calendar.dueDate
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
@@ -94,6 +94,9 @@ import kotlinx.coroutines.delay
 import kotlinx.datetime.Instant
 import kotlinx.datetime.LocalDateTime
 import kotlinx.datetime.TimeZone
+import kotlinx.datetime.plus
+import kotlinx.datetime.atTime
+import kotlinx.datetime.DateTimeUnit
 import kotlinx.datetime.format.MonthNames
 import kotlinx.datetime.offsetAt
 import kotlinx.datetime.toLocalDateTime
@@ -1263,7 +1266,7 @@ private fun CalendarPanel(
                 // dated one would say the same thing twice.
                 val shown = remember(rows, range, tick, zoneId) { agenda(rows.filter { !it.isTask }, range, tick, zone) }
                 val today = Instant.fromEpochMilliseconds(tick).toLocalDateTime(zone).date
-                val due = remember(tasks, today) { tasksDueBy(tasks, today) }
+                val due = remember(tasks, range, tick, zoneId) { tasksInRange(tasks, range, tick, zone) }
                 if (offers > 0) {
                     Text(
                         if (offers == 1) "A calendar was shared with you." else "$offers calendars were shared with you.",
@@ -1276,7 +1279,8 @@ private fun CalendarPanel(
                 } else {
                     val calColors = calendars.associate { it.id to it.color }
                     due.take(4).forEach { t ->
-                        val late = t.dueDate()?.let { it < today } ?: false
+                        val dueDay = t.dueDate()
+                        val late = dueDay != null && dueDay < today
                         Row(
                             Modifier.fillMaxWidth().combinedClickable(onClick = onOpen ?: {}, onLongClick = onLongPress).padding(start = 6.dp, end = 14.dp),
                             verticalAlignment = Alignment.CenterVertically,
@@ -1292,7 +1296,12 @@ private fun CalendarPanel(
                             )
                             Text(t.name.ifBlank { "(untitled)" }, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                             Text(
-                                if (late) "overdue" else "today",
+                                when {
+                                    late -> "overdue"
+                                    dueDay == null || dueDay == today -> "today"
+                                    dueDay == today.plus(1, DateTimeUnit.DAY) -> "tomorrow"
+                                    else -> dayLabel(dueDay.atTime(0, 0))
+                                },
                                 style = MaterialTheme.typography.labelSmall,
                                 color = if (late) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
                             )

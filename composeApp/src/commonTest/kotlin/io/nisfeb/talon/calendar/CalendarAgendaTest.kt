@@ -56,7 +56,13 @@ class CalendarAgendaTest {
         val tomorrow = 1_789_430_400_000L
         val ts = listOf(task("b-undated", null), task("a-undated", null), task("late", tomorrow - 3 * day), task("today", tomorrow - day), task("soon", tomorrow), task("done-late", tomorrow - day, done = true))
         assertEquals(listOf("late", "done-late", "today", "soon", "a-undated", "b-undated"), taskOrder(ts).map { it.id }, "same day: by name")
-        assertEquals(listOf("late", "today"), tasksDueBy(ts, today).map { it.id })
+        // 2026-09-14 22:00 UTC: the rest of today stops at midnight; three hours cross it.
+        val evening = 1_789_423_200_000L
+        assertEquals(listOf("late", "today"), tasksInRange(ts, CalendarRange.REST_OF_DAY, evening, utc).map { it.id })
+        assertEquals(listOf("late", "today", "soon"), tasksInRange(ts, CalendarRange.NEXT_3_HOURS, evening, utc).map { it.id })
+        assertEquals(listOf("late", "today"), tasksInRange(ts, CalendarRange.NEXT_3_HOURS, evening - 6 * h, utc).map { it.id }, "at 16:00 it does not")
+        assertEquals(listOf("late", "today", "soon"), tasksInRange(ts, CalendarRange.NEXT_DAY, evening, utc).map { it.id })
+        assertEquals(listOf("late", "today"), tasksInRange(ts, CalendarRange.NEXT_ONLY, evening, utc).map { it.id })
         assertEquals(today, task("today", tomorrow - day).dueDate())
     }
 }

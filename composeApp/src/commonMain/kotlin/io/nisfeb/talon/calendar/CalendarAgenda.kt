@@ -19,17 +19,22 @@ import kotlinx.datetime.toLocalDateTime
  */
 fun agenda(rows: List<CalendarRow>, range: CalendarRange, nowMs: Long, zone: TimeZone): List<CalendarRow> {
     val live = rows.filter { it.r > nowMs }.sortedWith(compareBy({ it.l }, { it.r }))
-    val until = when (range) {
-        CalendarRange.NEXT_ONLY -> return live.take(1)
-        CalendarRange.NEXT_3_HOURS -> nowMs + 3 * HOUR_MS
-        CalendarRange.NEXT_6_HOURS -> nowMs + 6 * HOUR_MS
-        CalendarRange.NEXT_DAY -> nowMs + 24 * HOUR_MS
-        CalendarRange.REST_OF_DAY -> {
-            val today = Instant.fromEpochMilliseconds(nowMs).toLocalDateTime(zone).date
-            today.plus(1, DateTimeUnit.DAY).atTime(LocalTime(0, 0)).toInstant(zone).toEpochMilliseconds()
-        }
-    }
+    val until = rangeEnd(range, nowMs, zone) ?: return live.take(1)
     return live.filter { it.l < until }
+}
+
+/** Where the widget's window ends, in unix ms; null for "next only", which has no end. */
+fun rangeEnd(range: CalendarRange, nowMs: Long, zone: TimeZone): Long? = when (range) {
+    CalendarRange.NEXT_ONLY -> null
+    CalendarRange.NEXT_3_HOURS -> nowMs + 3 * HOUR_MS
+    CalendarRange.NEXT_6_HOURS -> nowMs + 6 * HOUR_MS
+    CalendarRange.NEXT_DAY -> nowMs + 24 * HOUR_MS
+    CalendarRange.REST_OF_DAY -> midnightAfter(nowMs, zone)
+}
+
+private fun midnightAfter(ms: Long, zone: TimeZone): Long {
+    val day = Instant.fromEpochMilliseconds(ms).toLocalDateTime(zone).date
+    return day.plus(1, DateTimeUnit.DAY).atTime(LocalTime(0, 0)).toInstant(zone).toEpochMilliseconds()
 }
 
 private const val HOUR_MS = 60 * 60 * 1000L
@@ -41,6 +46,13 @@ fun taskOrder(tasks: List<CalendarTask>): List<CalendarTask> =
 /** The task's due day, as the calendar's page reads it: the UTC date of due_ms. */
 fun CalendarTask.dueDate(): LocalDate? = dueMs?.let { Instant.fromEpochMilliseconds(it).toLocalDateTime(TimeZone.UTC).date }
 
-/** Open and due today or earlier: what the home widget nags about. */
-fun tasksDueBy(tasks: List<CalendarTask>, today: LocalDate): List<CalendarTask> =
-    taskOrder(tasks.filter { !it.done && (it.dueDate()?.let { d -> d <= today } ?: false) })
+/**
+ * The open tasks the widget shows for [range]: due on a day the
+ * window reaches, or already overdue. A task has a day, not a
+ * moment, so a window that crosses midnight takes in tomorrow's
+ * tasks too, and "next only" means today.
+ */
+fun tasksInRange(tasks: List<CalendarTask>, range: CalendarRange, nowMs: Long, zone: TimeZone): List<CalendarTask> {
+    val lastDay = Instant.fromEpochMilliseconds((rangeEnd(range, nowMs, zone) ?: nowMs) - 1).toLocalDateTime(zone).date
+    return taskOrder(tasks.filter { !it.done && (it.dueDate()?.let { d -> d <= lastDay } ?: false) })
+}
