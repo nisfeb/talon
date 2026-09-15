@@ -34,12 +34,16 @@ data class CalendarRow(
     val idx: Int = 0,
     val meta: JsonObject = JsonObject(emptyMap()),
     val cat: String = "timed",
+    /** The rule's kind: once, daily, weekly, ..., or the category's own name. */
+    val kind: String = "once",
     val all: Boolean = false,
     val l: Long,
     val r: Long,
     /** A task's tick; false for events. */
     val done: Boolean = false,
 ) {
+    /** One of a series: timed or all-day with a repeating kind. */
+    val repeats: Boolean get() = (cat == "timed" || cat == "allday") && kind != "once"
     val name: String get() = meta.metaStr("name")
     val note: String get() = meta.metaStr("note")
     val location: String get() = meta.metaStr("location")

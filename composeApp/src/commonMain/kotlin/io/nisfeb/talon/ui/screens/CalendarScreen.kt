@@ -145,6 +145,8 @@ fun CalendarScreen(
     var month by remember { mutableStateOf(today.monthNumber) }
     var selected by remember { mutableStateOf(today) }
     var editing by remember { mutableStateOf<Pair<String?, EventDraft>?>(null) }
+    /** The row being looked at; editing starts from here. */
+    var viewing by remember { mutableStateOf<CalendarRow?>(null) }
     var editingIdx by remember { mutableStateOf<Int?>(null) }
     var editingStartMs by remember { mutableStateOf<Long?>(null) }
     var zones by remember { mutableStateOf<List<String>>(emptyList()) }
@@ -159,8 +161,12 @@ fun CalendarScreen(
         val to = grid.last().plus(1, DateTimeUnit.DAY).atTime(0, 0).toInstant(zone).toEpochMilliseconds()
         repo.loadRange(from, to)
     }
-    val visible = remember(rows, hidden, tagFilter) {
+    // A tick shows at once and holds until the calendar answers; the
+    // rows only learn of it on the refresh after the poke.
+    var pendingTicks by remember { mutableStateOf(mapOf<String, Boolean>()) }
+    val visible = remember(rows, hidden, tagFilter, pendingTicks) {
         rows.orEmpty().filter { it.cal !in hidden && (tagFilter == null || tagFilter in it.tags) }
+            .map { r -> pendingTicks[r.id]?.let { r.copy(done = it) } ?: r }
     }
     val byDay = remember(visible, zoneId) {
         val m = HashMap<LocalDate, MutableList<CalendarRow>>()
@@ -187,8 +193,20 @@ fun CalendarScreen(
         }
     }
     fun openExisting(r: CalendarRow) { if (r.cal in readOnly) status = readOnlyNote else openById(r.id, r.idx, r.l) }
+    fun view(r: CalendarRow) { viewing = r }
     fun tick(id: String, done: Boolean) {
-        scope.launch { if (!repo.setDone(id, done)) status = "The ship did not take the change." }
+        pendingTicks = pendingTicks + (id to done)
+        scope.launch {
+            if (!repo.setDone(id, done)) status = "The ship did not take the change."
+            pendingTicks = pendingTicks - id
+        }
+    }
+    /** Closes the editor and says what is happening; the calendar's
+     *  answer, and the reads after it, take seconds on a busy ship. */
+    fun act(doing: String, failed: String, body: suspend () -> Boolean) {
+        editing = null
+        status = doing
+        scope.launch { status = if (body()) null else failed }
     }
 
     Column(modifier.windowInsetsPadding(WindowInsets.safeDrawing)) {
@@ -266,19 +284,22 @@ fun CalendarScreen(
         }
         if (showTasks) {
             TasksView(
-                tasks = tasks?.filter { it.cal !in hidden && (tagFilter == null || tagFilter in it.tags) },
+                tasks = tasks?.filter { it.cal !in hidden && (tagFilter == null || tagFilter in it.tags) }
+                    ?.map { t -> pendingTicks[t.id]?.let { t.copy(done = it) } ?: t },
                 today = today,
                 calendars = calendars.filter { it.id !in hidden && it.id !in readOnly },
                 readOnly = readOnly,
                 colourOf = { t -> calendarHexColor(t.color ?: calColors[t.cal]) },
                 status = status ?: error,
                 onTick = ::tick,
-                onOpen = { t -> if (t.cal in readOnly) status = readOnlyNote else openById(t.id, null, null) },
+                onOpen = { t ->
+                    // The row's day is midnight in the calendar's zone, as the window feed has it.
+                    val dayMs = t.dueDate()?.atTime(0, 0)?.toInstant(zone)?.toEpochMilliseconds() ?: 0L
+                    view(CalendarRow(id = t.id, cal = t.cal, meta = t.meta, cat = "todo", kind = "todo", all = true, l = dayMs, r = dayMs, done = t.done))
+                },
                 onAdd = { name, due, cal ->
-                    scope.launch {
-                        val d = EventDraft(name = name, cat = EventCat.TODO, date = due ?: today, due = due, cal = cal, tags = listOfNotNull(tagFilter))
-                        status = if (repo.poke(eventBody(d))) null else "The ship did not take the task."
-                    }
+                    val d = EventDraft(name = name, cat = EventCat.TODO, date = due ?: today, due = due, cal = cal, tags = listOfNotNull(tagFilter))
+                    act("Adding…", "The ship did not take the task.") { repo.poke(eventBody(d)) }
                 },
                 modifier = Modifier.weight(1f).fillMaxWidth(),
             )
@@ -350,7 +371,11 @@ fun CalendarScreen(
             IconButton(onClick = ::openNew) { Icon(Icons.Filled.Add, contentDescription = "New event") }
         }
         status?.let {
-            Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(horizontal = 16.dp))
+            Text(
+                it, style = MaterialTheme.typography.bodySmall,
+                color = if (it.endsWith("…")) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.error,
+                modifier = Modifier.padding(horizontal = 16.dp),
+            )
         }
         error?.let {
             Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(horizontal = 16.dp))
@@ -365,7 +390,7 @@ fun CalendarScreen(
                 LazyColumn(Modifier.fillMaxSize()) {
                     items(dayRows, key = { "${it.id}/${it.idx}" }) { r ->
                         Row(
-                            Modifier.fillMaxWidth().clickable { openExisting(r) }.padding(horizontal = 16.dp, vertical = 8.dp),
+                            Modifier.fillMaxWidth().clickable { view(r) }.padding(horizontal = 16.dp, vertical = 8.dp),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(10.dp),
                         ) {
@@ -394,6 +419,63 @@ fun CalendarScreen(
         }
     }
 
+    viewing?.let { r ->
+        // Deleting asks once, here in the details, and closes on the tap.
+        var confirmDelete by remember(r.id) { mutableStateOf(false) }
+        val calName = calendars.firstOrNull { it.id == r.cal }?.let { it.name.ifBlank { it.id } }
+        val readOnlyHere = r.cal in readOnly
+        AlertDialog(
+            onDismissRequest = { viewing = null },
+            title = { Text(r.name.ifBlank { "(untitled)" }) },
+            text = {
+                Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    val whenText = when {
+                        r.isTask -> (r.dueLabel(zone) ?: "No due date") + if (r.done) " · done" else ""
+                        else -> "${d3(selected.dayOfWeek)} ${selected.dayOfMonth} ${MonthNames.ENGLISH_ABBREVIATED.names[selected.monthNumber - 1]} · ${spanLabel(r, selected, zone, twentyFourHour)}" +
+                            if (r.repeats) " · repeats ${r.kind}" else ""
+                    }
+                    Text(whenText, style = MaterialTheme.typography.bodyMedium)
+                    if (r.location.isNotBlank()) Text(r.location, style = MaterialTheme.typography.bodyMedium)
+                    if (r.note.isNotBlank()) Text(r.note, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    if (r.tags.isNotEmpty()) Text(r.tags.joinToString(" ") { "#$it" }, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Box(Modifier.size(10.dp).clip(CircleShape).background(colourOf(r) ?: MaterialTheme.colorScheme.primary))
+                        Text(
+                            (calName ?: r.cal) + if (readOnlyHere) " · shared with you, read-only" else "",
+                            style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    if (!readOnlyHere) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                            if (r.isTask) TextButton(onClick = { tick(r.id, !r.done); viewing = null }) { Text(if (r.done) "Reopen" else "Done") }
+                            if (r.repeats) TextButton(onClick = {
+                                val idx = r.idx
+                                act("Skipping this one…", "The ship did not skip it.") {
+                                    repo.poke(buildJsonObject { put("action", "skip-event"); put("id", r.id); put("idx", idx) })
+                                }
+                                viewing = null
+                            }) { Text("Skip this one") }
+                            if (confirmDelete) {
+                                TextButton(onClick = {
+                                    act(if (r.repeats) "Deleting the series…" else "Deleting…", "The ship did not delete \"${r.name}\"; it is still there.") {
+                                        repo.poke(buildJsonObject { put("action", "del-event"); put("id", r.id) })
+                                    }
+                                    viewing = null
+                                }) { Text(if (r.repeats) "Delete the whole series" else "Yes, delete", color = MaterialTheme.colorScheme.error) }
+                                TextButton(onClick = { confirmDelete = false }) { Text("Keep") }
+                            } else {
+                                TextButton(onClick = { confirmDelete = true }) { Text(if (r.repeats) "Delete series" else "Delete") }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                if (!readOnlyHere) TextButton(onClick = { viewing = null; openById(r.id, r.idx.takeIf { !r.isTask }, r.l.takeIf { !r.isTask }) }) { Text("Edit") }
+            },
+            dismissButton = { TextButton(onClick = { viewing = null }) { Text("Close") } },
+        )
+    }
     editing?.let { (id, draft) ->
         EventEditor(
             initial = draft,
@@ -404,10 +486,10 @@ fun CalendarScreen(
             twentyFourHour = twentyFourHour,
             onDismiss = { editing = null },
             onSave = { d, editScope ->
-                scope.launch {
-                    val idx = editingIdx
-                    val occurrence = editingStartMs?.let { Instant.fromEpochMilliseconds(it).toLocalDateTime(zone) }
-                    val ok = when {
+                val idx = editingIdx
+                val occurrence = editingStartMs?.let { Instant.fromEpochMilliseconds(it).toLocalDateTime(zone) }
+                act("Saving…", "The ship did not take the change; \"${d.name.trim()}\" is as it was.") {
+                    when {
                         id == null || editScope == EditScope.ALL || idx == null || occurrence == null ->
                             repo.poke(eventBody(d, id))
                         // The page's own two steps: end or skip the old, then add.
@@ -418,22 +500,20 @@ fun CalendarScreen(
                             repo.poke(buildJsonObject { put("action", "skip-event"); put("id", id); put("idx", idx) }) &&
                                 repo.poke(onlyBody(d, occurrence))
                     }
-                    if (ok) { editing = null; status = null } else status = "The ship did not take the change."
                 }
             },
             onDelete = if (id == null) null else {
                 {
-                    scope.launch {
-                        val ok = repo.poke(buildJsonObject { put("action", "del-event"); put("id", id) })
-                        if (ok) { editing = null; status = null } else status = "The ship did not take the change."
+                    act(if (draft.repeats) "Deleting the series…" else "Deleting…", "The ship did not delete \"${draft.name.trim()}\"; it is still there.") {
+                        repo.poke(buildJsonObject { put("action", "del-event"); put("id", id) })
                     }
                 }
             },
             onSkip = if (id == null || editingIdx == null) null else {
                 {
-                    scope.launch {
-                        val ok = repo.poke(buildJsonObject { put("action", "skip-event"); put("id", id); put("idx", editingIdx!!) })
-                        if (ok) { editing = null; status = null } else status = "The ship did not take the change."
+                    val idx = editingIdx!!
+                    act("Skipping this one…", "The ship did not skip it.") {
+                        repo.poke(buildJsonObject { put("action", "skip-event"); put("id", id); put("idx", idx) })
                     }
                 }
             },
@@ -474,6 +554,13 @@ fun CalendarScreen(
 }
 
 private fun d3(d: DayOfWeek) = listOf("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")[d.isoDayNumber - 1]
+
+/** A task row's due day, or null when it has none. */
+private fun CalendarRow.dueLabel(zone: TimeZone): String? {
+    if (l == 0L) return null
+    val d = Instant.fromEpochMilliseconds(l).toLocalDateTime(zone).date
+    return "Due ${d.dayOfMonth} ${MonthNames.ENGLISH_ABBREVIATED.names[d.monthNumber - 1]}"
+}
 
 /** When a row is, on the day being looked at. */
 private fun spanLabel(r: CalendarRow, day: LocalDate, zone: TimeZone, twentyFourHour: Boolean): String {
@@ -882,7 +969,13 @@ private fun TasksView(
                 }
             }
         }
-        status?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(horizontal = 16.dp)) }
+        status?.let {
+            Text(
+                it, style = MaterialTheme.typography.bodySmall,
+                color = if (it.endsWith("…")) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.error,
+                modifier = Modifier.padding(horizontal = 16.dp),
+            )
+        }
         if (tasks == null) {
             Text("Looking…", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(16.dp))
             return@Column
