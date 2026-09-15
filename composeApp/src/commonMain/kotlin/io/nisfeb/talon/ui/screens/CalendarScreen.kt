@@ -24,6 +24,11 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.offset
+import androidx.compose.ui.unit.Dp
+import kotlinx.datetime.minus
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Checklist
@@ -143,6 +148,8 @@ fun CalendarScreen(
     val rows by repo.rangeRows.collectAsState()
     val tasks by repo.tasks.collectAsState()
     var showTasks by remember { mutableStateOf(false) }
+    /** The top half: the month's grid, or the selected day's week by the hour. */
+    var weekView by remember { mutableStateOf(false) }
     val calendars by repo.calendars.collectAsState()
     val shares by repo.shares.collectAsState()
     val readOnly = shares?.readOnly.orEmpty()
@@ -287,13 +294,18 @@ fun CalendarScreen(
                 modifier = Modifier.weight(1f),
             )
             if (!showTasks) {
-                IconButton(onClick = { if (month == 1) { month = 12; year -= 1 } else month -= 1 }) {
-                    Icon(Icons.Filled.KeyboardArrowLeft, contentDescription = "Previous month")
+                fun step(days: Int) {
+                    selected = selected.plus(days, DateTimeUnit.DAY)
+                    year = selected.year; month = selected.monthNumber
+                }
+                IconButton(onClick = { if (weekView) step(-7) else if (month == 1) { month = 12; year -= 1 } else month -= 1 }) {
+                    Icon(Icons.Filled.KeyboardArrowLeft, contentDescription = if (weekView) "Previous week" else "Previous month")
                 }
                 TextButton(onClick = { year = today.year; month = today.monthNumber; selected = today }) { Text("Today") }
-                IconButton(onClick = { if (month == 12) { month = 1; year += 1 } else month += 1 }) {
-                    Icon(Icons.Filled.KeyboardArrowRight, contentDescription = "Next month")
+                IconButton(onClick = { if (weekView) step(7) else if (month == 12) { month = 1; year += 1 } else month += 1 }) {
+                    Icon(Icons.Filled.KeyboardArrowRight, contentDescription = if (weekView) "Next week" else "Next month")
                 }
+                TextButton(onClick = { weekView = !weekView }) { Text(if (weekView) "Month" else "Week") }
             }
             IconButton(onClick = { showTasks = !showTasks }) {
                 if (showTasks) Icon(Icons.Filled.CalendarMonth, contentDescription = "Month")
@@ -372,6 +384,21 @@ fun CalendarScreen(
             )
             return@Column
         }
+        if (weekView) {
+            val weekStart = selected.minus(selected.dayOfWeek.isoDayNumber - 1, DateTimeUnit.DAY)
+            WeekGrid(
+                weekStart = weekStart,
+                selected = selected,
+                today = today,
+                byDay = byDay,
+                zone = zone,
+                twentyFourHour = twentyFourHour,
+                colourOf = ::colourOf,
+                onSelect = { selected = it },
+                onOpen = ::view,
+                modifier = Modifier.fillMaxWidth().height(360.dp),
+            )
+        } else {
         Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp)) {
             listOf("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun").forEach {
                 Text(
@@ -424,6 +451,7 @@ fun CalendarScreen(
                     }
                 }
             }
+        }
         }
         HorizontalDivider(Modifier.padding(top = 4.dp))
         Row(
@@ -1247,4 +1275,137 @@ private fun TaskLine(
         }
     }
     HorizontalDivider(Modifier.padding(start = 48.dp))
+}
+
+/**
+ * A week by the hour, the way a wall planner has it: seven columns
+ * from Monday, all-day rows in a strip across the top, timed rows as
+ * blocks at their hour, overlapping ones side by side. Scrolls down
+ * through the day, and sideways where seven columns will not fit.
+ */
+@Composable
+private fun WeekGrid(
+    weekStart: LocalDate,
+    selected: LocalDate,
+    today: LocalDate,
+    byDay: Map<LocalDate, List<CalendarRow>>,
+    zone: TimeZone,
+    twentyFourHour: Boolean,
+    colourOf: (CalendarRow) -> Color?,
+    onSelect: (LocalDate) -> Unit,
+    onOpen: (CalendarRow) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val days = remember(weekStart) { List(7) { weekStart.plus(it, DateTimeUnit.DAY) } }
+    val hourDp = 44.dp
+    val gutter = 44.dp
+    val vScroll = rememberScrollState()
+    val hScroll = rememberScrollState()
+    // Open on the working day, not on midnight.
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    LaunchedEffect(Unit) { vScroll.scrollTo(with(density) { (hourDp * 7).roundToPx() }) }
+    val nowMinute = remember(today) { Instant.fromEpochMilliseconds(nowMs()).toLocalDateTime(zone).let { it.hour * 60 + it.minute } }
+    BoxWithConstraints(modifier) {
+        val colWidth = maxOf(88.dp, (maxWidth - gutter) / 7)
+        Column(Modifier.fillMaxSize().horizontalScroll(hScroll)) {
+            // Day heads, then the all-day strip.
+            Row {
+                Spacer(Modifier.width(gutter))
+                days.forEach { d ->
+                    val isSel = d == selected
+                    Column(
+                        Modifier.width(colWidth).clip(RoundedCornerShape(6.dp))
+                            .background(if (isSel) MaterialTheme.colorScheme.primaryContainer else Color.Transparent)
+                            .clickable { onSelect(d) }.padding(vertical = 2.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
+                        Text(d3(d.dayOfWeek), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(
+                            "${d.dayOfMonth}",
+                            style = MaterialTheme.typography.titleSmall.copy(fontWeight = if (d == today) FontWeight.SemiBold else FontWeight.Normal),
+                            color = if (d == today) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                        )
+                    }
+                }
+            }
+            Row(Modifier.padding(bottom = 2.dp)) {
+                Spacer(Modifier.width(gutter))
+                days.forEach { d ->
+                    Column(Modifier.width(colWidth).padding(horizontal = 1.dp), verticalArrangement = Arrangement.spacedBy(1.dp)) {
+                        byDay[d].orEmpty().filter { it.all }.take(3).forEach { r ->
+                            Text(
+                                (if (r.isTask) (if (r.done) "☑ " else "☐ ") else "") + r.name.ifBlank { "(untitled)" },
+                                style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                color = MaterialTheme.colorScheme.onPrimary,
+                                modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(3.dp))
+                                    .background((colourOf(r) ?: MaterialTheme.colorScheme.primary).copy(alpha = if (r.done) 0.4f else 0.9f))
+                                    .clickable { onOpen(r) }.padding(horizontal = 3.dp),
+                            )
+                        }
+                    }
+                }
+            }
+            HorizontalDivider()
+            // The hours.
+            Box(Modifier.verticalScroll(vScroll)) {
+                Row {
+                    Column(Modifier.width(gutter)) {
+                        repeat(24) { h ->
+                            Box(Modifier.height(hourDp), contentAlignment = Alignment.TopEnd) {
+                                Text(
+                                    io.nisfeb.talon.ui.SkyClock.clockLabel(h * 60, twentyFourHour),
+                                    style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(end = 4.dp),
+                                )
+                            }
+                        }
+                    }
+                    days.forEach { d ->
+                        val timed = byDay[d].orEmpty().filter { !it.all }.sortedWith(compareBy({ it.l }, { it.r }))
+                        // Blocks that overlap sit in lanes, leftmost first.
+                        val laneEnds = mutableListOf<Long>()
+                        val lanes = timed.map { r ->
+                            val lane = laneEnds.indexOfFirst { it <= r.l }.takeIf { it >= 0 } ?: laneEnds.size.also { laneEnds.add(0L) }
+                            laneEnds[lane] = r.r
+                            lane
+                        }
+                        val laneCount = laneEnds.size.coerceAtLeast(1)
+                        Box(
+                            Modifier.width(colWidth).height(hourDp * 24)
+                                .background(if (d == selected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.25f) else Color.Transparent)
+                                .clickable { onSelect(d) },
+                        ) {
+                            repeat(24) { h -> HorizontalDivider(Modifier.offset(y = hourDp * h), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)) }
+                            timed.forEachIndexed { i, r ->
+                                val s = Instant.fromEpochMilliseconds(r.l).toLocalDateTime(zone)
+                                val e = Instant.fromEpochMilliseconds(r.r).toLocalDateTime(zone)
+                                val startMin = if (s.date < d) 0 else s.hour * 60 + s.minute
+                                val endMin = if (e.date > d) 24 * 60 else e.hour * 60 + e.minute
+                                val laneW = (colWidth - 2.dp) / laneCount
+                                Column(
+                                    Modifier
+                                        .offset(x = 1.dp + laneW * lanes[i], y = hourDp * startMin / 60f)
+                                        .width(laneW - 1.dp)
+                                        .height((hourDp * (endMin - startMin).coerceAtLeast(20) / 60f))
+                                        .clip(RoundedCornerShape(4.dp))
+                                        .background((colourOf(r) ?: MaterialTheme.colorScheme.primary).copy(alpha = if (r.id.startsWith("pending-")) 0.4f else 0.85f))
+                                        .clickable { onOpen(r) }
+                                        .padding(horizontal = 3.dp, vertical = 1.dp),
+                                ) {
+                                    Text(r.name.ifBlank { "(untitled)" }, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onPrimary, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                                    if (endMin - startMin >= 45) Text(
+                                        io.nisfeb.talon.ui.SkyClock.clockLabel(startMin, twentyFourHour),
+                                        style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.8f), maxLines = 1,
+                                    )
+                                }
+                            }
+                            if (d == today) {
+                                HorizontalDivider(Modifier.offset(y = hourDp * nowMinute / 60f), thickness = 2.dp, color = MaterialTheme.colorScheme.error)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
