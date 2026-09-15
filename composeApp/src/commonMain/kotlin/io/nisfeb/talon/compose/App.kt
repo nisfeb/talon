@@ -2897,13 +2897,8 @@ fun App(
                                     ourPatp = ship,
                                     onOpenContact = { other -> profileSheetShip = other },
                                 )
-                                RailTab.Calendar -> io.nisfeb.talon.ui.screens.CalendarScreen(
-                                    repo = calendarRepo,
-                                    twentyFourHour = homeTwentyFourHour,
-                                    onBack = null,
-                                    onOpenWebSettings = onOpenCalendarPage,
-                                    db = db, chat = repo, mail = mailRepo, ourShip = ship,
-                                )
+                                // Calendar takes the whole area too; see the content slot.
+                                RailTab.Calendar -> Unit
                                 RailTab.Bookmarks -> BookmarksList(
                                     db = db,
                                     repo = repo,
@@ -3047,6 +3042,16 @@ fun App(
                                         onCompose = { mailComposing = it },
                                     )
                                 }
+                            } else if (activeRailTab == RailTab.Calendar && !showAssistant) {
+                                {
+                                    io.nisfeb.talon.ui.screens.CalendarScreen(
+                                        repo = calendarRepo,
+                                        twentyFourHour = homeTwentyFourHour,
+                                        onBack = null,
+                                        onOpenWebSettings = onOpenCalendarPage,
+                                        db = db, chat = repo, mail = mailRepo, ourShip = ship,
+                                    )
+                                }
                             } else if (showAssistant) {
                                 {
                                     AssistantScreen(
@@ -3080,7 +3085,12 @@ fun App(
                                     )
                                 }
                             } else null,
-                            rightSidebar = rightPaneContent?.let { content ->
+                            // A tab that takes the whole area has no chat beside it,
+                            // so no thread or info pane either.
+                            rightSidebar = rightPaneContent?.takeIf {
+                                !showAssistant && activeRailTab != RailTab.Home &&
+                                    activeRailTab != RailTab.Mail && activeRailTab != RailTab.Calendar
+                            }?.let { content ->
                                 {
                                     val paneMicTrigger = remember(content) { kotlinx.coroutines.flow.MutableSharedFlow<Unit>(extraBufferCapacity = 1) }
                                     RightPaneHost(
