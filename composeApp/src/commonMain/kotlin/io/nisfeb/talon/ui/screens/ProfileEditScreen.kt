@@ -49,6 +49,8 @@ import io.nisfeb.talon.urbit.TlonChatRepo
 import io.nisfeb.talon.util.decodeImageDimensions
 import io.nisfeb.talon.util.rememberImagePicker
 import kotlinx.coroutines.launch
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 
 @Composable
 fun ProfileEditScreen(
@@ -130,6 +132,7 @@ fun ProfileEditScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
+                .verticalScroll(rememberScrollState())
                 .padding(horizontal = 24.dp, vertical = 16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
@@ -227,6 +230,16 @@ fun ProfileEditScreen(
                 enabled = !saving && !uploading,
                 modifier = Modifier.fillMaxWidth(),
             ) { Text(if (saving) "Saving…" else "Save") }
+
+            HorizontalDivider()
+            // A code to post where people will see it. Someone who runs a
+            // group scans it from Talon's + screen and invites this ship.
+            io.nisfeb.talon.ui.ShareQr(
+                link = io.nisfeb.talon.urbit.TalonLink.forInviteMe(ourPatp),
+                title = "Invite me",
+                caption = "Post this anywhere. Someone who scans it in Talon can invite you to their groups.",
+                fileName = "invite-" + ourPatp.removePrefix("~"),
+            )
         }
     }
 }

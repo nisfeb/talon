@@ -17,4 +17,14 @@ class TalonLinkTest {
         assertNull(TalonLink.parse("talon://chat/~zod"))
         assertNull(TalonLink.parse("talon://what/ever"))
     }
+
+    @Test
+    fun groupAndInviteLinksRoundTrip() {
+        assertEquals(TalonLink.Group("~sampel-palnet/tlon-studio"), TalonLink.parse(TalonLink.forGroup("~sampel-palnet/tlon-studio")))
+        assertEquals(TalonLink.InviteMe("~zod"), TalonLink.parse(TalonLink.forInviteMe("~zod")))
+        assertNull(TalonLink.parse("talon://group/sampel/x"))
+        assertNull(TalonLink.parse("talon://group/~zod"))
+        assertNull(TalonLink.parse("talon://invite/zod"))
+        assertNull(TalonLink.parse("talon://invite/~zod/x"))
+    }
 }

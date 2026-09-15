@@ -1460,8 +1460,17 @@ class TlonChatRepo(
         }
     }
 
-    /** Accept an inbound group invite via `group-join`. */
+    /** Accept an inbound group invite: join it, and drop it from the list. */
     suspend fun acceptInvite(flag: String) {
+        joinGroup(flag)
+        _invites.value = _invites.value?.filterNot { it.flag == flag }
+    }
+
+    /**
+     * Join a group via `group-join`: one we hold an invite to, or a public
+     * group anyone may join, such as one whose code was scanned.
+     */
+    suspend fun joinGroup(flag: String) {
         val ch = channel ?: error("not connected")
         ch.poke(
             app = "groups",
@@ -1471,7 +1480,6 @@ class TlonChatRepo(
                 put("join-all", true)
             },
         )
-        _invites.value = _invites.value?.filterNot { it.flag == flag }
         // The ship accepts the poke and does the join afterwards, and the
         // groups subscription does not replay it. Reconcile until it
         // lands instead of depending on a reconnect that may never come.

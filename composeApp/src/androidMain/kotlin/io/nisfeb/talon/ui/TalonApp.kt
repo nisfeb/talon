@@ -521,6 +521,14 @@ fun TalonApp(
         floatingPartyState !is io.nisfeb.talon.call.PartyState.Idle &&
         !inlineCallUiShown.value
 
+    /** A ship whose invite-me code was scanned or tapped: pick a group to invite it to. */
+    var inviteShipFromCode by remember { mutableStateOf<String?>(null) }
+    inviteShipFromCode?.let { ship ->
+        io.nisfeb.talon.ui.InviteToGroupDialog(
+            db = app.db, repo = app.repo, ship = ship, shipName = io.nisfeb.talon.ui.shipHandle(ship),
+            onDismiss = { inviteShipFromCode = null },
+        )
+    }
     var openGroupFlag by remember {
         mutableStateOf(initialOpenWhom?.takeIf { it.startsWith("group:") }?.removePrefix("group:"))
     }
@@ -1213,6 +1221,16 @@ fun TalonApp(
                     is io.nisfeb.talon.urbit.TalonLink.Mail -> {
                         calendarOpen = false; homeOpen = false; assistantOpen = false; assistantListen = false
                         pendingMailThread = link.threadId; mailOpen = true
+                        true
+                    }
+                    is io.nisfeb.talon.urbit.TalonLink.Group -> {
+                        calendarOpen = false; homeOpen = false; assistantOpen = false; assistantListen = false; mailOpen = false
+                        openWhom = null
+                        openGroupFlag = link.flag
+                        true
+                    }
+                    is io.nisfeb.talon.urbit.TalonLink.InviteMe -> {
+                        inviteShipFromCode = link.ship
                         true
                     }
                     null -> false
@@ -2635,6 +2653,12 @@ fun TalonApp(
                     appScope.launch { runCatching { app.repo.addContact(patp, nickname) } }
                 },
                 bookContacts = bookContacts,
+                onJoinGroup = { flag ->
+                    newDmOpen = false
+                    appScope.launch { runCatching { app.repo.joinGroup(flag) } }
+                    openGroupFlag = flag
+                },
+                onInviteShip = { ship -> newDmOpen = false; inviteShipFromCode = ship },
                 modifier = mod,
             )
 

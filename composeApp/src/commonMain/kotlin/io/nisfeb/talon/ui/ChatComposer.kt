@@ -32,6 +32,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.foundation.focusable
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
@@ -450,7 +451,19 @@ fun ChatComposer(
         }
     }
 
-    val mention = detectMentionQuery(state.draft.text, state.draft.selection.start)
+    // `/invite <group> [~ship]`: its arguments get their own pickers, and
+    // the mention picker stands down while one of them is live.
+    val inDm = whom.startsWith("~")
+    val inviteArg = detectInviteArg(state.draft.text, state.draft.selection.start, inDm)
+    val myGroups by remember(db) { db.groups().streamGroups() }.collectAsState(initial = emptyList())
+    val groupSuggestions = remember(inviteArg, myGroups) {
+        (inviteArg as? InviteArg.Group)?.let { matchGroups(it.query, myGroups) } ?: emptyList()
+    }
+    val inviteShipSuggestions = remember(inviteArg, allShips, contactMap) {
+        (inviteArg as? InviteArg.Ship)?.let { suggestionsFor(it.query, contactMap, allShips) } ?: emptyList()
+    }
+    var inviteSel by remember(inviteArg?.query) { mutableStateOf(0) }
+    val mention = if (inviteArg != null) null else detectMentionQuery(state.draft.text, state.draft.selection.start)
     val suggestions = remember(mention, allShips, contactMap) {
         mention?.let { (q, _) -> suggestionsFor(q, contactMap, allShips) } ?: emptyList()
     }
@@ -502,6 +515,13 @@ fun ChatComposer(
     val applyMentionPick: (String) -> Unit = { ship -> replaceTrigger(mention!!.second, "$ship ") }
     val applySlashPick: (SlashCommandSpec) -> Unit = { spec ->
         updateDraft(TextFieldValue("/${spec.name} ", TextRange(spec.name.length + 2)))
+    }
+    val applyInvitePick: (String) -> Unit = { picked -> inviteArg?.let { replaceTrigger(it.start, "$picked ") } }
+    /** The highlighted /invite pick, group or ship, or null when neither picker is up. */
+    fun invitePick(): String? = when {
+        groupSuggestions.isNotEmpty() -> groupSuggestions[inviteSel.coerceIn(0, groupSuggestions.lastIndex)].flag
+        inviteShipSuggestions.isNotEmpty() -> inviteShipSuggestions[inviteSel.coerceIn(0, inviteShipSuggestions.lastIndex)].ship
+        else -> null
     }
 
     Column(
@@ -560,6 +580,22 @@ fun ChatComposer(
                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
             )
         }
+        if (groupSuggestions.isNotEmpty()) {
+            GroupPicker(
+                groups = groupSuggestions,
+                onPick = { applyInvitePick(it.flag) },
+                selectedIndex = inviteSel,
+                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+            )
+        }
+        if (inviteShipSuggestions.isNotEmpty()) {
+            MentionPicker(
+                suggestions = inviteShipSuggestions,
+                onPick = applyInvitePick,
+                selectedIndex = inviteSel,
+                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+            )
+        }
         if (suggestions.isNotEmpty() && mention != null) {
             MentionPicker(
                 suggestions = suggestions,
@@ -600,6 +636,22 @@ fun ChatComposer(
             val firstWord = body.lowercase().substringBefore(' ')
             val handledInUi = when {
                 quote != null -> false
+                firstWord == "/invite" -> {
+                    when (val p = parseInvite(body, whom.takeIf { inDm }, myGroups)) {
+                        is InviteParse.Problem -> {
+                            state.sendError = p.message
+                            return@doSend false
+                        }
+                        is InviteParse.Ok -> {
+                            val title = myGroups.firstOrNull { it.flag == p.flag }?.title ?: p.flag
+                            scope.launch {
+                                state.sendError = runCatching { repo.inviteToGroup(p.flag, p.ship) }
+                                    .fold({ "Invited ${shipHandle(p.ship)} to $title." }, ::inviteFailure)
+                            }
+                        }
+                    }
+                    true
+                }
                 firstWord == "/img" -> {
                     onPickImage(); true
                 }
@@ -900,6 +952,13 @@ fun ChatComposer(
                             }
                             return@onPreviewKeyEvent true
                         }
+                        // And the /invite argument pickers.
+                        val invitePicks = groupSuggestions.size.takeIf { it > 0 } ?: inviteShipSuggestions.size
+                        if (invitePicks > 0 && (e.key == Key.DirectionDown || e.key == Key.DirectionUp)) {
+                            inviteSel = if (e.key == Key.DirectionDown) (inviteSel + 1).coerceAtMost(invitePicks - 1)
+                            else (inviteSel - 1).coerceAtLeast(0)
+                            return@onPreviewKeyEvent true
+                        }
                         // Same for the mention dropdown.
                         if (mention != null && suggestions.isNotEmpty() &&
                             (e.key == Key.DirectionDown || e.key == Key.DirectionUp)
@@ -929,6 +988,7 @@ fun ChatComposer(
                         // is live; otherwise it falls through.
                         if (e.key == Key.Tab) {
                             when {
+                                invitePick() != null -> applyInvitePick(invitePick()!!)
                                 emojiQuery != null && emojiSuggestions.isNotEmpty() ->
                                     applyEmojiPick(emojiSuggestions[emojiSel.coerceIn(0, emojiSuggestions.lastIndex)])
                                 mention != null && suggestions.isNotEmpty() ->
@@ -988,6 +1048,11 @@ fun ChatComposer(
                         // into the room. Accepting closes the picker (the
                         // query no longer parses), so the NEXT Enter sends:
                         // pick-then-send is a double tap of the same key.
+                        // Enter on an /invite argument picks it, like Tab; the next Enter sends.
+                        invitePick()?.let {
+                            applyInvitePick(it)
+                            return@onPreviewKeyEvent true
+                        }
                         if (emojiQuery != null && emojiSuggestions.isNotEmpty()) {
                             applyEmojiPick(
                                 emojiSuggestions[emojiSel.coerceIn(0, emojiSuggestions.lastIndex)],

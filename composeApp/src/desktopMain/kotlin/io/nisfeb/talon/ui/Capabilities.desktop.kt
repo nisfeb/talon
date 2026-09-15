@@ -1,7 +1,7 @@
 package io.nisfeb.talon.ui
 
 actual val isVoiceMessagesSupported: Boolean = false
-actual val isQrLoginScanSupported: Boolean = false
+actual val isQrScanSupported: Boolean = false
 actual val isLocalCometSupported: Boolean = true
 // Loops run on desktop via a while-open ticker in App.kt (no
 // AlarmManager off Android): due loops fire once a minute while the

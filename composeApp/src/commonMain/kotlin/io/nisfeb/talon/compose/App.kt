@@ -358,6 +358,8 @@ fun App(
     var showGroupAdminList by remember { mutableStateOf(false) }
     var openGroupAdminFlag by remember { mutableStateOf<String?>(null) }
     var openGroupHomeFlag by remember { mutableStateOf<String?>(null) }
+    /** A ship whose invite-me code was scanned or tapped: pick a group to invite it to. */
+    var inviteShipFromCode by remember { mutableStateOf<String?>(null) }
     // Notebook overlay state. notebookComposeOpen + notebookEdit*
     // mirror production's edit flow: tap Edit on a post → close
     // the viewer, capture the existing fields into the edit-* vars,
@@ -1025,6 +1027,12 @@ fun App(
             calendarRepo.weekView.value = uiSettings.calendarWeekView.value
             calendarRepo.weekView.collect { uiSettings.setCalendarWeekView(it) }
         }
+        inviteShipFromCode?.let { ship ->
+            io.nisfeb.talon.ui.InviteToGroupDialog(
+                db = db, repo = repo, ship = ship, shipName = io.nisfeb.talon.ui.shipHandle(ship),
+                onDismiss = { inviteShipFromCode = null },
+            )
+        }
         val calendarInstall: suspend () -> Result<Unit> = remember(session, calendarRepo) {
             val install = io.nisfeb.talon.urbit.LatticeInstall.installer(
                 http,
@@ -1383,6 +1391,16 @@ fun App(
                               showCalendar = false; showBookmarks = false; showAssistant = false
                               openMailThread = link.threadId
                               uiSettings.setActiveRailTab(RailTab.Mail)
+                              true
+                          }
+                          is io.nisfeb.talon.urbit.TalonLink.Group -> {
+                              showCalendar = false; showBookmarks = false; showAssistant = false
+                              uiSettings.setActiveRailTab(RailTab.Chats)
+                              openGroupHomeFlag = link.flag
+                              true
+                          }
+                          is io.nisfeb.talon.urbit.TalonLink.InviteMe -> {
+                              inviteShipFromCode = link.ship
                               true
                           }
                           null -> false
@@ -1870,7 +1888,7 @@ fun App(
                         // assume and the keyboard is already the fast path.
                         // The generator works everywhere: the QR matrix is
                         // painted and shown to a phone.
-                        qrScanIntegration = if (io.nisfeb.talon.ui.isQrLoginScanSupported) {
+                        qrScanIntegration = if (io.nisfeb.talon.ui.isQrScanSupported) {
                             { onResult -> io.nisfeb.talon.ui.rememberQrLoginScanLauncher(onResult) }
                         } else null,
                         onOpenShareQr = { shareLoginQrOpen = true },
@@ -2068,6 +2086,12 @@ fun App(
                             }
                         },
                         bookContacts = bookContacts,
+                        onJoinGroup = { flag ->
+                            showNewDm = false
+                            rightPaneScope.launch { runCatching { repo.joinGroup(flag) } }
+                            openGroupHomeFlag = flag
+                        },
+                        onInviteShip = { ship -> showNewDm = false; inviteShipFromCode = ship },
                     )
                     showContacts -> io.nisfeb.talon.ui.screens.ContactsScreen(
                         db = db,

@@ -35,6 +35,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import io.nisfeb.talon.data.AppDatabase
 import io.nisfeb.talon.ui.Avatar
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.QrCodeScanner
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 
 @Composable
 fun NewDmScreen(
@@ -48,6 +52,11 @@ fun NewDmScreen(
      *  "Add contact" affordance shows. NOT the broad /v1/all table
      *  (which includes every known peer). */
     bookContacts: Set<String> = emptySet(),
+    /** A scanned group code: join the group. With [onInviteShip], puts a
+     *  camera on this screen where the platform has a scanner. */
+    onJoinGroup: ((flag: String) -> Unit)? = null,
+    /** A scanned invite-me code: invite that ship to one of our groups. */
+    onInviteShip: ((ship: String) -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val fieldFocus = remember { FocusRequester() }
@@ -88,6 +97,16 @@ fun NewDmScreen(
     val isValidPatp = resolved is io.nisfeb.talon.ui.NameToShip.Result.One
     val resolveHint = io.nisfeb.talon.ui.NameToShip.hint(resolved, trimmedInput)
     val alreadyContact = remember(asPatp, bookContacts) { asPatp in bookContacts }
+    var scanProblem by remember { mutableStateOf<String?>(null) }
+    val scan = if (io.nisfeb.talon.ui.isQrScanSupported && onJoinGroup != null && onInviteShip != null) {
+        io.nisfeb.talon.ui.rememberQrScanLauncher("Point the camera at a group or invite code") { raw ->
+            when (val link = raw?.let { io.nisfeb.talon.urbit.TalonLink.parse(it) }) {
+                is io.nisfeb.talon.urbit.TalonLink.Group -> onJoinGroup(link.flag)
+                is io.nisfeb.talon.urbit.TalonLink.InviteMe -> onInviteShip(link.ship)
+                else -> if (raw != null) scanProblem = "That is not a Talon group or invite code."
+            }
+        }
+    } else null
 
     Column(modifier = modifier.windowInsetsPadding(WindowInsets.safeDrawing)) {
         Row(
@@ -98,8 +117,16 @@ fun NewDmScreen(
             Text(
                 "New message",
                 style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
-                modifier = Modifier.padding(start = 4.dp),
+                modifier = Modifier.padding(start = 4.dp).weight(1f),
             )
+            if (scan != null) {
+                IconButton(onClick = { scanProblem = null; scan() }) {
+                    Icon(Icons.Filled.QrCodeScanner, contentDescription = "Scan a group or invite code")
+                }
+            }
+        }
+        scanProblem?.let {
+            Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp))
         }
         HorizontalDivider()
         Row(

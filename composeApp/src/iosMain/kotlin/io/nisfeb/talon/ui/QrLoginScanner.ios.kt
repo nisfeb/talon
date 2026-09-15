@@ -3,7 +3,6 @@ package io.nisfeb.talon.ui
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
-import io.nisfeb.talon.login.TalonLoginUri
 import kotlinx.cinterop.ExperimentalForeignApi
 import kotlinx.cinterop.ObjCAction
 import kotlinx.cinterop.useContents
@@ -39,26 +38,27 @@ import platform.darwin.dispatch_get_main_queue
 import platform.Foundation.NSSelectorFromString
 
 /**
- * The camera on a login QR: a full-screen preview with a cancel
+ * The camera on a QR code: a full-screen preview with a cancel
  * button, closed by the first QR it reads. AVFoundation reads the
  * code itself; no library.
  */
 @Composable
-actual fun rememberQrLoginScanLauncher(onResult: (TalonLoginUri.Payload?) -> Unit): (() -> Unit)? {
+actual fun rememberQrScanLauncher(prompt: String, onResult: (String?) -> Unit): (() -> Unit)? {
     val current = rememberUpdatedState(onResult)
-    return remember { { QrScanPresenter.present { raw -> current.value(raw?.let(TalonLoginUri::decode)) } } }
+    val shown = rememberUpdatedState(prompt)
+    return remember { { QrScanPresenter.present(shown.value) { raw -> current.value(raw) } } }
 }
 
 @OptIn(ExperimentalForeignApi::class)
 private object QrScanPresenter {
-    fun present(onCode: (String?) -> Unit) {
+    fun present(prompt: String, onCode: (String?) -> Unit) {
         val go = {
             dispatch_async(dispatch_get_main_queue()) {
                 var top = UIApplication.sharedApplication.keyWindow?.rootViewController
                 while (top?.presentedViewController != null) top = top.presentedViewController
                 val host = top
                 if (host == null) onCode(null)
-                else host.presentViewController(QrScanController(onCode), animated = true, completion = null)
+                else host.presentViewController(QrScanController(prompt, onCode), animated = true, completion = null)
             }
         }
         if (AVCaptureDevice.authorizationStatusForMediaType(AVMediaTypeVideo) == AVAuthorizationStatusAuthorized) go()
@@ -67,7 +67,7 @@ private object QrScanPresenter {
 }
 
 @OptIn(ExperimentalForeignApi::class, kotlinx.cinterop.BetaInteropApi::class)
-private class QrScanController(private val onCode: (String?) -> Unit) : UIViewController(nibName = null, bundle = null) {
+private class QrScanController(private val prompt: String, private val onCode: (String?) -> Unit) : UIViewController(nibName = null, bundle = null) {
     private val session = AVCaptureSession()
     private var preview: AVCaptureVideoPreviewLayer? = null
     private var delivered = false
@@ -96,7 +96,7 @@ private class QrScanController(private val onCode: (String?) -> Unit) : UIViewCo
         view.layer.addSublayer(layer)
         preview = layer
         val hint = UILabel().apply {
-            text = "Point the camera at a Talon login QR"
+            text = prompt
             textColor = UIColor.whiteColor
             textAlignment = NSTextAlignmentCenter
         }

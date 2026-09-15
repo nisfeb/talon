@@ -31,7 +31,13 @@ expect fun VoicePreviewPlayButton(path: String, enabled: Boolean)
  *  where there is none and the row falls back to a link. */
 expect fun platformInlineMediaPlayer(): (@Composable (url: String, kind: MediaKind) -> Unit)?
 
-/** A trigger that opens the camera on a login QR, or null where
- *  there is no scanner; the payload is null when nothing was read. */
+/** A trigger that opens the camera on a QR code, or null where there is
+ *  no scanner. [onResult] gets the code's text, or null when nothing was
+ *  read; [prompt] is shown over the camera. */
 @Composable
-expect fun rememberQrLoginScanLauncher(onResult: (TalonLoginUri.Payload?) -> Unit): (() -> Unit)?
+expect fun rememberQrScanLauncher(prompt: String, onResult: (String?) -> Unit): (() -> Unit)?
+
+/** The scanner on a login QR; the payload is null when nothing was read. */
+@Composable
+fun rememberQrLoginScanLauncher(onResult: (TalonLoginUri.Payload?) -> Unit): (() -> Unit)? =
+    rememberQrScanLauncher("Point the camera at a Talon login QR") { raw -> onResult(raw?.let(TalonLoginUri::decode)) }

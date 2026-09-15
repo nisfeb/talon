@@ -18,4 +18,4 @@ actual fun VoicePreviewPlayButton(path: String, enabled: Boolean) = Unit
 actual fun platformInlineMediaPlayer(): (@Composable (url: String, kind: MediaKind) -> Unit)? = null
 
 @Composable
-actual fun rememberQrLoginScanLauncher(onResult: (TalonLoginUri.Payload?) -> Unit): (() -> Unit)? = null
+actual fun rememberQrScanLauncher(prompt: String, onResult: (String?) -> Unit): (() -> Unit)? = null

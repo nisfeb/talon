@@ -46,13 +46,13 @@ expect val isLoopsSupported: Boolean
 expect val isBackgroundSchedulingSupported: Boolean
 
 /**
- * Whether the platform can launch an in-app QR scanner for login
- * handoff (see [io.nisfeb.talon.login.TalonLoginUri]). Android: true
- * via ZXing-android-embedded. iOS: true, AVFoundation's own reader
- * (QrLoginScanner.ios.kt). Desktop: false — desktops have keyboards,
- * the manual form is already the fast path.
+ * Whether the platform has an in-app camera QR scanner: login handoff
+ * (see [io.nisfeb.talon.login.TalonLoginUri]), and joining a group or
+ * inviting a ship from a scanned code. Android: true via
+ * ZXing-android-embedded. iOS: true, AVFoundation's own reader
+ * (QrLoginScanner.ios.kt). Desktop: false, no camera to assume.
  */
-expect val isQrLoginScanSupported: Boolean
+expect val isQrScanSupported: Boolean
 
 /**
  * Whether Talon can run a comet on this machine for someone with no
