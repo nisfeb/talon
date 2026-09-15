@@ -59,6 +59,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
@@ -209,6 +210,23 @@ fun CalendarScreen(
         status = doing
         scope.launch { status = if (body()) null else failed }
     }
+    // A task shows the moment it is typed, greyed, until the calendar's
+    // own copy arrives with the refresh after the poke.
+    var pendingTasks by remember { mutableStateOf(listOf<CalendarTask>()) }
+    fun addTask(name: String, due: LocalDate?, cal: String?) {
+        val d = EventDraft(name = name, cat = EventCat.TODO, date = due ?: today, due = due, cal = cal, tags = listOfNotNull(tagFilter))
+        val ghost = CalendarTask(
+            id = "pending-${nowMs()}", cal = cal ?: "default", cat = "todo",
+            meta = buildJsonObject { put("name", name); if (tagFilter != null) put("tags", kotlinx.serialization.json.JsonArray(listOf(kotlinx.serialization.json.JsonPrimitive(tagFilter!!)))) },
+            dueMs = due?.atTime(0, 0)?.toInstant(TimeZone.UTC)?.toEpochMilliseconds(),
+        )
+        pendingTasks = pendingTasks + ghost
+        scope.launch {
+            val ok = repo.poke(eventBody(d))
+            pendingTasks = pendingTasks - ghost
+            if (!ok) status = "The ship did not take \"$name\"."
+        }
+    }
 
     Column(modifier.windowInsetsPadding(WindowInsets.safeDrawing)) {
         Row(
@@ -298,10 +316,8 @@ fun CalendarScreen(
                     val dayMs = t.dueDate()?.atTime(0, 0)?.toInstant(zone)?.toEpochMilliseconds() ?: 0L
                     view(CalendarRow(id = t.id, cal = t.cal, meta = t.meta, cat = "todo", kind = "todo", all = true, l = dayMs, r = dayMs, done = t.done))
                 },
-                onAdd = { name, due, cal ->
-                    val d = EventDraft(name = name, cat = EventCat.TODO, date = due ?: today, due = due, cal = cal, tags = listOfNotNull(tagFilter))
-                    act("Adding…", "The ship did not take the task.") { repo.poke(eventBody(d)) }
-                },
+                pending = pendingTasks,
+                onAdd = ::addTask,
                 modifier = Modifier.weight(1f).fillMaxWidth(),
             )
             return@Column
@@ -957,6 +973,8 @@ private fun TasksView(
     today: LocalDate,
     calendars: List<CalendarInfo>,
     readOnly: Set<String>,
+    /** Added here and not yet answered; shown first, greyed. */
+    pending: List<CalendarTask>,
     colourOf: (CalendarTask) -> Color?,
     status: String?,
     onTick: (id: String, done: Boolean) -> Unit,
@@ -1000,14 +1018,15 @@ private fun TasksView(
                 modifier = Modifier.padding(horizontal = 16.dp),
             )
         }
-        if (tasks == null) {
+        if (tasks == null && pending.isEmpty()) {
             Text("Looking…", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(16.dp))
             return@Column
         }
-        val open = taskOrder(tasks.filter { !it.done })
-        val done = taskOrder(tasks.filter { it.done })
+        val open = taskOrder(tasks.orEmpty().filter { !it.done })
+        val done = taskOrder(tasks.orEmpty().filter { it.done })
         LazyColumn(Modifier.fillMaxSize()) {
-            if (open.isEmpty()) item { Text("Nothing to do.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(16.dp)) }
+            items(pending, key = { it.id }) { t -> TaskLine(t, today, colourOf(t), false, onTick, {}, pending = true) }
+            if (open.isEmpty() && pending.isEmpty()) item { Text("Nothing to do.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(16.dp)) }
             items(open, key = { it.id }) { t -> TaskLine(t, today, colourOf(t), t.cal !in readOnly, onTick, onOpen) }
             if (done.isNotEmpty()) {
                 item {
@@ -1035,11 +1054,17 @@ private fun TasksView(
 }
 
 @Composable
-private fun TaskLine(t: CalendarTask, today: LocalDate, colour: Color?, editable: Boolean, onTick: (String, Boolean) -> Unit, onOpen: (CalendarTask) -> Unit) {
+private fun TaskLine(
+    t: CalendarTask, today: LocalDate, colour: Color?, editable: Boolean,
+    onTick: (String, Boolean) -> Unit, onOpen: (CalendarTask) -> Unit,
+    pending: Boolean = false,
+) {
     val dueDay = t.dueDate()
     val late = !t.done && dueDay != null && dueDay < today
     Row(
-        Modifier.fillMaxWidth().clickable { onOpen(t) }.padding(start = 8.dp, end = 16.dp, top = 2.dp, bottom = 2.dp),
+        Modifier.fillMaxWidth().clickable(enabled = !pending) { onOpen(t) }
+            .alpha(if (pending) 0.45f else 1f)
+            .padding(start = 8.dp, end = 16.dp, top = 2.dp, bottom = 2.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         Checkbox(checked = t.done, onCheckedChange = { onTick(t.id, it) }, enabled = editable)
@@ -1052,7 +1077,9 @@ private fun TaskLine(t: CalendarTask, today: LocalDate, colour: Color?, editable
             val line = listOf(t.note, t.tags.joinToString(" ") { "#$it" }).filter { it.isNotBlank() }.joinToString(" · ")
             if (line.isNotBlank()) Text(line, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
-        if (dueDay != null) {
+        if (pending) {
+            Text("syncing…", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        } else if (dueDay != null) {
             Text(
                 "${dueDay.dayOfMonth} ${MonthNames.ENGLISH_ABBREVIATED.names[dueDay.monthNumber - 1]}" + if (late) " · overdue" else "",
                 style = MaterialTheme.typography.labelSmall,
