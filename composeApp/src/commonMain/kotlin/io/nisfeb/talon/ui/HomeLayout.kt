@@ -77,6 +77,18 @@ val HOME_SPAN_RANGE = 3..HOME_COLUMNS
  */
 val HOME_ROW_RANGE = 3..18
 
+/** A widget drawn as a square: the grid gives it the shorter of its
+ *  width and height on both sides, so it keeps its shape on every window. */
+val HomeWidgetKind.square: Boolean get() = this == HomeWidgetKind.ASSISTANT
+
+/**
+ * The columns a square widget of [rows] row units needs at this column
+ * pitch: enough to hold it and no more, so it does not keep a wide
+ * empty strip beside itself. At least one.
+ */
+fun squareSpan(rows: Int, rowUnitPx: Float, colPitchPx: Float): Int =
+    if (colPitchPx <= 0f) 1 else kotlin.math.ceil(rows * rowUnitPx / colPitchPx).toInt().coerceIn(1, HOME_COLUMNS)
+
 /** How tall one row unit is. Here rather than in the drawing because
  *  migrations have to know what a stored row count was worth. */
 const val HOME_ROW_UNIT_DP = 40
@@ -128,7 +140,8 @@ data class HomeWidget(
     /** Clamped into what the grid can actually draw, whatever a stored
      *  line or an older version happened to say. */
     fun sane(): HomeWidget {
-        val w = span.coerceIn(HOME_SPAN_RANGE.first, HOME_SPAN_RANGE.last)
+        // A square widget needs only the columns its height covers.
+        val w = span.coerceIn(if (kind.square) 1 else HOME_SPAN_RANGE.first, HOME_SPAN_RANGE.last)
         return copy(
             count = count.coerceIn(HOME_COUNTS.first(), HOME_COUNTS.last()),
             span = w,

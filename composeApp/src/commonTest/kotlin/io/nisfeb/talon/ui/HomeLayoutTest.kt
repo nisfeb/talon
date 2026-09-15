@@ -521,4 +521,14 @@ class NeedsWidgetArrivalTest {
         assertEquals(9, tile.row, "in a row of its own under what was there")
         assertTrue(old[HomeWidgetKind.MAIL].visible.not(), "the others still arrive hidden")
     }
+
+    @Test
+    fun `a square widget holds only the columns its height covers`() {
+        // Three 40px rows are 120px: at a 100px column pitch that is two columns, at 30px it is four.
+        assertEquals(2, squareSpan(3, 40f, 100f))
+        assertEquals(4, squareSpan(3, 40f, 30f))
+        assertEquals(1, squareSpan(3, 40f, 0f))
+        assertEquals(1, HomeWidget(HomeWidgetKind.ASSISTANT, span = 1).sane().span, "a square widget may be one column")
+        assertEquals(HOME_SPAN_RANGE.first, HomeWidget(HomeWidgetKind.MAIL, span = 1).sane().span, "the others keep their floor")
+    }
 }

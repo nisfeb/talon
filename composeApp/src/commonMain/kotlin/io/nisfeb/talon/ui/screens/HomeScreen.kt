@@ -88,6 +88,8 @@ import io.nisfeb.talon.ui.HomeWidgetKind
 import io.nisfeb.talon.ui.droppedAt
 import io.nisfeb.talon.ui.keepEdgeGesture
 import io.nisfeb.talon.ui.resizedRows
+import io.nisfeb.talon.ui.square
+import io.nisfeb.talon.ui.squareSpan
 import io.nisfeb.talon.ui.resizedSpan
 import io.nisfeb.talon.ui.SkyClock
 import io.nisfeb.talon.ui.Solar
@@ -456,14 +458,19 @@ private fun HomeGrid(
 
         val placeables = measurables.mapIndexed { i, m ->
             val w = widgets[i]
+            val cellW = (w.span * colWidth + (w.span - 1) * gapPx).toInt().coerceAtLeast(0)
+            // A gap's worth is left below each widget, so the
+            // spacing comes out of the grid rather than being
+            // added on top of it and pushing every row out of
+            // step with the guides.
+            val cellH = (w.rows * unitPx - gapPx).coerceAtLeast(0)
+            // A square widget is as wide as it is tall, whatever its
+            // columns come to on this window.
+            val side = minOf(cellW, cellH)
             m.measure(
                 androidx.compose.ui.unit.Constraints.fixed(
-                    width = (w.span * colWidth + (w.span - 1) * gapPx).toInt().coerceAtLeast(0),
-                    // A gap's worth is left below each widget, so the
-                    // spacing comes out of the grid rather than being
-                    // added on top of it and pushing every row out of
-                    // step with the guides.
-                    height = (w.rows * unitPx - gapPx).coerceAtLeast(0),
+                    width = if (w.kind.square) side else cellW,
+                    height = if (w.kind.square) side else cellH,
                 ),
             )
         }
@@ -575,13 +582,19 @@ private fun BoxScope.ResizeHandles(
         startCell = cellWidthPx
     }
 
-    Grip(
-        Modifier.align(Alignment.CenterEnd),
-        grip,
-        label = "Width of ${title(widget.kind)}",
-        onStart = ::freeze,
-    ) { total ->
-        resize(widget.copy(span = resizedSpan(startSpan, total.x, startCell, HOME_COLUMNS)))
+    // A square widget has no width of its own: its height sets both, and
+    // it holds just the columns that height covers.
+    val square = widget.kind.square
+    fun squared(rows: Int) = widget.copy(rows = rows, span = squareSpan(rows, rowUnitPx, startCell))
+    if (!square) {
+        Grip(
+            Modifier.align(Alignment.CenterEnd),
+            grip,
+            label = "Width of ${title(widget.kind)}",
+            onStart = ::freeze,
+        ) { total ->
+            resize(widget.copy(span = resizedSpan(startSpan, total.x, startCell, HOME_COLUMNS)))
+        }
     }
     Grip(
         Modifier.align(Alignment.BottomCenter),
@@ -589,7 +602,8 @@ private fun BoxScope.ResizeHandles(
         label = "Height of ${title(widget.kind)}",
         onStart = ::freeze,
     ) { total ->
-        resize(widget.copy(rows = resizedRows(startRows, total.y, rowUnitPx)))
+        val rows = resizedRows(startRows, total.y, rowUnitPx)
+        resize(if (square) squared(rows) else widget.copy(rows = rows))
     }
     Grip(
         Modifier.align(Alignment.BottomEnd),
@@ -598,12 +612,18 @@ private fun BoxScope.ResizeHandles(
         label = "Size of ${title(widget.kind)}",
         onStart = ::freeze,
     ) { total ->
-        resize(
-            widget.copy(
-                span = resizedSpan(startSpan, total.x, startCell, HOME_COLUMNS),
-                rows = resizedRows(startRows, total.y, rowUnitPx),
-            ),
-        )
+        if (square) {
+            // Whichever way the corner went further sets the side.
+            val by = if (kotlin.math.abs(total.x) > kotlin.math.abs(total.y)) total.x else total.y
+            resize(squared(resizedRows(startRows, by, rowUnitPx)))
+        } else {
+            resize(
+                widget.copy(
+                    span = resizedSpan(startSpan, total.x, startCell, HOME_COLUMNS),
+                    rows = resizedRows(startRows, total.y, rowUnitPx),
+                ),
+            )
+        }
     }
 
     IconButton(
