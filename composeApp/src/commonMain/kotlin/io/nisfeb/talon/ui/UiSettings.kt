@@ -124,6 +124,10 @@ interface UiSettings {
     val defaultCalendar: StateFlow<String>
     fun setDefaultCalendar(id: String)
 
+    /** Whether the calendar opens on the week rather than the month. Per device. */
+    val calendarWeekView: StateFlow<Boolean>
+    fun setCalendarWeekView(on: Boolean)
+
     /**
      * How the home dial reads out temperature and the hour.
      *
@@ -348,6 +352,9 @@ class InMemoryUiSettings(
     private val _defaultCalendar = MutableStateFlow("")
     override val defaultCalendar: StateFlow<String> = _defaultCalendar.asStateFlow()
     override fun setDefaultCalendar(id: String) { _defaultCalendar.value = id }
+    private val _calendarWeekView = MutableStateFlow(false)
+    override val calendarWeekView: StateFlow<Boolean> = _calendarWeekView.asStateFlow()
+    override fun setCalendarWeekView(on: Boolean) { _calendarWeekView.value = on }
 
     private val _homeFahrenheit = MutableStateFlow(true)
     override val homeFahrenheit: StateFlow<Boolean> = _homeFahrenheit.asStateFlow()

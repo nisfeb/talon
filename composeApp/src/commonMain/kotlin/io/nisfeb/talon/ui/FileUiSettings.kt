@@ -61,6 +61,7 @@ class FileUiSettings(
         val homePlace: String = "",
         val hiddenCalendars: List<String> = emptyList(),
         val defaultCalendar: String = "",
+        val calendarWeekView: Boolean = false,
         val homeFahrenheit: Boolean = true,
         val homeTwentyFourHour: Boolean = false,
         val homeLayout: String = "",
@@ -175,6 +176,14 @@ class FileUiSettings(
     override fun setDefaultCalendar(id: String) {
         if (_defaultCalendar.value == id) return
         _defaultCalendar.value = id
+        persistCurrent()
+    }
+
+    private val _calendarWeekView = MutableStateFlow(initial.calendarWeekView)
+    override val calendarWeekView: StateFlow<Boolean> = _calendarWeekView.asStateFlow()
+    override fun setCalendarWeekView(on: Boolean) {
+        if (_calendarWeekView.value == on) return
+        _calendarWeekView.value = on
         persistCurrent()
     }
 
@@ -337,6 +346,7 @@ class FileUiSettings(
                 homePlace = _homePlace.value,
                 hiddenCalendars = _hiddenCalendars.value.toList(),
                 defaultCalendar = _defaultCalendar.value,
+                calendarWeekView = _calendarWeekView.value,
                 homeFahrenheit = _homeFahrenheit.value,
                 homeTwentyFourHour = _homeTwentyFourHour.value,
                 homeLayout = _homeLayout.value,

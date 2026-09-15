@@ -26,6 +26,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.material3.VerticalDivider
 import androidx.compose.foundation.layout.offset
 import androidx.compose.ui.unit.Dp
 import kotlinx.datetime.minus
@@ -157,7 +160,7 @@ fun CalendarScreen(
     val tasks by repo.tasks.collectAsState()
     var showTasks by remember { mutableStateOf(false) }
     /** The top half: the month's grid, or the selected day's week by the hour. */
-    var weekView by remember { mutableStateOf(false) }
+    val weekView by repo.weekView.collectAsState()
     val calendars by repo.calendars.collectAsState()
     val shares by repo.shares.collectAsState()
     val syncRows by repo.sync.collectAsState()
@@ -363,7 +366,7 @@ fun CalendarScreen(
                 IconButton(onClick = { if (weekView) step(7) else if (month == 12) { month = 1; year += 1 } else month += 1 }) {
                     Icon(Icons.Filled.KeyboardArrowRight, contentDescription = if (weekView) "Next week" else "Next month")
                 }
-                TextButton(onClick = { weekView = !weekView }) { Text(if (weekView) "Month" else "Week") }
+                TextButton(onClick = { repo.weekView.value = !weekView }) { Text(if (weekView) "Month" else "Week") }
             }
             IconButton(onClick = { showTasks = !showTasks }) {
                 if (showTasks) Icon(Icons.Filled.CalendarMonth, contentDescription = "Month")
@@ -443,140 +446,160 @@ fun CalendarScreen(
             )
             return@Column
         }
-        if (weekView) {
-            val weekStart = selected.minus(selected.dayOfWeek.isoDayNumber - 1, DateTimeUnit.DAY)
-            WeekGrid(
-                weekStart = weekStart,
-                selected = selected,
-                today = today,
-                byDay = byDay,
-                zone = zone,
-                twentyFourHour = twentyFourHour,
-                colourOf = ::colourOf,
-                onSelect = { selected = it },
-                onOpen = ::view,
-                modifier = Modifier.fillMaxWidth().height(360.dp),
-            )
-        } else {
-        Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp)) {
-            listOf("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun").forEach {
+        val monthView: @Composable ColumnScope.(fill: Boolean) -> Unit = { fill ->
+            Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp)) {
+                listOf("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun").forEach {
+                    Text(
+                        it, style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Center, modifier = Modifier.weight(1f),
+                    )
+                }
+            }
+            grid.chunked(7).forEach { week ->
+                Row(Modifier.fillMaxWidth().then(if (fill) Modifier.weight(1f) else Modifier).padding(horizontal = 8.dp)) {
+                    week.forEach { d ->
+                        val inMonth = d.monthNumber == month
+                        val isSel = d == selected
+                        val dayRows = byDay[d].orEmpty()
+                        Column(
+                            Modifier
+                                .weight(1f)
+                                // Beside the day list the grid fills its pane; above it, cells keep their shape.
+                                .then(if (fill) Modifier.fillMaxHeight() else Modifier.aspectRatio(0.9f))
+                                .padding(1.dp)
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(
+                                    when {
+                                        isSel -> MaterialTheme.colorScheme.primaryContainer
+                                        d == today -> MaterialTheme.colorScheme.surfaceVariant
+                                        else -> Color.Transparent
+                                    },
+                                )
+                                .clickable { selected = d },
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                        ) {
+                            Text(
+                                "${d.dayOfMonth}",
+                                style = MaterialTheme.typography.labelMedium.copy(
+                                    fontWeight = if (d == today) FontWeight.SemiBold else FontWeight.Normal,
+                                ),
+                                color = if (inMonth) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                                modifier = Modifier.padding(top = 2.dp),
+                            )
+                            dayRows.take(3).forEach { r ->
+                                Box(
+                                    Modifier.fillMaxWidth().padding(horizontal = 3.dp, vertical = 1.dp)
+                                        .height(4.dp).clip(RoundedCornerShape(2.dp))
+                                        .background((colourOf(r) ?: MaterialTheme.colorScheme.primary).copy(alpha = if (r.done) 0.3f else 1f)),
+                                )
+                            }
+                            if (dayRows.size > 3) {
+                                Text("+${dayRows.size - 3}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        // The selected day's events: under the grid, or beside a month where the window has room.
+        val dayPane: @Composable ColumnScope.() -> Unit = {
+            Row(
+                Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
                 Text(
-                    it, style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    textAlign = TextAlign.Center, modifier = Modifier.weight(1f),
+                    "${d3(selected.dayOfWeek)} ${selected.dayOfMonth} ${MonthNames.ENGLISH_ABBREVIATED.names[selected.monthNumber - 1]}",
+                    style = MaterialTheme.typography.titleSmall,
+                    modifier = Modifier.weight(1f),
+                )
+                IconButton(onClick = ::openNew) { Icon(Icons.Filled.Add, contentDescription = "New event") }
+            }
+            status?.let {
+                if (it.endsWith("…")) LinearProgressIndicator(Modifier.fillMaxWidth().padding(horizontal = 16.dp))
+                Text(
+                    it, style = MaterialTheme.typography.bodySmall,
+                    color = if (it.endsWith("…")) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.error,
+                    modifier = Modifier.padding(horizontal = 16.dp),
                 )
             }
-        }
-        grid.chunked(7).forEach { week ->
-            Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp)) {
-                week.forEach { d ->
-                    val inMonth = d.monthNumber == month
-                    val isSel = d == selected
-                    val dayRows = byDay[d].orEmpty()
-                    Column(
-                        Modifier
-                            .weight(1f)
-                            .aspectRatio(0.9f)
-                            .padding(1.dp)
-                            .clip(RoundedCornerShape(6.dp))
-                            .background(
-                                when {
-                                    isSel -> MaterialTheme.colorScheme.primaryContainer
-                                    d == today -> MaterialTheme.colorScheme.surfaceVariant
-                                    else -> Color.Transparent
-                                },
-                            )
-                            .clickable { selected = d },
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                    ) {
-                        Text(
-                            "${d.dayOfMonth}",
-                            style = MaterialTheme.typography.labelMedium.copy(
-                                fontWeight = if (d == today) FontWeight.SemiBold else FontWeight.Normal,
-                            ),
-                            color = if (inMonth) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
-                            modifier = Modifier.padding(top = 2.dp),
-                        )
-                        dayRows.take(3).forEach { r ->
-                            Box(
-                                Modifier.fillMaxWidth().padding(horizontal = 3.dp, vertical = 1.dp)
-                                    .height(4.dp).clip(RoundedCornerShape(2.dp))
-                                    .background((colourOf(r) ?: MaterialTheme.colorScheme.primary).copy(alpha = if (r.done) 0.3f else 1f)),
-                            )
-                        }
-                        if (dayRows.size > 3) {
-                            Text("+${dayRows.size - 3}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            error?.let {
+                Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(horizontal = 16.dp))
+            }
+            notice?.let {
+                Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
+                    TextButton(onClick = { repo.clearNotice() }) { Text("OK") }
+                }
+            }
+            val dayRows = byDay[selected].orEmpty()
+            Box(Modifier.weight(1f).fillMaxWidth()) {
+                if (rows == null) {
+                    Text("Looking…", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(16.dp))
+                } else if (dayRows.isEmpty()) {
+                    Text("Nothing on this day.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(16.dp))
+                } else {
+                    LazyColumn(Modifier.fillMaxSize()) {
+                        items(dayRows, key = { "${it.id}/${it.idx}" }) { r ->
+                            val ghost = r.id.startsWith("pending-") || r.id in pendingEdits
+                            Row(
+                                Modifier.fillMaxWidth().clickable(enabled = !ghost) { view(r) }.alpha(if (ghost) 0.45f else 1f).padding(horizontal = 16.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            ) {
+                                if (r.isTask) {
+                                    Checkbox(checked = r.done, onCheckedChange = { tick(r.id, it) }, enabled = r.cal !in readOnly, modifier = Modifier.size(24.dp))
+                                }
+                                Box(Modifier.size(10.dp).clip(CircleShape).background(colourOf(r) ?: MaterialTheme.colorScheme.primary))
+                                Column(Modifier.weight(1f)) {
+                                    Text(
+                                        r.name.ifBlank { "(untitled)" }, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                        textDecoration = if (r.done) TextDecoration.LineThrough else null,
+                                    )
+                                    val line = listOf(r.location.ifBlank { r.note }, r.tags.joinToString(" ") { "#$it" })
+                                        .filter { it.isNotBlank() }.joinToString(" · ")
+                                    if (line.isNotBlank()) Text(line, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                }
+                                Text(if (ghost) "syncing…" else spanLabel(r, selected, zone, twentyFourHour), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            HorizontalDivider(Modifier.padding(start = 36.dp))
                         }
                     }
                 }
+                FloatingActionButton(onClick = ::openNew, modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp)) {
+                    Icon(Icons.Filled.Add, contentDescription = "New event")
+                }
             }
         }
-        }
-        HorizontalDivider(Modifier.padding(top = 4.dp))
-        Row(
-            Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                "${d3(selected.dayOfWeek)} ${selected.dayOfMonth} ${MonthNames.ENGLISH_ABBREVIATED.names[selected.monthNumber - 1]}",
-                style = MaterialTheme.typography.titleSmall,
-                modifier = Modifier.weight(1f),
-            )
-            IconButton(onClick = ::openNew) { Icon(Icons.Filled.Add, contentDescription = "New event") }
-        }
-        status?.let {
-            if (it.endsWith("…")) LinearProgressIndicator(Modifier.fillMaxWidth().padding(horizontal = 16.dp))
-            Text(
-                it, style = MaterialTheme.typography.bodySmall,
-                color = if (it.endsWith("…")) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.error,
-                modifier = Modifier.padding(horizontal = 16.dp),
-            )
-        }
-        error?.let {
-            Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(horizontal = 16.dp))
-        }
-        notice?.let {
-            Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
-                TextButton(onClick = { repo.clearNotice() }) { Text("OK") }
-            }
-        }
-        val dayRows = byDay[selected].orEmpty()
-        Box(Modifier.weight(1f).fillMaxWidth()) {
-            if (rows == null) {
-                Text("Looking…", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(16.dp))
-            } else if (dayRows.isEmpty()) {
-                Text("Nothing on this day.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(16.dp))
+        BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
+            if (!weekView && maxWidth >= io.nisfeb.talon.ui.ExpandedThreshold) {
+                Row(Modifier.fillMaxSize()) {
+                    Column(Modifier.weight(3f).fillMaxHeight().padding(bottom = 8.dp)) { monthView(true) }
+                    VerticalDivider()
+                    Column(Modifier.weight(2f).fillMaxHeight()) { dayPane() }
+                }
             } else {
-                LazyColumn(Modifier.fillMaxSize()) {
-                    items(dayRows, key = { "${it.id}/${it.idx}" }) { r ->
-                        val ghost = r.id.startsWith("pending-") || r.id in pendingEdits
-                        Row(
-                            Modifier.fillMaxWidth().clickable(enabled = !ghost) { view(r) }.alpha(if (ghost) 0.45f else 1f).padding(horizontal = 16.dp, vertical = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(10.dp),
-                        ) {
-                            if (r.isTask) {
-                                Checkbox(checked = r.done, onCheckedChange = { tick(r.id, it) }, enabled = r.cal !in readOnly, modifier = Modifier.size(24.dp))
-                            }
-                            Box(Modifier.size(10.dp).clip(CircleShape).background(colourOf(r) ?: MaterialTheme.colorScheme.primary))
-                            Column(Modifier.weight(1f)) {
-                                Text(
-                                    r.name.ifBlank { "(untitled)" }, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                                    textDecoration = if (r.done) TextDecoration.LineThrough else null,
-                                )
-                                val line = listOf(r.location.ifBlank { r.note }, r.tags.joinToString(" ") { "#$it" })
-                                    .filter { it.isNotBlank() }.joinToString(" · ")
-                                if (line.isNotBlank()) Text(line, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            }
-                            Text(if (ghost) "syncing…" else spanLabel(r, selected, zone, twentyFourHour), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                        HorizontalDivider(Modifier.padding(start = 36.dp))
+                Column(Modifier.fillMaxSize()) {
+                    if (weekView) {
+                        val weekStart = selected.minus(selected.dayOfWeek.isoDayNumber - 1, DateTimeUnit.DAY)
+                        WeekGrid(
+                            weekStart = weekStart,
+                            selected = selected,
+                            today = today,
+                            byDay = byDay,
+                            zone = zone,
+                            twentyFourHour = twentyFourHour,
+                            colourOf = ::colourOf,
+                            onSelect = { selected = it },
+                            onOpen = ::view,
+                            modifier = Modifier.fillMaxWidth().height(360.dp),
+                        )
+                    } else {
+                        monthView(false)
                     }
+                    HorizontalDivider(Modifier.padding(top = 4.dp))
+                    dayPane()
                 }
-            }
-            FloatingActionButton(onClick = ::openNew, modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp)) {
-                Icon(Icons.Filled.Add, contentDescription = "New event")
             }
         }
     }

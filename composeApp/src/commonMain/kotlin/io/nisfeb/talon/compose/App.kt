@@ -1021,6 +1021,10 @@ fun App(
             calendarRepo.defaultCalendar.value = uiSettings.defaultCalendar.value
             calendarRepo.defaultCalendar.collect { uiSettings.setDefaultCalendar(it) }
         }
+        LaunchedEffect(calendarRepo, uiSettings) {
+            calendarRepo.weekView.value = uiSettings.calendarWeekView.value
+            calendarRepo.weekView.collect { uiSettings.setCalendarWeekView(it) }
+        }
         val calendarInstall: suspend () -> Result<Unit> = remember(session, calendarRepo) {
             val install = io.nisfeb.talon.urbit.LatticeInstall.installer(
                 http,

@@ -410,6 +410,10 @@ fun TalonApp(
         calendarRepo.defaultCalendar.value = app.uiSettings.defaultCalendar.value
         calendarRepo.defaultCalendar.collect { app.uiSettings.setDefaultCalendar(it) }
     }
+    LaunchedEffect(calendarRepo) {
+        calendarRepo.weekView.value = app.uiSettings.calendarWeekView.value
+        calendarRepo.weekView.collect { app.uiSettings.setCalendarWeekView(it) }
+    }
     DisposableEffect(calendarRepo) {
         onDispose { runCatching { calendarRepo.detach() } }
     }

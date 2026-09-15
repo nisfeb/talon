@@ -61,6 +61,8 @@ class CalendarRepo(
     suspend fun clearConflicts(): Boolean = after { it.clearConflicts() }
     /** The calendar a new event goes to unless another is picked; "" for the first one. Seeded by the shell. */
     val defaultCalendar = MutableStateFlow("")
+    /** The top half shows the week rather than the month. Per device, seeded by the shell. */
+    val weekView = MutableStateFlow(false)
     private val _shares = MutableStateFlow<Shares?>(null)
     /** Sharing with ships; null on a calendar too old to have it. */
     val shares: StateFlow<Shares?> = _shares.asStateFlow()
