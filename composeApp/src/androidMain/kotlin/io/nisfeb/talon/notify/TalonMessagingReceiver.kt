@@ -121,6 +121,8 @@ class TalonMessagingReceiver : MessagingReceiver() {
         }
 
         if (whom.isNullOrBlank()) return
+        // On screen right now: the app already shows it, and a notification would only need clearing.
+        if (whom in io.nisfeb.talon.notify.ShownConversation.keys) return
         val title = patp ?: "Talon"
         val body = "New activity in $whom"
         // The relay sends the globally-unique post id as `id`

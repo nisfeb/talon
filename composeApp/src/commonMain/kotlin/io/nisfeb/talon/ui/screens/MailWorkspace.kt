@@ -37,6 +37,7 @@ fun MailWorkspace(
     onCompose: (MailIntent?) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    io.nisfeb.talon.notify.ClearNotificationsWhileShown("mail:more")
     BoxWithConstraints(modifier.fillMaxSize()) {
         // Enough for a mailbox column, a listing that can still show a
         // subject, and a message worth reading.

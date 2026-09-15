@@ -118,6 +118,7 @@ fun ThreadList(
     powerFeaturesEnabled: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
+    io.nisfeb.talon.notify.ClearNotificationsWhileShown(whom)
     // Taken once per thread: set by whatever opened it to reply.
     val openedToReply = remember(parentId) { ThreadOpenIntent.take() }
     val parent by remember(whom, parentId) {

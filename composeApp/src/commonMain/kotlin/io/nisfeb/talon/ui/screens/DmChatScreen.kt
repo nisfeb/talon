@@ -230,6 +230,7 @@ fun DmChatScreen(
     scrollAnchored: MutableState<Boolean>? = null,
     modifier: Modifier = Modifier,
 ) {
+    io.nisfeb.talon.notify.ClearNotificationsWhileShown(whom)
     val aiConfigured by aiSettings.state.collectAsState()
     val hideComposerButtons by uiSettings.hideComposerButtons.collectAsState()
     val swipeQuotes by uiSettings.swipeQuotes.collectAsState()

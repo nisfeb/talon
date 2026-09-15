@@ -1291,6 +1291,7 @@ fun TalonApp(
                 MediaKind.VIDEO -> InlineVideoPlayer(url = url)
             }
         },
+        io.nisfeb.talon.notify.LocalNotificationClearer provides remember(context) { { key: String -> Notifications.cancelAllForChat(context, key) } },
         LocalCalendarLauncher provides calendarLauncher,
         LocalMapsLauncher provides mapsLauncher,
         io.nisfeb.talon.ui.LocalUrbLinkHandler provides urbLinkHandler,

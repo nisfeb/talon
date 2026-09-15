@@ -101,6 +101,7 @@ fun MailThreadPane(
     val shut = remember(threadId) { mutableStateListOf<String>() }
     var selected by remember(threadId) { mutableStateOf<String?>(null) }
 
+    io.nisfeb.talon.notify.ClearNotificationsWhileShown("mail:$threadId")
     LaunchedEffect(threadId) {
         loading = true
         val t = repo.loadThread(threadId)

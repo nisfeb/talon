@@ -69,6 +69,7 @@ fun GalleryGridScreen(
     onCompose: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    io.nisfeb.talon.notify.ClearNotificationsWhileShown(whom)
     val contactMap by io.nisfeb.talon.ui.rememberContactMap(db)
 
     // distinctUntilChanged on the upstream so unrelated messages-table

@@ -63,6 +63,7 @@ fun NotesChannelScreen(
     onOpenNote: (noteId: Long) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    io.nisfeb.talon.notify.ClearNotificationsWhileShown(whom)
     val flag = remember(whom) { NotesFlag.parse(whom) }
     if (flag == null) {
         // Shouldn't happen — the caller only routes notes/ nests here —

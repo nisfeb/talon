@@ -48,6 +48,7 @@ fun MailScreen(
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    io.nisfeb.talon.notify.ClearNotificationsWhileShown("mail:more")
     var openThread by remember { mutableStateOf(initialThread) }
     androidx.compose.runtime.LaunchedEffect(initialThread) { if (initialThread != null) openThread = initialThread }
     var composing by remember { mutableStateOf<MailIntent?>(null) }

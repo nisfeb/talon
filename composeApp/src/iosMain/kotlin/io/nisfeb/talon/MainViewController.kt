@@ -137,6 +137,7 @@ fun MainViewController(rtc: NativeRtcFactory?): UIViewController {
             // CallPush.swift via IosVoipBridge.
             pushTokenProvider = io.nisfeb.talon.notify.IosPushTokenProvider(),
             appForeground = IosAppLifecycle.foreground,
+            notifier = io.nisfeb.talon.notify.IosNotifier(),
         )
         // Back gesture. A Compose view controller gets none of UIKit's
         // navigation edge-swipe, so we draw our own: a narrow strip on

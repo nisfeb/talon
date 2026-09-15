@@ -1026,7 +1026,7 @@ fun App(
         // no reason to inherit that.
         LaunchedEffect(mailRepo, notifier) {
             mailRepo.onNewMail = { news ->
-                news.forEach { notifier.notify(it.title, it.body) }
+                news.forEach { notifier.notify(it.title, it.body, "mail:" + it.threadId.ifBlank { "more" }) }
             }
         }
         // "Run now", from both the Loops screen and the assistant's jobs pane.
@@ -1249,7 +1249,7 @@ fun App(
                             )
                         lastSeenIds = diff.newLastSeen
                         for (n in diff.notifications) {
-                            runCatching { notifier.notify(n.title, n.body) }
+                            runCatching { notifier.notify(n.title, n.body, n.whom) }
                         }
                     }
             }
@@ -1436,6 +1436,7 @@ fun App(
           androidx.compose.runtime.CompositionLocalProvider(
               io.nisfeb.talon.ui.LocalImageDownloader provides imageDownloader,
               io.nisfeb.talon.ui.LocalInlineMediaPlayer provides io.nisfeb.talon.ui.platformInlineMediaPlayer(),
+              io.nisfeb.talon.notify.LocalNotificationClearer provides remember(notifier) { { key: String -> notifier.clear(key) } },
               io.nisfeb.talon.mail.LocalMailTo provides mailTarget,
               io.nisfeb.talon.mail.LocalGrubberyInstall provides grubberyInstall,
               io.nisfeb.talon.ui.LocalChatDensity provides chatDensity,
