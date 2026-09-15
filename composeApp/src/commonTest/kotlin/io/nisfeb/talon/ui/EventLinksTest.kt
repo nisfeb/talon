@@ -15,6 +15,11 @@ class EventLinksTest {
         assertEquals(listOf("https://example.com/a?b=1", "www.osm.org/x"), urlsIn("See https://example.com/a?b=1. Or www.osm.org/x, later"))
         assertEquals("https://www.osm.org/x", openableUrl("www.osm.org/x"))
         assertEquals(emptyList(), urlsIn("mail me at a@b.example.com"))
+        assertEquals(listOf("urb://~zod/chat/x"), urlsIn("see urb://~zod/chat/x"), "an urb address is a link too")
+    }
+
+    @Test fun `image links are the ones naming a picture`() {
+        assertEquals(listOf("https://a.example/p.jpg?x=1", "https://b.example/q.PNG"), imageUrlsIn("https://a.example/p.jpg?x=1 https://b.example/q.PNG https://c.example/page urb://~zod/x.png"))
     }
 
     @Test fun `a map search encodes the address`() {

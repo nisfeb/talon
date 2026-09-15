@@ -17,6 +17,11 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.material.icons.filled.BrokenImage
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
@@ -606,8 +611,29 @@ private fun MailMessageCard(
             )
         }
         Column(Modifier.padding(start = 24.dp, top = 6.dp)) {
+            // Links open through the app's handler, so an urb:// address
+            // lands in lattice as it does from a chat; the rest go out.
             SelectionContainer {
-                Text(m.body, style = MaterialTheme.typography.bodyMedium)
+                Text(io.nisfeb.talon.ui.linkifyStatus(m.body), style = MaterialTheme.typography.bodyMedium)
+            }
+            val images = remember(m.body) { io.nisfeb.talon.ui.imageUrlsIn(m.body) }
+            if (images.isNotEmpty()) {
+                val uriHandler = androidx.compose.ui.platform.LocalUriHandler.current
+                Column(Modifier.padding(top = 6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    images.take(6).forEach { url ->
+                        coil3.compose.AsyncImage(
+                            model = url,
+                            contentDescription = url,
+                            contentScale = androidx.compose.ui.layout.ContentScale.Fit,
+                            error = androidx.compose.ui.graphics.vector.rememberVectorPainter(Icons.Filled.BrokenImage),
+                            modifier = Modifier
+                                .widthIn(max = 480.dp).heightIn(max = 360.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(MaterialTheme.colorScheme.surfaceVariant)
+                                .clickable { runCatching { uriHandler.openUri(url) } },
+                        )
+                    }
+                }
             }
             // The author's rendering instruction is signed, which proves
             // they chose it and not that it is safe. Plain text is what

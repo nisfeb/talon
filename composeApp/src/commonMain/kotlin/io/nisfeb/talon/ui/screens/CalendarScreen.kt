@@ -597,6 +597,7 @@ fun CalendarScreen(
             recurringOccurrence = id != null && draft.repeats && editingIdx != null,
             calendars = calendars.filter { it.id !in readOnly },
             zones = zones,
+            allTags = allTags,
             twentyFourHour = twentyFourHour,
             onDismiss = { editing = null },
             onSave = { d, editScope ->
@@ -714,6 +715,8 @@ private fun EventEditor(
     recurringOccurrence: Boolean,
     calendars: List<CalendarInfo>,
     zones: List<String>,
+    /** Every tag in use, offered as the field is typed in. */
+    allTags: List<String>,
     twentyFourHour: Boolean,
     onDismiss: () -> Unit,
     onSave: (EventDraft, EditScope) -> Unit,
@@ -859,6 +862,21 @@ private fun EventEditor(
                     onValueChange = { tagText = it; d = d.copy(tags = io.nisfeb.talon.calendar.parseTags(it)) },
                     label = { Text("Tags, comma separated") }, singleLine = true, modifier = Modifier.fillMaxWidth(),
                 )
+                // The tags in use, narrowed by the word being typed; a tap
+                // finishes it. With nothing typed, every tag not yet chosen.
+                val typing = tagText.substringAfterLast(',').trim().trimStart('#')
+                val offered = allTags.filter { it !in d.tags && (typing.isEmpty() || it.contains(typing, ignoreCase = true)) }.take(12)
+                if (offered.isNotEmpty()) {
+                    androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
+                        offered.forEach { t ->
+                            FilterChip(selected = false, onClick = {
+                                val kept = d.tags.filter { it != typing }
+                                tagText = (kept + t).joinToString(", ") + ", "
+                                d = d.copy(tags = kept + t)
+                            }, label = { Text("#$t") })
+                        }
+                    }
+                }
                 if (recurringOccurrence) {
                     Text("This change applies to", style = MaterialTheme.typography.labelMedium)
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {

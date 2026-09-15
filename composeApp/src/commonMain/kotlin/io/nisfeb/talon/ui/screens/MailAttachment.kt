@@ -10,6 +10,11 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -49,8 +54,26 @@ fun MailAttachmentRow(
     val scope = rememberCoroutineScope()
     val downloader = LocalImageDownloader.current
     var state by remember(attachment.hash) { mutableStateOf<AttachState>(AttachState.Idle) }
-
-    Row(modifier, verticalAlignment = Alignment.CenterVertically) {
+    val isImage = attachment.mime.startsWith("image/", ignoreCase = true)
+    // A small picture is worth fetching unasked; it is what the
+    // message is about, and the row still says where it stands.
+    LaunchedEffect(attachment.hash) {
+        if (isImage && attachment.size in 1..IMAGE_AUTO_MAX && state is AttachState.Idle) {
+            state = AttachState.Working("Looking for it")
+            state = pull(repo, attachment, from) { state = AttachState.Working(it) }
+        }
+    }
+    Column(modifier) {
+    (state as? AttachState.Held)?.takeIf { isImage }?.let { held ->
+        coil3.compose.AsyncImage(
+            model = held.bytes,
+            contentDescription = attachment.name,
+            contentScale = androidx.compose.ui.layout.ContentScale.Fit,
+            modifier = Modifier.padding(bottom = 4.dp).widthIn(max = 480.dp).heightIn(max = 360.dp)
+                .clip(androidx.compose.foundation.shape.RoundedCornerShape(10.dp)),
+        )
+    }
+    Row(Modifier, verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
             Text(
                 attachment.name.ifBlank { attachment.hash },
@@ -99,7 +122,11 @@ fun MailAttachmentRow(
             ) { Text(if (state is AttachState.Failed) "Try again" else "Get") }
         }
     }
+    }
 }
+
+/** Bytes a picture may cost without being asked for. */
+private const val IMAGE_AUTO_MAX = 1_500_000L
 
 /**
  * Ask for the bytes; if this ship has none, ask the network and wait
