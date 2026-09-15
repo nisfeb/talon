@@ -222,6 +222,18 @@ expect val isEdgeSwipeBackSupported: Boolean
 expect val isDrawerNavigation: Boolean
 
 /**
+ * Whether the primary input is a finger rather than a pointer, so dense
+ * lists get touch-sized rows.
+ *
+ * Android and iOS: true. Rows are read at arm's length and hit with a
+ * thumb, so they need body-size text and 48dp targets.
+ *
+ * Desktop: false. A mouse and a close screen make the dense mail pane
+ * the useful one; more rows on screen is the point there.
+ */
+expect val isTouchPrimary: Boolean
+
+/**
  * Whether emoji need an explicit font span to render in colour.
  *
  * True only on desktop, where [EmojiFontFamily] resolves to a bundled

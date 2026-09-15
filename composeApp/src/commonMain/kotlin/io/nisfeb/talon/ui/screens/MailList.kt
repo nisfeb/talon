@@ -399,6 +399,14 @@ internal fun MailAbsent(text: String, actionLabel: String? = null, onAction: (()
 @Composable
 private fun MailRow(row: InboxEntry, nameFor: (String) -> String, onClick: () -> Unit) {
     val weight = if (row.unread) FontWeight.SemiBold else FontWeight.Normal
+    // Scanned by the dozen with a mouse, read by thumb on a phone: the
+    // phone gets the chat list's sizes and its density setting's spacing.
+    val touch = io.nisfeb.talon.ui.isTouchPrimary
+    val type = MaterialTheme.typography
+    val nameStyle = if (touch) type.titleMedium else type.bodySmall
+    val subjectStyle = if (touch) type.bodyMedium else type.bodySmall
+    val detailStyle = if (touch) type.bodyMedium else type.labelSmall
+    val timeStyle = if (touch) type.labelMedium else type.labelSmall
     // Not a ListItem. Mail rows are scanned by the dozen, and the
     // three-slot list item is built for one line of each with generous
     // vertical padding — which put the timestamp floating in the middle
@@ -407,13 +415,16 @@ private fun MailRow(row: InboxEntry, nameFor: (String) -> String, onClick: () ->
         Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick)
-            .padding(horizontal = 12.dp, vertical = 5.dp),
-        verticalArrangement = Arrangement.spacedBy(0.dp),
+            .padding(
+                horizontal = if (touch) 16.dp else 12.dp,
+                vertical = if (touch) io.nisfeb.talon.ui.LocalChatDensity.current.listRowVertical else 5.dp,
+            ),
+        verticalArrangement = Arrangement.spacedBy(if (touch) 2.dp else 0.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
                 nameFor(row.from),
-                style = MaterialTheme.typography.bodySmall.copy(fontWeight = weight),
+                style = nameStyle.copy(fontWeight = weight),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f, fill = true),
@@ -430,14 +441,14 @@ private fun MailRow(row: InboxEntry, nameFor: (String) -> String, onClick: () ->
             if (row.last > 0) {
                 Text(
                     shortRelativeTime(row.last, nowMs()),
-                    style = MaterialTheme.typography.labelSmall,
+                    style = timeStyle,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
         }
         Text(
             row.subject.ifBlank { "(no subject)" },
-            style = MaterialTheme.typography.bodySmall.copy(fontWeight = weight),
+            style = subjectStyle.copy(fontWeight = weight),
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
@@ -446,7 +457,7 @@ private fun MailRow(row: InboxEntry, nameFor: (String) -> String, onClick: () ->
         if (row.snippet.isNotBlank() && row.unread) {
             Text(
                 row.snippet,
-                style = MaterialTheme.typography.labelSmall,
+                style = detailStyle,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -458,7 +469,7 @@ private fun MailRow(row: InboxEntry, nameFor: (String) -> String, onClick: () ->
         if (row.unreadable > 0) {
             Text(
                 unreadableLine(row),
-                style = MaterialTheme.typography.labelSmall,
+                style = if (touch) type.bodySmall else type.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,

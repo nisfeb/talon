@@ -56,3 +56,4 @@ actual val isUrbWebViewSupported: Boolean = true
 
 /** As Android: a drawer, and the edge swipe to come back. */
 actual val isDrawerNavigation: Boolean = true
+actual val isTouchPrimary: Boolean = true

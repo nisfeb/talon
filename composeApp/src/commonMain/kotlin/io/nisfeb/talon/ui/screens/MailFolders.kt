@@ -124,21 +124,23 @@ private fun FolderRow(
         if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.14f) else Color.Transparent
     val ink =
         if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+    // A thumb needs a 48dp row and text read at arm's length; a mouse does not.
+    val touch = io.nisfeb.talon.ui.isTouchPrimary
     Row(
         Modifier
             .fillMaxWidth()
             .padding(horizontal = 6.dp, vertical = 1.dp)
-            .clip(RoundedCornerShape(6.dp))
+            .clip(RoundedCornerShape(if (touch) 10.dp else 6.dp))
             .background(ground)
             .clickable(onClick = onClick)
-            .padding(horizontal = 8.dp, vertical = 7.dp),
+            .padding(horizontal = if (touch) 12.dp else 8.dp, vertical = if (touch) 12.dp else 7.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(icon, contentDescription = null, tint = ink, modifier = Modifier.size(17.dp))
-        Spacer(Modifier.width(8.dp))
+        Icon(icon, contentDescription = null, tint = ink, modifier = Modifier.size(if (touch) 22.dp else 17.dp))
+        Spacer(Modifier.width(if (touch) 14.dp else 8.dp))
         Text(
             label,
-            style = MaterialTheme.typography.bodySmall.copy(
+            style = (if (touch) MaterialTheme.typography.bodyLarge else MaterialTheme.typography.bodySmall).copy(
                 fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
             ),
             color = ink,
