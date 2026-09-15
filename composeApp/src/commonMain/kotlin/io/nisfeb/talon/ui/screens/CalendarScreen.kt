@@ -27,6 +27,11 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Checklist
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Link
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material.icons.filled.Phone
+import androidx.compose.material.icons.filled.Place
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.KeyboardArrowLeft
@@ -76,6 +81,11 @@ import io.nisfeb.talon.calendar.CalendarRow
 import io.nisfeb.talon.calendar.CalendarTask
 import io.nisfeb.talon.calendar.Shares
 import io.nisfeb.talon.urbit.isValidPatp
+import io.nisfeb.talon.ui.mapsSearchUri
+import io.nisfeb.talon.ui.openableUrl
+import io.nisfeb.talon.ui.urlsIn
+import io.nisfeb.talon.ui.phoneNumbersIn
+import io.nisfeb.talon.ui.telUri
 import io.nisfeb.talon.calendar.dueDate
 import io.nisfeb.talon.calendar.taskOrder
 import io.nisfeb.talon.calendar.EventCat
@@ -173,6 +183,8 @@ fun CalendarScreen(
     // A new event shows on its day the moment it is saved, greyed,
     // until the calendar's own copy arrives; its id says so.
     var pendingRows by remember { mutableStateOf(listOf<CalendarRow>()) }
+    // An edited event wears its new words, greyed, until the refresh.
+    var pendingEdits by remember { mutableStateOf(mapOf<String, EventDraft>()) }
     fun placeholderFor(d: EventDraft): CalendarRow? {
         val id = "pending-${nowMs()}"
         fun utcDay(day: LocalDate, days: Int = 1) = day.atTime(0, 0).toInstant(TimeZone.UTC).toEpochMilliseconds().let { it to it + days * 86_400_000L }
@@ -188,9 +200,17 @@ fun CalendarScreen(
             meta = buildJsonObject { put("name", d.name.trim()); if (d.location.isNotBlank()) put("location", d.location.trim()) },
         )
     }
-    val visible = remember(rows, hidden, tagFilter, pendingTicks, pendingRows) {
+    val visible = remember(rows, hidden, tagFilter, pendingTicks, pendingRows, pendingEdits) {
         (rows.orEmpty().filter { it.cal !in hidden && (tagFilter == null || tagFilter in it.tags) } + pendingRows)
             .map { r -> pendingTicks[r.id]?.let { r.copy(done = it) } ?: r }
+            .map { r ->
+                pendingEdits[r.id]?.let { d ->
+                    r.copy(meta = buildJsonObject {
+                        put("name", d.name.trim()); if (d.location.isNotBlank()) put("location", d.location.trim()); if (d.note.isNotBlank()) put("note", d.note.trim())
+                        r.color?.let { put("color", it) }
+                    })
+                } ?: r
+            }
     }
     val byDay = remember(visible, zoneId) {
         val m = HashMap<LocalDate, MutableList<CalendarRow>>()
@@ -262,7 +282,7 @@ fun CalendarScreen(
         ) {
             io.nisfeb.talon.ui.NavIcon(onBack = onBack)
             Text(
-                if (showTasks) "Tasks" else "${MonthNames.ENGLISH_FULL.names[month - 1]} $year",
+                if (showTasks) "Tasks" else "${MonthNames.ENGLISH_ABBREVIATED.names[month - 1]} $year",
                 style = MaterialTheme.typography.titleLarge,
                 modifier = Modifier.weight(1f),
             )
@@ -418,6 +438,7 @@ fun CalendarScreen(
             IconButton(onClick = ::openNew) { Icon(Icons.Filled.Add, contentDescription = "New event") }
         }
         status?.let {
+            if (it.endsWith("…")) LinearProgressIndicator(Modifier.fillMaxWidth().padding(horizontal = 16.dp))
             Text(
                 it, style = MaterialTheme.typography.bodySmall,
                 color = if (it.endsWith("…")) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.error,
@@ -442,7 +463,7 @@ fun CalendarScreen(
             } else {
                 LazyColumn(Modifier.fillMaxSize()) {
                     items(dayRows, key = { "${it.id}/${it.idx}" }) { r ->
-                        val ghost = r.id.startsWith("pending-")
+                        val ghost = r.id.startsWith("pending-") || r.id in pendingEdits
                         Row(
                             Modifier.fillMaxWidth().clickable(enabled = !ghost) { view(r) }.alpha(if (ghost) 0.45f else 1f).padding(horizontal = 16.dp, vertical = 8.dp),
                             verticalAlignment = Alignment.CenterVertically,
@@ -489,8 +510,47 @@ fun CalendarScreen(
                             if (r.repeats) " · repeats ${r.kind}" else ""
                     }
                     Text(whenText, style = MaterialTheme.typography.bodyMedium)
-                    if (r.location.isNotBlank()) Text(r.location, style = MaterialTheme.typography.bodyMedium)
-                    if (r.note.isNotBlank()) Text(r.note, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    val uriHandler = androidx.compose.ui.platform.LocalUriHandler.current
+                    val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
+                    fun open(uri: String) { runCatching { uriHandler.openUri(uri) }.onFailure { status = "Nothing here opens that." } }
+                    fun copy(text: String) { clipboard.setText(androidx.compose.ui.text.AnnotatedString(text)); status = "Copied." }
+                    if (r.location.isNotBlank()) {
+                        // The place: on the map, or copied.
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Icon(Icons.Filled.Place, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
+                            androidx.compose.foundation.text.selection.SelectionContainer(Modifier.weight(1f)) {
+                                Text(r.location, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.clickable { open(mapsSearchUri(r.location)) })
+                            }
+                            IconButton(onClick = { copy(r.location) }, modifier = Modifier.size(32.dp)) {
+                                Icon(Icons.Filled.ContentCopy, contentDescription = "Copy the place", modifier = Modifier.size(16.dp))
+                            }
+                        }
+                    }
+                    // Phone numbers in the place or the note: dialled, or copied.
+                    phoneNumbersIn(r.location + "\n" + r.note).forEach { phone ->
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Icon(Icons.Filled.Phone, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
+                            Text(phone, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f).clickable { open(telUri(phone)) })
+                            IconButton(onClick = { copy(phone) }, modifier = Modifier.size(32.dp)) {
+                                Icon(Icons.Filled.ContentCopy, contentDescription = "Copy the number", modifier = Modifier.size(16.dp))
+                            }
+                        }
+                    }
+                    // Links in the place or the note: opened, or copied.
+                    urlsIn(r.location + "\n" + r.note).forEach { url ->
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Icon(Icons.Filled.Link, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
+                            Text(url, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f).clickable { open(openableUrl(url)) })
+                            IconButton(onClick = { copy(url) }, modifier = Modifier.size(32.dp)) {
+                                Icon(Icons.Filled.ContentCopy, contentDescription = "Copy the link", modifier = Modifier.size(16.dp))
+                            }
+                        }
+                    }
+                    if (r.note.isNotBlank()) {
+                        androidx.compose.foundation.text.selection.SelectionContainer {
+                            Text(r.note, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
                     if (r.tags.isNotEmpty()) Text(r.tags.joinToString(" ") { "#$it" }, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         Box(Modifier.size(10.dp).clip(CircleShape).background(colourOf(r) ?: MaterialTheme.colorScheme.primary))
@@ -544,6 +604,7 @@ fun CalendarScreen(
                 val occurrence = editingStartMs?.let { Instant.fromEpochMilliseconds(it).toLocalDateTime(zone) }
                 val ghost = if (id == null) placeholderFor(d) else null
                 if (ghost != null) pendingRows = pendingRows + ghost
+                if (id != null) pendingEdits = pendingEdits + (id to d)
                 act(if (id == null) "Adding…" else "Saving…", "The ship did not take the change; \"${d.name.trim()}\" is as it was.") {
                     val ok = when {
                         id == null || editScope == EditScope.ALL || idx == null || occurrence == null ->
@@ -557,6 +618,7 @@ fun CalendarScreen(
                                 repo.poke(onlyBody(d, occurrence))
                     }
                     if (ghost != null) pendingRows = pendingRows - ghost
+                    if (id != null) pendingEdits = pendingEdits - id
                     ok
                 }
             },
@@ -1090,6 +1152,7 @@ private fun TasksView(
             }
         }
         status?.let {
+            if (it.endsWith("…")) LinearProgressIndicator(Modifier.fillMaxWidth().padding(horizontal = 16.dp))
             Text(
                 it, style = MaterialTheme.typography.bodySmall,
                 color = if (it.endsWith("…")) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.error,
