@@ -10,6 +10,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
+import io.nisfeb.talon.util.nowMs
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -115,12 +117,40 @@ class MailRepo(
         if (f == MailFolder.Drafts) {
             scope.launch { refreshDrafts() }
         } else {
-            _page.value = null
+            // The folder's last listing, if there is one, while it is read again.
+            _page.value = pageCache.value[pageKey()]
             scope.launch { refresh() }
         }
     }
 
     /** What the ship is asked for, read off the one folder value. */
+    // ---- what was last seen, shown at once while the ship is asked again ----
+
+    /** A listing's identity: its view, the label of a label view, and the search. */
+    internal data class PageKey(val view: MailView, val label: String?, val query: String)
+    private fun pageKey(): PageKey = viewAndLabel().let { (v, l) -> PageKey(v, l, _query.value) }
+
+    // ponytail: memory only, for the life of this repo. A cold start still asks
+    // the ship first; a disk copy needs a file store the shared code lacks.
+    private val pageCache = MutableStateFlow<Map<PageKey, InboxPage>>(emptyMap())
+    private val threadCache = MutableStateFlow<Map<String, MailThread>>(emptyMap())
+
+    /** The last copy of a thread this session read, to show while it is read again. */
+    fun cachedThread(id: String): MailThread? = threadCache.value[id]
+
+    private fun keepThread(t: MailThread) = threadCache.update { m ->
+        (m - t.id + (t.id to t)).let { if (it.size > THREAD_CACHE) it - it.keys.first() else it }
+    }
+
+    private fun editThread(id: String, f: (MailThread) -> MailThread) =
+        threadCache.update { m -> m[id]?.let { m + (id to f(it)) } ?: m }
+
+    /** Edit every cached listing, and the one on screen with them. */
+    private fun editPages(f: (PageKey, InboxPage) -> InboxPage) {
+        pageCache.update { m -> m.mapValues { (k, p) -> f(k, p) } }
+        _page.value?.let { shown -> _page.value = pageCache.value[pageKey()] ?: f(pageKey(), shown) }
+    }
+
     private fun viewAndLabel(): Pair<MailView, String?> = when (val f = _folder.value) {
         is MailFolder.View -> f.view to null
         is MailFolder.Label -> MailView.LABEL to f.name
@@ -138,6 +168,8 @@ class MailRepo(
         _page.value = null
         _error.value = null
         seenUnread = null
+        pageCache.value = emptyMap()
+        threadCache.value = emptyMap()
         startPolling()
     }
 
@@ -149,6 +181,8 @@ class MailRepo(
         _availability.value = MailAvailability.UNKNOWN
         _page.value = null
         _error.value = null
+        pageCache.value = emptyMap()
+        threadCache.value = emptyMap()
     }
 
     /**
@@ -198,14 +232,16 @@ class MailRepo(
     private suspend fun read(a: AuspexApi, limit: Int): InboxPage? {
         _loading.value = true
         try {
-            val (view, label) = viewAndLabel()
+            val key = pageKey()
             val p = a.inbox(
-                view = view,
-                label = label,
-                query = _query.value.takeIf { it.isNotEmpty() },
+                view = key.view,
+                label = key.label,
+                query = key.query.takeIf { it.isNotEmpty() },
                 limit = limit.coerceAtMost(MAX_PAGE),
             )
-            _page.value = p
+            pageCache.update { it + (key to p) }
+            // Somebody who changed folder while this was on its way sees the new one.
+            if (pageKey() == key) _page.value = p
             _error.value = null
             return p
         } catch (e: AuspexError) {
@@ -319,7 +355,7 @@ class MailRepo(
     /** Read one thread. Null when it is gone, which the reader shows
      *  differently from a thread that failed to load. */
     suspend fun loadThread(id: String): MailThread? {
-        return call { it.thread(id).also { _error.value = null } }
+        return call { it.thread(id).also { t -> _error.value = null; if (t != null) keepThread(t) } }
     }
 
     /**
@@ -330,16 +366,29 @@ class MailRepo(
      * that can say the mark landed. Read marks are invisible to every
      * other client, so nothing else will ever tell us.
      */
-    suspend fun markRead(msgIds: List<String>) = write { it.markRead(msgIds) }
+    fun markRead(msgIds: List<String>, threadId: String? = null) =
+        act({ readState(msgIds, threadId, read = true) }) { it.markRead(msgIds) }
 
     /** Put a thread back to unread, so it stands out again on return.
      *  Also local, so this refreshes its own view like the rest. */
-    suspend fun markUnread(msgIds: List<String>) = write { it.markUnread(msgIds) }
+    fun markUnread(msgIds: List<String>, threadId: String? = null) =
+        act({ readState(msgIds, threadId, read = false) }) { it.markUnread(msgIds) }
 
-    suspend fun setArchived(threadId: String, archived: Boolean) =
-        write { it.setArchived(threadId, archived) }
+    private fun readState(msgIds: List<String>, threadId: String?, read: Boolean) {
+        val tid = threadId ?: threadCache.value.values.firstOrNull { t -> t.messages.any { it.id in msgIds } }?.id ?: return
+        editPages { _, p -> p.editRow(tid) { it.copy(unread = !read) } }
+        editThread(tid) { t -> t.copy(messages = t.messages.map { m -> if (m.id in msgIds) m.copy(read = read) else m }) }
+    }
 
-    suspend fun deleteThread(threadId: String) = write { it.deleteThread(threadId) }
+    fun setArchived(threadId: String, archived: Boolean) = act({
+        editPages { key, p -> p.archived(key.view, threadId, archived) }
+        editThread(threadId) { it.copy(archived = archived) }
+    }) { it.setArchived(threadId, archived) }
+
+    fun deleteThread(threadId: String) = act({
+        editPages { _, p -> p.without(threadId) }
+        threadCache.update { it - threadId }
+    }) { it.deleteThread(threadId) }
 
     /** Ask the network for an attachment we do not hold. */
     suspend fun fetchBlob(hash: String, from: String) {
@@ -363,7 +412,27 @@ class MailRepo(
         prev: String?,
         attachments: List<AttachRef>,
     ): Boolean {
-        call { it.send(to, subject, body, prev, attachments) } ?: return false
+        // A reply shows in its thread at once, as this ship's own message,
+        // until the thread is read again; a refused send takes it back out.
+        val threadsBefore = threadCache.value
+        if (prev != null) {
+            threadCache.value.values.firstOrNull { t -> t.messages.any { it.id == prev } }?.let { t ->
+                val now = nowMs()
+                editThread(t.id) {
+                    it.copy(
+                        messages = it.messages + MailMessage(
+                            id = "local-$now", from = ourShip.orEmpty(), to = to, subject = subject, body = body,
+                            sent = now, prev = prev, verdict = Verdict.VERIFIED, read = true,
+                            attachments = attachments.map { a -> Attachment(name = a.name, mime = a.mime, hash = a.hash) },
+                        ),
+                    )
+                }
+            }
+        }
+        if (call { it.send(to, subject, body, prev, attachments) } == null) {
+            threadCache.value = threadsBefore
+            return false
+        }
         refresh()
         return true
     }
@@ -391,24 +460,39 @@ class MailRepo(
         refresh()
     }
 
-    private suspend fun write(block: suspend (AuspexApi) -> Unit) {
-        val a = api ?: return
-        try {
-            block(a)
-        } catch (e: AuspexError) {
-            // A 404 on a write is the thing being written to having
-            // gone -- a thread another client deleted -- not the nexus
-            // being absent. onFailure reads every 404 as the latter and
-            // replaced the whole inbox with an install prompt. Refresh
-            // instead, which drops the vanished row.
-            if (e is AuspexError.Refused && e.status == AuspexApi.NOT_FOUND) {
-                refresh()
-                return
+    /**
+     * An action shows at once: [local] edits what is on screen, the write
+     * goes to the ship in the background, and a refused write puts the
+     * screen back as it was. Returns straight away, so a view that leaves
+     * after the action does not cancel the write by leaving.
+     */
+    private fun act(local: () -> Unit, write: suspend (AuspexApi) -> Unit) {
+        val pagesBefore = pageCache.value
+        val threadsBefore = threadCache.value
+        val shownBefore = _page.value
+        local()
+        scope.launch {
+            val a = api ?: return@launch
+            try {
+                write(a)
+            } catch (e: AuspexError) {
+                // A 404 on a write is the thing being written to having
+                // gone -- a thread another client deleted -- not the nexus
+                // being absent. onFailure reads every 404 as the latter and
+                // replaced the whole inbox with an install prompt. Refresh
+                // instead, which drops the vanished row.
+                if (e is AuspexError.Refused && e.status == AuspexApi.NOT_FOUND) {
+                    refresh()
+                    return@launch
+                }
+                pageCache.value = pagesBefore
+                threadCache.value = threadsBefore
+                _page.value = shownBefore
+                onFailure(e)
+                return@launch
             }
-            onFailure(e)
-            return
+            refresh()
         }
-        refresh()
     }
 
     // ---- labels, filters, lists ----------------------------------------
@@ -431,7 +515,7 @@ class MailRepo(
         if (_query.value == trimmed) return
         _query.value = trimmed
         if (trimmed.isNotEmpty()) _folder.value = MailFolder.View(MailView.ALL)
-        _page.value = null
+        _page.value = pageCache.value[pageKey()]
         scope.launch { refresh() }
     }
 
@@ -447,8 +531,13 @@ class MailRepo(
         .map { page -> page?.threads.orEmpty().flatMap { it.labels }.distinct().sorted() }
         .stateIn(scope, SharingStarted.Eagerly, emptyList())
 
-    suspend fun setLabel(threadId: String, label: String, add: Boolean) =
-        write { it.setLabel(threadId, label, add) }
+    fun setLabel(threadId: String, label: String, add: Boolean) = act({
+        editPages { key, p ->
+            if (!add && key.view == MailView.LABEL && key.label == label) p.without(threadId)
+            else p.editRow(threadId) { r -> r.copy(labels = if (add) (r.labels + label).distinct() else r.labels - label) }
+        }
+        editThread(threadId) { t -> t.copy(labels = if (add) (t.labels + label).distinct() else t.labels - label) }
+    }) { it.setLabel(threadId, label, add) }
 
     suspend fun refreshRules() {
         call { _rules.value = it.rules() }
@@ -506,6 +595,9 @@ class MailRepo(
     companion object {
         private const val TAG = "MailRepo"
 
+        /** Threads kept for a quick return; the oldest read goes first. */
+        private const val THREAD_CACHE = 40
+
         /** Mail is considered correspondence, not chat. The refresh
          *  control covers the case where the reader knows better. */
         const val DEFAULT_POLL_MS = 10 * 60 * 1000L
@@ -548,3 +640,22 @@ val LocalMailTo = androidx.compose.runtime.staticCompositionLocalOf<((String) ->
  */
 val LocalGrubberyInstall =
     androidx.compose.runtime.staticCompositionLocalOf<(suspend () -> Result<Unit>)?> { null }
+
+/** A listing without one thread, and one fewer in its total. */
+internal fun InboxPage.without(id: String): InboxPage =
+    if (threads.none { it.id == id }) this else copy(threads = threads.filter { it.id != id }, total = (total - 1).coerceAtLeast(0))
+
+/** A listing with one row changed. */
+internal fun InboxPage.editRow(id: String, f: (InboxEntry) -> InboxEntry): InboxPage =
+    copy(threads = threads.map { if (it.id == id) f(it) else it })
+
+/**
+ * What archiving or unarchiving a thread does to a listing of [view]: it
+ * leaves the inbox or the archive it no longer belongs in, and anywhere
+ * else it only says so.
+ */
+internal fun InboxPage.archived(view: MailView, threadId: String, archived: Boolean): InboxPage = when {
+    view == MailView.INBOX && archived -> without(threadId)
+    view == MailView.ARCHIVED && !archived -> without(threadId)
+    else -> editRow(threadId) { it.copy(archived = archived) }
+}

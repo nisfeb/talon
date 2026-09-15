@@ -91,9 +91,11 @@ fun MailThreadPane(
     modifier: Modifier = Modifier,
 ) {
     val scope = rememberCoroutineScope()
-    var thread by remember(threadId) { mutableStateOf<MailThread?>(null) }
+    // The last copy read this session shows at once; the ship's answer replaces it.
+    var thread by remember(threadId) { mutableStateOf(repo.cachedThread(threadId)) }
     val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
-    var loading by remember(threadId) { mutableStateOf(true) }
+    var loading by remember(threadId) { mutableStateOf(repo.cachedThread(threadId) == null) }
+    var refreshing by remember(threadId) { mutableStateOf(false) }
     var drawn by remember(threadId) { mutableStateOf(false) }
     // Folded subtrees, and messages read down to their header line.
     var filed by remember(threadId) { mutableStateOf<String?>(null) }
@@ -103,14 +105,20 @@ fun MailThreadPane(
 
     io.nisfeb.talon.notify.ClearNotificationsWhileShown("mail:$threadId")
     LaunchedEffect(threadId) {
-        loading = true
+        loading = thread == null
+        refreshing = thread != null
         val t = repo.loadThread(threadId)
-        thread = t
+        // Out of reach with a copy on screen: keep the copy rather than call the thread gone.
+        thread = if (t == null && repo.error.value != null && thread != null) thread else t
         loading = false
+        refreshing = false
         // Reading it is what marks it read, and the mark is invisible to
         // every other client, so nothing else would ever do it.
         val unread = t?.messages.orEmpty().filter { !it.read }.map { it.id }
-        if (unread.isNotEmpty()) scope.launch { repo.markRead(unread) }
+        if (unread.isNotEmpty()) {
+            repo.markRead(unread, threadId)
+            thread = repo.cachedThread(threadId) ?: thread
+        }
     }
 
     val knownLabels by repo.knownLabels.collectAsState()
@@ -165,38 +173,30 @@ fun MailThreadPane(
             labels = thread?.labels.orEmpty(),
             known = knownLabels,
             onLabel = { l, add ->
-                scope.launch {
-                    repo.setLabel(threadId, l, add)
-                    // Null is "could not load", which the when below
-                    // must never reach as thread!!.
-                    thread = repo.loadThread(threadId)
-                }
+                // Shown at once; the ship's copy follows the next time the thread is read.
+                thread = thread?.let { t -> t.copy(labels = if (add) (t.labels + l).distinct() else t.labels - l) }
+                repo.setLabel(threadId, l, add)
             },
             showTree = hasBranches,
             drawn = drawn,
             onMode = { drawn = it },
             onBack = onBack,
             archived = thread?.archived == true,
+            // Each shows at once and writes in the background, so the view can leave straight away.
             onArchive = {
-                scope.launch {
-                    repo.setArchived(threadId, thread?.archived != true)
-                    onGone()
-                }
+                repo.setArchived(threadId, thread?.archived != true)
+                onGone()
             },
             onMarkUnread = {
-                scope.launch {
-                    // The newest message is the one whose state the row
-                    // reads, so unread means that one.
-                    val newest = thread?.messages.orEmpty().maxByOrNull { it.sent }
-                    if (newest != null) repo.markUnread(listOf(newest.id))
-                    onGone()
-                }
+                // The newest message is the one whose state the row
+                // reads, so unread means that one.
+                val newest = thread?.messages.orEmpty().maxByOrNull { it.sent }
+                if (newest != null) repo.markUnread(listOf(newest.id), threadId)
+                onGone()
             },
             onDelete = {
-                scope.launch {
-                    repo.deleteThread(threadId)
-                    onGone()
-                }
+                repo.deleteThread(threadId)
+                onGone()
             },
             onFile = {
                 val t = thread ?: return@MailThreadHeader
@@ -219,6 +219,8 @@ fun MailThreadPane(
             )
         }
 
+        // A copy is on screen and a fresher one is on its way.
+        if (refreshing) androidx.compose.material3.LinearProgressIndicator(Modifier.fillMaxWidth())
         val t = thread
         when {
             loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
