@@ -19,6 +19,10 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
+import io.nisfeb.talon.util.ioDispatcher
+import io.nisfeb.talon.data.MailRowEntity
+import okio.Path.Companion.toPath
 
 /**
  * Whether this ship can do mail at all.
@@ -49,10 +53,11 @@ enum class MailAvailability {
 /**
  * The mailbox, read from the ship on a timer.
  *
- * There is no local mirror and no stream. Auspex owns every fact here,
- * and a client that invented its own copy would be a second source of
- * truth for something already stored in exactly one place. So this
- * holds the last answer and knows when to ask again.
+ * There is no mirror and no stream. Auspex owns every fact here, and a
+ * client that invented its own copy would be a second source of truth
+ * for something already stored in exactly one place. So this holds the
+ * last answer, in memory and on disk where the host gives it a place,
+ * shows it while it asks again, and knows when to ask.
  *
  * Asking again has four triggers, and the timer is only one of them.
  * A write answers as soon as the ship's writer accepts the poke, not
@@ -63,7 +68,12 @@ class MailRepo(
     private val http: HttpClient,
     private val scope: CoroutineScope,
     private val pollIntervalMs: Long = DEFAULT_POLL_MS,
+    /** This ship's stored folder listings. Null keeps none. */
+    private val rows: io.nisfeb.talon.data.MailRowDao? = null,
+    /** This ship's thread directory, from [MailThreadFiles.dirFor]. Null keeps none. */
+    threadDir: String? = null,
 ) {
+    private val files = threadDir?.let { MailThreadFiles(it.toPath()) }
     private var api: AuspexApi? = null
     private var shipUrl: String? = null
 
@@ -118,8 +128,9 @@ class MailRepo(
             scope.launch { refreshDrafts() }
         } else {
             // The folder's last listing, if there is one, while it is read again.
-            _page.value = pageCache.value[pageKey()]
-            scope.launch { refresh() }
+            val key = pageKey()
+            _page.value = pageCache.value[key]
+            scope.launch { restore(key); refresh() }
         }
     }
 
@@ -127,16 +138,58 @@ class MailRepo(
     // ---- what was last seen, shown at once while the ship is asked again ----
 
     /** A listing's identity: its view, the label of a label view, and the search. */
-    internal data class PageKey(val view: MailView, val label: String?, val query: String)
+    internal data class PageKey(val view: MailView, val label: String?, val query: String) {
+        /** Its name on disk. Searches are not kept: they are asked, not browsed. */
+        val stored: String? get() = when {
+            query.isNotEmpty() -> null
+            label != null -> "label:$label"
+            else -> view.wire
+        }
+    }
     private fun pageKey(): PageKey = viewAndLabel().let { (v, l) -> PageKey(v, l, _query.value) }
 
-    // ponytail: memory only, for the life of this repo. A cold start still asks
-    // the ship first; a disk copy needs a file store the shared code lacks.
+    // This session's copies. [rows] and [files] carry them across a restart.
     private val pageCache = MutableStateFlow<Map<PageKey, InboxPage>>(emptyMap())
     private val threadCache = MutableStateFlow<Map<String, MailThread>>(emptyMap())
 
     /** The last copy of a thread this session read, to show while it is read again. */
     fun cachedThread(id: String): MailThread? = threadCache.value[id]
+
+    /** [cachedThread], or else the copy an earlier session left on disk. */
+    suspend fun storedThread(id: String): MailThread? =
+        cachedThread(id) ?: files?.let { f -> withContext(ioDispatcher) { f.read(id) } }?.also { keepThread(it) }
+
+    /** Show a folder's stored listing, unless the ship has already answered for it. */
+    private suspend fun restore(key: PageKey) {
+        if (key in pageCache.value) return
+        val name = key.stored ?: return
+        val stored = runCatching { rows?.listing(name) }.getOrNull().orEmpty()
+        if (stored.isEmpty()) return
+        val threads = stored.mapNotNull { r ->
+            runCatching { AuspexApi.json.decodeFromString(InboxEntry.serializer(), r.json) }.getOrNull()
+        }
+        val p = InboxPage(total = stored.first().total, limit = threads.size, view = key.view.wire, threads = threads)
+        pageCache.update { if (key in it) it else it + (key to p) }
+        if (pageKey() == key && _page.value == null) _page.value = p
+    }
+
+    private suspend fun store(name: String, p: InboxPage) {
+        val d = rows ?: return
+        runCatching {
+            d.replace(
+                name,
+                p.threads.mapIndexed { i, t ->
+                    MailRowEntity(name, t.id, i, p.total, AuspexApi.json.encodeToString(InboxEntry.serializer(), t))
+                },
+            )
+        }.onFailure { Log.w(TAG, "mail listing not stored", it) }
+    }
+
+    /** A thread that is gone leaves nothing of itself on disk. */
+    private suspend fun forget(threadId: String) {
+        files?.let { f -> withContext(ioDispatcher) { f.delete(threadId) } }
+        runCatching { rows?.dropThread(threadId) }
+    }
 
     private fun keepThread(t: MailThread) = threadCache.update { m ->
         (m - t.id + (t.id to t)).let { if (it.size > THREAD_CACHE) it - it.keys.first() else it }
@@ -240,6 +293,7 @@ class MailRepo(
                 limit = limit.coerceAtMost(MAX_PAGE),
             )
             pageCache.update { it + (key to p) }
+            key.stored?.let { store(it, p) }
             // Somebody who changed folder while this was on its way sees the new one.
             if (pageKey() == key) _page.value = p
             _error.value = null
@@ -355,7 +409,16 @@ class MailRepo(
     /** Read one thread. Null when it is gone, which the reader shows
      *  differently from a thread that failed to load. */
     suspend fun loadThread(id: String): MailThread? {
-        return call { it.thread(id).also { t -> _error.value = null; if (t != null) keepThread(t) } }
+        val t = call { it.thread(id).also { _error.value = null } }
+        when {
+            t != null -> {
+                keepThread(t)
+                files?.let { f -> withContext(ioDispatcher) { f.write(t) } }
+            }
+            // Gone, rather than out of reach: nothing of it stays on disk.
+            _error.value == null -> forget(id)
+        }
+        return t
     }
 
     /**
@@ -388,7 +451,7 @@ class MailRepo(
     fun deleteThread(threadId: String) = act({
         editPages { _, p -> p.without(threadId) }
         threadCache.update { it - threadId }
-    }) { it.deleteThread(threadId) }
+    }) { it.deleteThread(threadId); forget(threadId) }
 
     /** Ask the network for an attachment we do not hold. */
     suspend fun fetchBlob(hash: String, from: String) {
@@ -515,8 +578,9 @@ class MailRepo(
         if (_query.value == trimmed) return
         _query.value = trimmed
         if (trimmed.isNotEmpty()) _folder.value = MailFolder.View(MailView.ALL)
-        _page.value = pageCache.value[pageKey()]
-        scope.launch { refresh() }
+        val key = pageKey()
+        _page.value = pageCache.value[key]
+        scope.launch { restore(key); refresh() }
     }
 
     private val _rules = MutableStateFlow<List<Rule>>(emptyList())
@@ -584,6 +648,7 @@ class MailRepo(
     private fun startPolling() {
         poller?.cancel()
         poller = scope.launch {
+            restore(pageKey())
             refresh()
             while (isActive) {
                 delay(jittered(pollIntervalMs))

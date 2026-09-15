@@ -24,3 +24,5 @@ actual val isMacOsHost: Boolean = run {
 
 actual val tempDirPath: String =
     System.getProperty("java.io.tmpdir")?.trimEnd('/') ?: "/tmp"
+
+actual val cacheDirPath: String get() = java.io.File(AppDirs.userData, "cache").absolutePath

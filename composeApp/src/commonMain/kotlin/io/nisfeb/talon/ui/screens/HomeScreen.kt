@@ -761,7 +761,7 @@ private fun WidgetBody(
             onOpenConversation, onOpenChats, onLongPress,
         )
         HomeWidgetKind.MAIL -> MailPanel(
-            mail, contacts, widget.count, onOpenMailThread, onOpenMail, onLongPress,
+            mail, contacts, ourShip, widget.count, onOpenMailThread, onOpenMail, onLongPress,
         )
         HomeWidgetKind.CALENDAR -> CalendarPanel(
             calendar, widget.calendarRange, twentyFourHour, onOpenCalendar, onInstallCalendar, onLongPress,
@@ -948,6 +948,7 @@ private fun preview(
 private fun MailPanel(
     mail: MailRepo?,
     contacts: ContactMap,
+    ourShip: String,
     count: Int,
     onOpen: (String) -> Unit,
     onAll: () -> Unit,
@@ -972,7 +973,7 @@ private fun MailPanel(
 
             else -> page.threads.take(count).forEach { row ->
                 QuickRow(
-                    title = contacts.displayName(row.from),
+                    title = mailPeople(row, ourShip) { contacts.displayName(it) },
                     line = row.subject.ifBlank { "(no subject)" },
                     at = row.last,
                     strong = row.unread,

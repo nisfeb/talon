@@ -105,6 +105,8 @@ fun MailThreadPane(
 
     io.nisfeb.talon.notify.ClearNotificationsWhileShown("mail:$threadId")
     LaunchedEffect(threadId) {
+        // Not read this session: the copy an earlier one left on disk, if any.
+        if (thread == null) thread = repo.storedThread(threadId)
         loading = thread == null
         refreshing = thread != null
         val t = repo.loadThread(threadId)

@@ -25,6 +25,7 @@ class DesktopShipDataEraser : ShipDataEraser {
         if (db.exists()) error("could not delete ${db.name}; is it still open?")
         // Asked of the store that writes it, not guessed at.
         io.nisfeb.talon.ui.DesktopMenuSeenStore.defaultFile(ship).delete()
+        io.nisfeb.talon.mail.MailThreadFiles.erase(ship)
         Log.i(TAG, "erased $ship ($gone files)")
     }
 }

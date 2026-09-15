@@ -27,6 +27,7 @@ class IosShipDataEraser : ShipDataEraser {
         for (path in listOf(base, "$base-wal", "$base-shm")) {
             if (fm.fileExistsAtPath(path) && fm.removeItemAtPath(path, null)) gone++
         }
+        io.nisfeb.talon.mail.MailThreadFiles.erase(ship)
         Log.i(TAG, "erased $ship ($gone files)")
     }
 }

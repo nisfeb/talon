@@ -31,6 +31,8 @@ class AndroidShipDataEraser(context: Context) : ShipDataEraser {
         // nickname would otherwise greet the ship on its way back in.
         io.nisfeb.talon.notify.AndroidLastOpenChatStore(app).clear(ship)
         io.nisfeb.talon.ui.ShipProfileStore(app).setNickname(ship, null)
+        // Mail kept for a cold start; the database above held its listings.
+        io.nisfeb.talon.mail.MailThreadFiles.erase(ship)
         // The relay device id is dropped by forgetShip, which also
         // tells the relay; this only ever runs after that.
 

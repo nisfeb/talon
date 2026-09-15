@@ -380,7 +380,11 @@ fun TalonApp(
     // Mail rides the ship's own HTTP surface, not the eyre channel, so
     // the session's cookie-bearing client is all it needs.
     val mailRepo = remember(app.session) {
-        io.nisfeb.talon.mail.MailRepo(app.session.http, appScope)
+        io.nisfeb.talon.mail.MailRepo(
+            app.session.http, appScope,
+            rows = app.db.mailRows(),
+            threadDir = loggedInShip?.let { io.nisfeb.talon.mail.MailThreadFiles.dirFor(it) },
+        )
     }
     // A switch builds a new session and with it a new repo, but the old
     // one's poller lived in appScope and kept polling the old ship every

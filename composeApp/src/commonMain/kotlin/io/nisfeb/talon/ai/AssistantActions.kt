@@ -681,7 +681,7 @@ internal fun toolSchema(vararg props: Pair<String, Pair<String, String>>, requir
 private const val DAY_MS = 86_400_000L
 
 private fun mailLines(threads: List<io.nisfeb.talon.mail.InboxEntry>): String = threads.joinToString("\n") {
-    "thread=${it.id} link=${io.nisfeb.talon.urbit.TalonLink.forMail(it.id)} from=${it.from} subject=${it.subject.ifBlank { "(no subject)" }}${if (it.unread) " unread" else ""}"
+    "thread=${it.id} link=${io.nisfeb.talon.urbit.TalonLink.forMail(it.id)} from=${it.from} participants=${it.participants.joinToString(",")} subject=${it.subject.ifBlank { "(no subject)" }}${if (it.unread) " unread" else ""}"
 }
 
 /** One calendar row as the model reads it: id, when, what, repeats, where, tags, note, calendar by name. */

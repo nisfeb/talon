@@ -65,6 +65,7 @@ fun MailWorkspace(
                 else -> MailList(
                     repo = repo,
                     contacts = contacts,
+                    ourShip = ourShip,
                     onOpenThread = { onOpenThread(it) },
                     onCompose = { onCompose(MailIntent()) },
                     onOpenDraft = { d -> onCompose(draftIntent(d)) },
@@ -77,6 +78,7 @@ fun MailWorkspace(
             MailList(
                 repo = repo,
                 contacts = contacts,
+                ourShip = ourShip,
                 onOpenThread = { onOpenThread(it) },
                 onCompose = { onCompose(MailIntent()) },
                 onOpenDraft = { d -> onCompose(draftIntent(d)) },

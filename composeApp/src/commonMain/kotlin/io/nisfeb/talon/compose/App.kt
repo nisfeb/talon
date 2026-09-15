@@ -867,7 +867,11 @@ fun App(
         // Mail lives on the ship's own HTTP surface, not the eyre
         // channel, so it needs only the session's cookie-bearing client.
         val mailRepo = remember(session) {
-            io.nisfeb.talon.mail.MailRepo(session.http, loopScope)
+            io.nisfeb.talon.mail.MailRepo(
+                session.http, loopScope,
+                rows = db.mailRows(),
+                threadDir = loggedInShip?.let { io.nisfeb.talon.mail.MailThreadFiles.dirFor(it) },
+            )
         }
 
         // Word names for planets and moons, fetched once per ship and

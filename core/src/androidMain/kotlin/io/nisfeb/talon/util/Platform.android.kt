@@ -22,3 +22,5 @@ actual val isMacOsHost: Boolean = false
 
 actual val tempDirPath: String =
     System.getProperty("java.io.tmpdir")?.trimEnd('/') ?: "/data/local/tmp"
+
+actual val cacheDirPath: String get() = System.getProperty("java.io.tmpdir")?.trimEnd('/') ?: tempDirPath

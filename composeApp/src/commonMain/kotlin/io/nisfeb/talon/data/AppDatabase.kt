@@ -56,8 +56,9 @@ import androidx.room.RoomDatabaseConstructor
         NotesNotebookEntity::class,
         NotesFolderEntity::class,
         NotesNoteEntity::class,
+        MailRowEntity::class,
     ],
-    version = 41,
+    version = 42,
     exportSchema = false,
 )
 @ConstructedBy(AppDatabaseConstructor::class)
@@ -85,6 +86,7 @@ expect abstract class AppDatabase : RoomDatabase {
     abstract fun loops(): LoopDao
     abstract fun loopRuns(): LoopRunDao
     abstract fun notes(): NotesDao
+    abstract fun mailRows(): MailRowDao
 }
 
 /**

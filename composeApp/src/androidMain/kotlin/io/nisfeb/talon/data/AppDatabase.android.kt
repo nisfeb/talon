@@ -36,6 +36,7 @@ actual abstract class AppDatabase : RoomDatabase() {
     actual abstract fun loops(): LoopDao
     actual abstract fun loopRuns(): LoopRunDao
     actual abstract fun notes(): NotesDao
+    actual abstract fun mailRows(): MailRowDao
 }
 
 /**
@@ -59,7 +60,7 @@ fun createAppDatabase(context: Context, name: String): AppDatabase {
             MIGRATION_26_27, MIGRATION_27_28, MIGRATION_28_29,
             MIGRATION_29_30, MIGRATION_30_31, MIGRATION_34_35, MIGRATION_35_36,
             MIGRATION_36_37, MIGRATION_37_38, MIGRATION_38_39,
-            MIGRATION_40_41,
+            MIGRATION_40_41, MIGRATION_41_42,
         )
         // dropAllTables = true preserves the pre-2.7 behaviour: when
         // Room can't find a migration path, drop everything and rebuild.
@@ -396,6 +397,13 @@ private val MIGRATION_38_39 = object : Migration(38, 39) {
 private val MIGRATION_40_41 = object : Migration(40, 41) {
     override fun migrate(db: SupportSQLiteDatabase) {
         db.execSQL("DROP TABLE IF EXISTS daily_digests")
+    }
+}
+
+/** Mail folders kept for a cold start. The statement is shared with desktop and iOS. */
+private val MIGRATION_41_42 = object : Migration(41, 42) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(MAIL_ROWS_SQL)
     }
 }
 

@@ -66,6 +66,8 @@ import kotlinx.coroutines.launch
 fun MailList(
     repo: MailRepo,
     contacts: ContactMap,
+    /** Shown as "me" among a thread's people. */
+    ourShip: String? = null,
     onOpenThread: (threadId: String) -> Unit,
     onCompose: (() -> Unit)? = null,
     onOpenDraft: ((io.nisfeb.talon.mail.Draft) -> Unit)? = null,
@@ -154,6 +156,7 @@ fun MailList(
                     drafts = drafts,
                     loading = loading,
                     contacts = contacts,
+                    ourShip = ourShip,
                     onOpenThread = onOpenThread,
                     onOpenDraft = onOpenDraft,
                 )
@@ -185,6 +188,7 @@ private fun MailBody(
     drafts: List<io.nisfeb.talon.mail.Draft>,
     loading: Boolean,
     contacts: ContactMap,
+    ourShip: String?,
     onOpenThread: (String) -> Unit,
     onOpenDraft: ((io.nisfeb.talon.mail.Draft) -> Unit)?,
 ) {
@@ -238,7 +242,7 @@ private fun MailBody(
             items(page?.threads.orEmpty(), key = { it.id }) { row ->
                 MailRow(
                     row = row,
-                    nameFor = { contacts.displayName(it) },
+                    people = mailPeople(row, ourShip) { contacts.displayName(it) },
                     onClick = { onOpenThread(row.id) },
                 )
                 HorizontalDivider(modifier = Modifier.padding(start = 12.dp))
@@ -397,7 +401,7 @@ internal fun MailAbsent(text: String, actionLabel: String? = null, onAction: (()
 }
 
 @Composable
-private fun MailRow(row: InboxEntry, nameFor: (String) -> String, onClick: () -> Unit) {
+private fun MailRow(row: InboxEntry, people: String, onClick: () -> Unit) {
     val weight = if (row.unread) FontWeight.SemiBold else FontWeight.Normal
     // Scanned by the dozen with a mouse, read by thumb on a phone: the
     // phone gets the chat list's sizes and its density setting's spacing.
@@ -423,7 +427,7 @@ private fun MailRow(row: InboxEntry, nameFor: (String) -> String, onClick: () ->
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
-                nameFor(row.from),
+                people,
                 style = nameStyle.copy(fontWeight = weight),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -476,6 +480,13 @@ private fun MailRow(row: InboxEntry, nameFor: (String) -> String, onClick: () ->
             )
         }
     }
+}
+
+/** Who is on a thread, for its row: the latest sender, everyone else, and us last as "me". */
+internal fun mailPeople(row: InboxEntry, ourShip: String?, nameFor: (String) -> String): String {
+    val ships = (listOf(row.from) + row.participants).filter { it.isNotBlank() }.distinct()
+    val me = if (ourShip != null && ourShip in ships) listOf("me") else emptyList()
+    return (ships.filter { it != ourShip }.map(nameFor) + me).joinToString(", ").ifEmpty { nameFor(row.from) }
 }
 
 internal fun unreadableLine(row: InboxEntry): String {
