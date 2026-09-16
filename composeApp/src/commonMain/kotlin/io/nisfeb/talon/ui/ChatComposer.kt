@@ -159,12 +159,36 @@ data class EditTarget(
 )
 
 /**
+ * Quotes waiting on a composer, by conversation.
+ *
+ * The composer is rebuilt for each conversation, so a quote picked in
+ * one chat was thrown away by walking to another and back, while the
+ * half-typed message beside it survived in the draft store. Held for
+ * the session, like a desktop draft, and put down with the ship:
+ * two ships can name the same conversation.
+ */
+object PendingQuotes {
+    private val byWhom = mutableMapOf<String, MessageEntity>()
+
+    fun get(whom: String): MessageEntity? = byWhom[whom]
+
+    fun set(whom: String, quote: MessageEntity?) {
+        if (quote == null) byWhom.remove(whom) else byWhom[whom] = quote
+    }
+
+    fun clear() = byWhom.clear()
+}
+
+/**
  * Re-keys on [whom] so switching conversations starts the composer
- * fresh. Loads any persisted draft text from [drafts].
+ * fresh. Loads any persisted draft text from [drafts], and the quote
+ * that was waiting on this conversation.
  */
 @Composable
 fun rememberComposerState(whom: String, drafts: DraftStore): ComposerState =
-    remember(whom) { ComposerState(drafts.load(whom)) }
+    remember(whom) {
+        ComposerState(drafts.load(whom)).also { it.pendingQuote = PendingQuotes.get(whom) }
+    }
 
 /**
  * Per-surface dispatch. DM sends top-level posts; thread sends
@@ -463,6 +487,9 @@ fun ChatComposer(
         (inviteArg as? InviteArg.Ship)?.let { suggestionsFor(it.query, contactMap, allShips) } ?: emptyList()
     }
     var inviteSel by remember(inviteArg?.query) { mutableStateOf(0) }
+    // Keep the quote with its conversation, so leaving and coming back
+    // finds it still attached, the way the draft text is.
+    LaunchedEffect(whom, state.pendingQuote?.id) { PendingQuotes.set(whom, state.pendingQuote) }
     val mention = if (inviteArg != null) null else detectMentionQuery(state.draft.text, state.draft.selection.start)
     val suggestions = remember(mention, allShips, contactMap) {
         mention?.let { (q, _) -> suggestionsFor(q, contactMap, allShips) } ?: emptyList()

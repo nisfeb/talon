@@ -431,6 +431,9 @@ fun App(
 
     /** Put down the ship on screen before the active one changes. */
     val leaveShip: () -> Unit = {
+        // Two ships can name the same conversation; a quote is the one
+        // ship's own and does not follow us to the other.
+        io.nisfeb.talon.ui.PendingQuotes.clear()
         openChat = null
         switchShipAction()
         viewerImageUrl = null

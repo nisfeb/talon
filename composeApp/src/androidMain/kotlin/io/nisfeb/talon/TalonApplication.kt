@@ -351,6 +351,8 @@ class TalonApplication : Application() {
         val priorDb = if (::db.isInitialized) db else null
         val priorIndexer = if (::embeddingIndexer.isInitialized) embeddingIndexer else null
 
+        // A quote waiting in a chat belongs to the ship that picked it.
+        io.nisfeb.talon.ui.PendingQuotes.clear()
         db = io.nisfeb.talon.data.createAppDatabase(this, io.nisfeb.talon.data.shipDbName(ship))
         session = UrbitSession(ktorHttp, sessionStore)
         // Re-hydrate the cookie jar + baseUrl from the stored session
