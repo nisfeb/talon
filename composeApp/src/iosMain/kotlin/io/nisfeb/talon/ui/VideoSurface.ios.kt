@@ -24,7 +24,15 @@ import platform.UIKit.UIView
     kotlinx.cinterop.ExperimentalForeignApi::class,
 )
 @Composable
-actual fun VideoSurface(engine: CallEngine, local: Boolean, modifier: Modifier) {
+actual fun VideoSurface(
+    engine: CallEngine,
+    local: Boolean,
+    modifier: Modifier,
+    // Not reported: the RTCMTLVideoView lives on the Swift side, which
+    // fits the picture itself (TalonRtc.swift). The pane keeps its
+    // assumed shape and the fit letterboxes the rest.
+    onFrameAspect: ((Float) -> Unit)?,
+) {
     val ios = engine as? IosCallEngine ?: return
     val video by ios.video.collectAsState()
     val on = if (local) video.localOn else video.remoteOn
@@ -50,6 +58,7 @@ actual fun VideoSurface(
     link: PeerLink,
     local: Boolean,
     modifier: Modifier,
+    onFrameAspect: ((Float) -> Unit)?,
 ) {
     val ios = link as? IosPeerLink ?: return
     val video by ios.video.collectAsState()

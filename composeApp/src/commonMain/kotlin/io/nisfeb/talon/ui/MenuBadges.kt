@@ -14,8 +14,9 @@ package io.nisfeb.talon.ui
  */
 data class MenuBadges(
     val statusesFresh: Boolean = false,
-    val digestFresh: Boolean = false,
     val invitesPending: Boolean = false,
+    /** A calendar another ship offered, waiting to be accepted. */
+    val calendarOffers: Boolean = false,
 ) {
     /**
      * Read-site helper: returns true if [item]'s rail icon should
@@ -25,8 +26,8 @@ data class MenuBadges(
      */
     fun forItem(item: RailItem): Boolean = when (item) {
         RailItem.Statuses -> statusesFresh
-        RailItem.TodaysBrief -> digestFresh
         RailItem.Invites -> invitesPending
+        RailItem.Calendar -> calendarOffers
         else -> false
     }
 }

@@ -21,7 +21,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -42,6 +41,8 @@ import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material.icons.filled.Mic
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -89,7 +90,6 @@ import io.nisfeb.talon.ui.DEFAULT_LIST_FRACTION
 import io.nisfeb.talon.ui.ExpandedThreshold
 import io.nisfeb.talon.ui.MarkdownText
 import io.nisfeb.talon.ui.MentionPicker
-import io.nisfeb.talon.ui.contactMapFlow
 import io.nisfeb.talon.ui.detectMentionQuery
 import io.nisfeb.talon.ui.isLoopsSupported
 import io.nisfeb.talon.ui.shortRelativeTime
@@ -173,17 +173,18 @@ fun AssistantScreen(
     // rail's 64dp can't push the content below the threshold and fall back to
     // the stacked/hamburger layout.
     forceExpanded: Boolean = false,
+    // What the assistant can act on beyond chat; each null where the
+    // host has none, and the agent simply gets fewer tools.
+    mail: io.nisfeb.talon.mail.MailRepo? = null,
+    calendar: io.nisfeb.talon.calendar.CalendarRepo? = null,
+    calls: io.nisfeb.talon.call.CallController? = null,
+    /** Start listening as the screen opens (the home widget's tap);
+     *  where nothing can listen, the field takes the cursor instead. */
+    listenOnOpen: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     val aiState by aiSettings.state.collectAsState()
-    val contactMap by remember {
-        contactMapFlow(
-            db.contacts().stream(),
-            db.clubs().stream(),
-            db.groups().streamGroups(),
-            db.groups().streamChannelGroups(),
-        )
-    }.collectAsState(initial = ContactMap.EMPTY)
+    val contactMap by io.nisfeb.talon.ui.rememberContactMap(db)
     val scope = rememberCoroutineScope()
 
     val agentClient = remember(aiSettings) { AgentClient { aiSettings.state.value } }
@@ -258,17 +259,27 @@ fun AssistantScreen(
     val systemPrompt = remember(aiState.urbitKnowledgePrompt, aiState.assistantPrompt) {
         AgentPrompt.forAssistant(aiState)
     }
-    val agentLoop = remember(aiSettings, embedder, repo, contactMap, mcpTools, braveKeyPresent, systemPrompt) {
+    val calendarZone by (calendar?.zone ?: remember { kotlinx.coroutines.flow.MutableStateFlow<String?>(null) }).collectAsState()
+    val agentLoop = remember(aiSettings, embedder, repo, contactMap, mcpTools, braveKeyPresent, systemPrompt, mail, calendar, calls, calendarZone) {
         // Needs a ship session for its tools; the embedder is optional
         // (search_history degrades to keyword-only, grouping to flat).
         if (repo != null) {
+            val actions = io.nisfeb.talon.ai.AssistantActions(
+                db = db, contacts = { contactMap }, mail = mail, calendar = calendar, calls = calls,
+                zone = { zoneFor(calendarZone) },
+                send = { whom, text -> repo.send(whom, text) },
+            )
             AgentLoop(
-                completer = { sys, msgs, tools -> agentClient.completeWithTools(sys, msgs, tools) },
+                // The time is appended per call rather than baked in, so a
+                // conversation that runs past midnight still says today.
+                completer = { sys, msgs, tools ->
+                    agentClient.completeWithTools(sys + "\n\n" + io.nisfeb.talon.ai.nowLine(zoneFor(calendarZone)), msgs, tools)
+                },
                 tools = ToolCatalog.default(
                     repo, db, embedder,
                     braveSearch = if (braveKeyPresent) braveSearch else null,
                     urlFetcher = urlFetcher,
-                ) { contactMap.displayName(it) } + mcpTools,
+                ) { contactMap.displayName(it) } + io.nisfeb.talon.ai.actionTools(actions) + mcpTools,
                 systemPrompt = systemPrompt,
             )
         } else null
@@ -567,9 +578,7 @@ fun AssistantScreen(
                         title = { Text("Assistant") },
                         navigationIcon = {
                             onBack?.let { back ->
-                                IconButton(onClick = back) {
-                                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-                                }
+                                io.nisfeb.talon.ui.NavIcon(onBack = back)
                             }
                         },
                         actions = {
@@ -604,12 +613,42 @@ fun AssistantScreen(
             }
 
             val ready = agentLoop != null
+            // A spoken instruction is typed in and sent, so it reads back
+            // in the transcript the way a typed one would.
+            val dictate = io.nisfeb.talon.ui.rememberDictation { spoken ->
+                questionField = TextFieldValue(spoken, TextRange(spoken.length))
+                submit()
+            }
+            // One listen per opening: the flag is consumed the first time
+            // the loop is ready, so a recomposition does not listen twice.
+            var wantListen by remember { mutableStateOf(listenOnOpen) }
+            val fieldFocus = remember { androidx.compose.ui.focus.FocusRequester() }
+            LaunchedEffect(ready, dictate) {
+                if (!ready) return@LaunchedEffect
+                if (wantListen && dictate != null && io.nisfeb.talon.ui.isDictationSupported) {
+                    wantListen = false
+                    dictate()
+                } else if (wantListen || !io.nisfeb.talon.ui.hasSoftKeyboard) {
+                    wantListen = false
+                    runCatching { fieldFocus.requestFocus() }
+                }
+            }
             OutlinedTextField(
                 value = questionField,
                 onValueChange = { questionField = it },
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth().focusRequester(fieldFocus),
                 label = { Text("Ask or tell your assistant…") },
                 enabled = ready && !busy,
+                trailingIcon = if (dictate != null && io.nisfeb.talon.ui.isDictationSupported) {
+                    {
+                        androidx.compose.material3.IconButton(onClick = dictate, enabled = ready && !busy) {
+                            androidx.compose.material3.Icon(
+                                androidx.compose.material.icons.Icons.Filled.Mic,
+                                contentDescription = "Speak to your assistant",
+                            )
+                        }
+                    }
+                } else null,
                 keyboardActions = androidx.compose.foundation.text.KeyboardActions(onSend = { submit() }),
                 keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = ImeAction.Send),
             )
@@ -830,9 +869,7 @@ private fun AssistantSidebar(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 if (!expanded) {
-                    IconButton(onClick = onCloseSidebar) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back to assistant")
-                    }
+                    io.nisfeb.talon.ui.NavIcon(onBack = onCloseSidebar, backLabel = "Back to assistant")
                 }
                 Text(
                     "Assistant",

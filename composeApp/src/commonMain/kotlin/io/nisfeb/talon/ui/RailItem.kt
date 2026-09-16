@@ -13,14 +13,16 @@ package io.nisfeb.talon.ui
  * stays exclusively in the kebab dropdown.
  */
 enum class RailItem(val isPaneTab: Boolean) {
+    Home(true),
     Chats(true),
+    Mail(true),
+    Calendar(true),
     Statuses(true),
     Bookmarks(true),
     Activity(true),
     Assistant(false),
     Profile(false),
     Watchwords(false),
-    TodaysBrief(false),
     Administration(false),
     Invites(false),
     Settings(false),
@@ -63,6 +65,30 @@ fun railItemOrNull(name: String?): RailItem? {
 fun Map<RailItem, Boolean>.isVisible(item: RailItem): Boolean {
     if (item == RailItem.Chats) return true
     return this[item] ?: true
+}
+
+/**
+ * Which sections the drawer shows, and the one it may never drop.
+ *
+ * A phone has no rail and, since the sections moved into the
+ * hamburger, no kebab either. The kebab used to guarantee that every
+ * destination stayed reachable however the rail was configured --
+ * hiding an item on desktop only moved it into the overflow tray.
+ * The drawer carries no such tray, so on a phone "hidden" means
+ * "gone".
+ *
+ * That is fine for any section somebody chooses to ignore, and fatal
+ * for exactly one: hiding Settings takes away the screen that unhides
+ * it, and nothing else on a phone opens it. So Settings stays,
+ * whatever the preference says, for the same reason [isVisible] keeps
+ * Chats.
+ */
+fun drawerSections(
+    order: List<RailItem>,
+    visibility: Map<RailItem, Boolean>,
+    canOpen: (RailItem) -> Boolean = { true },
+): List<RailItem> = order.filter { item ->
+    (item == RailItem.Settings || visibility.isVisible(item)) && canOpen(item)
 }
 
 /**

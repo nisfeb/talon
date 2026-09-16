@@ -128,7 +128,7 @@ private class DocumentPickerDelegate(
             data?.let {
                 PickedImage(
                     bytes = it.toByteArray(),
-                    mimeType = mimeFor(u.pathExtension),
+                    mimeType = io.nisfeb.talon.ui.mimeForName(u.lastPathComponent ?: ""),
                     displayName = u.lastPathComponent ?: "file",
                 )
             }
@@ -143,16 +143,4 @@ private class DocumentPickerDelegate(
         activeDelegates.remove(this)
         onResult(null)
     }
-}
-
-/** Best-effort MIME from a file extension for the picked document; the
- *  upload path re-derives content type, so octet-stream is a safe floor. */
-private fun mimeFor(ext: String?): String = when (ext?.lowercase()) {
-    "png" -> "image/png"
-    "jpg", "jpeg" -> "image/jpeg"
-    "gif" -> "image/gif"
-    "webp" -> "image/webp"
-    "pdf" -> "application/pdf"
-    "txt" -> "text/plain"
-    else -> "application/octet-stream"
 }

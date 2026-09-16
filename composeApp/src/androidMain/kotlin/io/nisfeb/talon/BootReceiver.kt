@@ -14,11 +14,10 @@ import kotlinx.coroutines.launch
  * AlarmManager forgets the schedule across a reboot, and time-of-day
  * alarms fire at the wrong local time after travel.
  *
- * Daily digest arms synchronously (it reads an in-memory settings flow),
- * so a plain call is enough. Loops arm from a suspend DB read, so we hold
- * the broadcast open with goAsync() + a wake lock and await the re-arm —
- * otherwise a freshly-booted process can be reclaimed before the alarm is
- * actually set, defeating the whole point of this receiver.
+ * Loops arm from a suspend DB read, so the broadcast is held open with
+ * goAsync() plus a wake lock while the re-arm is awaited — otherwise a
+ * freshly-booted process can be reclaimed before the alarm is actually
+ * set, defeating the whole point of this receiver.
  *
  * See spec §Error handling: "Reboot → BootReceiver re-arms."
  */
@@ -29,7 +28,6 @@ class BootReceiver : BroadcastReceiver() {
             Intent.ACTION_BOOT_COMPLETED,
             Intent.ACTION_TIMEZONE_CHANGED -> {
                 val app = context.applicationContext as TalonApplication
-                runCatching { app.dailyDigest.scheduleNext() }
                 val pending = goAsync()
                 try {
                     val wakeLock = app.loops.acquireWakeLock("loop-boot-rearm")

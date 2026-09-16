@@ -25,6 +25,12 @@ expect fun VideoSurface(
     /** True for our own camera, false for the far end's. */
     local: Boolean,
     modifier: Modifier,
+    /** Width over height of the picture as it will be shown, whenever
+     *  that changes, so a pane can take the picture's shape rather
+     *  than crop it to its own. Not every platform can say (iOS keeps
+     *  its view on the Swift side); a caller assumes a shape until
+     *  told. */
+    onFrameAspect: ((Float) -> Unit)? = null,
 )
 
 /**
@@ -38,4 +44,5 @@ expect fun VideoSurface(
     link: PeerLink,
     local: Boolean,
     modifier: Modifier,
+    onFrameAspect: ((Float) -> Unit)? = null,
 )

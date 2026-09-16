@@ -24,7 +24,12 @@ import org.webrtc.VideoTrack
  * failing — hence [WebRtcFactory.eglBase].
  */
 @Composable
-actual fun VideoSurface(engine: CallEngine, local: Boolean, modifier: Modifier) {
+actual fun VideoSurface(
+    engine: CallEngine,
+    local: Boolean,
+    modifier: Modifier,
+    onFrameAspect: ((Float) -> Unit)?,
+) {
     val android = engine as? AndroidCallEngine ?: return
     val video by android.video.collectAsState()
     TrackRenderer(
@@ -32,11 +37,17 @@ actual fun VideoSurface(engine: CallEngine, local: Boolean, modifier: Modifier) 
         on = if (local) video.localOn else video.remoteOn,
         local = local,
         modifier = modifier,
+        onFrameAspect = onFrameAspect,
     )
 }
 
 @Composable
-actual fun VideoSurface(link: PeerLink, local: Boolean, modifier: Modifier) {
+actual fun VideoSurface(
+    link: PeerLink,
+    local: Boolean,
+    modifier: Modifier,
+    onFrameAspect: ((Float) -> Unit)?,
+) {
     val p = link as? AndroidPeerLink ?: return
     val video by p.video.collectAsState()
     TrackRenderer(
@@ -44,6 +55,7 @@ actual fun VideoSurface(link: PeerLink, local: Boolean, modifier: Modifier) {
         on = if (local) video.localOn else video.remoteOn,
         local = local,
         modifier = modifier,
+        onFrameAspect = onFrameAspect,
     )
 }
 
@@ -53,6 +65,7 @@ private fun TrackRenderer(
     on: Boolean,
     local: Boolean,
     modifier: Modifier,
+    onFrameAspect: ((Float) -> Unit)?,
 ) {
     if (track == null || !on) return
     // key(track): AndroidView's factory runs once per node, so when a
@@ -67,8 +80,26 @@ private fun TrackRenderer(
         modifier = modifier,
         factory = { ctx ->
             SurfaceViewRenderer(ctx).apply {
-                init(WebRtcFactory.eglBase.eglBaseContext, null)
-                setScalingType(RendererCommon.ScalingType.SCALE_ASPECT_FILL)
+                val view = this
+                init(
+                    WebRtcFactory.eglBase.eglBaseContext,
+                    object : RendererCommon.RendererEvents {
+                        override fun onFirstFrameRendered() = Unit
+                        // The shape of the picture after the phone's
+                        // rotation is applied; a portrait camera sends
+                        // landscape frames turned 90 degrees.
+                        override fun onFrameResolutionChanged(w: Int, h: Int, rotation: Int) {
+                            val turned = rotation == 90 || rotation == 270
+                            val aspect = if (turned) h.toFloat() / w else w.toFloat() / h
+                            view.post { onFrameAspect?.invoke(aspect) }
+                        }
+                    },
+                )
+                // Fit, not fill: the whole picture, letterboxed if the
+                // pane is the wrong shape. Fill showed a band across a
+                // forehead whenever a portrait camera met a landscape
+                // pane, which on a phone was every call.
+                setScalingType(RendererCommon.ScalingType.SCALE_ASPECT_FIT)
                 setEnableHardwareScaler(true)
                 // Our own camera is a mirror, the way every video app
                 // and every actual mirror behaves; the far end is not.

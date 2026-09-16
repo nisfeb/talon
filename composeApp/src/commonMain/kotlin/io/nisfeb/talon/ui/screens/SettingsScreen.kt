@@ -1,5 +1,4 @@
 package io.nisfeb.talon.ui.screens
-import kotlinx.datetime.toLocalDateTime
 import io.nisfeb.talon.util.nowMs
 
 import androidx.compose.foundation.background
@@ -25,7 +24,6 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Visibility
@@ -112,20 +110,18 @@ fun SettingsScreen(
      *  and any host that hasn't wired RelayClient + RelaySettings
      *  + PushTokenProvider. */
     relayConfig: RelayPanelConfig? = null,
+    /**
+     * People the status widget can be told to pin, as ship to display
+     * name. Empty where the host has no contacts wired, which hides
+     * the pinning control rather than showing an empty picker.
+     */
+    homePinCandidates: List<Pair<String, String>> = emptyList(),
     onBack: () -> Unit,
     /** Optional call controller. When non-null (and the platform does
      *  calls at all) Settings grows a "Who can call you" section that
      *  edits the ship-level policy %trunk enforces. null hides it —
      *  tests and hosts that haven't wired calls. */
     callController: io.nisfeb.talon.call.CallController? = null,
-    /** Optional daily-digest config + alarm controls. Android wires
-     *  the JSON-prefs-backed impl that drives AlarmManager; desktop
-     *  passes null until a desktop scheduler lands and the section
-     *  hides entirely. */
-    dailyDigestSettings: io.nisfeb.talon.ai.DailyDigestSettings? = null,
-    /** Optional Android-only "Test now" handler that fires the digest
-     *  immediately. When null the button isn't rendered. */
-    onTestDigest: (() -> Unit)? = null,
     /** Opens the dedicated Sidebar visibility screen — lets the user
      *  toggle which rail items show. Defaults to no-op for callers
      *  that haven't wired the sub-screen yet. */
@@ -141,19 +137,28 @@ fun SettingsScreen(
     localShip: io.nisfeb.talon.comet.LocalShip = io.nisfeb.talon.comet.LocalShip.Noop,
     /** Open on the Account tab, where the local ship and its dojo live. */
     startOnAccount: Boolean = false,
-    /** Fired after the user flips the mnemonym-naming toggle; hosts
-     *  push the new value to %settings (ui-prefs bucket) so the choice
-     *  follows the user across devices. Local apply + persist happen
-     *  regardless via [io.nisfeb.talon.ui.MnemonymNames.set]. */
-    onMnemonymNamesChanged: (Boolean) -> Unit = {},
     onAlwaysPatpChanged: (Boolean) -> Unit = {},
+    /** Fired after the word-names toggle flips; hosts push the new
+     *  value to %settings so the choice follows the user. Local apply
+     *  and persist happen regardless. */
+    onNonCometNamesChanged: (Boolean) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val aiState by aiSettings.state.collectAsState()
     val themeMode by themePreference.mode.collectAsState()
     val hideComposerButtons by uiSettings.hideComposerButtons.collectAsState()
     val powerFeaturesEnabled by uiSettings.powerFeaturesEnabled.collectAsState()
+    val swipeQuotes by uiSettings.swipeQuotes.collectAsState()
     val density by uiSettings.density.collectAsState()
+    val homeFahrenheit by uiSettings.homeFahrenheit.collectAsState()
+    val homeTwentyFourHour by uiSettings.homeTwentyFourHour.collectAsState()
+    val homeLayoutRaw by uiSettings.homeLayout.collectAsState()
+    val homeLayout = remember(homeLayoutRaw) {
+        io.nisfeb.talon.ui.HomeLayoutCodec.decode(homeLayoutRaw)
+    }
+    fun saveHomeLayout(next: io.nisfeb.talon.ui.HomeLayout) {
+        uiSettings.setHomeLayout(io.nisfeb.talon.ui.HomeLayoutCodec.encode(next))
+    }
     val accentSettings by uiSettings.accentSettings.collectAsState()
     val groupChannelOrder by uiSettings.groupChannelOrder.collectAsState()
     val folderItemOrder by uiSettings.folderItemOrder.collectAsState()
@@ -195,9 +200,7 @@ fun SettingsScreen(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            IconButton(onClick = onBack) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-            }
+            io.nisfeb.talon.ui.NavIcon(onBack = onBack)
             Text(
                 "Settings",
                 style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
@@ -208,9 +211,9 @@ fun SettingsScreen(
 
         val visibleTabs = buildList {
             add(SettingsTab.Appearance)
+            add(SettingsTab.Home)
             add(SettingsTab.Chats)
-            if (notificationHealth != null || relayConfig != null ||
-                dailyDigestSettings != null) {
+            if (notificationHealth != null || relayConfig != null) {
                 add(SettingsTab.Notifications)
             }
             add(SettingsTab.Ai)
@@ -233,6 +236,45 @@ fun SettingsScreen(
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
             if (safeTab == SettingsTab.Appearance) {
+            // ── Which sections show, and in what order ─────────────
+            //
+            // Drills into SidebarSettingsScreen. First thing on the
+            // first tab: it lived under Chats, where nobody looking for
+            // the menu's contents thought to look. Shown at every
+            // width: it used to hide in a desktop window too narrow
+            // for the rail, though the same preference decides what
+            // the kebab holds there, and a setting that vanishes with
+            // the window is one nobody finds.
+            val drawerNav = io.nisfeb.talon.ui.isDrawerNavigation
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable(onClick = onOpenSidebarSettings)
+                    .padding(vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        if (drawerNav) "Menu" else "Sidebar",
+                        style = MaterialTheme.typography.bodyLarge,
+                    )
+                    Text(
+                        // Named for the thing in front of them rather
+                        // than for the one this setting was built for.
+                        if (drawerNav) "Choose what shows in the menu, and in what order."
+                        else "Choose what shows in the sidebar and its menu, and in what order.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Icon(
+                    Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Spacer(Modifier.height(12.dp))
             Text(
                 "Appearance",
                 style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
@@ -342,25 +384,25 @@ fun SettingsScreen(
                     onAlwaysPatpChanged(on)
                 },
             )
-            val mnemonymNames by io.nisfeb.talon.ui.MnemonymNames.enabled.collectAsState()
+            val nonCometNames by io.nisfeb.talon.ui.AzimuthNames.enabled.collectAsState()
             FeatureToggleRow(
-                label = "Word-based ship names",
+                label = "Word names for planets and moons",
                 description = if (alwaysPatp) {
                     "Turned off while \"Always show ~ship names\" is on."
                 } else {
-                    "Ships without a nickname show as readable words " +
-                        "(~sampel-palnet → .accept.engulf.relents) instead " +
-                        "of the raw Urbit name. Synced across your devices; " +
-                        "off restores classic ~ship naming."
+                    "Off by default. Comets always show word names -- " +
+                        "their Urbit name is their key. A planet's is " +
+                        "not, so turning this on has Talon look each " +
+                        "one up from your own ship, which only works " +
+                        "where that ship can answer."
                 },
-                enabled = mnemonymNames && !alwaysPatp,
+                enabled = nonCometNames && !alwaysPatp,
                 onChange = { on ->
-                    io.nisfeb.talon.ui.MnemonymNames.set(on)
-                    onMnemonymNamesChanged(on)
+                    io.nisfeb.talon.ui.AzimuthNames.setEnabled(on)
+                    onNonCometNamesChanged(on)
                 },
                 switchEnabled = !alwaysPatp,
             )
-
             // ── Accent color ────────────────────────────────────────
             FeatureToggleRow(
                 label = "Custom accent color",
@@ -506,39 +548,79 @@ fun SettingsScreen(
             Spacer(Modifier.height(8.dp))
 
             }
-            if (safeTab == SettingsTab.Chats) {
-            // ── Sidebar visibility ─────────────────────────────────
-            // Drills into SidebarSettingsScreen where the user toggles
-            // which rail items show. Inline here so it sits next to
-            // the other home/rail personalisation rows. The rail only
-            // exists at expanded widths (desktop, tablet landscape);
-            // a phone has nothing this would change, so hide it there.
-            val wide = with(androidx.compose.ui.platform.LocalDensity.current) {
-                androidx.compose.ui.platform.LocalWindowInfo.current.containerSize.width.toDp()
-            } >= io.nisfeb.talon.ui.ExpandedThreshold
-            if (wide) Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable(onClick = onOpenSidebarSettings)
-                    .padding(vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text("Sidebar", style = MaterialTheme.typography.bodyLarge)
-                    Text(
-                        "Choose what shows in the rail.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                Icon(
-                    Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            if (safeTab == SettingsTab.Home) {
+            Text(
+                "Home",
+                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
+            )
+            // One group so far. The home page has four panels and only
+            // the dial has anything to set yet, so this is laid out as a
+            // list of groups rather than a flat run of controls — the
+            // next thing added should be another heading, not a chip
+            // dropped in beside these.
+            Text(
+                "Clock and weather",
+                style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
+                modifier = Modifier.padding(top = 4.dp),
+            )
+            Text(
+                "How the dial reads out temperature and the hour. Kept on this " +
+                    "device rather than on the ship: which units somebody reads " +
+                    "is a fact about them, not about their identity.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilterChip(
+                    selected = homeFahrenheit,
+                    onClick = { uiSettings.setHomeFahrenheit(true) },
+                    label = { Text("Fahrenheit") },
+                )
+                FilterChip(
+                    selected = !homeFahrenheit,
+                    onClick = { uiSettings.setHomeFahrenheit(false) },
+                    label = { Text("Celsius") },
                 )
             }
-            if (wide) Spacer(Modifier.height(4.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilterChip(
+                    selected = !homeTwentyFourHour,
+                    onClick = { uiSettings.setHomeTwentyFourHour(false) },
+                    label = { Text("12-hour") },
+                )
+                FilterChip(
+                    selected = homeTwentyFourHour,
+                    onClick = { uiSettings.setHomeTwentyFourHour(true) },
+                    label = { Text("24-hour") },
+                )
+            }
+            Text(
+                "The place the dial uses is set on the dial itself.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 4.dp),
+            )
+
+            Text(
+                "Widgets",
+                style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
+                modifier = Modifier.padding(top = 16.dp),
+            )
+            Text(
+                "What the home page carries. Order and size are set on the " +
+                    "page itself, under Arrange.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            homeLayout.widgets.forEach { widget ->
+                HomeWidgetRow(
+                    widget = widget,
+                    pinCandidates = homePinCandidates,
+                    onChange = { saveHomeLayout(homeLayout.with(it)) },
+                )
+            }
+            }
+            if (safeTab == SettingsTab.Chats) {
 
             }
             if (safeTab == SettingsTab.Account) {
@@ -604,6 +686,29 @@ fun SettingsScreen(
                 onChange = { uiSettings.setHideComposerButtons(it) },
             )
             Spacer(Modifier.height(4.dp))
+
+            Text(
+                "Swiping a message",
+                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
+            )
+            Text(
+                "In a direct message, or on a reply, a swipe always opens the thread.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilterChip(
+                    selected = swipeQuotes,
+                    onClick = { uiSettings.setSwipeQuotes(true) },
+                    label = { Text("Quotes it") },
+                )
+                FilterChip(
+                    selected = !swipeQuotes,
+                    onClick = { uiSettings.setSwipeQuotes(false) },
+                    label = { Text("Replies in its thread") },
+                )
+            }
+            Spacer(Modifier.height(8.dp))
 
             FeatureToggleRow(
                 label = "Power features",
@@ -941,19 +1046,6 @@ fun SettingsScreen(
 
             }
             if (safeTab == SettingsTab.Notifications) {
-            // Daily digest config — only when the platform supplied
-            // a concrete settings impl (Android does today; desktop
-            // gets null until a scheduler lands).
-            if (dailyDigestSettings != null) {
-                Spacer(Modifier.height(16.dp))
-                HorizontalDivider()
-                Spacer(Modifier.height(8.dp))
-                DailyDigestSection(
-                    settings = dailyDigestSettings,
-                    onTestDigest = onTestDigest,
-                )
-            }
-
             }
             if (safeTab == SettingsTab.Calls) {
             // Who may ring this ship. The policy lives in %trunk, not
@@ -1170,110 +1262,7 @@ private fun AboutRow(label: String, value: String) {
 }
 
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
-@Composable
-private fun DailyDigestSection(
-    settings: io.nisfeb.talon.ai.DailyDigestSettings,
-    onTestDigest: (() -> Unit)?,
-) {
-    val ddState by settings.state.collectAsState()
-    var showTimePicker by remember { mutableStateOf(false) }
 
-    Text(
-        "Daily digest",
-        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
-    )
-    Text(
-        "A morning brief at your chosen time: unread, watchword hits, and @mentions. " +
-            "The AI summary toggle is in Cloud features above; this section just controls the alarm.",
-        style = MaterialTheme.typography.bodySmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-    )
-
-    Spacer(Modifier.height(8.dp))
-
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Column(Modifier.weight(1f)) {
-            Text("Enabled", style = MaterialTheme.typography.bodyLarge)
-            val sub = if (ddState.enabled) {
-                "Next: ${formatNextFire(ddState.hourOfDay, ddState.minuteOfDay)}"
-            } else "Off"
-            Text(
-                sub,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-        Switch(
-            checked = ddState.enabled,
-            onCheckedChange = { settings.setEnabled(it) },
-        )
-    }
-
-    if (ddState.enabled) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text("Fire time", Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
-            TextButton(onClick = { showTimePicker = true }) {
-                Text(
-                    "${ddState.hourOfDay.toString().padStart(2, '0')}:" +
-                        ddState.minuteOfDay.toString().padStart(2, '0'),
-                )
-            }
-        }
-
-        Spacer(Modifier.height(8.dp))
-
-        // "Test now" only when the platform supplies an immediate-
-        // fire path (Android wires DailyDigest.generateAndNotifyAsync;
-        // desktop has no equivalent yet).
-        if (onTestDigest != null) {
-            OutlinedButton(onClick = onTestDigest) { Text("Test now") }
-        }
-    }
-
-    if (showTimePicker) {
-        val state = androidx.compose.material3.rememberTimePickerState(
-            initialHour = ddState.hourOfDay,
-            initialMinute = ddState.minuteOfDay,
-            is24Hour = false,
-        )
-        androidx.compose.material3.AlertDialog(
-            onDismissRequest = { showTimePicker = false },
-            confirmButton = {
-                TextButton(onClick = {
-                    settings.setTime(state.hour, state.minute)
-                    showTimePicker = false
-                }) { Text("OK") }
-            },
-            dismissButton = {
-                TextButton(onClick = { showTimePicker = false }) { Text("Cancel") }
-            },
-            text = {
-                androidx.compose.material3.TimePicker(state = state)
-            },
-        )
-    }
-}
-
-/** Wallclock-friendly "Next: 7:30 AM" / "Tomorrow at 7:30 AM" string. */
-private fun formatNextFire(hourOfDay: Int, minuteOfDay: Int): String {
-    val zone = kotlinx.datetime.TimeZone.currentSystemDefault()
-    val now = kotlin.time.Clock.System.now()
-    // Reuse the digest scheduler's next-fire math so the label and the
-    // actual alarm never disagree.
-    val fireMs = io.nisfeb.talon.ai.DailyDigestSchedule
-        .nextFireMs(now, hourOfDay, minuteOfDay, zone)
-    val timeStr = io.nisfeb.talon.util.formatTime12(fireMs)
-    val today = now.toLocalDateTime(zone).date
-    val fireDate = kotlin.time.Instant.fromEpochMilliseconds(fireMs)
-        .toLocalDateTime(zone).date
-    return if (fireDate != today) "Tomorrow at $timeStr" else "Today at $timeStr"
-}
 
 /** Single source of truth for "is this feature toggle on?" — keeps the
  *  Settings UI's toggle state in lockstep with the gates wired across
@@ -1281,7 +1270,6 @@ private fun formatNextFire(hourOfDay: Int, minuteOfDay: Int): String {
 internal fun aiFeatureEnabled(state: AiSettings.Config, feature: AiSettings.Feature): Boolean =
     when (feature) {
         AiSettings.Feature.CatchMeUp -> state.catchMeUpEnabled
-        AiSettings.Feature.DailyDigest -> state.dailyDigestEnabled
         AiSettings.Feature.SmartFeatures -> state.smartFeaturesEnabled
         // Unified assistant: either legacy flag counts as enabled.
         AiSettings.Feature.Agent -> state.assistantOn()
@@ -2130,6 +2118,7 @@ private fun SystemPromptEditorDialog(
 /** Settings groups. Order here is the rail / tab-row order. */
 private enum class SettingsTab(val label: String) {
     Appearance("Appearance"),
+    Home("Home"),
     Chats("Chats"),
     Notifications("Notifications"),
     Ai("AI"),
@@ -2292,6 +2281,119 @@ private fun CustomThemeEditor(
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 androidx.compose.material3.Button(onClick = onSave, enabled = draft.valid) { Text("Save and use") }
                 TextButton(onClick = onCancel) { Text("Cancel") }
+            }
+        }
+    }
+}
+
+/**
+ * One widget's settings: whether it shows, how much it shows, and the
+ * handful of things only it cares about.
+ *
+ * Order and size are not here. Those are spatial decisions and belong
+ * on the page being arranged, where somebody can see what they are
+ * doing; a pair of number fields in a settings list would be a worse
+ * way to say the same thing.
+ */
+@Composable
+private fun HomeWidgetRow(
+    widget: io.nisfeb.talon.ui.HomeWidget,
+    pinCandidates: List<Pair<String, String>>,
+    onChange: (io.nisfeb.talon.ui.HomeWidget) -> Unit,
+) {
+    val kind = widget.kind
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+        shape = RoundedCornerShape(10.dp),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    io.nisfeb.talon.ui.screens.title(kind),
+                    style = MaterialTheme.typography.bodyMedium
+                        .copy(fontWeight = FontWeight.Medium),
+                    modifier = Modifier.weight(1f),
+                )
+                Switch(
+                    checked = widget.visible,
+                    onCheckedChange = { onChange(widget.copy(visible = it)) },
+                )
+            }
+
+            if (widget.visible) {
+                // The clock shows one thing and the calendar counts in
+                // time rather than in rows, so neither has a count.
+                if (kind != io.nisfeb.talon.ui.HomeWidgetKind.CLOCK &&
+                    kind != io.nisfeb.talon.ui.HomeWidgetKind.CALENDAR
+                ) {
+                    Text(
+                        "How many to show",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        io.nisfeb.talon.ui.HOME_COUNTS.forEach { n ->
+                            FilterChip(
+                                selected = widget.count == n,
+                                onClick = { onChange(widget.copy(count = n)) },
+                                label = { Text("$n") },
+                            )
+                        }
+                    }
+                }
+
+                if (kind == io.nisfeb.talon.ui.HomeWidgetKind.CALENDAR) {
+                    Text(
+                        "How far ahead to look",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    androidx.compose.foundation.layout.FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        io.nisfeb.talon.ui.CalendarRange.entries.forEach { r ->
+                            FilterChip(
+                                selected = widget.calendarRange == r,
+                                onClick = { onChange(widget.copy(calendarRange = r)) },
+                                label = { Text(r.label) },
+                            )
+                        }
+                    }
+                }
+
+                if (kind == io.nisfeb.talon.ui.HomeWidgetKind.STATUS && pinCandidates.isNotEmpty()) {
+                    Text(
+                        "Keep at the top",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Text(
+                        "Pinned people show whether or not they have said anything " +
+                            "lately. That is usually the point of pinning them.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    androidx.compose.foundation.layout.FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        pinCandidates.forEach { (shipId, name) ->
+                            val on = shipId in widget.pinned
+                            FilterChip(
+                                selected = on,
+                                onClick = {
+                                    val next = if (on) widget.pinned - shipId
+                                    else widget.pinned + shipId
+                                    onChange(widget.copy(pinned = next))
+                                },
+                                label = { Text(name) },
+                                enabled = on || widget.pinned.size < io.nisfeb.talon.ui.HOME_PINNED_MAX,
+                            )
+                        }
+                    }
+                }
             }
         }
     }

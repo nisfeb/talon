@@ -16,8 +16,6 @@ import io.nisfeb.talon.notify.Notifier
 import io.nisfeb.talon.notify.SystemNotifier
 import org.jetbrains.skia.Image as SkiaImage
 import io.nisfeb.talon.ai.AiSettingsRepository
-import io.nisfeb.talon.ai.DailyDigestSettings
-import io.nisfeb.talon.ai.DesktopDailyDigestSettings
 import io.nisfeb.talon.ai.DesktopWatchwordsSyncSettings
 import io.nisfeb.talon.ai.WatchwordsSyncSettings
 import io.nisfeb.talon.ai.createAiSettings
@@ -30,7 +28,7 @@ import io.nisfeb.talon.data.DatabaseOpenTimeoutException
 import io.nisfeb.talon.data.createAppDatabase
 import io.nisfeb.talon.ui.DraftStore
 import io.nisfeb.talon.ui.InMemoryDraftStore
-import io.nisfeb.talon.update.DesktopBrowserUpdateInstaller
+import io.nisfeb.talon.update.DesktopUpdateInstaller
 import io.nisfeb.talon.update.HttpUpdateChecker
 import io.nisfeb.talon.update.UpdateRuntime
 import io.nisfeb.talon.update.UpdateState
@@ -82,7 +80,6 @@ private class DesktopAppGraph {
     /** The comet Talon runs on this machine, if the user set one up. */
     val localShip = io.nisfeb.talon.comet.DesktopLocalShip(ktorHttp)
     val aiSettings: AiSettingsRepository = createAiSettings()
-    val dailyDigestSettings: DailyDigestSettings = DesktopDailyDigestSettings()
     val watchwordsSync: WatchwordsSyncSettings = DesktopWatchwordsSyncSettings()
     val themePreference: ThemePreference = DesktopThemePreference()
     val relaySettings: io.nisfeb.talon.notify.RelaySettings =
@@ -126,11 +123,9 @@ private class DesktopAppGraph {
         SettingsSyncImpl(
             db = db,
             aiSettings = aiSettings,
-            dailyDigestSettings = dailyDigestSettings,
             // Desktop has no AlarmManager equivalent wired, so the
             // digest doesn't actually fire here. The callback's a no-op
             // until that subsystem ports.
-            rearmDailyDigest = {},
         )
     }
 
@@ -144,7 +139,16 @@ private class DesktopAppGraph {
             override fun installedVersionCode(): Int = io.nisfeb.talon.TalonBuild.versionCode
             override fun supportedSdk(): Int = Int.MAX_VALUE
         },
-        installer = DesktopBrowserUpdateInstaller(),
+        installer = DesktopUpdateInstaller(
+            http = ktorHttp,
+            updatesDir = File(AppDirs.userData, "updates"),
+            quit = {
+                Thread {
+                    runCatching { shutdown() }
+                    kotlin.system.exitProcess(0)
+                }.apply { isDaemon = true; name = "Talon-update-restart" }.start()
+            },
+        ),
     )
 
     init {
@@ -467,13 +471,13 @@ fun main() {
                 App(
                     http = graph.ktorHttp,
                     sessionStore = graph.sessionStore,
+                    shipDataEraser = io.nisfeb.talon.data.DesktopShipDataEraser(),
                     localShip = graph.localShip,
                     aiSettings = graph.aiSettings,
                     createDb = graph.createDb,
                     drafts = graph.drafts,
                     updateState = graph.updateState,
                     createSettingsSync = graph.createSettingsSync,
-                    dailyDigestSettings = graph.dailyDigestSettings,
                     watchwordsSync = graph.watchwordsSync,
                     themePreference = graph.themePreference,
                     callEngineProvider = io.nisfeb.talon.call.DesktopCallEngineProvider,

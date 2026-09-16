@@ -1,14 +1,15 @@
 package io.nisfeb.talon.ui
 
-actual val isDailyDigestSupported: Boolean = true
 actual val isVoiceMessagesSupported: Boolean = true
 actual val isOnDeviceAiSupported: Boolean = true
 actual val isAssistantSupported: Boolean = true
 actual val isLoopsSupported: Boolean = true
 actual val isBackgroundSchedulingSupported: Boolean = true
-actual val isQrLoginScanSupported: Boolean = true
+actual val isQrScanSupported: Boolean = true
 actual val isLocalCometSupported: Boolean = false
 actual val isTouchSwipeNavSupported: Boolean = true
+actual val hasSoftKeyboard: Boolean = true
+actual val isDictationSupported: Boolean = true
 actual val isTapToOpenMenuSupported: Boolean = true
 
 actual val platformLabel: String = "Android ${android.os.Build.VERSION.RELEASE}"
@@ -39,3 +40,7 @@ actual val needsEmojiFontSpans: Boolean = false
 actual val needsManualImagePaste: Boolean = false
 actual val isImmersiveCallSupported: Boolean = true
 actual val isUrbWebViewSupported: Boolean = true
+
+/** A phone has no room for a rail; the drawer is the way to every section. */
+actual val isDrawerNavigation: Boolean = true
+actual val isTouchPrimary: Boolean = true

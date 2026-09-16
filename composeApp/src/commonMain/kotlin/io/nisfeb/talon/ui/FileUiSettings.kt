@@ -55,14 +55,23 @@ class FileUiSettings(
         val folderItemOrder: String = FolderItemOrder.Manual.name,
         // Fraction of total width given to the chat-list pane on wide windows.
         val chatPaneListFraction: Float = 0.30f,
+        val rightPaneWidthDp: Float = 360f,
         val activeRailTab: String = RailTab.Chats.name,
         val smartSearchPreferred: Boolean = false,
+        val homePlace: String = "",
+        val hiddenCalendars: List<String> = emptyList(),
+        val defaultCalendar: String = "",
+        val calendarWeekView: Boolean = false,
+        val homeFahrenheit: Boolean = true,
+        val homeTwentyFourHour: Boolean = false,
+        val homeLayout: String = "",
         val railItemOrder: List<String> = emptyList(),
         val powerFeaturesEnabled: Boolean = false,
+        val swipeQuotes: Boolean = true,
         val density: String = Density.Comfortable.name,
         val fontScale: Float = 1.0f,
-        val mnemonymNames: Boolean = true,
         val alwaysPatp: Boolean = false,
+        val nonCometNames: Boolean = false,
         /** [io.nisfeb.talon.ui.theme.ThemeSettings] as JSON text. */
         val customThemes: String = "",
         val micNoiseSuppression: Boolean = true,
@@ -73,13 +82,10 @@ class FileUiSettings(
     private val initial = loadInitial()
 
     init {
-        // Mnemonym naming: the runtime switch lives in the shared
-        // [MnemonymNames] object (ContactMap reads it); this store just
-        // loads the persisted choice over the default and keeps writes.
-        MnemonymNames.enabled.value = initial.mnemonymNames
-        MnemonymNames.persist = { persistCurrent() }
         ShipNames.alwaysPatp.value = initial.alwaysPatp
         ShipNames.persist = { persistCurrent() }
+        AzimuthNames.enabled.value = initial.nonCometNames
+        AzimuthNames.persist = { persistCurrent() }
     }
     private val _hideComposerButtons = MutableStateFlow(initial.hideComposerButtons)
     override val hideComposerButtons: StateFlow<Boolean> =
@@ -140,11 +146,70 @@ class FileUiSettings(
     override val chatPaneListFraction: StateFlow<Float> =
         _chatPaneListFraction.asStateFlow()
 
+    private val _rightPaneWidthDp = MutableStateFlow(initial.rightPaneWidthDp.coerceIn(280f, 900f))
+    override val rightPaneWidthDp: StateFlow<Float> = _rightPaneWidthDp.asStateFlow()
+
     private val _activeRailTab = MutableStateFlow(
         railTabOrDefault(initial.activeRailTab),
     )
     override val activeRailTab: StateFlow<RailTab> =
         _activeRailTab.asStateFlow()
+
+    private val _homePlace = MutableStateFlow(initial.homePlace)
+    override val homePlace: StateFlow<String> = _homePlace.asStateFlow()
+    override fun setHomePlace(encoded: String) {
+        if (_homePlace.value == encoded) return
+        _homePlace.value = encoded
+        persistCurrent()
+    }
+
+    private val _hiddenCalendars = MutableStateFlow(initial.hiddenCalendars.toSet())
+    override val hiddenCalendars: StateFlow<Set<String>> = _hiddenCalendars.asStateFlow()
+    override fun setHiddenCalendars(ids: Set<String>) {
+        if (_hiddenCalendars.value == ids) return
+        _hiddenCalendars.value = ids
+        persistCurrent()
+    }
+
+    private val _defaultCalendar = MutableStateFlow(initial.defaultCalendar)
+    override val defaultCalendar: StateFlow<String> = _defaultCalendar.asStateFlow()
+    override fun setDefaultCalendar(id: String) {
+        if (_defaultCalendar.value == id) return
+        _defaultCalendar.value = id
+        persistCurrent()
+    }
+
+    private val _calendarWeekView = MutableStateFlow(initial.calendarWeekView)
+    override val calendarWeekView: StateFlow<Boolean> = _calendarWeekView.asStateFlow()
+    override fun setCalendarWeekView(on: Boolean) {
+        if (_calendarWeekView.value == on) return
+        _calendarWeekView.value = on
+        persistCurrent()
+    }
+
+    private val _homeFahrenheit = MutableStateFlow(initial.homeFahrenheit)
+    override val homeFahrenheit: StateFlow<Boolean> = _homeFahrenheit.asStateFlow()
+    override fun setHomeFahrenheit(on: Boolean) {
+        if (_homeFahrenheit.value == on) return
+        _homeFahrenheit.value = on
+        persistCurrent()
+    }
+
+    private val _homeTwentyFourHour = MutableStateFlow(initial.homeTwentyFourHour)
+    override val homeTwentyFourHour: StateFlow<Boolean> = _homeTwentyFourHour.asStateFlow()
+    override fun setHomeTwentyFourHour(on: Boolean) {
+        if (_homeTwentyFourHour.value == on) return
+        _homeTwentyFourHour.value = on
+        persistCurrent()
+    }
+
+    private val _homeLayout = MutableStateFlow(initial.homeLayout)
+    override val homeLayout: StateFlow<String> = _homeLayout.asStateFlow()
+    override fun setHomeLayout(encoded: String) {
+        if (_homeLayout.value == encoded) return
+        _homeLayout.value = encoded
+        persistCurrent()
+    }
 
     private val _smartSearchPreferred = MutableStateFlow(initial.smartSearchPreferred)
     override val smartSearchPreferred: StateFlow<Boolean> =
@@ -153,6 +218,9 @@ class FileUiSettings(
     private val _powerFeaturesEnabled = MutableStateFlow(initial.powerFeaturesEnabled)
     override val powerFeaturesEnabled: StateFlow<Boolean> =
         _powerFeaturesEnabled.asStateFlow()
+
+    private val _swipeQuotes = MutableStateFlow(initial.swipeQuotes)
+    override val swipeQuotes: StateFlow<Boolean> = _swipeQuotes.asStateFlow()
 
     private val _density = MutableStateFlow(
         runCatching { Density.valueOf(initial.density) }
@@ -210,6 +278,13 @@ class FileUiSettings(
         persistCurrent()
     }
 
+    override fun setRightPaneWidthDp(value: Float) {
+        val clamped = value.coerceIn(280f, 900f)
+        if (_rightPaneWidthDp.value == clamped) return
+        _rightPaneWidthDp.value = clamped
+        persistCurrent()
+    }
+
     override fun setActiveRailTab(tab: RailTab) {
         if (_activeRailTab.value == tab) return
         _activeRailTab.value = tab
@@ -225,6 +300,12 @@ class FileUiSettings(
     override fun setPowerFeaturesEnabled(enabled: Boolean) {
         if (_powerFeaturesEnabled.value == enabled) return
         _powerFeaturesEnabled.value = enabled
+        persistCurrent()
+    }
+
+    override fun setSwipeQuotes(quotes: Boolean) {
+        if (_swipeQuotes.value == quotes) return
+        _swipeQuotes.value = quotes
         persistCurrent()
     }
 
@@ -259,14 +340,23 @@ class FileUiSettings(
                 groupChannelOrder = _groupChannelOrder.value.name,
                 folderItemOrder = _folderItemOrder.value.name,
                 chatPaneListFraction = _chatPaneListFraction.value,
+                rightPaneWidthDp = _rightPaneWidthDp.value,
                 activeRailTab = _activeRailTab.value.name,
                 smartSearchPreferred = _smartSearchPreferred.value,
+                homePlace = _homePlace.value,
+                hiddenCalendars = _hiddenCalendars.value.toList(),
+                defaultCalendar = _defaultCalendar.value,
+                calendarWeekView = _calendarWeekView.value,
+                homeFahrenheit = _homeFahrenheit.value,
+                homeTwentyFourHour = _homeTwentyFourHour.value,
+                homeLayout = _homeLayout.value,
                 railItemOrder = _railItemOrder.value.map { it.name },
                 powerFeaturesEnabled = _powerFeaturesEnabled.value,
+                swipeQuotes = _swipeQuotes.value,
                 density = _density.value.name,
                 fontScale = _fontScale.value,
-                mnemonymNames = MnemonymNames.enabled.value,
                 alwaysPatp = ShipNames.alwaysPatp.value,
+                nonCometNames = AzimuthNames.enabled.value,
                 customThemes = _themeSettings.value.toJson(),
                 micNoiseSuppression = _micProcessing.value.noiseSuppression,
                 micEchoCancellation = _micProcessing.value.echoCancellation,

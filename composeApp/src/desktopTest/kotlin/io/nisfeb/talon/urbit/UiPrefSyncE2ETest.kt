@@ -2,7 +2,6 @@ package io.nisfeb.talon.urbit
 
 import androidx.room.Room
 import androidx.sqlite.driver.bundled.BundledSQLiteDriver
-import io.nisfeb.talon.ai.NoopDailyDigestSettings
 import io.nisfeb.talon.ai.AiSettings
 import io.nisfeb.talon.ai.AiSettingsRepository
 import io.nisfeb.talon.data.AppDatabase
@@ -150,7 +149,6 @@ class UiPrefSyncE2ETest {
         val sync = SettingsSyncImpl(
             db = db,
             aiSettings = StubAi,
-            dailyDigestSettings = NoopDailyDigestSettings(),
         )
         val repo = TlonChatRepo(db, settingsSync = sync)
         repo.start(session)

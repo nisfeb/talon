@@ -28,18 +28,77 @@ object LatticeInstall {
             resp.status.value == 200
         }.getOrDefault(false)
 
+/**
+     * Install %grubbery and wait for it to arrive.
+     *
+     * Two steps that have to stay together: kiln accepting the poke is
+     * not the desk being here — it arrives over the network afterwards
+     * — so the only way to know is to keep asking. Callers that stopped
+     * at the poke reported success onto a ship with no app on it.
+     *
+     * Failure carries a sentence worth showing. A timeout in particular
+     * is not a refusal: the install may still land, and saying so is
+     * more use than saying it failed.
+     */
+    suspend fun installAndWait(
+        http: HttpClient,
+        shipUrl: String,
+        poke: suspend (String, String, JsonElement) -> Boolean,
+        timeoutMs: Long = DEFAULT_TIMEOUT_MS,
+        nowMs: () -> Long = { io.nisfeb.talon.util.nowMs() },
+        wait: suspend (Long) -> Unit = { kotlinx.coroutines.delay(it) },
+        /** Which of ~ricsul-bilwyt's desks; each has its own way of
+         *  showing it has arrived. */
+        desk: String = DESK,
+        installed: suspend () -> Boolean = { isInstalled(http, shipUrl) },
+    ): Result<Unit> {
+        val (app, mark, body) = installPoke(desk)
+        if (!poke(app, mark, body)) {
+            return Result.failure(IllegalStateException("Your ship refused the install."))
+        }
+        val deadline = nowMs() + timeoutMs
+        while (nowMs() < deadline) {
+            wait(POLL_MS)
+            if (installed()) return Result.success(Unit)
+        }
+        return Result.failure(
+            IllegalStateException(
+                "Install is taking a while — it may still finish. Try again shortly.",
+            ),
+        )
+    }
+
+    /** The install as one call, for the hosts that offer it from a menu. */
+    fun installer(
+        http: HttpClient,
+        shipUrl: () -> String?,
+        desk: String = DESK,
+        installed: (suspend (String) -> Boolean)? = null,
+        poke: suspend (String, String, JsonElement) -> Boolean,
+    ): suspend () -> Result<Unit> = {
+        val url = shipUrl()
+        if (url == null) Result.failure(IllegalStateException("Not signed in to a ship."))
+        else installAndWait(
+            http, url, poke, desk = desk,
+            installed = { installed?.invoke(url) ?: isInstalled(http, url) },
+        )
+    }
+
+    private const val POLL_MS = 3_000L
+    const val DEFAULT_TIMEOUT_MS = 90_000L
+
     /**
      * Poke our own %hood to install %grubbery from [PUBLISHER] — the
      * same action as `|install ~ricsul-bilwyt %grubbery`. kiln-install
      * takes json, so no dojo is needed. Returns (app, mark, body).
      */
-    fun installPoke(): Triple<String, String, JsonElement> = Triple(
+    fun installPoke(desk: String = DESK): Triple<String, String, JsonElement> = Triple(
         "hood",
         "kiln-install",
         buildJsonObject {
-            put("local", DESK)
+            put("local", desk)
             put("ship", PUBLISHER)
-            put("desk", DESK)
+            put("desk", desk)
         },
     )
 }

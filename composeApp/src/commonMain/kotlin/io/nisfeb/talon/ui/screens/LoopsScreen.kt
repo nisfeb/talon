@@ -113,9 +113,7 @@ fun LoopsScreen(
                     )
                 },
                 navigationIcon = {
-                    IconButton(onClick = { if (job != null) openJob = null else onBack() }) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-                    }
+                    io.nisfeb.talon.ui.NavIcon(onBack = { if (job != null) openJob = null else onBack() })
                 },
             )
         },
@@ -380,9 +378,7 @@ fun LoopDetail(
         ) {
             if (showBack) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    IconButton(onClick = onClose) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-                    }
+                    io.nisfeb.talon.ui.NavIcon(onBack = onClose)
                     Text(
                         loop.name,
                         style = MaterialTheme.typography.titleLarge,

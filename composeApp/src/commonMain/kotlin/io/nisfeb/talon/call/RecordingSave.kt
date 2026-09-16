@@ -11,7 +11,8 @@ expect suspend fun saveWavFile(bytes: ByteArray, name: String): String?
 
 /**
  * Saves any file next to the recordings (Downloads/Talon on desktop
- * and Android) with the given extension and MIME type. Returns where
- * it went, or null where saving is not possible (iOS today).
+ * and Android; Documents/Talon on iOS, shown in the Files app) with the
+ * given extension and MIME type. Returns where it went, or null when the
+ * write failed.
  */
 expect suspend fun saveFile(bytes: ByteArray, name: String, extension: String, mime: String): String?

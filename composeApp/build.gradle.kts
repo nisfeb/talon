@@ -618,7 +618,27 @@ ksp {
 // belong in this list.
 val iconsExtendedKeep = setOf(
     "androidx/compose/material/icons/automirrored/filled/LogoutKt.class",
+    // The home page: a chat icon for Chats, now that Home has the house,
+    // and a calendar for the day's panel.
+    "androidx/compose/material/icons/automirrored/filled/ChatKt.class",
+    "androidx/compose/material/icons/filled/CalendarTodayKt.class",
+    "androidx/compose/material/icons/filled/CalendarMonthKt.class",
+    "androidx/compose/material/icons/filled/ChecklistKt.class",
+    "androidx/compose/material/icons/filled/LinkKt.class",
+    // The home dial's weather: what the sky is doing, in one glyph.
+    "androidx/compose/material/icons/filled/CloudKt.class",
+    "androidx/compose/material/icons/filled/WaterDropKt.class",
+    "androidx/compose/material/icons/filled/AcUnitKt.class",
+    "androidx/compose/material/icons/filled/GrainKt.class",
+    "androidx/compose/material/icons/filled/AirKt.class",
+    "androidx/compose/material/icons/filled/ThunderstormKt.class",
     "androidx/compose/material/icons/filled/AttachFileKt.class",
+    // The mail sidebar: a mailbox column wants mailbox icons, and core
+    // has no equivalent that reads as one.
+    "androidx/compose/material/icons/filled/ArchiveKt.class",
+    "androidx/compose/material/icons/filled/InboxKt.class",
+    "androidx/compose/material/icons/filled/LabelKt.class",
+    "androidx/compose/material/icons/filled/TuneKt.class",
     // Broken-image tile for dead chat-image URLs (StoryRenderer).
     "androidx/compose/material/icons/filled/BrokenImageKt.class",
     "androidx/compose/material/icons/filled/ContentCopyKt.class",

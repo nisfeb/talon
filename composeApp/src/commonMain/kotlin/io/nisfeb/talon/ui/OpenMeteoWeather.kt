@@ -1,0 +1,170 @@
+package io.nisfeb.talon.ui
+
+import io.ktor.client.HttpClient
+import io.ktor.client.request.get
+import io.ktor.client.statement.bodyAsText
+import io.ktor.http.isSuccess
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
+
+/**
+ * Turning a place into today's weather.
+ *
+ * Null where nothing is wired, which keeps the dial honest: it draws
+ * the day and says nothing about the temperature rather than drawing
+ * a temperate blue it has no reason to believe.
+ */
+typealias WeatherLookup = suspend (HomePlace) -> Result<SkyClock.Sky>
+
+/**
+ * Today's temperature and cloud, from Open-Meteo.
+ *
+ * THIS SENDS COORDINATES TO A THIRD PARTY, and unlike the geocoder it
+ * does so on its own once a place is set, because that is what a
+ * weather dial is. Coarse by nature — the request carries a rounded
+ * position, which is all the forecast grid resolves to anyway, so the
+ * number that leaves is a neighbourhood rather than an address.
+ *
+ * No key and no account.
+ */
+class OpenMeteoWeather(private val http: HttpClient) {
+
+    suspend fun fetch(place: HomePlace): Result<SkyClock.Sky> = runCatching {
+        val resp = http.get(requestUrl(place))
+        if (!resp.status.isSuccess()) error("HTTP ${resp.status.value}")
+        parseForecast(resp.bodyAsText()) ?: error("no weather in the answer")
+    }
+
+    fun asLookup(): WeatherLookup = { p -> fetch(p) }
+
+    companion object {
+        private const val ENDPOINT = "https://api.open-meteo.com/v1/forecast"
+
+        /**
+         * The request for a place. Public because the home-screen
+         * widget asks the same question from a different process and
+         * must not ask it differently — not least about how much of
+         * somebody's position it sends.
+         *
+         * Two decimal places is about a kilometre, and the forecast
+         * model's own cells are coarser than that. Sending the raw fix
+         * would give away more than the answer uses.
+         */
+        fun requestUrl(place: HomePlace): String {
+            val lat = round2(place.lat)
+            val lon = round2(place.lon)
+            return "$ENDPOINT?latitude=$lat&longitude=$lon" +
+                "&current=temperature_2m,cloud_cover,weather_code" +
+                "&hourly=temperature_2m,cloud_cover,weather_code" +
+                "&forecast_days=1&timezone=auto"
+        }
+    }
+}
+
+private fun round2(v: Double): Double = (v * 100).toLong() / 100.0
+
+/**
+ * The weather half of a [SkyClock.Sky] — temperature, the day's high
+ * and low with the hour each falls on, and cloud. The sun's times and
+ * the current minute are the caller's business and are left at their
+ * defaults here.
+ *
+ * Pure so the awkward answers can be tested: a day with one hour of
+ * forecast in it, a missing cloud figure, a flat temperature where
+ * the high and the low are the same hour.
+ */
+internal fun parseForecast(body: String): SkyClock.Sky? {
+    val f = runCatching { forecastJson.decodeFromString<Forecast>(body) }.getOrNull() ?: return null
+    val current = f.current?.temperature ?: return null
+
+    val times = f.hourly?.time.orEmpty()
+    val temps = f.hourly?.temperature.orEmpty()
+    // A short or ragged array is the service having less to say, not a
+    // reason to drop the current temperature on the floor.
+    val pairs = times.zip(temps).mapNotNull { (t, c) ->
+        val m = minuteOfDay(t) ?: return@mapNotNull null
+        if (c == null) null else m to c
+    }
+    val high = pairs.maxByOrNull { it.second }
+    val low = pairs.minByOrNull { it.second }
+
+    // Laid out by hour of the day rather than by position in the
+    // answer, so a run that starts late or skips an hour still puts
+    // each reading on the right part of the ring.
+    val byHour = MutableList(24) { -1f }
+    val condByHour = MutableList(24) { SkyClock.Weather.CLEAR }
+    var sawCloud = false
+    var sawCode = false
+    times.forEachIndexed { i, t ->
+        val m = minuteOfDay(t) ?: return@forEachIndexed
+        val h = m / 60
+        if (h !in 0..23) return@forEachIndexed
+        f.hourly?.cloudCover?.getOrNull(i)?.let {
+            byHour[h] = (it / 100f).coerceIn(0f, 1f)
+            sawCloud = true
+        }
+        f.hourly?.weatherCode?.getOrNull(i)?.let {
+            condByHour[h] = SkyClock.weatherOf(it)
+            sawCode = true
+        }
+    }
+    // A gap in the middle of the run is filled from the hour before it.
+    // Better a cloud that lingers an hour too long than a hole in the
+    // ring that reads as a sudden clearing.
+    var carry = 0f
+    for (h in 0 until 24) {
+        if (byHour[h] < 0f) byHour[h] = carry else carry = byHour[h]
+    }
+
+    return SkyClock.Sky(
+        minuteOfDay = 0,
+        currentC = current,
+        highC = high?.second,
+        highAtMinute = high?.first,
+        lowC = low?.second,
+        lowAtMinute = low?.first,
+        cloudCover = f.current.cloudCover?.let { (it / 100f).coerceIn(0f, 1f) },
+        hourlyCloud = if (sawCloud) byHour.toList() else emptyList(),
+        hourlyCondition = if (sawCode) condByHour.toList() else emptyList(),
+        condition = SkyClock.weatherOf(f.current.weatherCode),
+        // The request asks for the place's own zone, and the answer
+        // says which one that turned out to be. It is how a set of
+        // typed coordinates ever learns what clock it is on.
+        zoneId = f.timezone?.takeIf { it.isNotBlank() },
+    )
+}
+
+/** `2026-09-11T14:00` — the local wall clock, because the request asks
+ *  for the place's own zone. Anything else is not a time we can plot. */
+private fun minuteOfDay(stamp: String): Int? {
+    val t = stamp.substringAfter('T', "")
+    val h = t.substringBefore(':', "").toIntOrNull() ?: return null
+    val m = t.substringAfter(':', "").take(2).toIntOrNull() ?: return null
+    if (h !in 0..23 || m !in 0..59) return null
+    return h * 60 + m
+}
+
+private val forecastJson = Json { ignoreUnknownKeys = true }
+
+@Serializable
+private data class Forecast(
+    val timezone: String? = null,
+    val current: Current? = null,
+    val hourly: Hourly? = null,
+)
+
+@Serializable
+private data class Current(
+    @SerialName("temperature_2m") val temperature: Double? = null,
+    @SerialName("cloud_cover") val cloudCover: Float? = null,
+    @SerialName("weather_code") val weatherCode: Int? = null,
+)
+
+@Serializable
+private data class Hourly(
+    val time: List<String> = emptyList(),
+    @SerialName("temperature_2m") val temperature: List<Double?> = emptyList(),
+    @SerialName("cloud_cover") val cloudCover: List<Float?> = emptyList(),
+    @SerialName("weather_code") val weatherCode: List<Int?> = emptyList(),
+)

@@ -4,7 +4,6 @@ import androidx.room.Room
 import androidx.sqlite.driver.bundled.BundledSQLiteDriver
 import io.nisfeb.talon.ai.AiSettings
 import io.nisfeb.talon.ai.AiSettingsRepository
-import io.nisfeb.talon.ai.DailyDigestSettings
 import io.nisfeb.talon.data.AppDatabase
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -48,7 +47,6 @@ class SettingsSyncFuzzTest {
         SettingsSyncImpl.BUCKET_AI_SETTINGS,
         SettingsSyncImpl.BUCKET_WATCHWORDS,
         SettingsSyncImpl.BUCKET_WATCHWORD_EXCLUDES,
-        SettingsSyncImpl.BUCKET_DAILY_DIGEST,
         // unknown buckets — must also be a no-op rather than a throw
         "unknown-bucket",
         "",
@@ -65,7 +63,6 @@ class SettingsSyncFuzzTest {
         sync = SettingsSyncImpl(
             db = db,
             aiSettings = NoopAiSettings(),
-            dailyDigestSettings = NoopDailyDigest(),
         )
     }
 
@@ -181,21 +178,10 @@ private class NoopAiSettings : AiSettingsRepository {
     ) {}
     override fun setFeature(feature: AiSettings.Feature, enabled: Boolean) {}
     override fun setBraveApiKey(key: String) {}
-        override fun setSttApiKey(key: String) {}
+    override fun setSttApiKey(key: String) {}
     override fun setPrompt(kind: AiSettings.PromptKind, value: String) {}
     override fun setSyncEnabled(enabled: Boolean) {}
     override fun applyRemote(config: AiSettings.Config) { _state.value = config }
     override fun clear() {}
 }
 
-private class NoopDailyDigest : DailyDigestSettings {
-    private val _state = MutableStateFlow(DailyDigestSettings.State())
-    override val state: StateFlow<DailyDigestSettings.State> = _state.asStateFlow()
-    override var onChange: ((DailyDigestSettings.Change, Boolean) -> Unit)? = null
-    override fun setEnabled(enabled: Boolean) {}
-    override fun setTime(hourOfDay: Int, minuteOfDay: Int) {}
-    override fun applyRemote(enabled: Boolean, hourOfDay: Int, minuteOfDay: Int) {
-        _state.value = DailyDigestSettings.State(enabled, hourOfDay, minuteOfDay)
-    }
-    override fun emitSyncToggledOff() {}
-}

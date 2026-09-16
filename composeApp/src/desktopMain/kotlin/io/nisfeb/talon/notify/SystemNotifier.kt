@@ -51,14 +51,50 @@ class SystemNotifier(
 
     private val iconFile = AtomicReference<File?>(null)
 
-    override fun notify(title: String, body: String) {
+    // ponytail: ids per key for the life of the process, the last 20 each; a toast parked in GNOME's tray stays closable.
+    private val shown = HashMap<String, ArrayDeque<Long>>()
+
+    private fun record(key: String?, id: Long?) {
+        if (key == null || id == null) return
+        synchronized(shown) {
+            val q = shown.getOrPut(key) { ArrayDeque() }
+            q.addLast(id)
+            while (q.size > 20) q.removeFirst()
+        }
+    }
+
+    /** Closes what was shown under [key]. Linux only: the macOS and Windows tray balloons cannot be withdrawn. */
+    override fun clear(key: String) {
+        val ids = synchronized(shown) { shown.remove(key) } ?: return
+        if (backend == Backend.FALLBACK) return
+        Thread {
+            ids.forEach { id ->
+                runCatching {
+                    spawn(
+                        listOf(
+                            "gdbus", "call", "--session",
+                            "--dest", "org.freedesktop.Notifications",
+                            "--object-path", "/org/freedesktop/Notifications",
+                            "--method", "org.freedesktop.Notifications.CloseNotification",
+                            id.toString(),
+                        )
+                    )
+                }
+            }
+        }.apply {
+            isDaemon = true
+            name = "Talon-notify-clear"
+        }.start()
+    }
+
+    override fun notify(title: String, body: String, key: String?) {
         Thread {
             // Try up to one demotion (notify-send → gdbus on Linux)
             // before serving via the tray fallback. The retry is what
             // keeps the *first* notification on a notify-send-less host
             // from being an ugly Swing balloon.
             repeat(2) {
-                if (tryEmit(title, body)) return@Thread
+                if (tryEmit(title, body, key)) return@Thread
             }
             runCatching { trayFallback(title, body) }
         }.apply {
@@ -67,11 +103,11 @@ class SystemNotifier(
         }.start()
     }
 
-    private fun tryEmit(title: String, body: String): Boolean {
+    private fun tryEmit(title: String, body: String, key: String?): Boolean {
         return try {
             when (backend) {
-                Backend.LINUX_NOTIFY_SEND -> notifyNotifySend(title, body)
-                Backend.LINUX_GDBUS -> notifyGdbus(title, body)
+                Backend.LINUX_NOTIFY_SEND -> notifyNotifySend(title, body, key)
+                Backend.LINUX_GDBUS -> notifyGdbus(title, body, key)
                 Backend.FALLBACK -> return false
             }
             true
@@ -105,7 +141,7 @@ class SystemNotifier(
         }
     }
 
-    private fun notifyNotifySend(title: String, body: String) {
+    private fun notifyNotifySend(title: String, body: String, key: String?) {
         val args = mutableListOf("notify-send", "-a", "Talon")
         ensureIconFile()?.let {
             args += "-i"
@@ -116,6 +152,8 @@ class SystemNotifier(
         // until the toast closes and prints the activated action's
         // name on stdout — we're already on the per-notification
         // daemon thread, so blocking on that here is free.
+        // -p prints the id first, before the wait, so the toast can be closed later.
+        args += "-p"
         args += "-A"
         args += "default=Open"
         // -A implies --wait, and the wait is only bounded when an
@@ -130,7 +168,10 @@ class SystemNotifier(
         val process = ProcessBuilder(args)
             .redirectError(ProcessBuilder.Redirect.DISCARD)
             .start()
-        val action = process.inputStream.bufferedReader().use { it.readLine() }
+        val action = process.inputStream.bufferedReader().use { out ->
+            record(key, out.readLine()?.trim()?.toLongOrNull())
+            out.readLine()
+        }
         if (process.waitFor() != 0) {
             // Likely a notify-send too old for -A (< 0.7.10). Throwing
             // IOException routes through tryEmit's demotion so the
@@ -140,12 +181,13 @@ class SystemNotifier(
         if (action?.trim() == "default") onActivate()
     }
 
-    private fun notifyGdbus(title: String, body: String) {
+    private fun notifyGdbus(title: String, body: String, key: String?) {
         // Direct call to org.freedesktop.Notifications.Notify. Args:
         //   app_name, replaces_id, app_icon, summary, body,
         //   actions[], hints{}, expire_timeout_ms
         val iconPath = ensureIconFile()?.absolutePath ?: ""
-        spawn(
+        // The answer is "(uint32 <id>,)": kept so the toast can be closed later.
+        val process = ProcessBuilder(
             listOf(
                 "gdbus", "call", "--session",
                 "--dest", "org.freedesktop.Notifications",
@@ -160,7 +202,10 @@ class SystemNotifier(
                 "{}",
                 "-1",
             )
-        )
+        ).redirectErrorStream(true).start()
+        val out = process.inputStream.bufferedReader().use { it.readText() }
+        process.waitFor()
+        record(key, gdbusId(out))
     }
 
     private fun spawn(args: List<String>) {
@@ -190,3 +235,6 @@ class SystemNotifier(
         }.getOrNull()
     }
 }
+
+/** The id in gdbus's answer to Notify, "(uint32 42,)", or null. */
+internal fun gdbusId(out: String): Long? = Regex("""uint32 (\d+)""").find(out)?.groupValues?.get(1)?.toLongOrNull()

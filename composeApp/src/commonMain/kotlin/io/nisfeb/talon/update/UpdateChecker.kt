@@ -21,6 +21,6 @@ sealed interface UpdateStatus {
     data object Idle : UpdateStatus
     data class Available(val manifest: UpdateManifest) : UpdateStatus
     data class Downloading(val manifest: UpdateManifest, val progress: Int) : UpdateStatus
-    data class Ready(val manifest: UpdateManifest, val apkPath: String) : UpdateStatus
+    data class Ready(val manifest: UpdateManifest, val apkPath: String, val hint: String) : UpdateStatus
     data class Failed(val manifest: UpdateManifest?, val message: String) : UpdateStatus
 }

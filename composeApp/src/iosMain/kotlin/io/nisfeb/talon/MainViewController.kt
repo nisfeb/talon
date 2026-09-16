@@ -17,7 +17,6 @@ import io.nisfeb.talon.call.IosPeerLinkFactory
 import io.nisfeb.talon.call.NativeRtcFactory
 import io.nisfeb.talon.compose.App
 import io.nisfeb.talon.data.createAppDatabase
-import io.nisfeb.talon.ai.NoopDailyDigestSettings
 import io.nisfeb.talon.ui.IosDraftStore
 import io.nisfeb.talon.ui.createUiSettings
 import io.nisfeb.talon.ui.theme.IosThemePreference
@@ -66,7 +65,6 @@ fun MainViewController(rtc: NativeRtcFactory?): UIViewController {
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default + backgroundExceptionHandler)
     // Digest has no scheduler on iOS (gated off in Capabilities), but
     // %settings sync still needs a sink for the bucket.
-    val dailyDigestSettings = NoopDailyDigestSettings()
 
     val updateState = UpdateState(
         scope = scope,
@@ -87,6 +85,9 @@ fun MainViewController(rtc: NativeRtcFactory?): UIViewController {
             override fun install(apkPath: String) {
                 // No sideload on iOS.
             }
+
+            override val readyHint = ""
+
         },
     )
 
@@ -101,11 +102,13 @@ fun MainViewController(rtc: NativeRtcFactory?): UIViewController {
     // Built once, like the factories above: anything constructed inside
     // the composable lambda is rebuilt on recomposition.
     val drafts = IosDraftStore()
+    IosAppLifecycle.observe()
     return ComposeUIViewController {
         Box(Modifier.fillMaxSize()) {
         App(
             http = http,
             sessionStore = sessionStore,
+            shipDataEraser = io.nisfeb.talon.data.IosShipDataEraser(),
             aiSettings = aiSettings,
             createDb = { shipKey -> createAppDatabase(shipKey) },
             drafts = drafts,
@@ -118,8 +121,6 @@ fun MainViewController(rtc: NativeRtcFactory?): UIViewController {
                 SettingsSyncImpl(
                     db = db,
                     aiSettings = aiSettings,
-                    dailyDigestSettings = dailyDigestSettings,
-                    rearmDailyDigest = {},
                 )
             },
             createUiSettings = { db -> createUiSettings(db, scope) },
@@ -129,13 +130,14 @@ fun MainViewController(rtc: NativeRtcFactory?): UIViewController {
             // shows no call button rather than a broken one.
             callEngineProvider = callEngineProvider,
             peerLinkFactory = peerLinkFactory,
-            dailyDigestSettings = dailyDigestSettings,
             audioDevices = io.nisfeb.talon.call.IosAudioDevices(),
             callSounds = io.nisfeb.talon.call.IosCallSoundPlayer(),
             // PushKit VoIP token → relay, so a backgrounded phone
             // gets an APNs VoIP ring. The token itself arrives from
             // CallPush.swift via IosVoipBridge.
             pushTokenProvider = io.nisfeb.talon.notify.IosPushTokenProvider(),
+            appForeground = IosAppLifecycle.foreground,
+            notifier = io.nisfeb.talon.notify.IosNotifier(),
         )
         // Back gesture. A Compose view controller gets none of UIKit's
         // navigation edge-swipe, so we draw our own: a narrow strip on

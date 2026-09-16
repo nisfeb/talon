@@ -1,5 +1,8 @@
 package io.nisfeb.talon.ui.screens
 
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -15,11 +18,7 @@ import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -36,7 +35,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import io.nisfeb.talon.data.AppDatabase
 import io.nisfeb.talon.ui.Avatar
-import io.nisfeb.talon.urbit.PATP_REGEX
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.QrCodeScanner
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 
 @Composable
 fun NewDmScreen(
@@ -50,8 +52,15 @@ fun NewDmScreen(
      *  "Add contact" affordance shows. NOT the broad /v1/all table
      *  (which includes every known peer). */
     bookContacts: Set<String> = emptySet(),
+    /** A scanned group code: join the group. With [onInviteShip], puts a
+     *  camera on this screen where the platform has a scanner. */
+    onJoinGroup: ((flag: String) -> Unit)? = null,
+    /** A scanned invite-me code: invite that ship to one of our groups. */
+    onInviteShip: ((ship: String) -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
+    val fieldFocus = remember { FocusRequester() }
+    LaunchedEffect(Unit) { runCatching { fieldFocus.requestFocus() } }
     var query by remember { mutableStateOf("") }
     var newContactName by remember { mutableStateOf("") }
     val contacts by remember { db.contacts().stream() }.collectAsState(initial = emptyList())
@@ -61,28 +70,63 @@ fun NewDmScreen(
         if (q.isEmpty()) contacts
         else contacts.filter { c ->
             c.ship.lowercase().removePrefix("~").contains(q) ||
-                (c.nickname?.lowercase()?.contains(q) == true)
+                (c.nickname?.lowercase()?.contains(q) == true) ||
+                // The name a comet actually goes by on every other
+                // screen. Leaving it out meant the list could not find
+                // somebody by the only name the reader had seen.
+                io.nisfeb.talon.ui.shipHandle(c.ship).lowercase().contains(q) ||
+                io.nisfeb.talon.ui.shipHandleLong(c.ship)?.lowercase()?.contains(q) == true
         }
     }
 
     val trimmedInput = query.trim()
-    val asPatp = if (trimmedInput.startsWith("~")) trimmedInput else "~$trimmedInput"
-    val isValidPatp = PATP_REGEX.matches(asPatp)
+    // A comet answers to its @p, its twelve-word name and the two-word
+    // one every screen shows. Only the first used to be accepted, so
+    // the name people were actually given was the one this box refused.
+    val namesGen by io.nisfeb.talon.ui.AzimuthNames.generation.collectAsState()
+    val byShip = remember(contacts) { contacts.associateBy { it.ship } }
+    val resolved = remember(trimmedInput, byShip, namesGen) {
+        io.nisfeb.talon.ui.NameToShip.resolve(
+            typed = trimmedInput,
+            known = byShip.keys,
+            nicknameOf = { ship -> byShip[ship]?.nickname },
+        )
+    }
+    val asPatp = (resolved as? io.nisfeb.talon.ui.NameToShip.Result.One)?.ship
+        ?: if (trimmedInput.startsWith("~")) trimmedInput else "~$trimmedInput"
+    val isValidPatp = resolved is io.nisfeb.talon.ui.NameToShip.Result.One
+    val resolveHint = io.nisfeb.talon.ui.NameToShip.hint(resolved, trimmedInput)
     val alreadyContact = remember(asPatp, bookContacts) { asPatp in bookContacts }
+    var scanProblem by remember { mutableStateOf<String?>(null) }
+    val scan = if (io.nisfeb.talon.ui.isQrScanSupported && onJoinGroup != null && onInviteShip != null) {
+        io.nisfeb.talon.ui.rememberQrScanLauncher("Point the camera at a group or invite code") { raw ->
+            when (val link = raw?.let { io.nisfeb.talon.urbit.TalonLink.parse(it) }) {
+                is io.nisfeb.talon.urbit.TalonLink.Group -> onJoinGroup(link.flag)
+                is io.nisfeb.talon.urbit.TalonLink.InviteMe -> onInviteShip(link.ship)
+                else -> if (raw != null) scanProblem = "That is not a Talon group or invite code."
+            }
+        }
+    } else null
 
     Column(modifier = modifier.windowInsetsPadding(WindowInsets.safeDrawing)) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            IconButton(onClick = onBack) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-            }
+            io.nisfeb.talon.ui.NavIcon(onBack = onBack)
             Text(
                 "New message",
                 style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
-                modifier = Modifier.padding(start = 4.dp),
+                modifier = Modifier.padding(start = 4.dp).weight(1f),
             )
+            if (scan != null) {
+                IconButton(onClick = { scanProblem = null; scan() }) {
+                    Icon(Icons.Filled.QrCodeScanner, contentDescription = "Scan a group or invite code")
+                }
+            }
+        }
+        scanProblem?.let {
+            Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp))
         }
         HorizontalDivider()
         Row(
@@ -93,14 +137,27 @@ fun NewDmScreen(
             OutlinedTextField(
                 value = query,
                 onValueChange = { query = it },
-                placeholder = { Text("~patp or name") },
-                singleLine = true,
-                modifier = Modifier.weight(1f),
+                placeholder = { Text("~ship, or a word name") },
+                // Not single-line: a comet's @p is fifty-six characters
+                // and its full name is twelve words, and either one
+                // scrolled off the end of a single line with no way to
+                // see what you had typed.
+                singleLine = false,
+                maxLines = 3,
+                modifier = Modifier.weight(1f).focusRequester(fieldFocus),
             )
             TextButton(
                 onClick = { onPickPeer(asPatp) },
                 enabled = isValidPatp,
             ) { Text("Start") }
+        }
+        resolveHint?.let {
+            Text(
+                it,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 6.dp),
+            )
         }
         // Add-to-contacts row — only when a valid ~patp that isn't
         // already a contact is entered. Optional nickname; tracks the
@@ -156,7 +213,7 @@ fun NewDmScreen(
                             )
                         }
                         Text(
-                            c.ship,
+                            io.nisfeb.talon.ui.shipHandle(c.ship),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )

@@ -66,7 +66,6 @@ class IosAiSettings : AiSettingsRepository {
         val cfg = _state.value
         val new = when (feature) {
             AiSettings.Feature.CatchMeUp -> cfg.copy(catchMeUpEnabled = enabled)
-            AiSettings.Feature.DailyDigest -> cfg.copy(dailyDigestEnabled = enabled)
             AiSettings.Feature.SmartFeatures -> cfg.copy(smartFeaturesEnabled = enabled)
             AiSettings.Feature.Agent -> cfg.copy(agentEnabled = enabled)
         }

@@ -1,4 +1,5 @@
 package io.nisfeb.talon.ui.screens
+import io.nisfeb.talon.ui.reorderHandle
 import kotlin.concurrent.Volatile
 import io.nisfeb.talon.util.ConcurrentMap
 import io.nisfeb.talon.util.formatMonthDay
@@ -8,7 +9,6 @@ import io.nisfeb.talon.util.nowMs
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.combinedClickable
 import io.nisfeb.talon.ui.combinedClickableWithSecondary
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -26,7 +26,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
@@ -41,12 +40,10 @@ import androidx.compose.material.icons.filled.Done
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.DragHandle
 import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
@@ -94,10 +91,9 @@ import io.nisfeb.talon.ui.applyEmojiSpans
 import io.nisfeb.talon.ui.FolderAssignmentSheet
 import io.nisfeb.talon.ui.RailItem
 import io.nisfeb.talon.ui.UpdateBanner
-import io.nisfeb.talon.ui.contactMapFlow
 import io.nisfeb.talon.ui.shortRelativeTime
 import io.nisfeb.talon.update.UpdateStatus
-import io.nisfeb.talon.ai.DailyDigestMentionMatcher
+import io.nisfeb.talon.ui.MentionMatcher
 import io.nisfeb.talon.urbit.StoryCache
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.combine
@@ -126,23 +122,23 @@ fun DmListScreen(
     onSignOut: () -> Unit,
     onOpenSelfProfile: () -> Unit,
     onOpenStatusFeed: () -> Unit,
+    onOpenMail: () -> Unit = {},
     partyLinesTab: (@Composable () -> Unit)? = null,
     partyLinesOccupied: Boolean = false,
     onOpenBookmarks: () -> Unit,
     onOpenActivity: () -> Unit,
+    onOpenCalendar: () -> Unit = {},
     /** Open the curated Contacts (book) screen. Always shown in the
      *  overflow menu (not a rail item). */
     onOpenContacts: () -> Unit = {},
     onOpenWatchwords: () -> Unit = {},
-    onOpenDigest: () -> Unit = {},
-    /** Hide the "Today's brief" menu entry when the digest alarm is
-     *  disabled in settings — no point routing into a screen the user
-     *  hasn't opted into yet. */
-    digestEnabled: Boolean = false,
+    /** Open the home page. Null where the host has no Home surface,
+     *  which hides the entry rather than offering a dead one. */
+    onOpenHome: (() -> Unit)? = null,
     /** Per-ship persistent "I've seen this" timestamps for the More
-     *  menu's freshness dots. Tap-throughs on Today's brief /
-     *  Statuses / Invites mark the corresponding entry seen so the
-     *  pip clears even though the underlying data is still there.
+     *  menu's freshness dots. Tap-throughs on Statuses / Invites mark
+     *  the corresponding entry seen so the pip clears even though the
+     *  underlying data is still there.
      *  Defaults to NoopMenuSeenStore for tests / hosts that haven't
      *  wired persistence yet. */
     menuSeen: io.nisfeb.talon.ui.MenuSeenStore =
@@ -150,6 +146,10 @@ fun DmListScreen(
     onOpenAdministration: () -> Unit = {},
     onOpenInvites: () -> Unit = {},
     onOpenSettings: () -> Unit,
+    /** Opens the screen that chooses the sidebar's and kebab's
+     *  contents; offered from the kebab, where a missing section is
+     *  noticed. Null where the host has no such screen. */
+    onOpenSidebarSettings: (() -> Unit)? = null,
     /**
      * Items the kebab dropdown should show. App.kt computes this:
      *  - On wide windows: items NOT on the rail (the rail is the
@@ -290,7 +290,7 @@ fun DmListScreen(
             } else {
                 recent.any { m ->
                     val text = StoryCache.textFor(m.id, m.contentJson)
-                    DailyDigestMentionMatcher.containsMention(text, patp)
+                    io.nisfeb.talon.ui.MentionMatcher.containsMention(text, patp)
                 }
             }
             if (include) filtered.add(u)
@@ -303,14 +303,7 @@ fun DmListScreen(
         out
     }
 
-    val contactMap by remember {
-        contactMapFlow(
-            db.contacts().stream(),
-            db.clubs().stream(),
-            db.groups().streamGroups(),
-            db.groups().streamChannelGroups(),
-        ).onEach { snap.contactMap = it }
-    }.collectAsState(initial = snap.contactMap)
+    val contactMap by io.nisfeb.talon.ui.rememberContactMap(db)
 
     val drafts by drafts.state.collectAsState()
     val updateStatus by updateState.status.collectAsState()
@@ -742,22 +735,11 @@ fun DmListScreen(
             modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            // Full-color brand mark — keep as `Image` (Icon would tint
-            // every non-transparent pixel with the surface color and
-            // flatten the multi-color logo into a silhouette).
-            androidx.compose.foundation.Image(
-                painter = io.nisfeb.talon.ui.talonLogoPainter(),
-                contentDescription = "Switch ship",
-                modifier = Modifier
-                    .size(32.dp)
-                    .clickable { onOpenShipSwitcher() },
-            )
-            Text(
-                "Talon",
-                style = MaterialTheme.typography.titleLarge,
-                modifier = Modifier
-                    .padding(start = 8.dp, top = 8.dp, bottom = 8.dp),
-            )
+            // The hamburger takes the left, where the logo used to be.
+            // Nothing on desktop: the rail is already the way to every
+            // section, and the name of the app is not news to anybody
+            // running it.
+            io.nisfeb.talon.ui.NavIcon(onBack = null)
             if (allShips.size > 1 && activeShip != null) {
                 // Prefer nickname, but collapse to patp when more than
                 // one logged-in ship shares the same nickname so the
@@ -765,7 +747,16 @@ fun DmListScreen(
                 val activeNick = shipNicknames[activeShip]
                 val collision = activeNick != null &&
                     allShips.count { shipNicknames[it] == activeNick } > 1
-                val label = if (activeNick != null && !collision) activeNick else activeShip
+                // Falling back to the @p made this the one place a
+                // comet still showed its fifty-six characters. It falls
+                // back to the word name now, and to the unabridged one
+                // where two signed-in ships would otherwise read alike,
+                // since a label that cannot tell them apart is the
+                // thing this branch exists to avoid.
+                val label = when {
+                    activeNick != null && !collision -> activeNick
+                    else -> io.nisfeb.talon.ui.shipHandles(allShips).getValue(activeShip)
+                }
                 // Colored dot in the user's chosen accent — same
                 // value as `colorScheme.primary` since App.kt's
                 // TalonTheme override drives the theme primary
@@ -803,10 +794,8 @@ fun DmListScreen(
             var menuOpen by remember { mutableStateOf(false) }
             // Freshness-dot inputs. Per-feature data flows joined with
             // the menuSeen state so a tap-through actually clears the
-            // dot — leaving "Today's brief" lit 24/7 just because a
-            // digest exists for today helps no one (the user said
-            // exactly that). The marker writes happen in the per-item
-            // onClick branches below.
+            // dot. The marker writes happen in the per-item onClick
+            // branches below.
             val seenState by menuSeen.state.collectAsState()
             // Status-feed "seen" syncs across the user's devices via
             // %settings; merge that high-water mark with the local one so
@@ -818,18 +807,12 @@ fun DmListScreen(
             val syncedStatusesSeenMs by statusesSeenFlow.collectAsState()
             val pendingInvites = repo.invitesFlow.collectAsState().value
                 ?: emptyList()
-            val latestDigest by remember(db, activeShip) {
-                db.dailyDigests().streamLatestForShip(activeShip ?: "")
-            }.collectAsState(initial = null)
             val statusFeedRows by remember(db) {
                 db.contacts().streamStatusFeed()
             }.collectAsState(initial = emptyList())
             val invitesSnapshot = remember(pendingInvites) {
                 io.nisfeb.talon.ui.invitesSnapshot(pendingInvites.map { it.flag })
             }
-            val hasFreshDigest = latestDigest?.dateLocal?.let {
-                it != seenState.lastSeenDigestDate
-            } == true
             val effectiveStatusesSeenMs =
                 maxOf(seenState.lastSeenStatusesMs, syncedStatusesSeenMs)
             val hasFreshStatuses = remember(statusFeedRows, effectiveStatusesSeenMs, activeShip) {
@@ -853,10 +836,12 @@ fun DmListScreen(
             // rail instead). The rail itself doesn't carry badges
             // today; that's a separate follow-up.
             val anyMenuBadge =
-                (hasFreshDigest && RailItem.TodaysBrief in kebabItems) ||
                 (hasFreshStatuses && RailItem.Statuses in kebabItems) ||
                 (hasPendingInvites && RailItem.Invites in kebabItems)
-            Box {
+            // Desktop only. A phone reaches every section through
+            // the drawer, and two ways to one set of sections is
+            // one way too many.
+            if (!io.nisfeb.talon.ui.isDrawerNavigation) Box {
                 IconButton(onClick = { menuOpen = true }) {
                     Box {
                         Icon(Icons.Filled.MoreVert, contentDescription = "More")
@@ -884,6 +869,18 @@ fun DmListScreen(
                             )
                         }
                     }
+                    // First in the list where a host has one at all.
+                    // Desktop reaches Home from the rail; a phone has
+                    // no rail, so this is the way in.
+                    onOpenHome?.let { open ->
+                        DropdownMenuItem(
+                            text = { Text("Home") },
+                            onClick = {
+                                menuOpen = false
+                                open()
+                            },
+                        )
+                    }
                     if (RailItem.Profile in kebabItems) {
                         DropdownMenuItem(
                             text = { Text("My profile") },
@@ -910,6 +907,15 @@ fun DmListScreen(
                             },
                         )
                     }
+                    if (RailItem.Mail in kebabItems) {
+                        DropdownMenuItem(
+                            text = { Text("Mail") },
+                            onClick = {
+                                menuOpen = false
+                                onOpenMail()
+                            },
+                        )
+                    }
                     if (RailItem.Bookmarks in kebabItems) {
                         DropdownMenuItem(
                             text = { Text("Bookmarks") },
@@ -928,6 +934,15 @@ fun DmListScreen(
                             },
                         )
                     }
+                    if (RailItem.Calendar in kebabItems) {
+                        DropdownMenuItem(
+                            text = { Text("Calendar") },
+                            onClick = {
+                                menuOpen = false
+                                onOpenCalendar()
+                            },
+                        )
+                    }
                     DropdownMenuItem(
                         text = { Text("Contacts") },
                         onClick = {
@@ -941,21 +956,6 @@ fun DmListScreen(
                             onClick = {
                                 menuOpen = false
                                 onOpenWatchwords()
-                            },
-                        )
-                    }
-                    if (RailItem.TodaysBrief in kebabItems && digestEnabled) {
-                        DropdownMenuItem(
-                            text = { Text("Today's brief") },
-                            trailingIcon = {
-                                if (hasFreshDigest) MenuBadgeDot()
-                            },
-                            onClick = {
-                                menuOpen = false
-                                latestDigest?.dateLocal?.let {
-                                    menuSeen.markDigestSeen(it)
-                                }
-                                onOpenDigest()
                             },
                         )
                     }
@@ -990,6 +990,15 @@ fun DmListScreen(
                             },
                         )
                     }
+                    if (onOpenSidebarSettings != null) {
+                        DropdownMenuItem(
+                            text = { Text(if (io.nisfeb.talon.ui.isDrawerNavigation) "Edit menu" else "Edit sidebar") },
+                            onClick = {
+                                menuOpen = false
+                                onOpenSidebarSettings()
+                            },
+                        )
+                    }
                     // Sign out is always rendered last, never gated by kebabItems —
                     // it's not a RailItem and never lives on the rail.
                     DropdownMenuItem(
@@ -1001,6 +1010,18 @@ fun DmListScreen(
                     )
                 }
             }
+            // The brand mark on the right, where the ellipsis was, and
+            // it is what opens the ship picker. Kept as an Image: an
+            // Icon would tint every non-transparent pixel and flatten a
+            // multi-colour logo into a silhouette.
+            androidx.compose.foundation.Image(
+                painter = io.nisfeb.talon.ui.talonLogoPainter(),
+                contentDescription = "Switch ship",
+                modifier = Modifier
+                    .padding(end = 4.dp)
+                    .size(32.dp)
+                    .clickable { onOpenShipSwitcher() },
+            )
         }
         HorizontalDivider()
         batteryBanner?.invoke()
@@ -1099,6 +1120,10 @@ fun DmListScreen(
                 .sortedByDescending { it.recencyMs }
                 .map { u -> u to rowsByWhom[u.whom] }
         }
+        // The list and the chips that point at unread rows beyond its
+        // edges share a box, so the chips sit against the list's own top
+        // and bottom rather than a guessed distance from the screen's.
+        Box(Modifier.weight(1f).fillMaxWidth()) {
         // The party tab is a different list, not a slice of the home
         // rows, so it stands in for the whole LazyColumn. Guarded on the
         // view selectors too: selectedHomeTab survives a switch to a
@@ -1299,7 +1324,7 @@ fun DmListScreen(
                                             },
                                             onLongClick = if (editMode) null else onGroupHeadLongPress,
                                             editMode = editMode,
-                                            dragHandleModifier = if (!canReorder) null else Modifier.longPressDraggableHandle(
+                                            dragHandleModifier = if (!canReorder) null else reorderHandle(
                                                 onDragStarted = {
                                                     hapticRoot.performHapticFeedback(HapticFeedbackType.LongPress)
                                                     expandedGroups = expandedGroups - row.flag
@@ -1381,7 +1406,7 @@ fun DmListScreen(
                                         onClick = onRowOpen,
                                         onLongClick = onRowLongPress,
                                         editMode = editMode,
-                                        dragHandleModifier = if (!canReorder) null else Modifier.longPressDraggableHandle(
+                                        dragHandleModifier = if (!canReorder) null else reorderHandle(
                                             onDragStarted = {
                                                 hapticRoot.performHapticFeedback(HapticFeedbackType.LongPress)
                                             },
@@ -1486,7 +1511,7 @@ fun DmListScreen(
                                             },
                                             onLongClick = if (editMode) null else onGroupHeadLongPress,
                                             editMode = editMode,
-                                            dragHandleModifier = if (!canReorder) null else Modifier.longPressDraggableHandle(
+                                            dragHandleModifier = if (!canReorder) null else reorderHandle(
                                                 onDragStarted = {
                                                     hapticRoot.performHapticFeedback(
                                                         HapticFeedbackType.LongPress,
@@ -1564,20 +1589,10 @@ fun DmListScreen(
                 }
             }
         }
-    }
-        FloatingActionButton(
-            onClick = onNewMessage,
-            modifier = Modifier
-                .align(Alignment.BottomEnd)
-                .padding(16.dp),
-        ) { Icon(Icons.Filled.Add, contentDescription = "New message") }
-
-        // Subtle off-screen unread indicators. Only valid for the All
-        // tab — the Unread / Mentions tabs render a different flat
-        // list, so unreadIndices (built from homeRows) wouldn't line
-        // up with listState's visibleItemsInfo and we'd flash a stale
-        // "scroll for more" chip on top of an already-fully-visible
-        // list. Folder views are short enough not to need the hint.
+        // Only valid for the All tab: the Unread / Mentions tabs render
+        // a different flat list, so unreadIndices (built from homeRows)
+        // would not line up with listState. Folder views are short
+        // enough not to need the hint.
         if (selectedFolderId == null && selectedSpecial == SpecialTab.All) {
             UnreadOffscreenIndicators(
                 homeRows = visibleHomeRows,
@@ -1587,6 +1602,15 @@ fun DmListScreen(
                 },
             )
         }
+        }
+    }
+        FloatingActionButton(
+            onClick = onNewMessage,
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(16.dp),
+        ) { Icon(Icons.Filled.Add, contentDescription = "New message") }
+
     }
 
     folderSheetWhom?.let { whom ->
@@ -1765,7 +1789,14 @@ internal fun ShipSwitcherDrawer(
     nicknames: Map<String, String>,
     onPick: (String) -> Unit,
     onAdd: () -> Unit,
+    /** Drop a ship's saved session, keeping what it cached so signing
+     *  back in does not start from nothing. Null where unwired. */
+    onSignOut: ((String) -> Unit)? = null,
+    /** Drop the session and everything stored under it. */
+    onForget: ((String) -> Unit)? = null,
 ) {
+    var menuFor by remember { mutableStateOf<String?>(null) }
+    var confirmForget by remember { mutableStateOf<String?>(null) }
     androidx.compose.material3.ModalDrawerSheet {
         Column(
             modifier = Modifier
@@ -1791,7 +1822,7 @@ internal fun ShipSwitcherDrawer(
                             else androidx.compose.ui.graphics.Color.Transparent,
                         )
                         .clickable { onPick(ship) }
-                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                        .padding(start = 12.dp, end = 4.dp, top = 10.dp, bottom = 10.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     androidx.compose.foundation.Image(
@@ -1810,18 +1841,46 @@ internal fun ShipSwitcherDrawer(
                                 ),
                             )
                             Text(
-                                ship,
+                                io.nisfeb.talon.ui.shipHandle(ship),
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         } else {
                             Text(
-                                ship,
+                                io.nisfeb.talon.ui.shipHandle(ship),
                                 style = MaterialTheme.typography.bodyLarge.copy(
                                     fontWeight = if (selected) FontWeight.SemiBold
                                     else FontWeight.Normal,
                                 ),
                             )
+                        }
+                    }
+                    if (onSignOut != null || onForget != null) {
+                        Spacer(Modifier.weight(1f))
+                        Box {
+                            IconButton(onClick = { menuFor = ship }) {
+                                Icon(
+                                    Icons.Filled.MoreVert,
+                                    contentDescription = "What to do with $ship",
+                                )
+                            }
+                            DropdownMenu(
+                                expanded = menuFor == ship,
+                                onDismissRequest = { menuFor = null },
+                            ) {
+                                onSignOut?.let { act ->
+                                    DropdownMenuItem(
+                                        text = { Text("Sign out") },
+                                        onClick = { menuFor = null; act(ship) },
+                                    )
+                                }
+                                onForget?.let {
+                                    DropdownMenuItem(
+                                        text = { Text("Sign out and delete data") },
+                                        onClick = { menuFor = null; confirmForget = ship },
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -1851,6 +1910,31 @@ internal fun ShipSwitcherDrawer(
                 )
             }
         }
+    }
+
+    // Deleting cannot be undone and the button sits next to one that
+    // can, so it asks — and says what goes and what does not.
+    confirmForget?.let { ship ->
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { confirmForget = null },
+            title = { Text("Delete $ship's data?") },
+            text = {
+                Text(
+                    "Signs out and removes everything stored on this device for " +
+                        "$ship: its chats, groups and unread marks. Nothing on the " +
+                        "ship itself is touched, and signing in again downloads it " +
+                        "afresh.",
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { confirmForget = null; onForget?.invoke(ship) }) {
+                    Text("Delete", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmForget = null }) { Text("Cancel") }
+            },
+        )
     }
 }
 
@@ -2302,7 +2386,7 @@ private fun MentionPlaceholderRow(
  * than centering.
  */
 @Composable
-private fun MenuBadgeDot(modifier: Modifier = Modifier) {
+internal fun MenuBadgeDot(modifier: Modifier = Modifier) {
     Box(
         modifier = modifier
             .size(8.dp)
@@ -2646,10 +2730,7 @@ private fun androidx.compose.foundation.layout.BoxScope.UnreadOffscreenIndicator
             onClick = { onScrollTo(above.max()) },
             modifier = Modifier
                 .align(Alignment.TopCenter)
-                // Clears the title row + tab strip above the LazyColumn
-                // (~56 + ~52 + status-bar inset on most devices). 72dp
-                // overlapped the tab chips on tall-status-bar phones.
-                .padding(top = 140.dp),
+                .padding(top = 12.dp),
         )
     }
     if (below.isNotEmpty()) {
@@ -2718,6 +2799,34 @@ fun homeSnapshotZeroUnread(whom: String) {
  */
 fun resetHomeListSnapshot() { /* no-op; per-ship snapshots replace this */ }
 
+/** Drop a ship's cached rows, previews and counts. Without this a
+ *  ship whose data was just erased came back in the same process with
+ *  every row it used to have. */
+fun forgetHomeListSnapshot(ship: String) = HomeListSnapshot.forget(ship)
+
+/**
+ * Forget a conversation's unread count in the cached chat list.
+ *
+ * The cache exists so switching ships does not paint the list
+ * empty-of-unreads while Room catches up, and it is filled by the
+ * list's own flow. But the list is torn down the moment somebody
+ * opens a conversation, so the flow stops collecting and the cache
+ * freezes with the counts as they were just before. Reading the
+ * conversation clears the badge in the database at once; the cache
+ * never hears. Coming back replayed the stale counts, so the unread
+ * dots appeared for the length of one Room round trip and then went
+ * out -- for messages that had already been read.
+ *
+ * Called from the one place that marks a conversation read, so every
+ * route in (opening it, a deep link, the assistant) is covered.
+ */
+fun noteConversationRead(whom: String) {
+    val snap = HomeListSnapshot.active ?: return
+    val rows = snap.rows
+    if (rows.none { it.first.whom == whom && it.second != 0 }) return
+    snap.rows = rows.map { if (it.first.whom == whom) it.first to 0 else it }
+}
+
 /**
  * Per-ship home-list cache. Keyed on the active ship so switching
  * between accounts keeps each one's cached rows (and unread counts)
@@ -2725,10 +2834,15 @@ fun resetHomeListSnapshot() { /* no-op; per-ship snapshots replace this */ }
  * switch paints the chat list empty-of-unreads for a beat while Room
  * catches up behind whatever repo.start is doing on IO.
  */
-private object HomeListSnapshot {
+internal object HomeListSnapshot {
     private val perShip = ConcurrentMap<String, ShipSnapshot>()
 
     @Volatile var active: ShipSnapshot? = null
+
+    fun forget(ship: String) {
+        val gone = perShip.remove(ship)
+        if (active === gone) active = null
+    }
 
     fun bind(ship: String?): ShipSnapshot {
         val s = if (ship == null) ShipSnapshot() else perShip.getOrPut(ship) { ShipSnapshot() }
@@ -2759,7 +2873,6 @@ private fun ChannelTypeBadge(whom: String) {
 
 internal class ShipSnapshot {
     @Volatile var rows: List<Pair<MessageEntity, Int>> = emptyList()
-    @Volatile var contactMap: ContactMap = ContactMap.EMPTY
     @Volatile var expandedGroups: Set<String> = emptySet()
     @Volatile var groupOrders: List<io.nisfeb.talon.data.GroupOrderEntity> = emptyList()
     @Volatile var folders: List<FolderEntity> = emptyList()

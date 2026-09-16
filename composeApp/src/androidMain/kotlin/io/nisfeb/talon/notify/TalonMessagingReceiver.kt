@@ -121,6 +121,8 @@ class TalonMessagingReceiver : MessagingReceiver() {
         }
 
         if (whom.isNullOrBlank()) return
+        // On screen right now: the app already shows it, and a notification would only need clearing.
+        if (whom in io.nisfeb.talon.notify.ShownConversation.keys) return
         val title = patp ?: "Talon"
         val body = "New activity in $whom"
         // The relay sends the globally-unique post id as `id`
@@ -136,6 +138,11 @@ class TalonMessagingReceiver : MessagingReceiver() {
             context = context,
             whom = whom,
             postId = eventId?.takeIf { it.isNotBlank() },
+            // The relay has always told us which ship this is for; it
+            // was only ever used as the title. A tap now switches to
+            // that ship, because the same whom on another one is a
+            // different conversation or none.
+            forShip = patp,
             title = title,
             body = body,
             sentMs = System.currentTimeMillis(),

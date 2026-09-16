@@ -82,6 +82,7 @@ fun GroupInfoPane(
     // Null until the fetch lands (or forever if it fails) — the count
     // lines render only when we actually know the number, never "0".
     var memberCount by remember(whom) { mutableStateOf<Int?>(null) }
+    var isPublic by remember(whom) { mutableStateOf(false) }
     var pendingLeave by remember(whom) { mutableStateOf(false) }
     var inviteOpen by remember(whom) { mutableStateOf(false) }
     var inviteShip by remember(whom) { mutableStateOf("") }
@@ -150,7 +151,7 @@ fun GroupInfoPane(
         val flag = mapping?.groupFlag ?: return@LaunchedEffect
         runCatching { repo.fetchGroupAdmin(flag) }
             .getOrNull()
-            ?.let { memberCount = it.members.size }
+            ?.let { memberCount = it.members.size; isPublic = it.privacy == "public" }
     }
 
     val groupRowFlow: Flow<io.nisfeb.talon.data.GroupEntity?> =
@@ -327,6 +328,20 @@ fun GroupInfoPane(
                     Spacer(Modifier.size(12.dp))
                     Text("Invite someone", modifier = Modifier.weight(1f).padding(end = 8.dp))
                 }
+                HorizontalDivider()
+            }
+        }
+
+        // A public group's code: another phone scans it from the + screen and joins.
+        if (isPublic) groupFlag?.let { flag ->
+            item {
+                io.nisfeb.talon.ui.ShareQr(
+                    link = io.nisfeb.talon.urbit.TalonLink.forGroup(flag),
+                    title = "Join by code",
+                    caption = "Anyone can scan this from Talon's + screen to join.",
+                    fileName = "group-" + flag.removePrefix("~").replace('/', '-'),
+                    modifier = Modifier.padding(16.dp),
+                )
                 HorizontalDivider()
             }
         }

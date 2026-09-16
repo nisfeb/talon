@@ -8,15 +8,16 @@ import platform.UIKit.UIDevice
 // BGTaskScheduler wiring that doesn't exist yet, so those gate off too.
 // Touch affordances (swipe-nav, tap-to-open-menu) are on.
 
-actual val isDailyDigestSupported: Boolean = false
-actual val isVoiceMessagesSupported: Boolean = false
+actual val isVoiceMessagesSupported: Boolean = true
 actual val isOnDeviceAiSupported: Boolean = false
 actual val isAssistantSupported: Boolean = true
-actual val isLoopsSupported: Boolean = false
+actual val isLoopsSupported: Boolean = true
 actual val isBackgroundSchedulingSupported: Boolean = false
-actual val isQrLoginScanSupported: Boolean = false
+actual val isQrScanSupported: Boolean = true
 actual val isLocalCometSupported: Boolean = false
 actual val isTouchSwipeNavSupported: Boolean = true
+actual val hasSoftKeyboard: Boolean = true
+actual val isDictationSupported: Boolean = true
 actual val isTapToOpenMenuSupported: Boolean = true
 
 actual val platformLabel: String = "iOS ${UIDevice.currentDevice.systemVersion}"
@@ -52,3 +53,7 @@ actual val needsEmojiFontSpans: Boolean = false
 actual val needsManualImagePaste: Boolean = true
 actual val isImmersiveCallSupported: Boolean = true
 actual val isUrbWebViewSupported: Boolean = true
+
+/** As Android: a drawer, and the edge swipe to come back. */
+actual val isDrawerNavigation: Boolean = true
+actual val isTouchPrimary: Boolean = true

@@ -40,3 +40,10 @@ actual fun timeZoneShortLabel(zoneId: String, atMs: Long): String {
 actual val isMacOsHost: Boolean = false
 
 actual val tempDirPath: String = NSTemporaryDirectory().trimEnd('/')
+
+actual val cacheDirPath: String
+    get() = (
+        platform.Foundation.NSSearchPathForDirectoriesInDomains(
+            platform.Foundation.NSCachesDirectory, platform.Foundation.NSUserDomainMask, true,
+        ).first() as String
+    ).trimEnd('/')

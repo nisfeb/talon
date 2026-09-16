@@ -34,8 +34,6 @@ class SettingsSyncRailItemsTest {
         sync = SettingsSyncImpl(
             db = db,
             aiSettings = FakeAiSettings(),
-            dailyDigestSettings = FakeDailyDigest(),
-            rearmDailyDigest = { /* no-op for these tests */ },
         )
     }
 

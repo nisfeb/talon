@@ -35,6 +35,26 @@ object LatticePublish {
     }
 
     /**
+     * The same save, for a client whose own cookie store carries the
+     * session. The overload above exists for the shared client, which
+     * has none and has to be handed the header.
+     */
+    suspend fun publish(
+        http: HttpClient,
+        shipUrl: String,
+        ourShip: String,
+        slug: String,
+        gemtext: String,
+    ): String {
+        val resp: HttpResponse = http.post(UrbHttp.saveUrl(shipUrl, slug)) {
+            contentType(ContentType.Text.Plain)
+            setBody(gemtext)
+        }
+        if (resp.status.value != 200) error("Lattice save returned ${resp.status.value}")
+        return UrbHttp.canonicalUrbUrl(ourShip, slug)
+    }
+
+    /**
      * A stable, readable slug under a `talon/` namespace, made unique
      * per source thread by a short hash of [seed] (the parent post id)
      * so two threads with the same title don't clobber each other,

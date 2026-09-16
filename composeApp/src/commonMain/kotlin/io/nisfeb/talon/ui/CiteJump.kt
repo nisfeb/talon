@@ -10,8 +10,12 @@ class TalonCiteResolver(
     private val db: AppDatabase,
     private val repo: TlonChatRepo,
 ) : CiteResolver {
+    // A cite carries the post's number dotted, the way a scry path
+    // wants it; the database keys posts on the bare digits. Compared
+    // as given, no quoted post was ever found locally, and every one
+    // of them went to the ship.
     override suspend fun findLocal(whom: String, da: String): MessageEntity? =
-        db.messages().findByDa(whom, da)
+        db.messages().findByDa(whom, da.replace(".", ""))
 
     override suspend fun fetchPost(whom: String, da: String): MessageEntity? =
         repo.fetchCitePost(whom, da)
@@ -80,10 +84,15 @@ suspend fun resolveCiteJump(
             CiteCache.resolve(whom, da) { resolver.findLocal(whom, da) ?: load() }
         }.getOrNull()
 
+    // A channel post's number is its message id, so the jump can name
+    // it even when the ship never answered for the preview.
     val parent = find(postDa) { resolver.fetchPost(whom, postDa) }
-        ?: return CiteJump.Message(whom, null, flag)
+        ?: return CiteJump.Message(whom, channelPostId(whom, postDa), flag)
 
     val replyDa = cite.replyDa ?: return CiteJump.Message(whom, parent.id, flag)
     val reply = find(replyDa) { resolver.fetchReply(whom, postDa, replyDa) }
     return CiteJump.Reply(whom, parent.id, reply?.id, flag)
 }
+
+private fun channelPostId(whom: String, postDa: String): String? =
+    postDa.replace(".", "").takeIf { whom.contains('/') && it.all(Char::isDigit) }

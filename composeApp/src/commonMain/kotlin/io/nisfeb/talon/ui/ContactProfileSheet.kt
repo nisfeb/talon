@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.MailOutline
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -65,6 +66,9 @@ fun ContactProfileSheet(
      *  book membership, not mere presence in the /v1/all peer cache. */
     isInBook: Boolean = false,
 ) {
+    // Where the viewer's ship has no mail app this is null and the
+    // button is simply not drawn, rather than drawn and dead.
+    val mailTo = io.nisfeb.talon.mail.LocalMailTo.current
     val sheetState = rememberModalBottomSheetState()
     val label = remember(contact, ship) { contact?.nickname ?: ship }
 
@@ -90,31 +94,35 @@ fun ContactProfileSheet(
                         .copy(fontWeight = FontWeight.SemiBold),
                 )
             }
-            // @p and (when the naming setting is on) the full mnemonym,
-            // each tap-to-copy — the profile sheet is where you go to
-            // grab someone's exact name.
+            // The name, tap-to-copy: this sheet is where you come to
+            // read somebody's name in full and take it away with you.
             val clipboard = LocalClipboardManager.current
             var copied by remember { mutableStateOf<String?>(null) }
             fun copyRow(text: String): () -> Unit = {
                 clipboard.setText(AnnotatedString(text))
                 copied = text
             }
+            // A comet is its word name and nothing else, here as
+            // everywhere. This is the long form of it -- every word,
+            // not the two-word short name the rest of the app shows --
+            // because telling two alike-looking comets apart is what
+            // somebody opened this sheet to do. Its @p is not shown at
+            // all: it is the fifty-six characters the name replaces.
+            //
+            // Every other ship shows its @p, which is its real name and
+            // short enough to read.
+            // Unless the reader asked for raw @p everywhere: that
+            // toggle means what it says, here as on every other screen.
+            val alwaysPatp by ShipNames.alwaysPatp.collectAsState()
+            val nym = remember(ship, alwaysPatp) {
+                if (alwaysPatp) null else Mnemonym.forShip(ship)
+            }
             Text(
-                ship,
+                nym ?: ship,
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.clickable(onClick = copyRow(ship)),
+                modifier = Modifier.clickable(onClick = copyRow(nym ?: ship)),
             )
-            val mnemonymOn by MnemonymNames.enabled.collectAsState()
-            val nym = remember(ship) { Mnemonym.forShip(ship) }
-            if (mnemonymOn && nym != null) {
-                Text(
-                    nym,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.clickable(onClick = copyRow(nym)),
-                )
-            }
             copied?.let {
                 Text(
                     "Copied $it",
@@ -189,6 +197,16 @@ fun ContactProfileSheet(
                         Icon(Icons.AutoMirrored.Filled.Send, contentDescription = null)
                         Spacer(Modifier.width(6.dp))
                         Text("Message")
+                    }
+                    if (mailTo != null) {
+                        OutlinedButton(
+                            onClick = { onDismiss(); mailTo(ship) },
+                            modifier = Modifier.weight(1f),
+                        ) {
+                            Icon(Icons.Filled.MailOutline, contentDescription = null)
+                            Spacer(Modifier.width(6.dp))
+                            Text("Mail")
+                        }
                     }
                     OutlinedButton(onClick = onDismiss) { Text("Close") }
                 }

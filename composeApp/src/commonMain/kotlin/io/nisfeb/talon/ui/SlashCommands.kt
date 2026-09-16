@@ -59,6 +59,11 @@ val SLASH_COMMANDS: List<SlashCommandSpec> = listOf(
         description = "Pick an image to send (same as the image button)",
     ),
     SlashCommandSpec(
+        name = "invite",
+        synopsis = "/invite <group> [~ship]",
+        description = "Invite someone to one of your groups; in a DM, the other person",
+    ),
+    SlashCommandSpec(
         name = "loc",
         synopsis = "/loc",
         description = "Share your current location — a one-shot OSM link",
@@ -170,7 +175,7 @@ suspend fun runCommand(
         // UI-dispatched commands — DmChatScreen intercepts before this
         // function runs. Recognize them here so unknown-command errors
         // don't fire if someone routes a stale invocation through.
-        "img", "file", "mic", "call" -> CommandResult.Handled
+        "img", "file", "mic", "call", "invite" -> CommandResult.Handled
         // Unrecognized slash commands pass through as a normal message
         // (verbatim — original casing/spacing preserved) so server-side
         // bots like hermes can receive their own `/command` syntax. A

@@ -113,7 +113,7 @@ private class AndroidVoiceRecorder(private val context: Context) {
 }
 
 @Composable
-fun VoiceRecordButton(
+actual fun VoiceRecordButton(
     enabled: Boolean,
     onRecorded: (path: String, durationMs: Long) -> Unit,
     modifier: Modifier,
@@ -121,7 +121,7 @@ fun VoiceRecordButton(
      *  button starts recording (or stops if already recording),
      *  same code path as a tap. Used by the `/mic` slash command
      *  so typing `/mic` and pressing send begins a recording. */
-    externalTrigger: kotlinx.coroutines.flow.Flow<Unit>? = null,
+    externalTrigger: kotlinx.coroutines.flow.Flow<Unit>?,
 ) {
     val context = LocalContext.current
     val recorder = remember { AndroidVoiceRecorder(context) }

@@ -4,7 +4,6 @@ import androidx.room.Room
 import androidx.sqlite.driver.bundled.BundledSQLiteDriver
 import io.nisfeb.talon.ai.AiSettings
 import io.nisfeb.talon.ai.AiSettingsRepository
-import io.nisfeb.talon.ai.DailyDigestSettings
 import io.nisfeb.talon.data.ASSISTANT_HISTORY_KEEP
 import io.nisfeb.talon.data.AppDatabase
 import io.nisfeb.talon.data.AssistantConversationEntity
@@ -57,7 +56,6 @@ class SettingsSyncApplyBucketTest {
     private lateinit var tmpDir: File
     private lateinit var db: AppDatabase
     private lateinit var aiSettings: FakeAiSettings
-    private lateinit var dailyDigest: FakeDailyDigest
     private var rearmCount = 0
     private lateinit var sync: SettingsSyncImpl
 
@@ -70,13 +68,10 @@ class SettingsSyncApplyBucketTest {
             .fallbackToDestructiveMigration(dropAllTables = true)
             .build()
         aiSettings = FakeAiSettings()
-        dailyDigest = FakeDailyDigest()
         rearmCount = 0
         sync = SettingsSyncImpl(
             db = db,
             aiSettings = aiSettings,
-            dailyDigestSettings = dailyDigest,
-            rearmDailyDigest = { rearmCount += 1 },
         )
     }
 
@@ -299,7 +294,6 @@ class SettingsSyncApplyBucketTest {
                     put("apiKey", "sk-secret")
                     put("model", "gpt-4")
                     put("catchMeUpEnabled", "false")
-                    put("dailyDigestEnabled", "true")
                 })
             }
             sync.applyBucket(SettingsSyncImpl.BUCKET_AI_SETTINGS, bucket)
@@ -309,7 +303,6 @@ class SettingsSyncApplyBucketTest {
             assertEquals("sk-secret", cfg.apiKey)
             assertEquals("gpt-4", cfg.model)
             assertEquals(false, cfg.catchMeUpEnabled)
-            assertEquals(true, cfg.dailyDigestEnabled)
         }
 
     @Test
@@ -671,32 +664,7 @@ class SettingsSyncApplyBucketTest {
 
     // ── daily-digest ────────────────────────────────────────────────
 
-    @Test
-    fun `applyBucket DAILY_DIGEST forwards to applyRemote and rearms`() = runBlocking {
-        val bucket = buildJsonObject {
-            put("enabled", true)
-            put("hourOfDay", 7)
-            put("minuteOfDay", 30)
-        }
-        sync.applyBucket(SettingsSyncImpl.BUCKET_DAILY_DIGEST, bucket)
 
-        val state = dailyDigest.state.value
-        assertEquals(true, state.enabled)
-        assertEquals(7, state.hourOfDay)
-        assertEquals(30, state.minuteOfDay)
-        assertEquals(1, rearmCount, "rearm must run after applyRemote")
-    }
-
-    @Test
-    fun `applyBucket DAILY_DIGEST falls back to defaults for missing fields`() =
-        runBlocking {
-            // Empty bucket → enabled=false (default), hour=6, minute=0.
-            sync.applyBucket(SettingsSyncImpl.BUCKET_DAILY_DIGEST, buildJsonObject {})
-            val state = dailyDigest.state.value
-            assertEquals(false, state.enabled)
-            assertEquals(6, state.hourOfDay)
-            assertEquals(0, state.minuteOfDay)
-        }
 
     // ── applySettingsEvent envelopes ────────────────────────────────
 
@@ -812,7 +780,6 @@ class SettingsSyncApplyBucketTest {
         val routedSync = SettingsSyncImpl(
             db = db,
             aiSettings = aiSettings,
-            dailyDigestSettings = dailyDigest,
             watchwordExcludeRouter = { whom, excluded ->
                 captured += whom to excluded
             },
@@ -884,97 +851,8 @@ class SettingsSyncApplyBucketTest {
 
     // ── applyEntry per-key paths for daily-digest ────────────────────
 
-    @Test
-    fun `put-entry daily-digest enabled toggles only the enabled field`() = runBlocking {
-        // Pre-set hour/minute so we can verify the per-key apply preserves them.
-        dailyDigest.applyRemote(enabled = false, hourOfDay = 9, minuteOfDay = 15)
-        rearmCount = 0
-        val payload = buildJsonObject {
-            put("put-entry", buildJsonObject {
-                put("desk", "talon")
-                put("bucket-key", SettingsSyncImpl.BUCKET_DAILY_DIGEST)
-                put("entry-key", "enabled")
-                put("value", JsonPrimitive("true"))
-            })
-        }
-        sync.applySettingsEvent(payload)
 
-        val state = dailyDigest.state.value
-        assertEquals(true, state.enabled)
-        assertEquals(9, state.hourOfDay)
-        assertEquals(15, state.minuteOfDay)
-        assertEquals(1, rearmCount)
-    }
 
-    @Test
-    fun `put-entry daily-digest hourOfDay rejects out-of-range values`() = runBlocking {
-        dailyDigest.applyRemote(enabled = true, hourOfDay = 6, minuteOfDay = 0)
-        rearmCount = 0
-        val payload = buildJsonObject {
-            put("put-entry", buildJsonObject {
-                put("desk", "talon")
-                put("bucket-key", SettingsSyncImpl.BUCKET_DAILY_DIGEST)
-                put("entry-key", "hourOfDay")
-                put("value", JsonPrimitive("99"))
-            })
-        }
-        sync.applySettingsEvent(payload)
-
-        // Out-of-range value rejected → state untouched, no rearm.
-        assertEquals(6, dailyDigest.state.value.hourOfDay)
-        assertEquals(0, rearmCount)
-    }
-
-    @Test
-    fun `put-entry daily-digest minuteOfDay rejects out-of-range values`() = runBlocking {
-        dailyDigest.applyRemote(enabled = true, hourOfDay = 6, minuteOfDay = 0)
-        rearmCount = 0
-        val payload = buildJsonObject {
-            put("put-entry", buildJsonObject {
-                put("desk", "talon")
-                put("bucket-key", SettingsSyncImpl.BUCKET_DAILY_DIGEST)
-                put("entry-key", "minuteOfDay")
-                put("value", JsonPrimitive("60"))
-            })
-        }
-        sync.applySettingsEvent(payload)
-
-        assertEquals(0, dailyDigest.state.value.minuteOfDay)
-        assertEquals(0, rearmCount)
-    }
-
-    // ── ui-prefs (mnemonym naming toggle) ───────────────────────────
-
-    @Test
-    fun `applyBucket UI_PREFS applies the mnemonym toggle, removeEntry restores the default`() = runBlocking {
-        io.nisfeb.talon.ui.MnemonymNames.set(true)
-        sync.applyBucket(
-            SettingsSyncImpl.BUCKET_UI_PREFS,
-            buildJsonObject {
-                put(
-                    SettingsSyncImpl.ENTRY_MNEMONYM_NAMES,
-                    buildJsonObject { put("enabled", false) },
-                )
-            },
-        )
-        assertEquals(false, io.nisfeb.talon.ui.MnemonymNames.enabled.value)
-
-        // Live put-entry flips it back on.
-        sync.applyEntry(
-            SettingsSyncImpl.BUCKET_UI_PREFS,
-            SettingsSyncImpl.ENTRY_MNEMONYM_NAMES,
-            buildJsonObject { put("enabled", true) },
-        )
-        assertEquals(true, io.nisfeb.talon.ui.MnemonymNames.enabled.value)
-
-        // Peer deleted the entry → back to the default (on).
-        io.nisfeb.talon.ui.MnemonymNames.set(false)
-        sync.removeEntry(
-            SettingsSyncImpl.BUCKET_UI_PREFS,
-            SettingsSyncImpl.ENTRY_MNEMONYM_NAMES,
-        )
-        assertEquals(true, io.nisfeb.talon.ui.MnemonymNames.enabled.value)
-    }
 
     // ── status-seen (cross-device fresh-status marker) ──────────────
 
@@ -1366,22 +1244,4 @@ internal class FakeAiSettings : AiSettingsRepository {
             model = null,
         )
     }
-}
-
-internal class FakeDailyDigest : DailyDigestSettings {
-    private val _state = MutableStateFlow(DailyDigestSettings.State())
-    override val state: StateFlow<DailyDigestSettings.State> = _state.asStateFlow()
-    override var onChange: ((DailyDigestSettings.Change, Boolean) -> Unit)? = null
-    override fun setEnabled(enabled: Boolean) {
-        _state.value = _state.value.copy(enabled = enabled)
-    }
-    override fun setTime(hourOfDay: Int, minuteOfDay: Int) {
-        _state.value = _state.value.copy(
-            hourOfDay = hourOfDay, minuteOfDay = minuteOfDay,
-        )
-    }
-    override fun applyRemote(enabled: Boolean, hourOfDay: Int, minuteOfDay: Int) {
-        _state.value = DailyDigestSettings.State(enabled, hourOfDay, minuteOfDay)
-    }
-    override fun emitSyncToggledOff() {}
 }

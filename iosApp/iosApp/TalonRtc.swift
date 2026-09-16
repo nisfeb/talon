@@ -76,8 +76,14 @@ final class TalonRtcPeer: NSObject, NativeRtcPeer, RTCPeerConnectionDelegate {
     private var remoteWatch: Timer?
     private var videoListener: ((VideoState) -> Void)?
     private var videoState = VideoState(localOn: false, remoteOn: false)
-    private lazy var localView: RTCMTLVideoView = RTCMTLVideoView(frame: .zero)
-    private lazy var remoteView: RTCMTLVideoView = RTCMTLVideoView(frame: .zero)
+    // Fit, not fill: the whole picture, letterboxed if the pane is
+    // the wrong shape, rather than a band across a forehead.
+    private lazy var localView: RTCMTLVideoView = fitted(RTCMTLVideoView(frame: .zero))
+    private lazy var remoteView: RTCMTLVideoView = fitted(RTCMTLVideoView(frame: .zero))
+    private func fitted(_ v: RTCMTLVideoView) -> RTCMTLVideoView {
+        v.videoContentMode = .scaleAspectFit
+        return v
+    }
 
     init(iceServers: [IceServer], sendAudio: Bool, trickle: Bool) {
         self.trickle = trickle

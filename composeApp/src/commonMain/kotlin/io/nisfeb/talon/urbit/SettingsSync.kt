@@ -43,24 +43,15 @@ interface SettingsSync : io.nisfeb.talon.ai.LoopWriteCoordinator {
      */
     suspend fun pushAiSettings() {}
 
-    /**
-     * Push the current daily-digest schedule to %settings. Default
-     * no-op for hosts that don't sync the digest bucket.
-     */
-    suspend fun pushDailyDigest(state: io.nisfeb.talon.ai.DailyDigestSettings.State) {}
 
-    /** Nuke the ship's daily-digest bucket. Used when the user
-     *  transitions sync off and we need to drop their schedule from
-     *  the ship-side store. Default no-op. */
-    suspend fun clearDailyDigestOnShip() {}
 
     /** Push the mnemonym-naming preference (ui-prefs bucket) so every
      *  device shows the same fallback ship names. Default no-op. */
-    suspend fun pushMnemonymNames(enabled: Boolean) {}
 
     /** Push the always-show-@p preference (ui-prefs bucket). Naming is
      *  one decision to the user, so both halves travel together. */
     suspend fun pushAlwaysPatp(enabled: Boolean) {}
+    suspend fun pushNonCometNames(enabled: Boolean) {}
 
     // ───────── assistant history sync ─────────
     /**

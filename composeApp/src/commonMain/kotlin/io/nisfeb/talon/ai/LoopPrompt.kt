@@ -18,7 +18,9 @@ object LoopPrompt {
         complete. Use only what the tools return; do not invent. If nothing
         relevant turns up, say so briefly.
 
-        - Default to reading (search_history, read_conversation). If write
+        - Default to reading: search_history and read_conversation for
+          chats, list_mail, search_mail and read_mail for mail, list_events
+          and list_tasks for the calendar. If write
           tools are present at all, this loop has been authorized to act on
           the ship unattended, with no confirmation — so take a write action
           only when the task explicitly calls for it, and never a destructive

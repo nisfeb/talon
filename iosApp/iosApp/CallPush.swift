@@ -131,7 +131,14 @@ class AppDelegate: NSObject, UIApplicationDelegate, PKPushRegistryDelegate, CXPr
     ) {
         let info = response.notification.request.content.userInfo
         if let whom = info["whom"] as? String, !whom.isEmpty {
-            IosVoipBridge.shared.openChat(whom: whom, postId: info["id"] as? String)
+            // The relay names the ship the alert was for; a tap goes
+            // there first, since the same whom on another ship is a
+            // different conversation or none.
+            IosVoipBridge.shared.openChat(
+                whom: whom,
+                postId: info["id"] as? String,
+                forShip: info["patp"] as? String
+            )
         }
         completionHandler()
     }

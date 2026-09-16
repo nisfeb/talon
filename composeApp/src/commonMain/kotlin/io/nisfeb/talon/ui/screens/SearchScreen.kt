@@ -15,12 +15,8 @@ import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -43,7 +39,6 @@ import io.nisfeb.talon.data.ContactEntity
 import io.nisfeb.talon.data.MessageEntity
 import io.nisfeb.talon.ui.Avatar
 import io.nisfeb.talon.ui.ContactMap
-import io.nisfeb.talon.ui.contactMapFlow
 import io.nisfeb.talon.urbit.StoryCache
 import kotlinx.coroutines.flow.flowOf
 
@@ -138,14 +133,7 @@ fun SearchScreen(
         knownWhoms.mapTo(hashSetOf()) { it.whom }
     }
 
-    val contactMap by remember {
-        contactMapFlow(
-            db.contacts().stream(),
-            db.clubs().stream(),
-            db.groups().streamGroups(),
-            db.groups().streamChannelGroups(),
-        )
-    }.collectAsState(initial = ContactMap.EMPTY)
+    val contactMap by io.nisfeb.talon.ui.rememberContactMap(db)
 
 
     // The chip surfaces a per-search-session preference — "for my
@@ -195,9 +183,7 @@ fun SearchScreen(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            IconButton(onClick = onBack) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-            }
+            io.nisfeb.talon.ui.NavIcon(onBack = onBack)
             // Focus the box on open so the keyboard is up and typing
             // starts the search without a second tap.
             val focus = remember { FocusRequester() }

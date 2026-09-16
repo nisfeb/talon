@@ -20,14 +20,25 @@ val PATP_REGEX: Regex =
 /**
  * Whether [text] is a real `@p`: the right shape and every syllable
  * from Urbit's phonetic tables. [PATP_REGEX] only checks the shape, so
- * `~wisper` passes it; the ship's own parser rejects such a string and
+ * `~wisdom` passes it; the ship's own parser rejects such a string and
  * with it the whole post, as a user found when a stray `~word` in a
- * message made every send fail. A 3-letter name is a galaxy (suffix
+ * message made every send fail.
+ *
+ * (This comment used to name `~wisper` as the example, which is in
+ * fact a perfectly good star -- `wis` is a prefix and `per` a suffix.
+ * `~wisdom` really is not one: `dom` is no suffix.) A 3-letter name is a galaxy (suffix
  * only); 6-letter groups are prefix + suffix.
  */
 fun isValidPatp(text: String): Boolean {
     if (!PATP_REGEX.matches(text)) return false
     val groups = text.removePrefix("~").split(Regex("--?"))
+    // Galaxy and star render as one group, planet two, moon four,
+    // comet eight. Six, ten and twelve are all even and none of them
+    // names a ship. And a three-letter group is a galaxy, which is the
+    // whole name: ~zod-zod has a legal count and two legal lengths and
+    // is still nothing @p ever renders.
+    if (groups.size !in PATP_GROUP_COUNTS) return false
+    if (groups.size > 1 && groups.any { it.length != 6 }) return false
     return groups.all { g ->
         when (g.length) {
             3 -> g in SUFFIXES
@@ -36,6 +47,8 @@ fun isValidPatp(text: String): Boolean {
         }
     }
 }
+
+private val PATP_GROUP_COUNTS = setOf(1, 2, 4, 8)
 
 // The 256 prefix and 256 suffix syllables, from `++po` in hoon.hoon.
 private val PREFIXES: Set<String> = (

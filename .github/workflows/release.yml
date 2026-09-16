@@ -140,12 +140,20 @@ jobs:
           OUT_APK="talon-$VERSION_NAME.apk"
           cp "$UNIVERSAL" "$OUT_APK"
           STAGED=("$OUT_APK")
+          # Each split's URL and hash, so a device downloads the APK
+          # for its own architecture rather than the universal one,
+          # which is several times the size.
+          ANDROID='{}'
+          BASE="https://github.com/nisfeb/talon/releases/download/v$VERSION_NAME"
           for abi in arm64-v8a armeabi-v7a x86_64; do
             SRC="$APK_DIR/androidApp-$abi-release.apk"
             if [ -f "$SRC" ]; then
               DEST="talon-$VERSION_NAME-$abi.apk"
               cp "$SRC" "$DEST"
               STAGED+=("$DEST")
+              ANDROID=$(jq --arg k "$abi" --arg url "$BASE/$DEST" \
+                --arg sha "$(sha256sum "$DEST" | awk '{print $1}')" \
+                '.[$k] = {url: $url, sha256: $sha}' <<<"$ANDROID")
             else
               echo "::warning::missing split APK for $abi at $SRC"
             fi
@@ -166,6 +174,7 @@ jobs:
               --arg     versionName "$VERSION_NAME" \
               --arg     sha         "$SHA" \
               --arg     changelog   "$CHANGELOG" \
+              --argjson android     "$ANDROID" \
               '{
                 versionCode: $versionCode,
                 versionName: $versionName,
@@ -174,7 +183,8 @@ jobs:
                 sha256: $sha,
                 minSdk: 26,
                 changelog: $changelog,
-                mandatory: false
+                mandatory: false,
+                android: $android
               }' > latest.json
           # Newline-separated list of staged paths for the upload step.
           printf '%s\n' "${STAGED[@]}" > staged-apks.txt
@@ -318,6 +328,31 @@ jobs:
             exit 1
           fi
           ls -la release-files/
+
+      # The Android job wrote latest.json before any desktop installer
+      # existed. Add each one's URL and hash now, so a desktop Talon
+      # can fetch and verify the installer for the way it was installed
+      # (AppImage swaps itself; deb / dmg / msi open in the system).
+      - name: List desktop installers in latest.json
+        run: |
+          set -euo pipefail
+          cd release-files
+          if [ ! -f latest.json ]; then
+            echo "no latest.json (no keystore); desktop keeps the browser fallback"
+            exit 0
+          fi
+          BASE="https://github.com/nisfeb/talon/releases/download/${GITHUB_REF_NAME}"
+          DESKTOP='{}'
+          for pair in appimage:AppImage deb:deb dmg:dmg msi:msi; do
+            kind="${pair%%:*}"; ext="${pair#*:}"
+            f=$(ls *."$ext" | head -1)
+            sha=$(sha256sum "$f" | awk '{print $1}')
+            DESKTOP=$(jq --arg k "$kind" --arg url "$BASE/$f" --arg sha "$sha" \
+              '.[$k] = {url: $url, sha256: $sha}' <<<"$DESKTOP")
+          done
+          jq --argjson desktop "$DESKTOP" '.desktop = $desktop' latest.json > latest.json.new
+          mv latest.json.new latest.json
+          cat latest.json
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2

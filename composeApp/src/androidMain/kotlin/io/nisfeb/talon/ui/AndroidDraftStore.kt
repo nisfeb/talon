@@ -12,8 +12,7 @@ import androidx.core.content.edit
 class AndroidDraftStore(context: Context, ship: String) : DraftStore() {
     // Per-ship prefs file so switching ships hides the other ship's
     // drafts. The filename can't contain `~` or `/`, so we sanitize.
-    private val prefsName: String = "talon.drafts." +
-        ship.removePrefix("~").replace(Regex("[^a-z0-9-]"), "_")
+    private val prefsName: String = "talon.drafts." + prefsKey(ship)
     private val prefs: SharedPreferences = context.applicationContext
         .getSharedPreferences(prefsName, Context.MODE_PRIVATE)
 
@@ -54,3 +53,7 @@ class AndroidDraftStore(context: Context, ship: String) : DraftStore() {
         }
         .toMap()
 }
+
+/** A ship as a preferences file name: no `~`, nothing a path minds. */
+internal fun prefsKey(ship: String): String =
+    ship.removePrefix("~").replace(Regex("[^a-z0-9-]"), "_")

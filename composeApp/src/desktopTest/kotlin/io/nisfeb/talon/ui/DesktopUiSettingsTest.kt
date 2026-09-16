@@ -182,4 +182,11 @@ class DesktopUiSettingsTest {
             newStore().activeRailTab.value,
         )
     }
+
+    @Test
+    fun `the calendar's week view survives a reload`() {
+        assertFalse(newStore().calendarWeekView.value)
+        newStore().setCalendarWeekView(true)
+        assertTrue(newStore().calendarWeekView.value)
+    }
 }

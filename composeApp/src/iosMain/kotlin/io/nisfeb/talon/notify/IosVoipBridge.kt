@@ -50,8 +50,9 @@ object IosVoipBridge {
      *  the user is already reading. */
     fun shouldPresentAlert(whom: String): Boolean = NotificationFocus.openWhom != whom
 
-    /** A tapped alert: open its chat. */
-    fun openChat(whom: String, postId: String?) = OpenChatRequests.request(whom, postId)
+    /** A tapped alert: open its chat, on the ship it was for. */
+    fun openChat(whom: String, postId: String?, forShip: String?) =
+        OpenChatRequests.request(whom, postId, forShip)
 
     /** Set by the Kotlin side (NativeCallActions.ios.kt). */
     var actions: IosCallActions? = null

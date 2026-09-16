@@ -32,6 +32,8 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.foundation.focusable
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.runtime.DisposableEffect
@@ -202,6 +204,10 @@ fun ChatComposer(
     allShips: List<String>,
     canSend: Boolean,
     hideComposerButtons: Boolean,
+    /** Take the cursor as soon as this composer appears. Off where a
+     *  keyboard would pop up over the conversation; a thread opened by
+     *  Reply turns it on regardless, since typing is why it opened. */
+    focusOnOpen: Boolean = !hasSoftKeyboard,
     /** Commit an in-place edit. Default no-op so surfaces that don't
      *  support editing need not pass one. */
     onSaveEdit: (EditTarget, String) -> Unit = { _, _ -> },
@@ -241,15 +247,16 @@ fun ChatComposer(
     strategy: ChatSendStrategy,
 ) {
     val scope = rememberCoroutineScope()
-    // Focus the composer when an edit begins, which brings the soft
-    // keyboard up on touch. Keyed on the post id so starting an edit
-    // (or switching to a different one) fires; ending an edit (-> null)
-    // does not.
-    val editFocusRequester = remember { FocusRequester() }
-    LaunchedEffect(state.editing?.postId) {
-        if (state.editing != null) {
-            runCatching { editFocusRequester.requestFocus() }
-        }
+    // The cursor goes to the field whenever the next thing to do is
+    // type: the composer opened with a keyboard in hand, an edit
+    // began, a quote or an attachment was picked. Keyed on what began
+    // rather than on the flag, so switching to a different edit fires
+    // and ending one (-> null) does not bring the keyboard back.
+    val fieldFocus = remember { FocusRequester() }
+    LaunchedEffect(state, state.editing?.postId, state.pendingQuote?.id, state.pendingAttachment) {
+        val typingNext = focusOnOpen || state.editing != null ||
+            state.pendingQuote != null || state.pendingAttachment != null
+        if (typingNext) runCatching { fieldFocus.requestFocus() }
     }
     val pickImage = rememberImagePicker()
     val pickAnyFile = io.nisfeb.talon.util.rememberAnyFilePicker()
@@ -398,7 +405,9 @@ fun ChatComposer(
 
     val updateDraft: (TextFieldValue) -> Unit = { next ->
         state.draft = next
-        drafts.save(whom, next.text)
+        // An edit is not a draft: saving it would bring it back as a new
+        // message. The draft it displaced stays saved underneath.
+        if (state.editing == null) drafts.save(whom, next.text)
     }
 
     // Typing presence. Keying on the draft text means a keystroke
@@ -433,7 +442,8 @@ fun ChatComposer(
     // the next mount agree.
     DisposableEffect(whom) {
         onDispose {
-            drafts.save(whom, state.draft.text)
+            // Leaving mid-edit abandons the edit and keeps the real draft.
+            drafts.save(whom, state.editing?.priorDraftText ?: state.draft.text)
             // Leaving the screen mid-draft must not leave us announcing
             // forever on the peer's side.
             repo.retractPresenceNow(whom)
@@ -441,7 +451,19 @@ fun ChatComposer(
         }
     }
 
-    val mention = detectMentionQuery(state.draft.text, state.draft.selection.start)
+    // `/invite <group> [~ship]`: its arguments get their own pickers, and
+    // the mention picker stands down while one of them is live.
+    val inDm = whom.startsWith("~")
+    val inviteArg = detectInviteArg(state.draft.text, state.draft.selection.start, inDm)
+    val myGroups by remember(db) { db.groups().streamGroups() }.collectAsState(initial = emptyList())
+    val groupSuggestions = remember(inviteArg, myGroups) {
+        (inviteArg as? InviteArg.Group)?.let { matchGroups(it.query, myGroups) } ?: emptyList()
+    }
+    val inviteShipSuggestions = remember(inviteArg, allShips, contactMap) {
+        (inviteArg as? InviteArg.Ship)?.let { suggestionsFor(it.query, contactMap, allShips) } ?: emptyList()
+    }
+    var inviteSel by remember(inviteArg?.query) { mutableStateOf(0) }
+    val mention = if (inviteArg != null) null else detectMentionQuery(state.draft.text, state.draft.selection.start)
     val suggestions = remember(mention, allShips, contactMap) {
         mention?.let { (q, _) -> suggestionsFor(q, contactMap, allShips) } ?: emptyList()
     }
@@ -493,6 +515,13 @@ fun ChatComposer(
     val applyMentionPick: (String) -> Unit = { ship -> replaceTrigger(mention!!.second, "$ship ") }
     val applySlashPick: (SlashCommandSpec) -> Unit = { spec ->
         updateDraft(TextFieldValue("/${spec.name} ", TextRange(spec.name.length + 2)))
+    }
+    val applyInvitePick: (String) -> Unit = { picked -> inviteArg?.let { replaceTrigger(it.start, "$picked ") } }
+    /** The highlighted /invite pick, group or ship, or null when neither picker is up. */
+    fun invitePick(): String? = when {
+        groupSuggestions.isNotEmpty() -> groupSuggestions[inviteSel.coerceIn(0, groupSuggestions.lastIndex)].flag
+        inviteShipSuggestions.isNotEmpty() -> inviteShipSuggestions[inviteSel.coerceIn(0, inviteShipSuggestions.lastIndex)].ship
+        else -> null
     }
 
     Column(
@@ -551,6 +580,22 @@ fun ChatComposer(
                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
             )
         }
+        if (groupSuggestions.isNotEmpty()) {
+            GroupPicker(
+                groups = groupSuggestions,
+                onPick = { applyInvitePick(it.flag) },
+                selectedIndex = inviteSel,
+                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+            )
+        }
+        if (inviteShipSuggestions.isNotEmpty()) {
+            MentionPicker(
+                suggestions = inviteShipSuggestions,
+                onPick = applyInvitePick,
+                selectedIndex = inviteSel,
+                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+            )
+        }
         if (suggestions.isNotEmpty() && mention != null) {
             MentionPicker(
                 suggestions = suggestions,
@@ -591,6 +636,22 @@ fun ChatComposer(
             val firstWord = body.lowercase().substringBefore(' ')
             val handledInUi = when {
                 quote != null -> false
+                firstWord == "/invite" -> {
+                    when (val p = parseInvite(body, whom.takeIf { inDm }, myGroups)) {
+                        is InviteParse.Problem -> {
+                            state.sendError = p.message
+                            return@doSend false
+                        }
+                        is InviteParse.Ok -> {
+                            val title = myGroups.firstOrNull { it.flag == p.flag }?.title ?: p.flag
+                            scope.launch {
+                                state.sendError = runCatching { repo.inviteToGroup(p.flag, p.ship) }
+                                    .fold({ "Invited ${shipHandle(p.ship)} to $title." }, ::inviteFailure)
+                            }
+                        }
+                    }
+                    true
+                }
                 firstWord == "/img" -> {
                     onPickImage(); true
                 }
@@ -864,7 +925,7 @@ fun ChatComposer(
                 visualTransformation = EmojiVisualTransformation,
                 modifier = Modifier
                     .weight(1f)
-                    .focusRequester(editFocusRequester)
+                    .focusRequester(fieldFocus)
                     // Android paste-image route (no-op on desktop, which
                     // uses the Ctrl+V intercept below). Same upload+send
                     // path as drag-drop and the picker.
@@ -889,6 +950,13 @@ fun ChatComposer(
                             } else {
                                 (emojiSel - 1).coerceAtLeast(0)
                             }
+                            return@onPreviewKeyEvent true
+                        }
+                        // And the /invite argument pickers.
+                        val invitePicks = groupSuggestions.size.takeIf { it > 0 } ?: inviteShipSuggestions.size
+                        if (invitePicks > 0 && (e.key == Key.DirectionDown || e.key == Key.DirectionUp)) {
+                            inviteSel = if (e.key == Key.DirectionDown) (inviteSel + 1).coerceAtMost(invitePicks - 1)
+                            else (inviteSel - 1).coerceAtLeast(0)
                             return@onPreviewKeyEvent true
                         }
                         // Same for the mention dropdown.
@@ -920,6 +988,7 @@ fun ChatComposer(
                         // is live; otherwise it falls through.
                         if (e.key == Key.Tab) {
                             when {
+                                invitePick() != null -> applyInvitePick(invitePick()!!)
                                 emojiQuery != null && emojiSuggestions.isNotEmpty() ->
                                     applyEmojiPick(emojiSuggestions[emojiSel.coerceIn(0, emojiSuggestions.lastIndex)])
                                 mention != null && suggestions.isNotEmpty() ->
@@ -979,6 +1048,11 @@ fun ChatComposer(
                         // into the room. Accepting closes the picker (the
                         // query no longer parses), so the NEXT Enter sends:
                         // pick-then-send is a double tap of the same key.
+                        // Enter on an /invite argument picks it, like Tab; the next Enter sends.
+                        invitePick()?.let {
+                            applyInvitePick(it)
+                            return@onPreviewKeyEvent true
+                        }
                         if (emojiQuery != null && emojiSuggestions.isNotEmpty()) {
                             applyEmojiPick(
                                 emojiSuggestions[emojiSel.coerceIn(0, emojiSuggestions.lastIndex)],
@@ -1081,16 +1155,31 @@ private fun QuotePreviewRow(
 }
 
 @Composable
-private fun AttachmentPreviewRow(
+internal fun AttachmentPreviewRow(
     pending: PendingAttachment,
     sending: Boolean,
     sendAccent: Color,
     onCancel: () -> Unit,
     onSend: () -> Unit,
 ) {
+    // The text field, and the Enter handler on it, leave while this
+    // shows, so a paste followed by Enter went nowhere. The row takes
+    // the keys itself: Enter sends, Escape discards.
+    val keys = remember { FocusRequester() }
+    LaunchedEffect(Unit) { runCatching { keys.requestFocus() } }
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .focusRequester(keys)
+            .onPreviewKeyEvent { e ->
+                if (e.type != KeyEventType.KeyDown || sending) return@onPreviewKeyEvent false
+                when (e.key) {
+                    Key.Enter, Key.NumPadEnter -> { onSend(); true }
+                    Key.Escape -> { onCancel(); true }
+                    else -> false
+                }
+            }
+            .focusable()
             .padding(horizontal = 8.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -1132,7 +1221,8 @@ private fun AttachmentPreviewRow(
                 maxLines = 1,
             )
             Text(
-                if (pending.isImage) "Image · tap send to post" else "File · tap send to post",
+                (if (pending.isImage) "Image · " else "File · ") +
+                    if (isTouchPrimary) "tap send to post" else "Enter to post, Esc to discard",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

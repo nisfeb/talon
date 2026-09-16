@@ -1,5 +1,10 @@
 package io.nisfeb.talon.ui
 
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.State
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.remember
+import io.nisfeb.talon.data.AppDatabase
 import androidx.compose.runtime.Immutable
 import io.nisfeb.talon.data.ChannelGroupEntity
 import io.nisfeb.talon.data.ClubEntity
@@ -7,7 +12,9 @@ import io.nisfeb.talon.data.ContactEntity
 import io.nisfeb.talon.data.GroupEntity
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlin.concurrent.Volatile
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flowOn
@@ -24,12 +31,11 @@ data class ContactMap(
     val clubs: List<ClubEntity> = emptyList(),
     val groups: List<GroupEntity> = emptyList(),
     val channelGroups: List<ChannelGroupEntity> = emptyList(),
-    /** Ships without a nickname fall back to their mnemonym (see
-     *  [Mnemonym]) instead of the raw @p. Synced via %settings
-     *  (ui-prefs bucket); flip off in Settings for classic naming. */
-    val mnemonymNames: Boolean = true,
     /** Ignore nicknames and mnemonyms; show the raw @p everywhere. */
     val alwaysPatp: Boolean = false,
+    /** Bumped as looked-up names arrive or the setting for them flips,
+     *  so a map built before is not equal to one built after. */
+    val namesGeneration: Int = 0,
 ) {
     private val byShip: Map<String, ContactEntity> =
         contacts.associateBy(ContactEntity::ship)
@@ -53,8 +59,8 @@ data class ContactMap(
      * message text.
      */
     val namesVersion: Int by lazy {
-        var h = if (mnemonymNames) 1 else 0
-        h = h * 31 + if (alwaysPatp) 1 else 0
+        var h = if (alwaysPatp) 1 else 0
+        h = h * 31 + namesGeneration
         for (c in contacts) {
             h = h * 31 + c.ship.hashCode()
             h = h * 31 + (c.nickname?.hashCode() ?: 0)
@@ -76,10 +82,18 @@ data class ContactMap(
         if (alwaysPatp) {
             ship
         } else {
-            nickname(ship)
-                ?: (if (mnemonymNames) Mnemonym.display(ship) else null)
-                ?: ship
+            nickname(ship) ?: handle(ship)
         }
+    /**
+     * What a ship is called with nicknames set aside.
+     *
+     * Its word name if it has one, otherwise its @p. This is the line
+     * that goes under a nickname, and for a comet it is the only thing
+     * ever shown: a comet's @p is the fifty-six characters its name
+     * exists to replace, so no surface puts one in front of anybody.
+     */
+    fun handle(ship: String): String = shipHandle(ship)
+
     fun contact(ship: String): ContactEntity? = byShip[ship]
     fun shipColor(ship: String): String? = byShip[ship]?.color
 
@@ -132,6 +146,70 @@ data class ContactMap(
 }
 
 /**
+ * What a ship is called with nobody's nicknames involved: its word
+ * name if it has one, otherwise its @p.
+ *
+ * The same rule as [ContactMap.handle] and the same one definition,
+ * but reachable without a ContactMap -- the ship switcher lists the
+ * accounts you are signed in to, where there is no such thing as
+ * somebody else's name for them, and it was printing a comet's full
+ * @p because it had no contact data to consult.
+ */
+fun shipHandle(ship: String, nonCometNames: Boolean = AzimuthNames.enabled.value): String =
+    // A comet spells its own fingerprint, so it needs nothing fetched
+    // and nobody's permission.
+    Mnemonym.display(ship)
+        ?: (if (nonCometNames) AzimuthNames.nameFor(ship) else null)
+        ?: ship
+
+/**
+ * The unabridged word name, for telling apart two ships whose short
+ * names came out the same.
+ */
+fun shipHandleLong(ship: String): String? =
+    Mnemonym.forShip(ship) ?: AzimuthNames.fullNameFor(ship)
+
+/**
+ * A handle for each of [ships], lengthened only where it has to be.
+ *
+ * Two comets can abridge to the same two words. Shown side by side --
+ * in a picker, or as two of your own accounts -- the same name twice
+ * tells nobody apart, so those rows get the unabridged name instead.
+ */
+fun shipHandles(ships: Collection<String>): Map<String, String> {
+    val short = ships.associateWith { shipHandle(it) }
+    val clashing = short.values.groupingBy { it }.eachCount().filterValues { it > 1 }.keys
+    return short.mapValues { (ship, name) ->
+        if (name in clashing) shipHandleLong(ship) ?: name else name
+    }
+}
+
+/**
+ * The last [ContactMap] anybody built, so a screen opening can start
+ * from the names it had a moment ago rather than from none at all.
+ *
+ * Built empty, a screen shows every ship as its bare @p and every
+ * avatar as a fallback for the frame it takes Room to answer, and
+ * then the whole thing lands at once -- which reads as the page
+ * assembling itself even when its actual content was never missing.
+ * Sixteen screens did that; this is the one place they all now start
+ * from.
+ *
+ * It is the signed-in ship's, and [forget] is called when that
+ * changes, because another ship's nicknames are worse than none.
+ */
+object LastContactMap {
+    @Volatile
+    var value: ContactMap = ContactMap.EMPTY
+        private set
+
+    internal fun remember(map: ContactMap) { value = map }
+
+    /** On the way out of a ship, and on the way in to another. */
+    fun forget() { value = ContactMap.EMPTY }
+}
+
+/**
  * Combine every directory DAO flow into one ContactMap flow.
  *
  * Status updates land via %contacts /v1/news roughly every minute on
@@ -155,20 +233,28 @@ fun contactMapFlow(
     channelGroupsFlow: Flow<List<ChannelGroupEntity>>,
     // Defaulted to the app-wide switch so the ~17 call sites don't
     // each have to thread a UiSettings reference through; flipping
-    // the setting re-emits every ContactMap and re-renders names.
-    mnemonymNamesFlow: Flow<Boolean> = MnemonymNames.enabled,
+    // it re-emits every ContactMap and re-renders names.
     alwaysPatpFlow: Flow<Boolean> = ShipNames.alwaysPatp,
+    /** Ticks as looked-up names arrive, so a row drawn before the
+     *  answer landed is redrawn once it has. */
+    namesGenerationFlow: Flow<Int> = AzimuthNames.generation,
 ): Flow<ContactMap> = combine(
     contactsFlow.distinctUntilChanged(::sameContactDisplay),
     clubsFlow.distinctUntilChanged(),
     groupsFlow.distinctUntilChanged(),
     channelGroupsFlow.distinctUntilChanged(),
-    // Both naming switches ride one slot: `combine` only types five.
+    // Two naming inputs ride one slot: `combine` only types five.
     combine(
-        mnemonymNamesFlow.distinctUntilChanged(),
         alwaysPatpFlow.distinctUntilChanged(),
-    ) { mn, patp -> mn to patp },
-) { c, cl, g, cg, naming -> ContactMap(c, cl, g, cg, naming.first, naming.second) }
+        namesGenerationFlow.distinctUntilChanged(),
+    ) { patp, gen -> patp to gen },
+) { c, cl, g, cg, (patp, gen) -> ContactMap(c, cl, g, cg, patp, gen) }
+    .onEach {
+        LastContactMap.remember(it)
+        // Story parsing runs outside composition (StoryCache, ingest),
+        // so the naming policy is published from here.
+        ShipNames.setResolver(it.namesVersion, it::displayName)
+    }
     .flowOn(Dispatchers.Default)
     // Conflate so cascading bootstrap emissions (e.g. all four DAOs
     // streaming initial values within a frame of each other) collapse
@@ -196,3 +282,18 @@ internal fun sameContactDisplay(a: List<ContactEntity>, b: List<ContactEntity>):
     }
     return true
 }
+
+/**
+ * The contact map, as every screen wants it: built once per database,
+ * starting from the last one anybody had rather than from none.
+ */
+@Composable
+fun rememberContactMap(db: AppDatabase): State<ContactMap> =
+    remember(db) {
+        contactMapFlow(
+            db.contacts().stream(),
+            db.clubs().stream(),
+            db.groups().streamGroups(),
+            db.groups().streamChannelGroups(),
+        )
+    }.collectAsState(LastContactMap.value)

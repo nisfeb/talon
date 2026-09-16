@@ -47,9 +47,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import io.nisfeb.talon.data.AppDatabase
 import io.nisfeb.talon.ui.Avatar
-import io.nisfeb.talon.ui.ContactMap
 import io.nisfeb.talon.ui.StoryRenderer
-import io.nisfeb.talon.ui.contactMapFlow
 import io.nisfeb.talon.urbit.StoryCache
 import io.nisfeb.talon.urbit.TlonChatRepo
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -102,14 +100,7 @@ fun GalleryPostScreen(
         db.messages().streamReplies(whom, postId).distinctUntilChanged()
     }.collectAsState(initial = emptyList())
 
-    val contactMap by remember {
-        contactMapFlow(
-            db.contacts().stream(),
-            db.clubs().stream(),
-            db.groups().streamGroups(),
-            db.groups().streamChannelGroups(),
-        )
-    }.collectAsState(initial = ContactMap.EMPTY)
+    val contactMap by io.nisfeb.talon.ui.rememberContactMap(db)
 
     var replyText by remember(postId) { mutableStateOf("") }
     var sending by remember(postId) { mutableStateOf(false) }

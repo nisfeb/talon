@@ -47,7 +47,7 @@ fun UpdateBanner(
         )
         is UpdateStatus.Ready -> BannerSurface(
             primary = "Tap to install ${status.manifest.versionName}",
-            secondary = "Verified — Android will ask you to confirm.",
+            secondary = status.hint,
             onTap = onTap,
             onDismiss = null,
         )
