@@ -54,6 +54,12 @@ fun CalendarTask.dueDate(): LocalDate? = dueMs?.let { Instant.fromEpochMilliseco
  * tasks too, and "next only" means today.
  */
 fun tasksInRange(tasks: List<CalendarTask>, range: CalendarRange, nowMs: Long, zone: TimeZone): List<CalendarTask> {
-    val lastDay = Instant.fromEpochMilliseconds((rangeEnd(range, nowMs, zone) ?: nowMs) - 1).toLocalDateTime(zone).date
+    // A real end is exclusive, so its last day ends a millisecond
+    // before it; "next only" has no end to subtract from, and at
+    // exactly midnight nowMs - 1 would be yesterday. Its day is today.
+    val lastDay = when (val end = rangeEnd(range, nowMs, zone)) {
+        null -> Instant.fromEpochMilliseconds(nowMs).toLocalDateTime(zone).date
+        else -> Instant.fromEpochMilliseconds(end - 1).toLocalDateTime(zone).date
+    }
     return taskOrder(tasks.filter { !it.done && (it.dueDate()?.let { d -> d <= lastDay } ?: false) })
 }

@@ -177,4 +177,54 @@ class CalendarEditTest {
         assertEquals(90, timed.durMin)
         assertEquals("America/New_York", timed.zone)
     }
+
+    @Test fun `an until is written as the midnight after and read back as the last day`() {
+        val until = LocalDate(2026, 9, 20)
+        val d = EventDraft(name = "Term", date = day, repeat = Repeat.DAILY, until = until)
+        val b = eventBody(d)
+        assertEquals(
+            until.plus(1, kotlinx.datetime.DateTimeUnit.DAY).atTime(0, 0).toInstant(TimeZone.UTC).toEpochMilliseconds(),
+            b["until_ms"]!!.jsonPrimitive.content.toLong(),
+            "until_ms is the day after the last occurrence, at utc midnight",
+        )
+        assertNull(b["count"])
+        val back = draftFromEvent(eventBody(d, "e1"), day)!!
+        assertEquals(until, back.until, "the last day itself survives the round trip")
+        assertNull(eventBody(EventDraft(name = "x", date = day, repeat = Repeat.DAILY))["until_ms"], "no until, no key")
+        val both = eventBody(EventDraft(name = "x", date = day, repeat = Repeat.DAILY, count = 3, until = until))
+        assertEquals("3", both["count"]!!.jsonPrimitive.content)
+        assertNull(both["until_ms"], "a count wins over an until")
+    }
+
+    @Test fun `an out-of-range at from a peer is coerced into the day`() {
+        fun at(v: Int) = io.nisfeb.talon.mail.AuspexApi.json.parseToJsonElement(
+            """{"id":"x","cat":"timed","meta":{"name":"Standup"},"kind":"daily","start_ms":1789344000000,"args":{"at":$v},"fin":"dur","dur_min":15}""",
+        ).jsonObject
+        assertEquals(1439, draftFromEvent(at(99999), day)!!.minuteOfDay)
+        assertEquals(0, draftFromEvent(at(-5), day)!!.minuteOfDay)
+    }
+
+    @Test fun `an all-day occurrence is read as utc, a timed one in the zone`() {
+        val ny = TimeZone.of("America/New_York")
+        val utcMidnight = day.atTime(0, 0).toInstant(TimeZone.UTC).toEpochMilliseconds()
+        assertEquals(
+            kotlinx.datetime.LocalDateTime(2026, 9, 14, 0, 0),
+            occurrenceAt(utcMidnight, true, ny),
+            "date-space: the same date whatever the zone",
+        )
+        assertEquals(
+            kotlinx.datetime.LocalDateTime(2026, 9, 13, 20, 0),
+            occurrenceAt(utcMidnight, false, ny),
+            "a moment: midnight utc is the evening before in new york",
+        )
+    }
+
+    @Test fun `a long all-day row keeps its end while the days shown are capped`() {
+        val utcMidnight = day.atTime(0, 0).toInstant(TimeZone.UTC).toEpochMilliseconds()
+        val long = CalendarRow(id = "long", all = true, l = utcMidnight, r = utcMidnight + 90 * 86_400_000L)
+        assertEquals(62, daysOf(long, TimeZone.UTC).size, "the grid never lists more than this")
+        val (s, e) = long.bounds(TimeZone.UTC)
+        assertEquals(utcMidnight, s)
+        assertEquals(utcMidnight + 90 * 86_400_000L, e, "the full ninety days, not the capped list's end")
+    }
 }

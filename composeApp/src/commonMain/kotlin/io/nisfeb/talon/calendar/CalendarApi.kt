@@ -215,7 +215,7 @@ class CalendarApi(private val http: HttpClient, baseUrl: String) {
      * what config.json named. True when the shell accepted it.
      */
     suspend fun poke(ball: String, body: JsonObject): Boolean =
-        postJson("$base/grubbery/api/poke/$ball/calendar.calendar?blot=/json", body)
+        postJson("$base/grubbery/api/poke/${ball.encodeURLParameter()}/calendar.calendar?blot=/json", body)
 
     private suspend fun postForJson(url: String, body: JsonObject): JsonObject? {
         val resp = try {

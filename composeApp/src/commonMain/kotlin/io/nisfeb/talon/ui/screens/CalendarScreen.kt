@@ -68,6 +68,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -110,7 +111,9 @@ import io.nisfeb.talon.calendar.daysOf
 import io.nisfeb.talon.calendar.draftFromEvent
 import io.nisfeb.talon.calendar.eventBody
 import io.nisfeb.talon.calendar.monthGrid
+import io.nisfeb.talon.calendar.occurrenceAt
 import io.nisfeb.talon.util.nowMs
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.datetime.DateTimeUnit
 import kotlinx.datetime.DayOfWeek
@@ -178,7 +181,14 @@ fun CalendarScreen(
     val zone = zoneFor(zoneId)
     val scope = rememberCoroutineScope()
 
-    val today = remember { Instant.fromEpochMilliseconds(nowMs()).toLocalDateTime(TimeZone.currentSystemDefault()).date }
+    // Read again on a slow tick: a screen left open past midnight must
+    // not go on calling yesterday "today".
+    val today by produceState(initialValue = Instant.fromEpochMilliseconds(nowMs()).toLocalDateTime(TimeZone.currentSystemDefault()).date) {
+        while (true) {
+            value = Instant.fromEpochMilliseconds(nowMs()).toLocalDateTime(TimeZone.currentSystemDefault()).date
+            delay(60_000L)
+        }
+    }
     var year by remember { mutableStateOf(today.year) }
     var month by remember { mutableStateOf(today.monthNumber) }
     var selected by remember { mutableStateOf(today) }
@@ -187,6 +197,8 @@ fun CalendarScreen(
     var viewing by remember { mutableStateOf<CalendarRow?>(null) }
     var editingIdx by remember { mutableStateOf<Int?>(null) }
     var editingStartMs by remember { mutableStateOf<Long?>(null) }
+    /** Whether the row being edited is all-day: its start is date-space, read as UTC. */
+    var editingAllDay by remember { mutableStateOf(false) }
     var zones by remember { mutableStateOf<List<String>>(emptyList()) }
     LaunchedEffect(availability) { if (availability == CalendarAvailability.PRESENT) zones = repo.zones() }
     var managing by remember { mutableStateOf(false) }
@@ -214,7 +226,8 @@ fun CalendarScreen(
         val id = "pending-${nowMs()}"
         fun utcDay(day: LocalDate, days: Int = 1) = day.atTime(0, 0).toInstant(TimeZone.UTC).toEpochMilliseconds().let { it to it + days * 86_400_000L }
         val (l, r) = when (d.cat) {
-            EventCat.TIMED -> d.date.atTime(d.minuteOfDay / 60, d.minuteOfDay % 60).toInstant(zone).toEpochMilliseconds().let { it to it + d.durMin.coerceAtLeast(0) * 60_000L }
+            // A named zone is the one the times were picked in, not the calendar's.
+            EventCat.TIMED -> d.date.atTime(d.minuteOfDay / 60, d.minuteOfDay % 60).toInstant(d.zone?.let { zoneFor(it) } ?: zone).toEpochMilliseconds().let { it to it + d.durMin.coerceAtLeast(0) * 60_000L }
             EventCat.ALLDAY -> utcDay(d.date, d.spanDays.coerceAtLeast(1))
             EventCat.DATE -> utcDay(d.date)
             EventCat.TODO -> utcDay(d.due ?: return null)
@@ -222,11 +235,14 @@ fun CalendarScreen(
         return CalendarRow(
             id = id, cal = d.cal ?: "default", cat = d.cat.wire, kind = if (d.cat == EventCat.TODO) "todo" else d.repeat.kind,
             all = d.cat != EventCat.TIMED, l = l, r = r,
-            meta = buildJsonObject { put("name", d.name.trim()); if (d.location.isNotBlank()) put("location", d.location.trim()) },
+            meta = buildJsonObject {
+                put("name", d.name.trim()); if (d.location.isNotBlank()) put("location", d.location.trim())
+                if (d.tags.isNotEmpty()) put("tags", kotlinx.serialization.json.JsonArray(d.tags.map { kotlinx.serialization.json.JsonPrimitive(it) }))
+            },
         )
     }
     val visible = remember(rows, hidden, tagFilter, pendingTicks, pendingRows, pendingEdits) {
-        (rows.orEmpty().filter { it.cal !in hidden && (tagFilter == null || tagFilter in it.tags) } + pendingRows)
+        (rows.orEmpty() + pendingRows).filter { it.cal !in hidden && (tagFilter == null || tagFilter in it.tags) }
             .map { r -> pendingTicks[r.id]?.let { r.copy(done = it) } ?: r }
             .map { r ->
                 pendingEdits[r.id]?.let { d ->
@@ -252,8 +268,9 @@ fun CalendarScreen(
         editing = null to EventDraft(date = selected, minuteOfDay = minute, cal = newEventCalendar())
         editingIdx = null
         editingStartMs = null
+        editingAllDay = false
     }
-    fun openById(id: String, idx: Int?, startMs: Long?) {
+    fun openById(id: String, idx: Int?, startMs: Long?, allDay: Boolean) {
         scope.launch {
             val json = repo.eventDetail(id)
             val d = json?.let { draftFromEvent(it, selected) }
@@ -261,9 +278,10 @@ fun CalendarScreen(
             editing = id to d
             editingIdx = idx
             editingStartMs = startMs
+            editingAllDay = allDay
         }
     }
-    fun openExisting(r: CalendarRow) { if (r.cal in readOnly) status = readOnlyNote else openById(r.id, r.idx, r.l) }
+    fun openExisting(r: CalendarRow) { if (r.cal in readOnly) status = readOnlyNote else openById(r.id, r.idx, r.l, r.all) }
     fun view(r: CalendarRow) { viewing = r }
     fun tick(id: String, done: Boolean) {
         pendingTicks = pendingTicks + (id to done)
@@ -305,7 +323,8 @@ fun CalendarScreen(
     fun icsOf(r: CalendarRow) = io.nisfeb.talon.calendar.eventIcs(r.id, r.name, r.location, r.note, r.l, r.r, r.all)
     suspend fun mailEvent(r: CalendarRow, to: List<String>): Boolean {
         val m = mail ?: return false
-        val hash = runCatching { m.uploadBlob(icsOf(r).encodeToByteArray()) }.getOrNull()
+        // A task is not an event to import; the text alone carries it.
+        val hash = if (r.isTask) null else runCatching { m.uploadBlob(icsOf(r).encodeToByteArray()) }.getOrNull()
         val refs = hash?.let { listOf(io.nisfeb.talon.mail.AttachRef("event.ics", "text/calendar", it)) }.orEmpty()
         return m.send(to, r.name.ifBlank { "An event" }, textOf(r), null, refs)
     }
@@ -318,10 +337,15 @@ fun CalendarScreen(
         val d = db ?: return
         say("Sharing with ${labelOf(whom)}…", "The group could not be reached.") {
             val flag = d.groups().channelGroupFor(whom)?.groupFlag ?: return@say false
-            val members = runCatching { c.fetchGroupAdmin(flag)?.members?.map { it.ship } }.getOrNull().orEmpty().filter { it != ourShip }
+            // Null: the roster could not be read, so no invites were mailed -- not the same as none.
+            val members = runCatching { c.fetchGroupAdmin(flag)?.members?.map { it.ship } }.getOrNull()?.filter { it != ourShip }
             val posted = runCatching { c.send(whom, textOf(r)) }.isSuccess
-            val mailed = members.isEmpty() || mailEvent(r, members)
-            if (posted && mailed) status = "Posted to ${labelOf(whom)} and mailed the invite to ${members.size} ship${if (members.size == 1) "" else "s"}."
+            val mailed = members.isNullOrEmpty() || mailEvent(r, members)
+            if (posted && mailed) status = when {
+                members == null -> "Posted to ${labelOf(whom)}. The member list could not be read, so no invites were mailed."
+                members.isEmpty() -> "Posted to ${labelOf(whom)}."
+                else -> "Posted to ${labelOf(whom)} and mailed the invite to ${members.size} ship${if (members.size == 1) "" else "s"}."
+            }
             posted && mailed
         }
     }
@@ -649,8 +673,12 @@ fun CalendarScreen(
                 Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     val whenText = when {
                         r.isTask -> (r.dueLabel(zone) ?: "No due date") + if (r.done) " · done" else ""
-                        else -> "${d3(selected.dayOfWeek)} ${selected.dayOfMonth} ${MonthNames.ENGLISH_ABBREVIATED.names[selected.monthNumber - 1]} · ${spanLabel(r, selected, zone, twentyFourHour)}" +
-                            if (r.repeats) " · repeats ${r.kind}" else ""
+                        else -> {
+                            // The row's own day, not whatever day is selected now.
+                            val day = daysOf(r, zone).first()
+                            "${d3(day.dayOfWeek)} ${day.dayOfMonth} ${MonthNames.ENGLISH_ABBREVIATED.names[day.monthNumber - 1]} · ${spanLabel(r, day, zone, twentyFourHour)}" +
+                                if (r.repeats) " · repeats ${r.kind}" else ""
+                        }
                     }
                     Text(whenText, style = MaterialTheme.typography.bodyMedium)
                     val uriHandler = androidx.compose.ui.platform.LocalUriHandler.current
@@ -735,7 +763,7 @@ fun CalendarScreen(
                 }
             },
             confirmButton = {
-                if (!readOnlyHere) TextButton(onClick = { viewing = null; openById(r.id, r.idx.takeIf { !r.isTask }, r.l.takeIf { !r.isTask }) }) { Text("Edit") }
+                if (!readOnlyHere) TextButton(onClick = { viewing = null; openById(r.id, r.idx.takeIf { !r.isTask }, r.l.takeIf { !r.isTask }, r.all) }) { Text("Edit") }
             },
             dismissButton = { TextButton(onClick = { viewing = null }) { Text("Close") } },
         )
@@ -788,7 +816,7 @@ fun CalendarScreen(
             onDismiss = { editing = null; postTo = null },
             onSave = { d, editScope ->
                 val idx = editingIdx
-                val occurrence = editingStartMs?.let { Instant.fromEpochMilliseconds(it).toLocalDateTime(zone) }
+                val occurrence = editingStartMs?.let { occurrenceAt(it, editingAllDay, zone) }
                 val ghost = if (id == null) placeholderFor(d) else null
                 if (ghost != null) pendingRows = pendingRows + ghost
                 if (id != null) pendingEdits = pendingEdits + (id to d)
@@ -854,10 +882,14 @@ fun CalendarScreen(
             onShare = { id, ship, edit ->
                 status = "Sharing with $ship…"
                 scope.launch {
-                    status = when (repo.share(id, ship, edit)) {
-                        null -> "The ship would not share that calendar."
-                        false -> "$ship could not be reached (down, or no calendar there yet). The share is recorded; share again once it is up to send the offer."
-                        true -> null
+                    status = try {
+                        when (repo.share(id, ship, edit)) {
+                            null -> "The ship would not share that calendar."
+                            false -> "$ship could not be reached (down, or no calendar there yet). The share is recorded; share again once it is up to send the offer."
+                            true -> null
+                        }
+                    } catch (e: io.nisfeb.talon.mail.AuspexError.Unreachable) {
+                        "The ship could not be reached; nothing was shared."
                     }
                 }
             },
@@ -1045,7 +1077,8 @@ private fun EventEditor(
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             OutlinedTextField(
                                 value = if (d.count == 0) "" else d.count.toString(),
-                                onValueChange = { v -> d = d.copy(count = v.toIntOrNull() ?: 0) },
+                                // A count wins over an until on the wire; keeping both would lie.
+                                onValueChange = { v -> val n = v.toIntOrNull() ?: 0; d = d.copy(count = n, until = if (n > 0) null else d.until) },
                                 label = { Text("Times") }, placeholder = { Text("no limit") }, singleLine = true,
                                 modifier = Modifier.width(110.dp),
                             )
@@ -1552,7 +1585,8 @@ private fun WeekGrid(
                 Row(Modifier.horizontalScroll(hScroll)) {
                 days.forEach { d ->
                     Column(Modifier.width(colWidth).padding(horizontal = 1.dp), verticalArrangement = Arrangement.spacedBy(1.dp)) {
-                        byDay[d].orEmpty().filter { it.all }.take(3).forEach { r ->
+                        val allDay = byDay[d].orEmpty().filter { it.all }
+                        allDay.take(3).forEach { r ->
                             Text(
                                 (if (r.isTask) (if (r.done) "☑ " else "☐ ") else "") + r.name.ifBlank { "(untitled)" },
                                 style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis,
@@ -1560,6 +1594,14 @@ private fun WeekGrid(
                                 modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(3.dp))
                                     .background((colourOf(r) ?: MaterialTheme.colorScheme.primary).copy(alpha = if (r.done) 0.4f else 0.9f))
                                     .clickable { onOpen(r) }.padding(horizontal = 3.dp),
+                            )
+                        }
+                        if (allDay.size > 3) {
+                            Text(
+                                "+${allDay.size - 3} more",
+                                style = MaterialTheme.typography.labelSmall, maxLines = 1,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(horizontal = 3.dp),
                             )
                         }
                     }

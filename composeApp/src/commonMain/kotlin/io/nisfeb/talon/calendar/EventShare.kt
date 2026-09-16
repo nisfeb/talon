@@ -1,5 +1,6 @@
 package io.nisfeb.talon.calendar
 
+import io.nisfeb.talon.util.nowMs
 import kotlinx.datetime.Instant
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
@@ -18,7 +19,7 @@ fun eventShareText(name: String, whenLine: String, location: String, note: Strin
  * carries its moments in UTC; a whole day carries dates.
  */
 fun eventIcs(id: String, name: String, location: String, note: String, startMs: Long, endMs: Long, allDay: Boolean): String {
-    fun esc(s: String) = s.replace("\\", "\\\\").replace(";", "\\;").replace(",", "\\,").replace("\n", "\\n")
+    fun esc(s: String) = s.replace("\\", "\\\\").replace(";", "\\;").replace(",", "\\,").replace("\r", "\\r").replace("\n", "\\n")
     fun stamp(ms: Long): String {
         val t = Instant.fromEpochMilliseconds(ms).toLocalDateTime(TimeZone.UTC)
         fun p(n: Int) = n.toString().padStart(2, '0')
@@ -29,9 +30,12 @@ fun eventIcs(id: String, name: String, location: String, note: String, startMs: 
         fun p(n: Int) = n.toString().padStart(2, '0')
         return "${d.year}${p(d.monthNumber)}${p(d.dayOfMonth)}"
     }
+    // The id goes into the file raw, so nothing that could end its line
+    // early -- or smuggle a new one in -- may survive into the UID.
+    val safeId = id.filter { it.code in 0x20..0x7e }
     val lines = mutableListOf(
         "BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Talon//Calendar//EN", "METHOD:PUBLISH",
-        "BEGIN:VEVENT", "UID:$id@talon", "DTSTAMP:${stamp(startMs)}",
+        "BEGIN:VEVENT", "UID:$safeId@talon", "DTSTAMP:${stamp(nowMs())}",
     )
     if (allDay) { lines += "DTSTART;VALUE=DATE:${day(startMs)}"; lines += "DTEND;VALUE=DATE:${day(endMs)}" }
     else { lines += "DTSTART:${stamp(startMs)}"; lines += "DTEND:${stamp(endMs)}" }

@@ -65,4 +65,11 @@ class CalendarAgendaTest {
         assertEquals(listOf("late", "today"), tasksInRange(ts, CalendarRange.NEXT_ONLY, evening, utc).map { it.id })
         assertEquals(today, task("today", tomorrow - day).dueDate())
     }
+
+    @Test fun `next only at exactly utc midnight still means today`() {
+        // 2026-09-14 00:00:00 UTC: nowMs - 1 would be yesterday, but "next only" has no end to subtract from.
+        val midnight = 1_789_344_000_000L
+        val ts = listOf(task("today", midnight), task("tomorrow", midnight + 24 * h))
+        assertEquals(listOf("today"), tasksInRange(ts, CalendarRange.NEXT_ONLY, midnight, utc).map { it.id })
+    }
 }

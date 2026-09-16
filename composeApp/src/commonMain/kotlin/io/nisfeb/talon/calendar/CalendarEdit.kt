@@ -234,6 +234,11 @@ fun draftFromEvent(e: JsonObject, today: LocalDate): EventDraft? {
         durMin = num("dur_min") ?: 60,
         spanDays = num("span_days") ?: 1,
         count = num("count") ?: 0,
+        // Written as midnight of the day after the last occurrence;
+        // read back as the last day itself.
+        until = e["until_ms"]?.jsonPrimitive?.longOrNull?.let {
+            Instant.fromEpochMilliseconds(it).toLocalDateTime(TimeZone.UTC).date.minus(1, DateTimeUnit.DAY)
+        },
         zone = zone,
     )
     val repeat = Repeat.entries.firstOrNull { it.kind == kind }
@@ -246,7 +251,9 @@ fun draftFromEvent(e: JsonObject, today: LocalDate): EventDraft? {
     }.orEmpty().toSet()
     val anchorsOnTime = cat == EventCat.TIMED && (repeat == Repeat.ONCE || repeat == Repeat.EVERY)
     return common.copy(
-        minuteOfDay = if (anchorsOnTime) wall.hour * 60 + wall.minute else at ?: 0,
+        // A shared calendar's args come from a peer; an out-of-range at
+        // would crash the time picker or throw on save.
+        minuteOfDay = if (anchorsOnTime) wall.hour * 60 + wall.minute else at?.coerceIn(0, 1439) ?: 0,
         repeat = repeat,
         weekdays = days,
         ordinal = args?.get("ord")?.jsonPrimitive?.contentOrNull?.takeIf { it in ORDINALS } ?: "first",
@@ -262,11 +269,24 @@ fun draftFromEvent(e: JsonObject, today: LocalDate): EventDraft? {
  */
 fun CalendarRow.bounds(zone: TimeZone): Pair<Long, Long> {
     if (!all) return l to r
-    val days = daysOf(this, zone)
-    val start = days.first().atTime(0, 0).toInstant(zone).toEpochMilliseconds()
-    val end = days.last().plus(1, DateTimeUnit.DAY).atTime(0, 0).toInstant(zone).toEpochMilliseconds()
+    // Straight from the moments rather than through daysOf, whose cap
+    // on the days shown would shorten a long span's end.
+    val first = Instant.fromEpochMilliseconds(l).toLocalDateTime(TimeZone.UTC).date
+    val last = Instant.fromEpochMilliseconds(r - 1).toLocalDateTime(TimeZone.UTC).date
+    val start = first.atTime(0, 0).toInstant(zone).toEpochMilliseconds()
+    val end = (if (last < first) first else last).plus(1, DateTimeUnit.DAY).atTime(0, 0).toInstant(zone).toEpochMilliseconds()
     return start to end
 }
+
+/**
+ * The occurrence a scoped edit ("this one only", "this and following")
+ * anchors on. An all-day row's start is date-space -- midnight UTC --
+ * and is read as UTC whatever the display zone, or the write lands on
+ * the day before in a zone behind UTC; a timed row's is a moment, read
+ * in [zone].
+ */
+fun occurrenceAt(startMs: Long, allDay: Boolean, zone: TimeZone): LocalDateTime =
+    Instant.fromEpochMilliseconds(startMs).toLocalDateTime(if (allDay) TimeZone.UTC else zone)
 
 /**
  * A shared event, given as moments, as a draft for this ship's calendar.
