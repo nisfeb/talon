@@ -796,6 +796,9 @@ private fun CalWidgetBlock(
             val addScope = androidx.compose.runtime.rememberCoroutineScope()
             var menuOpen by remember { mutableStateOf(false) }
             var added by remember { mutableStateOf<String?>(null) }
+            // A successful add disarms the button — left armed, every
+            // further tap wrote another copy of the event.
+            var addedDone by remember { mutableStateOf(false) }
             fun toAnotherApp() = runCatching {
                 // Android: Intent.ACTION_INSERT pops the system
                 // create-event sheet pre-filled. Desktop / unset:
@@ -810,9 +813,12 @@ private fun CalWidgetBlock(
             }
             androidx.compose.foundation.layout.Box {
                 // The ship's own calendars first; another calendar app after.
-                androidx.compose.material3.TextButton(onClick = {
-                    if (shipCalendar != null && shipCalendars.isNotEmpty()) menuOpen = true else toAnotherApp()
-                }) { Text(added ?: "Add") }
+                androidx.compose.material3.TextButton(
+                    onClick = {
+                        if (shipCalendar != null && shipCalendars.isNotEmpty()) menuOpen = true else toAnotherApp()
+                    },
+                    enabled = !addedDone,
+                ) { Text(added ?: "Add") }
                 androidx.compose.material3.DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
                     shipCalendar?.writable().orEmpty().forEach { c ->
                         androidx.compose.material3.DropdownMenuItem(
@@ -821,7 +827,9 @@ private fun CalWidgetBlock(
                                 menuOpen = false
                                 added = "Adding…"
                                 addScope.launch {
-                                    added = if (shipCalendar!!.addShared(c.id, title, startEpochMs, endEpochMs)) "Added to ${c.name.ifBlank { c.id }}" else "Not added"
+                                    val ok = shipCalendar!!.addShared(c.id, title, startEpochMs, endEpochMs)
+                                    addedDone = ok
+                                    added = if (ok) "Added to ${c.name.ifBlank { c.id }}" else "Not added"
                                 }
                             },
                         )

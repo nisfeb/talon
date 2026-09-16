@@ -77,4 +77,53 @@ class QuoteSurvivesTest {
             tmp.deleteRecursively()
         }
     }
+
+    @Test
+    fun `a thread surface does not share the main composer's quote slot`() {
+        val tmp = createTempDirectory(prefix = "talon-quote-").toFile()
+        val db = Room.databaseBuilder<AppDatabase>(File(tmp, "t.db").absolutePath)
+            .setDriver(BundledSQLiteDriver())
+            .fallbackToDestructiveMigration(dropAllTables = true)
+            .build()
+        try {
+            runComposeUiTest {
+                val whom = "~zod"
+                val threadKey = "thread:~zod#170.141.184.500"
+                lateinit var main: ComposerState
+                lateinit var thread: ComposerState
+                val drafts = InMemoryDraftStore()
+                setContent {
+                    TalonTheme(darkTheme = false) {
+                        main = rememberComposerState(whom, drafts)
+                        thread = rememberComposerState(threadKey, drafts, quoteKey = threadKey)
+                        ChatComposer(
+                            state = main, db = db, repo = TlonChatRepo(db), http = createAppHttpClient(),
+                            drafts = drafts, whom = whom, contactMap = ContactMap.EMPTY, allShips = emptyList(),
+                            canSend = true, hideComposerButtons = true, focusOnOpen = false, strategy = noSend,
+                        )
+                        ChatComposer(
+                            state = thread, db = db, repo = TlonChatRepo(db), http = createAppHttpClient(),
+                            drafts = drafts, whom = threadKey, quoteKey = threadKey, contactMap = ContactMap.EMPTY,
+                            allShips = emptyList(), canSend = true, hideComposerButtons = true,
+                            focusOnOpen = false, strategy = noSend,
+                        )
+                    }
+                }
+                waitForIdle()
+                runOnIdle { main.pendingQuote = quoted }
+                waitForIdle()
+                assertNull(thread.pendingQuote, "a quote picked in the main composer is not the thread's")
+
+                // The main composer consumes its quote; nothing the
+                // thread surface writes may bring it back.
+                runOnIdle { main.pendingQuote = null }
+                waitForIdle()
+                assertNull(PendingQuotes.get(whom))
+                assertNull(PendingQuotes.get(threadKey))
+            }
+        } finally {
+            db.close()
+            tmp.deleteRecursively()
+        }
+    }
 }

@@ -159,13 +159,19 @@ data class EditTarget(
 )
 
 /**
- * Quotes waiting on a composer, by conversation.
+ * Quotes waiting on a composer, by composer-surface key.
  *
  * The composer is rebuilt for each conversation, so a quote picked in
  * one chat was thrown away by walking to another and back, while the
  * half-typed message beside it survived in the draft store. Held for
  * the session, like a desktop draft, and put down with the ship:
  * two ships can name the same conversation.
+ *
+ * The key is the surface's own key, not bare whom: a main composer
+ * (keyed by whom) and a thread composer (keyed by its thread draft
+ * key) for the same conversation each get a slot. Sharing one, each
+ * surface's effect took turns overwriting the other — a quote one
+ * consumed came back when the other re-wrote its stale copy.
  */
 object PendingQuotes {
     private val byWhom = mutableMapOf<String, MessageEntity>()
@@ -182,12 +188,17 @@ object PendingQuotes {
 /**
  * Re-keys on [whom] so switching conversations starts the composer
  * fresh. Loads any persisted draft text from [drafts], and the quote
- * that was waiting on this conversation.
+ * that was waiting on this composer's surface.
+ *
+ * [quoteKey] is this surface's slot in [PendingQuotes]; it defaults
+ * to [whom], which is the main composer's key. A thread composer
+ * passes its thread draft key so it and the main composer of the
+ * same conversation don't share one slot.
  */
 @Composable
-fun rememberComposerState(whom: String, drafts: DraftStore): ComposerState =
+fun rememberComposerState(whom: String, drafts: DraftStore, quoteKey: String = whom): ComposerState =
     remember(whom) {
-        ComposerState(drafts.load(whom)).also { it.pendingQuote = PendingQuotes.get(whom) }
+        ComposerState(drafts.load(whom)).also { it.pendingQuote = PendingQuotes.get(quoteKey) }
     }
 
 /**
@@ -221,6 +232,11 @@ fun ChatComposer(
     http: HttpClient,
     drafts: DraftStore,
     whom: String,
+    /** This surface's slot in [PendingQuotes]; defaults to [whom],
+     *  the main composer's key. A thread composer passes its thread
+     *  draft key so the two surfaces of one conversation don't
+     *  overwrite each other's staged quote. */
+    quoteKey: String = whom,
     contactMap: ContactMap,
     /** All ships eligible for `@` autocomplete. Caller computes from
      *  rows + contacts so the picker can suggest people from this
@@ -502,9 +518,9 @@ fun ChatComposer(
         (inviteArg as? InviteArg.Ship)?.let { suggestionsFor(it.query, contactMap, allShips) } ?: emptyList()
     }
     var inviteSel by remember(inviteArg?.query) { mutableStateOf(0) }
-    // Keep the quote with its conversation, so leaving and coming back
-    // finds it still attached, the way the draft text is.
-    LaunchedEffect(whom, state.pendingQuote?.id) { PendingQuotes.set(whom, state.pendingQuote) }
+    // Keep the quote with its composer's surface, so leaving and
+    // coming back finds it still attached, the way the draft text is.
+    LaunchedEffect(quoteKey, state.pendingQuote?.id) { PendingQuotes.set(quoteKey, state.pendingQuote) }
     val mention = if (inviteArg != null) null else detectMentionQuery(state.draft.text, state.draft.selection.start)
     val suggestions = remember(mention, allShips, contactMap) {
         mention?.let { (q, _) -> suggestionsFor(q, contactMap, allShips) } ?: emptyList()
@@ -677,6 +693,13 @@ fun ChatComposer(
             // runner is meant to interpret.
             val firstWord = body.lowercase().substringBefore(' ')
             val handledInUi = when {
+                // A staged quote turns the send into a quoted message,
+                // so /invite typed on top of one would go out as
+                // literal text. Refuse it and name the way out.
+                quote != null && firstWord == "/invite" -> {
+                    state.sendError = "/invite can't go out with a quote staged — dismiss the quote or send it first"
+                    return@doSend false
+                }
                 quote != null -> false
                 firstWord == "/invite" -> {
                     when (val p = parseInvite(body, whom.takeIf { inDm }, myGroups)) {

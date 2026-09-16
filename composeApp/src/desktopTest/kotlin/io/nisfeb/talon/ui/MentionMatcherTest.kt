@@ -67,4 +67,15 @@ class MentionMatcherTest {
         assertTrue(MentionMatcher.containsMention(
             "(~mister-foo)", "mister-foo"))
     }
+
+    @Test fun `letter glued to the tilde does NOT match`() {
+        // x~zod is one token, not a mention of ~zod.
+        assertFalse(MentionMatcher.containsMention(
+            "see x~mister-foo for details", "mister-foo"))
+        assertFalse(MentionMatcher.containsMention(
+            "dash-glued-~mister-foo either", "mister-foo"))
+        // ...but a later free-standing mention still counts.
+        assertTrue(MentionMatcher.containsMention(
+            "x~mister-foo then ~mister-foo", "mister-foo"))
+    }
 }

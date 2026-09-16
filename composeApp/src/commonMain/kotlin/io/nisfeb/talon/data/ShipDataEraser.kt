@@ -28,6 +28,20 @@ interface ShipDataEraser {
      */
     fun erase(ship: String): Result<Unit>
 
+    /**
+     * Record that [ship]'s data must go once the database lets go of
+     * it. The active ship's erase waits on a re-key; if the process
+     * dies in that window the marker is what the next launch replays
+     * (see [takePending]). A successful [erase] clears the marker.
+     */
+    fun markPending(ship: String) {}
+
+    /**
+     * The ship whose erase was parked by [markPending], or null. The
+     * caller owns the replay: erase, and the marker clears with it.
+     */
+    fun takePending(): String? = null
+
     companion object {
         /** For hosts and tests that store nothing per ship. */
         val Noop: ShipDataEraser = object : ShipDataEraser {

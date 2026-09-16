@@ -57,7 +57,11 @@ class DialSizeTest {
     @Test
     fun `the smallest dial is not a dot`() {
         val smallest = dialSizeFor(HOME_ROW_RANGE.first)
-        val cell = HOME_ROW_RANGE.first * HOME_ROW_UNIT_DP
+        // The cell the dial actually gets: the grid's gap and the
+        // panel's padding come out of the raw rows first (that was the
+        // clipping fix), so the proportion is measured against what is
+        // left, not the raw cell.
+        val cell = HOME_ROW_RANGE.first * HOME_ROW_UNIT_DP - 14 - 12
         assertTrue(
             smallest.value > cell * 0.7f,
             "the shortest clock gives the dial ${smallest.value}dp of its ${cell}dp",

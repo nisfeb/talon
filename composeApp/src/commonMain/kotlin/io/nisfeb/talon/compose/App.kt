@@ -428,12 +428,27 @@ fun App(
         io.nisfeb.talon.ui.LastContactMap.forget()
         io.nisfeb.talon.ui.AzimuthNames.reset()
     }
+    // A "forget + erase" of the active ship waits on the database
+    // re-key before it can delete files; if the process died in that
+    // window, the marker is still here. Finish what was asked.
+    LaunchedEffect(Unit) {
+        shipDataEraser.takePending()?.let { gone ->
+            shipDataEraser.erase(gone)
+                .onFailure { io.nisfeb.talon.util.Log.w("App", "pending erase replay failed for $gone", it) }
+        }
+    }
 
     /** Put down the ship on screen before the active one changes. */
     val leaveShip: () -> Unit = {
         // Two ships can name the same conversation; a quote is the one
         // ship's own and does not follow us to the other.
         io.nisfeb.talon.ui.PendingQuotes.clear()
+        // Names belong to the ship that set them. Dropped here, before
+        // the switch, so the new ship never composes one frame wearing
+        // the old ship's nicknames (the LaunchedEffect above re-drops
+        // them on the restore path, where leaveShip doesn't run).
+        io.nisfeb.talon.ui.LastContactMap.forget()
+        io.nisfeb.talon.ui.AzimuthNames.reset()
         openChat = null
         switchShipAction()
         viewerImageUrl = null
@@ -451,9 +466,13 @@ fun App(
     LaunchedEffect(Unit) {
         io.nisfeb.talon.notify.OpenChatRequests.requests.collect { r ->
             val forShip = r.forShip
-            if (forShip != null && forShip != loggedInShip &&
-                sessionStore.all().any { it.ship == forShip }
-            ) {
+            if (forShip != null && sessionStore.all().none { it.ship == forShip }) {
+                // A tap for a ship this device no longer knows. Opening
+                // the same-named chat on the current ship would be the
+                // wrong conversation; nowhere to land, so drop it.
+                return@collect
+            }
+            if (forShip != null && forShip != loggedInShip) {
                 leaveShip()
                 sessionStore.setActive(forShip)
                 loggedInShip = forShip
@@ -827,9 +846,9 @@ fun App(
                 }
             }
         }
-        // Names for the call surface. A third collection of the same
-        // local-Room flows in this function — cheap, but the three
-        // (here, citeContacts, partyContacts) want hoisting into one.
+        // Names for every surface below — calls, cites, the party
+        // roster: one collection of the same local-Room flows, hoisted
+        // from what used to be three identical ones.
         val callContacts by io.nisfeb.talon.ui.rememberContactMap(db)
         // iOS wires CallKit here — answer/end/mute/hold in, every call
         // and line reported out; no-op on Android and desktop. After
@@ -875,7 +894,7 @@ fun App(
 
         // Mail lives on the ship's own HTTP surface, not the eyre
         // channel, so it needs only the session's cookie-bearing client.
-        val mailRepo = remember(session) {
+        val mailRepo = remember(session, db, loggedInShip) {
             io.nisfeb.talon.mail.MailRepo(
                 session.http, loopScope,
                 rows = db.mailRows(),
@@ -1416,7 +1435,14 @@ fun App(
                               inviteShipFromCode = link.ship
                               true
                           }
-                          null -> false
+                          null -> {
+                              // A talon:// shape we don't know. Returning
+                              // false hands it to the OS handler, which on
+                              // desktop surfaces an OS-level error for what
+                              // is really just an unrecognized link.
+                              io.nisfeb.talon.util.Log.w("App", "unrecognized talon link: $uri", null)
+                              true
+                          }
                       }
                   },
                   onUrb = urbLinkHandler,
@@ -1473,7 +1499,7 @@ fun App(
           // Root contact map so a quoted post's author resolves to the
           // same nickname / mnemonym the rest of the app shows, rather
           // than the bare @p the renderer would emit on its own.
-          val citeContacts by io.nisfeb.talon.ui.rememberContactMap(db)
+          val citeContacts = callContacts
           val citeDisplayName: (String) -> String = remember(citeContacts) {
               { ship -> citeContacts.displayName(ship) }
           }
@@ -1706,26 +1732,43 @@ fun App(
                  * switcher lists them all, and clearing out an account
                  * somebody no longer uses should not require switching
                  * into it first.
+                 *
+                 * TalonApplication.kt (androidMain) has its own
+                 * forgetShip for the system-settings path — keep the
+                 * two in step when the erase timing changes.
                  */
                 val forgetShip: (String, Boolean) -> Unit = { gone, alsoData ->
                     val wasActive = gone == loggedInShip
                     if (wasActive) {
                         leaveShip()
                     }
-                    runCatching { sessionStore.remove(gone) }
-                    if (alsoData) {
+                    // Erasing data for a ship whose session never went
+                    // away would leave a signed-in ship with nothing
+                    // under it.
+                    val removed = runCatching { sessionStore.remove(gone) }
+                    if (removed.isFailure) {
+                        io.nisfeb.talon.util.Log.w("App", "forgetShip: session remove failed for $gone", removed.exceptionOrNull())
+                    }
+                    if (alsoData && removed.isSuccess) {
                         if (wasActive) {
                             // The key block closes this database two
                             // seconds after it re-keys. Erasing before
                             // that deletes a file SQLite still has
                             // open: Windows refuses, and elsewhere the
                             // next checkpoint writes it straight back.
+                            // The marker is the record in case the
+                            // process dies inside the window — the next
+                            // launch replays it (see the takePending
+                            // call near the top of App).
+                            shipDataEraser.markPending(gone)
                             GlobalScope.launch(ioDispatcher) {
                                 delay(2_500)
                                 shipDataEraser.erase(gone)
+                                    .onFailure { io.nisfeb.talon.util.Log.w("App", "forgetShip: erase failed for $gone", it) }
                             }
                         } else {
                             shipDataEraser.erase(gone)
+                                .onFailure { io.nisfeb.talon.util.Log.w("App", "forgetShip: erase failed for $gone", it) }
                         }
                     }
                     if (wasActive) {
@@ -2401,7 +2444,7 @@ fun App(
                                 // Nicknames for the party-line roster:
                                 // the @p is the identity, the nickname
                                 // is what a reader actually recognises.
-                                val partyContacts by io.nisfeb.talon.ui.rememberContactMap(db)
+                                val partyContacts = callContacts
                                 // Ask the host once per group whether a
                                 // line exists, when we hold no invite.
                                 // A member whose ship had no %trunk when

@@ -1,5 +1,39 @@
 package io.nisfeb.talon.ui
 
+/**
+ * The platform capability registry. Every `expect val` flag below is
+ * one row here; the flag's own KDoc says what it gates. Platforms:
+ * A = Android, D = desktop, i = iOS.
+ *
+ *  - isVoiceMessagesSupported — A, i. D: no recorder pipeline on the JVM.
+ *  - isOnDeviceAiSupported — A (MediaPipe); D by EmbedderProbe verdict (DJL ONNX SIGSEGVs some libstdc++ ABIs); i: no embedder port.
+ *  - isAssistantSupported — A, D, i: a cloud LLM key + ship session is all it needs.
+ *  - isLoopsSupported — A, D, i: AlarmManager on A; the while-open ticker (App.kt) on D/i.
+ *  - isBackgroundSchedulingSupported — A (AlarmManager + BootReceiver); D/i: the ticker only runs while the app is open.
+ *  - isQrScanSupported — A (ZXing), i (AVFoundation); D: no camera to assume.
+ *  - isLocalCometSupported — D (runtime driven under a pseudo-terminal); A/i: no background process can host a ship.
+ *  - isTouchSwipeNavSupported — A, i; D: drag detectors claim click-with-drift and deaden links/buttons.
+ *  - hasSoftKeyboard — A, i; D: focusing a field pops no keyboard over the content.
+ *  - isDictationSupported — A, i (the platform speech recogniser); D: no recogniser to call.
+ *  - isTapToOpenMenuSupported — A, i; D: left-drag belongs to text selection, the menu is right-click.
+ *  - isCallsSupported — A, D, i: a libwebrtc-backed CallEngine actual exists on each.
+ *  - isCallRecordingSupported — A, D; i: the Swift bridge exposes no PCM tap.
+ *  - isWindowFullScreenSupported — D (window placement is ours); A/i: the app already is the whole screen.
+ *  - isBackgroundCallRingSupported — A (UnifiedPush), D (long-running process), i (PushKit + CallKit).
+ *  - isVideoCallsSupported — A, D, i: camera capture + render end-to-end on all three.
+ *  - isPartyVideoSupported — A, D, i: PeerLink publishes and renders cameras on all three.
+ *  - isCameraSwitchSupported — A, i; D: a webcam has one lens and no switch.
+ *  - isEdgeSwipeBackSupported — i (Compose gets none of UIKit's gesture); A: the system back owns the edge; D: no touch edge.
+ *  - isDrawerNavigation — A, i (no room for a rail); D: the permanent rail is already one click from anywhere.
+ *  - isTouchPrimary — A, i (thumb-sized rows); D: mouse + close screen favour density.
+ *  - needsEmojiFontSpans — D (a bundled emoji family does the work); A/i: colour emoji render in the default family.
+ *  - needsManualImagePaste — D, i; A: the text field's content receiver takes pasted images.
+ *  - isImmersiveCallSupported — A, i (full-screen call view); D: the inline roster toggles in place.
+ *  - isUrbWebViewSupported — A, i (in-app webview popover); D: hands off to the system browser.
+ *
+ * [platformLabel] and [isOnDeviceAiFeatureSupported] are declared
+ * below too — a display name and a per-feature predicate, not flags.
+ */
 expect val isVoiceMessagesSupported: Boolean
 
 /**

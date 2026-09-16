@@ -140,8 +140,13 @@ fun DesktopShell(
             // sent content here that was silently dropped on the floor
             // until 0.10.0-rc4.
             if (rightSidebar != null) {
-                // Never wider than leaves the chat its minimum.
-                val cap = (this@BoxWithConstraints.maxWidth - RAIL_WIDTH - MIN_MAIN_WIDTH).coerceAtLeast(MIN_RIGHT_PANE_WIDTH)
+                // Never wider than leaves the chat its minimum, and
+                // never past MAX_RIGHT_PANE_WIDTH — UiSettings clamps
+                // the stored width to the same ceiling, and this keeps
+                // the pane honest even for a caller that didn't.
+                val cap = (this@BoxWithConstraints.maxWidth - RAIL_WIDTH - MIN_MAIN_WIDTH)
+                    .coerceAtLeast(MIN_RIGHT_PANE_WIDTH)
+                    .coerceAtMost(MAX_RIGHT_PANE_WIDTH)
                 val width = rightPaneWidth.coerceIn(MIN_RIGHT_PANE_WIDTH, cap)
                 val density = LocalDensity.current
                 PaneDragHandle(onDragDelta = { deltaPx ->
