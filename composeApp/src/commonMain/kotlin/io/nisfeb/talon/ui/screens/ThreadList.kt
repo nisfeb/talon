@@ -120,7 +120,7 @@ fun ThreadList(
 ) {
     io.nisfeb.talon.notify.ClearNotificationsWhileShown(whom)
     // Taken once per thread: set by whatever opened it to reply.
-    val openedToReply = remember(parentId) { ThreadOpenIntent.take() }
+    val openedToReply = remember(parentId) { ThreadOpenIntent.take(parentId) }
     val parent by remember(whom, parentId) {
         db.messages().streamOne(whom, parentId).distinctUntilChanged()
     }.collectAsState(initial = null)
@@ -240,8 +240,11 @@ fun ThreadList(
     // doesn't share state with the main chat composer or with other
     // threads in the same channel. The composer treats the namespaced
     // string as its draft key — that's all the screen passes to it.
+    // It is also the thread surface's quote slot: the main composer of
+    // the same conversation keeps its own, so neither surface's
+    // PendingQuotes effect can resurrect a quote the other consumed.
     val threadDraftKey = remember(whom, parentId) { "thread:$whom#$parentId" }
-    val composerState = io.nisfeb.talon.ui.rememberComposerState(threadDraftKey, drafts)
+    val composerState = io.nisfeb.talon.ui.rememberComposerState(threadDraftKey, drafts, quoteKey = threadDraftKey)
 
     val contactList by remember {
         db.contacts().stream()
@@ -493,6 +496,7 @@ fun ThreadList(
             drafts = drafts,
             focusOnOpen = !io.nisfeb.talon.ui.hasSoftKeyboard || openedToReply,
             whom = threadDraftKey,
+            quoteKey = threadDraftKey,
             contactMap = contactMap,
             allShips = allShips,
             canSend = canSend,
@@ -1032,11 +1036,12 @@ private fun isChannelNest(whom: String): Boolean =
  * Whether the thread about to open was opened in order to reply --
  * the action sheet's Reply, or a swipe -- as opposed to being opened
  * to read. Set just before the host is asked to open it, taken once
- * by the thread as it composes. A flag passed hand to hand through
- * two hosts and a screen would say the same thing in four places.
+ * by the thread as it composes. Keyed by the parent: a bare flag
+ * handed the intent to whichever thread happened to compose first,
+ * which is not necessarily the one the reply was aimed at.
  */
 internal object ThreadOpenIntent {
-    private var reply = false
-    fun reply() { reply = true }
-    fun take(): Boolean = reply.also { reply = false }
+    private val replies = mutableSetOf<String>()
+    fun reply(parentId: String) { replies += parentId }
+    fun take(parentId: String): Boolean = replies.remove(parentId)
 }

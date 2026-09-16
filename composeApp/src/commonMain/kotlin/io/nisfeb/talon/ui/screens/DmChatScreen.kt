@@ -629,10 +629,10 @@ fun DmChatScreen(
     }
     val onSwipeMessage: (MessageEntity) -> Unit = remember(swipeQuotes, whom) {
         { m ->
-            if (swipeQuotes(swipeQuotes, whom, m.parentId)) {
+            if (shouldQuoteOnSwipe(swipeQuotes, whom, m.parentId)) {
                 composerState.pendingQuote = m
             } else {
-                io.nisfeb.talon.ui.screens.ThreadOpenIntent.reply()
+                io.nisfeb.talon.ui.screens.ThreadOpenIntent.reply(m.id)
                 currentOnOpenThread(m.id)
             }
         }
@@ -904,7 +904,7 @@ fun DmChatScreen(
                 },
                 onReply = {
                     actionTarget = null
-                    io.nisfeb.talon.ui.screens.ThreadOpenIntent.reply()
+                    io.nisfeb.talon.ui.screens.ThreadOpenIntent.reply(target.id)
                     onOpenThread(target.id)
                 },
                 onQuote = {
@@ -2684,5 +2684,5 @@ private fun TypingIndicator(
  * A quote only exists for a channel's top-level posts; anywhere else
  * the swipe opens the thread whatever the setting says.
  */
-internal fun swipeQuotes(setting: Boolean, whom: String, parentId: String?): Boolean =
+internal fun shouldQuoteOnSwipe(setting: Boolean, whom: String, parentId: String?): Boolean =
     setting && whom.startsWith("chat/") && parentId == null

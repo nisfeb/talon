@@ -23,6 +23,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -60,8 +61,10 @@ internal fun PartyVideoGrid(
     // flickers with every pause, and a picture that swapped on each
     // one would be unwatchable.
     var lastSpeaker by remember { mutableStateOf<String?>(null) }
-    members.firstOrNull { it.ship != selfShip && it.speaking && it.ship in videoOnShips }
-        ?.let { lastSpeaker = it.ship }
+    LaunchedEffect(members) {
+        members.firstOrNull { it.ship != selfShip && it.speaking && it.ship in videoOnShips }
+            ?.let { lastSpeaker = it.ship }
+    }
     val onCamera = members.filter { it.ship in videoOnShips }
     val featured = featuredVideo(onCamera.map { it.ship }, selfShip, focusedShip, lastSpeaker)
         ?: return

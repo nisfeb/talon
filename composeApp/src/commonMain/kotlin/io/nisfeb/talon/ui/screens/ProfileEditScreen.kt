@@ -83,6 +83,8 @@ fun ProfileEditScreen(
 
     LaunchedEffect(ourPatp, keys) {
         if (ourPatp.isBlank()) return@LaunchedEffect
+        // A host with no %azimuth-rpc wires None; asking can only fail.
+        if (keys === io.nisfeb.talon.ui.AzimuthRpc.None) return@LaunchedEffect
         // A comet is not in Azimuth at all, so asking can only fail.
         if (io.nisfeb.talon.ui.isComet(ourPatp)) {
             keysProblem = "This is a comet: its name is the fingerprint of its own keys, so " +
@@ -259,44 +261,48 @@ fun ProfileEditScreen(
                 modifier = Modifier.fillMaxWidth(),
             ) { Text(if (saving) "Saving…" else "Save") }
 
-            HorizontalDivider()
-            // The ship's own networking keys, which are public: whatever
-            // registry attests the ship already publishes them, so anyone
-            // can read them. Shown here so they can be handed over when
-            // somebody asks.
-            Column(modifier = Modifier.fillMaxWidth()) {
-                Text(
-                    "Public keys",
-                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
-                )
-                val k = shipKeys
-                if (k == null) {
-                    Text(
-                        keysProblem ?: "Reading your keys…",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                } else {
-                    Text(
-                        "Your ship's networking keys, as Azimuth holds them.",  // an Azimuth ship; a comet says so above
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Spacer(Modifier.height(6.dp))
-                    KeyLine("Signing", k.auth)
-                    KeyLine("Encryption", k.crypt)
-                    TextButton(onClick = {
-                        clipboard.setText(androidx.compose.ui.text.AnnotatedString(io.nisfeb.talon.ui.shipKeyBlock(ourPatp, k)))
-                        copied = true
-                    }) { Text(if (copied) "Copied" else "Copy keys") }
-                }
-                if (signer != null) {
-                    Text(
-                        "Sign something with this ship's key, or check what someone else signed.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    TextButton(onClick = { signing = true }) { Text("Sign or check") }
+            if (keys !== io.nisfeb.talon.ui.AzimuthRpc.None || signer != null) {
+                HorizontalDivider()
+                // The ship's own networking keys, which are public: whatever
+                // registry attests the ship already publishes them, so anyone
+                // can read them. Shown here so they can be handed over when
+                // somebody asks.
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    if (keys !== io.nisfeb.talon.ui.AzimuthRpc.None) {
+                        Text(
+                            "Public keys",
+                            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
+                        )
+                        val k = shipKeys
+                        if (k == null) {
+                            Text(
+                                keysProblem ?: "Reading your keys…",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        } else {
+                            Text(
+                                "Your ship's networking keys, as Azimuth holds them.",  // an Azimuth ship; a comet says so above
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            Spacer(Modifier.height(6.dp))
+                            KeyLine("Signing", k.auth)
+                            KeyLine("Encryption", k.crypt)
+                            TextButton(onClick = {
+                                clipboard.setText(androidx.compose.ui.text.AnnotatedString(io.nisfeb.talon.ui.shipKeyBlock(ourPatp, k)))
+                                copied = true
+                            }) { Text(if (copied) "Copied" else "Copy keys") }
+                        }
+                    }
+                    if (signer != null) {
+                        Text(
+                            "Sign something with this ship's key, or check what someone else signed.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        TextButton(onClick = { signing = true }) { Text("Sign or check") }
+                    }
                 }
             }
 

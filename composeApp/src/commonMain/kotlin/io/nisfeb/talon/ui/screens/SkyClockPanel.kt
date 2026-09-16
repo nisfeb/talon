@@ -654,7 +654,7 @@ internal fun dialDescription(
     parts += when {
         sky.polar && sky.polarDay -> "The sun does not set today"
         sky.polar -> "The sun does not rise today"
-        sky.sunUp -> "The sun is up. It set" + "s at ${at(sky.sunsetMinute)}"
+        sky.sunUp -> "The sun is up. It sets at ${at(sky.sunsetMinute)}"
         else -> "The sun is down. It rises at ${at(sky.sunriseMinute)}"
     }
     if (!sky.polar) {

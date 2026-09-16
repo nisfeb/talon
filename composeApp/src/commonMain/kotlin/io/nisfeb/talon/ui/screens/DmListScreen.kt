@@ -755,7 +755,9 @@ fun DmListScreen(
                 // thing this branch exists to avoid.
                 val label = when {
                     activeNick != null && !collision -> activeNick
-                    else -> io.nisfeb.talon.ui.shipHandles(allShips).getValue(activeShip)
+                    // A sign-out or forget can drop the active ship from
+                    // the list mid-compose; getValue would throw there.
+                    else -> io.nisfeb.talon.ui.shipHandles(allShips)[activeShip] ?: activeShip
                 }
                 // Colored dot in the user's chosen accent — same
                 // value as `colorScheme.primary` since App.kt's

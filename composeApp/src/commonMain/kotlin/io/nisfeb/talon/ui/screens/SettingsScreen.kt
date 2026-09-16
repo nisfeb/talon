@@ -2341,10 +2341,12 @@ private fun HomeWidgetRow(
             }
 
             if (widget.visible) {
-                // The clock shows one thing and the calendar counts in
-                // time rather than in rows, so neither has a count.
+                // The clock shows one thing, the calendar counts in
+                // time rather than in rows, and the assistant reads no
+                // count, so none of the three has a count.
                 if (kind != io.nisfeb.talon.ui.HomeWidgetKind.CLOCK &&
-                    kind != io.nisfeb.talon.ui.HomeWidgetKind.CALENDAR
+                    kind != io.nisfeb.talon.ui.HomeWidgetKind.CALENDAR &&
+                    kind != io.nisfeb.talon.ui.HomeWidgetKind.ASSISTANT
                 ) {
                     Text(
                         "How many to show",

@@ -40,6 +40,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.remember
@@ -199,7 +200,9 @@ fun HomeScreen(
             greetingTick = nowMs()
         }
     }
-    val greetingMinute = remember(greetingTick / 60_000, place, weather) {
+    // A derived value rather than a keyed remember: the minute-floor
+    // is the intent, and only a change in it redraws the greeting.
+    val greetingMinute by derivedStateOf {
         val zone = zoneFor(place?.timeZoneId ?: weather?.zoneId)
         val local = Instant.fromEpochMilliseconds(greetingTick).toLocalDateTime(zone)
         local.hour * 60 + local.minute
@@ -525,7 +528,10 @@ private const val DIAL_CHROME_SHARE = 0.22f
  * it ends up at, which is what a floor was standing in for.
  */
 internal fun dialSizeFor(rows: Int): androidx.compose.ui.unit.Dp {
-    val cell = HOME_ROW_UNIT * rows
+    // The grid leaves a gap's worth below each cell, and the panel pads
+    // six dip top and bottom; both come out of the cell before the dial
+    // does, or the dial and the line under it clip at small row counts.
+    val cell = HOME_ROW_UNIT * rows - GRID_GAP - 12.dp
     // Proportional while the cell is short, fixed once there is room.
     // Taken flat it was most of the smallest cell, so the dial began
     // near nothing and one row unit of drag nearly doubled it: a step
@@ -1249,12 +1255,16 @@ private fun CalendarPanel(
     val rows = calendar?.rows?.collectAsState()?.value?.filter { it.cal !in hidden }
     val zoneId = calendar?.zone?.collectAsState()?.value
     val calendars = calendar?.calendars?.collectAsState()?.value.orEmpty()
-    val tasks = calendar?.tasks?.collectAsState()?.value.orEmpty().filter { it.cal !in hidden }
+    val rawTasks = calendar?.tasks?.collectAsState()?.value.orEmpty()
+    val tasks = rawTasks.filter { it.cal !in hidden }
     val shares = calendar?.shares?.collectAsState()?.value
     val offers = shares?.offers?.size ?: 0
     val readOnly = shares?.readOnly.orEmpty()
     // Ticked here, until the refresh after the poke drops the line.
     var ticked by remember { mutableStateOf(setOf<String>()) }
+    // A refresh is the truth again: whatever it holds replaces the
+    // local ticks, so an un-tick or a failed poke cannot linger.
+    LaunchedEffect(rawTasks) { ticked = emptySet() }
     val scope = rememberCoroutineScope()
     var installing by remember { mutableStateOf(false) }
     var installError by remember { mutableStateOf<String?>(null) }
@@ -1321,9 +1331,13 @@ private fun CalendarPanel(
                         ) {
                             androidx.compose.material3.Checkbox(
                                 checked = t.id in ticked,
-                                onCheckedChange = {
-                                    ticked = ticked + t.id
-                                    scope.launch { if (!calendar!!.setDone(t.id, true)) ticked = ticked - t.id }
+                                onCheckedChange = { done ->
+                                    ticked = if (done) ticked + t.id else ticked - t.id
+                                    scope.launch {
+                                        if (!calendar!!.setDone(t.id, done)) {
+                                            ticked = if (done) ticked - t.id else ticked + t.id
+                                        }
+                                    }
                                 },
                                 enabled = t.cal !in readOnly,
                                 modifier = Modifier.size(32.dp),

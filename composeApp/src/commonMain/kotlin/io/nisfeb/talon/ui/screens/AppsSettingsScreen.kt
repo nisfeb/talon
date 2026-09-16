@@ -72,10 +72,13 @@ fun AppsSettingsScreen(
     val uriHandler = LocalUriHandler.current
     val installGrubbery = io.nisfeb.talon.mail.LocalGrubberyInstall.current
 
+    // One remembered stand-in for a null repo's error flow, rather
+    // than a fresh MutableStateFlow on every recomposition.
+    val noError = remember { kotlinx.coroutines.flow.MutableStateFlow<String?>(null) }
     val mailAvailability = mail?.availability?.collectAsState()?.value
-    val mailError by (mail?.error ?: kotlinx.coroutines.flow.MutableStateFlow(null)).collectAsState()
+    val mailError by (mail?.error ?: noError).collectAsState()
     val calendarAvailability = calendar?.availability?.collectAsState()?.value
-    val calendarError by (calendar?.error ?: kotlinx.coroutines.flow.MutableStateFlow(null)).collectAsState()
+    val calendarError by (calendar?.error ?: noError).collectAsState()
 
     var lattice by remember { mutableStateOf<Boolean?>(null) }
     var groups by remember { mutableStateOf<Boolean?>(null) }
