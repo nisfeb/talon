@@ -48,8 +48,8 @@ fun desktopUpdateFlavor(appImagePath: String?, osName: String): DesktopUpdateFla
 class DesktopUpdateInstaller(
     private val http: HttpClient,
     private val updatesDir: File,
-    /** Shut the app down cleanly and exit; the new AppImage is
-     *  already running by the time this is called. */
+    /** Shut the app down cleanly and exit; a detached waiter starts
+     *  the new AppImage as soon as this process is gone. */
     private val quit: () -> Unit,
     private val appImagePath: String? = System.getenv("APPIMAGE"),
     private val osName: String = System.getProperty("os.name", ""),
@@ -60,7 +60,11 @@ class DesktopUpdateInstaller(
 
     override val readyHint: String = when (flavor) {
         DesktopUpdateFlavor.AppImage -> "Verified — Talon will restart into it."
-        else -> "Verified — opens the installer."
+        DesktopUpdateFlavor.Deb, DesktopUpdateFlavor.Dmg, DesktopUpdateFlavor.Msi ->
+            "Verified — opens the installer."
+        // Never reaches Ready: with no flavor, download() falls back
+        // to the releases page and reports onFailure instead.
+        null -> ""
     }
 
     override suspend fun download(
@@ -71,13 +75,20 @@ class DesktopUpdateInstaller(
     ) {
         val asset = flavor?.let { manifest.desktop[it.manifestKey] }
         if (asset == null) {
-            runCatching { DesktopUriHandler.openUri(releasesPageUrl) }
-                .onFailure { onFailure("Couldn't open browser. Visit $releasesPageUrl manually."); return }
+            if (!DesktopUriHandler.tryOpenUri(releasesPageUrl)) {
+                onFailure("Couldn't open browser. Visit $releasesPageUrl manually.")
+                return
+            }
             onFailure("Opened the releases page in your browser — download and replace your install.")
             return
         }
         updatesDir.mkdirs()
-        val target = File(updatesDir, asset.url.substringAfterLast('/'))
+        // A trailing-slash URL yields an empty name; fall back to a
+        // fixed one (the name only matters for the deb/dmg/msi case,
+        // where the file keeps its extension either way).
+        val name = asset.url.substringAfterLast('/')
+            .ifBlank { "talon-update-${flavor?.manifestKey ?: "installer"}" }
+        val target = File(updatesDir, name)
         val part = File(updatesDir, target.name + ".part")
         runCatching {
             http.prepareGet(asset.url) {
@@ -101,6 +112,10 @@ class DesktopUpdateInstaller(
                     }
                 }
                 val got = md.digest().joinToString("") { "%02x".format(it) }
+                // Corruption guard only — the hash and the payload
+                // come from the same origin (see RELEASE.md, "Update
+                // payload trust model"), so this is not a signature.
+                // Pinned-key minisign/cosign is the planned hardening.
                 if (got != asset.sha256) error("downloaded file failed SHA-256 check")
                 Files.move(part.toPath(), target.toPath(), StandardCopyOption.REPLACE_EXISTING)
             }
@@ -110,6 +125,11 @@ class DesktopUpdateInstaller(
             Log.w(TAG, "download failed: ${it.message}")
             onFailure("Couldn't download the update: ${it.message ?: it::class.simpleName}")
             return
+        }
+        // Prune older installers so the updates dir doesn't accumulate
+        // one download per past update.
+        updatesDir.listFiles()?.forEach { old ->
+            if (old.name != target.name) old.delete()
         }
         onReady(target.absolutePath)
     }
@@ -126,18 +146,44 @@ class DesktopUpdateInstaller(
     }
 
     /**
-     * Swap the running AppImage for [fresh] and start the new one.
+     * Swap the running AppImage for [fresh] and restart into it.
      * Linux keeps the running file's inode alive, so the move is safe
      * under our own feet; a location we cannot write to (a system
      * dir) leaves the download where it is and shows it.
+     *
+     * The new binary is NOT started directly: the old process still
+     * holds the pier lock at this point and vere refuses to boot a
+     * locked pier, so a detached waiter shell execs the new AppImage
+     * only after this process has exited.
      */
     private fun replaceAppImage(fresh: File, current: File) {
         val ok = runCatching {
             fresh.setExecutable(true, false)
             Files.move(fresh.toPath(), current.toPath(), StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE)
-            ProcessBuilder(current.absolutePath).start()
+            spawnRestartAfterExit(current)
         }.onFailure { Log.w(TAG, "could not replace ${current.path}: ${it.message}") }.isSuccess
         if (ok) quit() else DesktopUriHandler.openUri(fresh.parentFile.toURI().toString())
+    }
+
+    /**
+     * Detached waiter that execs [current] once this process is gone.
+     * A tiny `sh` polls for our pid to vanish, then execs the new
+     * AppImage; when we exit the shell is reparented to init, so it
+     * outlives us without holding the JVM open. stdio is cut loose so
+     * the child can't inherit a pipe that keeps a parent reader
+     * blocked.
+     */
+    private fun spawnRestartAfterExit(current: File) {
+        val pid = ProcessHandle.current().pid()
+        ProcessBuilder(
+            "sh", "-c",
+            "while kill -0 \"$1\" 2>/dev/null; do sleep 0.2; done; exec \"$2\"",
+            "talon-update-waiter", pid.toString(), current.absolutePath,
+        )
+            .redirectInput(ProcessBuilder.Redirect.from(File("/dev/null")))
+            .redirectOutput(ProcessBuilder.Redirect.DISCARD)
+            .redirectError(ProcessBuilder.Redirect.DISCARD)
+            .start()
     }
 
     private companion object {

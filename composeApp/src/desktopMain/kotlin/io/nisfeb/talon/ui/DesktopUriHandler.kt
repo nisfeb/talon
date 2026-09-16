@@ -26,25 +26,42 @@ object DesktopUriHandler : UriHandler {
     private val osName = System.getProperty("os.name", "").lowercase()
 
     override fun openUri(uri: String) {
+        tryOpenUri(uri)
+    }
+
+    /**
+     * Same as [openUri] but reports whether an opener was actually
+     * launched, for callers with their own fallback (the update
+     * installer surfaces a failure message instead of silently doing
+     * nothing). [openUri] swallows the result because the UriHandler
+     * interface has no error channel and most click handlers don't
+     * have one either.
+     */
+    fun tryOpenUri(uri: String): Boolean {
         val cmd = when {
             "linux" in osName -> arrayOf("xdg-open", uri)
             "mac" in osName || "darwin" in osName -> arrayOf("open", uri)
             "windows" in osName -> arrayOf("rundll32", "url.dll,FileProtocolHandler", uri)
             else -> null
         }
-        if (cmd != null && tryRun(cmd)) return
+        if (cmd != null && tryRun(cmd)) return true
 
         // Last-resort AWT fallback for an OS we don't recognise.
-        runCatching {
+        return runCatching {
             val desktop = java.awt.Desktop.getDesktop()
             if (java.awt.Desktop.isDesktopSupported() &&
                 desktop.isSupported(java.awt.Desktop.Action.BROWSE)
             ) {
                 desktop.browse(java.net.URI(uri))
+                true
             } else {
                 Log.w(TAG, "no native opener for $osName and AWT BROWSE unsupported")
+                false
             }
-        }.onFailure { Log.w(TAG, "AWT Desktop.browse failed for $uri", it) }
+        }.getOrElse {
+            Log.w(TAG, "AWT Desktop.browse failed for $uri", it)
+            false
+        }
     }
 
     private fun tryRun(cmd: Array<String>): Boolean = runCatching {

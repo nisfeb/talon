@@ -10,7 +10,8 @@ import kotlinx.coroutines.launch
 
 /**
  * Pluggable installer hook so commonMain can drive both the Android
- * PackageInstaller-backed download/install path and a desktop no-op.
+ * PackageInstaller-backed download/install path and the desktop
+ * self-update installer.
  */
 interface UpdateInstallerHook {
     suspend fun download(
@@ -99,10 +100,10 @@ class UpdateState(
 }
 
 /**
- * Desktop-friendly default. Renders the banner inert: nothing is
- * installed via this path on desktop, so the supported SDK is wide
- * open and the installer is a no-op. Stage F replaces this with a
- * real installer when desktop sideload distribution is wired up.
+ * No-op fallback for targets with no self-update path (iOS, tests).
+ * Desktop self-update exists — see DesktopUpdateInstaller in
+ * desktopMain — so this hook is only for platforms where installing
+ * from a manifest isn't wired at all.
  */
 class NoopUpdateInstallerHook : UpdateInstallerHook {
     override suspend fun download(
@@ -111,7 +112,7 @@ class NoopUpdateInstallerHook : UpdateInstallerHook {
         onReady: (String) -> Unit,
         onFailure: (String) -> Unit,
     ) {
-        onFailure("Desktop builds do not self-update yet.")
+        onFailure("This build cannot self-update.")
     }
 
     override val readyHint = ""
@@ -122,10 +123,11 @@ class NoopUpdateInstallerHook : UpdateInstallerHook {
 }
 
 /**
- * Default desktop runtime — pretends version 0 is installed so any
- * manifest looks newer (the banner is still gated by the no-op
- * installer above; the user can't actually install anything from
- * desktop in this revision).
+ * Default runtime for targets without a real version source —
+ * pretends version 0 is installed so any manifest looks newer. Pair
+ * with a real installer hook (Android's UpdateInstaller, desktop's
+ * DesktopUpdateInstaller); with NoopUpdateInstallerHook the banner
+ * renders but install is a no-op.
  */
 class StaticUpdateRuntime(
     private val versionCode: Int = 0,

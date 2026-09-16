@@ -5,6 +5,13 @@ on:
     tags:
       - 'v*'
 
+# Default to read-only for every job. Only the `release` job below
+# re-escalates to contents: write so it can publish the GitHub
+# Release — build-android holds the signing keystore and must not
+# carry a write token it never uses.
+permissions:
+  contents: read
+
 jobs:
   # Single source of truth for the tag-vs-versionName check, so the
   # downstream jobs don't each re-parse build.gradle.kts. Outputs the
@@ -42,8 +49,6 @@ jobs:
   build-android:
     needs: tagcheck
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     steps:
       - uses: actions/checkout@v4
 
@@ -165,9 +170,9 @@ jobs:
           # 0.9.0-rc1: `(list | chat | thread visible at once)`).
           # Triple-escaping `\` / `"` / `&` / `|` through two cascaded
           # sed runs is also fragile. jq knows how to escape JSON
-          # strings; let it do that job. Template still lives at
-          # release/manifest-template.json for readability — we just
-          # populate the placeholders structurally.
+          # strings; let it do that job. (The old
+          # release/manifest-template.json skeleton is gone — this jq
+          # invocation is the manifest's single source of truth.)
           CHANGELOG="$(git log -1 --pretty=%B | tr '\n' ' ')"
           jq -n \
               --argjson versionCode "$VERSION_CODE" \
@@ -319,11 +324,17 @@ jobs:
           # one .msi, and one .AppImage. Bail if any of those are
           # missing — they're not optional. APK + latest.json are
           # optional (only present when the keystore secret is set).
-          required_count=$(find release-files -type f \
-            \( -name '*.deb' -o -name '*.dmg' -o -name '*.msi' \
-               -o -name '*.AppImage' \) | wc -l)
-          if [ "$required_count" -lt 4 ]; then
-            echo "::error::Expected ≥4 desktop installers (.deb, .dmg, .msi, .AppImage), got $required_count"
+          # Check per extension: a bare total count can't tell four
+          # .debs apart from one-of-each.
+          missing=0
+          for ext in deb dmg msi AppImage; do
+            if ! find release-files -maxdepth 1 -type f -name "*.$ext" -print -quit | grep -q .; then
+              echo "::error::Missing required desktop installer: no *.$ext in release-files/"
+              missing=$((missing + 1))
+            fi
+          done
+          if [ "$missing" -gt 0 ]; then
+            echo "::error::$missing required desktop installer kind(s) missing — refusing to publish"
             ls -la release-files/
             exit 1
           fi
@@ -345,7 +356,22 @@ jobs:
           DESKTOP='{}'
           for pair in appimage:AppImage deb:deb dmg:dmg msi:msi; do
             kind="${pair%%:*}"; ext="${pair#*:}"
-            f=$(ls *."$ext" | head -1)
+            # An unmatched glob stays literal, so matches[0] is
+            # "*.$ext" when nothing exists — the -e test catches a
+            # missing kind; the count test catches an ambiguous one.
+            # (The flatten step already bails on a missing kind, but
+            # this step must not die with a bare ls error or silently
+            # pick an arbitrary file if run standalone.)
+            matches=( *."$ext" )
+            if [ ! -e "${matches[0]}" ]; then
+              echo "::error::latest.json: no *.$ext installer present for desktop.$kind"
+              exit 1
+            fi
+            if [ "${#matches[@]}" -ne 1 ]; then
+              echo "::error::latest.json: ${#matches[@]} *.$ext files — ambiguous which is desktop.$kind: ${matches[*]}"
+              exit 1
+            fi
+            f="${matches[0]}"
             sha=$(sha256sum "$f" | awk '{print $1}')
             DESKTOP=$(jq --arg k "$kind" --arg url "$BASE/$f" --arg sha "$sha" \
               '.[$k] = {url: $url, sha256: $sha}' <<<"$DESKTOP")
