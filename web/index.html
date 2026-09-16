@@ -389,8 +389,9 @@
 
         <p class="lede">
             Fast chat client for the parts of Urbit you actually use day-to-day.
-            DMs, group channels, reactions, threads, and now voice and video calls
-            between ships. Native on Android, iOS, Linux, macOS, and Windows.
+            DMs, group channels, reactions, threads, voice and video calls, and now
+            mail and a calendar that live on your own ship. Native on Android, iOS,
+            Linux, macOS, and Windows.
             <a href="https://urbit.org/overview/running-urbit">Bring your own ship</a>.
         </p>
 
@@ -429,6 +430,38 @@
                 <span class="desc">Record a party line per speaker. Everyone on it sees the badge. Transcribe with your own Whisper-compatible key, then publish the transcript to Lattice as a <span class="mono">urb://</span> link.</span>
             </li>
             <li>
+                <span class="name">Mail</span>
+                <span class="desc">A mailbox on your ship, through Grubbery's Auspex. Inbox, threads drawn as a tree, labels, drafts, rules, lists and attachments. Mail arrives with a notification and stays on the device, so a large inbox never reloads from the ship. File a thread to Lattice, or write someone from their profile.</span>
+            </li>
+            <li>
+                <span class="name">Calendar</span>
+                <span class="desc">The Grubbery calendar on your ship, by month, by week and by day. Several calendars, tasks with due dates, sharing with another ship, and synced calendars pulled from ICS, CalDAV or Google every few minutes. An event someone posted in chat or mailed you goes onto your own calendar in one tap.</span>
+            </li>
+            <li>
+                <span class="name">Home screen</span>
+                <span class="desc">A grid of widgets you arrange and resize: the sky clock, New (everything unread, no AI involved), chat, mail, today's events and tasks, statuses and the assistant. On Android the sky clock is a home-screen widget too.</span>
+            </li>
+            <li>
+                <span class="name">The sky clock</span>
+                <span class="desc">A 24-hour dial with the sun, a correctly phased moon, stars, cloud and rain, and the day's high and low. Your location comes from GPS or a place you type. Weather is from Open-Meteo, with no account and no key.</span>
+            </li>
+            <li>
+                <span class="name">Keys &amp; signatures</span>
+                <span class="desc">Your profile shows your ship's public keys. Sign a message or a file with the ship's own key, and check a signature someone sent you. Azimuth ships and Groundwire comets alike.</span>
+            </li>
+            <li>
+                <span class="name">Invites by QR</span>
+                <span class="desc">A public group shows a code in its info pane. Your profile carries an invite-me code that opens a DM or gets you into a group. Scan either with the phone's camera. <span class="mono">/invite</span> in any composer picks a group by name.</span>
+            </li>
+            <li>
+                <span class="name">Names, not @ps</span>
+                <span class="desc">A comet goes by a two-word name everywhere and its long name on its profile. Invite one by any of its names. Word names for planets and moons are a setting, off by default.</span>
+            </li>
+            <li>
+                <span class="name">Apps on your ship</span>
+                <span class="desc">Settings shows what Talon needs on the ship: Groups for chat, and Grubbery for mail, the calendar and Lattice. Install what is missing with one tap, then open the ship's permits page to approve what each app may do.</span>
+            </li>
+            <li>
                 <span class="name"><span class="mono">urb://</span> links</span>
                 <span class="desc">Inline preview cards for Urbit links, opened in-app through the Lattice reader. Publish a whole thread to Lattice from its menu.</span>
             </li>
@@ -457,16 +490,12 @@
                 <span class="desc">Find that chat you half-remember. The embedder runs on-device, MediaPipe on Android and ONNX MiniLM-L6 on desktop. Private. Nothing leaves your machine.</span>
             </li>
             <li>
-                <span class="name">Daily digest</span>
-                <span class="desc">Optional morning brief. Who pinged you, what watchwords matched, the chats you missed. Local AI summary, plus today's weather. Android only, since it depends on AlarmManager.</span>
-            </li>
-            <li>
                 <span class="name">Watchwords</span>
                 <span class="desc">Cross-channel keyword alerts. Tracks any term you care about across every chat your ship sees, foreground or background.</span>
             </li>
             <li>
                 <span class="name">AI features</span>
-                <span class="desc">Catch-me-up summaries and emoji-react suggestions, using your own OpenAI / Anthropic / compatible API key. Off by default. Key encrypted on-device.</span>
+                <span class="desc">An assistant that answers over your own chat history and can mail, schedule, message and call for you, by text or by voice. Catch-me-up summaries and emoji-react suggestions. Your own OpenAI, Anthropic or compatible API key, off by default, encrypted on-device.</span>
             </li>
             <li>
                 <span class="name">Voice messages</span>
@@ -478,7 +507,7 @@
             </li>
             <li>
                 <span class="name">Multi-ship at once</span>
-                <span class="desc">Sign in to as many ships as you like and switch from the top-left. The active ship's color tints the send button, so you don't accidentally post as the wrong identity in shared groups.</span>
+                <span class="desc">Sign in to as many ships as you like and switch from the ship picker. The active ship's color tints the send button, so you don't accidentally post as the wrong identity in shared groups. A notification opens the ship it came for. Sign out of a ship, or delete its data, from the switcher.</span>
             </li>
         </ul>
     </div>
@@ -533,7 +562,8 @@
             notifications. Room for local storage, OkHttp for the SSE channel,
             kotlinx.serialization for everything on the wire. Calls are a small Hoon
             agent, <span class="mono">%trunk</span>, plus WebRTC. Party lines run on
-            Galène. Mutation-tested on the parsers and wire helpers, with a JVM test
+            Galène. Mail, the calendar and Lattice are Grubbery apps on the ship,
+            spoken to as JSON over HTTP under the same session. Mutation-tested on the parsers and wire helpers, with a JVM test
             suite behind every release.
         </p>
         <div class="tech-grid">
