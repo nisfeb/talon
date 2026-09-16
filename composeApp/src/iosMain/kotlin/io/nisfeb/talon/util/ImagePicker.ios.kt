@@ -19,8 +19,11 @@ import platform.UIKit.UIImagePickerControllerOriginalImage
 import platform.UIKit.UIImagePickerControllerSourceType
 import platform.UIKit.UINavigationControllerDelegateProtocol
 import platform.UIKit.UIViewController
+import platform.UIKit.endEditing
 import platform.UniformTypeIdentifiers.UTTypeItem
 import platform.darwin.NSObject
+import platform.darwin.dispatch_async
+import platform.darwin.dispatch_get_main_queue
 import kotlin.coroutines.resume
 
 // Delegates are retained here for the lifetime of the presentation —
@@ -50,40 +53,70 @@ actual fun decodeImageDimensions(bytes: ByteArray): Pair<Int, Int>? {
 
 private fun topViewController(): UIViewController? {
     var vc = UIApplication.sharedApplication.keyWindow?.rootViewController
-    while (vc?.presentedViewController != null) vc = vc.presentedViewController
+    while (true) {
+        // A controller on its way out cannot present anything: UIKit
+        // drops the presentation without a word, and the picker never
+        // opens. Stop at the last one that is actually staying.
+        val next = vc?.presentedViewController ?: break
+        if (next.isBeingDismissed()) break
+        vc = next
+    }
     return vc
 }
 
-private suspend fun pickPhoto(): PickedImage? = suspendCancellableCoroutine { cont ->
-    val root = topViewController()
-    if (root == null) {
-        cont.resume(null)
-        return@suspendCancellableCoroutine
+/**
+ * Show a picker, or say it never opened.
+ *
+ * Three things, each a tap somebody lost. The keyboard is a first
+ * responder and presenting while it dismisses is a race, so editing
+ * ends first. The presentation goes on the main queue, after that
+ * dismissal has begun. And a presentation UIKit declines is checked
+ * for rather than assumed, because the delegate would never fire and
+ * the caller would wait for ever.
+ */
+private fun present(picker: UIViewController, onDropped: () -> Unit) {
+    UIApplication.sharedApplication.keyWindow?.endEditing(true)
+    dispatch_async(dispatch_get_main_queue()) {
+        val root = topViewController()
+        if (root == null || root.isBeingDismissed() || root.isBeingPresented()) {
+            onDropped()
+            return@dispatch_async
+        }
+        root.presentViewController(picker, animated = true, completion = null)
+        dispatch_async(dispatch_get_main_queue()) {
+            if (picker.presentingViewController == null) onDropped()
+        }
     }
+}
+
+private suspend fun pickPhoto(): PickedImage? = suspendCancellableCoroutine { cont ->
     val picker = UIImagePickerController()
+    var done = false
     val delegate = PhotoPickerDelegate { result ->
-        cont.resume(result)
+        if (!done) { done = true; cont.resume(result) }
     }
     activeDelegates.add(delegate)
     picker.sourceType =
         UIImagePickerControllerSourceType.UIImagePickerControllerSourceTypePhotoLibrary
     picker.delegate = delegate
-    root.presentViewController(picker, animated = true, completion = null)
+    present(picker) {
+        activeDelegates.remove(delegate)
+        if (!done) { done = true; cont.resume(null) }
+    }
 }
 
 private suspend fun pickDocument(): PickedImage? = suspendCancellableCoroutine { cont ->
-    val root = topViewController()
-    if (root == null) {
-        cont.resume(null)
-        return@suspendCancellableCoroutine
-    }
+    var done = false
     val delegate = DocumentPickerDelegate { result ->
-        cont.resume(result)
+        if (!done) { done = true; cont.resume(result) }
     }
     activeDelegates.add(delegate)
     val picker = UIDocumentPickerViewController(forOpeningContentTypes = listOf(UTTypeItem))
     picker.delegate = delegate
-    root.presentViewController(picker, animated = true, completion = null)
+    present(picker) {
+        activeDelegates.remove(delegate)
+        if (!done) { done = true; cont.resume(null) }
+    }
 }
 
 private class PhotoPickerDelegate(

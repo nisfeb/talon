@@ -10,6 +10,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.ComposeUIViewController
+import androidx.compose.ui.uikit.OnFocusBehavior
 import io.nisfeb.talon.ui.IosBackDispatcher
 import io.nisfeb.talon.ai.createAiSettings
 import io.nisfeb.talon.call.IosCallEngineProvider
@@ -103,7 +104,11 @@ fun MainViewController(rtc: NativeRtcFactory?): UIViewController {
     // the composable lambda is rebuilt on recomposition.
     val drafts = IosDraftStore()
     IosAppLifecycle.observe()
-    return ComposeUIViewController {
+    // The keyboard is the app's business, not the controller's. Every
+    // screen pads for safe drawing, which on iOS counts the keyboard, so
+    // a controller that ALSO lifted the view made room twice: the space
+    // it left behind is the white band under a dismissed keyboard.
+    return ComposeUIViewController(configure = { onFocusBehavior = OnFocusBehavior.DoNothing }) {
         Box(Modifier.fillMaxSize()) {
         App(
             http = http,

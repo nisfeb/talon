@@ -276,6 +276,7 @@ fun ChatComposer(
     // began, a quote or an attachment was picked. Keyed on what began
     // rather than on the flag, so switching to a different edit fires
     // and ending one (-> null) does not bring the keyboard back.
+    val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
     val fieldFocus = remember { FocusRequester() }
     LaunchedEffect(state, state.editing?.postId, state.pendingQuote?.id, state.pendingAttachment) {
         val typingNext = focusOnOpen || state.editing != null ||
@@ -314,9 +315,16 @@ fun ChatComposer(
         }
     }
 
+    // Guard AND set before the picker suspends: two taps both saw no
+    // picker in flight and asked for two, which on iOS is two
+    // presentations racing and one of them silently dropped.
+    var picking by remember { mutableStateOf(false) }
     val onPickImage: () -> Unit = {
         scope.launch {
+            if (picking) return@launch
+            picking = true
             val picked = runCatching { pickImage() }
+                .also { picking = false }
                 .onFailure { state.sendError = "couldn't read image: ${it.message ?: it::class.simpleName}" }
                 .getOrNull() ?: return@launch
             stage(picked.bytes, picked.mimeType, picked.displayName, true)
@@ -325,7 +333,10 @@ fun ChatComposer(
 
     val onPickFile: () -> Unit = {
         scope.launch {
+            if (picking) return@launch
+            picking = true
             val picked = runCatching { pickAnyFile() }
+                .also { picking = false }
                 .onFailure { state.sendError = "couldn't read file: ${it.message ?: it::class.simpleName}" }
                 .getOrNull() ?: return@launch
             stage(
@@ -466,6 +477,10 @@ fun ChatComposer(
     // the next mount agree.
     DisposableEffect(whom) {
         onDispose {
+            // Walking away puts the keyboard down with the screen. Nothing
+            // else ever cleared focus, so on a platform where the keyboard
+            // follows the focused field it stayed up over the next screen.
+            runCatching { focusManager.clearFocus(force = true) }
             // Leaving mid-edit abandons the edit and keeps the real draft.
             drafts.save(whom, state.editing?.priorDraftText ?: state.draft.text)
             // Leaving the screen mid-draft must not leave us announcing
