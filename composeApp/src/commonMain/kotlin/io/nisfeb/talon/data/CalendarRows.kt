@@ -49,6 +49,17 @@ interface CalendarCacheDao {
         if (rows.isNotEmpty()) insert(rows)
     }
 
+    /** Every part of the answer swapped at once: a reader that catches
+     *  the calendar between kinds never sees a fresh window beside
+     *  empty calendars. */
+    @Transaction
+    suspend fun replaceAll(parts: Map<String, List<CalendarCacheEntity>>) {
+        for ((kind, rows) in parts) {
+            clear(kind)
+            if (rows.isNotEmpty()) insert(rows)
+        }
+    }
+
     @Query("DELETE FROM calendar_rows")
     suspend fun clearAll()
 }

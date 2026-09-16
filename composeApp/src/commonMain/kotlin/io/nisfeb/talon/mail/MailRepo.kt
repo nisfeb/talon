@@ -576,10 +576,11 @@ class MailRepo(
         }
     }
 
-    /** A write, and the re-read that shows it, unless the write failed. */
-    private suspend fun mutate(refresh: suspend () -> Unit, block: suspend (AuspexApi) -> Unit) {
-        call(block = block) ?: return
+    /** A write, and the re-read that shows it. False when the write failed. */
+    private suspend fun mutate(refresh: suspend () -> Unit, block: suspend (AuspexApi) -> Unit): Boolean {
+        call(block = block) ?: return false
         refresh()
+        return true
     }
 
     /**
@@ -703,7 +704,7 @@ class MailRepo(
 
     /** Store a draft. The id comes from the caller and stays the same
      *  across saves, so the second save overwrites the first. */
-    suspend fun saveDraft(d: Draft) = mutate(::refreshDrafts) { it.saveDraft(d) }
+    suspend fun saveDraft(d: Draft): Boolean = mutate(::refreshDrafts) { it.saveDraft(d) }
 
     suspend fun deleteDraft(id: String) = mutate(::refreshDrafts) { it.deleteDraft(id) }
 

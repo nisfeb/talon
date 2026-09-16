@@ -177,6 +177,22 @@ class TalonApplication : Application() {
         ktorHttp = createAppHttpClient()
         shipDataEraser = io.nisfeb.talon.data.AndroidShipDataEraser(this)
         sessionStore = io.nisfeb.talon.urbit.AndroidSessionStore(this)
+        // A "forget + erase" of the active ship waits on the database
+        // close; if the process died in that window, the marker is
+        // still here. Finish what was asked — unless the ship came
+        // back: re-adding it means the data is wanted, and erasing
+        // now would delete the database under the open connection.
+        appScope.launch {
+            shipDataEraser.takePending()?.let { gone ->
+                if (sessionStore.all().none { it.ship == gone }) {
+                    shipDataEraser.erase(gone)
+                        .onFailure {
+                            android.util.Log.w("Talon", "pending erase replay failed for $gone", it)
+                            shipDataEraser.markPending(gone)
+                        }
+                }
+            }
+        }
         aiSettings = io.nisfeb.talon.ai.AndroidAiSettings(this)
         // uiSettings is constructed below once buildShipScoped has set
         // up the per-ship `db` field — AndroidUiSettings derives its
@@ -541,7 +557,10 @@ class TalonApplication : Application() {
         // tree, and is closed on the same deferred path a switch uses --
         // the file's own KDoc on buildShipScoped says why a synchronous
         // close here crashes. Erasing has to wait for that close, or on
-        // Android the file is deleted out from under the pool.
+        // Android the file is deleted out from under the pool. The
+        // marker is the record in case the process dies first; the
+        // replay in onCreate finishes it.
+        if (alsoData) shipDataEraser.markPending(ship)
         val dying = db
         val dyingIndexer = if (::embeddingIndexer.isInitialized) embeddingIndexer else null
         val next = sessionStore.activeShip() ?: sessionStore.all().firstOrNull()?.ship

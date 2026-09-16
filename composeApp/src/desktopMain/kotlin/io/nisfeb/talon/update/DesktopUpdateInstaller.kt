@@ -83,11 +83,10 @@ class DesktopUpdateInstaller(
             return
         }
         updatesDir.mkdirs()
-        // A trailing-slash URL yields an empty name; fall back to a
-        // fixed one (the name only matters for the deb/dmg/msi case,
-        // where the file keeps its extension either way).
-        val name = asset.url.substringAfterLast('/')
-            .ifBlank { "talon-update-${flavor?.manifestKey ?: "installer"}" }
+        val name = io.nisfeb.talon.update.sanitizedUpdateFileName(
+            asset.url,
+            "talon-update-${flavor?.manifestKey ?: "installer"}",
+        )
         val target = File(updatesDir, name)
         val part = File(updatesDir, target.name + ".part")
         runCatching {

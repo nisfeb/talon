@@ -211,15 +211,27 @@ fun MailComposer(
                                 // there is no draft route that carries
                                 // them, so that send goes direct.
                                 val ok = if (intent.draftId != null && refs.isEmpty()) {
-                                    repo.saveDraft(
-                                        io.nisfeb.talon.mail.Draft(
-                                            id = draftId,
-                                            to = to,
-                                            subject = subject,
-                                            body = body,
-                                            prev = intent.prev,
-                                        ),
-                                    )
+                                    // The save has to land before the
+                                    // ship is asked to send by id: a
+                                    // transient failure here would
+                                    // otherwise send the STALE stored
+                                    // draft to the stale recipients,
+                                    // report success, and delete it.
+                                    if (!repo.saveDraft(
+                                            io.nisfeb.talon.mail.Draft(
+                                                id = draftId,
+                                                to = to,
+                                                subject = subject,
+                                                body = body,
+                                                prev = intent.prev,
+                                            ),
+                                        )
+                                    ) {
+                                        problem = repo.error.value ?: "The edits did not reach the ship; nothing was sent."
+                                        progress = null
+                                        sending = false
+                                        return@launch
+                                    }
                                     repo.sendDraft(draftId)
                                 } else {
                                     repo.send(to, subject, body, intent.prev, refs)

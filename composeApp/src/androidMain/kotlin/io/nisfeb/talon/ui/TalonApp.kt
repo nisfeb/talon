@@ -1246,7 +1246,12 @@ fun TalonApp(
                         inviteShipFromCode = link.ship
                         true
                     }
-                    null -> false
+                    null -> {
+                        // Same as the desktop shell: an unrecognized
+                        // talon link is logged, not handed to the OS.
+                        io.nisfeb.talon.util.Log.w("TalonApp", "unrecognized talon link: $uri", null)
+                        true
+                    }
                 }
             },
             onUrb = urbLinkHandler,
@@ -1690,28 +1695,21 @@ fun TalonApp(
                 return@LaunchedEffect
             }
             var fetchedAt = 0L
-            var failures = 0
-            var nextAttemptAt = 0L
+            val backoff = io.nisfeb.talon.ui.FetchBackoff()
             while (true) {
                 val now = io.nisfeb.talon.util.nowMs()
                 // Backgrounded: nobody is looking at the dial, and a
                 // fetch would only warm a cache the widget keeps too.
                 val inForeground = ProcessLifecycleOwner.get()
                     .lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)
-                if (inForeground && now >= nextAttemptAt &&
+                if (inForeground && backoff.ready(now) &&
                     io.nisfeb.talon.ui.screens.weatherIsStale(fetchedAt, now)
                 ) {
                     weatherFor(where).onSuccess {
                         homeWeather = it
                         fetchedAt = io.nisfeb.talon.util.nowMs()
-                        failures = 0
-                    }.onFailure {
-                        // Back off doubling rather than retry every
-                        // minute forever: two, four, eight … capped at
-                        // half an hour.
-                        failures = (failures + 1).coerceAtMost(5)
-                        nextAttemptAt = now + 60_000L * (1L shl failures)
-                    }
+                        backoff.onSuccess()
+                    }.onFailure { backoff.onFailure(now) }
                 }
                 kotlinx.coroutines.delay(60_000L)
             }

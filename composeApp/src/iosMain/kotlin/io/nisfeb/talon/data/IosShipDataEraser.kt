@@ -50,6 +50,10 @@ class IosShipDataEraser : ShipDataEraser {
         runCatching { IosFiles.write(PENDING_FILE, ship) }
     }
 
-    override fun takePending(): String? =
-        IosFiles.read(PENDING_FILE)?.trim()?.takeIf { it.isNotBlank() }
+    override fun takePending(): String? {
+        val ship = IosFiles.read(PENDING_FILE)?.trim()?.takeIf { it.isNotBlank() }
+        // Taken means taken; see the desktop copy for why.
+        if (ship != null) IosFiles.delete(PENDING_FILE)
+        return ship
+    }
 }

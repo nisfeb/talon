@@ -23,9 +23,12 @@ sealed interface TalonLink {
 
     companion object {
         const val SCHEME = "talon://"
-        private val SHIP = Regex("~[a-z]+(-[a-z]+)*")
-        private val FLAG = Regex("~[a-z]+(-[a-z]+)*/[a-z0-9][a-z0-9-]*")
-        private val NEST = Regex("(chat|heap|diary)/~[a-z]+(-[a-z]+)*/[a-z0-9][a-z0-9-]*")
+        // The ship body is Patp's: moons and comets carry `--`, and a
+        // regex without it parses every comet link Talon emits to null.
+        private const val SHIP_BODY = "(?:[a-z]{6}|[a-z]{3})(?:--?(?:[a-z]{6}|[a-z]{3}))*"
+        private val SHIP = Regex("~$SHIP_BODY")
+        private val FLAG = Regex("~$SHIP_BODY/[a-z0-9][a-z0-9-]*")
+        private val NEST = Regex("(chat|heap|diary)/~$SHIP_BODY/[a-z0-9][a-z0-9-]*")
         private val CLUB = Regex("0v[0-9a-v]+(\\.[0-9a-v]+)*")
 
         fun forMessage(whom: String, id: String, parentId: String? = null): String =

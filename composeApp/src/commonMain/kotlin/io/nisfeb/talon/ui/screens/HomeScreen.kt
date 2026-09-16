@@ -1262,9 +1262,13 @@ private fun CalendarPanel(
     val readOnly = shares?.readOnly.orEmpty()
     // Ticked here, until the refresh after the poke drops the line.
     var ticked by remember { mutableStateOf(setOf<String>()) }
-    // A refresh is the truth again: whatever it holds replaces the
-    // local ticks, so an un-tick or a failed poke cannot linger.
-    LaunchedEffect(rawTasks) { ticked = emptySet() }
+    // Reconcile, don't clear: a tick the ship has caught up with (done,
+    // or dropped from the list) is its truth now; one it hasn't stays
+    // optimistic instead of flickering off on any unrelated refresh.
+    LaunchedEffect(rawTasks) {
+        val byId = rawTasks.associateBy { it.id }
+        ticked = ticked.filter { byId[it]?.done == false }.toSet()
+    }
     val scope = rememberCoroutineScope()
     var installing by remember { mutableStateOf(false) }
     var installError by remember { mutableStateOf<String?>(null) }

@@ -388,8 +388,11 @@ fun actionTools(a: AssistantActions): List<Tool> = buildList {
                 note = args.text("note") ?: d0.note,
                 tags = args.text("tags")?.let { io.nisfeb.talon.calendar.parseTags(it) } ?: d0.tags,
                 cal = calId,
-                durMin = saneDurMin(args.int("duration_min") ?: d0.durMin),
-                spanDays = saneSpanDays(args.int("days") ?: d0.spanDays),
+                // Only the model's own numbers get clamped: the event's
+                // existing span is its business, and a rename must not
+                // shorten it.
+                durMin = args.int("duration_min")?.let(::saneDurMin) ?: d0.durMin,
+                spanDays = args.int("days")?.let(::saneSpanDays) ?: d0.spanDays,
             )
             if (d.cat == EventCat.TODO) {
                 if (newDate != null) d = d.copy(due = newDate, date = newDate)

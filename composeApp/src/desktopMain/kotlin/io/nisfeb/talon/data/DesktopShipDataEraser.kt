@@ -42,6 +42,12 @@ class DesktopShipDataEraser : ShipDataEraser {
         runCatching { pendingFile.writeText(ship) }
     }
 
-    override fun takePending(): String? =
-        pendingFile.takeIf { it.exists() }?.readText()?.trim()?.takeIf { it.isNotBlank() }
+    override fun takePending(): String? {
+        val ship = pendingFile.takeIf { it.exists() }?.readText()?.trim()?.takeIf { it.isNotBlank() }
+        // Taken means taken: the caller owns what happens next, and a
+        // ship re-added since the marker was written must not be
+        // erased by a stale replay. erase() re-marks on failure.
+        if (ship != null) pendingFile.delete()
+        return ship
+    }
 }

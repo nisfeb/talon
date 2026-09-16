@@ -236,15 +236,25 @@ class CalendarRepo(
         val json = AuspexApi.json
         fun rows(kind: String, texts: List<String>) =
             texts.mapIndexed { i, t -> CalendarCacheEntity(kind, i, t) }
-        // All of it or none: the parts are written in turn, and a detach
-        // between two of them left a window with no calendars beside it.
+        // Snapshot first: the flows empty on a ship switch, and reading
+        // them lazily between writes stored a fresh window beside
+        // empty calendars. Then one transaction, all of it or none.
+        val snapWindow = _rows.value
+        val snapCalendars = _calendars.value
+        val snapTasks = _tasks.value
+        val snapTags = _tags.value
+        val snapZone = _zone.value
         runCatching {
             kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
-            c.replace("window", rows("window", _rows.value.orEmpty().map { json.encodeToString(CalendarRow.serializer(), it) }))
-            c.replace("calendars", rows("calendars", _calendars.value.map { json.encodeToString(CalendarInfo.serializer(), it) }))
-            c.replace("tasks", rows("tasks", _tasks.value.orEmpty().map { json.encodeToString(CalendarTask.serializer(), it) }))
-            c.replace("tags", rows("tags", _tags.value))
-            c.replace("zone", rows("zone", listOfNotNull(_zone.value)))
+            c.replaceAll(
+                mapOf(
+                    "window" to rows("window", snapWindow.orEmpty().map { json.encodeToString(CalendarRow.serializer(), it) }),
+                    "calendars" to rows("calendars", snapCalendars.map { json.encodeToString(CalendarInfo.serializer(), it) }),
+                    "tasks" to rows("tasks", snapTasks.orEmpty().map { json.encodeToString(CalendarTask.serializer(), it) }),
+                    "tags" to rows("tags", snapTags),
+                    "zone" to rows("zone", listOfNotNull(snapZone)),
+                ),
+            )
             }
         }.onFailure { Log.w(TAG, "calendar not kept", it) }
     }

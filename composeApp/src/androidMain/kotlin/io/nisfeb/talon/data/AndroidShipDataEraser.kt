@@ -46,8 +46,12 @@ class AndroidShipDataEraser(context: Context) : ShipDataEraser {
         runCatching { pendingFile().writeText(ship) }
     }
 
-    override fun takePending(): String? =
-        pendingFile().takeIf { it.exists() }?.readText()?.trim()?.takeIf { it.isNotBlank() }
+    override fun takePending(): String? {
+        val ship = pendingFile().takeIf { it.exists() }?.readText()?.trim()?.takeIf { it.isNotBlank() }
+        // Taken means taken; see the desktop copy for why.
+        if (ship != null) pendingFile().delete()
+        return ship
+    }
 
     /**
      * Clearing a SharedPreferences leaves an empty XML file behind.

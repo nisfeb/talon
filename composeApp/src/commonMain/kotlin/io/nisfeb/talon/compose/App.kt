@@ -430,11 +430,18 @@ fun App(
     }
     // A "forget + erase" of the active ship waits on the database
     // re-key before it can delete files; if the process died in that
-    // window, the marker is still here. Finish what was asked.
+    // window, the marker is still here. Finish what was asked — unless
+    // the ship came back: re-adding it means the data is wanted, and
+    // erasing now would delete the database under the open connection.
     LaunchedEffect(Unit) {
         shipDataEraser.takePending()?.let { gone ->
-            shipDataEraser.erase(gone)
-                .onFailure { io.nisfeb.talon.util.Log.w("App", "pending erase replay failed for $gone", it) }
+            if (sessionStore.all().none { it.ship == gone }) {
+                shipDataEraser.erase(gone)
+                    .onFailure {
+                        io.nisfeb.talon.util.Log.w("App", "pending erase replay failed for $gone", it)
+                        shipDataEraser.markPending(gone)
+                    }
+            }
         }
     }
 
@@ -959,12 +966,17 @@ fun App(
                 return@LaunchedEffect
             }
             var fetchedAt = 0L
+            val backoff = io.nisfeb.talon.ui.FetchBackoff()
             while (true) {
-                if (io.nisfeb.talon.ui.screens.weatherIsStale(fetchedAt, nowMs())) {
+                val now = nowMs()
+                if (backoff.ready(now) &&
+                    io.nisfeb.talon.ui.screens.weatherIsStale(fetchedAt, now)
+                ) {
                     weatherFor(where).onSuccess {
                         homeWeather = it
                         fetchedAt = nowMs()
-                    }
+                        backoff.onSuccess()
+                    }.onFailure { backoff.onFailure(now) }
                 }
                 delay(60_000L)
             }

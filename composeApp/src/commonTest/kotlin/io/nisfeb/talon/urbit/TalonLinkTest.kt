@@ -41,4 +41,24 @@ class TalonLinkTest {
         )
         assertEquals(TalonLink.Message("0v1.a2c3d", "1", null), TalonLink.parse("talon://chat/0v1.a2c3d?id=1"))
     }
+
+    @Test
+    fun cometLinksParse() {
+        // A comet name carries `--`; the ship regex has to take it or
+        // every link Talon emits for a comet parses to nothing.
+        val comet = "~mister-botter-dozzod-anycpu--dortun-dotheb-holsur-rigdet"
+        assertEquals(TalonLink.Message(comet, "1", null), TalonLink.parse("talon://chat/$comet?id=1"))
+        assertEquals(TalonLink.InviteMe(comet), TalonLink.parse("talon://invite/$comet"))
+        assertEquals(
+            TalonLink.Group("$comet/hall"),
+            TalonLink.parse("talon://group/$comet/hall"),
+        )
+        assertEquals(
+            TalonLink.Message("chat/$comet/hall", "1", null),
+            TalonLink.parse("talon://chat/chat%2F$comet%2Fhall?id=1"),
+        )
+        // Moons still parse, and a doubled dash inside a group name
+        // does not make the ship part greedier than Patp's.
+        assertEquals(TalonLink.Message("~mister-botter", "1", null), TalonLink.parse("talon://chat/~mister-botter?id=1"))
+    }
 }

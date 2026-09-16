@@ -51,7 +51,9 @@ class ClockWidgetProvider : AppWidgetProvider() {
         // alarms: the half-hourly update fires, and the minute tick
         // starts again from here.
         scheduleTick(context)
-        refresh(context, manager, ids)
+        // Not trusted: any app can broadcast APPWIDGET_UPDATE at an
+        // exported receiver, so this path is rate-limited.
+        refresh(context, manager, ids, trusted = false)
     }
 
     override fun onEnabled(context: Context) {
@@ -76,7 +78,11 @@ class ClockWidgetProvider : AppWidgetProvider() {
             return
         }
         scheduleTick(context)
-        refresh(context, manager, ids)
+        // Our own PendingIntent carries the process's token; a tick
+        // without it is somebody else's broadcast and gets throttled.
+        // Our own minute ticks never are — dropping one is the clock
+        // showing a stale minute, which is the thing it exists not to do.
+        refresh(context, manager, ids, trusted = intent.getStringExtra(EXTRA_TICK_TOKEN) == tickToken)
     }
 
     /**
@@ -109,12 +115,14 @@ class ClockWidgetProvider : AppWidgetProvider() {
     }
 
     /** Explicit, so it reaches our own receiver without an intent
-     *  filter and without the background-broadcast restrictions. */
+     *  filter and without the background-broadcast restrictions. The
+     *  token tells our tick from a stranger's copy of the action. */
     private fun tickIntent(context: Context): PendingIntent =
         PendingIntent.getBroadcast(
             context,
             TICK_REQUEST,
-            Intent(context, ClockWidgetProvider::class.java).setAction(ACTION_TICK),
+            Intent(context, ClockWidgetProvider::class.java).setAction(ACTION_TICK)
+                .putExtra(EXTRA_TICK_TOKEN, tickToken),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
 
@@ -125,19 +133,21 @@ class ClockWidgetProvider : AppWidgetProvider() {
         newOptions: Bundle,
     ) {
         // Resized on the home screen. The dial is a bitmap, so it has
-        // to be drawn again at the new size or it stretches.
-        refresh(context, manager, intArrayOf(id))
+        // to be drawn again at the new size or it stretches. A real
+        // nudge the widget exists to serve: never throttled.
+        refresh(context, manager, intArrayOf(id), trusted = true)
     }
 
-    private fun refresh(context: Context, manager: AppWidgetManager, ids: IntArray) {
+    private fun refresh(context: Context, manager: AppWidgetManager, ids: IntArray, trusted: Boolean) {
         if (ids.isEmpty()) return
         // This receiver is exported (the manifest says why), so any
-        // app can broadcast APPWIDGET_UPDATE or ACTION_TICK at it and
-        // each one lands here, costing a bitmap render. Collapse
-        // repeats inside half a minute unless the widget set changed —
-        // a new widget or a resize always paints.
+        // app can broadcast APPWIDGET_UPDATE or a tokenless ACTION_TICK
+        // at it and each one lands here, costing a bitmap render.
+        // Collapse THOSE repeats inside half a minute unless the widget
+        // set changed. Trusted renders — our own minute tick, a resize —
+        // always paint: throttling them is the clock lying.
         val now = nowMs()
-        if (now - lastRenderAt < MIN_RENDER_GAP_MS && ids.toSet() == lastRenderIds) return
+        if (!trusted && now - lastRenderAt < MIN_RENDER_GAP_MS && ids.toSet() == lastRenderIds) return
         lastRenderAt = now
         lastRenderIds = ids.toSet()
         // Held past the end of onUpdate, because the forecast is a
@@ -335,6 +345,12 @@ class ClockWidgetProvider : AppWidgetProvider() {
         /** Our own, so onReceive can tell a tick from a system update. */
         private const val ACTION_TICK = "io.nisfeb.talon.widget.CLOCK_TICK"
         private const val TICK_REQUEST = 1
+
+        /** Tells our PendingIntent's tick from a stranger's copy of the
+         *  action. Per process; a regenerated token just takes the first
+         *  post-restart tick down the throttled path, which passes. */
+        private const val EXTRA_TICK_TOKEN = "io.nisfeb.talon.widget.TICK_TOKEN"
+        private val tickToken = java.util.UUID.randomUUID().toString()
 
         private const val WEATHER_TIMEOUT_MS = 8_000L
 

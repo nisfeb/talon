@@ -14,50 +14,53 @@ import kotlinx.serialization.json.Json
  * across a relaunch, as the Android store does.
  *
  * Per-ship files so ship-switch hides the other ship's drafts (the
- * Android store's per-ship prefs file, mirrored). The active ship is
- * re-checked on every access rather than cached at construction:
- * switching ships must not keep writing to the old ship's file.
+ * Android store's per-ship prefs file, mirrored). A draft is pinned to
+ * the ship it was LOADED under: the composer saves on dispose, which
+ * can fire a frame after a ship switch, and resolving the active ship
+ * at save time writes the outgoing ship's text into the incoming
+ * ship's file.
  */
 class IosDraftStore(private val activeShip: () -> String?) : DraftStore() {
-    private var ship: String? = null
-    private var drafts: MutableMap<String, String> = mutableMapOf()
 
-    init { reload() }
+    /** Every loaded ship's drafts, keyed so a save can only ever land
+     *  in the file the draft was composed under. */
+    private val byShip = mutableMapOf<String, MutableMap<String, String>>()
 
-    /** Swap the in-memory map when the active ship changed. */
-    private fun reload() {
-        val now = activeShip()
-        if (now == ship) return
-        ship = now
-        drafts = now?.let { s ->
+    /** The ship a whom's draft was last loaded under. */
+    private val loadedUnder = mutableMapOf<String, String>()
+
+    private fun draftsFor(ship: String): MutableMap<String, String> =
+        byShip.getOrPut(ship) {
             runCatching {
-                IosFiles.read(fileFor(s))?.let { Json.decodeFromString<Map<String, String>>(it) }
-            }.getOrNull()
-        }.orEmpty().toMutableMap()
-        backing.value = drafts.toMap()
-    }
+                IosFiles.read(fileFor(ship))?.let { Json.decodeFromString<Map<String, String>>(it) }
+            }.getOrNull().orEmpty().toMutableMap()
+        }
 
     override fun load(whom: String): String {
-        reload()
-        return drafts[whom] ?: ""
+        val s = activeShip() ?: return ""
+        loadedUnder[whom] = s
+        backing.value = draftsFor(s).toMap()
+        return draftsFor(s)[whom] ?: ""
     }
 
     override fun save(whom: String, draft: String) {
-        reload()
-        if (draft.isBlank()) drafts.remove(whom) else drafts[whom] = draft
-        persist()
+        // Pin, not re-resolve: a dispose-time save after a ship switch
+        // belongs to the ship the draft was composed under.
+        val s = loadedUnder[whom] ?: activeShip() ?: return
+        if (draft.isBlank()) draftsFor(s).remove(whom) else draftsFor(s)[whom] = draft
+        persist(s)
+        if (s == activeShip()) backing.value = draftsFor(s).toMap()
     }
 
     override fun clear(whom: String) {
-        reload()
-        drafts.remove(whom)
-        persist()
+        val s = loadedUnder[whom] ?: activeShip() ?: return
+        draftsFor(s).remove(whom)
+        persist(s)
+        if (s == activeShip()) backing.value = draftsFor(s).toMap()
     }
 
-    private fun persist() {
-        backing.value = drafts.toMap()
-        val s = ship ?: return
-        runCatching { IosFiles.write(fileFor(s), Json.encodeToString(drafts.toMap())) }
+    private fun persist(ship: String) {
+        runCatching { IosFiles.write(fileFor(ship), Json.encodeToString(draftsFor(ship).toMap())) }
     }
 
     companion object {

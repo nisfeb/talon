@@ -45,14 +45,7 @@ class UpdateInstaller(private val context: Context) : UpdateInstallerHook {
         // the universal APK's size; the universal one only when none fits.
         val asset = manifest.androidAssetFor(android.os.Build.SUPPORTED_ABIS.toList())
         val updatesDir = File(context.getExternalFilesDir(null), "updates").apply { mkdirs() }
-        // A trailing-slash URL yields an empty name; strip path
-        // separators and ".." so a hostile manifest can't write
-        // outside the updates dir.
-        val name = asset.url.substringAfterLast('/')
-            .ifBlank { "talon-update.apk" }
-            .replace("..", "")
-            .replace('/', '_')
-            .replace('\\', '_')
+        val name = io.nisfeb.talon.update.sanitizedUpdateFileName(asset.url, "talon-update.apk")
         val target = File(updatesDir, name)
         if (target.exists()) target.delete()
 
