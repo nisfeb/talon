@@ -1,7 +1,6 @@
 package io.nisfeb.talon.ui.screens
 
 import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.combinedClickable
 import io.nisfeb.talon.ui.combinedClickableWithSecondary
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -16,11 +15,9 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
-import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
 import io.nisfeb.talon.ui.isCallsSupported
-import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material3.Switch
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -55,14 +52,13 @@ import androidx.compose.ui.unit.dp
 import io.nisfeb.talon.data.AppDatabase
 import io.nisfeb.talon.ui.Avatar
 import io.nisfeb.talon.ui.ContactMap
-import io.nisfeb.talon.ui.contactMapFlow
 import io.nisfeb.talon.urbit.AdminGroup
 import io.nisfeb.talon.urbit.AdminMember
-import io.nisfeb.talon.urbit.PATP_REGEX
 import io.nisfeb.talon.urbit.TlonChatRepo
 import io.nisfeb.talon.util.decodeImageDimensions
 import io.nisfeb.talon.util.rememberImagePicker
 import kotlinx.coroutines.launch
+import io.nisfeb.talon.ui.icons.TalonIcons
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -95,14 +91,7 @@ fun GroupAdminScreen(
 
     // Contact map for nicknames on member rows. Updates live as
     // %contacts events come in.
-    val contactMap by remember {
-        contactMapFlow(
-            db.contacts().stream(),
-            db.clubs().stream(),
-            db.groups().streamGroups(),
-            db.groups().streamChannelGroups(),
-        )
-    }.collectAsState(initial = ContactMap.EMPTY)
+    val contactMap by io.nisfeb.talon.ui.rememberContactMap(db)
 
     suspend fun refresh() {
         runCatching { repo.fetchGroupAdmin(flag) }
@@ -670,6 +659,18 @@ private fun AdminBody(
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+        // Same resolution as NewDmScreen: a @p with or without its
+        // sig, a full word name (checksummed, so a typo fails rather
+        // than inviting somebody else), or a short name or nickname
+        // matched against people already known.
+        val invited = remember(inviteText, contactMap) {
+            io.nisfeb.talon.ui.NameToShip.resolve(
+                typed = inviteText,
+                known = contactMap.contacts.map { it.ship },
+                nicknameOf = { ship -> contactMap.nickname(ship) },
+            )
+        }
+        val invitePatp = (invited as? io.nisfeb.talon.ui.NameToShip.Result.One)?.ship
         Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -677,22 +678,64 @@ private fun AdminBody(
             OutlinedTextField(
                 value = inviteText,
                 onValueChange = { inviteText = it },
-                label = { Text("~ship-name") },
+                label = { Text("~ship, or a word name") },
                 modifier = Modifier.weight(1f),
-                singleLine = true,
+                // A comet's @p is fifty-six characters and its full
+                // name twelve words; on one line you could not see
+                // what you had pasted.
+                singleLine = false,
+                maxLines = 3,
             )
-            // Same shape check + sig normalization as NewDmScreen, so
-            // a typo or a missing ~ never goes on the wire raw.
-            val inviteTrimmed = inviteText.trim()
-            val invitePatp =
-                if (inviteTrimmed.startsWith("~")) inviteTrimmed else "~$inviteTrimmed"
             Button(
-                enabled = PATP_REGEX.matches(invitePatp),
+                enabled = invitePatp != null,
                 onClick = {
-                    onInvite(invitePatp)
+                    invitePatp?.let { onInvite(it) }
                     inviteText = ""
                 },
             ) { Text("Invite") }
+        }
+        // Contacts, offered as you type. A short name keeps two words
+        // of twelve, so it is the one form that can fit two people --
+        // picking from a list settles that before the invite goes out,
+        // and saves anybody typing a twelve-word name by hand.
+        val inviteSuggestions = remember(inviteText, contactMap) {
+            if (inviteText.isBlank() || invitePatp != null) emptyList()
+            // The picker matches @ps with the sig stripped, so a typed
+            // one has to come off or nothing would ever match.
+            else io.nisfeb.talon.ui.suggestionsFor(
+                inviteText.trim().removePrefix("~"),
+                contactMap,
+                contactMap.contacts.map { it.ship },
+            )
+        }
+        for (s in inviteSuggestions) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { inviteText = s.ship }
+                    .padding(vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    s.nickname?.let { nick ->
+                        Text(nick, style = MaterialTheme.typography.bodyMedium)
+                    }
+                    Text(
+                        s.label,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+        io.nisfeb.talon.ui.NameToShip.hint(invited, inviteText)?.let {
+            if (inviteSuggestions.isEmpty()) {
+                Text(
+                    it,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
 
         HorizontalDivider()
@@ -758,11 +801,14 @@ private fun AdminBody(
                                 ),
                             )
                             Text(
-                                ship,
+                                contactMap.handle(ship),
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
-                        } ?: Text(ship, style = MaterialTheme.typography.bodyMedium)
+                        } ?: Text(
+                            contactMap.handle(ship),
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
                     }
                     OutlinedButton(onClick = { onUnban(ship) }) { Text("Unban") }
                 }
@@ -1006,7 +1052,7 @@ private fun PartyLineSection(
             )
         }
         Icon(
-            if (sfuOpen) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
+            if (sfuOpen) TalonIcons.ExpandLess else TalonIcons.ExpandMore,
             contentDescription = if (sfuOpen) "Hide server settings" else "Server settings",
         )
     }
@@ -1314,11 +1360,11 @@ private fun ShipRow(
                     ),
                 )
                 Text(
-                    ship,
+                    contactMap.handle(ship),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-            } ?: Text(ship, style = MaterialTheme.typography.bodyMedium)
+            } ?: Text(contactMap.handle(ship), style = MaterialTheme.typography.bodyMedium)
         }
         trailing?.invoke()
     }

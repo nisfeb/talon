@@ -1,5 +1,6 @@
 package io.nisfeb.talon.ui.screens
 
+import io.nisfeb.talon.ui.reorderHandle
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -47,7 +48,6 @@ import sh.calvin.reorderable.rememberReorderableLazyListState
 fun SidebarSettingsScreen(
     repo: TlonChatRepo,
     uiSettings: UiSettings,
-    dailyDigestEnabled: Boolean,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -83,14 +83,23 @@ fun SidebarSettingsScreen(
                 Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
             }
             Text(
-                "Sidebar",
+                // One screen, two things in front of people: a rail on
+                // a desktop and a drawer on a phone, both driven by
+                // these preferences.
+                if (io.nisfeb.talon.ui.isDrawerNavigation) "Menu" else "Sidebar",
                 style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
                 modifier = Modifier.padding(start = 4.dp),
             )
         }
         Text(
-            "Drag the handle to reorder. Toggle off to hide an item " +
-                "from the sidebar (it stays available in the kebab menu).",
+            if (io.nisfeb.talon.ui.isDrawerNavigation) {
+                "Drag the handle to reorder. Toggle off to leave an item " +
+                    "out of the menu. Settings stays: it is the only way " +
+                    "back here."
+            } else {
+                "Drag the handle to reorder. Toggle off to hide an item " +
+                    "from the sidebar (it stays available in the kebab menu)."
+            },
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
@@ -113,7 +122,6 @@ fun SidebarSettingsScreen(
                     SidebarItemRow(
                         item = item,
                         visible = railVisibility.isVisible(item),
-                        dailyDigestEnabled = dailyDigestEnabled,
                         onToggle = { newVisible ->
                             scope.launch {
                                 val sync = repo.settingsSync
@@ -126,7 +134,7 @@ fun SidebarSettingsScreen(
                                 }
                             }
                         },
-                        dragHandleModifier = Modifier.longPressDraggableHandle(
+                        dragHandleModifier = reorderHandle(
                             onDragStarted = {
                                 haptics.performHapticFeedback(HapticFeedbackType.LongPress)
                             },
@@ -143,17 +151,16 @@ fun SidebarSettingsScreen(
 private fun SidebarItemRow(
     item: RailItem,
     visible: Boolean,
-    dailyDigestEnabled: Boolean,
     onToggle: (Boolean) -> Unit,
     dragHandleModifier: Modifier,
 ) {
-    val state = sidebarRowState(item, dailyDigestEnabled)
+    val state = sidebarRowState(item)
     Row(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        // Drag handle. Long-press anywhere on the icon to start a drag.
+        // Drag handle: a long press on touch, at once with a mouse.
         Icon(
             Icons.Filled.Menu,
             contentDescription = "Drag to reorder",
@@ -201,22 +208,16 @@ private data class SidebarRowState(
     val gatedOff: Boolean,
 )
 
-private fun sidebarRowState(
-    item: RailItem,
-    dailyDigestEnabled: Boolean,
-): SidebarRowState = when (item) {
+private fun sidebarRowState(item: RailItem): SidebarRowState = when (item) {
     RailItem.Chats -> SidebarRowState(
         label = "Chats",
         subtitle = "Always on the sidebar",
         fixedAlwaysOn = true,
         gatedOff = false,
     )
-    RailItem.TodaysBrief -> SidebarRowState(
-        label = "Today's brief",
-        subtitle = if (!dailyDigestEnabled) "Enable Daily Digest in Settings to use this" else null,
-        fixedAlwaysOn = false,
-        gatedOff = !dailyDigestEnabled,
-    )
+    RailItem.Home -> SidebarRowState("Home", null, false, false)
+    RailItem.Mail -> SidebarRowState("Mail", null, false, false)
+    RailItem.Calendar -> SidebarRowState("Calendar", null, false, false)
     RailItem.Statuses -> SidebarRowState("Statuses", null, false, false)
     RailItem.Bookmarks -> SidebarRowState("Bookmarks", null, false, false)
     RailItem.Activity -> SidebarRowState("Activity", null, false, false)
@@ -227,5 +228,18 @@ private fun sidebarRowState(
     RailItem.Watchwords -> SidebarRowState("Watchwords", null, false, false)
     RailItem.Administration -> SidebarRowState("Administration", null, false, false)
     RailItem.Invites -> SidebarRowState("Invites", null, false, false)
-    RailItem.Settings -> SidebarRowState("Settings", null, false, false)
+    // On a phone the drawer is the only thing that opens Settings,
+    // so the toggle that would hide it is not offered: turning it off
+    // would take away the screen the toggle lives on. The sidebar has
+    // the kebab to fall back on, so there it stays a choice.
+    RailItem.Settings -> SidebarRowState(
+        label = "Settings",
+        subtitle = if (io.nisfeb.talon.ui.isDrawerNavigation) {
+            "Always in the menu"
+        } else {
+            null
+        },
+        fixedAlwaysOn = io.nisfeb.talon.ui.isDrawerNavigation,
+        gatedOff = false,
+    )
 }

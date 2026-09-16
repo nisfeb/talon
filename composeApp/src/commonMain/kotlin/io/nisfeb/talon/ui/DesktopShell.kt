@@ -22,6 +22,7 @@ import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.MailOutline
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Search
@@ -44,8 +45,11 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import io.nisfeb.talon.ui.icons.TalonIcons
 
 /**
  * Desktop / tablet-landscape host. Below [ExpandedThreshold] this is a
@@ -76,6 +80,9 @@ fun DesktopShell(
     listFraction: Float,
     onListFractionChange: (Float) -> Unit,
     rightSidebar: (@Composable () -> Unit)? = null,
+    // The right pane's width; dragged at its left edge like the list pane.
+    rightPaneWidth: Dp = DEFAULT_RIGHT_PANE_WIDTH,
+    onRightPaneWidthChange: (Dp) -> Unit = {},
     menuBadges: MenuBadges = MenuBadges(),
     // Full-width content that takes over the whole area beside the rail,
     // bypassing the list/detail split — for a screen that manages its own
@@ -133,8 +140,20 @@ fun DesktopShell(
             // sent content here that was silently dropped on the floor
             // until 0.10.0-rc4.
             if (rightSidebar != null) {
-                androidx.compose.material3.VerticalDivider()
-                Box(modifier = Modifier.width(RIGHT_SIDEBAR_WIDTH).fillMaxHeight()) {
+                // Never wider than leaves the chat its minimum, and
+                // never past MAX_RIGHT_PANE_WIDTH — UiSettings clamps
+                // the stored width to the same ceiling, and this keeps
+                // the pane honest even for a caller that didn't.
+                val cap = (this@BoxWithConstraints.maxWidth - RAIL_WIDTH - MIN_MAIN_WIDTH)
+                    .coerceAtLeast(MIN_RIGHT_PANE_WIDTH)
+                    .coerceAtMost(MAX_RIGHT_PANE_WIDTH)
+                val width = rightPaneWidth.coerceIn(MIN_RIGHT_PANE_WIDTH, cap)
+                val density = LocalDensity.current
+                PaneDragHandle(onDragDelta = { deltaPx ->
+                    val delta = with(density) { deltaPx.toDp() }
+                    onRightPaneWidthChange((width - delta).coerceIn(MIN_RIGHT_PANE_WIDTH, cap))
+                })
+                Box(modifier = Modifier.width(width).fillMaxHeight()) {
                     rightSidebar()
                 }
             }
@@ -251,11 +270,17 @@ private fun RailIconButton(
     }
 }
 
-private fun railIcon(item: RailItem): ImageVector? = when (item) {
-    // All icons resolve to material-icons-core (verified by
-    // unzipping the core jar at plan-write time). Safe with the
-    // slim-jar strip; auditIconKeepList catches any drift.
-    RailItem.Chats -> Icons.Filled.Home
+internal fun railIcon(item: RailItem): ImageVector? = when (item) {
+    // Core icons, or ones the app owns in TalonIcons: the extended
+    // set is not shipped.
+    RailItem.Home -> Icons.Filled.Home
+    // Chats gave up the house to the home page and took the icon
+    // that actually means chat.
+    RailItem.Chats -> TalonIcons.Chat
+    // MailOutline is in material-icons-core, so it survives the slim
+    // strip; Email is already spent on Invites.
+    RailItem.Mail -> Icons.Filled.MailOutline
+    RailItem.Calendar -> Icons.Filled.DateRange
     RailItem.Statuses -> Icons.Filled.Person
     RailItem.Bookmarks -> Icons.Filled.Star
     RailItem.Activity -> Icons.Filled.Notifications
@@ -263,25 +288,30 @@ private fun railIcon(item: RailItem): ImageVector? = when (item) {
     RailItem.Assistant -> null
     RailItem.Profile -> Icons.Filled.AccountCircle
     RailItem.Watchwords -> Icons.Filled.Search
-    RailItem.TodaysBrief -> Icons.Filled.DateRange
     RailItem.Administration -> Icons.Filled.Build
     RailItem.Invites -> Icons.Filled.Email
     RailItem.Settings -> Icons.Filled.Settings
 }
 
-private fun railLabel(item: RailItem): String = when (item) {
+internal fun railLabel(item: RailItem): String = when (item) {
+    RailItem.Home -> "Home"
     RailItem.Chats -> "Chats"
+    RailItem.Mail -> "Mail"
+    RailItem.Calendar -> "Calendar"
     RailItem.Statuses -> "Statuses"
     RailItem.Bookmarks -> "Bookmarks"
     RailItem.Activity -> "Activity"
     RailItem.Assistant -> "Assistant"
     RailItem.Profile -> "My profile"
     RailItem.Watchwords -> "Watchwords"
-    RailItem.TodaysBrief -> "Today's brief"
     RailItem.Administration -> "Administration"
     RailItem.Invites -> "Invites"
     RailItem.Settings -> "Settings"
 }
 
 private val RAIL_WIDTH = 64.dp
-private val RIGHT_SIDEBAR_WIDTH = 360.dp
+val DEFAULT_RIGHT_PANE_WIDTH = 360.dp
+val MIN_RIGHT_PANE_WIDTH = 280.dp
+val MAX_RIGHT_PANE_WIDTH = 900.dp
+/** What the list and chat keep between them however wide the right pane gets. */
+private val MIN_MAIN_WIDTH = 520.dp

@@ -5,8 +5,8 @@ import io.nisfeb.talon.util.IosFiles
 import kotlinx.coroutines.CoroutineScope
 
 /**
- * iOS UI settings: [FileUiSettings] over a JSON file in Documents,
- * the same place the session, theme and assistant settings live.
+ * iOS UI settings: [FileUiSettings] over a JSON file in Application
+ * Support, the same place the session, theme and assistant settings live.
  *
  * Before this, iOS fell through to [InMemoryUiSettings], so every
  * per-device preference — naming style, accent, density, rail order —

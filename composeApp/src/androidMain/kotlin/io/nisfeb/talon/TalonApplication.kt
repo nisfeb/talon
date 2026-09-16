@@ -3,7 +3,6 @@ package io.nisfeb.talon
 import android.app.Application
 import io.nisfeb.talon.ai.AiClient
 import io.nisfeb.talon.ai.AiFeatures
-import io.nisfeb.talon.ai.AiSettings
 import io.nisfeb.talon.data.AppDatabase
 import io.nisfeb.talon.ui.DraftStore
 import io.nisfeb.talon.ui.ShipProfileStore
@@ -33,9 +32,8 @@ internal var talonAppContext: android.content.Context? = null
 
 class TalonApplication : Application() {
     // Always-on singletons — not ship-scoped.
-    // OkHttp client for the Android-only leaf consumers (image
-    // downloader, daily-digest weather fetch). Session/repo/UI use
-    // [ktorHttp] instead.
+    // OkHttp client for the Android-only leaf consumers (the image
+    // downloader). Session/repo/UI use [ktorHttp] instead.
     lateinit var http: OkHttpClient
         private set
     // Shared multiplatform HTTP client threaded into common
@@ -44,9 +42,9 @@ class TalonApplication : Application() {
         private set
     lateinit var sessionStore: SessionStore
         private set
-    lateinit var aiSettings: io.nisfeb.talon.ai.AiSettingsRepository
+    lateinit var shipDataEraser: io.nisfeb.talon.data.ShipDataEraser
         private set
-    lateinit var dailyDigestSettings: io.nisfeb.talon.ai.DailyDigestSettings
+    lateinit var aiSettings: io.nisfeb.talon.ai.AiSettingsRepository
         private set
     lateinit var uiSettings: UiSettings
         private set
@@ -62,8 +60,6 @@ class TalonApplication : Application() {
     lateinit var ai: AiFeatures
         private set
     lateinit var embedder: io.nisfeb.talon.ai.Embedder
-        private set
-    lateinit var dailyDigest: io.nisfeb.talon.ai.DailyDigest
         private set
     lateinit var loops: io.nisfeb.talon.ai.Loops
         private set
@@ -179,9 +175,25 @@ class TalonApplication : Application() {
             .writeTimeout(15, TimeUnit.SECONDS)
             .build()
         ktorHttp = createAppHttpClient()
+        shipDataEraser = io.nisfeb.talon.data.AndroidShipDataEraser(this)
         sessionStore = io.nisfeb.talon.urbit.AndroidSessionStore(this)
+        // A "forget + erase" of the active ship waits on the database
+        // close; if the process died in that window, the marker is
+        // still here. Finish what was asked — unless the ship came
+        // back: re-adding it means the data is wanted, and erasing
+        // now would delete the database under the open connection.
+        appScope.launch {
+            shipDataEraser.takePending()?.let { gone ->
+                if (sessionStore.all().none { it.ship == gone }) {
+                    shipDataEraser.erase(gone)
+                        .onFailure {
+                            android.util.Log.w("Talon", "pending erase replay failed for $gone", it)
+                            shipDataEraser.markPending(gone)
+                        }
+                }
+            }
+        }
         aiSettings = io.nisfeb.talon.ai.AndroidAiSettings(this)
-        dailyDigestSettings = io.nisfeb.talon.ai.AndroidDailyDigestSettings(this)
         // uiSettings is constructed below once buildShipScoped has set
         // up the per-ship `db` field — AndroidUiSettings derives its
         // railVisibility flow from the rail_item_prefs Room table.
@@ -267,22 +279,10 @@ class TalonApplication : Application() {
         // The worker itself no-ops when no ship is bound.
         CatchUpWorker.schedule(this)
 
-        dailyDigest = io.nisfeb.talon.ai.DailyDigest(
-            context = this,
-            sessionStore = sessionStore,
-            activeShipFlow = activeShipFlow,
-            getDb = { db },
-            aiSettings = aiSettings,
-            aiClient = aiClient,
-            settings = dailyDigestSettings,
-            http = http,
-            scope = appScope,
-            receiverClass = io.nisfeb.talon.DigestAlarmReceiver::class.java,
-        )
 
         // User loops — headless scheduled agent runs. Ship-scoped deps
-        // resolved lazily (getDb/getRepo/getEmbedder) like dailyDigest, so
-        // a ship switch is picked up on the next run rather than captured.
+        // resolved lazily (getDb/getRepo/getEmbedder), so a ship switch
+        // is picked up on the next run rather than captured.
         loops = io.nisfeb.talon.ai.Loops(
             context = this,
             sessionStore = sessionStore,
@@ -339,23 +339,10 @@ class TalonApplication : Application() {
             }
         }
 
-        dailyDigestSettings.onChange = { evt, transitionedOffSync ->
-            appScope.launch {
-                runCatching {
-                    when {
-                        transitionedOffSync -> settingsSync.clearDailyDigestOnShip()
-                        else -> settingsSync.pushDailyDigest(dailyDigestSettings.state.value)
-                    }
-                }
-                // Re-arm on toggle / time change.
-                runCatching { dailyDigest.scheduleNext() }
-            }
-        }
 
         // Arm the alarm if the user has enabled it (and re-arm on every
         // app start — belt-and-suspenders against the receiver being killed
         // before it finished re-arming yesterday).
-        runCatching { dailyDigest.scheduleNext() }
         // Same for loops: re-arm the earliest due loop on every start.
         runCatching { loops.reschedule() }
     }
@@ -375,11 +362,13 @@ class TalonApplication : Application() {
      * the `SQLiteConnectionPool: connection was leaked` warning that
      * fired on every ship-switch.
      */
-    private fun buildShipScoped(ship: String) {
+    private fun buildShipScoped(ship: String, afterPriorClose: (() -> Unit)? = null) {
         val priorDb = if (::db.isInitialized) db else null
         val priorIndexer = if (::embeddingIndexer.isInitialized) embeddingIndexer else null
 
-        db = io.nisfeb.talon.data.createAppDatabase(this, "talon-${ship}.db")
+        // A quote waiting in a chat belongs to the ship that picked it.
+        io.nisfeb.talon.ui.PendingQuotes.clear()
+        db = io.nisfeb.talon.data.createAppDatabase(this, io.nisfeb.talon.data.shipDbName(ship))
         session = UrbitSession(ktorHttp, sessionStore)
         // Re-hydrate the cookie jar + baseUrl from the stored session
         // for this ship (if any). Skips silently for the placeholder
@@ -392,13 +381,6 @@ class TalonApplication : Application() {
         settingsSync = io.nisfeb.talon.urbit.SettingsSyncImpl(
             db = db,
             aiSettings = aiSettings,
-            dailyDigestSettings = dailyDigestSettings,
-            rearmDailyDigest = {
-                // `dailyDigest` is lateinit and built later in onCreate; this
-                // lambda only fires from inbound %settings events long after
-                // initialization, so the runtime guard is sufficient.
-                runCatching { dailyDigest.scheduleNext() }
-            },
             rearmLoops = {
                 // A loop synced in from another device may change the
                 // next-fire time; re-arm the single loop alarm. `loops` is
@@ -443,7 +425,7 @@ class TalonApplication : Application() {
         }
 
         if (priorDb != null || priorIndexer != null) {
-            scheduleShipScopedTeardown(priorDb, priorIndexer)
+            scheduleShipScopedTeardown(priorDb, priorIndexer, afterPriorClose)
         }
     }
 
@@ -457,11 +439,15 @@ class TalonApplication : Application() {
     private fun scheduleShipScopedTeardown(
         priorDb: AppDatabase?,
         priorIndexer: io.nisfeb.talon.ai.EmbeddingIndexer?,
+        /** Runs once the database is closed -- the only safe moment to
+         *  delete its file, which forgetShip needs. */
+        afterClose: (() -> Unit)? = null,
     ) {
         appScope.launch {
             delay(2_000)
             runCatching { priorIndexer?.stop() }
             runCatching { priorDb?.close() }
+            afterClose?.let { runCatching(it) }
         }
     }
 
@@ -511,6 +497,80 @@ class TalonApplication : Application() {
             // placeholder; the tree won't touch them while it renders
             // the login screen.
             _activeShip.value = null
+        }
+    }
+
+    /**
+     * Drop [ship]'s saved session, optionally taking its cached data
+     * with it.
+     *
+     * Works for any saved ship, not only the active one: the switcher
+     * lists them all, and somebody clearing out an account they no
+     * longer use should not have to switch into it first.
+     *
+     * The database is closed before the files go. Deleting underneath
+     * an open connection leaves Room holding a handle to something
+     * that is not there any more, and the next query then fails in a
+     * way that has nothing to do with signing out.
+     */
+    fun forgetShip(ship: String, alsoData: Boolean) {
+        val wasActive = ship == _activeShip.value
+        // The relay keeps pushing a ship's activity until told to stop,
+        // and a notification for a ship no longer signed in has nowhere
+        // right to land. Best effort; the device id is dropped either
+        // way so nothing tries to use it again.
+        val deviceId = relaySettings.deviceIdFor(ship)
+        if (deviceId.isNotBlank()) {
+            appScope.launch {
+                runCatching {
+                    io.nisfeb.talon.notify.RelayClient(
+                        http = ktorHttp,
+                        endpoint = { relaySettings.endpoint.value },
+                    ).unregister(deviceId)
+                }
+                relaySettings.clearDeviceIdFor(ship)
+            }
+        }
+        val erase: () -> Unit = {
+            if (alsoData) {
+                shipDataEraser.erase(ship)
+                    .onFailure { android.util.Log.w("Talon", "erase $ship failed", it) }
+            }
+        }
+        if (wasActive) {
+            runCatching { repo.stop() }
+            runCatching { shortcuts.stop() }
+            session.logout()
+        }
+        runCatching { sessionStore.remove(ship) }
+        refreshAllShips()
+        io.nisfeb.talon.ui.screens.forgetHomeListSnapshot(ship)
+        if (!wasActive) {
+            // Its database is not open. Erase now — on appScope rather
+            // than the caller: the switcher calls this on the main
+            // thread, and deleteDatabase plus file deletes are not
+            // frame-sized work.
+            appScope.launch { erase() }
+            return
+        }
+        // The active ship's database is still being read by the mounted
+        // tree, and is closed on the same deferred path a switch uses --
+        // the file's own KDoc on buildShipScoped says why a synchronous
+        // close here crashes. Erasing has to wait for that close, or on
+        // Android the file is deleted out from under the pool. The
+        // marker is the record in case the process dies first; the
+        // replay in onCreate finishes it.
+        if (alsoData) shipDataEraser.markPending(ship)
+        val dying = db
+        val dyingIndexer = if (::embeddingIndexer.isInitialized) embeddingIndexer else null
+        val next = sessionStore.activeShip() ?: sessionStore.all().firstOrNull()?.ship
+        if (next != null) {
+            buildShipScoped(next, afterPriorClose = erase)
+            sessionStore.setActive(next)
+            _activeShip.value = next
+        } else {
+            _activeShip.value = null
+            scheduleShipScopedTeardown(dying, dyingIndexer, afterClose = erase)
         }
     }
 

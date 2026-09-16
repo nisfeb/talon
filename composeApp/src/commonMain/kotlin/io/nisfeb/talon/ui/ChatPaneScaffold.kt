@@ -66,7 +66,7 @@ fun ChatPaneScaffold(
 }
 
 @Composable
-private fun PaneDragHandle(
+internal fun PaneDragHandle(
     onDragDelta: (Float) -> Unit,
     modifier: Modifier = Modifier,
 ) {

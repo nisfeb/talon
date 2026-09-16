@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material3.Surface
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.input.key.onPreviewKeyEvent
@@ -71,7 +72,6 @@ import io.nisfeb.talon.ui.screens.DmListScreen
 import io.nisfeb.talon.ui.screens.ActivityFeedScreen
 import io.nisfeb.talon.ui.screens.BookmarksScreen
 import io.nisfeb.talon.ui.screens.StatusFeedList
-import io.nisfeb.talon.ui.screens.DailyDigestScreen
 import io.nisfeb.talon.ui.screens.GalleryComposeScreen
 import io.nisfeb.talon.ui.screens.GalleryGridScreen
 import io.nisfeb.talon.ui.screens.GalleryPostScreen
@@ -128,6 +128,10 @@ private const val PEEK_ATTEMPTS = 3
 fun App(
     http: HttpClient,
     sessionStore: SessionStore,
+    /** Deletes a ship's cached data when somebody asks for it to go.
+     *  Noop where the host stores nothing per ship. */
+    shipDataEraser: io.nisfeb.talon.data.ShipDataEraser =
+        io.nisfeb.talon.data.ShipDataEraser.Noop,
     aiSettings: AiSettingsRepository,
     /** Builds a per-ship AppDatabase. Called inside `key(shipKey)` so each
      *  ship's data lives in its own SQLite file — without this the DM
@@ -135,14 +139,16 @@ fun App(
     createDb: (shipKey: String) -> AppDatabase,
     drafts: DraftStore,
     updateState: UpdateState,
+    /**
+     * Whether the app is in front, where the host knows better than
+     * the window does. iOS: UIKit's notifications, since a phone's one
+     * window never loses focus while the process is suspended and its
+     * sockets die. Null means window focus is the signal (desktop).
+     */
+    appForeground: kotlinx.coroutines.flow.Flow<Boolean>? = null,
     /** Builds a SettingsSync bound to the per-ship db. Null on platforms
      *  without %settings sync wired. */
     createSettingsSync: ((AppDatabase) -> SettingsSync)? = null,
-    /** Per-process daily-digest config. Null on platforms without a
-     *  digest impl wired (Android composeApp today). When non-null,
-     *  DmListScreen reveals the "Today's brief" drawer entry only
-     *  if the user enabled the alarm. */
-    dailyDigestSettings: io.nisfeb.talon.ai.DailyDigestSettings? = null,
     /** Source of truth for the "mirror watchwords to %settings" toggle.
      *  Defaults to in-memory; desktop passes a JSON-backed impl so the
      *  flag survives restart. */
@@ -250,6 +256,7 @@ fun App(
     var settingsStartOnAccount by remember { mutableStateOf(false) }
     var showSettings by remember { mutableStateOf(false) }
     var showSidebarSettings by remember { mutableStateOf(false) }
+    var showApps by remember { mutableStateOf(false) }
     var showLoops by remember { mutableStateOf(false) }
     var openChat by remember { mutableStateOf<String?>(null) }
     // Optional message id to scroll-and-flash when DmChatScreen mounts /
@@ -325,9 +332,18 @@ fun App(
         applyRightPaneState(RightPaneStateReducer.switchShip(rightPaneSnapshot()))
     }
     var showSelfProfile by remember { mutableStateOf(false) }
+    /** A message being written, if any. Owns the detail pane while it
+     *  is open, so a reply cannot be lost behind the thread it answers. */
+    var mailComposing by remember { mutableStateOf<io.nisfeb.talon.ui.screens.MailIntent?>(null) }
+    /** The mail thread the reader is on. The reader itself is the next
+     *  slice; until it lands this records the tap and nothing renders it. */
+    var openMailThread by remember { mutableStateOf<String?>(null) }
     var showStatusFeed by remember { mutableStateOf(false) }
     var showInvites by remember { mutableStateOf(false) }
     var showBookmarks by remember { mutableStateOf(false) }
+    var showCalendar by remember { mutableStateOf(false) }
+    var calendarPageOpen by remember { mutableStateOf(false) }
+    var assistantListen by remember { mutableStateOf(false) }
     var showActivity by remember { mutableStateOf(false) }
     var showSearch by remember { mutableStateOf(false) }
     var showAssistant by remember { mutableStateOf(false) }
@@ -340,10 +356,11 @@ fun App(
     var showNewDm by remember { mutableStateOf(false) }
     var showContacts by remember { mutableStateOf(false) }
     var showWatchwords by remember { mutableStateOf(false) }
-    var showDailyDigest by remember { mutableStateOf(false) }
     var showGroupAdminList by remember { mutableStateOf(false) }
     var openGroupAdminFlag by remember { mutableStateOf<String?>(null) }
     var openGroupHomeFlag by remember { mutableStateOf<String?>(null) }
+    /** A ship whose invite-me code was scanned or tapped: message it, or invite it to a group. */
+    var inviteShipFromCode by remember { mutableStateOf<String?>(null) }
     // Notebook overlay state. notebookComposeOpen + notebookEdit*
     // mirror production's edit flow: tap Edit on a post → close
     // the viewer, capture the existing fields into the edit-* vars,
@@ -371,17 +388,18 @@ fun App(
     // first, or the tap sets openChat and shows nothing.
     val jumpToChat: (String) -> Unit = { who ->
         showSettings = false
+        showApps = false
         showSelfProfile = false
         showStatusFeed = false
         showInvites = false
         showBookmarks = false
+        showCalendar = false
         showActivity = false
         showSearch = false
         showAssistant = false
         showNewDm = false
         showContacts = false
         showWatchwords = false
-        showDailyDigest = false
         showGroupAdminList = false
         openGroupAdminFlag = null
         openGroupHomeFlag = null
@@ -392,14 +410,6 @@ fun App(
         openThreadParent = null
         openThreadReplyAnchor = null
         openChat = who
-    }
-    // A tapped system notification (iOS) asks for a chat from outside
-    // the composition; land there the way the call strip's Message does.
-    LaunchedEffect(Unit) {
-        io.nisfeb.talon.notify.OpenChatRequests.requests.collect { r ->
-            jumpToChat(r.whom)
-            openChatFocusMessageId = r.postId
-        }
     }
     // Watchwords-sync flag. Backed by [watchwordsSync] (caller-supplied)
     // so desktop's JSON-file impl can persist across restarts and
@@ -412,6 +422,71 @@ fun App(
     var loginNotice by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(loggedInShip) {
         if (loggedInShip != null) loginNotice = null
+        // Both of these are the signed-in ship's, and another ship's
+        // names are worse than no names. Screens seed from the first
+        // and would otherwise open showing the last ship's nicknames.
+        io.nisfeb.talon.ui.LastContactMap.forget()
+        io.nisfeb.talon.ui.AzimuthNames.reset()
+    }
+    // A "forget + erase" of the active ship waits on the database
+    // re-key before it can delete files; if the process died in that
+    // window, the marker is still here. Finish what was asked — unless
+    // the ship came back: re-adding it means the data is wanted, and
+    // erasing now would delete the database under the open connection.
+    LaunchedEffect(Unit) {
+        shipDataEraser.takePending()?.let { gone ->
+            if (sessionStore.all().none { it.ship == gone }) {
+                shipDataEraser.erase(gone)
+                    .onFailure {
+                        io.nisfeb.talon.util.Log.w("App", "pending erase replay failed for $gone", it)
+                        shipDataEraser.markPending(gone)
+                    }
+            }
+        }
+    }
+
+    /** Put down the ship on screen before the active one changes. */
+    val leaveShip: () -> Unit = {
+        // Two ships can name the same conversation; a quote is the one
+        // ship's own and does not follow us to the other.
+        io.nisfeb.talon.ui.PendingQuotes.clear()
+        // Names belong to the ship that set them. Dropped here, before
+        // the switch, so the new ship never composes one frame wearing
+        // the old ship's nicknames (the LaunchedEffect above re-drops
+        // them on the restore path, where leaveShip doesn't run).
+        io.nisfeb.talon.ui.LastContactMap.forget()
+        io.nisfeb.talon.ui.AzimuthNames.reset()
+        openChat = null
+        switchShipAction()
+        viewerImageUrl = null
+        viewerImageList = null
+        showSelfProfile = false
+        showSettings = false
+        showSidebarSettings = false
+        showApps = false
+    }
+    // A tapped system notification (iOS) asks for a chat from outside
+    // the composition; land there the way the call strip's Message
+    // does -- on the ship it was for, first, when that is another of
+    // ours. The state this writes is hoisted above the re-key a switch
+    // causes, so the chat opens once the new ship's tree is up.
+    LaunchedEffect(Unit) {
+        io.nisfeb.talon.notify.OpenChatRequests.requests.collect { r ->
+            val forShip = r.forShip
+            if (forShip != null && sessionStore.all().none { it.ship == forShip }) {
+                // A tap for a ship this device no longer knows. Opening
+                // the same-named chat on the current ship would be the
+                // wrong conversation; nowhere to land, so drop it.
+                return@collect
+            }
+            if (forShip != null && forShip != loggedInShip) {
+                leaveShip()
+                sessionStore.setActive(forShip)
+                loggedInShip = forShip
+            }
+            jumpToChat(r.whom)
+            openChatFocusMessageId = r.postId
+        }
     }
 
     // Keyboard-shortcut request flags. Hoisted outside key() so the
@@ -502,13 +577,13 @@ fun App(
         profileSheetShip = null
     }
     PlatformBackHandler(enabled = showBookmarks) { showBookmarks = false }
+    PlatformBackHandler(enabled = showCalendar) { showCalendar = false }
     PlatformBackHandler(enabled = showActivity) { showActivity = false }
     PlatformBackHandler(enabled = showAssistant) { showAssistant = false }
     PlatformBackHandler(enabled = showSearch) { showSearch = false }
     PlatformBackHandler(enabled = showNewDm) { showNewDm = false }
     PlatformBackHandler(enabled = showWatchwords) { showWatchwords = false }
     PlatformBackHandler(enabled = showContacts) { showContacts = false }
-    PlatformBackHandler(enabled = showDailyDigest) { showDailyDigest = false }
     PlatformBackHandler(
         enabled = openGroupAdminFlag != null,
     ) { openGroupAdminFlag = null }
@@ -562,6 +637,7 @@ fun App(
     PlatformBackHandler(enabled = showSidebarSettings) {
         showSidebarSettings = false
     }
+    PlatformBackHandler(enabled = showApps) { showApps = false }
     PlatformBackHandler(enabled = showLoops) {
         showLoops = false
     }
@@ -777,17 +853,10 @@ fun App(
                 }
             }
         }
-        // Names for the call surface. A third collection of the same
-        // local-Room flows in this function — cheap, but the three
-        // (here, citeContacts, partyContacts) want hoisting into one.
-        val callContacts by remember(db) {
-            io.nisfeb.talon.ui.contactMapFlow(
-                db.contacts().stream(),
-                db.clubs().stream(),
-                db.groups().streamGroups(),
-                db.groups().streamChannelGroups(),
-            )
-        }.collectAsState(initial = io.nisfeb.talon.ui.ContactMap.EMPTY)
+        // Names for every surface below — calls, cites, the party
+        // roster: one collection of the same local-Room flows, hoisted
+        // from what used to be three identical ones.
+        val callContacts by io.nisfeb.talon.ui.rememberContactMap(db)
         // iOS wires CallKit here — answer/end/mute/hold in, every call
         // and line reported out; no-op on Android and desktop. After
         // the party line, which it reports too, and reading names
@@ -828,6 +897,111 @@ fun App(
 
         val aiState by aiSettings.state.collectAsState()
 
+        val loopScope = rememberCoroutineScope()
+
+        // Mail lives on the ship's own HTTP surface, not the eyre
+        // channel, so it needs only the session's cookie-bearing client.
+        val mailRepo = remember(session, db, loggedInShip) {
+            io.nisfeb.talon.mail.MailRepo(
+                session.http, loopScope,
+                rows = db.mailRows(),
+                threadDir = loggedInShip?.let { io.nisfeb.talon.mail.MailThreadFiles.dirFor(it) },
+            )
+        }
+
+        // Word names for planets and moons, fetched once per ship and
+        // kept. One call, here rather than at each of the places a
+        // ContactMap is built: those would each ask for the same ships
+        // and the two hosts would drift apart, which is how this file
+        // and TalonApp have parted company before.
+        LaunchedEffect(session, db) {
+            val url = session.baseUrl
+            if (url.isNullOrBlank()) return@LaunchedEffect
+            io.nisfeb.talon.ui.AzimuthNames.keepWarm(
+                db.contacts().stream(),
+                io.nisfeb.talon.ui.EyreAzimuthRpc(session.http, url),
+            )
+        }
+        // Mail lives in the same desk as the link handler's app, so the
+        // install is one thing offered from two places.
+        val grubberyInstall: (suspend () -> Result<Unit>)? = remember(session) {
+            io.nisfeb.talon.urbit.LatticeInstall.installer(http, { sessionStore.active()?.shipUrl }) {
+                app, mark, body -> runCatching { repo.pokeRaw(app, mark, body) }.isSuccess
+            }
+        }
+        val homePlaceRaw by uiSettings.homePlace.collectAsState()
+        val homePlace = remember(homePlaceRaw) {
+            io.nisfeb.talon.ui.HomePlaceCodec.decode(homePlaceRaw)
+        }
+        // Only ever called when somebody types a place and asks; see the
+        // note on the class about what leaves the machine.
+        val placeLookup = remember(http) { io.nisfeb.talon.ui.OpenMeteoPlaces(http).asLookup() }
+        val deviceLocation = io.nisfeb.talon.ui.rememberDeviceLocation()
+        val weatherFor = remember(http) { io.nisfeb.talon.ui.OpenMeteoWeather(http).asLookup() }
+        val homeFahrenheit by uiSettings.homeFahrenheit.collectAsState()
+        val homeLayoutRaw by uiSettings.homeLayout.collectAsState()
+        val homeLayout = remember(homeLayoutRaw) {
+            io.nisfeb.talon.ui.HomeLayoutCodec.decode(homeLayoutRaw)
+        }
+        // Collected above the navigation for the same reason the
+        // weather is: held inside the page it comes back empty and the
+        // status list flashes through "none" on every return.
+        val homeStatuses by remember(db) { db.contacts().streamStatusFeed() }
+            .collectAsState(initial = emptyList())
+        val homeInvites = repo.invitesFlow.collectAsState().value
+            ?.map { it.flag }.orEmpty()
+        val homeTwentyFourHour by uiSettings.homeTwentyFourHour.collectAsState()
+
+        // Kept here rather than inside HomeScreen, which is torn down
+        // every time somebody looks at their messages. Held below the
+        // navigation it came back empty, so the dial redrew with no
+        // weather and then popped when the answer landed. Up here it is
+        // already waiting, and the panel's own cross-fades carry any
+        // change that arrived while it was away.
+        var homeWeather by remember { mutableStateOf<io.nisfeb.talon.ui.SkyClock.Sky?>(null) }
+        LaunchedEffect(homePlace, weatherFor) {
+            val where = homePlace
+            if (where == null) {
+                homeWeather = null
+                return@LaunchedEffect
+            }
+            var fetchedAt = 0L
+            val backoff = io.nisfeb.talon.ui.FetchBackoff()
+            while (true) {
+                val now = nowMs()
+                if (backoff.ready(now) &&
+                    io.nisfeb.talon.ui.screens.weatherIsStale(fetchedAt, now)
+                ) {
+                    weatherFor(where).onSuccess {
+                        homeWeather = it
+                        fetchedAt = nowMs()
+                        backoff.onSuccess()
+                    }.onFailure { backoff.onFailure(now) }
+                }
+                delay(60_000L)
+            }
+        }
+        val mailAvailability by mailRepo.availability.collectAsState()
+        // Null until the nexus answers, so nothing offers mail on a ship
+        // that has none.
+        val mailTarget: ((String) -> Unit)? =
+            if (mailAvailability == io.nisfeb.talon.mail.MailAvailability.PRESENT) {
+                { peer ->
+                    mailComposing = io.nisfeb.talon.ui.screens.MailIntent(to = listOf(peer))
+                    uiSettings.setActiveRailTab(RailTab.Mail)
+                }
+            } else null
+        val mailShipUrl = sessionStore.active()?.shipUrl
+        LaunchedEffect(mailRepo, mailShipUrl) {
+            if (mailShipUrl != null) mailRepo.attach(mailShipUrl) else mailRepo.detach()
+        }
+        // The calendar rides the same surface as mail.
+        val calendarRepo = remember(session) {
+            io.nisfeb.talon.calendar.CalendarRepo(session.http, loopScope, cache = db.calendarCache())
+        }
+        LaunchedEffect(calendarRepo, mailShipUrl) {
+            if (mailShipUrl != null) calendarRepo.attach(mailShipUrl) else calendarRepo.detach()
+        }
         // Desktop loop runner. No AlarmManager on desktop, so loops run
         // via a while-open ticker (below, inside the logged-in guard) plus
         // the "Run now" button. Built here so both the ticker and the
@@ -838,7 +1012,7 @@ fun App(
         // rather than hand a scheduled run a tool it can only fail with.
         val loopWebOn = aiState.assistantOn()
         val loopBraveOn = loopWebOn && aiState.braveApiKey.isNotBlank()
-        val loopRunner = remember(db, repo, searchEmbedderClient, loopWebOn, loopBraveOn) {
+        val loopRunner = remember(db, repo, searchEmbedderClient, loopWebOn, loopBraveOn, mailRepo, calendarRepo) {
             val agentClient = io.nisfeb.talon.ai.AgentClient { aiSettings.state.value }
             io.nisfeb.talon.ai.LoopRunner(
                 loops = db.loops(),
@@ -855,7 +1029,15 @@ fun App(
                     } else {
                         null
                     },
-                ) { it },
+                ) { it } + io.nisfeb.talon.ai.actionTools(
+                    // The mail, calendar, task and event tools, as the assistant has them;
+                    // no calls, since no one is there to talk.
+                    io.nisfeb.talon.ai.AssistantActions(
+                        db = db, contacts = { callContacts }, mail = mailRepo, calendar = calendarRepo,
+                        zone = { io.nisfeb.talon.ui.screens.zoneFor(calendarRepo.zone.value) },
+                        send = { whom, text -> repo.send(whom, text) },
+                    ),
+                ),
                 completer = { sys, msgs, t -> agentClient.completeWithTools(sys, msgs, t) },
                 aiConfig = { aiSettings.state.value },
                 // One device runs a scheduled write fire — the %settings lease
@@ -870,7 +1052,51 @@ fun App(
                 notify = { _, title, body -> notifier.notify(title, body) },
             )
         }
-        val loopScope = rememberCoroutineScope()
+        // Which calendars this device keeps off survives a restart.
+        LaunchedEffect(calendarRepo, uiSettings) {
+            calendarRepo.seedHidden(uiSettings.hiddenCalendars.value)
+            calendarRepo.hidden.collect { uiSettings.setHiddenCalendars(it) }
+        }
+        LaunchedEffect(calendarRepo, uiSettings) {
+            calendarRepo.defaultCalendar.value = uiSettings.defaultCalendar.value
+            calendarRepo.defaultCalendar.collect { uiSettings.setDefaultCalendar(it) }
+        }
+        LaunchedEffect(calendarRepo, uiSettings) {
+            calendarRepo.weekView.value = uiSettings.calendarWeekView.value
+            calendarRepo.weekView.collect { uiSettings.setCalendarWeekView(it) }
+        }
+        inviteShipFromCode?.let { ship ->
+            io.nisfeb.talon.ui.InviteToGroupDialog(
+                db = db, repo = repo, ship = ship, shipName = io.nisfeb.talon.ui.shipHandle(ship),
+                onDismiss = { inviteShipFromCode = null },
+                onMessage = {
+                    inviteShipFromCode = null
+                    showCalendar = false; showBookmarks = false; showAssistant = false
+                    uiSettings.setActiveRailTab(RailTab.Chats)
+                    jumpToChat(ship)
+                },
+            )
+        }
+        val calendarInstall: suspend () -> Result<Unit> = remember(session, calendarRepo) {
+            val install = io.nisfeb.talon.urbit.LatticeInstall.installer(
+                http,
+                { sessionStore.active()?.shipUrl },
+                desk = "calendar",
+                installed = { url ->
+                    runCatching { io.nisfeb.talon.calendar.CalendarApi(session.http, url).config() }.isSuccess
+                },
+            ) { app, mark, body -> runCatching { repo.pokeRaw(app, mark, body) }.isSuccess }
+            val thenRefresh: suspend () -> Result<Unit> = { install().also { calendarRepo.refresh() } }
+            thenRefresh
+        }
+        // One decision in common, delivered through the interface that
+        // already exists. Chat notifies twice on this codebase; mail has
+        // no reason to inherit that.
+        LaunchedEffect(mailRepo, notifier) {
+            mailRepo.onNewMail = { news ->
+                news.forEach { notifier.notify(it.title, it.body, "mail:" + it.threadId.ifBlank { "more" }) }
+            }
+        }
         // "Run now", from both the Loops screen and the assistant's jobs pane.
         val runLoopNow: (Long) -> Unit = { loopId ->
             loopScope.launch { db.loops().get(loopId)?.let { loopRunner.runLoop(it) } }
@@ -962,27 +1188,6 @@ fun App(
                 }
             }
 
-            // Relay daily-digest schedule changes the same way. Was
-            // missing on desktop — TalonApplication wires
-            // dailyDigestSettings.onChange for Android, but desktop
-            // had no equivalent, so a desktop user changing the
-            // schedule would never push to the ship. The user
-            // reported "settings not syncing to new installs" and
-            // this was one of the gaps.
-            LaunchedEffect(settingsSync, dailyDigestSettings) {
-                val sink = settingsSync ?: return@LaunchedEffect
-                val ds = dailyDigestSettings ?: return@LaunchedEffect
-                val scope = this
-                ds.onChange = { _, transitionedOffSync ->
-                    scope.launch {
-                        runCatching {
-                            if (transitionedOffSync) sink.clearDailyDigestOnShip()
-                            else sink.pushDailyDigest(ds.state.value)
-                        }
-                    }
-                }
-            }
-
             // Desktop loop scheduler. Android arms an AlarmManager wake-up;
             // desktop has none, so loops run on a while-open ticker that
             // fires due loops once a minute. Bounded to the logged-in
@@ -1004,9 +1209,31 @@ fun App(
             // below. Without this, a DM open in a background window got
             // neither an unread badge nor a notification.
             val windowInfo = LocalWindowInfo.current
-            LaunchedEffect(repo, windowInfo) {
-                snapshotFlow { windowInfo.isWindowFocused }
-                    .collect { focused -> repo.setForeground(focused) }
+            LaunchedEffect(repo, windowInfo, appForeground) {
+                if (appForeground != null) {
+                    // A process that was suspended comes back with a
+                    // dead event stream and no way to know it short of
+                    // the ninety-second watchdog; reconnecting at once
+                    // is what Android does on ON_START, and it is why
+                    // new messages were slow to show on iOS.
+                    var was = true
+                    appForeground.collect { front ->
+                        repo.setForeground(front)
+                        mailRepo.setForeground(front)
+                        calendarRepo.setForeground(front)
+                        if (front && !was) repo.forceReconnect()
+                        was = front
+                    }
+                } else {
+                    snapshotFlow { windowInfo.isWindowFocused }
+                        .collect { focused ->
+                            repo.setForeground(focused)
+                            // Coming back to the window is one of the four
+                            // things that makes the mailbox ask again.
+                            mailRepo.setForeground(focused)
+                            calendarRepo.setForeground(focused)
+                        }
+                }
             }
 
             // New pending DM request → tray notification. Always fires
@@ -1090,7 +1317,7 @@ fun App(
                             )
                         lastSeenIds = diff.newLastSeen
                         for (n in diff.notifications) {
-                            runCatching { notifier.notify(n.title, n.body) }
+                            runCatching { notifier.notify(n.title, n.body, n.whom) }
                         }
                     }
             }
@@ -1191,7 +1418,47 @@ fun App(
           // Compose's built-in LinkAnnotation handling (statuses, bios)
           // also route here, not just the chat screens' onLinkTap.
           val urbAwareUriHandler = remember(platformUriHandler, urbLinkHandler) {
-              io.nisfeb.talon.ui.UrbAwareUriHandler(platformUriHandler, urbLinkHandler)
+              io.nisfeb.talon.ui.UrbAwareUriHandler(
+                  delegate = platformUriHandler,
+                  // A talon:// address lands on its message or mail thread.
+                  onTalon = { uri ->
+                      when (val link = io.nisfeb.talon.urbit.TalonLink.parse(uri)) {
+                          is io.nisfeb.talon.urbit.TalonLink.Message -> {
+                              showCalendar = false; showBookmarks = false; showAssistant = false
+                              uiSettings.setActiveRailTab(RailTab.Chats)
+                              jumpToChat(link.whom)
+                              if (link.parentId != null) { openThreadParent = link.parentId; openThreadReplyAnchor = link.id }
+                              else openChatFocusMessageId = link.id
+                              true
+                          }
+                          is io.nisfeb.talon.urbit.TalonLink.Mail -> {
+                              showCalendar = false; showBookmarks = false; showAssistant = false
+                              openMailThread = link.threadId
+                              uiSettings.setActiveRailTab(RailTab.Mail)
+                              true
+                          }
+                          is io.nisfeb.talon.urbit.TalonLink.Group -> {
+                              showCalendar = false; showBookmarks = false; showAssistant = false
+                              uiSettings.setActiveRailTab(RailTab.Chats)
+                              openGroupHomeFlag = link.flag
+                              true
+                          }
+                          is io.nisfeb.talon.urbit.TalonLink.InviteMe -> {
+                              inviteShipFromCode = link.ship
+                              true
+                          }
+                          null -> {
+                              // A talon:// shape we don't know. Returning
+                              // false hands it to the OS handler, which on
+                              // desktop surfaces an OS-level error for what
+                              // is really just an unrecognized link.
+                              io.nisfeb.talon.util.Log.w("App", "unrecognized talon link: $uri", null)
+                              true
+                          }
+                      }
+                  },
+                  onUrb = urbLinkHandler,
+              )
           }
           // Resolves a urb:// address to title+snippet for the inline
           // unfurl card, against the active ship over the authenticated
@@ -1244,30 +1511,20 @@ fun App(
           // Root contact map so a quoted post's author resolves to the
           // same nickname / mnemonym the rest of the app shows, rather
           // than the bare @p the renderer would emit on its own.
-          val citeContacts by remember(db) {
-              io.nisfeb.talon.ui.contactMapFlow(
-                  db.contacts().stream(),
-                  db.clubs().stream(),
-                  db.groups().streamGroups(),
-                  db.groups().streamChannelGroups(),
-              )
-          }.collectAsState(initial = io.nisfeb.talon.ui.ContactMap.EMPTY)
+          val citeContacts = callContacts
           val citeDisplayName: (String) -> String = remember(citeContacts) {
               { ship -> citeContacts.displayName(ship) }
           }
           val citePlaceName: (String) -> String? = remember(citeContacts) {
               { whom -> citeContacts.conversationLabel(whom) }
           }
-          // Story parsing runs outside composition (StoryCache, ingest),
-          // so the naming policy is published to it here rather than
-          // threaded through every call site.
-          LaunchedEffect(citeContacts) {
-              io.nisfeb.talon.ui.ShipNames.setResolver(citeContacts.namesVersion) { ship ->
-                  citeContacts.displayName(ship)
-              }
-          }
           androidx.compose.runtime.CompositionLocalProvider(
               io.nisfeb.talon.ui.LocalImageDownloader provides imageDownloader,
+              io.nisfeb.talon.ui.LocalInlineMediaPlayer provides io.nisfeb.talon.ui.platformInlineMediaPlayer(),
+              io.nisfeb.talon.notify.LocalNotificationClearer provides remember(notifier) { { key: String -> notifier.clear(key) } },
+              io.nisfeb.talon.calendar.LocalCalendarRepo provides calendarRepo,
+              io.nisfeb.talon.mail.LocalMailTo provides mailTarget,
+              io.nisfeb.talon.mail.LocalGrubberyInstall provides grubberyInstall,
               io.nisfeb.talon.ui.LocalChatDensity provides chatDensity,
               androidx.compose.ui.platform.LocalDensity provides scaledDensity,
               io.nisfeb.talon.ui.LocalUrbLinkHandler provides urbLinkHandler,
@@ -1430,16 +1687,7 @@ fun App(
                                 uiSettings.setFontScale(1.0f)
                             is io.nisfeb.talon.ui.ShortcutAction.SwitchShip -> {
                                 sessionStore.all().getOrNull(action.index)?.ship?.let { targetShip ->
-                                    // Clear the previous ship's open chat before
-                                    // sessionStore.setActive so no frame renders with
-                                    // the new active ship but stale chat state.
-                                    openChat = null
-                                    switchShipAction()
-                                    viewerImageUrl = null
-                                    viewerImageList = null
-                                    showSelfProfile = false
-                                    showSettings = false
-                                    showSidebarSettings = false
+                                    leaveShip()
                                     sessionStore.setActive(targetShip)
                                     loggedInShip = targetShip
                                 }
@@ -1486,24 +1734,62 @@ fun App(
                     nicknames.value
                 }
                 val switchShip: (String) -> Unit = { newShip ->
-                    openChat = null
-                    switchShipAction()
-                    viewerImageUrl = null
-                    viewerImageList = null
-                    showSelfProfile = false
-                    showSettings = false
-                    showSidebarSettings = false
+                    leaveShip()
                     sessionStore.setActive(newShip)
                     loggedInShip = newShip
                 }
+                /**
+                 * Drop a ship's saved session, and optionally what it
+                 * cached. Any saved ship, not only the active one: the
+                 * switcher lists them all, and clearing out an account
+                 * somebody no longer uses should not require switching
+                 * into it first.
+                 *
+                 * TalonApplication.kt (androidMain) has its own
+                 * forgetShip for the system-settings path — keep the
+                 * two in step when the erase timing changes.
+                 */
+                val forgetShip: (String, Boolean) -> Unit = { gone, alsoData ->
+                    val wasActive = gone == loggedInShip
+                    if (wasActive) {
+                        leaveShip()
+                    }
+                    // Erasing data for a ship whose session never went
+                    // away would leave a signed-in ship with nothing
+                    // under it.
+                    val removed = runCatching { sessionStore.remove(gone) }
+                    if (removed.isFailure) {
+                        io.nisfeb.talon.util.Log.w("App", "forgetShip: session remove failed for $gone", removed.exceptionOrNull())
+                    }
+                    if (alsoData && removed.isSuccess) {
+                        if (wasActive) {
+                            // The key block closes this database two
+                            // seconds after it re-keys. Erasing before
+                            // that deletes a file SQLite still has
+                            // open: Windows refuses, and elsewhere the
+                            // next checkpoint writes it straight back.
+                            // The marker is the record in case the
+                            // process dies inside the window — the next
+                            // launch replays it (see the takePending
+                            // call near the top of App).
+                            shipDataEraser.markPending(gone)
+                            GlobalScope.launch(ioDispatcher) {
+                                delay(2_500)
+                                shipDataEraser.erase(gone)
+                                    .onFailure { io.nisfeb.talon.util.Log.w("App", "forgetShip: erase failed for $gone", it) }
+                            }
+                        } else {
+                            shipDataEraser.erase(gone)
+                                .onFailure { io.nisfeb.talon.util.Log.w("App", "forgetShip: erase failed for $gone", it) }
+                        }
+                    }
+                    if (wasActive) {
+                        loggedInShip = sessionStore.activeShip()
+                            ?: sessionStore.all().firstOrNull()?.ship
+                    }
+                }
                 val addShip: () -> Unit = {
-                    openChat = null
-                    switchShipAction()
-                    viewerImageUrl = null
-                    viewerImageList = null
-                    showSelfProfile = false
-                    showSettings = false
-                    showSidebarSettings = false
+                    leaveShip()
                     loggedInShip = null
                 }
                 // Modal / full-screen branches short-circuit first so they
@@ -1518,8 +1804,12 @@ fun App(
                     // On iOS the same edge belongs to the back gesture,
                     // which users reach for far more often; the switcher
                     // keeps its logo tap.
-                    gesturesEnabled = io.nisfeb.talon.ui.isTouchSwipeNavSupported &&
-                        !io.nisfeb.talon.ui.isEdgeSwipeBackSupported,
+                    // Material gates the scrim tap on this flag too, so an
+                    // open drawer keeps it on: the ambiguity is only in the
+                    // swipe that opens, never in the tap that closes.
+                    gesturesEnabled = drawerState.isOpen ||
+                        (io.nisfeb.talon.ui.isTouchSwipeNavSupported &&
+                            !io.nisfeb.talon.ui.isEdgeSwipeBackSupported),
                     drawerContent = {
                         // Empty drawer content when no ships are logged in
                         // (LoginScreen path). The drawer trigger isn't
@@ -1536,6 +1826,14 @@ fun App(
                                 onAdd = {
                                     drawerScope.launch { drawerState.close() }
                                     addShip()
+                                },
+                                onSignOut = { gone ->
+                                    drawerScope.launch { drawerState.close() }
+                                    forgetShip(gone, false)
+                                },
+                                onForget = { gone ->
+                                    drawerScope.launch { drawerState.close() }
+                                    forgetShip(gone, true)
                                 },
                             )
                         }
@@ -1569,6 +1867,31 @@ fun App(
                     val onOpenActivity: () -> Unit = {
                         if (expanded) uiSettings.setActiveRailTab(RailTab.Activity)
                         else showActivity = true
+                    }
+                    val onOpenCalendar: () -> Unit = {
+                        if (expanded) uiSettings.setActiveRailTab(RailTab.Calendar)
+                        else showCalendar = true
+                    }
+                    // The calendar's own page: in-app where there is a
+                    // webview, the browser on desktop, which has none.
+                    val calendarPageOpener = androidx.compose.ui.platform.LocalUriHandler.current
+                    val onOpenCalendarPage: () -> Unit = {
+                        val s = sessionStore.active()?.shipUrl
+                        if (s != null) {
+                            if (io.nisfeb.talon.ui.isUrbWebViewSupported) calendarPageOpen = true
+                            else runCatching { calendarPageOpener.openUri(s.trimEnd('/') + io.nisfeb.talon.calendar.CalendarApi.APP_PATH) }
+                        }
+                    }
+                    if (calendarPageOpen) {
+                        sessionStore.active()?.let { active ->
+                            io.nisfeb.talon.ui.ShipPageSheet(
+                                title = "Calendar settings",
+                                pageUrl = active.shipUrl.trimEnd('/') + io.nisfeb.talon.calendar.CalendarApi.APP_PATH,
+                                shipUrl = active.shipUrl,
+                                cookie = "${active.cookieName}=${active.cookieValue}",
+                                onDismiss = { calendarPageOpen = false; loopScope.launch { calendarRepo.refresh() } },
+                            )
+                        }
                     }
                     // Right-pane content. Computed at render time from the
                     // flat state vars; mutual exclusion is enforced at the
@@ -1629,11 +1952,13 @@ fun App(
                         } else {
                             null
                         },
-                        // Desktop has no QR scanner (no camera to assume,
-                        // keyboard is already the fast path) but the
-                        // generator works — Compose Desktop can paint the
-                        // QR matrix and the user shows their screen to
-                        // someone scanning from a phone.
+                        // iOS scans with the camera; desktop has none to
+                        // assume and the keyboard is already the fast path.
+                        // The generator works everywhere: the QR matrix is
+                        // painted and shown to a phone.
+                        qrScanIntegration = if (io.nisfeb.talon.ui.isQrScanSupported) {
+                            { onResult -> io.nisfeb.talon.ui.rememberQrLoginScanLauncher(onResult) }
+                        } else null,
                         onOpenShareQr = { shareLoginQrOpen = true },
                     )
                     // Sidebar settings drills out of Settings; both flags
@@ -1644,16 +1969,28 @@ fun App(
                     // — which renders Settings, giving the user a
                     // breadcrumb pop instead of a full unwind to the
                     // chat list.
+                    // Before showSettings, so Back from Apps pops to
+                    // Settings rather than out of it (same as Sidebar).
+                    showApps -> io.nisfeb.talon.ui.screens.AppsSettingsScreen(
+                        mail = mailRepo,
+                        calendar = calendarRepo,
+                        latticeInstalled = sessionStore.active()?.shipUrl?.let { url ->
+                            { io.nisfeb.talon.urbit.LatticeInstall.isInstalled(http, url) }
+                        },
+                        groupsInstalled = sessionStore.active()?.shipUrl?.let { url ->
+                            { io.nisfeb.talon.urbit.GroupsInstall.isInstalled(session.http, url) }
+                        },
+                        onInstallGroups = io.nisfeb.talon.urbit.GroupsInstall.installer(
+                            session.http,
+                            { sessionStore.active()?.shipUrl },
+                        ) { a, mark, body -> runCatching { repo.pokeRaw(a, mark, body) }.isSuccess },
+                        shipUrl = sessionStore.active()?.shipUrl,
+                        onBack = { showApps = false },
+                    )
                     showSidebarSettings -> {
-                        val dailyDigestEnabled = dailyDigestSettings
-                            ?.state
-                            ?.collectAsState()
-                            ?.value
-                            ?.enabled == true
                         SidebarSettingsScreen(
                             repo = repo,
                             uiSettings = uiSettings,
-                            dailyDigestEnabled = dailyDigestEnabled,
                             onBack = { showSidebarSettings = false },
                         )
                     }
@@ -1681,6 +2018,16 @@ fun App(
                             ship?.let { sessionStore.all().firstOrNull { it.ship == ship } }?.shipUrl
                         }
                         SettingsScreen(
+                            // Anyone who has ever posted a status, plus
+                            // whoever is already pinned so a pin can be
+                            // taken off again when they go quiet.
+                            homePinCandidates = remember(homeStatuses, homeLayout, callContacts) {
+                                val pinned = homeLayout[io.nisfeb.talon.ui.HomeWidgetKind.STATUS].pinned
+                                (homeStatuses.map { it.ship } + pinned)
+                                    .distinct()
+                                    .filter { it != ship }
+                                    .map { it to callContacts.displayName(it) }
+                            },
                             aiSettings = aiSettings,
                             themePreference = themePreference,
                             uiSettings = uiSettings,
@@ -1700,23 +2047,22 @@ fun App(
                                 showSettings = false
                                 settingsStartOnAccount = false
                             },
-                            dailyDigestSettings = dailyDigestSettings,
-                            // onTestDigest stays null on desktop — Android
                             // wires it to dailyDigest.generateAndNotifyAsync
                             // when the production MainActivity migrates here.
                             onOpenSidebarSettings = { showSidebarSettings = true },
+                            onOpenApps = { showApps = true },
                             onOpenShareLoginQr = { shareLoginQrOpen = true },
                             onOpenLoops = { showLoops = true },
                             localShip = localShip,
                             startOnAccount = settingsStartOnAccount,
-                            onMnemonymNamesChanged = { on ->
-                                repo.pushScope.launch {
-                                    runCatching { settingsSync?.pushMnemonymNames(on) }
-                                }
-                            },
                             onAlwaysPatpChanged = { on ->
                                 repo.pushScope.launch {
                                     runCatching { settingsSync?.pushAlwaysPatp(on) }
+                                }
+                            },
+                            onNonCometNamesChanged = { on ->
+                                repo.pushScope.launch {
+                                    runCatching { settingsSync?.pushNonCometNames(on) }
                                 }
                             },
                         )
@@ -1726,6 +2072,15 @@ fun App(
                         repo = repo,
                         ourPatp = ship,
                         onBack = { showSelfProfile = false },
+                        keys = remember(session) {
+                            session.baseUrl?.takeIf { it.isNotBlank() }
+                                ?.let { io.nisfeb.talon.ui.EyreAzimuthRpc(session.http, it) }
+                                ?: io.nisfeb.talon.ui.AzimuthRpc.None
+                        },
+                        signer = remember(session) {
+                            session.baseUrl?.takeIf { it.isNotBlank() }
+                                ?.let { io.nisfeb.talon.urbit.LatticeSign(session.http, it) }
+                        },
                     )
                     showStatusFeed -> StatusFeedScreen(
                         db = db,
@@ -1737,6 +2092,13 @@ fun App(
                     showInvites -> GroupInvitesScreen(
                         repo = repo,
                         onBack = { showInvites = false },
+                    )
+                    showCalendar -> io.nisfeb.talon.ui.screens.CalendarScreen(
+                        repo = calendarRepo,
+                        twentyFourHour = homeTwentyFourHour,
+                        onBack = { showCalendar = false },
+                        onOpenWebSettings = onOpenCalendarPage,
+                        db = db, chat = repo, mail = mailRepo, ourShip = ship,
                     )
                     showBookmarks -> BookmarksScreen(
                         db = db,
@@ -1820,6 +2182,12 @@ fun App(
                             }
                         },
                         bookContacts = bookContacts,
+                        onJoinGroup = { flag ->
+                            showNewDm = false
+                            rightPaneScope.launch { runCatching { repo.joinGroup(flag) } }
+                            openGroupHomeFlag = flag
+                        },
+                        onInviteShip = { ship -> showNewDm = false; inviteShipFromCode = ship },
                     )
                     showContacts -> io.nisfeb.talon.ui.screens.ContactsScreen(
                         db = db,
@@ -1843,20 +2211,6 @@ fun App(
                             openChatFocusMessageId = postId
                             openChat = other
                         },
-                    )
-                    showDailyDigest -> DailyDigestScreen(
-                        db = db,
-                        activeShip = ship,
-                        onBack = { showDailyDigest = false },
-                        onOpenMessage = { whomTarget, postId ->
-                            showDailyDigest = false
-                            openChatFocusMessageId = postId
-                            openChat = whomTarget
-                        },
-                        // Desktop has no AlarmManager-equivalent
-                        // wired; the Android-side Generate-Now flow
-                        // doesn't fire here. No-op until Stage F.
-                        onGenerateNow = {},
                     )
                     openGroupAdminFlag != null -> GroupAdminScreen(
                         db = db,
@@ -1936,6 +2290,7 @@ fun App(
                     // in the right pane next to the chat. Replaces the
                     // detailSlot thread branch that lived here in Phase 2.
                     openThreadParent != null && openChat != null && !expanded -> {
+                        val threadMicTrigger = remember(openChat, openThreadParent) { kotlinx.coroutines.flow.MutableSharedFlow<Unit>(extraBufferCapacity = 1) }
                         ThreadScreen(
                             db = db,
                             repo = repo,
@@ -1952,6 +2307,9 @@ fun App(
                                 openChat = other
                             },
                             onOpenImage = { url -> viewerImageUrl = url },
+                            voiceComposer = voiceComposerFor(threadMicTrigger),
+                            onSlashMic = if (io.nisfeb.talon.ui.isVoiceMessagesSupported) { { threadMicTrigger.tryEmit(Unit) } } else null,
+                            voicePlayer = voicePreviewPlayer,
                             powerFeaturesEnabled = powerFeaturesEnabled,
                         )
                     }
@@ -2098,16 +2456,7 @@ fun App(
                                 // Nicknames for the party-line roster:
                                 // the @p is the identity, the nickname
                                 // is what a reader actually recognises.
-                                val partyContacts by remember(db) {
-                                    io.nisfeb.talon.ui.contactMapFlow(
-                                        db.contacts().stream(),
-                                        db.clubs().stream(),
-                                        db.groups().streamGroups(),
-                                        db.groups().streamChannelGroups(),
-                                    )
-                                }.collectAsState(
-                                    initial = io.nisfeb.talon.ui.ContactMap.EMPTY,
-                                )
+                                val partyContacts = callContacts
                                 // Ask the host once per group whether a
                                 // line exists, when we hold no invite.
                                 // A member whose ship had no %trunk when
@@ -2222,6 +2571,7 @@ fun App(
                                 val recordingNow = recordingControls.recording
                                 val recordedBy = recordingControls.recordedBy
                                 val onToggleRecord = recordingControls.onToggleRecord
+                                val micTrigger = remember(openChat) { kotlinx.coroutines.flow.MutableSharedFlow<Unit>(extraBufferCapacity = 1) }
                                 DmChatScreen(
                                     db = db,
                                     repo = repo,
@@ -2284,6 +2634,9 @@ fun App(
                                         } else {
                                             null
                                         },
+                                    voiceComposer = voiceComposerFor(micTrigger),
+                                    onSlashMic = if (io.nisfeb.talon.ui.isVoiceMessagesSupported) { { micTrigger.tryEmit(Unit) } } else null,
+                                    voicePlayer = voicePreviewPlayer,
                                     partyPresent = partyShown,
                                     partyStatus = partyStatus,
                                     onSlashParty = {
@@ -2418,14 +2771,10 @@ fun App(
                             else -> null
                         }
                         val listFraction by uiSettings.chatPaneListFraction.collectAsState()
+                        val rightPaneWidthDp by uiSettings.rightPaneWidthDp.collectAsState()
                         val activeRailTab by uiSettings.activeRailTab.collectAsState()
                         val railVisibility by uiSettings.railVisibility.collectAsState()
                         val railItemOrder by uiSettings.railItemOrder.collectAsState()
-                        val dailyDigestEnabled = dailyDigestSettings
-                            ?.state
-                            ?.collectAsState()
-                            ?.value
-                            ?.enabled == true
                         // Opt-in assistant: only surface its rail / kebab entry
                         // once it's supported, turned on, and has a key — the
                         // same gate the old star icon used.
@@ -2433,15 +2782,14 @@ fun App(
                             aiState.assistantOn() &&
                             aiState.hasKey()
                         val enabledItems: List<RailItem> = remember(
-                            railVisibility, railItemOrder, dailyDigestEnabled, assistantEnabled,
+                            railVisibility, railItemOrder, assistantEnabled,
                         ) {
                             railItemOrder.filter { item ->
                                 // Map.isVisible enforces the Chats always-on invariant
                                 // (regardless of map state) and falls back to true
                                 // for absent entries.
                                 val visible = railVisibility.isVisible(item)
-                                val gateOk = (item != RailItem.TodaysBrief || dailyDigestEnabled) &&
-                                    (item != RailItem.Assistant || assistantEnabled)
+                                val gateOk = item != RailItem.Assistant || assistantEnabled
                                 visible && gateOk
                             }
                         }
@@ -2475,9 +2823,6 @@ fun App(
                         val railSyncedStatusesSeenMs by railStatusesSeenFlow.collectAsState()
                         val railPendingInvites = repo.invitesFlow.collectAsState().value
                             ?: emptyList()
-                        val railLatestDigest by remember(db, ship) {
-                            db.dailyDigests().streamLatestForShip(ship ?: "")
-                        }.collectAsState(initial = null)
                         val railStatusFeed by remember(db) {
                             db.contacts().streamStatusFeed()
                         }.collectAsState(initial = emptyList())
@@ -2486,19 +2831,18 @@ fun App(
                         }
                         val railEffectiveStatusesSeenMs =
                             maxOf(menuSeenState.lastSeenStatusesMs, railSyncedStatusesSeenMs)
+                        val calendarShares by calendarRepo.shares.collectAsState()
                         val menuBadges = remember(
-                            railLatestDigest, railStatusFeed, railPendingInvites,
-                            railInvitesSnapshot, menuSeenState, railEffectiveStatusesSeenMs, ship,
+                            railStatusFeed, railPendingInvites,
+                            railInvitesSnapshot, menuSeenState, railEffectiveStatusesSeenMs, ship, calendarShares,
                         ) {
                             MenuBadges(
+                                calendarOffers = !calendarShares?.offers.isNullOrEmpty(),
                                 statusesFresh = railStatusFeed.any { c ->
                                     (c.statusUpdatedMs ?: 0L) > railEffectiveStatusesSeenMs &&
                                         !c.status.isNullOrBlank() &&
                                         c.ship != ship
                                 },
-                                digestFresh = railLatestDigest?.dateLocal?.let {
-                                    it != menuSeenState.lastSeenDigestDate
-                                } == true,
                                 invitesPending = railPendingInvites.isNotEmpty() &&
                                     railInvitesSnapshot != menuSeenState.lastSeenInvitesSnapshot,
                             )
@@ -2509,6 +2853,26 @@ fun App(
                             // ANY rail item must close it (the Assistant case
                             // below re-opens it, so clicking A is a no-op).
                             showAssistant = false
+                            // And leaving whichever of the others was open.
+                            // The render is a `when` over these flags, so it
+                            // shows the first one that is true rather than the
+                            // one most recently asked for: left set, they pile
+                            // up and the earliest keeps winning. Harmless on a
+                            // rail, where people tended to come back the way
+                            // they went in; not harmless behind a drawer,
+                            // which is built for going straight from one
+                            // section to the next.
+                            showSelfProfile = false
+                            showWatchwords = false
+                            showGroupAdminList = false
+                            showInvites = false
+                            showSettings = false
+                            showApps = false
+                            showLoops = false
+                            showContacts = false
+                            showSearch = false
+                            showNewDm = false
+                            showCalendar = false
                             // Clear the rail badge for items that show
                             // freshness signals — rail clicks were missing
                             // the markXSeen calls the kebab paths in
@@ -2522,11 +2886,14 @@ fun App(
                                         runCatching { repo.settingsSync?.pushStatusesSeen(now) }
                                     }
                                 }
-                                RailItem.TodaysBrief ->
-                                    railLatestDigest?.dateLocal?.let { menuSeen.markDigestSeen(it) }
                                 RailItem.Invites ->
                                     menuSeen.markInvitesSeen(railInvitesSnapshot)
                                 else -> Unit
+                            }
+                            // Leaving Mail closes the thread it was showing.
+                            if (item != RailItem.Mail) {
+                                openMailThread = null
+                                mailComposing = null
                             }
                             item.toRailTab()?.let { tab ->
                                 uiSettings.setActiveRailTab(tab)
@@ -2534,17 +2901,19 @@ fun App(
                                 RailItem.Assistant -> openAssistantAction()
                                 RailItem.Profile -> showSelfProfile = true
                                 RailItem.Watchwords -> showWatchwords = true
-                                RailItem.TodaysBrief -> showDailyDigest = true
                                 RailItem.Administration -> showGroupAdminList = true
                                 RailItem.Invites -> showInvites = true
                                 RailItem.Settings -> showSettings = true
                                 // pane tabs handled above; never reaches here
-                                RailItem.Chats, RailItem.Statuses,
-                                RailItem.Bookmarks, RailItem.Activity -> Unit
+                                RailItem.Home, RailItem.Chats, RailItem.Mail, RailItem.Calendar,
+                                RailItem.Statuses, RailItem.Bookmarks, RailItem.Activity -> Unit
                             }
                         }
                         val railListSlot: @Composable () -> Unit = {
                             when (activeRailTab) {
+                                // Home takes the whole area; see the content
+                                // slot, where it sits beside Mail.
+                                RailTab.Home -> Unit
                                 RailTab.Chats -> {
                                     DmListScreen(
                                         db = db,
@@ -2580,21 +2949,15 @@ fun App(
                                             // which is wrong for multi-ship setups
                                             // and only worked under Path A by accident.
                                             session.logout()
-                                            // Reset every navigation-state var so the
-                                            // next sign-in lands on DmList instead of
-                                            // a stale chat from the prior ship.
-                                            openChat = null
-                                            switchShipAction()
-                                            viewerImageUrl = null
-                                            viewerImageList = null
-                                            showSelfProfile = false
-                                            showSettings = false
-                                            showSidebarSettings = false
+                                            leaveShip()
                                             loggedInShip = null
                                         },
                                         onOpenSelfProfile = { showSelfProfile = true },
                                         kebabItems = kebabItems,
                                         onOpenStatusFeed = onOpenStatusFeed,
+                                        onOpenMail = {
+                                            uiSettings.setActiveRailTab(RailTab.Mail)
+                                        },
                                         partyLinesOccupied =
                                             io.nisfeb.talon.ui.screens.rememberPartyLinesOccupied(
                                                 callController, callContacts,
@@ -2611,12 +2974,16 @@ fun App(
                                         onOpenInvites = { showInvites = true },
                                         onOpenBookmarks = onOpenBookmarks,
                                         onOpenActivity = onOpenActivity,
+                                        onOpenCalendar = onOpenCalendar,
                                         onOpenContacts = { showContacts = true },
                                         onOpenWatchwords = { showWatchwords = true },
-                                        onOpenDigest = { showDailyDigest = true },
-                                        digestEnabled = dailyDigestEnabled,
                                         onOpenAdministration = { showGroupAdminList = true },
                                         onOpenSettings = { showSettings = true },
+                                        onOpenSidebarSettings = {
+                                            // Settings underneath, so Back lands there.
+                                            showSettings = true
+                                            showSidebarSettings = true
+                                        },
                                         activeShip = ship,
                                         allShips = remember(loggedInShip) {
                                             sessionStore.all().map { it.ship }
@@ -2642,33 +3009,8 @@ fun App(
                                             }
                                             nicknames.value
                                         },
-                                        onSwitchShip = { newShip ->
-                                            // Clear the previous ship's open chat before
-                                            // sessionStore.setActive so no frame renders with
-                                            // the new active ship but stale chat state.
-                                            openChat = null
-                                            switchShipAction()
-                                            viewerImageUrl = null
-                                            viewerImageList = null
-                                            showSelfProfile = false
-                                            showSettings = false
-                                            showSidebarSettings = false
-                                            sessionStore.setActive(newShip)
-                                            loggedInShip = newShip
-                                        },
-                                        onAddShip = {
-                                            // Drop to LoginScreen without signing the current
-                                            // ship out — its session entry stays in sessionStore
-                                            // so the drawer can switch back after the new login.
-                                            openChat = null
-                                            switchShipAction()
-                                            viewerImageUrl = null
-                                            viewerImageList = null
-                                            showSelfProfile = false
-                                            showSettings = false
-                                            showSidebarSettings = false
-                                            loggedInShip = null
-                                        },
+                                        onSwitchShip = switchShip,
+                                        onAddShip = addShip,
                                         onOpenShipSwitcher = {
                                             drawerScope.launch { drawerState.open() }
                                         },
@@ -2684,12 +3026,17 @@ fun App(
                                         onRevealGroupHandled = { revealGroupRequest = null },
                                     )
                                 }
+                                // Mail takes the whole area instead; see
+                                // DesktopShell's content slot above.
+                                RailTab.Mail -> Unit
                                 RailTab.Statuses -> StatusFeedList(
                                     db = db,
                                     repo = repo,
                                     ourPatp = ship,
                                     onOpenContact = { other -> profileSheetShip = other },
                                 )
+                                // Calendar takes the whole area too; see the content slot.
+                                RailTab.Calendar -> Unit
                                 RailTab.Bookmarks -> BookmarksList(
                                     db = db,
                                     repo = repo,
@@ -2721,6 +3068,30 @@ fun App(
                                 )
                             }
                         }
+                        // iOS reaches its sections through this; desktop has the
+                        // rail, and TalonDrawer is a pass-through there.
+                        io.nisfeb.talon.ui.TalonDrawer(
+                            drawer = { closeDrawer ->
+                                io.nisfeb.talon.ui.SectionsDrawer(
+                                    order = railItemOrder,
+                                    visibility = railVisibility,
+                                    active = activeRailTab?.let {
+                                        runCatching { io.nisfeb.talon.ui.RailItem.valueOf(it.name) }.getOrNull()
+                                    },
+                                    canOpen = { item -> item in enabledItems },
+                                    onSection = { item ->
+                                        closeDrawer()
+                                        onRailItemClicked(item)
+                                    },
+                                    onEditMenu = {
+                                        closeDrawer()
+                                        // Settings underneath, so Back lands there.
+                                        onRailItemClicked(io.nisfeb.talon.ui.RailItem.Settings)
+                                        showSidebarSettings = true
+                                    },
+                                )
+                            },
+                        ) {
                         DesktopShell(
                             activeRailTab = activeRailTab,
                             // Assistant is a modal destination that keeps the
@@ -2733,6 +3104,8 @@ fun App(
                             detail = detailSlot,
                             listFraction = listFraction,
                             onListFractionChange = { uiSettings.setChatPaneListFraction(it) },
+                            rightPaneWidth = rightPaneWidthDp.dp,
+                            onRightPaneWidthChange = { uiSettings.setRightPaneWidthDp(it.value) },
                             menuBadges = menuBadges,
                             // The assistant takes over the whole area beside the
                             // rail and manages its OWN panes (conversations/jobs
@@ -2740,16 +3113,97 @@ fun App(
                             // width here instead of being crammed into the 30%
                             // list slot. Rail stays for navigation; back arrow
                             // only on narrow (where DesktopShell stacks it).
-                            content = if (showAssistant) {
+                            // The assistant outranks the two tabs that take the
+                            // whole area; opened over either, it used to show nothing.
+                            content = if (activeRailTab == RailTab.Home && !showAssistant) {
+                                {
+                                    io.nisfeb.talon.ui.screens.HomeScreen(
+                                        db = db,
+                                        mail = mailRepo,
+                                        calendar = calendarRepo,
+                                        onOpenCalendar = onOpenCalendar,
+                                        onInstallCalendar = calendarInstall,
+                                        onOpenAssistant = if (assistantEnabled) {
+                                            { listen -> assistantListen = listen; openAssistantAction() }
+                                        } else null,
+                                        contacts = callContacts,
+                                        ourShip = ship,
+                                        place = homePlace,
+                                        // Null on desktop, which is the
+                                        // manual-fallback case by default.
+                                        onUseDeviceLocation = deviceLocation,
+                                        placeLookup = placeLookup,
+                                        weather = homeWeather,
+                                        fahrenheit = homeFahrenheit,
+                                        twentyFourHour = homeTwentyFourHour,
+                                        layout = homeLayout,
+                                        onLayoutChanged = { next ->
+                                            uiSettings.setHomeLayout(
+                                                io.nisfeb.talon.ui.HomeLayoutCodec.encode(next),
+                                            )
+                                        },
+                                        statuses = homeStatuses,
+                                        invites = homeInvites,
+                                        onOpenInvites = { showInvites = true },
+                                        onOpenContact = { other -> profileSheetShip = other },
+                                        onOpenStatuses = {
+                                            uiSettings.setActiveRailTab(RailTab.Statuses)
+                                        },
+                                        onPlacePicked = { p ->
+                                            uiSettings.setHomePlace(
+                                                io.nisfeb.talon.ui.HomePlaceCodec.encode(p),
+                                            )
+                                        },
+                                        // Home keeps the whole content area, so the
+                                        // chat has to be on a tab that shows one.
+                                        onOpenConversation = { whom ->
+                                            uiSettings.setActiveRailTab(RailTab.Chats)
+                                            jumpToChat(whom)
+                                        },
+                                        onOpenChats = { uiSettings.setActiveRailTab(RailTab.Chats) },
+                                        onOpenMailThread = { id ->
+                                            openMailThread = id
+                                            uiSettings.setActiveRailTab(RailTab.Mail)
+                                        },
+                                        onOpenMail = { uiSettings.setActiveRailTab(RailTab.Mail) },
+                                    )
+                                }
+                            } else if (activeRailTab == RailTab.Mail && !showAssistant) {
+                                {
+                                    io.nisfeb.talon.ui.screens.MailWorkspace(
+                                        repo = mailRepo,
+                                        contacts = callContacts,
+                                        ourShip = ship,
+                                        openThread = openMailThread,
+                                        onOpenThread = { openMailThread = it },
+                                        composing = mailComposing,
+                                        onCompose = { mailComposing = it },
+                                    )
+                                }
+                            } else if (activeRailTab == RailTab.Calendar && !showAssistant) {
+                                {
+                                    io.nisfeb.talon.ui.screens.CalendarScreen(
+                                        repo = calendarRepo,
+                                        twentyFourHour = homeTwentyFourHour,
+                                        onBack = null,
+                                        onOpenWebSettings = onOpenCalendarPage,
+                                        db = db, chat = repo, mail = mailRepo, ourShip = ship,
+                                    )
+                                }
+                            } else if (showAssistant) {
                                 {
                                     AssistantScreen(
                                         db = db,
                                         aiSettings = aiSettings,
                                         embedder = searchEmbedderClient,
                                         repo = repo,
+                                        mail = mailRepo,
+                                        calendar = calendarRepo,
+                                        calls = callController,
+                                        listenOnOpen = assistantListen,
                                         scheduler = io.nisfeb.talon.ai.LoopScheduler.Noop,
                                         onRunLoop = runLoopNow,
-                                        onBack = if (expanded) null else ({ showAssistant = false }),
+                                        onBack = if (expanded) null else ({ showAssistant = false; assistantListen = false }),
                                         // Rail is showing → force the two-pane
                                         // layout so the 64dp rail can't trip the
                                         // stacked/hamburger fallback.
@@ -2769,8 +3223,14 @@ fun App(
                                     )
                                 }
                             } else null,
-                            rightSidebar = rightPaneContent?.let { content ->
+                            // A tab that takes the whole area has no chat beside it,
+                            // so no thread or info pane either.
+                            rightSidebar = rightPaneContent?.takeIf {
+                                !showAssistant && activeRailTab != RailTab.Home &&
+                                    activeRailTab != RailTab.Mail && activeRailTab != RailTab.Calendar
+                            }?.let { content ->
                                 {
+                                    val paneMicTrigger = remember(content) { kotlinx.coroutines.flow.MutableSharedFlow<Unit>(extraBufferCapacity = 1) }
                                     RightPaneHost(
                                         content = content,
                                         db = db,
@@ -2790,6 +3250,9 @@ fun App(
                                             viewerImageList = io.nisfeb.talon.ui.screens
                                                 .ViewerImageList(urls, idx)
                                         },
+                                        voiceComposer = voiceComposerFor(paneMicTrigger),
+                                        onSlashMic = if (io.nisfeb.talon.ui.isVoiceMessagesSupported) { { paneMicTrigger.tryEmit(Unit) } } else null,
+                                        voicePlayer = voicePreviewPlayer,
                                         onOpenMembers = { whom ->
                                             // Resolve channel-nest → group-flag
                                             // because GroupAdminScreen takes a
@@ -2809,6 +3272,7 @@ fun App(
                                 }
                             },
                         )
+                        }
                     }
                     }
                 }
@@ -2859,3 +3323,14 @@ fun App(
         }
     }
 }
+
+/** The mic button slot, where the platform records; null elsewhere. */
+private fun voiceComposerFor(trigger: kotlinx.coroutines.flow.Flow<Unit>): (@Composable (enabled: Boolean, onRecorded: (String, Long) -> Unit) -> Unit)? =
+    if (!io.nisfeb.talon.ui.isVoiceMessagesSupported) null else { enabled, onRecorded ->
+        io.nisfeb.talon.ui.VoiceRecordButton(enabled = enabled, onRecorded = onRecorded, externalTrigger = trigger)
+    }
+
+private val voicePreviewPlayer: (@Composable (path: String, sending: Boolean) -> Unit)? =
+    if (!io.nisfeb.talon.ui.isVoiceMessagesSupported) null else { path, sending ->
+        io.nisfeb.talon.ui.VoicePreviewPlayButton(path = path, enabled = !sending)
+    }

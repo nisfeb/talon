@@ -76,10 +76,14 @@ fun MentionPicker(
                             )
                         }
                         Text(
-                            // Keep the exact @p visible next to the friendly
-                            // name — the row is how users verify WHICH ship
-                            // they're about to mention.
-                            s.mnemonym?.let { "${s.ship} · $it" } ?: s.ship,
+                            // The word name leads, and for a comet it is
+                            // the only thing shown: its @p is fifty-six
+                            // characters of exactly what the name exists
+                            // to replace. Two comets can abridge the
+                            // same, so the full nym follows when one is
+                            // ambiguous -- the longer name, not the @p,
+                            // is what tells them apart.
+                            s.label,
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -94,8 +98,18 @@ fun MentionPicker(
 data class Suggestion(
     val ship: String,
     val nickname: String?,
-    /** Mnemonym shown alongside the patp when the naming setting is
-     *  on; null otherwise (or for galaxies/stars). */
+    /**
+     * The line under the nickname: what this ship is called.
+     *
+     * A comet's word name, never its @p -- fifty-six characters of
+     * exactly what the name exists to replace. Where two rows would
+     * read the same, the unabridged nym instead, since that is what
+     * tells them apart. A ship with no word name shows its @p, which
+     * is the only name it has.
+     */
+    val label: String,
+    /** The abridged word name, or null for a ship that has none.
+     *  Matching runs against the full nym too; see [nymMatches]. */
     val mnemonym: String? = null,
 )
 
@@ -129,41 +143,78 @@ fun detectMentionQuery(text: String, cursor: Int): Pair<String, Int>? {
 
 /**
  * Shortlist contacts matching a query (case-insensitive). Matches
- * against the nickname, the raw patp, and — when mnemonym naming is
- * on — the ship's mnemonym, so `@sam`, `@sampel` and `@accept.eng`
- * all find the same ship. Capped at 6 entries.
+ * against the nickname, the raw patp, and a comet's word name, so
+ * `@sam`, `@doznec`, `@admire` and `@..admire...attune` all find the
+ * same ship. Capped at 6 entries.
  */
 fun suggestionsFor(
     query: String,
     contactMap: ContactMap,
     allShips: Collection<String>,
 ): List<Suggestion> {
-    val mnemonyms = contactMap.mnemonymNames
-    fun nymOf(ship: String) = if (mnemonyms) Mnemonym.forShip(ship) else null
+    fun nymOf(ship: String) = Mnemonym.forShip(ship)
 
     val q = query.lowercase()
-    if (q.isEmpty()) {
-        return allShips.asSequence()
-            .take(6)
-            .map { Suggestion(it, contactMap.nickname(it), nymOf(it)) }
-            .toList()
-    }
-    // ponytail: whole-nym prefix match (leading dots stripped), so
-    // "@accept", "@.accept" and "@accept.eng" all hit — a mid-nym word
-    // like "@engulf" doesn't. Widen to per-word prefixes if it bites.
+    if (q.isEmpty()) return labelled(allShips.take(6), contactMap)
     val qNym = q.trimStart('.')
-    val matches = mutableListOf<Suggestion>()
+    val matches = mutableListOf<String>()
     for (ship in allShips) {
         if (matches.size >= 6) break
         val shipLower = ship.lowercase().removePrefix("~")
         val nick = contactMap.nickname(ship)
-        val nym = nymOf(ship)
         if (shipLower.startsWith(q) ||
             nick?.lowercase()?.contains(q) == true ||
-            (qNym.isNotEmpty() && nym?.trimStart('.')?.startsWith(qNym) == true)
+            nymMatches(qNym, ship)
         ) {
-            matches += Suggestion(ship, nick, nym)
+            matches += ship
         }
     }
-    return matches
+    return labelled(matches, contactMap)
+}
+
+/**
+ * Name each row, and lengthen only the names that need it.
+ *
+ * A comet is shown by its word name and never by its @p. Two comets
+ * can abridge to the same two words, though, and a list offering the
+ * same name twice is no use to anybody -- so when that happens the
+ * unabridged nym is shown instead, for those rows only. That is the
+ * longer name, not the @p: the @p disambiguates but tells you nothing,
+ * and the whole point of the name is that people can read it.
+ */
+private fun labelled(ships: List<String>, contactMap: ContactMap): List<Suggestion> {
+    val labels = shipHandles(ships)
+    return ships.map { ship ->
+        Suggestion(
+            ship = ship,
+            nickname = contactMap.nickname(ship),
+            label = labels.getValue(ship),
+            mnemonym = shipHandle(ship).takeIf { it != ship },
+        )
+    }
+}
+
+/**
+ * Whether [qNym] (dots already stripped from the front) picks out this
+ * ship by its word name.
+ *
+ * Three ways in, because there are two different strings a person
+ * might be going from. What they see anywhere else in the app is the
+ * abridged `..first...last`, so typing that, or just the last word of
+ * it, has to work -- it used to not, which made the name on screen the
+ * one string that found nothing. What they may have been given or
+ * pasted is the full nym, so a prefix of that has to work too, and any
+ * single word of it, since the middle is where two comets differ.
+ *
+ * A loose net is the right shape here: every row carries its exact @p,
+ * and the picker is for narrowing down to the ship you then verify,
+ * not for deciding on your behalf.
+ */
+private fun nymMatches(qNym: String, ship: String): Boolean {
+    if (qNym.isEmpty()) return false
+    val full = shipHandleLong(ship)?.trimStart('.') ?: return false
+    if (full.startsWith(qNym)) return true
+    val abridged = shipHandle(ship).takeIf { it != ship }?.trimStart('.')
+    if (abridged != null && abridged.startsWith(qNym)) return true
+    return full.split('.').any { it.startsWith(qNym) }
 }

@@ -13,74 +13,68 @@ import kotlin.test.assertNotEquals
  */
 class ShipNamingTest {
 
+    private val COMET = "~doznec-binwes-samper-siglet--fidpen-sogdur-wacser-wissun"
+    private val NYM = "..admire...attune"
+
     private val nicked = ContactEntity(
         ship = "~litzod", nickname = "Maya", bio = null, avatarUrl = null,
     )
+    /** A comet, which is the only thing that gets a nym. */
     private val bare = ContactEntity(
-        ship = "~sampel-palnet", nickname = null, bio = null, avatarUrl = null,
+        ship = COMET, nickname = null, bio = null, avatarUrl = null,
     )
 
-    private fun map(mnemonym: Boolean, alwaysPatp: Boolean) = ContactMap(
+    private fun map(alwaysPatp: Boolean) = ContactMap(
         contacts = listOf(nicked, bare),
-        mnemonymNames = mnemonym,
         alwaysPatp = alwaysPatp,
     )
 
     @Test
     fun nicknameWinsWhenPresent() {
-        assertEquals("Maya", map(mnemonym = true, alwaysPatp = false).displayName("~litzod"))
+        assertEquals("Maya", map(alwaysPatp = false).displayName("~litzod"))
     }
 
     @Test
     fun starsHaveNoMnemonymAndKeepTheirPatp() {
-        // Mnemonyms only exist for planets and below; a star has no
-        // syllable payload to name, so it stays a ~ship either way.
-        val m = ContactMap(
-            contacts = listOf(ContactEntity("~timzod", null, null, null)),
-            mnemonymNames = true,
-        )
+        // Only a comet's @p spells a key, so a star stays a ~ship.
+        val m = ContactMap(contacts = listOf(ContactEntity("~timzod", null, null, null)))
         assertEquals("~timzod", m.displayName("~timzod"))
     }
 
     @Test
-    fun mnemonymFillsInForShipsWithoutNicknames() {
-        val shown = map(mnemonym = true, alwaysPatp = false).displayName("~sampel-palnet")
-        assertNotEquals("~sampel-palnet", shown)
-        assertEquals(Mnemonym.display("~sampel-palnet"), shown)
+    fun planetsHaveNoMnemonymAndKeepTheirPatp() {
+        val m = ContactMap(
+            contacts = listOf(ContactEntity("~sampel-palnet", null, null, null)),
+        )
+        assertEquals("~sampel-palnet", m.displayName("~sampel-palnet"))
     }
 
     @Test
-    fun mnemonymOffFallsBackToPatp() {
-        val m = map(mnemonym = false, alwaysPatp = false)
-        assertEquals("~sampel-palnet", m.displayName("~sampel-palnet"))
-        // A nickname still wins — that switch is only about the fallback.
-        assertEquals("Maya", m.displayName("~litzod"))
+    fun mnemonymFillsInForShipsWithoutNicknames() {
+        val shown = map(alwaysPatp = false).displayName(COMET)
+        assertNotEquals(COMET, shown)
+        assertEquals(NYM, shown)
     }
 
     @Test
     fun alwaysPatpOverridesEverything() {
-        val m = map(mnemonym = true, alwaysPatp = true)
+        val m = map(alwaysPatp = true)
         assertEquals("~litzod", m.displayName("~litzod"))
-        assertEquals("~sampel-palnet", m.displayName("~sampel-palnet"))
+        assertEquals(COMET, m.displayName(COMET))
     }
 
     @Test
     fun namesVersionTracksWhatDisplayNameDependsOn() {
-        val base = map(mnemonym = true, alwaysPatp = false)
-        // Both switches change what you see...
-        assertNotEquals(base.namesVersion, map(false, false).namesVersion)
-        assertNotEquals(base.namesVersion, map(true, true).namesVersion)
+        val base = map(alwaysPatp = false)
+        // The switch changes what you see...
+        assertNotEquals(base.namesVersion, map(alwaysPatp = true).namesVersion)
         // ...as does editing a nickname...
-        val renamed = ContactMap(
-            contacts = listOf(nicked.copy(nickname = "Maya R"), bare),
-            mnemonymNames = true,
-        )
+        val renamed = ContactMap(contacts = listOf(nicked.copy(nickname = "Maya R"), bare))
         assertNotEquals(base.namesVersion, renamed.namesVersion)
         // ...but an avatar or colour change must not, or every message
         // in the cache would re-render for nothing.
         val recolored = ContactMap(
             contacts = listOf(nicked.copy(color = "#ff0000", avatarUrl = "x"), bare),
-            mnemonymNames = true,
         )
         assertEquals(base.namesVersion, recolored.namesVersion)
     }

@@ -27,3 +27,13 @@ fun Double.formatDecimals(digits: Int): String {
     if (digits == 0) return "$sign$intPart"
     return "$sign$intPart.${fracPart.toString().padStart(digits, '0')}"
 }
+
+/** Bytes as people read them: 512 B, 3.4 KB, 12.0 MB, 1.25 GB. */
+fun humanFileSize(bytes: Long): String {
+    if (bytes < 1024) return "$bytes B"
+    val kb = bytes / 1024.0
+    if (kb < 1024) return "${kb.formatDecimals(1)} KB"
+    val mb = kb / 1024.0
+    if (mb < 1024) return "${mb.formatDecimals(1)} MB"
+    return "${(mb / 1024.0).formatDecimals(2)} GB"
+}

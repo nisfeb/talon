@@ -53,8 +53,8 @@ object ToolCatalog {
         Tool(
             spec = ToolSpec(
                 "search_history",
-                "Search the user's whole chat history (semantic + keyword). Returns the most relevant messages with their whom (conversation id), post (message id), author, and text.",
-                schema(
+                "Search the user's whole chat history (semantic + keyword). Returns the most relevant messages with their whom (conversation id), post (message id), a link that opens the message, author, and text.",
+                toolSchema(
                     "query" to ("string" to "What to search for, in natural language."),
                     "k" to ("integer" to "Max results (default 10)."),
                     required = listOf("query"),
@@ -78,7 +78,7 @@ object ToolCatalog {
             spec = ToolSpec(
                 "read_conversation",
                 "Read the most recent messages in one conversation, oldest-first.",
-                schema(
+                toolSchema(
                     "whom" to ("string" to "Conversation id from a prior tool result."),
                     "count" to ("integer" to "How many recent messages (default 30)."),
                     required = listOf("whom"),
@@ -94,7 +94,7 @@ object ToolCatalog {
             spec = ToolSpec(
                 "send_message",
                 "Send a new message to a conversation.",
-                schema(
+                toolSchema(
                     "whom" to ("string" to "Conversation id from a prior tool result."),
                     "text" to ("string" to "The message body."),
                     required = listOf("whom", "text"),
@@ -112,7 +112,7 @@ object ToolCatalog {
             spec = ToolSpec(
                 "reply",
                 "Reply in-thread to a specific message.",
-                schema(
+                toolSchema(
                     "whom" to ("string" to "Conversation id."),
                     "parentPost" to ("string" to "The post id being replied to."),
                     "text" to ("string" to "The reply body."),
@@ -132,7 +132,7 @@ object ToolCatalog {
             spec = ToolSpec(
                 "react",
                 "Add an emoji reaction to a message.",
-                schema(
+                toolSchema(
                     "whom" to ("string" to "Conversation id."),
                     "post" to ("string" to "The post id to react to."),
                     "emoji" to ("string" to "A single unicode emoji, e.g. 👍."),
@@ -152,7 +152,7 @@ object ToolCatalog {
             spec = ToolSpec(
                 "mark_read",
                 "Mark a conversation as read.",
-                schema(
+                toolSchema(
                     "whom" to ("string" to "Conversation id."),
                     required = listOf("whom"),
                 ),
@@ -170,7 +170,7 @@ object ToolCatalog {
                 spec = ToolSpec(
                     "web_search",
                     "Search the public web (Brave Search) for current events, facts, or anything outside the user's chat history. Returns ranked results with title, URL, and snippet.",
-                    schema(
+                    toolSchema(
                         "query" to ("string" to "The search query, in natural language."),
                         "count" to ("integer" to "Max results (default 5, max 20)."),
                         required = listOf("query"),
@@ -191,7 +191,7 @@ object ToolCatalog {
                 spec = ToolSpec(
                     "fetch_url",
                     "Fetch a single public web page or API endpoint (http/https) and return its text content (HTML is reduced to text). Use to read a specific web_search result, or a known URL/JSON API directly — e.g. https://hacker-news.firebaseio.com/v0/topstories.json. Internal/loopback addresses are refused.",
-                    schema(
+                    toolSchema(
                         "url" to ("string" to "The full http(s) URL to fetch."),
                         required = listOf("url"),
                     ),
@@ -211,7 +211,7 @@ object ToolCatalog {
         if (messages.isEmpty()) return "No messages found."
         return messages.joinToString("\n") { m ->
             val text = StoryCache.textFor(m.id, m.contentJson).replace('\n', ' ').take(300)
-            "whom=${m.whom} post=${m.id} from=${displayName(m.author)}: $text"
+            "whom=${m.whom} post=${m.id} link=${io.nisfeb.talon.urbit.TalonLink.forMessage(m.whom, m.id, m.parentId)} from=${displayName(m.author)}: $text"
         }
     }
 }
@@ -222,8 +222,10 @@ object ToolCatalog {
 private fun JsonObject.str(key: String): String? = this[key].asText()
 private fun JsonObject.int(key: String): Int? = this[key].asInt()
 
-/** Build a JSON-Schema object for a tool's arguments. */
-private fun schema(
+/** Build a JSON-Schema object for a tool's arguments. The ONE helper for
+ *  every catalog (ToolCatalog, AssistantActions) — a second copy once
+ *  drifted from this one. */
+internal fun toolSchema(
     vararg props: Pair<String, Pair<String, String>>,
     required: List<String>,
 ): JsonObject = buildJsonObject {

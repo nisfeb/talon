@@ -39,19 +39,27 @@ class AndroidUiSettings(
     initialDb: AppDatabase,
     scope: CoroutineScope,
 ) : UiSettings {
-    private val prefs = context.getSharedPreferences("talon.ui", Context.MODE_PRIVATE)
+    private val prefs = context.getSharedPreferences(HomePrefs.FILE, Context.MODE_PRIVATE)
+    private val appContext = context.applicationContext
+
+    /**
+     * The home-screen widget reads these same preferences from another
+     * process, and has no way of knowing they changed. Without this it
+     * would go on showing the old place until its half-hourly update
+     * came round, which looks like the setting not having taken.
+     */
+    private fun nudgeWidget() {
+        runCatching { io.nisfeb.talon.widget.ClockWidgetProvider.nudge(appContext) }
+    }
 
     init {
-        // Mnemonym naming: the runtime switch lives in the shared
-        // [MnemonymNames] object (ContactMap reads it); this store just
-        // loads the persisted choice over the default and keeps writes.
-        MnemonymNames.enabled.value = prefs.getBoolean(KEY_MNEMONYM_NAMES, true)
-        MnemonymNames.persist = { v ->
-            prefs.edit().putBoolean(KEY_MNEMONYM_NAMES, v).apply()
-        }
         ShipNames.alwaysPatp.value = prefs.getBoolean(KEY_ALWAYS_PATP, false)
         ShipNames.persist = { v ->
             prefs.edit().putBoolean(KEY_ALWAYS_PATP, v).apply()
+        }
+        AzimuthNames.enabled.value = prefs.getBoolean(KEY_NON_COMET_NAMES, false)
+        AzimuthNames.persist = { v ->
+            prefs.edit().putBoolean(KEY_NON_COMET_NAMES, v).apply()
         }
     }
 
@@ -107,11 +115,75 @@ class AndroidUiSettings(
     override val chatPaneListFraction: StateFlow<Float> =
         _chatPaneListFraction.asStateFlow()
 
+    private val _rightPaneWidthDp = MutableStateFlow(
+        prefs.getFloat(KEY_RIGHT_PANE_WIDTH_DP, 360f).coerceIn(280f, 900f),
+    )
+    override val rightPaneWidthDp: StateFlow<Float> = _rightPaneWidthDp.asStateFlow()
+
     private val _activeRailTab = MutableStateFlow(
         railTabOrDefault(prefs.getString(KEY_ACTIVE_RAIL_TAB, null)),
     )
     override val activeRailTab: StateFlow<RailTab> =
         _activeRailTab.asStateFlow()
+
+    private val _homePlace = MutableStateFlow(prefs.getString(KEY_HOME_PLACE, "") ?: "")
+    override val homePlace: StateFlow<String> = _homePlace.asStateFlow()
+    private val _hiddenCalendars = MutableStateFlow<Set<String>>(prefs.getStringSet(KEY_HIDDEN_CALENDARS, emptySet()).orEmpty().toSet())
+    override val hiddenCalendars: StateFlow<Set<String>> = _hiddenCalendars.asStateFlow()
+    override fun setHiddenCalendars(ids: Set<String>) {
+        if (_hiddenCalendars.value == ids) return
+        prefs.edit().putStringSet(KEY_HIDDEN_CALENDARS, ids).apply()
+        _hiddenCalendars.value = ids
+    }
+
+    private val _calendarWeekView = MutableStateFlow(prefs.getBoolean(KEY_CALENDAR_WEEK_VIEW, false))
+    override val calendarWeekView: StateFlow<Boolean> = _calendarWeekView.asStateFlow()
+    override fun setCalendarWeekView(on: Boolean) {
+        if (_calendarWeekView.value == on) return
+        prefs.edit().putBoolean(KEY_CALENDAR_WEEK_VIEW, on).apply()
+        _calendarWeekView.value = on
+    }
+
+    private val _defaultCalendar = MutableStateFlow(prefs.getString(KEY_DEFAULT_CALENDAR, "") ?: "")
+    override val defaultCalendar: StateFlow<String> = _defaultCalendar.asStateFlow()
+    override fun setDefaultCalendar(id: String) {
+        if (_defaultCalendar.value == id) return
+        prefs.edit().putString(KEY_DEFAULT_CALENDAR, id).apply()
+        _defaultCalendar.value = id
+    }
+
+    override fun setHomePlace(encoded: String) {
+        if (_homePlace.value == encoded) return
+        _homePlace.value = encoded
+        prefs.edit().putString(KEY_HOME_PLACE, encoded).apply()
+        nudgeWidget()
+    }
+
+    private val _homeFahrenheit = MutableStateFlow(prefs.getBoolean(KEY_HOME_FAHRENHEIT, true))
+    override val homeFahrenheit: StateFlow<Boolean> = _homeFahrenheit.asStateFlow()
+    override fun setHomeFahrenheit(on: Boolean) {
+        if (_homeFahrenheit.value == on) return
+        _homeFahrenheit.value = on
+        prefs.edit().putBoolean(KEY_HOME_FAHRENHEIT, on).apply()
+        nudgeWidget()
+    }
+
+    private val _homeLayout = MutableStateFlow(prefs.getString(KEY_HOME_LAYOUT, "") ?: "")
+    override val homeLayout: StateFlow<String> = _homeLayout.asStateFlow()
+    override fun setHomeLayout(encoded: String) {
+        if (_homeLayout.value == encoded) return
+        _homeLayout.value = encoded
+        prefs.edit().putString(KEY_HOME_LAYOUT, encoded).apply()
+    }
+
+    private val _homeTwentyFourHour = MutableStateFlow(prefs.getBoolean(KEY_HOME_24H, false))
+    override val homeTwentyFourHour: StateFlow<Boolean> = _homeTwentyFourHour.asStateFlow()
+    override fun setHomeTwentyFourHour(on: Boolean) {
+        if (_homeTwentyFourHour.value == on) return
+        _homeTwentyFourHour.value = on
+        prefs.edit().putBoolean(KEY_HOME_24H, on).apply()
+        nudgeWidget()
+    }
 
     private val _smartSearchPreferred = MutableStateFlow(
         prefs.getBoolean(KEY_SMART_SEARCH_PREFERRED, false),
@@ -124,6 +196,9 @@ class AndroidUiSettings(
     )
     override val powerFeaturesEnabled: StateFlow<Boolean> =
         _powerFeaturesEnabled.asStateFlow()
+
+    private val _swipeQuotes = MutableStateFlow(prefs.getBoolean(KEY_SWIPE_QUOTES, true))
+    override val swipeQuotes: StateFlow<Boolean> = _swipeQuotes.asStateFlow()
 
     private val _density = MutableStateFlow(loadDensity())
     override val density: StateFlow<Density> = _density.asStateFlow()
@@ -205,6 +280,13 @@ class AndroidUiSettings(
         _chatPaneListFraction.value = clamped
     }
 
+    override fun setRightPaneWidthDp(value: Float) {
+        val clamped = value.coerceIn(280f, 900f)
+        if (_rightPaneWidthDp.value == clamped) return
+        prefs.edit().putFloat(KEY_RIGHT_PANE_WIDTH_DP, clamped).apply()
+        _rightPaneWidthDp.value = clamped
+    }
+
     override fun setActiveRailTab(tab: RailTab) {
         if (_activeRailTab.value == tab) return
         prefs.edit().putString(KEY_ACTIVE_RAIL_TAB, tab.name).apply()
@@ -215,6 +297,12 @@ class AndroidUiSettings(
         if (_powerFeaturesEnabled.value == enabled) return
         prefs.edit().putBoolean(KEY_POWER_FEATURES, enabled).apply()
         _powerFeaturesEnabled.value = enabled
+    }
+
+    override fun setSwipeQuotes(quotes: Boolean) {
+        if (_swipeQuotes.value == quotes) return
+        prefs.edit().putBoolean(KEY_SWIPE_QUOTES, quotes).apply()
+        _swipeQuotes.value = quotes
     }
 
     override fun setDensity(mode: Density) {
@@ -290,6 +378,13 @@ class AndroidUiSettings(
 
     private companion object {
         private const val KEY_HIDE_COMPOSER_BUTTONS = "hide_composer_buttons"
+        private const val KEY_HOME_PLACE = HomePrefs.PLACE
+        private const val KEY_HIDDEN_CALENDARS = "hidden_calendars"
+        private const val KEY_DEFAULT_CALENDAR = "default_calendar"
+        private const val KEY_CALENDAR_WEEK_VIEW = "calendar_week_view"
+        private const val KEY_HOME_FAHRENHEIT = HomePrefs.FAHRENHEIT
+        private const val KEY_HOME_24H = HomePrefs.TWENTY_FOUR_HOUR
+        private const val KEY_HOME_LAYOUT = "home_layout"
         private const val KEY_ACCENT_ENABLED = "accent_enabled"
         private const val KEY_ACCENT_MODE = "accent_mode"
         private const val KEY_ACCENT_HEX = "accent_hex"
@@ -300,13 +395,31 @@ private const val KEY_MIC_AGC = "mic_auto_gain"
         private const val KEY_GROUP_CHANNEL_ORDER = "group_channel_order"
         private const val KEY_FOLDER_ITEM_ORDER = "folder_item_order"
         private const val KEY_CHAT_PANE_LIST_FRACTION = "chat_pane_list_fraction"
+        private const val KEY_RIGHT_PANE_WIDTH_DP = "right_pane_width_dp"
         private const val KEY_ACTIVE_RAIL_TAB = "active_rail_tab"
         private const val KEY_SMART_SEARCH_PREFERRED = "smart_search_preferred"
         private const val KEY_POWER_FEATURES = "power_features_enabled"
+        private const val KEY_SWIPE_QUOTES = "swipe_quotes"
         private const val KEY_DENSITY = "density"
         private const val KEY_FONT_SCALE = "font_scale"
         private const val KEY_RAIL_ITEM_ORDER = "rail_item_order"
-        private const val KEY_ALWAYS_PATP = "always_patp"
-private const val KEY_MNEMONYM_NAMES = "mnemonym_names"
+        private const val KEY_NON_COMET_NAMES = "non_comet_names"
+private const val KEY_ALWAYS_PATP = "always_patp"
     }
+}
+
+/**
+ * The names the home-page settings are stored under.
+ *
+ * Shared rather than repeated, because the home-screen widget is a
+ * second reader of the same preferences and it reads them from a
+ * different process. A widget with its own spelling of the file name
+ * finds nothing and says so by showing no location at all, for ever,
+ * with nothing to suggest why.
+ */
+internal object HomePrefs {
+    const val FILE = "talon.ui"
+    const val PLACE = "home_place"
+    const val FAHRENHEIT = "home_fahrenheit"
+    const val TWENTY_FOUR_HOUR = "home_24h"
 }

@@ -27,16 +27,17 @@ import io.nisfeb.talon.ui.theme.ThemePreference
 
 class MainActivity : ComponentActivity() {
 
+    /** Which ship the tapped notification belonged to, so the app can
+     *  go there before it opens anything. */
+    private val deepLinkForShip = mutableStateOf<String?>(null)
     private val deepLinkWhom = mutableStateOf<String?>(null)
     private val deepLinkMessageId = mutableStateOf<String?>(null)
     private val deepLinkThreadParent = mutableStateOf<String?>(null)
     private val deepLinkThreadAnchor = mutableStateOf<String?>(null)
-    /** Holds the ship from a Daily Digest notification tap; non-null
-     *  asks TalonApp to navigate straight to DailyDigestScreen on next
-     *  composition. The value is the ship the digest belongs to —
-     *  stashed for completeness even though the screen reads the
-     *  active ship's digest itself. */
-    private val deepLinkOpenDigest = mutableStateOf<String?>(null)
+    /** Set by a tapped mail notification (EXTRA_OPEN_MAIL): TalonApp
+     *  opens Mail on arrival. Routed like the other deep links — see
+     *  consumeIntent. */
+    private val deepLinkOpenMail = mutableStateOf(false)
     /** Set when the user hit Answer on the incoming-call notification.
      *  The action can only open the activity — accepting needs the
      *  running CallController — so TalonApp does the accept. */
@@ -90,11 +91,12 @@ class MainActivity : ComponentActivity() {
 
         val app = applicationContext as TalonApplication
         setContent {
+            val forShip by deepLinkForShip
             val whom by deepLinkWhom
             val messageId by deepLinkMessageId
             val threadParent by deepLinkThreadParent
             val threadAnchor by deepLinkThreadAnchor
-            val openDigest by deepLinkOpenDigest
+            val openMail by deepLinkOpenMail
             val share by pendingShare
             val shareTarget by pendingShareTarget
             val answerFrom by pendingAnswerFrom
@@ -160,11 +162,12 @@ class MainActivity : ComponentActivity() {
             TalonTheme(darkTheme = darkTheme, accentOverride = accentOverride, customTheme = themeSettings.active) {
                 CompositionLocalProvider(LocalImageDownloader provides imageDownloader) {
                     TalonApp(
+                        initialForShip = forShip,
                         initialOpenWhom = whom,
                         initialScrollMessageId = messageId,
                         initialOpenThread = threadParent,
                         initialThreadAnchor = threadAnchor,
-                        initialOpenDigest = openDigest,
+                        initialOpenMail = openMail,
                         pendingShare = share,
                         pendingShareTarget = shareTarget,
                         onShareConsumed = {
@@ -177,11 +180,12 @@ class MainActivity : ComponentActivity() {
                         // to (param value unchanged → LaunchedEffect
                         // doesn't refire) and silently no-ops.
                         onDeepLinkConsumed = {
+                            deepLinkForShip.value = null
                             deepLinkWhom.value = null
                             deepLinkMessageId.value = null
                             deepLinkThreadParent.value = null
                             deepLinkThreadAnchor.value = null
-                            deepLinkOpenDigest.value = null
+                            deepLinkOpenMail.value = false
                         },
                         initialAnswerFrom = answerFrom,
                         initialAnswerCallId = answerCallId,
@@ -222,6 +226,13 @@ class MainActivity : ComponentActivity() {
     private fun consumeIntent(intent: Intent?) {
         if (intent == null) return
         var consumedDeepLink = false
+        // Read before the target, though order does not matter here:
+        // what matters is that TalonApp switches ships before it acts
+        // on any of the rest.
+        intent.getStringExtra(Notifications.EXTRA_FOR_SHIP)?.let {
+            deepLinkForShip.value = it
+            consumedDeepLink = true
+        }
         intent.getStringExtra(Notifications.EXTRA_OPEN_WHOM)?.let {
             deepLinkWhom.value = it
             consumedDeepLink = true
@@ -238,8 +249,8 @@ class MainActivity : ComponentActivity() {
             deepLinkThreadAnchor.value = it
             consumedDeepLink = true
         }
-        intent.getStringExtra(Notifications.EXTRA_OPEN_DIGEST)?.let {
-            deepLinkOpenDigest.value = it
+        if (intent.getBooleanExtra(Notifications.EXTRA_OPEN_MAIL, false)) {
+            deepLinkOpenMail.value = true
             consumedDeepLink = true
         }
         intent.getStringExtra(Notifications.EXTRA_ANSWER_FROM)?.let {
@@ -277,11 +288,12 @@ class MainActivity : ComponentActivity() {
         // onCreate). Only the deep-link extras are cleared — share
         // routing below is a transient ACTION_SEND intent, not retained.
         if (consumedDeepLink) {
+            intent.removeExtra(Notifications.EXTRA_FOR_SHIP)
             intent.removeExtra(Notifications.EXTRA_OPEN_WHOM)
             intent.removeExtra(Notifications.EXTRA_SCROLL_TO_MESSAGE)
             intent.removeExtra(Notifications.EXTRA_OPEN_THREAD)
             intent.removeExtra(Notifications.EXTRA_THREAD_ANCHOR)
-            intent.removeExtra(Notifications.EXTRA_OPEN_DIGEST)
+            intent.removeExtra(Notifications.EXTRA_OPEN_MAIL)
             setIntent(intent)
         }
         ShareIntent.from(intent)?.let {

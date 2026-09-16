@@ -20,8 +20,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Mic
-import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
@@ -38,6 +36,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import java.io.File
+import io.nisfeb.talon.ui.icons.TalonIcons
 
 private const val TAG = "VoiceRecordButton"
 
@@ -113,7 +112,7 @@ private class AndroidVoiceRecorder(private val context: Context) {
 }
 
 @Composable
-fun VoiceRecordButton(
+actual fun VoiceRecordButton(
     enabled: Boolean,
     onRecorded: (path: String, durationMs: Long) -> Unit,
     modifier: Modifier,
@@ -121,7 +120,7 @@ fun VoiceRecordButton(
      *  button starts recording (or stops if already recording),
      *  same code path as a tap. Used by the `/mic` slash command
      *  so typing `/mic` and pressing send begins a recording. */
-    externalTrigger: kotlinx.coroutines.flow.Flow<Unit>? = null,
+    externalTrigger: kotlinx.coroutines.flow.Flow<Unit>?,
 ) {
     val context = LocalContext.current
     val recorder = remember { AndroidVoiceRecorder(context) }
@@ -197,7 +196,7 @@ fun VoiceRecordButton(
         contentAlignment = Alignment.Center,
     ) {
         Icon(
-            imageVector = if (recording) Icons.Filled.Stop else Icons.Filled.Mic,
+            imageVector = if (recording) TalonIcons.Stop else TalonIcons.Mic,
             contentDescription = if (recording) "Stop recording" else "Record voice",
             tint = if (recording) MaterialTheme.colorScheme.error
             else MaterialTheme.colorScheme.onSurfaceVariant,

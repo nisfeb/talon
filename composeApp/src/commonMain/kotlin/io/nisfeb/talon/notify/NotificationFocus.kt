@@ -17,12 +17,15 @@ object NotificationFocus {
  * notification on iOS lands here and the app host navigates.
  */
 object OpenChatRequests {
-    data class Request(val whom: String, val postId: String?)
+    /** [forShip]: which of the user's ships the notification was for.
+     *  The same whom on another ship is a different conversation or
+     *  none, so the host switches there before it opens anything. */
+    data class Request(val whom: String, val postId: String?, val forShip: String? = null)
 
     private val _requests = MutableSharedFlow<Request>(extraBufferCapacity = 4)
     val requests: SharedFlow<Request> = _requests
 
-    fun request(whom: String, postId: String?) {
-        _requests.tryEmit(Request(whom, postId))
+    fun request(whom: String, postId: String?, forShip: String? = null) {
+        _requests.tryEmit(Request(whom, postId, forShip))
     }
 }

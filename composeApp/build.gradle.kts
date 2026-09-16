@@ -96,7 +96,12 @@ kotlin {
             implementation(compose.runtime)
             implementation(compose.foundation)
             implementation(compose.material3)
-            implementation(compose.materialIconsExtended)
+            // The core icon set, at the version the Compose plugin pins its
+            // icon artifacts to (no accessor exists for core). The extended
+            // set is a desktop TEST dependency only: the 46 extended icons
+            // the app uses are owned in ui/icons/TalonIcons.kt, which keeps
+            // 18 MB of Kotlin out of the iOS release link.
+            implementation("org.jetbrains.compose.material:material-icons-core:1.7.3")
             implementation(compose.components.resources)
             implementation(libs.kotlinx.coroutines.core)
             implementation(libs.kotlinx.serialization.json)
@@ -271,6 +276,9 @@ kotlin {
         val desktopTest by getting
         desktopTest.dependencies {
             implementation(libs.junit)
+            // Only the generator and its fidelity test see the extended
+            // icon set now; the app owns the fifty it uses (TalonIcons).
+            implementation(compose.materialIconsExtended)
             implementation(libs.kotlinx.coroutines.test)
             implementation(kotlin("test"))
             implementation(libs.ktor.client.mock)
@@ -395,7 +403,6 @@ val generateTalonBuild = tasks.register("generateTalonBuild") {
         )
     }
 }
-
 
 compose.desktop {
     application {
@@ -605,68 +612,11 @@ ksp {
 // Pure JVM impl (no `zip` binary dep) so this works the same on
 // every CI runner.
 
-// Material Icons Extended keep-list, shared by [slimReleaseDistributable]
-// (which strips everything not on the list) and [auditIconKeepList]
-// (which verifies every Icons.X.Y reference in source resolves to either
-// material-icons-core OR this list — runtime-NoClassDefFoundError guard).
-//
-// Sources of truth for additions:
-//   grep -rhoE 'Icons\.(AutoMirrored\.)?(Filled|Outlined|Rounded|Sharp|TwoTone)\.[A-Za-z0-9_]+' \
-//     --include='*.kt' composeApp/src | sort -u
-// and verify each one against the contents of the
-// material-icons-core-desktop JAR — anything found there does NOT
-// belong in this list.
-val iconsExtendedKeep = setOf(
-    "androidx/compose/material/icons/automirrored/filled/LogoutKt.class",
-    "androidx/compose/material/icons/filled/AttachFileKt.class",
-    // Broken-image tile for dead chat-image URLs (StoryRenderer).
-    "androidx/compose/material/icons/filled/BrokenImageKt.class",
-    "androidx/compose/material/icons/filled/ContentCopyKt.class",
-    "androidx/compose/material/icons/filled/DownloadKt.class",
-    "androidx/compose/material/icons/filled/DragHandleKt.class",
-    "androidx/compose/material/icons/filled/ErrorOutlineKt.class",
-    "androidx/compose/material/icons/filled/ExpandLessKt.class",
-    "androidx/compose/material/icons/filled/ExpandMoreKt.class",
-    "androidx/compose/material/icons/filled/ImageKt.class",
-    "androidx/compose/material/icons/filled/MicKt.class",
-    // Trunkline call UI
-    "androidx/compose/material/icons/filled/CallEndKt.class",
-    "androidx/compose/material/icons/filled/GroupsKt.class",
-    "androidx/compose/material/icons/filled/ContentPasteKt.class",
-    // Meeting mode in the call view (PartyLineFullScreen).
-    "androidx/compose/material/icons/filled/FullscreenKt.class",
-    "androidx/compose/material/icons/filled/FullscreenExitKt.class",
-    // Invite someone (GroupInfoPane).
-    "androidx/compose/material/icons/filled/PersonAddKt.class",
-    "androidx/compose/material/icons/filled/MicOffKt.class",
-    "androidx/compose/material/icons/filled/NotificationsOffKt.class",
-    "androidx/compose/material/icons/filled/PauseKt.class",
-    "androidx/compose/material/icons/filled/PeopleKt.class",
-    "androidx/compose/material/icons/filled/PublicKt.class",
-    "androidx/compose/material/icons/filled/PushPinKt.class",
-    "androidx/compose/material/icons/filled/QrCodeScannerKt.class",
-    "androidx/compose/material/icons/filled/ScheduleKt.class",
-    "androidx/compose/material/icons/filled/StopKt.class",
-    "androidx/compose/material/icons/filled/TopicKt.class",
-    "androidx/compose/material/icons/filled/VideocamKt.class",
-    "androidx/compose/material/icons/filled/VideocamOffKt.class",
-    "androidx/compose/material/icons/filled/VisibilityKt.class",
-    "androidx/compose/material/icons/filled/VisibilityOffKt.class",
-)
-
 val slimReleaseDistributable = tasks.register("slimReleaseDistributable") {
     description = "Strip non-host-platform native libs from bundled DJL/ONNX/tokenizers JARs in the release distributable."
     dependsOn("createReleaseDistributable")
     val distDirProvider = layout.buildDirectory.dir("compose/binaries/main-release/app/Talon")
     outputs.dir(distDirProvider)
-    // Capture the keep-list into a local val at configuration time so
-    // the doLast closure's serialized form holds a Set<String> value
-    // instead of a free-variable reference to the script-level val
-    // (which the configuration cache rejects as a "Gradle script
-    // object reference"). Lifting iconsExtendedKeep to script scope
-    // for the audit task to share broke the slim task's previously-
-    // local capture.
-    val keep: Set<String> = iconsExtendedKeep
     doLast {
         // All helpers inlined inside doLast so the configuration
         // cache doesn't have to serialize a reference back to the
@@ -769,39 +719,6 @@ val slimReleaseDistributable = tasks.register("slimReleaseDistributable") {
                     entry.startsWith("native/lib/$tokKeep/")
                 }
             }
-
-        // Material Icons Extended ships every Material icon (~11k
-        // class files, 37 MB on desktop). Android R8 strips the
-        // unused ones; jpackage has no equivalent step. The rest of
-        // the icons we use come from the small material-icons-core
-        // JAR we leave alone. Keep just the [iconsExtendedKeep]
-        // entries plus the manifest. The [auditIconKeepList] task
-        // (wired as a dependency below) verifies every Icons.X.Y
-        // reference in source code resolves to either core or the
-        // keep-list — so adding a new icon without updating the
-        // list fails CI, not the user's runtime.
-        libApp.listFiles { _, n ->
-            n.startsWith("material-icons-extended-desktop-") && n.endsWith(".jar")
-        }?.forEach { jar ->
-            // Verify keep-list members all exist in the source JAR so
-            // a typo or upstream rename surfaces here, not as a
-            // ClassNotFoundException at runtime.
-            val present = ZipFile(jar).use { zf ->
-                keep.filter { zf.getEntry(it) != null }.toSet()
-            }
-            val missing = keep - present
-            check(missing.isEmpty()) {
-                "icons-extended slim: keep-list entries not found in ${jar.name}: $missing"
-            }
-            slimJarInPlace(jar) { entry ->
-                when {
-                    entry.endsWith("/") -> true
-                    entry == "META-INF/MANIFEST.MF" -> true
-                    entry.endsWith(".class") -> entry in keep
-                    else -> false
-                }
-            }
-        }
     }
 }
 
@@ -816,97 +733,3 @@ afterEvaluate {
     }
 }
 
-// ─── Icons keep-list audit ───
-//
-// Greps composeApp/src for `Icons.X.Y` references and verifies each
-// resolves to either the material-icons-core JAR (shipped whole) or
-// the [iconsExtendedKeep] set above (preserved by the slim task). A
-// reference that lives only in material-icons-extended without a
-// keep-list entry is silently stripped at release build time and
-// crashes the user's first paint with NoClassDefFoundError —
-// regression class that bit 0.8.7 (PushPin), 0.8.7 (Logout), and
-// 0.10.0-rc5 (People). This audit fails the build instead.
-//
-// Resolves the core JAR via a `Configuration` walk to stay
-// independent of where Gradle caches the artifact.
-val auditIconKeepList = tasks.register("auditIconKeepList") {
-    description = "Verify every Icons.X.Y reference in composeApp/src resolves to material-icons-core or iconsExtendedKeep."
-    group = "verification"
-    val srcDir = file("src")
-    val keepList = iconsExtendedKeep
-    // Capture the resolved core jar path lazily via a Provider so the
-    // configuration cache stays valid (no project state captured into
-    // the action).
-    val coreJarProvider: Provider<File> = providers.provider {
-        configurations
-            .filter { it.isCanBeResolved && it.name.startsWith("desktop") }
-            .firstNotNullOfOrNull { conf ->
-                runCatching {
-                    conf.resolvedConfiguration.resolvedArtifacts
-                        .firstOrNull { it.name == "material-icons-core-desktop" }
-                        ?.file
-                }.getOrNull()
-            }
-    }
-    inputs.dir(srcDir)
-    inputs.property("keepList", keepList.toSortedSet().joinToString(","))
-    doLast {
-        val iconRegex = Regex(
-            """Icons\.(?:AutoMirrored\.)?(?:Filled|Outlined|Rounded|Sharp|TwoTone)\.[A-Za-z0-9_]+"""
-        )
-        val srcRefs = sortedSetOf<String>()
-        srcDir.walkTopDown()
-            .filter { it.isFile && it.extension == "kt" }
-            .forEach { file ->
-                iconRegex.findAll(file.readText()).forEach { srcRefs.add(it.value) }
-            }
-        if (srcRefs.isEmpty()) {
-            println("auditIconKeepList: no Icons.X.Y references found; skipping.")
-            return@doLast
-        }
-        // Icons.Filled.PushPin -> androidx/compose/material/icons/filled/PushPinKt.class
-        // Icons.AutoMirrored.Filled.Logout -> androidx/compose/material/icons/automirrored/filled/LogoutKt.class
-        fun toClassPath(ref: String): String {
-            val parts = ref.removePrefix("Icons.").split(".")
-            val name = parts.last()
-            val variantPath = parts.dropLast(1).joinToString("/") { it.lowercase() }
-            return "androidx/compose/material/icons/$variantPath/${name}Kt.class"
-        }
-        val coreJar = coreJarProvider.orNull
-        if (coreJar == null || !coreJar.isFile) {
-            println("auditIconKeepList: material-icons-core-desktop jar not resolvable; skipping.")
-            return@doLast
-        }
-        val coreClasses: Set<String> = ZipFile(coreJar).use { zf ->
-            buildSet {
-                val entries = zf.entries()
-                while (entries.hasMoreElements()) add(entries.nextElement().name)
-            }
-        }
-        val missing = mutableListOf<Pair<String, String>>()
-        for (ref in srcRefs) {
-            val classPath = toClassPath(ref)
-            if (classPath !in coreClasses && classPath !in keepList) {
-                missing.add(ref to classPath)
-            }
-        }
-        check(missing.isEmpty()) {
-            buildString {
-                appendLine("auditIconKeepList: ${missing.size} icon reference(s) live in material-icons-extended without a keep-list entry:")
-                missing.forEach { (ref, path) -> appendLine("  $ref  ->  $path") }
-                appendLine()
-                appendLine("Add each missing class path to `iconsExtendedKeep` in composeApp/build.gradle.kts.")
-                appendLine("Without this, the desktop release build will strip the class and crash on first paint")
-                appendLine("with NoClassDefFoundError — regression that bit 0.8.7 (PushPin/Logout) and 0.10.0-rc5 (People).")
-            }
-        }
-        println("auditIconKeepList: ${srcRefs.size} icon reference(s) verified — all resolve to core or keep-list.")
-    }
-}
-
-// Run the audit before the slim task strips and before the standard
-// `check` verification target — so a missing keep-list entry fails
-// CI at PR review time, not at the user's first launch of the
-// release build.
-slimReleaseDistributable.configure { dependsOn(auditIconKeepList) }
-tasks.named("check") { dependsOn(auditIconKeepList) }

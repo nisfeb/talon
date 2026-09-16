@@ -156,9 +156,26 @@
             </intent-filter>
         </service>
 
+
+        <!--
+          The home-screen clock. Exported because AppWidgetProvider
+          only receives APPWIDGET_UPDATE this way — but exported means
+          ANY app can broadcast it (or our ACTION_TICK), not just the
+          system, and every one of them lands in onUpdate. The
+          provider rate-limits its paints so a chatty or hostile
+          broadcaster costs at most one redraw per interval.
+        -->
         <receiver
-            android:name="io.nisfeb.talon.DigestAlarmReceiver"
-            android:exported="false" />
+            android:name="io.nisfeb.talon.widget.ClockWidgetProvider"
+            android:exported="true"
+            android:label="@string/widget_clock_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/clock_widget_info" />
+        </receiver>
 
         <receiver
             android:name="io.nisfeb.talon.LoopAlarmReceiver"

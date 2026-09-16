@@ -70,21 +70,11 @@ class MenuSeenStoreTest {
     fun `defaults are empty when file does not exist`() {
         val store = DesktopMenuSeenStore(ship = "~test", file = file)
         val s = store.state.value
-        assertNull(s.lastSeenDigestDate)
         assertEquals(0L, s.lastSeenStatusesMs)
         assertEquals("", s.lastSeenInvitesSnapshot)
         assertFalse(file.exists())
     }
 
-    @Test
-    fun `markDigestSeen persists and survives reload`() {
-        DesktopMenuSeenStore(ship = "~test", file = file)
-            .markDigestSeen("2026-05-02")
-        assertTrue(file.exists())
-
-        val reloaded = DesktopMenuSeenStore(ship = "~test", file = file)
-        assertEquals("2026-05-02", reloaded.state.value.lastSeenDigestDate)
-    }
 
     @Test
     fun `markStatusesSeenAt persists and survives reload`() {
@@ -104,28 +94,17 @@ class MenuSeenStoreTest {
         assertEquals("~zod,~nec", reloaded.state.value.lastSeenInvitesSnapshot)
     }
 
-    @Test
-    fun `markDigestSeen with null clears the saved date`() {
-        val store = DesktopMenuSeenStore(ship = "~test", file = file)
-        store.markDigestSeen("2026-05-02")
-        store.markDigestSeen(null)
-
-        val reloaded = DesktopMenuSeenStore(ship = "~test", file = file)
-        assertNull(reloaded.state.value.lastSeenDigestDate)
-    }
 
     @Test
     fun `the three markers are independent and accumulate in one file`() {
         // All three writes hit the same per-ship JSON; one mark must
         // not stomp the others. Reload reads them all back.
         val store = DesktopMenuSeenStore(ship = "~test", file = file)
-        store.markDigestSeen("2026-05-02")
         store.markStatusesSeenAt(1_700_000_000_000L)
         store.markInvitesSeen("~zod")
 
         val reloaded = DesktopMenuSeenStore(ship = "~test", file = file)
         val s = reloaded.state.value
-        assertEquals("2026-05-02", s.lastSeenDigestDate)
         assertEquals(1_700_000_000_000L, s.lastSeenStatusesMs)
         assertEquals("~zod", s.lastSeenInvitesSnapshot)
     }
@@ -138,7 +117,6 @@ class MenuSeenStoreTest {
         file.writeText("{ malformed")
         val store = DesktopMenuSeenStore(ship = "~test", file = file)
         val s = store.state.value
-        assertNull(s.lastSeenDigestDate)
         assertEquals(0L, s.lastSeenStatusesMs)
         assertEquals("", s.lastSeenInvitesSnapshot)
     }
@@ -148,16 +126,14 @@ class MenuSeenStoreTest {
         // Lets a future schema version add a field without breaking
         // older clients that read the same file.
         file.writeText(
-            """{"lastSeenDigestDate":"2026-05-02","futureField":42}""",
+            """{"lastSeenStatusesMs":7,"somethingNew":"x"}""",
         )
         val store = DesktopMenuSeenStore(ship = "~test", file = file)
-        assertEquals("2026-05-02", store.state.value.lastSeenDigestDate)
     }
 
     @Test
     fun `atomic move leaves no tmp file after persist`() {
         DesktopMenuSeenStore(ship = "~test", file = file)
-            .markDigestSeen("2026-05-02")
         val tmp = File(tmpDir, file.name + ".tmp")
         assertFalse(tmp.exists())
     }

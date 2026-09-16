@@ -131,6 +131,30 @@ class McpToolsTest {
     }
 
     @Test
+    fun `dedupToolNames keeps the first occurrence and renames later duplicates`() {
+        // The cross-catalog case mcpAgentTools can't see: a ship tool whose
+        // sanitized name equals a built-in. Built-ins come first in the
+        // concatenation, so the built-in keeps the name and the MCP tool is
+        // renamed — two advertised specs with the same name would 400 the
+        // whole provider request.
+        fun t(name: String) = Tool(
+            spec = ToolSpec(name, "", JsonObject(emptyMap())),
+            write = false,
+            execute = { "" },
+        )
+        val builtin = t("search_history")
+        val other = t("read_conversation")
+        val colliding = t("search_history")
+        val out = listOf(builtin, other, colliding).dedupToolNames()
+        assertEquals(listOf("search_history", "read_conversation", "search_history_2"), out.map { it.spec.name })
+        // Untouched entries are the same instances; the renamed one keeps
+        // its own execute closure, so dispatch still reaches the MCP tool.
+        assertTrue(out[0] === builtin && out[1] === other)
+        assertTrue(out[2].execute === colliding.execute)
+        assertTrue(Regex("^[A-Za-z0-9_-]{1,64}$").matches(out[2].spec.name))
+    }
+
+    @Test
     fun `isLoopbackHost recognizes only localhost forms`() {
         // These pass the ship's HTTPS-or-loopback gate over http; the rest
         // trip the bodyless 400 → drive the "use https" diagnostic.

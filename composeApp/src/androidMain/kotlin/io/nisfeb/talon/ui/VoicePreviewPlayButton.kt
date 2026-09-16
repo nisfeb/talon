@@ -3,7 +3,6 @@ package io.nisfeb.talon.ui
 import android.net.Uri
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -20,6 +19,7 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import java.io.File
+import io.nisfeb.talon.ui.icons.TalonIcons
 
 /**
  * Compact play/pause control for the in-progress voice-recording
@@ -32,7 +32,7 @@ import java.io.File
  * scrubber here would dominate the row.
  */
 @Composable
-fun VoicePreviewPlayButton(path: String, enabled: Boolean) {
+actual fun VoicePreviewPlayButton(path: String, enabled: Boolean) {
     val context = LocalContext.current
     val player = remember(path) {
         ExoPlayer.Builder(context).build().apply {
@@ -70,7 +70,7 @@ fun VoicePreviewPlayButton(path: String, enabled: Boolean) {
         modifier = Modifier.size(36.dp),
     ) {
         Icon(
-            imageVector = if (isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+            imageVector = if (isPlaying) TalonIcons.Pause else Icons.Filled.PlayArrow,
             contentDescription = if (isPlaying) "Pause" else "Play",
             modifier = Modifier.size(22.dp),
         )

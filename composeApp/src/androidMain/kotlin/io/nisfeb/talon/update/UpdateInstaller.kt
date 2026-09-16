@@ -26,6 +26,8 @@ import java.security.MessageDigest
  */
 class UpdateInstaller(private val context: Context) : UpdateInstallerHook {
 
+    override val readyHint = "Verified — Android will ask you to confirm."
+
     /**
      * Download the APK to external-files/updates, verify its SHA-256,
      * call onReady with the absolute path. onProgress receives 0..99
@@ -39,12 +41,16 @@ class UpdateInstaller(private val context: Context) : UpdateInstallerHook {
         onReady: (String) -> Unit,
         onFailure: (String) -> Unit,
     ) {
+        // The split for this device's own architecture, a fraction of
+        // the universal APK's size; the universal one only when none fits.
+        val asset = manifest.androidAssetFor(android.os.Build.SUPPORTED_ABIS.toList())
         val updatesDir = File(context.getExternalFilesDir(null), "updates").apply { mkdirs() }
-        val target = File(updatesDir, "talon-${manifest.versionName}.apk")
+        val name = io.nisfeb.talon.update.sanitizedUpdateFileName(asset.url, "talon-update.apk")
+        val target = File(updatesDir, name)
         if (target.exists()) target.delete()
 
         val dm = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
-        val req = DownloadManager.Request(Uri.parse(manifest.url))
+        val req = DownloadManager.Request(Uri.parse(asset.url))
             .setTitle("Talon ${manifest.versionName}")
             .setDescription("Downloading update")
             .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE)
@@ -54,7 +60,9 @@ class UpdateInstaller(private val context: Context) : UpdateInstallerHook {
 
         // Poll. DownloadManager's broadcast is racy in our use case
         // (we want fine-grained progress); polling at 250ms is fine
-        // for a single foreground-bounded download.
+        // for a single foreground-bounded download. The overall
+        // deadline keeps a stalled connection from spinning forever.
+        val deadline = System.currentTimeMillis() + DOWNLOAD_TIMEOUT_MS
         while (true) {
             val q = DownloadManager.Query().setFilterById(downloadId)
             val cursor: Cursor = dm.query(q) ?: run {
@@ -73,7 +81,7 @@ class UpdateInstaller(private val context: Context) : UpdateInstallerHook {
                 when (status) {
                     DownloadManager.STATUS_SUCCESSFUL -> {
                         val ok = try {
-                            verifySha256(target, manifest.sha256)
+                            verifySha256(target, asset.sha256)
                         } catch (e: java.io.IOException) {
                             target.delete()
                             onFailure("SHA-256 check failed: ${e.message ?: e::class.simpleName}")
@@ -84,6 +92,11 @@ class UpdateInstaller(private val context: Context) : UpdateInstallerHook {
                             onFailure("downloaded APK failed SHA-256 check")
                             return
                         }
+                        // Prune older APKs so the updates dir doesn't
+                        // accumulate one download per past update.
+                        updatesDir.listFiles()
+                            ?.filter { it.name != target.name && it.extension == "apk" }
+                            ?.forEach { it.delete() }
                         onReady(target.absolutePath)
                         return
                     }
@@ -105,6 +118,12 @@ class UpdateInstaller(private val context: Context) : UpdateInstallerHook {
                         onProgress(pct.coerceIn(0, 99))
                     }
                 }
+            }
+            if (System.currentTimeMillis() > deadline) {
+                dm.remove(downloadId)
+                target.delete()
+                onFailure("Download timed out — check your connection and retry")
+                return
             }
             delay(250)
         }
@@ -158,5 +177,10 @@ class UpdateInstaller(private val context: Context) : UpdateInstallerHook {
         }
         val got = md.digest().joinToString("") { "%02x".format(it) }
         return got.equals(expected, ignoreCase = true)
+    }
+
+    private companion object {
+        /** Overall cap on the DownloadManager poll — 15 minutes. */
+        const val DOWNLOAD_TIMEOUT_MS = 15L * 60 * 1000
     }
 }

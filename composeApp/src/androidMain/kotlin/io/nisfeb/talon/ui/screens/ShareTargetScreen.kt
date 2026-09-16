@@ -36,7 +36,6 @@ import io.nisfeb.talon.data.AppDatabase
 import io.nisfeb.talon.data.MessageEntity
 import io.nisfeb.talon.ui.Avatar
 import io.nisfeb.talon.ui.ContactMap
-import io.nisfeb.talon.ui.contactMapFlow
 
 /**
  * Telegram-style "share to which chat" picker. Lists conversations in
@@ -60,14 +59,7 @@ fun ShareTargetScreen(
             .filterNot { it.whom.startsWith("diary/") || it.whom.startsWith("notes/") }
     }
 
-    val contactMap by remember {
-        contactMapFlow(
-            db.contacts().stream(),
-            db.clubs().stream(),
-            db.groups().streamGroups(),
-            db.groups().streamChannelGroups(),
-        )
-    }.collectAsState(initial = ContactMap.EMPTY)
+    val contactMap by io.nisfeb.talon.ui.rememberContactMap(db)
 
     var query by remember { mutableStateOf("") }
     val filtered = remember(dedupedConversations, contactMap, query) {

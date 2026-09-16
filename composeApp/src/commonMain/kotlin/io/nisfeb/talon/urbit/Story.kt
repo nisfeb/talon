@@ -9,7 +9,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import io.nisfeb.talon.ui.EmojiCatalog
 import io.nisfeb.talon.util.Log
-import io.nisfeb.talon.util.formatDecimals
+import io.nisfeb.talon.util.humanFileSize
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
@@ -71,9 +71,9 @@ sealed interface StoryPart {
         val label: String,        // human-facing "Post in #channel" / "Group ~host/name"
         val openTarget: String?,  // whom-shaped string to open on tap, if any
         /**
-         * Dotted @da suffix of the cited post, if the cite resolves to a
-         * chat-channel message. Messages in our DB are keyed on
-         * "~author/<dotted-da>" so callers can fuzzy-match by DA.
+         * The cited post's number, dotted as a scry path wants it. The
+         * database keys a channel post on the bare digits and a writ
+         * on "~author/<digits>"; strip the dots before looking one up.
          */
         val postDa: String?,
         /** Dotted @da suffix of the cited reply, for reply cites. */
@@ -757,15 +757,6 @@ object Story {
                 )
             }
         }
-    }
-
-    private fun humanFileSize(bytes: Long): String {
-        if (bytes < 1024) return "$bytes B"
-        val kb = bytes / 1024.0
-        if (kb < 1024) return "${kb.formatDecimals(1)} KB"
-        val mb = kb / 1024.0
-        if (mb < 1024) return "${mb.formatDecimals(1)} MB"
-        return "${(mb / 1024.0).formatDecimals(2)} GB"
     }
 
     // ───────── style constants ─────────

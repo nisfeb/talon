@@ -23,11 +23,8 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.width
@@ -37,7 +34,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Search
@@ -48,11 +44,9 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.DisposableEffect
@@ -70,7 +64,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import io.nisfeb.talon.data.AppDatabase
 import io.nisfeb.talon.data.MessageEntity
@@ -80,7 +73,6 @@ import io.nisfeb.talon.ui.EmojiCatalog
 import io.nisfeb.talon.ui.ReactionPalette
 import io.nisfeb.talon.ui.StoryRenderer
 import io.nisfeb.talon.ui.combinedClickableWithSecondary
-import io.nisfeb.talon.ui.contactMapFlow
 import io.nisfeb.talon.ui.onSecondaryClick
 import io.nisfeb.talon.urbit.StoryCache
 import io.nisfeb.talon.urbit.TlonChatRepo
@@ -126,6 +118,9 @@ fun ThreadList(
     powerFeaturesEnabled: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
+    io.nisfeb.talon.notify.ClearNotificationsWhileShown(whom)
+    // Taken once per thread: set by whatever opened it to reply.
+    val openedToReply = remember(parentId) { ThreadOpenIntent.take(parentId) }
     val parent by remember(whom, parentId) {
         db.messages().streamOne(whom, parentId).distinctUntilChanged()
     }.collectAsState(initial = null)
@@ -156,14 +151,7 @@ fun ThreadList(
         }.flowOn(Dispatchers.Default)
     }.collectAsState(initial = emptyList<ReactionEntity>() to emptyList<ReplyRow>())
 
-    val contactMap by remember {
-        contactMapFlow(
-            db.contacts().stream(),
-            db.clubs().stream(),
-            db.groups().streamGroups(),
-            db.groups().streamChannelGroups(),
-        )
-    }.collectAsState(initial = ContactMap.EMPTY)
+    val contactMap by io.nisfeb.talon.ui.rememberContactMap(db)
 
     val listState = rememberLazyListState()
     val isPinnedToBottom by remember {
@@ -252,8 +240,11 @@ fun ThreadList(
     // doesn't share state with the main chat composer or with other
     // threads in the same channel. The composer treats the namespaced
     // string as its draft key — that's all the screen passes to it.
+    // It is also the thread surface's quote slot: the main composer of
+    // the same conversation keeps its own, so neither surface's
+    // PendingQuotes effect can resurrect a quote the other consumed.
     val threadDraftKey = remember(whom, parentId) { "thread:$whom#$parentId" }
-    val composerState = io.nisfeb.talon.ui.rememberComposerState(threadDraftKey, drafts)
+    val composerState = io.nisfeb.talon.ui.rememberComposerState(threadDraftKey, drafts, quoteKey = threadDraftKey)
 
     val contactList by remember {
         db.contacts().stream()
@@ -503,7 +494,9 @@ fun ThreadList(
             repo = repo,
             http = http,
             drafts = drafts,
+            focusOnOpen = !io.nisfeb.talon.ui.hasSoftKeyboard || openedToReply,
             whom = threadDraftKey,
+            quoteKey = threadDraftKey,
             contactMap = contactMap,
             allShips = allShips,
             canSend = canSend,
@@ -1038,3 +1031,17 @@ private fun ThreadActionMenu(
  *  thread screen serves all three. */
 private fun isChannelNest(whom: String): Boolean =
     whom.startsWith("chat/") || whom.startsWith("heap/") || whom.startsWith("diary/")
+
+/**
+ * Whether the thread about to open was opened in order to reply --
+ * the action sheet's Reply, or a swipe -- as opposed to being opened
+ * to read. Set just before the host is asked to open it, taken once
+ * by the thread as it composes. Keyed by the parent: a bare flag
+ * handed the intent to whichever thread happened to compose first,
+ * which is not necessarily the one the reply was aimed at.
+ */
+internal object ThreadOpenIntent {
+    private val replies = mutableSetOf<String>()
+    fun reply(parentId: String) { replies += parentId }
+    fun take(parentId: String): Boolean = replies.remove(parentId)
+}

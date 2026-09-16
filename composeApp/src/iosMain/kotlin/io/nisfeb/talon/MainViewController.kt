@@ -10,14 +10,19 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.ComposeUIViewController
+import androidx.compose.ui.uikit.OnFocusBehavior
 import io.nisfeb.talon.ui.IosBackDispatcher
 import io.nisfeb.talon.ai.createAiSettings
+import io.nisfeb.talon.call.IosAudioDevices
 import io.nisfeb.talon.call.IosCallEngineProvider
+import io.nisfeb.talon.call.IosCallSoundPlayer
 import io.nisfeb.talon.call.IosPeerLinkFactory
 import io.nisfeb.talon.call.NativeRtcFactory
 import io.nisfeb.talon.compose.App
+import io.nisfeb.talon.data.IosShipDataEraser
 import io.nisfeb.talon.data.createAppDatabase
-import io.nisfeb.talon.ai.NoopDailyDigestSettings
+import io.nisfeb.talon.notify.IosNotifier
+import io.nisfeb.talon.notify.IosPushTokenProvider
 import io.nisfeb.talon.ui.IosDraftStore
 import io.nisfeb.talon.ui.createUiSettings
 import io.nisfeb.talon.ui.theme.IosThemePreference
@@ -42,7 +47,7 @@ import platform.UIKit.UIViewController
  * impls; the rest take their commonMain defaults.
  *
  * Persistence today: session, assistant settings, and theme survive
- * restart (JSON under Documents). UI settings use the in-memory default
+ * restart (JSON under Application Support). UI settings use the in-memory default
  * (persistence pending — it needs the per-ship rail-visibility DB
  * projection). Update install is a no-op — App Store owns updates.
  * On-device AI / digest / loops are gated off in Capabilities.ios.kt.
@@ -66,7 +71,6 @@ fun MainViewController(rtc: NativeRtcFactory?): UIViewController {
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default + backgroundExceptionHandler)
     // Digest has no scheduler on iOS (gated off in Capabilities), but
     // %settings sync still needs a sink for the bucket.
-    val dailyDigestSettings = NoopDailyDigestSettings()
 
     val updateState = UpdateState(
         scope = scope,
@@ -87,6 +91,9 @@ fun MainViewController(rtc: NativeRtcFactory?): UIViewController {
             override fun install(apkPath: String) {
                 // No sideload on iOS.
             }
+
+            override val readyHint = ""
+
         },
     )
 
@@ -100,12 +107,23 @@ fun MainViewController(rtc: NativeRtcFactory?): UIViewController {
     val peerLinkFactory = rtc?.let { IosPeerLinkFactory(it) }
     // Built once, like the factories above: anything constructed inside
     // the composable lambda is rebuilt on recomposition.
-    val drafts = IosDraftStore()
-    return ComposeUIViewController {
+    val drafts = IosDraftStore { sessionStore.activeShip() }
+    val shipDataEraser = IosShipDataEraser()
+    val audioDevices = IosAudioDevices()
+    val callSounds = IosCallSoundPlayer()
+    val pushTokenProvider = IosPushTokenProvider()
+    val notifier = IosNotifier()
+    IosAppLifecycle.observe()
+    // The keyboard is the app's business, not the controller's. Every
+    // screen pads for safe drawing, which on iOS counts the keyboard, so
+    // a controller that ALSO lifted the view made room twice: the space
+    // it left behind is the white band under a dismissed keyboard.
+    return ComposeUIViewController(configure = { onFocusBehavior = OnFocusBehavior.DoNothing }) {
         Box(Modifier.fillMaxSize()) {
         App(
             http = http,
             sessionStore = sessionStore,
+            shipDataEraser = shipDataEraser,
             aiSettings = aiSettings,
             createDb = { shipKey -> createAppDatabase(shipKey) },
             drafts = drafts,
@@ -118,8 +136,6 @@ fun MainViewController(rtc: NativeRtcFactory?): UIViewController {
                 SettingsSyncImpl(
                     db = db,
                     aiSettings = aiSettings,
-                    dailyDigestSettings = dailyDigestSettings,
-                    rearmDailyDigest = {},
                 )
             },
             createUiSettings = { db -> createUiSettings(db, scope) },
@@ -129,13 +145,14 @@ fun MainViewController(rtc: NativeRtcFactory?): UIViewController {
             // shows no call button rather than a broken one.
             callEngineProvider = callEngineProvider,
             peerLinkFactory = peerLinkFactory,
-            dailyDigestSettings = dailyDigestSettings,
-            audioDevices = io.nisfeb.talon.call.IosAudioDevices(),
-            callSounds = io.nisfeb.talon.call.IosCallSoundPlayer(),
+            audioDevices = audioDevices,
+            callSounds = callSounds,
             // PushKit VoIP token → relay, so a backgrounded phone
             // gets an APNs VoIP ring. The token itself arrives from
             // CallPush.swift via IosVoipBridge.
-            pushTokenProvider = io.nisfeb.talon.notify.IosPushTokenProvider(),
+            pushTokenProvider = pushTokenProvider,
+            appForeground = IosAppLifecycle.foreground,
+            notifier = notifier,
         )
         // Back gesture. A Compose view controller gets none of UIKit's
         // navigation edge-swipe, so we draw our own: a narrow strip on

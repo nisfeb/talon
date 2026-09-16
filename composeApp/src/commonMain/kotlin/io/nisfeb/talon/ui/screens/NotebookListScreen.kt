@@ -19,7 +19,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
@@ -45,7 +44,6 @@ import coil3.compose.AsyncImage
 import io.nisfeb.talon.data.AppDatabase
 import io.nisfeb.talon.data.MessageEntity
 import io.nisfeb.talon.ui.ContactMap
-import io.nisfeb.talon.ui.contactMapFlow
 import io.nisfeb.talon.urbit.StoryCache
 import io.nisfeb.talon.urbit.TlonChatRepo
 import kotlinx.coroutines.Dispatchers
@@ -67,14 +65,8 @@ fun NotebookListScreen(
     onCompose: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val contactMap by remember {
-        contactMapFlow(
-            db.contacts().stream(),
-            db.clubs().stream(),
-            db.groups().streamGroups(),
-            db.groups().streamChannelGroups(),
-        )
-    }.collectAsState(initial = ContactMap.EMPTY)
+    io.nisfeb.talon.notify.ClearNotificationsWhileShown(whom)
+    val contactMap by io.nisfeb.talon.ui.rememberContactMap(db)
 
     // distinctUntilChanged on the upstream so unrelated messages-table
     // writes don't re-emit; flowOn(Default) keeps the reverse off main.
@@ -131,9 +123,7 @@ fun NotebookListScreen(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            IconButton(onClick = onBack) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-            }
+            io.nisfeb.talon.ui.NavIcon(onBack = onBack)
             Text(
                 title,
                 style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),

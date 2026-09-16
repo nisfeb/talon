@@ -21,7 +21,12 @@ That triggers `.github/workflows/release.yml`, which:
   `secrets.RELEASE_KEYSTORE_BASE64` and uploads them as
   `talon-VERSION.apk` (universal) plus per-ABI splits.
 - Builds the desktop matrix (`.deb` / `.dmg` / `.msi` / `.AppImage`).
-- Generates `latest.json` for the in-app updater.
+- Generates `latest.json` for the in-app updater: the universal APK
+  plus each ABI split, so a phone downloads the one for its own
+  architecture; and lists the
+  desktop installers' URLs and hashes in it once they are built, so
+  a desktop Talon can update itself (an AppImage swaps and restarts;
+  deb / dmg / msi open in the system installer).
 - Creates the GitHub Release and attaches everything via
   `softprops/action-gh-release`.
 
@@ -37,6 +42,28 @@ post-mortem cleanup deleted the debug-signed duplicates.
 
 If a tag is pushed but CI didn't trigger (e.g. a typo'd tag name), fix
 the tag and re-push. Do not paper over with a manual upload.
+
+### Update payload trust model
+
+The in-app updater's trust root is **TLS to github.com plus the
+GitHub release token**: `latest.json` and the installers it points at
+come from the same origin, fetched over the same kind of connection.
+The SHA-256 in the manifest therefore guards against corruption and
+truncated downloads only — it is *not* a signature. Anyone who can
+publish a GitHub Release on this repo (stolen token, compromised
+maintainer account) can ship a manifest and payload that both verify.
+
+- **Android** gets real enforcement from the OS regardless: the
+  PackageInstaller rejects any APK not signed by the same release
+  keystore as the installed app, so a forged manifest can at worst
+  waste a download.
+- **Desktop** has no equivalent backstop — the AppImage path swaps
+  the binary and restarts into it, so payload trust *is* manifest
+  trust today. Planned hardening: sign installers with
+  minisign/cosign using a public key pinned in the app, and verify
+  before the swap. Until then the boundary is the token's scope
+  (`contents: write` on the release job only) and tag-push-only
+  releases.
 
 The `dist/Talon-x86_64.AppImage` you build locally is for **smoke
 testing**, not for shipping. CI runs `scripts/build-appimage.sh` itself

@@ -12,10 +12,14 @@ package io.nisfeb.talon.notify
  * impl trampolines onto the AWT EDT internally.
  */
 interface Notifier {
-    fun notify(title: String, body: String)
+    /** [key] names what it is about (a whom, or "mail:<thread>") so [clear] can take it back. */
+    fun notify(title: String, body: String, key: String? = null)
+
+    /** Take back what was notified under [key], where the platform can. */
+    fun clear(key: String) {}
 }
 
 /** No-op default for tests and platforms without a wired notifier. */
 object NoopNotifier : Notifier {
-    override fun notify(title: String, body: String) {}
+    override fun notify(title: String, body: String, key: String?) {}
 }

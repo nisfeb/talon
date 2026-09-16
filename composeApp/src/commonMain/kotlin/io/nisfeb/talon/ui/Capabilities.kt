@@ -1,15 +1,39 @@
 package io.nisfeb.talon.ui
 
 /**
- * Per-platform feature flags. A flag is `true` only when the platform
- * has the infrastructure to support the feature end-to-end; UI gates
- * itself on these so half-implemented features don't surface broken.
+ * The platform capability registry. Every `expect val` flag below is
+ * one row here; the flag's own KDoc says what it gates. Platforms:
+ * A = Android, D = desktop, i = iOS.
  *
- * Today these mirror the port plan's "out of scope on desktop" list.
- * Stage F or beyond can flip individual flags as features get the
- * platform glue they need.
+ *  - isVoiceMessagesSupported — A, i. D: no recorder pipeline on the JVM.
+ *  - isOnDeviceAiSupported — A (MediaPipe); D by EmbedderProbe verdict (DJL ONNX SIGSEGVs some libstdc++ ABIs); i: no embedder port.
+ *  - isAssistantSupported — A, D, i: a cloud LLM key + ship session is all it needs.
+ *  - isLoopsSupported — A, D, i: AlarmManager on A; the while-open ticker (App.kt) on D/i.
+ *  - isBackgroundSchedulingSupported — A (AlarmManager + BootReceiver); D/i: the ticker only runs while the app is open.
+ *  - isQrScanSupported — A (ZXing), i (AVFoundation); D: no camera to assume.
+ *  - isLocalCometSupported — D (runtime driven under a pseudo-terminal); A/i: no background process can host a ship.
+ *  - isTouchSwipeNavSupported — A, i; D: drag detectors claim click-with-drift and deaden links/buttons.
+ *  - hasSoftKeyboard — A, i; D: focusing a field pops no keyboard over the content.
+ *  - isDictationSupported — A, i (the platform speech recogniser); D: no recogniser to call.
+ *  - isTapToOpenMenuSupported — A, i; D: left-drag belongs to text selection, the menu is right-click.
+ *  - isCallsSupported — A, D, i: a libwebrtc-backed CallEngine actual exists on each.
+ *  - isCallRecordingSupported — A, D; i: the Swift bridge exposes no PCM tap.
+ *  - isWindowFullScreenSupported — D (window placement is ours); A/i: the app already is the whole screen.
+ *  - isBackgroundCallRingSupported — A (UnifiedPush), D (long-running process), i (PushKit + CallKit).
+ *  - isVideoCallsSupported — A, D, i: camera capture + render end-to-end on all three.
+ *  - isPartyVideoSupported — A, D, i: PeerLink publishes and renders cameras on all three.
+ *  - isCameraSwitchSupported — A, i; D: a webcam has one lens and no switch.
+ *  - isEdgeSwipeBackSupported — i (Compose gets none of UIKit's gesture); A: the system back owns the edge; D: no touch edge.
+ *  - isDrawerNavigation — A, i (no room for a rail); D: the permanent rail is already one click from anywhere.
+ *  - isTouchPrimary — A, i (thumb-sized rows); D: mouse + close screen favour density.
+ *  - needsEmojiFontSpans — D (a bundled emoji family does the work); A/i: colour emoji render in the default family.
+ *  - needsManualImagePaste — D, i; A: the text field's content receiver takes pasted images.
+ *  - isImmersiveCallSupported — A, i (full-screen call view); D: the inline roster toggles in place.
+ *  - isUrbWebViewSupported — A, i (in-app webview popover); D: hands off to the system browser.
+ *
+ * [platformLabel] and [isOnDeviceAiFeatureSupported] are declared
+ * below too — a display name and a per-feature predicate, not flags.
  */
-expect val isDailyDigestSupported: Boolean
 expect val isVoiceMessagesSupported: Boolean
 
 /**
@@ -41,6 +65,7 @@ expect val isAssistantSupported: Boolean
  * a coroutine ticker (App.kt) runs due loops while the window is open;
  * loops only advance with the app running, which the screen's copy
  * states (CLAUDE.md §3: an honest ceiling, not a faked schedule).
+ * iOS: true, the same while-open ticker as desktop (App.kt is shared).
  * Gates the Loops screen + nav entry (which also require an LLM key).
  */
 expect val isLoopsSupported: Boolean
@@ -55,12 +80,13 @@ expect val isLoopsSupported: Boolean
 expect val isBackgroundSchedulingSupported: Boolean
 
 /**
- * Whether the platform can launch an in-app QR scanner for login
- * handoff (see [io.nisfeb.talon.login.TalonLoginUri]). Android: true
- * via ML Kit's GoogleCodeScanner (Play Services). Desktop: false —
- * desktops have keyboards, the manual form is already the fast path.
+ * Whether the platform has an in-app camera QR scanner: login handoff
+ * (see [io.nisfeb.talon.login.TalonLoginUri]), and joining a group or
+ * inviting a ship from a scanned code. Android: true via
+ * ZXing-android-embedded. iOS: true, AVFoundation's own reader
+ * (QrLoginScanner.ios.kt). Desktop: false, no camera to assume.
  */
-expect val isQrLoginScanSupported: Boolean
+expect val isQrScanSupported: Boolean
 
 /**
  * Whether Talon can run a comet on this machine for someone with no
@@ -79,13 +105,31 @@ expect val isLocalCometSupported: Boolean
  * links / reactions / buttons appear dead.
  *
  * Gates two surfaces today:
- *  - swipe-a-message-row to open its thread (DmChatScreen.MessageRow);
- *    desktop uses the reply-count pill / ⋯ menu / right-click instead.
+ *  - swipe-a-message-row to quote it or open its thread, per the
+ *    setting (DmChatScreen.MessageRow); desktop uses the ⋯ menu /
+ *    right-click instead.
  *  - edge-swipe to open the ship-switcher drawer (App.kt
  *    ModalNavigationDrawer.gesturesEnabled); desktop opens it by
  *    clicking the Talon logo.
  */
 expect val isTouchSwipeNavSupported: Boolean
+
+/**
+ * Whether focusing a text field raises a keyboard over the screen.
+ * Android, iOS: true. Desktop: false. Decides whether a composer may
+ * take focus the moment its screen opens: with a keyboard in hand
+ * that is what a person wants; with one that pops up over the thing
+ * they came to read, it is not.
+ */
+expect val hasSoftKeyboard: Boolean
+
+/**
+ * Whether the assistant can take an instruction by voice. Android and
+ * iOS: true (the platform's own speech recogniser). Desktop: false, no
+ * recogniser to call; the JVM has no speech API and the cloud path is
+ * built for recorded calls, not a microphone.
+ */
+expect val isDictationSupported: Boolean
 
 /**
  * Whether a plain left-tap on a message opens its action menu.
@@ -197,6 +241,31 @@ expect val isPartyVideoSupported: Boolean
 expect val isCameraSwitchSupported: Boolean
 
 expect val isEdgeSwipeBackSupported: Boolean
+
+/**
+ * Whether sections are reached through a drawer rather than a rail.
+ *
+ * Android and iOS: true. A phone has no room for a permanent rail, so
+ * a hamburger opens a drawer and that is the one way to every section.
+ *
+ * Desktop: false. The rail is already there and already one click from
+ * anywhere; a hamburger beside it would be a second way to do the same
+ * thing, and the screens keep their back buttons because a desktop has
+ * neither an edge swipe nor a system back.
+ */
+expect val isDrawerNavigation: Boolean
+
+/**
+ * Whether the primary input is a finger rather than a pointer, so dense
+ * lists get touch-sized rows.
+ *
+ * Android and iOS: true. Rows are read at arm's length and hit with a
+ * thumb, so they need body-size text and 48dp targets.
+ *
+ * Desktop: false. A mouse and a close screen make the dense mail pane
+ * the useful one; more rows on screen is the point there.
+ */
+expect val isTouchPrimary: Boolean
 
 /**
  * Whether emoji need an explicit font span to render in colour.

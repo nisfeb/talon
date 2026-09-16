@@ -7,12 +7,13 @@ import androidx.room.PrimaryKey
 /**
  * A pending DM request — a ship that opened a DM with us that we haven't
  * accepted or declined yet. In Tlon, a DM from a non-contact lands as an
- * "invite" rather than a conversation: its writs don't flow over the
- * normal subscription until accepted, so without this Talon never
- * surfaced it (no list row, no notification).
+ * "invite" rather than a conversation: its writs do reach a live
+ * subscription, but the init scry leaves the DM out and no unread is
+ * ever given for it, so a session that was down when the messages came
+ * has nothing to show and needs this row to know the request exists.
  *
  * Sourced from %chat's `/dm/invited` scry at bootstrap + the live
- * ship-array facts the chat `/v4` subscription pushes. Accept/decline
+ * ship-array facts on the `/dm/invited` subscription. Accept/decline
  * via the `chat-dm-rsvp` poke; the row is then removed (accept turns it
  * into a real DM whose messages flow normally).
  */

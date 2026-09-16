@@ -31,15 +31,6 @@ class MenuBadgesTest {
     }
 
     @Test
-    fun `digestFresh maps only to RailItem TodaysBrief`() {
-        val b = MenuBadges(digestFresh = true)
-        assertTrue(b.forItem(RailItem.TodaysBrief))
-        for (item in RailItem.entries.filter { it != RailItem.TodaysBrief }) {
-            assertFalse(b.forItem(item), "$item should not be fresh when only digest is")
-        }
-    }
-
-    @Test
     fun `invitesPending maps only to RailItem Invites`() {
         val b = MenuBadges(invitesPending = true)
         assertTrue(b.forItem(RailItem.Invites))
@@ -52,11 +43,9 @@ class MenuBadgesTest {
     fun `all three flags compose without crosstalk`() {
         val b = MenuBadges(
             statusesFresh = true,
-            digestFresh = true,
             invitesPending = true,
         )
         assertTrue(b.forItem(RailItem.Statuses))
-        assertTrue(b.forItem(RailItem.TodaysBrief))
         assertTrue(b.forItem(RailItem.Invites))
         // Items without a freshness concept stay quiet
         for (item in listOf(
@@ -75,9 +64,8 @@ class MenuBadgesTest {
         val combos = listOf(
             MenuBadges(),
             MenuBadges(statusesFresh = true),
-            MenuBadges(digestFresh = true),
             MenuBadges(invitesPending = true),
-            MenuBadges(true, true, true),
+            MenuBadges(true, true),
         )
         for (b in combos) {
             for (item in RailItem.entries) {

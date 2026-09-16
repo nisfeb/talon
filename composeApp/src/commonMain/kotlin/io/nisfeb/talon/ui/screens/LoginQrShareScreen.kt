@@ -21,7 +21,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -49,6 +48,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import io.nisfeb.talon.login.QrCodeGenerator
 import io.nisfeb.talon.login.TalonLoginUri
+import io.nisfeb.talon.ui.icons.TalonIcons
 
 /**
  * Login-handoff QR generator. The user (typically a host helping a
@@ -218,7 +218,7 @@ fun LoginQrShareScreen(
                     modifier = Modifier.widthIn(max = 320.dp).fillMaxWidth(),
                 ) {
                     Icon(
-                        imageVector = Icons.Filled.ContentCopy,
+                        imageVector = TalonIcons.ContentCopy,
                         contentDescription = null,
                         modifier = Modifier.size(18.dp),
                     )

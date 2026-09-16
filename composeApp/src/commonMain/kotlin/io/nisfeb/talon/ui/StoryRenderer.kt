@@ -21,7 +21,6 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.BrokenImage
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -30,6 +29,8 @@ import androidx.compose.material3.VerticalDivider
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import kotlinx.coroutines.launch
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
@@ -53,6 +54,7 @@ import io.nisfeb.talon.urbit.MENTION_TAG
 import io.nisfeb.talon.urbit.StoryPart
 import io.nisfeb.talon.urbit.URL_TAG
 import kotlinx.coroutines.sync.withLock
+import io.nisfeb.talon.ui.icons.TalonIcons
 
 /**
  * Resolver for citation lookups. The production app couples this
@@ -276,7 +278,7 @@ fun StoryRenderer(
                         // A dead URL used to render as a 0-height nothing —
                         // the message looked empty. The tile makes the
                         // failure visible.
-                        error = rememberVectorPainter(Icons.Filled.BrokenImage),
+                        error = rememberVectorPainter(TalonIcons.BrokenImage),
                         modifier = Modifier
                             .widthIn(max = 320.dp)
                             .heightIn(max = 360.dp)
@@ -448,7 +450,7 @@ private fun StoryTableRow(
 }
 
 @Composable
-private fun FallbackInlineMediaRow(url: String, kind: MediaKind) {
+internal fun FallbackInlineMediaRow(url: String, kind: MediaKind) {
     val uriHandler = androidx.compose.ui.platform.LocalUriHandler.current
     val label = when (kind) {
         MediaKind.AUDIO -> "🔊 Play $url"
@@ -789,20 +791,52 @@ private fun CalWidgetBlock(
             }
             val uriHandlerCal = androidx.compose.ui.platform.LocalUriHandler.current
             val calendarLauncher = LocalCalendarLauncher.current
-            androidx.compose.material3.TextButton(onClick = {
-                runCatching {
-                    // Android: Intent.ACTION_INSERT pops the system
-                    // create-event sheet pre-filled. Desktop / unset:
-                    // ICS tempfile + URI-handler handoff (browsers /
-                    // mail clients on most OSes attach the file).
-                    if (calendarLauncher != null) {
-                        calendarLauncher.launch(startEpochMs, endEpochMs, title)
-                    } else {
-                        val ics = buildIcs(startEpochMs, endEpochMs, title)
-                        uriHandlerCal.openUri(createTempFileUri("talon-event-", ".ics", ics))
-                    }
+            val shipCalendar = io.nisfeb.talon.calendar.LocalCalendarRepo.current
+            val shipCalendars = shipCalendar?.calendars?.collectAsState()?.value.orEmpty()
+            val addScope = androidx.compose.runtime.rememberCoroutineScope()
+            var menuOpen by remember { mutableStateOf(false) }
+            var added by remember { mutableStateOf<String?>(null) }
+            // A successful add disarms the button — left armed, every
+            // further tap wrote another copy of the event.
+            var addedDone by remember { mutableStateOf(false) }
+            fun toAnotherApp() = runCatching {
+                // Android: Intent.ACTION_INSERT pops the system
+                // create-event sheet pre-filled. Desktop / unset:
+                // ICS tempfile + URI-handler handoff (browsers /
+                // mail clients on most OSes attach the file).
+                if (calendarLauncher != null) {
+                    calendarLauncher.launch(startEpochMs, endEpochMs, title)
+                } else {
+                    val ics = buildIcs(startEpochMs, endEpochMs, title)
+                    uriHandlerCal.openUri(createTempFileUri("talon-event-", ".ics", ics))
                 }
-            }) { Text("Add") }
+            }
+            androidx.compose.foundation.layout.Box {
+                // The ship's own calendars first; another calendar app after.
+                androidx.compose.material3.TextButton(
+                    onClick = {
+                        if (shipCalendar != null && shipCalendars.isNotEmpty()) menuOpen = true else toAnotherApp()
+                    },
+                    enabled = !addedDone,
+                ) { Text(added ?: "Add") }
+                androidx.compose.material3.DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                    shipCalendar?.writable().orEmpty().forEach { c ->
+                        androidx.compose.material3.DropdownMenuItem(
+                            text = { Text(c.name.ifBlank { c.id }) },
+                            onClick = {
+                                menuOpen = false
+                                added = "Adding…"
+                                addScope.launch {
+                                    val ok = shipCalendar!!.addShared(c.id, title, startEpochMs, endEpochMs)
+                                    addedDone = ok
+                                    added = if (ok) "Added to ${c.name.ifBlank { c.id }}" else "Not added"
+                                }
+                            },
+                        )
+                    }
+                    androidx.compose.material3.DropdownMenuItem(text = { Text("Another calendar app…") }, onClick = { menuOpen = false; toAnotherApp() })
+                }
+            }
         }
     }
 }

@@ -17,9 +17,7 @@ import androidx.compose.foundation.lazy.staggeredgrid.StaggeredGridCells
 import androidx.compose.foundation.lazy.staggeredgrid.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.BrokenImage
 import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
@@ -46,7 +44,6 @@ import coil3.compose.AsyncImage
 import io.nisfeb.talon.data.AppDatabase
 import io.nisfeb.talon.data.MessageEntity
 import io.nisfeb.talon.ui.ContactMap
-import io.nisfeb.talon.ui.contactMapFlow
 import io.nisfeb.talon.urbit.StoryCache
 import io.nisfeb.talon.urbit.StoryPart
 import io.nisfeb.talon.urbit.TlonChatRepo
@@ -54,6 +51,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
+import io.nisfeb.talon.ui.icons.TalonIcons
 
 /**
  * Staggered-grid view of a gallery (%heap) channel. Each tile shows
@@ -71,14 +69,8 @@ fun GalleryGridScreen(
     onCompose: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val contactMap by remember {
-        contactMapFlow(
-            db.contacts().stream(),
-            db.clubs().stream(),
-            db.groups().streamGroups(),
-            db.groups().streamChannelGroups(),
-        )
-    }.collectAsState(initial = ContactMap.EMPTY)
+    io.nisfeb.talon.notify.ClearNotificationsWhileShown(whom)
+    val contactMap by io.nisfeb.talon.ui.rememberContactMap(db)
 
     // distinctUntilChanged on the upstream so unrelated messages-table
     // writes don't re-emit; flowOn(Default) keeps the reverse off main.
@@ -131,9 +123,7 @@ fun GalleryGridScreen(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            IconButton(onClick = onBack) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-            }
+            io.nisfeb.talon.ui.NavIcon(onBack = onBack)
             Text(
                 title,
                 style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
@@ -235,7 +225,7 @@ private fun GalleryTile(
                     AsyncImage(
                         model = primary.src,
                         contentDescription = primary.alt,
-                        error = rememberVectorPainter(Icons.Filled.BrokenImage),
+                        error = rememberVectorPainter(TalonIcons.BrokenImage),
                         modifier = Modifier
                             .fillMaxWidth()
                             .aspectRatio(ratio.coerceIn(0.4f, 2.5f))
@@ -247,7 +237,7 @@ private fun GalleryTile(
                         AsyncImage(
                             model = url,
                             contentDescription = null,
-                            error = rememberVectorPainter(Icons.Filled.BrokenImage),
+                            error = rememberVectorPainter(TalonIcons.BrokenImage),
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .aspectRatio(16f / 9f)

@@ -23,7 +23,6 @@ import androidx.compose.foundation.hoverable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.ui.draw.alpha
-import androidx.compose.foundation.combinedClickable
 import io.nisfeb.talon.ui.combinedClickableWithSecondary
 import io.nisfeb.talon.ui.onSecondaryClick
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
@@ -56,26 +55,13 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.KeyboardArrowDown
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
-import androidx.compose.foundation.layout.IntrinsicSize
-import androidx.compose.foundation.layout.fillMaxHeight
-import androidx.compose.material.icons.filled.AttachFile
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.ErrorOutline
-import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Call
-import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.Notifications
-import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Call
-import androidx.compose.material.icons.filled.Groups
-import androidx.compose.material.icons.filled.NotificationsOff
-import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.Topic
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
@@ -115,12 +101,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.input.key.Key
-import androidx.compose.ui.input.key.KeyEventType
-import androidx.compose.ui.input.key.isShiftPressed
 import androidx.compose.ui.input.key.key
-import androidx.compose.ui.input.key.onPreviewKeyEvent
-import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.style.TextOverflow
@@ -136,33 +117,19 @@ import io.nisfeb.talon.data.AppDatabase
 import io.nisfeb.talon.data.MessageEntity
 import io.nisfeb.talon.data.NotifyLevel
 import io.nisfeb.talon.data.ReactionEntity
-import io.nisfeb.talon.data.ReactionUsageEntity
 import io.nisfeb.talon.data.ReplyCount
 import io.nisfeb.talon.ui.Avatar
-import io.nisfeb.talon.ui.CommandResult
 import io.nisfeb.talon.ui.ContactMap
 import io.nisfeb.talon.ui.ContactProfileSheet
 import io.nisfeb.talon.ui.DraftStore
 import io.nisfeb.talon.ui.EmojiCatalog
-import io.nisfeb.talon.ui.EmojiPickerDropdown
 import io.nisfeb.talon.ui.LinkPreviewCard
 import io.nisfeb.talon.ui.firstLinkUrl
-import io.nisfeb.talon.ui.MentionPicker
 import io.nisfeb.talon.ui.ReactionPalette
-import io.nisfeb.talon.ui.SlashPicker
 import io.nisfeb.talon.ui.StoryRenderer
-import io.nisfeb.talon.ui.contactMapFlow
-import io.nisfeb.talon.ui.detectEmojiQuery
-import io.nisfeb.talon.ui.detectMentionQuery
-import io.nisfeb.talon.ui.detectSlashTrigger
-import io.nisfeb.talon.ui.filterSlashCommands
-import io.nisfeb.talon.ui.runCommand
-import io.nisfeb.talon.ui.suggestionsFor
 import io.nisfeb.talon.urbit.StoryCache
 import io.nisfeb.talon.urbit.TlonChatRepo
 import io.nisfeb.talon.util.Log
-import io.nisfeb.talon.util.decodeImageDimensions
-import io.nisfeb.talon.util.rememberImagePicker
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -171,6 +138,7 @@ import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.launch
 import io.ktor.client.HttpClient
+import io.nisfeb.talon.ui.icons.TalonIcons
 
 @OptIn(
     ExperimentalFoundationApi::class,
@@ -256,8 +224,10 @@ fun DmChatScreen(
     scrollAnchored: MutableState<Boolean>? = null,
     modifier: Modifier = Modifier,
 ) {
+    io.nisfeb.talon.notify.ClearNotificationsWhileShown(whom)
     val aiConfigured by aiSettings.state.collectAsState()
     val hideComposerButtons by uiSettings.hideComposerButtons.collectAsState()
+    val swipeQuotes by uiSettings.swipeQuotes.collectAsState()
     val powerFeaturesEnabled by uiSettings.powerFeaturesEnabled.collectAsState()
     val aiFeatures = remember(aiSettings) {
         AiFeatures(AiClient { aiSettings.state.value })
@@ -348,14 +318,13 @@ fun DmChatScreen(
         }
     }
 
-    val contactMap by remember {
-        contactMapFlow(
-            db.contacts().stream(),
-            db.clubs().stream(),
-            db.groups().streamGroups(),
-            db.groups().streamChannelGroups(),
-        )
-    }.collectAsState(initial = ContactMap.EMPTY)
+    // Starts from the names the chat list already has, not from none.
+    // Built empty, every author in view is its bare @p and every
+    // avatar its fallback for the frame it takes Room to answer --
+    // which is the whole channel visibly assembling itself on the way
+    // in, for a conversation that was on screen a moment ago. The
+    // snapshot is per-ship, so a switch still starts clean.
+    val contactMap by io.nisfeb.talon.ui.rememberContactMap(db)
 
     // Current pinned-post id for this channel (chat channels only);
     // null for DMs / clubs / non-chat channels.
@@ -652,6 +621,16 @@ fun DmChatScreen(
     val onOpenThreadForMessage: (MessageEntity) -> Unit = remember {
         { m -> currentOnOpenThread(m.id) }
     }
+    val onSwipeMessage: (MessageEntity) -> Unit = remember(swipeQuotes, whom) {
+        { m ->
+            if (shouldQuoteOnSwipe(swipeQuotes, whom, m.parentId)) {
+                composerState.pendingQuote = m
+            } else {
+                io.nisfeb.talon.ui.screens.ThreadOpenIntent.reply(m.id)
+                currentOnOpenThread(m.id)
+            }
+        }
+    }
     val onMentionTap: (String) -> Unit = remember {
         { patp -> profileSheetShip = patp }
     }
@@ -697,9 +676,7 @@ fun DmChatScreen(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            IconButton(onClick = onBack) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-            }
+            io.nisfeb.talon.ui.NavIcon(onBack = onBack)
             Text(
                 contactMap.conversationLabel(whom),
                 style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
@@ -730,7 +707,7 @@ fun DmChatScreen(
                 ) {
                     IconButton(onClick = onPartyLine) {
                         Icon(
-                            Icons.Filled.Groups,
+                            TalonIcons.Groups,
                             contentDescription = if (partyPresent > 0) {
                                 "Party line — $partyPresent on the line"
                             } else {
@@ -758,7 +735,7 @@ fun DmChatScreen(
                 )
             ) {
                 IconButton(onClick = { topicsSheetOpen = true }) {
-                    Icon(Icons.Filled.Topic, contentDescription = "Topics in this chat")
+                    Icon(TalonIcons.Topic, contentDescription = "Topics in this chat")
                 }
             }
             // For group channels, the Info pane already exposes the
@@ -921,6 +898,7 @@ fun DmChatScreen(
                 },
                 onReply = {
                     actionTarget = null
+                    io.nisfeb.talon.ui.screens.ThreadOpenIntent.reply(target.id)
                     onOpenThread(target.id)
                 },
                 onQuote = {
@@ -937,6 +915,10 @@ fun DmChatScreen(
                     val md = io.nisfeb.talon.urbit.RawMarkdown
                         .fromStoryJson(target.contentJson)
                     clipboardManager.setText(AnnotatedString(md))
+                },
+                onCopyLink = {
+                    actionTarget = null
+                    clipboardManager.setText(AnnotatedString(io.nisfeb.talon.urbit.TalonLink.forMessage(target.whom, target.id, target.parentId)))
                 },
                 onToggleBookmark = {
                     actionTarget = null
@@ -1044,6 +1026,7 @@ fun DmChatScreen(
                                 messageActionMenuFor(rowMsg)
                             },
                             onOpenThread = onOpenThreadForMessage,
+                            onSwipe = onSwipeMessage,
                             onReactionTap = onReactionForMessage,
                             onReactionLongPress = { reactions ->
                                 reactionDetailsTarget = reactions
@@ -1463,6 +1446,8 @@ private fun MessageRow(
      *  (bookmark flag, pin state) don't run for every row in the list. */
     actionMenu: @Composable () -> Unit,
     onOpenThread: (MessageEntity) -> Unit,
+    /** A swipe across the row: a quote or the thread, per the setting. */
+    onSwipe: (MessageEntity) -> Unit,
     onReactionTap: (MessageEntity, List<ReactionEntity>, String) -> Unit,
     /** Long-press / right-click on any reaction chip — surfaces the
      *  per-reactor breakdown so the user can see who reacted with
@@ -1536,7 +1521,7 @@ private fun MessageRow(
                 translationX = offsetX.value
                 alpha = if (isPending) 0.55f else 1f
             }
-            // Swipe-to-open-thread is a touch gesture only. On desktop
+            // The swipe is a touch gesture only. On desktop
             // the row-level horizontal-drag detector competed with
             // child clicks — a click with a few px of horizontal drift
             // got claimed as a sub-threshold swipe and the child's
@@ -1551,7 +1536,7 @@ private fun MessageRow(
                             onDragEnd = {
                                 val fired = offsetX.value < -SWIPE_REPLY_THRESHOLD_PX
                                 offsetX.value = 0f
-                                if (fired) onOpenThread(m)
+                                if (fired) onSwipe(m)
                             },
                             onDragCancel = {
                                 offsetX.value = 0f
@@ -1601,7 +1586,7 @@ private fun MessageRow(
                     // a failed send must never be invisible.
                     if (m.status == "pending") {
                         Icon(
-                            imageVector = Icons.Filled.Schedule,
+                            imageVector = TalonIcons.Schedule,
                             contentDescription = "Sending",
                             tint = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.size(14.dp),
@@ -1629,7 +1614,7 @@ private fun MessageRow(
                     horizontalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
                     Icon(
-                        imageVector = Icons.Filled.ErrorOutline,
+                        imageVector = TalonIcons.ErrorOutline,
                         contentDescription = "Send failed",
                         tint = MaterialTheme.colorScheme.error,
                         modifier = Modifier.size(14.dp),
@@ -1799,7 +1784,7 @@ private fun PinnedPostBanner(
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Icon(
-            imageVector = Icons.Filled.PushPin,
+            imageVector = TalonIcons.PushPin,
             contentDescription = "Pinned",
             tint = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.size(14.dp),
@@ -2104,7 +2089,7 @@ private fun NotifyLevelDropdown(
         IconButton(onClick = { if (enabled) open = true }, enabled = enabled) {
             Icon(
                 imageVector = if (level == NotifyLevel.NONE)
-                    Icons.Filled.NotificationsOff
+                    TalonIcons.NotificationsOff
                 else Icons.Filled.Notifications,
                 contentDescription = "Notifications",
             )
@@ -2163,6 +2148,8 @@ private fun MessageActionMenu(
      *  use; this one is for forwarding / archiving / quoting where
      *  formatting matters. */
     onCopyMarkdown: () -> Unit,
+    /** Copy a talon:// address for the message, to paste anywhere. */
+    onCopyLink: () -> Unit,
     onToggleBookmark: () -> Unit,
     onEdit: () -> Unit,
     onDelete: () -> Unit,
@@ -2318,6 +2305,7 @@ private fun MessageActionMenu(
             }
             ActionRow(onClick = onCopy, label = "Copy text")
             ActionRow(onClick = onCopyMarkdown, label = "Copy as Markdown")
+            ActionRow(onClick = onCopyLink, label = "Copy link")
             if (canBookmark) {
                 ActionRow(
                     onClick = onToggleBookmark,
@@ -2684,3 +2672,11 @@ private fun TypingIndicator(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 2.dp),
     )
 }
+
+/**
+ * Whether a swipe quotes the message rather than opening its thread.
+ * A quote only exists for a channel's top-level posts; anywhere else
+ * the swipe opens the thread whatever the setting says.
+ */
+internal fun shouldQuoteOnSwipe(setting: Boolean, whom: String, parentId: String?): Boolean =
+    setting && whom.startsWith("chat/") && parentId == null

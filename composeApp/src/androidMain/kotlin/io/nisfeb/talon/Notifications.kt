@@ -25,9 +25,9 @@ import io.nisfeb.talon.util.Log
 object Notifications {
 
     const val CHANNEL_MESSAGES = "messages"
+    const val CHANNEL_MAIL = "mail"
     const val CHANNEL_SYNC = "sync"
     const val CHANNEL_WATCHWORDS = "watchwords"
-    const val CHANNEL_DAILY_DIGEST = "daily-digest"
     const val CHANNEL_LOOPS = "loops"
     // v2: the Ringer owns sound and vibration now, so the channel must
     // do neither. A channel's alerting cannot be changed after it is
@@ -51,6 +51,15 @@ object Notifications {
     /** One notification id for calls: only one can ring at a time. */
     private const val CALL_NOTIFICATION_ID = 0x0CA11
     private const val MISSED_CALL_NOTIFICATION_ID = 0x0CA12
+    /**
+     * Which of the user's ships this notification belongs to.
+     *
+     * Without it a tap opened the conversation under whichever ship
+     * happened to be signed in, where that whom is either somebody
+     * else's conversation or nothing at all. The relay has always sent
+     * the ship; it was only ever used as the notification's title.
+     */
+    const val EXTRA_FOR_SHIP = "for_ship"
     const val EXTRA_OPEN_WHOM = "open_whom"
     const val EXTRA_SCROLL_TO_MESSAGE = "scroll_to_message"
     /** When the notification is for a reply, the parent post id —
@@ -60,8 +69,9 @@ object Notifications {
     /** When EXTRA_OPEN_THREAD is set, the specific reply id to anchor
      *  the thread's initial scroll on. */
     const val EXTRA_THREAD_ANCHOR = "thread_anchor"
-    const val EXTRA_OPEN_DIGEST = "open_digest"
-    const val EXTRA_DIGEST_DATE = "digest_date"
+    /** Tap on a mail notification: open Mail. The thread is not named
+     *  because the listing is re-read on the way in anyway. */
+    const val EXTRA_OPEN_MAIL = "open_mail"
 
     fun ensureChannel(context: Context) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
@@ -123,6 +133,15 @@ object Notifications {
                 }
             )
         }
+        if (mgr.getNotificationChannel(CHANNEL_MAIL) == null) {
+            mgr.createNotificationChannel(
+                NotificationChannel(
+                    CHANNEL_MAIL,
+                    "Mail",
+                    NotificationManager.IMPORTANCE_DEFAULT,
+                ).apply { description = "New signed mail" },
+            )
+        }
         if (mgr.getNotificationChannel(CHANNEL_WATCHWORDS) == null) {
             mgr.createNotificationChannel(
                 NotificationChannel(
@@ -133,18 +152,6 @@ object Notifications {
                     description = "Hits on user-defined watchword terms"
                     enableLights(true)
                     enableVibration(true)
-                }
-            )
-        }
-        if (mgr.getNotificationChannel(CHANNEL_DAILY_DIGEST) == null) {
-            mgr.createNotificationChannel(
-                NotificationChannel(
-                    CHANNEL_DAILY_DIGEST,
-                    "Daily digest",
-                    NotificationManager.IMPORTANCE_DEFAULT,
-                ).apply {
-                    description = "Morning brief — fires once a day"
-                    enableLights(true)
                 }
             )
         }
@@ -384,6 +391,8 @@ object Notifications {
         context: Context,
         whom: String,
         postId: String?,
+        /** The ship this arrived for. A tap switches to it first. */
+        forShip: String? = null,
         /** Non-null when this notification is for a reply — the
          *  parent's id. Tap routes into ThreadScreen anchored on
          *  [postId] (the reply itself). */
@@ -398,6 +407,7 @@ object Notifications {
         val tapIntent = Intent(context, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
             putExtra(EXTRA_OPEN_WHOM, whom)
+            if (forShip != null) putExtra(EXTRA_FOR_SHIP, forShip)
             if (parentId != null) {
                 putExtra(EXTRA_OPEN_THREAD, parentId)
                 if (postId != null) putExtra(EXTRA_THREAD_ANCHOR, postId)
@@ -407,7 +417,10 @@ object Notifications {
         }
         val pending = PendingIntent.getActivity(
             context,
-            whom.hashCode(),
+            // The ship is part of the identity: the same whom on two
+            // ships is two conversations, and one request code would
+            // let the second notification overwrite the first's target.
+            (forShip.orEmpty() + whom).hashCode(),
             tapIntent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
@@ -425,9 +438,11 @@ object Notifications {
             .setShowWhen(true)
             .build()
 
-        // Tag = whom so new messages from the same conversation replace
-        // the previous notification rather than stacking.
-        mgr.notify(whom, NOTIFICATION_ID, notification)
+        // Tag = ship + whom so new messages from the same conversation
+        // replace the previous notification rather than stacking — and
+        // the same whom on two ships keeps two rows, matching the
+        // request code above.
+        mgr.notify(forShip.orEmpty() + whom, NOTIFICATION_ID, notification)
     }
 
     /**
@@ -440,6 +455,8 @@ object Notifications {
         whom: String,
         postId: String?,
         parentId: String? = null,
+        /** The ship this arrived for. A tap switches to it first. */
+        forShip: String? = null,
         terms: List<String>,
         label: String,
         body: String,
@@ -451,6 +468,7 @@ object Notifications {
         val tapIntent = Intent(context, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
             putExtra(EXTRA_OPEN_WHOM, whom)
+            if (forShip != null) putExtra(EXTRA_FOR_SHIP, forShip)
             if (parentId != null) {
                 putExtra(EXTRA_OPEN_THREAD, parentId)
                 if (postId != null) putExtra(EXTRA_THREAD_ANCHOR, postId)
@@ -460,7 +478,8 @@ object Notifications {
         }
         val pending = PendingIntent.getActivity(
             context,
-            ("watchword:$whom").hashCode(),
+            // The ship is part of the identity, as in showMessage.
+            ("watchword:" + forShip.orEmpty() + whom).hashCode(),
             tapIntent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
@@ -480,59 +499,48 @@ object Notifications {
             .setShowWhen(true)
             .build()
 
-        // Tag = "watchword:<whom>" so repeated hits in the same chat
-        // collapse into one row, but never collide with showMessage's
-        // <whom>-tagged notification for the same chat.
-        mgr.notify("watchword:$whom", NOTIFICATION_ID, notification)
+        // Tag = "watchword:<ship><whom>" so repeated hits in the same
+        // chat collapse into one row, but never collide with
+        // showMessage's row for the same chat — or with the same
+        // chat's watchword row on another ship.
+        mgr.notify("watchword:" + forShip.orEmpty() + whom, NOTIFICATION_ID, notification)
     }
 
     /**
-     * Daily digest notification. Tap routes into MainActivity with
-     * EXTRA_OPEN_DIGEST set; TalonApp picks it up and navigates to
-     * DailyDigestScreen for [ship] / [dateLocal].
+     * New mail. Its own channel because mail is considered
+     * correspondence and a person may reasonably want it quieter than
+     * chat, or louder, without touching the other.
      *
-     * Tag = "digest:<ship>:<dateLocal>" so re-firing the same day
-     * replaces. The notification ID is shared with the chat-message
-     * notifications because Android dedupes per (tag, id).
+     * Tag is the thread, so a thread that somehow announces twice
+     * replaces rather than stacks. The summary row ("and N more") has no
+     * thread and gets its own tag.
      */
-    fun showDailyDigest(
-        context: Context,
-        ship: String,
-        dateLocal: String,
-        title: String,
-        body: String,
-        generatedAtMs: Long,
-    ) {
+    fun showMail(context: Context, threadId: String, title: String, body: String) {
         val mgr = ContextCompat.getSystemService(context, NotificationManager::class.java)
             ?: return
-
+        ensureChannel(context)
         val tapIntent = Intent(context, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
-            putExtra(EXTRA_OPEN_DIGEST, ship)
-            putExtra(EXTRA_DIGEST_DATE, dateLocal)
+            putExtra(EXTRA_OPEN_MAIL, true)
         }
         val pending = PendingIntent.getActivity(
             context,
-            ("digest:$ship:$dateLocal").hashCode(),
+            ("mail:" + threadId).hashCode(),
             tapIntent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
-
-        val notification = NotificationCompat.Builder(context, CHANNEL_DAILY_DIGEST)
+        val notification = NotificationCompat.Builder(context, CHANNEL_MAIL)
             .setSmallIcon(R.drawable.ic_stat_talon)
             .setContentTitle(title)
             .setContentText(body)
             .setStyle(NotificationCompat.BigTextStyle().bigText(body))
             .setContentIntent(pending)
             .setAutoCancel(true)
-            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
-            .setCategory(NotificationCompat.CATEGORY_REMINDER)
-            .setWhen(generatedAtMs)
-            .setShowWhen(true)
+            .setCategory(NotificationCompat.CATEGORY_EMAIL)
             .build()
-
-        mgr.notify("digest:$ship:$dateLocal", NOTIFICATION_ID, notification)
+        mgr.notify("mail:" + threadId.ifBlank { "more" }, NOTIFICATION_ID, notification)
     }
+
 
     /**
      * Loop-result notification. One channel for all loops; tag =
@@ -580,12 +588,23 @@ object Notifications {
 
     /** Cancel all notifications associated with a chat — called when the
      *  user opens the conversation. Also cancels the watchword tag for the
-     *  same chat so both notification rows disappear together. */
-    fun cancelAllForChat(context: Context, whom: String) {
+     *  same chat so both notification rows disappear together.
+     *
+     *  Rows are tagged with the ship they were posted for, and
+     *  [forShip] is the ship the open conversation belongs to. The
+     *  bare tags are cancelled too: mail rows carry no ship, and a row
+     *  posted before the tags grew one can still be up after an
+     *  upgrade. Cancelling a tag nothing posted is a no-op. */
+    fun cancelAllForChat(context: Context, whom: String, forShip: String? = null) {
         val mgr = ContextCompat.getSystemService(context, NotificationManager::class.java)
             ?: return
-        mgr.cancel(whom, NOTIFICATION_ID)
-        mgr.cancel("watchword:$whom", NOTIFICATION_ID)
+        val tagged = forShip.orEmpty() + whom
+        mgr.cancel(tagged, NOTIFICATION_ID)
+        mgr.cancel("watchword:$tagged", NOTIFICATION_ID)
+        if (forShip != null) {
+            mgr.cancel(whom, NOTIFICATION_ID)
+            mgr.cancel("watchword:$whom", NOTIFICATION_ID)
+        }
     }
 
     private const val NOTIFICATION_ID = 1001

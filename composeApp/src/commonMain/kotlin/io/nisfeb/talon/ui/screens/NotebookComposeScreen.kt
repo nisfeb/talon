@@ -1,5 +1,8 @@
 package io.nisfeb.talon.ui.screens
 
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -61,6 +64,8 @@ fun NotebookComposeScreen(
     initialBody: String = "",
     originalSentMs: Long = 0L,
 ) {
+    val fieldFocus = remember { FocusRequester() }
+    LaunchedEffect(Unit) { runCatching { fieldFocus.requestFocus() } }
     val scope = rememberCoroutineScope()
 
     // Keep this channel "focused" while composing — the notebook list is
@@ -185,7 +190,7 @@ fun NotebookComposeScreen(
                 onValueChange = { title = it },
                 label = { Text("Title") },
                 singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth().focusRequester(fieldFocus),
             )
             Row(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),

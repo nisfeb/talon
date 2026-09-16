@@ -1,8 +1,7 @@
 package io.nisfeb.talon.ui
 
-actual val isDailyDigestSupported: Boolean = false
 actual val isVoiceMessagesSupported: Boolean = false
-actual val isQrLoginScanSupported: Boolean = false
+actual val isQrScanSupported: Boolean = false
 actual val isLocalCometSupported: Boolean = true
 // Loops run on desktop via a while-open ticker in App.kt (no
 // AlarmManager off Android): due loops fire once a minute while the
@@ -16,6 +15,8 @@ actual val isBackgroundSchedulingSupported: Boolean = false
 // the mouse drifts a few px mid-click, and edge-swipe to open the
 // ship drawer is meaningless with a mouse (the logo opens it).
 actual val isTouchSwipeNavSupported: Boolean = false
+actual val hasSoftKeyboard: Boolean = false
+actual val isDictationSupported: Boolean = false
 // Off on desktop: left-press-drag selects message text (SelectionContainer);
 // the action menu opens on right-click instead. A left-tap-to-open clickable
 // here swallows the selection drag and pops the menu on mouse-up.
@@ -77,3 +78,7 @@ actual val needsEmojiFontSpans: Boolean = true
 actual val needsManualImagePaste: Boolean = true
 actual val isImmersiveCallSupported: Boolean = false
 actual val isUrbWebViewSupported: Boolean = false
+
+/** The rail is already there, and there is no swipe to replace a back button with. */
+actual val isDrawerNavigation: Boolean = false
+actual val isTouchPrimary: Boolean = false

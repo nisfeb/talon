@@ -1,6 +1,6 @@
 package io.nisfeb.talon.urbit
 
-import io.nisfeb.talon.util.formatDecimals
+import io.nisfeb.talon.util.humanFileSize
 
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -130,12 +130,3 @@ internal fun parseCite(cite: JsonObject): CiteParse {
     )
 }
 
-private fun humanFileSize(bytes: Long): String {
-    if (bytes < 1024) return "$bytes B"
-    val kb = bytes / 1024.0
-    if (kb < 1024) return "${kb.formatDecimals(1)} KB"
-    val mb = kb / 1024.0
-    if (mb < 1024) return "${mb.formatDecimals(1)} MB"
-    val gb = mb / 1024.0
-    return "${gb.formatDecimals(1)} GB"
-}

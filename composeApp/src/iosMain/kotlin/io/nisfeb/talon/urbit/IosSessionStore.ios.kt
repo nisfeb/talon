@@ -4,7 +4,7 @@ import io.nisfeb.talon.util.IosFiles
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
-/** iOS session persistence — one JSON blob under Documents. Mirrors
+/** iOS session persistence — one JSON blob under Application Support. Mirrors
  *  DesktopSessionStore: active-ship pointer plus the saved sessions,
  *  promoting the first remaining ship when the active one is removed. */
 fun createSessionStore(): SessionStore = IosSessionStore()

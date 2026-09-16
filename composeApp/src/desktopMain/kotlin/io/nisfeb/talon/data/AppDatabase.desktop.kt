@@ -17,12 +17,12 @@ private const val TAG = "AppDatabase.desktop"
  * SQLite driver. The bundled driver ships native binaries for Linux,
  * macOS, and Windows so no system-wide SQLite install is required.
  *
- * The desktop schema-evolution story is intentionally simple right now:
- * destructive fallback only. The Android migrations encoded in
- * AppDatabase.android.kt rely on SupportSQLiteDatabase, which the
- * SQLiteConnection-based desktop driver doesn't speak. Re-introducing
- * them on desktop is a Stage F follow-up — for now, a desktop user
- * upgrading hits the destructive path and re-syncs from the ship.
+ * Schema evolution: migrations from 41 on, written against the
+ * SQLiteConnection this driver speaks (see MAIL_ROWS_MIGRATION). The
+ * Android ones before that use SupportSQLiteDatabase, which it does not,
+ * so a database older than 41 still takes the destructive path and
+ * re-syncs from the ship. Every version bump now needs a migration here
+ * and on iOS, or it wipes local notes, loops and assistant history.
  */
 actual abstract class AppDatabase : RoomDatabase() {
     actual abstract fun messages(): MessageDao
@@ -40,7 +40,6 @@ actual abstract class AppDatabase : RoomDatabase() {
     actual abstract fun embeddings(): EmbeddingDao
     actual abstract fun bookmarkFolders(): BookmarkFolderDao
     actual abstract fun watchwords(): WatchwordsDao
-    actual abstract fun dailyDigests(): DailyDigestDao
     actual abstract fun messageMedia(): MessageMediaDao
     actual abstract fun railItemPrefs(): RailItemPrefDao
     actual abstract fun dmInvites(): DmInviteDao
@@ -49,6 +48,8 @@ actual abstract class AppDatabase : RoomDatabase() {
     actual abstract fun loops(): LoopDao
     actual abstract fun loopRuns(): LoopRunDao
     actual abstract fun notes(): NotesDao
+    actual abstract fun mailRows(): MailRowDao
+    actual abstract fun calendarCache(): CalendarCacheDao
 }
 
 /**
@@ -67,11 +68,12 @@ actual abstract class AppDatabase : RoomDatabase() {
  * once. If the second build also fails, throw — at startup the
  * crash is loud and easy to debug, vs the silent backoff loop.
  */
+/** Where a ship's database lives; the eraser deletes what this names. */
+internal fun shipDbFile(shipKey: String): File =
+    File(io.nisfeb.talon.util.AppDirs.userData, "talon-port-${sanitizeShipKey(shipKey)}.db")
+
 fun createAppDatabase(shipKey: String): AppDatabase {
-    val dbFile = File(
-        io.nisfeb.talon.util.AppDirs.userData,
-        "talon-port-${sanitizeShipKey(shipKey)}.db",
-    )
+    val dbFile = shipDbFile(shipKey)
     sweepOldOrphans(dbFile.parentFile)
     return try {
         buildAndPing(dbFile)
@@ -116,6 +118,7 @@ private const val SMOKE_TEST_TIMEOUT_MS = 15_000L
 private fun buildAndPing(dbFile: File): AppDatabase {
     val db = Room.databaseBuilder<AppDatabase>(name = dbFile.absolutePath)
         .setDriver(BundledSQLiteDriver())
+        .addMigrations(MAIL_ROWS_MIGRATION, CALENDAR_ROWS_MIGRATION)
         .fallbackToDestructiveMigration(dropAllTables = true)
         .build()
     try {

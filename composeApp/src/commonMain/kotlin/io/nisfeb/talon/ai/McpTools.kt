@@ -79,12 +79,29 @@ internal fun sanitizeToolName(name: String): String {
 /** Ensure a name is unique within [used] by appending `_2`, `_3`, … —
  *  two distinct MCP names can sanitize to the same string, which would
  *  otherwise collide in the agent's name→tool map. */
-private fun uniqueToolName(base: String, used: MutableSet<String>): String {
+internal fun uniqueToolName(base: String, used: MutableSet<String>): String {
     if (used.add(base)) return base
     var i = 2
     while (true) {
         val candidate = "${base.take(60)}_$i"
         if (used.add(candidate)) return candidate
         i++
+    }
+}
+
+/** De-dup tool names across a CONCATENATED catalog (built-ins + MCP):
+ *  [mcpAgentTools] only de-dups within the MCP list, so a ship tool whose
+ *  sanitized name equals a built-in (e.g. `search_history`) would produce
+ *  two advertised specs with the same name — providers 400 the whole
+ *  request — and would shadow the built-in in [AgentLoop]'s name→tool
+ *  map. The FIRST occurrence keeps the name (callers put built-ins
+ *  first); later duplicates are renamed `_2`, `_3`, …, which keeps the
+ *  provider-required name pattern. Dispatch is unaffected: a renamed
+ *  tool keeps its own execute closure. */
+internal fun List<Tool>.dedupToolNames(): List<Tool> {
+    val used = mutableSetOf<String>()
+    return map { t ->
+        val name = uniqueToolName(t.spec.name, used)
+        if (name == t.spec.name) t else Tool(t.spec.copy(name = name), t.write, t.execute)
     }
 }

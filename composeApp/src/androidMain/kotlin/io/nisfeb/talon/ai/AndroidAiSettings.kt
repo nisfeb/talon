@@ -67,7 +67,6 @@ class AndroidAiSettings(context: Context) : AiSettingsRepository {
         editor.apply()
         _state.value = when (feature) {
             AiSettings.Feature.CatchMeUp -> _state.value.copy(catchMeUpEnabled = enabled)
-            AiSettings.Feature.DailyDigest -> _state.value.copy(dailyDigestEnabled = enabled)
             AiSettings.Feature.SmartFeatures -> _state.value.copy(smartFeaturesEnabled = enabled)
             // Unified assistant — keep the legacy askUrbit flag mirrored.
             AiSettings.Feature.Agent ->
@@ -110,7 +109,6 @@ class AndroidAiSettings(context: Context) : AiSettingsRepository {
             .putString(KEY_MODEL, config.model?.takeIf { it.isNotBlank() })
             .putString(KEY_BASE_URL, config.baseUrl?.takeIf { it.isNotBlank() })
             .putBoolean(AiSettings.Feature.CatchMeUp.key, config.catchMeUpEnabled)
-            .putBoolean(AiSettings.Feature.DailyDigest.key, config.dailyDigestEnabled)
             .putBoolean(AiSettings.Feature.SmartFeatures.key, config.smartFeaturesEnabled)
             .putBoolean(AiSettings.Feature.Agent.key, config.agentEnabled)
             // read() ORs feat_agent with the legacy key, so persist the legacy
@@ -180,7 +178,6 @@ class AndroidAiSettings(context: Context) : AiSettingsRepository {
             // Explicit-off survives because SharedPreferences only
             // returns the default when the key is absent.
             catchMeUpEnabled = prefs.getBoolean(AiSettings.Feature.CatchMeUp.key, true),
-            dailyDigestEnabled = prefs.getBoolean(AiSettings.Feature.DailyDigest.key, true),
             smartFeaturesEnabled = readSmartFeatures(),
             askUrbitEnabled = assistantOn,
             agentEnabled = assistantOn,

@@ -46,7 +46,7 @@ class DesktopFilePicker : FilePicker {
             runCatching {
                 PickedImage(
                     bytes = file.readBytes(),
-                    mimeType = mimeFromExtension(file.extension.lowercase()),
+                    mimeType = io.nisfeb.talon.ui.mimeForName(file.name),
                     displayName = file.name,
                 )
             }.onFailure {
@@ -72,7 +72,7 @@ class DesktopFilePicker : FilePicker {
                 PickedImage(
                     bytes = file.readBytes(),
                     mimeType = probedMime
-                        ?: mimeFromExtension(file.extension.lowercase()),
+                        ?: io.nisfeb.talon.ui.mimeForName(file.name),
                     displayName = file.name,
                 )
             }.onFailure {
@@ -87,13 +87,4 @@ class DesktopFilePicker : FilePicker {
     // lookup Main.kt's bring-to-front routine uses; runs on the EDT.
     private fun appFrame(): java.awt.Frame? =
         java.awt.Frame.getFrames().firstOrNull { it.title == "Talon" }
-
-    private fun mimeFromExtension(ext: String): String = when (ext) {
-        "jpg", "jpeg" -> "image/jpeg"
-        "png" -> "image/png"
-        "gif" -> "image/gif"
-        "webp" -> "image/webp"
-        "bmp" -> "image/bmp"
-        else -> "application/octet-stream"
-    }
 }

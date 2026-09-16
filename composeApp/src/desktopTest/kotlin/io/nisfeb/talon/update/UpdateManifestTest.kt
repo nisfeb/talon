@@ -108,4 +108,34 @@ class UpdateManifestTest {
         assertNull(UpdateManifest.parse("\"just a string\""))
         assertNull(UpdateManifest.parse("42"))
     }
+
+    @Test fun `desktop installers are read when listed, and absent when not`() {
+        assertEquals(emptyMap<String, UpdateAsset>(), UpdateManifest.parse(sample)!!.desktop)
+        val withDesktop = sample.replace(
+            "\"mandatory\": false",
+            "\"mandatory\": false, \"desktop\": {" +
+                "\"appimage\": {\"url\": \"https://x/Talon.AppImage\", \"sha256\": \"" + "ab".repeat(32) + "\"}," +
+                "\"deb\": {\"url\": \"http://x/t.deb\", \"sha256\": \"" + "ab".repeat(32) + "\"}," +
+                "\"msi\": {\"url\": \"https://x/t.msi\", \"sha256\": \"nope\"}}",
+        )
+        val d = UpdateManifest.parse(withDesktop)!!.desktop
+        assertEquals("http and a bad hash are dropped, not fatal", listOf("appimage"), d.keys.toList())
+        assertEquals("https://x/Talon.AppImage", d.getValue("appimage").url)
+    }
+
+    @Test fun `a device takes the split for its own ABI, and the universal APK otherwise`() {
+        val h = "ab".repeat(32)
+        val withSplits = sample.replace(
+            "\"mandatory\": false",
+            "\"mandatory\": false, \"android\": {" +
+                "\"arm64-v8a\": {\"url\": \"https://x/t-arm64-v8a.apk\", \"sha256\": \"$h\"}," +
+                "\"armeabi-v7a\": {\"url\": \"https://x/t-armeabi-v7a.apk\", \"sha256\": \"$h\"}}",
+        )
+        val m = UpdateManifest.parse(withSplits)!!
+        // A 64-bit phone lists its 64-bit ABI first.
+        assertEquals("https://x/t-arm64-v8a.apk", m.androidAssetFor(listOf("arm64-v8a", "armeabi-v7a")).url)
+        assertEquals("https://x/t-armeabi-v7a.apk", m.androidAssetFor(listOf("armeabi-v7a")).url)
+        assertEquals("no split fits: the universal one", m.url, m.androidAssetFor(listOf("x86")).url)
+        assertEquals("an old manifest", m.url, UpdateManifest.parse(sample)!!.androidAssetFor(listOf("arm64-v8a")).url)
+    }
 }

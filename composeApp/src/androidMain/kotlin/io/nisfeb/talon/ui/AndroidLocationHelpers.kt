@@ -38,11 +38,16 @@ suspend fun fetchLastKnownLocation(ctx: Context): Location? {
             val loc = lm.getLastKnownLocation(p) ?: continue
             if (best == null || loc.time > best.time) best = loc
         }
-        best ?: requestSingleUpdate(lm)
+        // A device with no fix to give never calls back; iOS's version
+        // times out inside itself, and this one now does too rather
+        // than leaving the picker's button spinning for good.
+        best ?: kotlinx.coroutines.withTimeoutOrNull(FIX_TIMEOUT_MS) { requestSingleUpdate(lm) }
     } catch (_: SecurityException) {
         null
     }
 }
+
+private const val FIX_TIMEOUT_MS = 20_000L
 
 private suspend fun requestSingleUpdate(lm: LocationManager): Location? =
     suspendCancellableCoroutine { cont ->

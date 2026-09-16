@@ -1,0 +1,1581 @@
+package io.nisfeb.talon.ui.screens
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.MailOutline
+import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.zIndex
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import io.nisfeb.talon.data.AppDatabase
+import io.nisfeb.talon.mail.MailAvailability
+import io.nisfeb.talon.mail.MailRepo
+import androidx.compose.material.icons.filled.Edit
+import kotlinx.coroutines.launch
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.draw.clip
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.foundation.shape.CircleShape
+import io.nisfeb.talon.calendar.CalendarAvailability
+import io.nisfeb.talon.calendar.CalendarRepo
+import io.nisfeb.talon.calendar.CalendarRow
+import io.nisfeb.talon.calendar.agenda
+import io.nisfeb.talon.calendar.bounds
+import io.nisfeb.talon.calendar.tasksInRange
+import io.nisfeb.talon.calendar.dueDate
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import io.nisfeb.talon.ui.CalendarRange
+import io.nisfeb.talon.ui.HOME_COUNTS
+import io.nisfeb.talon.ui.HOME_COLUMNS
+import io.nisfeb.talon.ui.HomeLayout
+import io.nisfeb.talon.ui.HomePlace
+import io.nisfeb.talon.ui.HomeWidget
+import io.nisfeb.talon.ui.HomeWidgetKind
+import io.nisfeb.talon.ui.droppedAt
+import io.nisfeb.talon.ui.keepEdgeGesture
+import io.nisfeb.talon.ui.resizedRows
+import io.nisfeb.talon.ui.square
+import io.nisfeb.talon.ui.squareSpan
+import io.nisfeb.talon.ui.resizedSpan
+import io.nisfeb.talon.ui.SkyClock
+import io.nisfeb.talon.ui.Solar
+import kotlinx.coroutines.delay
+import kotlinx.datetime.Instant
+import kotlinx.datetime.LocalDateTime
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.plus
+import kotlinx.datetime.atTime
+import kotlinx.datetime.DateTimeUnit
+import kotlinx.datetime.format.MonthNames
+import kotlinx.datetime.offsetAt
+import kotlinx.datetime.toLocalDateTime
+import io.nisfeb.talon.ui.ContactMap
+import io.nisfeb.talon.ui.shortRelativeTime
+import io.nisfeb.talon.urbit.StoryCache
+import io.nisfeb.talon.util.nowMs
+import io.nisfeb.talon.ui.icons.TalonIcons
+
+/**
+ * The home page.
+ *
+ * Widgets, each a door rather than a destination: the chats that moved
+ * most recently, the newest mail, the time and weather, today's
+ * calendar, who is up to what. None tries to be the surface it points
+ * at — a handful of rows and a way through is the whole job.
+ *
+ * Which of them appear, and how many rows each carries, is set in
+ * Settings under Home. Where they sit and how big they are is set
+ * here: a long press on any of them starts arranging, after which
+ * they can be dragged about and pulled by their corners.
+ *
+ * The calendar is still a placeholder. It is drawn as what it is, so
+ * the page reads as a page rather than as most of one, and so the seam
+ * it drops into is obvious.
+ */
+@Composable
+fun HomeScreen(
+    db: AppDatabase,
+    mail: MailRepo?,
+    /** The ship's calendar, or null where the host wires none. */
+    calendar: CalendarRepo? = null,
+    /** Opens the calendar's own page, where events are made. */
+    onOpenCalendar: (() -> Unit)? = null,
+    /** Installs the calendar desk on the ship, where it is missing. */
+    onInstallCalendar: (suspend () -> Result<Unit>)? = null,
+    /** Opens the assistant; true asks it to start listening. Null
+     *  where the assistant is off, and the widget says how to turn it on. */
+    onOpenAssistant: ((listen: Boolean) -> Unit)? = null,
+    contacts: ContactMap,
+    ourShip: String,
+    /** Where the dial thinks you are, or null before anyone has said. */
+    place: HomePlace? = null,
+    /**
+     * Today's weather, or null before anything has fetched it.
+     *
+     * Passed in rather than fetched here. This screen is torn down
+     * every time somebody looks at their messages, so state kept
+     * inside it comes back empty: the dial would redraw with no
+     * weather, then pop when the answer arrived. It lives above the
+     * navigation instead, and comes back ready.
+     */
+    weather: SkyClock.Sky? = null,
+    /** Ask the device where it is. Null where it cannot say, which is
+     *  desktop and a refused permission alike. */
+    onUseDeviceLocation: (suspend () -> Result<HomePlace>)? = null,
+    /** Turn a typed place into coordinates, or null for coordinates only. */
+    placeLookup: io.nisfeb.talon.ui.PlaceLookup? = null,
+    onPlacePicked: (HomePlace) -> Unit = {},
+    /** How the dial reads out. Set in Settings, under Home. */
+    fahrenheit: Boolean = true,
+    twentyFourHour: Boolean = false,
+    /** Which widgets, in what order, at what size. */
+    layout: HomeLayout = HomeLayout.DEFAULT,
+    /** Called when the page is rearranged from the page itself. */
+    onLayoutChanged: (HomeLayout) -> Unit = {},
+    /** Statuses, for the status widget. */
+    statuses: List<io.nisfeb.talon.data.ContactEntity> = emptyList(),
+    onOpenContact: (ship: String) -> Unit = {},
+    onOpenStatuses: () -> Unit = {},
+    /** Group flags awaiting an answer, for the things-waiting-on-you
+     *  widget. Empty where the host has not wired invitations. */
+    invites: List<String> = emptyList(),
+    onOpenInvites: () -> Unit = {},
+    onOpenConversation: (whom: String) -> Unit,
+    onOpenChats: () -> Unit,
+    onOpenMailThread: (threadId: String) -> Unit,
+    onOpenMail: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val latest by remember(db) { db.messages().conversationLatest() }
+        .collectAsState(initial = emptyList())
+    val unreads by remember(db) { db.unreads().stream() }
+        .collectAsState(initial = emptyList())
+
+    val recent = remember(latest) { latest.take(HOME_COUNTS.last()) }
+    val unreadBy = remember(unreads) { unreads.associateBy { it.whom } }
+
+    var editing by remember { mutableStateOf(false) }
+
+    // The greeting changes four times a day, so a minute is plenty.
+    // On the place's own clock, like the dial: a page set to somewhere
+    // else should not wish you good morning at their midnight.
+    var greetingTick by remember { mutableStateOf(nowMs()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(60_000)
+            greetingTick = nowMs()
+        }
+    }
+    // A derived value rather than a keyed remember: the minute-floor
+    // is the intent, and only a change in it redraws the greeting.
+    val greetingMinute by derivedStateOf {
+        val zone = zoneFor(place?.timeZoneId ?: weather?.zoneId)
+        val local = Instant.fromEpochMilliseconds(greetingTick).toLocalDateTime(zone)
+        local.hour * 60 + local.minute
+    }
+    var drag by remember { mutableStateOf<Drag?>(null) }
+
+    // Gesture modifiers keep whatever lambda they were made with. Keyed
+    // on the layout they would restart on every change and drop the
+    // drag; captured plainly they would go on reading a stale layout.
+    val put by rememberUpdatedState<(HomeWidgetKind, Int, Int) -> Unit> { kind, col, row ->
+        onLayoutChanged(layout.placed(kind, col, row))
+    }
+    val resizeTo by rememberUpdatedState<(HomeWidget) -> Unit> { w ->
+        onLayoutChanged(layout.with(w))
+    }
+
+    BoxWithConstraints(modifier.fillMaxSize()) {
+        val placedWidgets = remember(layout) {
+            layout.shown.sortedWith(compareBy({ it.row }, { it.col }))
+        }
+        val guideBand = MaterialTheme.colorScheme.primary.copy(alpha = 0.030f)
+        val guideLine = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.20f)
+        // Worked out from the width the page already has rather than
+        // reported back out of the layout pass. Set from inside measure
+        // it was still zero when a drag read it, and a column pitch of
+        // zero is a widget that cannot be moved sideways at all.
+        val density = LocalDensity.current
+        val rowPitch = with(density) { HOME_ROW_UNIT.toPx() }
+        val colPitch = with(density) {
+            val inner = maxWidth - PAGE_PADDING * 2
+            ((inner - GRID_GAP * (HOME_COLUMNS - 1)) / HOME_COLUMNS + GRID_GAP).toPx()
+        }
+        // Held rather than captured, for the same reason as everything
+        // else a gesture reads: pointerInput keeps whatever it was
+        // given when the node was made.
+        val pitch = rememberUpdatedState(colPitch to rowPitch)
+
+        Column(
+            Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(PAGE_PADDING),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                // Home had no way out but the back gesture, which is
+                // the one screen where that matters most: it is where
+                // the menu sends people first.
+                io.nisfeb.talon.ui.NavIcon(onBack = null)
+                Text(
+                    greeting(ourShip, contacts, greetingMinute),
+                    style = MaterialTheme.typography.headlineSmall
+                        .copy(fontWeight = FontWeight.SemiBold),
+                    modifier = Modifier.weight(1f),
+                )
+                // No Arrange button. A long press on any widget starts
+                // it, which is the gesture people already try on a page
+                // of tiles.
+                if (editing) {
+                    TextButton(onClick = { editing = false }) { Text("Done") }
+                }
+            }
+
+            if (layout.shown.isEmpty()) {
+                Text(
+                    "Nothing on the home page. Settings, under Home, has the list.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+
+            HomeGrid(
+                widgets = placedWidgets,
+                gap = GRID_GAP,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    // One lattice over the whole page now, because every
+                    // widget sits on the same grid rather than in a row
+                    // of its own working out.
+                    .then(
+                        if (!editing) Modifier else Modifier.drawWithContent {
+                            drawContent()
+                            val gap = GRID_GAP.toPx()
+                            val colWidth = (size.width - gap * (HOME_COLUMNS - 1)) / HOME_COLUMNS
+                            for (i in 0 until HOME_COLUMNS) {
+                                drawRect(
+                                    color = guideBand,
+                                    topLeft = Offset(i * (colWidth + gap), 0f),
+                                    size = Size(colWidth, size.height),
+                                )
+                            }
+                            var y = rowPitch
+                            while (y < size.height) {
+                                drawLine(
+                                    color = guideLine,
+                                    start = Offset(0f, y),
+                                    end = Offset(size.width, y),
+                                    strokeWidth = 1f,
+                                )
+                                y += rowPitch
+                            }
+                        }
+                    ),
+            ) { widget ->
+                // The widget as it is drawn, and the widget as it is
+                // stored. On a narrow window they differ: everything is
+                // laid out full width in reading order, and editing has
+                // to write to what is stored or a phone would flatten
+                // the arrangement made on a desktop.
+                val real by rememberUpdatedState(layout[widget.kind])
+                val held = drag?.kind == widget.kind
+                // Overlapping is allowed, so it has to be visible.
+                // Nothing gets moved out of the way any more, and two
+                // widgets silently stacked would read as one missing.
+                val clashes = editing && !held && placedWidgets.any {
+                    it.kind != widget.kind && io.nisfeb.talon.ui.overlaps(it, widget)
+                }
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        .zIndex(if (held) 1f else 0f)
+                        .graphicsLayer {
+                            drag?.takeIf { it.kind == widget.kind }?.let {
+                                translationX = it.by.x
+                                translationY = it.by.y
+                                scaleX = 1.02f
+                                scaleY = 1.02f
+                            }
+                        }
+                        .then(
+                            if (editing) Modifier else Modifier.pointerInput(Unit) {
+                                detectTapGestures(onLongPress = { editing = true })
+                            }
+                        )
+                        .then(
+                            if (!editing) Modifier else Modifier.border(
+                                width = 1.dp,
+                                color = when {
+                                    held -> MaterialTheme.colorScheme.primary
+                                    clashes -> MaterialTheme.colorScheme.error
+                                    else -> MaterialTheme.colorScheme.outlineVariant
+                                },
+                                shape = RoundedCornerShape(10.dp),
+                            )
+                        ),
+                ) {
+                    WidgetBody(
+                        widget = widget,
+                        recent = recent,
+                        unreadBy = unreadBy,
+                        contacts = contacts,
+                        ourShip = ourShip,
+                        mail = mail,
+                        calendar = calendar,
+                        onOpenCalendar = onOpenCalendar,
+                        onInstallCalendar = onInstallCalendar,
+                        onOpenAssistant = onOpenAssistant,
+                        statuses = statuses,
+                        place = place,
+                        weather = weather,
+                        fahrenheit = fahrenheit,
+                        twentyFourHour = twentyFourHour,
+                        onUseDeviceLocation = onUseDeviceLocation,
+                        placeLookup = placeLookup,
+                        onPlacePicked = onPlacePicked,
+                        onOpenConversation = onOpenConversation,
+                        onOpenChats = onOpenChats,
+                        onOpenMailThread = onOpenMailThread,
+                        onOpenMail = onOpenMail,
+                        onOpenContact = onOpenContact,
+                        onOpenStatuses = onOpenStatuses,
+                        invites = invites,
+                        onOpenInvites = onOpenInvites,
+                        onLongPress = { editing = true },
+                    )
+
+                    if (editing) {
+                        // The move surface sits over the whole widget
+                        // and the grips sit over that. Overlapping
+                        // siblings hit-test topmost first, so a grip
+                        // takes the pointer outright rather than racing
+                        // the move gesture for it.
+                        Box(
+                            Modifier
+                                .matchParentSize()
+                                // Keyed on the widget alone. Keyed on
+                                // the layout it would be torn down and
+                                // rebuilt on every step of the drag
+                                // that changed it, which is to say on
+                                // every step that worked.
+                                .pointerInput(widget.kind) {
+                                    detectDragGestures(
+                                        onDragStart = { drag = Drag(widget.kind, real.col, real.row) },
+                                        onDragEnd = { drag = null },
+                                        onDragCancel = { drag = null },
+                                    ) { change, delta ->
+                                        change.consume()
+                                        val d = drag?.let { it.copy(by = it.by + delta) }
+                                            ?: return@detectDragGestures
+                                        drag = d
+                                        val (c, r) = droppedAt(
+                                            startCol = d.col,
+                                            startRow = d.row,
+                                            dragXPx = d.by.x,
+                                            dragYPx = d.by.y,
+                                            colPitchPx = pitch.value.first,
+                                            rowPitchPx = pitch.value.second,
+                                        )
+                                        if (c != real.col || r != real.row) {
+                                            put(widget.kind, c, r)
+                                            // It has just been moved to
+                                            // where the pointer is, so
+                                            // the offset and the origin
+                                            // both start again there.
+                                            drag = Drag(widget.kind, c, r)
+                                        }
+                                    }
+                                },
+                        )
+                        if (!held) {
+                            ResizeHandles(
+                                widget = real,
+                                cellWidthPx = colPitch,
+                                onResize = resizeTo,
+                                onRemove = { resizeTo(real.copy(visible = false)) },
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * The widgets, each at its own coordinates.
+ *
+ * A plain layout rather than rows of weights, so the page can be told
+ * where to put a widget and it stays put.
+ */
+@Composable
+private fun HomeGrid(
+    widgets: List<HomeWidget>,
+    gap: androidx.compose.ui.unit.Dp,
+    modifier: Modifier = Modifier,
+    cell: @Composable (HomeWidget) -> Unit,
+) {
+    androidx.compose.ui.layout.Layout(
+        modifier = modifier,
+        content = { widgets.forEach { w -> key(w.kind) { cell(w) } } },
+    ) { measurables, constraints ->
+        val gapPx = gap.roundToPx()
+        val unitPx = HOME_ROW_UNIT.roundToPx()
+        val width = constraints.maxWidth
+        val colWidth = (width - gapPx * (HOME_COLUMNS - 1)).toFloat() / HOME_COLUMNS
+
+        val placeables = measurables.mapIndexed { i, m ->
+            val w = widgets[i]
+            val cellW = (w.span * colWidth + (w.span - 1) * gapPx).toInt().coerceAtLeast(0)
+            // A gap's worth is left below each widget, so the
+            // spacing comes out of the grid rather than being
+            // added on top of it and pushing every row out of
+            // step with the guides.
+            val cellH = (w.rows * unitPx - gapPx).coerceAtLeast(0)
+            // A square widget is as wide as it is tall, whatever its
+            // columns come to on this window.
+            val side = minOf(cellW, cellH)
+            m.measure(
+                androidx.compose.ui.unit.Constraints.fixed(
+                    width = if (w.kind.square) side else cellW,
+                    height = if (w.kind.square) side else cellH,
+                ),
+            )
+        }
+        val height = widgets.maxOfOrNull { it.bottom * unitPx } ?: 0
+        layout(width, height.coerceAtLeast(0)) {
+            placeables.forEachIndexed { i, p ->
+                val w = widgets[i]
+                p.place((w.col * (colWidth + gapPx)).toInt(), w.row * unitPx)
+            }
+        }
+    }
+}
+
+
+/**
+ * One grid row's worth of height.
+ *
+ * Small, because it is the size of the step rather than the size of a
+ * widget: at 168dp the only heights on offer were 168, 336 and 504,
+ * and nothing anybody wanted sat on one of them.
+ */
+private val HOME_ROW_UNIT = io.nisfeb.talon.ui.HOME_ROW_UNIT_DP.dp
+
+/** The space between two widgets. Named because the grid guides have
+ *  to subtract exactly the same gaps the layout adds. */
+private val GRID_GAP = 14.dp
+
+/** And the page's own margin, for the same reason: the drag has to
+ *  work out a column's width from the space the grid actually gets. */
+private val PAGE_PADDING = 16.dp
+
+/** The most the clock panel spends on padding and its location line,
+ *  above and below the dial itself. */
+private val DIAL_CHROME = 34.dp
+
+/** And the most of a short widget it may take. A flat allowance ate
+ *  nearly the whole of the smallest cell, which is what left the
+ *  smallest dial a dot and made the next one look twice its size. */
+private const val DIAL_CHROME_SHARE = 0.22f
+
+/**
+ * How big the dial may be in a clock widget [rows] units tall.
+ *
+ * The dial is square, so its width is what sets the widget's height.
+ * Left to fill whatever width it had, it ignored the height entirely
+ * and the clock drew the same at two row units as at six.
+ *
+ * No floor and no ceiling. Both were fictions: the dial is also bound
+ * by the width the window gives it, which slides continuously as the
+ * window is dragged, so it was already being drawn at sizes arranging
+ * refused to offer. The readout inside thins out to suit whatever size
+ * it ends up at, which is what a floor was standing in for.
+ */
+internal fun dialSizeFor(rows: Int): androidx.compose.ui.unit.Dp {
+    // The grid leaves a gap's worth below each cell, and the panel pads
+    // six dip top and bottom; both come out of the cell before the dial
+    // does, or the dial and the line under it clip at small row counts.
+    val cell = HOME_ROW_UNIT * rows - GRID_GAP - 12.dp
+    // Proportional while the cell is short, fixed once there is room.
+    // Taken flat it was most of the smallest cell, so the dial began
+    // near nothing and one row unit of drag nearly doubled it: a step
+    // of ninety per cent where the cell itself grew by thirty.
+    val chrome = minOf(DIAL_CHROME, cell * DIAL_CHROME_SHARE)
+    return (cell - chrome).coerceAtLeast(0.dp)
+}
+
+/** How big a handle has to be to be hit with a thumb. */
+private val HANDLE = 26.dp
+
+/**
+ * The grips on a widget's edges while the page is being arranged.
+ *
+ * A right edge for width, a bottom edge for height, a corner for both,
+ * and a cross to take the thing off the page. Dragging the widget
+ * itself moves it; these only resize, which is why they sit on the
+ * edges where nothing else wants the pointer.
+ *
+ * Each snaps to whole grid units. The grid is two columns by three
+ * rows, so a handle that followed the finger continuously would only
+ * ever be settling back onto one of a handful of positions.
+ */
+@Composable
+private fun BoxScope.ResizeHandles(
+    widget: HomeWidget,
+    cellWidthPx: Float,
+    onResize: (HomeWidget) -> Unit,
+    onRemove: () -> Unit,
+) {
+    val rowUnitPx = with(LocalDensity.current) { HOME_ROW_UNIT.toPx() }
+    val grip = MaterialTheme.colorScheme.primary
+    // Every pixel of drag reports a size; most of them the size it
+    // already is, which is not worth a layout write.
+    fun resize(w: HomeWidget) { if (w != widget) onResize(w) }
+
+    // The size the widget was when this drag began.
+    //
+    // Load-bearing. The running total is measured from where the
+    // pointer went down, so it has to be added to the size the widget
+    // had at that moment. Adding it to the *current* size instead
+    // compounds: cross the first snap point and the widget grows a
+    // column, which becomes the new base, so the same total then reads
+    // as another column, and another. A mouse moved one column wide
+    // sent the widget clear across the grid.
+    var startSpan by remember { mutableStateOf(widget.span) }
+    var startRows by remember { mutableStateOf(widget.rows) }
+    var startCell by remember { mutableStateOf(cellWidthPx) }
+    fun freeze() {
+        startSpan = widget.span
+        startRows = widget.rows
+        // Frozen too, because it is derived from the widget's own width
+        // and would otherwise shift under the drag that is changing it.
+        startCell = cellWidthPx
+    }
+
+    // A square widget has no width of its own: its height sets both, and
+    // it holds just the columns that height covers.
+    val square = widget.kind.square
+    fun squared(rows: Int) = widget.copy(rows = rows, span = squareSpan(rows, rowUnitPx, startCell))
+    if (!square) {
+        Grip(
+            Modifier.align(Alignment.CenterEnd),
+            grip,
+            label = "Width of ${title(widget.kind)}",
+            onStart = ::freeze,
+        ) { total ->
+            resize(widget.copy(span = resizedSpan(startSpan, total.x, startCell, HOME_COLUMNS)))
+        }
+    }
+    Grip(
+        Modifier.align(Alignment.BottomCenter),
+        grip,
+        label = "Height of ${title(widget.kind)}",
+        onStart = ::freeze,
+    ) { total ->
+        val rows = resizedRows(startRows, total.y, rowUnitPx)
+        resize(if (square) squared(rows) else widget.copy(rows = rows))
+    }
+    Grip(
+        Modifier.align(Alignment.BottomEnd),
+        grip,
+        corner = true,
+        label = "Size of ${title(widget.kind)}",
+        onStart = ::freeze,
+    ) { total ->
+        if (square) {
+            // Whichever way the corner went further sets the side.
+            val by = if (kotlin.math.abs(total.x) > kotlin.math.abs(total.y)) total.x else total.y
+            resize(squared(resizedRows(startRows, by, rowUnitPx)))
+        } else {
+            resize(
+                widget.copy(
+                    span = resizedSpan(startSpan, total.x, startCell, HOME_COLUMNS),
+                    rows = resizedRows(startRows, total.y, rowUnitPx),
+                ),
+            )
+        }
+    }
+
+    IconButton(
+        onClick = onRemove,
+        modifier = Modifier.align(Alignment.TopEnd).size(HANDLE),
+    ) {
+        Icon(
+            Icons.Filled.Close,
+            contentDescription = "Take ${title(widget.kind)} off the home page",
+            modifier = Modifier.size(16.dp),
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+/**
+ * A widget on the move: which, where it was when the pointer went
+ * down, and how far the pointer has gone since. The offset is measured
+ * from where it started, so the two travel together.
+ */
+private data class Drag(
+    val kind: HomeWidgetKind,
+    val col: Int,
+    val row: Int,
+    val by: Offset = Offset.Zero,
+)
+
+/**
+ * One grip.
+ *
+ * The drag is reported as a running total from where the pointer went
+ * down, and [onStart] is where the caller notes the size to add it to.
+ * Both halves matter: a per-frame delta would ratchet the widget
+ * across the grid on a few pixels of jitter, and a running total added
+ * to a size that is itself changing compounds every snap.
+ *
+ * [onDrag] is held through rememberUpdatedState because pointerInput
+ * keeps whatever lambda it was given when the node was made.
+ */
+@Composable
+private fun Grip(
+    modifier: Modifier,
+    color: androidx.compose.ui.graphics.Color,
+    label: String,
+    corner: Boolean = false,
+    onStart: () -> Unit = {},
+    onDrag: (Offset) -> Unit,
+) {
+    val current by rememberUpdatedState(onDrag)
+    val began by rememberUpdatedState(onStart)
+    Box(
+        modifier
+            .size(HANDLE)
+            // A grip on a widget flush against the side of a phone
+            // sits in the strip the system keeps for its back swipe,
+            // which makes it a grip that leaves the app instead of
+            // being dragged.
+            .keepEdgeGesture()
+            .semantics { contentDescription = label }
+            .pointerInput(Unit) {
+                var total = Offset.Zero
+                detectDragGestures(
+                    onDragStart = { total = Offset.Zero; began() },
+                    onDragEnd = { total = Offset.Zero },
+                    onDragCancel = { total = Offset.Zero },
+                ) { change, delta ->
+                    change.consume()
+                    total += delta
+                    current(total)
+                }
+            },
+        contentAlignment = Alignment.Center,
+    ) {
+        Box(
+            Modifier
+                .size(if (corner) 14.dp else 10.dp)
+                .background(color, RoundedCornerShape(3.dp)),
+        )
+    }
+}
+
+/** What each widget is called, wherever one needs naming. */
+fun title(kind: HomeWidgetKind): String = when (kind) {
+    HomeWidgetKind.CLOCK -> "Clock and weather"
+    HomeWidgetKind.NEEDS -> "New"
+    HomeWidgetKind.MESSAGES -> "Chat"
+    HomeWidgetKind.MAIL -> "Mail"
+    HomeWidgetKind.CALENDAR -> "Today"
+    HomeWidgetKind.STATUS -> "Statuses"
+    HomeWidgetKind.ASSISTANT -> "Assistant"
+}
+
+@Composable
+private fun WidgetBody(
+    widget: HomeWidget,
+    recent: List<io.nisfeb.talon.data.MessageEntity>,
+    unreadBy: Map<String, io.nisfeb.talon.data.UnreadEntity>,
+    contacts: ContactMap,
+    ourShip: String,
+    mail: MailRepo?,
+    calendar: CalendarRepo?,
+    onOpenCalendar: (() -> Unit)?,
+    onInstallCalendar: (suspend () -> Result<Unit>)?,
+    onOpenAssistant: ((Boolean) -> Unit)?,
+    statuses: List<io.nisfeb.talon.data.ContactEntity>,
+    place: HomePlace?,
+    weather: SkyClock.Sky?,
+    fahrenheit: Boolean,
+    twentyFourHour: Boolean,
+    onUseDeviceLocation: (suspend () -> Result<HomePlace>)?,
+    placeLookup: io.nisfeb.talon.ui.PlaceLookup?,
+    onPlacePicked: (HomePlace) -> Unit,
+    onOpenConversation: (String) -> Unit,
+    onOpenChats: () -> Unit,
+    onOpenMailThread: (String) -> Unit,
+    onOpenMail: () -> Unit,
+    onOpenContact: (String) -> Unit,
+    onOpenStatuses: () -> Unit,
+    invites: List<String>,
+    onOpenInvites: () -> Unit,
+    onLongPress: () -> Unit,
+) {
+    when (widget.kind) {
+        HomeWidgetKind.NEEDS -> NewPanel(
+            recent, unreadBy, mail, invites, contacts, ourShip, widget,
+            onOpenConversation, onOpenMailThread, onOpenInvites, onLongPress,
+        )
+        HomeWidgetKind.CLOCK -> ClockWeatherPanel(
+            dialSizeFor(widget.rows),
+            place, weather, onUseDeviceLocation, placeLookup, onPlacePicked,
+            fahrenheit, twentyFourHour,
+        )
+        HomeWidgetKind.MESSAGES -> ChatsPanel(
+            recent.take(widget.count), unreadBy, contacts, ourShip,
+            onOpenConversation, onOpenChats, onLongPress,
+        )
+        HomeWidgetKind.MAIL -> MailPanel(
+            mail, contacts, ourShip, widget.count, onOpenMailThread, onOpenMail, onLongPress,
+        )
+        HomeWidgetKind.CALENDAR -> CalendarPanel(
+            calendar, widget.calendarRange, twentyFourHour, onOpenCalendar, onInstallCalendar, onLongPress,
+        )
+        HomeWidgetKind.ASSISTANT -> AssistantPanel(onOpenAssistant, onLongPress)
+        HomeWidgetKind.STATUS -> StatusPanel(
+            statuses, contacts, ourShip, widget, onOpenContact, onOpenStatuses, onLongPress,
+        )
+    }
+}
+
+private fun greeting(ourShip: String, contacts: ContactMap, minuteOfDay: Int): String {
+    val who = contacts.displayName(ourShip).takeIf { it.isNotBlank() && ourShip.isNotBlank() }
+    val hello = timeOfDayGreeting(minuteOfDay)
+    return if (who == null) hello else "$hello, $who"
+}
+
+/**
+ * Morning, afternoon, evening or night, by the clock the dial runs on.
+ *
+ * The boundaries are where people put them rather than where a quarter
+ * of the day falls: morning starts when somebody might be up and ends
+ * at noon, evening starts at five, and the small hours get their own
+ * because "good evening" at three in the morning reads as a machine
+ * that has not looked at the time.
+ */
+internal fun timeOfDayGreeting(minuteOfDay: Int): String {
+    val hour = minuteOfDay.mod(1440) / 60
+    return when (hour) {
+        in 5..11 -> "Good morning"
+        in 12..16 -> "Good afternoon"
+        in 17..21 -> "Good evening"
+        else -> "Good night"
+    }
+}
+
+// ---- panels ------------------------------------------------------------
+
+@Composable
+private fun Panel(
+    title: String,
+    icon: ImageVector,
+    action: Pair<String, () -> Unit>? = null,
+    /** Let the rows run past the widget's height and be scrolled to.
+     *  The grid measures every widget at a fixed height, so the body is
+     *  bounded and its scroll nests inside the page's own. */
+    scrollable: Boolean = false,
+    content: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit,
+) {
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.30f),
+        shape = RoundedCornerShape(10.dp),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(Modifier.padding(vertical = 10.dp)) {
+            Row(
+                Modifier.fillMaxWidth().padding(start = 14.dp, end = 6.dp, bottom = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    icon,
+                    contentDescription = null,
+                    modifier = Modifier.size(16.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    title,
+                    style = MaterialTheme.typography.labelLarge
+                        .copy(fontWeight = FontWeight.SemiBold),
+                    modifier = Modifier.weight(1f),
+                )
+                if (action != null) {
+                    TextButton(onClick = action.second) {
+                        Text(action.first, style = MaterialTheme.typography.labelMedium)
+                    }
+                }
+            }
+            HorizontalDivider(
+                Modifier.padding(horizontal = 14.dp),
+                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
+            )
+            val body = if (!scrollable) {
+                Modifier.padding(top = 2.dp)
+            } else {
+                // fill = false so a short list still sits at the top
+                // rather than being stretched down the whole widget.
+                Modifier.weight(1f, fill = false).padding(top = 2.dp).verticalScroll(rememberScrollState())
+            }
+            Column(body) { content() }
+        }
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun QuickRow(
+    title: String,
+    line: String,
+    at: Long,
+    strong: Boolean,
+    onClick: () -> Unit,
+    onLongPress: () -> Unit,
+) {
+    Column(
+        Modifier
+            .fillMaxWidth()
+            // Combined rather than a long-press detector over the top:
+            // a plain clickable fires its click on release no matter
+            // how long it was held, so a long press on a row would
+            // arrange the page and then walk off it.
+            .combinedClickable(onClick = onClick, onLongClick = onLongPress)
+            .padding(horizontal = 14.dp, vertical = 6.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                title,
+                style = MaterialTheme.typography.bodySmall.copy(
+                    fontWeight = if (strong) FontWeight.SemiBold else FontWeight.Normal,
+                ),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+            if (at > 0) {
+                Text(
+                    shortRelativeTime(at, nowMs()),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        if (line.isNotBlank()) {
+            Text(
+                line,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
+@Composable
+private fun Empty(text: String) {
+    Text(
+        text,
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+    )
+}
+
+@Composable
+private fun ChatsPanel(
+    recent: List<io.nisfeb.talon.data.MessageEntity>,
+    unreadBy: Map<String, io.nisfeb.talon.data.UnreadEntity>,
+    contacts: ContactMap,
+    ourShip: String,
+    onOpen: (String) -> Unit,
+    onAll: () -> Unit,
+    onLongPress: () -> Unit,
+) {
+    Panel(title(HomeWidgetKind.MESSAGES), TalonIcons.Chat, "All chats" to onAll) {
+        if (recent.isEmpty()) {
+            Empty("Nothing yet.")
+        } else {
+            recent.forEach { m ->
+                val unread = (unreadBy[m.whom]?.count ?: 0) > 0
+                QuickRow(
+                    title = contacts.conversationLabel(m.whom),
+                    line = preview(m, contacts, ourShip),
+                    at = m.sentMs,
+                    strong = unread,
+                    onClick = { onOpen(m.whom) },
+                    onLongPress = onLongPress,
+                )
+            }
+        }
+    }
+}
+
+private fun preview(
+    m: io.nisfeb.talon.data.MessageEntity,
+    contacts: ContactMap,
+    ourShip: String,
+): String {
+    val body = StoryCache.previewFor(m)
+    val who = if (m.author == ourShip) "You" else contacts.displayName(m.author)
+    return if (body.isBlank()) who else "$who: $body"
+}
+
+@Composable
+private fun MailPanel(
+    mail: MailRepo?,
+    contacts: ContactMap,
+    ourShip: String,
+    count: Int,
+    onOpen: (String) -> Unit,
+    onAll: () -> Unit,
+    onLongPress: () -> Unit,
+) {
+    // Null where the host wires no mailbox at all; PRESENT is the ship
+    // actually having the app. Anything else and the panel says so
+    // rather than sitting empty as though there were no mail.
+    val availability = mail?.availability?.collectAsState()?.value
+    val page = mail?.page?.collectAsState()?.value
+    Panel("Mail", Icons.Filled.MailOutline, ("Inbox" to onAll).takeIf { mail != null }) {
+        when {
+            mail == null || availability == MailAvailability.NO_GRUBBERY ||
+                availability == MailAvailability.OLD_GRUBBERY ->
+                Empty("This ship has no mail app yet.")
+
+            availability == MailAvailability.SIGNED_OUT -> Empty("Signed out of the ship.")
+
+            page == null -> Empty("Looking…")
+
+            page.threads.isEmpty() -> Empty("No mail.")
+
+            else -> page.threads.take(count).forEach { row ->
+                QuickRow(
+                    title = mailPeople(row, ourShip) { contacts.displayName(it) },
+                    line = row.subject.ifBlank { "(no subject)" },
+                    at = row.last,
+                    strong = row.unread,
+                    onClick = { onOpen(row.id) },
+                    onLongPress = onLongPress,
+                )
+            }
+        }
+    }
+}
+
+/**
+ * The time and the day's shape, which is the page's centrepiece.
+ *
+ * Ticks every ten seconds rather than every second: the dial shows
+ * minutes, and waking the composition sixty times a minute to redraw
+ * the same picture is how a page somebody leaves open all day becomes
+ * a page that costs them battery all day.
+ */
+@Composable
+private fun ClockWeatherPanel(
+    maxDial: androidx.compose.ui.unit.Dp,
+    place: HomePlace?,
+    weather: SkyClock.Sky?,
+    onUseDeviceLocation: (suspend () -> Result<HomePlace>)?,
+    placeLookup: io.nisfeb.talon.ui.PlaceLookup?,
+    onPlacePicked: (HomePlace) -> Unit,
+    fahrenheit: Boolean,
+    twentyFourHour: Boolean,
+) {
+    var picking by remember { mutableStateOf(false) }
+    var nowMsState by remember { mutableStateOf(nowMs()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(10_000)
+            nowMsState = nowMs()
+        }
+    }
+
+    val sky = remember(nowMsState / 60_000, place, weather) {
+        skyFor(nowMsState, place, weather)
+    }
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.30f),
+        shape = RoundedCornerShape(10.dp),
+        modifier = Modifier.fillMaxSize(),
+    ) {
+        BoxWithConstraints(Modifier.padding(vertical = 6.dp)) {
+        // The dial is square and the cell is not. Width-bound in a
+        // narrow cell, it thins its readout to what fits inside, while
+        // the cell's height goes spare below it: so whatever the dial
+        // could not hold is written under it, a line at a time, as far
+        // as that spare height allows. A small dial in a tall cell now
+        // says everything a big one does.
+        val side = minOf(maxWidth - 24.dp, maxDial)
+        val below = buildList {
+            if (side < DIAL_DATE_AT && sky.dateLabel.isNotBlank()) add(sky.dateLabel)
+            if (side < DIAL_WEATHER_AT) {
+                val word = conditionIcon(sky.condition)?.second
+                val temp = sky.currentC?.let { SkyClock.tempLabel(it, fahrenheit) }
+                listOfNotNull(word, temp).takeIf { it.isNotEmpty() }?.let { add(it.joinToString(" · ")) }
+            }
+            if (side < DIAL_RANGE_AT && sky.highC != null && sky.lowC != null) {
+                add("H ${SkyClock.tempLabel(sky.highC, fahrenheit)} · L ${SkyClock.tempLabel(sky.lowC, fahrenheit)}")
+            }
+        }.take(((maxDial - side) / 18.dp).toInt().coerceAtLeast(0))
+        Column(
+            Modifier.fillMaxSize(),
+            verticalArrangement = Arrangement.Center,
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            SkyClockDial(
+                sky = sky,
+                fahrenheit = fahrenheit,
+                twentyFourHour = twentyFourHour,
+                maxSize = maxDial,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp),
+            )
+            below.forEach { line ->
+                Text(
+                    line,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            // A line of text rather than a button. A Material button
+            // carries a forty-eight dip touch target, and on the
+            // shortest clock that was more of the widget than the dial
+            // itself got.
+            Text(
+                place?.label ?: "Set a location",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.primary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier
+                    .clickable { picking = true }
+                    .padding(horizontal = 12.dp, vertical = 2.dp),
+            )
+            if (place == null) {
+                Text(
+                    "Without one the dial shows an even day and no weather.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 24.dp),
+                )
+            }
+        }
+        }
+    }
+
+    if (picking) {
+        LocationPicker(
+            current = place,
+            onUseDevice = onUseDeviceLocation,
+            lookup = placeLookup,
+            onPick = { picking = false; onPlacePicked(it) },
+            onDismiss = { picking = false },
+        )
+    }
+}
+
+/**
+ * The dial's state for a moment in time.
+ *
+ * Without a place the sun's times are unknowable, so it falls back to
+ * an even twelve hours and says where it is by saying nothing: the
+ * panel's own caption is what admits there is no location.
+ */
+internal fun skyFor(atMs: Long, place: HomePlace?, weather: SkyClock.Sky?): SkyClock.Sky {
+    val zone = zoneFor(place?.timeZoneId ?: weather?.zoneId)
+    val local = Instant.fromEpochMilliseconds(atMs).toLocalDateTime(zone)
+    val minuteOfDay = local.hour * 60 + local.minute
+    val offsetMinutes = zone.offsetAt(Instant.fromEpochMilliseconds(atMs)).totalSeconds / 60
+
+    val sun = place?.let {
+        Solar.sunTimes(
+            latitude = it.lat,
+            longitude = it.lon,
+            dayOfYear = local.date.dayOfYear,
+            zoneOffsetMinutes = offsetMinutes,
+            elevationMetres = it.elevationMetres ?: 0.0,
+        )
+    }
+    val base = weather ?: SkyClock.Sky(minuteOfDay = minuteOfDay)
+    return base.copy(
+        minuteOfDay = minuteOfDay,
+        dateLabel = dayLabel(local),
+        sunriseMinute = sun?.sunriseMinute ?: base.sunriseMinute,
+        sunsetMinute = sun?.sunsetMinute ?: base.sunsetMinute,
+        twilight = place?.let { Solar.twilightMinutes(it.lat) } ?: base.twilight,
+        polar = sun?.polar ?: false,
+        polarDay = sun?.polarDay ?: false,
+        // Independent of where you are: the phase is the same moon for
+        // everybody, and where it sits on the dial follows from it.
+        moonElongationDeg = io.nisfeb.talon.ui.Moon.phaseAt(atMs).elongationDeg,
+    )
+}
+
+/** How long a forecast is good for. Finer than the model updates. */
+internal const val WEATHER_MAX_AGE_MS = 30 * 60_000L
+
+/**
+ * Whether what we have is old enough to ask again.
+ *
+ * Never fetched counts as stale, and so does a clock that has gone
+ * backwards: a machine that woke with a corrected time should refetch
+ * rather than sit on an answer it now believes is from the future.
+ */
+internal fun weatherIsStale(fetchedAtMs: Long, nowMs: Long): Boolean =
+    fetchedAtMs <= 0L || nowMs < fetchedAtMs || nowMs - fetchedAtMs >= WEATHER_MAX_AGE_MS
+
+/**
+ * The clock the dial runs on.
+ *
+ * The place's own, wherever it is known, and the device's otherwise.
+ * This is not cosmetic: the sun's times come out of the solar geometry
+ * in UTC and are shifted into a local clock, so shifting a remote
+ * place's by the device's offset rotates the whole lit arc — fifteen
+ * degrees of dial for every hour of error. New Zealand read on an
+ * American clock is sixteen hours out and lands its daylight across
+ * the bottom of the ring, very nearly upside down.
+ *
+ * An unknown zone id falls back rather than throwing: a dial on the
+ * wrong clock is a bad dial, and a dial that crashes is no dial.
+ */
+internal fun zoneFor(id: String?): TimeZone =
+    id?.let { runCatching { TimeZone.of(it) }.getOrNull() } ?: TimeZone.currentSystemDefault()
+
+internal fun dayLabel(t: LocalDateTime): String {
+    val d = t.dayOfMonth
+    val suffix = when {
+        d % 100 in 11..13 -> "th"
+        d % 10 == 1 -> "st"
+        d % 10 == 2 -> "nd"
+        d % 10 == 3 -> "rd"
+        else -> "th"
+    }
+    return "${MonthNames.ENGLISH_ABBREVIATED.names[t.monthNumber - 1]} $d$suffix"
+}
+
+/**
+ * Today's calendar, pending the feature itself.
+ *
+ * Says which of the two it is waiting on. "Coming soon" on a panel
+ * that is waiting on a design and one waiting on a feature would hide
+ * the difference between a week and a quarter.
+ */
+/**
+ * A button, really: tap it and the assistant is listening (or, on a
+ * platform that cannot listen, ready to be typed to). A square the
+ * size of the tile's shorter side, the icon alone; the widget exists
+ * so an instruction is one tap from the page that opens first.
+ */
+@Composable
+private fun AssistantPanel(onOpen: ((Boolean) -> Unit)?, onLongPress: () -> Unit) {
+    val listens = io.nisfeb.talon.ui.isDictationSupported
+    androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        val side = minOf(maxWidth, maxHeight)
+        Surface(
+            color = if (onOpen != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.30f),
+            shape = RoundedCornerShape(side / 5),
+            modifier = Modifier.size(side),
+        ) {
+            Box(
+                Modifier.fillMaxSize().combinedClickable(onClick = { onOpen?.invoke(listens) }, onLongClick = onLongPress),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    if (listens) TalonIcons.Mic else Icons.Filled.Edit,
+                    contentDescription = when {
+                        onOpen == null -> "Assistant is off"
+                        listens -> "Tell your assistant"
+                        else -> "Ask your assistant"
+                    },
+                    tint = if (onOpen != null) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(side * 0.45f),
+                )
+            }
+        }
+    }
+}
+
+/**
+ * What is on the calendar for the widget's range: whatever is under
+ * way or starts before the range ends. Read from the ship's calendar;
+ * a tap opens the calendar's own page, which is where events are made.
+ */
+@Composable
+private fun CalendarPanel(
+    calendar: CalendarRepo?,
+    range: CalendarRange,
+    twentyFourHour: Boolean,
+    onOpen: (() -> Unit)?,
+    onInstall: (suspend () -> Result<Unit>)?,
+    onLongPress: () -> Unit,
+) {
+    val availability = calendar?.availability?.collectAsState()?.value
+    val hidden = calendar?.hidden?.collectAsState()?.value.orEmpty()
+    val rows = calendar?.rows?.collectAsState()?.value?.filter { it.cal !in hidden }
+    val zoneId = calendar?.zone?.collectAsState()?.value
+    val calendars = calendar?.calendars?.collectAsState()?.value.orEmpty()
+    val rawTasks = calendar?.tasks?.collectAsState()?.value.orEmpty()
+    val tasks = rawTasks.filter { it.cal !in hidden }
+    val shares = calendar?.shares?.collectAsState()?.value
+    val offers = shares?.offers?.size ?: 0
+    val readOnly = shares?.readOnly.orEmpty()
+    // Ticked here, until the refresh after the poke drops the line.
+    var ticked by remember { mutableStateOf(setOf<String>()) }
+    // Reconcile, don't clear: a tick the ship has caught up with (done,
+    // or dropped from the list) is its truth now; one it hasn't stays
+    // optimistic instead of flickering off on any unrelated refresh.
+    LaunchedEffect(rawTasks) {
+        val byId = rawTasks.associateBy { it.id }
+        ticked = ticked.filter { byId[it]?.done == false }.toSet()
+    }
+    val scope = rememberCoroutineScope()
+    var installing by remember { mutableStateOf(false) }
+    var installError by remember { mutableStateOf<String?>(null) }
+    // The minute decides what is "now" and what is "today".
+    var tick by remember { mutableStateOf(nowMs()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(60_000)
+            tick = nowMs()
+        }
+    }
+    val action = onOpen?.takeIf { availability == CalendarAvailability.PRESENT }?.let { "Calendar" to it }
+    Panel("Today", TalonIcons.CalendarToday, action, scrollable = true) {
+        when {
+            calendar == null -> Empty("This host has no calendar.")
+
+            availability == CalendarAvailability.ABSENT -> {
+                Empty("This ship has no calendar yet.")
+                if (onInstall != null) {
+                    TextButton(
+                        enabled = !installing,
+                        onClick = {
+                            installing = true
+                            installError = null
+                            scope.launch {
+                                onInstall().onFailure { installError = it.message }
+                                installing = false
+                            }
+                        },
+                        modifier = Modifier.padding(horizontal = 6.dp),
+                    ) { Text(if (installing) "Installing…" else "Install the calendar") }
+                    installError?.let { Empty(it) }
+                }
+            }
+
+            availability == CalendarAvailability.SIGNED_OUT -> Empty("Signed out of the ship.")
+
+            rows == null -> Empty("Looking…")
+
+            else -> {
+                val zone = zoneFor(zoneId)
+                // Tasks have their own lines below; the window's copy of a
+                // dated one would say the same thing twice.
+                val shown = remember(rows, range, tick, zoneId) { agenda(rows.filter { !it.isTask }, range, tick, zone) }
+                val today = Instant.fromEpochMilliseconds(tick).toLocalDateTime(zone).date
+                val due = remember(tasks, range, tick, zoneId) { tasksInRange(tasks, range, tick, zone) }
+                if (offers > 0) {
+                    Text(
+                        if (offers == 1) "A calendar was shared with you." else "$offers calendars were shared with you.",
+                        style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.fillMaxWidth().clickable { onOpen?.invoke() }.padding(horizontal = 14.dp, vertical = 4.dp),
+                    )
+                }
+                if (shown.isEmpty() && due.isEmpty()) {
+                    if (offers == 0) Empty(if (range == CalendarRange.NEXT_ONLY) "Nothing coming up." else "Nothing scheduled.")
+                } else {
+                    val calColors = calendars.associate { it.id to it.color }
+                    due.forEach { t ->
+                        val dueDay = t.dueDate()
+                        val late = dueDay != null && dueDay < today
+                        Row(
+                            Modifier.fillMaxWidth().combinedClickable(onClick = onOpen ?: {}, onLongClick = onLongPress).padding(start = 6.dp, end = 14.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            androidx.compose.material3.Checkbox(
+                                checked = t.id in ticked,
+                                onCheckedChange = { done ->
+                                    ticked = if (done) ticked + t.id else ticked - t.id
+                                    scope.launch {
+                                        if (!calendar!!.setDone(t.id, done)) {
+                                            ticked = if (done) ticked - t.id else ticked + t.id
+                                        }
+                                    }
+                                },
+                                enabled = t.cal !in readOnly,
+                                modifier = Modifier.size(32.dp),
+                            )
+                            Text(t.name.ifBlank { "(untitled)" }, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                            Text(
+                                when {
+                                    late -> "overdue"
+                                    dueDay == null || dueDay == today -> "today"
+                                    dueDay == today.plus(1, DateTimeUnit.DAY) -> "tomorrow"
+                                    else -> dayLabel(dueDay.atTime(0, 0))
+                                },
+                                style = MaterialTheme.typography.labelSmall,
+                                color = if (late) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                    shown.forEach { row ->
+                        EventRow(
+                            row = row,
+                            whenLabel = whenLabel(row, tick, zone, twentyFourHour),
+                            colour = calendarHexColor(row.color ?: calColors[row.cal]),
+                            ongoing = row.bounds(zone).first <= tick,
+                            onClick = onOpen ?: {},
+                            onLongPress = onLongPress,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun EventRow(
+    row: CalendarRow,
+    whenLabel: String,
+    colour: Color?,
+    ongoing: Boolean,
+    onClick: () -> Unit,
+    onLongPress: () -> Unit,
+) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .combinedClickable(onClick = onClick, onLongClick = onLongPress)
+            .padding(horizontal = 14.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Box(
+            Modifier.size(8.dp).clip(CircleShape)
+                .background(colour ?: MaterialTheme.colorScheme.primary),
+        )
+        Column(Modifier.weight(1f)) {
+            Text(
+                row.name.ifBlank { "(untitled)" },
+                style = MaterialTheme.typography.bodySmall.copy(
+                    fontWeight = if (ongoing) FontWeight.SemiBold else FontWeight.Normal,
+                ),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            val line = listOf(row.location.ifBlank { row.note }, row.tags.joinToString(" ") { "#$it" })
+                .filter { it.isNotBlank() }.joinToString(" · ")
+            if (line.isNotBlank()) {
+                Text(
+                    line,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+        Text(
+            whenLabel,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+        )
+    }
+}
+
+/** When a row is, said the way somebody glancing at it needs. */
+internal fun whenLabel(row: CalendarRow, nowMs: Long, zone: TimeZone, twentyFourHour: Boolean): String {
+    if (row.all) return "All day"
+    fun at(ms: Long) = Instant.fromEpochMilliseconds(ms).toLocalDateTime(zone)
+    fun clock(t: LocalDateTime) = SkyClock.clockLabel(t.hour * 60 + t.minute, twentyFourHour)
+    val start = at(row.l)
+    val end = at(row.r)
+    return when {
+        row.l <= nowMs -> "Now · until ${clock(end)}"
+        start.date == at(nowMs).date -> "${clock(start)}–${clock(end)}"
+        else -> "${dayLabel(start)} · ${clock(start)}"
+    }
+}
+
+/** A calendar's "#rrggbb", or null for anything else. */
+internal fun calendarHexColor(s: String?): Color? {
+    val hex = s?.trim()?.removePrefix("#") ?: return null
+    if (hex.length != 6) return null
+    val v = hex.toLongOrNull(16) ?: return null
+    return Color(0xFF000000L or v)
+}
+
+/**
+ * What is new, across everything.
+ *
+ * What replaced the daily digest. Nothing here is generated or
+ * scheduled: unread conversations, mentions, unread mail and pending
+ * invitations are already in the database and all of it is true the
+ * moment it is drawn.
+ *
+ * New rather than owed. Most of what arrives in a group chat is not
+ * addressed to anybody in particular, and a panel that called all of
+ * it a thing waiting on you would be wrong about most of its rows.
+ */
+@Composable
+private fun NewPanel(
+    recent: List<io.nisfeb.talon.data.MessageEntity>,
+    unreadBy: Map<String, io.nisfeb.talon.data.UnreadEntity>,
+    mail: MailRepo?,
+    invites: List<String>,
+    contacts: ContactMap,
+    ourShip: String,
+    widget: HomeWidget,
+    onOpenConversation: (String) -> Unit,
+    onOpenMailThread: (String) -> Unit,
+    onOpenInvites: () -> Unit,
+    onLongPress: () -> Unit,
+) {
+    val page = mail?.page?.collectAsState()?.value
+    val mailNeeds = remember(page) {
+        page?.threads.orEmpty().filter { it.unread }
+            .map { io.nisfeb.talon.ui.NewMail(it.id, it.from, it.subject, it.last) }
+    }
+    val rows = remember(recent, unreadBy, mailNeeds, invites, ourShip, widget.count) {
+        io.nisfeb.talon.ui.whatsNew(
+            latest = recent,
+            unreadBy = unreadBy,
+            mail = mailNeeds,
+            invites = invites,
+            ourShip = ourShip,
+            limit = widget.count,
+            label = { contacts.conversationLabel(it) },
+            preview = { preview(it, contacts, ourShip) },
+        )
+    }
+    Panel("New", Icons.Filled.Notifications) {
+        if (rows.isEmpty()) {
+            Empty("Nothing new.")
+        } else {
+            rows.forEach { row ->
+                QuickRow(
+                    title = row.title,
+                    line = row.line,
+                    at = row.atMs,
+                    // A mention is the one row here that somebody was
+                    // addressed by name for, so it is the one that
+                    // carries any weight.
+                    strong = row.kind == io.nisfeb.talon.ui.NewKind.MENTION,
+                    onClick = {
+                        when (row.kind) {
+                            io.nisfeb.talon.ui.NewKind.MAIL -> onOpenMailThread(row.target)
+                            io.nisfeb.talon.ui.NewKind.INVITE -> onOpenInvites()
+                            else -> onOpenConversation(row.target)
+                        }
+                    },
+                    onLongPress = onLongPress,
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Who is up to what.
+ *
+ * Pinned people first and always, whether or not they have said
+ * anything lately, then everyone else newest first. The pin is the
+ * point of the widget: a feed sorted purely by recency buries the
+ * three people somebody actually watches under whoever typed last.
+ */
+@Composable
+private fun StatusPanel(
+    statuses: List<io.nisfeb.talon.data.ContactEntity>,
+    contacts: ContactMap,
+    ourShip: String,
+    widget: HomeWidget,
+    onOpenContact: (String) -> Unit,
+    onAll: () -> Unit,
+    onLongPress: () -> Unit,
+) {
+    val rows = remember(statuses, widget.pinned, widget.count, ourShip) {
+        statusRows(statuses, widget.pinned, widget.count, ourShip)
+    }
+    Panel("Statuses", Icons.Filled.Star, "All" to onAll) {
+        if (rows.isEmpty()) {
+            Empty("No statuses yet.")
+        } else {
+            rows.forEach { (contact, pinned) ->
+                QuickRow(
+                    title = contacts.displayName(contact.ship),
+                    line = contact.status?.takeIf { it.isNotBlank() } ?: "No status",
+                    at = contact.statusUpdatedMs ?: 0L,
+                    strong = pinned,
+                    onClick = { onOpenContact(contact.ship) },
+                    onLongPress = onLongPress,
+                )
+            }
+        }
+    }
+}
+
+/**
+ * The status rows to show, pinned people first.
+ *
+ * A pinned person appears whether or not they have said anything,
+ * because the silence is part of what somebody pinned them for.
+ * Everybody else has to have a status to earn a row.
+ */
+internal fun statusRows(
+    statuses: List<io.nisfeb.talon.data.ContactEntity>,
+    pinned: List<String>,
+    count: Int,
+    ourShip: String,
+): List<Pair<io.nisfeb.talon.data.ContactEntity, Boolean>> {
+    val others = statuses.filter { it.ship != ourShip }
+    val byShip = others.associateBy { it.ship }
+    val pins = pinned.mapNotNull { byShip[it] }.map { it to true }
+    val pinnedShips = pins.mapTo(mutableSetOf()) { it.first.ship }
+    val rest = others
+        .filter { it.ship !in pinnedShips && !it.status.isNullOrBlank() }
+        .map { it to false }
+    // Pins are never crowded out: they take their places first and the
+    // rest fill whatever is left.
+    return (pins + rest).take(count.coerceAtLeast(pins.size))
+}

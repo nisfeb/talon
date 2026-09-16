@@ -38,3 +38,7 @@ actual fun Modifier.onSecondaryClick(onClick: () -> Unit): Modifier =
             }
         }
     }
+
+
+/** Nothing to exclude: a desktop window's edges belong to the window. */
+actual fun Modifier.keepEdgeGesture(): Modifier = this

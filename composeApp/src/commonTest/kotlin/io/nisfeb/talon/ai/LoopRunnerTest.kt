@@ -99,6 +99,28 @@ class LoopRunnerTest {
     }
 
     @Test
+    fun `destructive tools are filtered even for a writes-authorized loop`() = runBlocking {
+        // delete_event is irreversible and a loop auto-confirms its own
+        // writes, so it must never reach the model — even for a loop that
+        // opted into writes. The completer sees the post-filter specs.
+        val seen = mutableListOf<List<String>>()
+        val runner = LoopRunner(
+            loops = FakeLoopDao(), runs = FakeLoopRunDao(),
+            tools = listOf(
+                tool("list_events", write = false),
+                tool("delete_event", write = true),
+                tool("create_event", write = true),
+            ),
+            completer = { _, _, specs -> seen += specs.map { it.name }; AgentTurn.Final("ok") },
+            aiConfig = { config("k") },
+            notify = { _, _, _ -> },
+            now = { 1 },
+        )
+        runner.runLoop(loop.copy(writesAuthorized = true))
+        assertEquals(listOf("list_events", "create_event"), seen.last(), "an authorized loop still saw delete_event")
+    }
+
+    @Test
     fun `completed run records outcome and notifies with the loop id`() = runBlocking {
         val loops = FakeLoopDao()
         val runs = FakeLoopRunDao()

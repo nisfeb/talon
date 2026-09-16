@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The whole widget is one image.
+
+  RemoteViews only knows a handful of views and none of them can draw
+  a dial, so the dial is rendered to a bitmap in our own process and
+  set on this ImageView. adjustViewBounds keeps it square as the
+  launcher's cell shape changes under it.
+-->
+<ImageView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_dial"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:adjustViewBounds="true"
+    android:scaleType="fitCenter"
+    android:contentDescription="@string/widget_clock_label" />

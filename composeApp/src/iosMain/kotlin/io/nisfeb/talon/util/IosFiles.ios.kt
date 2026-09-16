@@ -95,4 +95,10 @@ internal object IosFiles {
             protect("$dir/$name")
         }
     }
+
+    /** Remove a file if it exists; a missing one is not an error. */
+    fun delete(name: String) {
+        val dir = baseDir()
+        runCatching { FileSystem.SYSTEM.delete("$dir/$name".toPath(), mustExist = false) }
+    }
 }

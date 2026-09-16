@@ -28,20 +28,12 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items as gridItems
-import androidx.compose.material.icons.filled.Videocam
-import androidx.compose.material.icons.filled.VideocamOff
 import androidx.compose.runtime.collectAsState
 import kotlinx.coroutines.flow.MutableStateFlow
 import io.nisfeb.talon.call.VideoState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.CallEnd
-import androidx.compose.material.icons.filled.ExpandMore
-import androidx.compose.material.icons.filled.Fullscreen
-import androidx.compose.material.icons.filled.FullscreenExit
-import androidx.compose.material.icons.filled.Mic
-import androidx.compose.material.icons.filled.MicOff
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.DropdownMenu
@@ -75,6 +67,7 @@ import io.nisfeb.talon.call.AudioDevices
 import io.nisfeb.talon.call.MediaState
 import io.nisfeb.talon.call.PartyMember
 import io.nisfeb.talon.call.PartyState
+import io.nisfeb.talon.ui.icons.TalonIcons
 
 /**
  * The full-screen party-line call view for phones — big touch targets,
@@ -162,7 +155,7 @@ fun PartyLineFullScreen(
             ) {
                 IconButton(onClick = onMinimize, modifier = Modifier.size(48.dp)) {
                     Icon(
-                        Icons.Filled.ExpandMore,
+                        TalonIcons.ExpandMore,
                         contentDescription = "Minimize the call",
                         modifier = Modifier.size(32.dp),
                     )
@@ -299,7 +292,7 @@ fun PartyLineFullScreen(
                         },
                     ) {
                         Icon(
-                            if (state.muted) Icons.Filled.MicOff else Icons.Filled.Mic,
+                            if (state.muted) TalonIcons.MicOff else TalonIcons.Mic,
                             contentDescription = null,
                             modifier = Modifier.size(26.dp),
                         )
@@ -316,7 +309,7 @@ fun PartyLineFullScreen(
                             contentAlignment = Alignment.Center,
                         ) {
                             Icon(
-                                Icons.Filled.MicOff,
+                                TalonIcons.MicOff,
                                 contentDescription = null,
                                 tint = if (state.selfMutedByAdmin) {
                                     MaterialTheme.colorScheme.error
@@ -346,7 +339,7 @@ fun PartyLineFullScreen(
                         contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
                     ) {
                         Icon(
-                            if (meeting) Icons.Filled.FullscreenExit else Icons.Filled.Fullscreen,
+                            if (meeting) TalonIcons.FullscreenExit else TalonIcons.Fullscreen,
                             contentDescription = null,
                             modifier = Modifier.size(26.dp),
                         )
@@ -369,7 +362,7 @@ fun PartyLineFullScreen(
                         },
                     ) {
                         Icon(
-                            if (cameraOn) Icons.Filled.Videocam else Icons.Filled.VideocamOff,
+                            if (cameraOn) TalonIcons.Videocam else TalonIcons.VideocamOff,
                             contentDescription = null,
                             modifier = Modifier.size(26.dp),
                         )
@@ -432,7 +425,7 @@ fun PartyLineFullScreen(
                     contentColor = MaterialTheme.colorScheme.onErrorContainer,
                 ) {
                     Icon(
-                        Icons.Filled.CallEnd,
+                        TalonIcons.CallEnd,
                         contentDescription = null,
                         modifier = Modifier.size(26.dp),
                     )
@@ -582,7 +575,7 @@ private fun ParticipantRow(
         }
         if (member.mutedByAdmin || member.muted) {
             Icon(
-                Icons.Filled.MicOff,
+                TalonIcons.MicOff,
                 contentDescription = if (member.mutedByAdmin) "Muted by an admin" else "Muted",
                 tint = if (member.mutedByAdmin) {
                     MaterialTheme.colorScheme.error

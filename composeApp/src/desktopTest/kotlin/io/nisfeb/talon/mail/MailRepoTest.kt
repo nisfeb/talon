@@ -1,0 +1,231 @@
+package io.nisfeb.talon.mail
+
+import io.ktor.client.HttpClient
+import io.ktor.client.engine.mock.MockEngine
+import io.ktor.client.engine.mock.respond
+import io.ktor.client.engine.mock.respondError
+import io.ktor.http.HttpStatusCode
+import io.ktor.http.headersOf
+import io.ktor.utils.io.ByteReadChannel
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.runBlocking
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertNull
+import kotlin.test.assertTrue
+
+/**
+ * What the mailbox does when the ship answers, and what it concludes
+ * when it does not. The distinctions here are the ones a user sees as
+ * different sentences: no mail app, an out-of-date one, a dead session,
+ * and a mailbox that is simply empty.
+ */
+class MailRepoTest {
+
+    private val emptyPage =
+        """{"total":0,"offset":0,"limit":50,"view":"inbox","threads":[]}"""
+
+    private fun repo(
+        scope: CoroutineScope,
+        respond: (String) -> Pair<Int, String>,
+    ): MailRepo {
+        val http = HttpClient(
+            MockEngine { req ->
+                val (code, body) = respond(req.url.encodedPath)
+                if (code == 200) {
+                    respond(
+                        ByteReadChannel(body),
+                        HttpStatusCode.OK,
+                        headersOf("Content-Type", "application/json"),
+                    )
+                } else {
+                    respondError(HttpStatusCode.fromValue(code), body)
+                }
+            },
+        )
+        // A poll interval far past the test, so only explicit refreshes run.
+        return MailRepo(http, scope, pollIntervalMs = 60 * 60 * 1000L)
+    }
+
+    private fun <T> withRepo(
+        respond: (String) -> Pair<Int, String>,
+        block: suspend (MailRepo) -> T,
+    ): T {
+        val scope = CoroutineScope(SupervisorJob())
+        return try {
+            runBlocking { block(repo(scope, respond)) }
+        } finally {
+            scope.cancel()
+        }
+    }
+
+    @Test
+    fun `a good read fills the page and clears any error`() = withRepo({ 200 to emptyPage }) { r ->
+        r.attach("https://ship.example")
+        // attach() starts the poller, which reads once and then sleeps
+        // past the end of the test. Let that read finish BEFORE driving
+        // one by hand, or the two race over the loading flag and the
+        // assertion below reads whichever gap it happens to land in.
+        settle(r)
+        r.refresh()
+        assertEquals(MailAvailability.PRESENT, r.availability.value)
+        assertEquals(0, r.page.value?.total)
+        assertNull(r.error.value)
+        assertEquals(false, r.loading.value, "a finished read leaves nothing in flight")
+    }
+
+    /** Wait for the poller's opening read to finish. */
+    private suspend fun settle(r: MailRepo) {
+        repeat(200) {
+            kotlinx.coroutines.delay(20)
+            if (!r.loading.value && r.page.value != null) return
+        }
+    }
+
+    @Test
+    fun `a ship with no grubbery is told apart from one with an old grubbery`() {
+        // The nexus is absent, and so is lattice's manifest: no grubbery.
+        withRepo({ path ->
+            if (path.endsWith("manifest.webmanifest")) 404 to "" else 404 to """{"error":"not found"}"""
+        }) { r ->
+            r.attach("https://ship.example")
+            r.refresh()
+            assertEquals(MailAvailability.NO_GRUBBERY, r.availability.value)
+        }
+        // The nexus is absent but lattice answers: grubbery is here and stale.
+        withRepo({ path ->
+            if (path.endsWith("manifest.webmanifest")) 200 to "{}" else 404 to """{"error":"not found"}"""
+        }) { r ->
+            r.attach("https://ship.example")
+            r.refresh()
+            assertEquals(MailAvailability.OLD_GRUBBERY, r.availability.value)
+        }
+    }
+
+    @Test
+    fun `a missing app is not reported as an error to fix`() = withRepo({ path ->
+        if (path.endsWith("manifest.webmanifest")) 404 to "" else 404 to """{"error":"not found"}"""
+    }) { r ->
+        r.attach("https://ship.example")
+        r.refresh()
+        assertNull(r.error.value, "not having mail installed is a state, not a failure")
+    }
+
+    @Test
+    fun `a dead session says so and is never read as a missing app`() =
+        withRepo({ 403 to """{"error":"forbidden"}""" }) { r ->
+            r.attach("https://ship.example")
+            r.refresh()
+            assertEquals(MailAvailability.SIGNED_OUT, r.availability.value)
+            assertTrue(r.error.value!!.contains("Signed out"))
+        }
+
+    @Test
+    fun `a refusal is reported in the ship's own words`() =
+        withRepo({ 400 to """{"error":"limit is not a number"}""" }) { r ->
+            r.attach("https://ship.example")
+            r.refresh()
+            assertEquals("limit is not a number", r.error.value)
+            assertEquals(MailAvailability.UNKNOWN, r.availability.value)
+        }
+
+    @Test
+    fun `an unreadable answer is not a missing app either`() = withRepo({ 200 to "not json" }) { r ->
+        r.attach("https://ship.example")
+        r.refresh()
+        assertTrue(r.error.value!!.contains("could not read"))
+        assertEquals(MailAvailability.UNKNOWN, r.availability.value)
+    }
+
+    @Test
+    fun `one selection drives the view and the label together`() =
+        withRepo({ 200 to emptyPage }) { r ->
+            r.attach("https://ship.example")
+            r.refresh()
+            assertEquals(MailFolder.View(MailView.INBOX), r.folder.value)
+
+            r.selectFolder(MailFolder.View(MailView.ARCHIVED))
+            assertEquals(MailFolder.View(MailView.ARCHIVED), r.folder.value)
+
+            // A label is a folder: one value, nothing kept in step by hand.
+            r.selectFolder(MailFolder.Label("work"))
+            assertEquals(MailFolder.Label("work"), r.folder.value)
+
+            r.selectFolder(MailFolder.View(MailView.INBOX))
+            assertEquals(MailFolder.View(MailView.INBOX), r.folder.value, "leaving a label clears the filter with it")
+        }
+
+    @Test
+    fun `a listing asks for the label the folder names`() {
+        val asked = mutableListOf<String>()
+        withRepo({ path -> asked += path; 200 to emptyPage }) { r ->
+            r.attach("https://ship.example")
+            r.selectFolder(MailFolder.Label("work"))
+            r.refresh()
+        }
+        assertTrue(asked.isNotEmpty())
+    }
+
+    @Test
+    fun `detaching forgets the mailbox`() = withRepo({ 200 to emptyPage }) { r ->
+        r.attach("https://ship.example")
+        r.refresh()
+        r.detach()
+        assertNull(r.page.value)
+        assertEquals(MailAvailability.UNKNOWN, r.availability.value)
+        r.refresh()
+        assertNull(r.page.value, "a detached mailbox does not talk to a ship")
+    }
+
+    @Test
+    fun `searching leaves the current mailbox`() = withRepo({ 200 to emptyPage }) { r ->
+        r.attach("https://ship.example")
+        r.selectFolder(MailFolder.View(MailView.ARCHIVED))
+        r.search("invoice")
+        // An archived forgery is exactly what somebody searches for, so a
+        // search that only looked where they already were would not find it.
+        assertEquals(MailFolder.View(MailView.ALL), r.folder.value)
+        assertEquals("invoice", r.query.value)
+    }
+
+    @Test
+    fun `picking a mailbox ends the search`() = withRepo({ 200 to emptyPage }) { r ->
+        r.attach("https://ship.example")
+        r.search("invoice")
+        r.selectFolder(MailFolder.View(MailView.INBOX))
+        assertEquals("", r.query.value)
+    }
+
+    @Test
+    fun `a search asks the ship for it`() {
+        val asked = mutableListOf<String>()
+        withRepo({ path -> asked += path; 200 to emptyPage }) { r ->
+            r.attach("https://ship.example")
+            r.search("needle")
+            r.refresh()
+        }
+        assertTrue(asked.isNotEmpty())
+    }
+
+    @Test
+    fun `more is offered only while the ship has more to give`() {
+        val one = """{"total":80,"offset":0,"limit":50,"view":"inbox","threads":[
+            {"id":"0v1","subject":"s","from":"~zod","snippet":"","verdict":"verified",
+             "forged":false,"count":1,"last":1,"unread":false,"participants":[],
+             "unreadable":0,"archived":false,"labels":[]}]}"""
+        withRepo({ 200 to one }) { r ->
+            r.attach("https://ship.example")
+            r.refresh()
+            settle(r)
+            assertTrue(r.hasMore.value, "one of eighty shown means there is more")
+        }
+        withRepo({ 200 to emptyPage }) { r ->
+            r.attach("https://ship.example")
+            r.refresh()
+            settle(r)
+            assertEquals(false, r.hasMore.value, "nothing to show, nothing more")
+        }
+    }
+}

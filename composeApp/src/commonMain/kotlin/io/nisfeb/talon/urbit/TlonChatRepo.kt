@@ -6,7 +6,7 @@
 //     Log.i because the facade omits `d` (see Log.kt KDoc).
 //
 //  2. The constructor takes (db, settingsSync: SettingsSync? = null)
-//     instead of (db, aiSettings, dailyDigestSettings, rearmDailyDigest).
+//     instead of (db, aiSettings, ...).
 //     The production class constructs SettingsSync internally from those
 //     three Android-only deps; commonMain instead receives an already-
 //     constructed SettingsSync (interface, not class) -- or null on
@@ -117,7 +117,7 @@ class TlonChatRepo(
     /**
      * Optional %settings sync surface. Production app/ Android passes
      * the real implementation (constructed from EncryptedSharedPreferences-
-     * backed AiSettings/DailyDigestSettings); composeApp desktop passes
+     * backed AiSettings); composeApp desktop passes
      * `null` until a desktop %settings bridge is added in Stage F.
      */
     val settingsSync: SettingsSync? = null,
@@ -554,8 +554,11 @@ class TlonChatRepo(
                     runCatching { bootstrapChannelOrders(ch) }
                         .onFailure { Log.e(TAG, "channel orders scry failed", it) }
                 }
+                // A request that arrived while this session was down is
+                // news on a reconnect, so it notifies; only the first
+                // pass of a session stays quiet.
                 val dmInvitesJob = async {
-                    runCatching { bootstrapDmInvites(ch) }
+                    runCatching { bootstrapDmInvites(ch, notify = !firstRun) }
                         .onFailure { Log.e(TAG, "dm-invites scry failed", it) }
                 }
                 // Group invites had no bootstrap at all — refreshInvites ran
@@ -1460,8 +1463,17 @@ class TlonChatRepo(
         }
     }
 
-    /** Accept an inbound group invite via `group-join`. */
+    /** Accept an inbound group invite: join it, and drop it from the list. */
     suspend fun acceptInvite(flag: String) {
+        joinGroup(flag)
+        _invites.value = _invites.value?.filterNot { it.flag == flag }
+    }
+
+    /**
+     * Join a group via `group-join`: one we hold an invite to, or a public
+     * group anyone may join, such as one whose code was scanned.
+     */
+    suspend fun joinGroup(flag: String) {
         val ch = channel ?: error("not connected")
         ch.poke(
             app = "groups",
@@ -1471,7 +1483,6 @@ class TlonChatRepo(
                 put("join-all", true)
             },
         )
-        _invites.value = _invites.value?.filterNot { it.flag == flag }
         // The ship accepts the poke and does the join afterwards, and the
         // groups subscription does not replay it. Reconcile until it
         // lands instead of depending on a reconnect that may never come.
@@ -1644,7 +1655,7 @@ class TlonChatRepo(
             color?.let {
                 put("color", buildJsonObject {
                     put("type", "tint")
-                    put("value", toUrbitHexColor(it))
+                    put("value", urbitHexColor(it))
                 })
             }
         }
@@ -1683,21 +1694,6 @@ class TlonChatRepo(
                 put("self", contactFields)
             },
         )
-    }
-
-    /**
-     * `#FF5050` → `ff.5050` for the JSON `tint` value.
-     *
-     * The hoon json-1 mark decodes a tint as `(slav %ux (cat 3 '0x' s))` —
-     * it prepends `0x` itself before parsing as @ux. So the value we send
-     * must NOT carry a `0x` prefix; the cat would otherwise produce
-     * `0x0xff.5050` and slav would fail. Dot grouping is optional but
-     * keeps roundtripped values matching the form `parseContact` reads.
-     */
-    private fun toUrbitHexColor(hex: String): String {
-        val stripped = hex.trim().removePrefix("#").lowercase()
-        val padded = stripped.padStart(6, '0').takeLast(6)
-        return padded.substring(0, 2) + "." + padded.substring(2, 6)
     }
 
     /**
@@ -2865,8 +2861,8 @@ class TlonChatRepo(
         }
         if (response != "diff") return
         // %chat pushes the full pending-DM-invite ship list as a bare
-        // JSON array on the chat /v4 subscription (the other agents only
-        // ever emit objects, so an array is unambiguously this). Handle
+        // JSON array on its /dm/invited subscription (the other agents
+        // only ever emit objects, so an array is unambiguously this). Handle
         // it before the object cast below drops it on the floor — that
         // drop is why brand-new DMs were invisible.
         (outer["json"] as? JsonArray)?.let { applyDmInvites(it, notify = true); return }
@@ -3115,15 +3111,10 @@ class TlonChatRepo(
         db.messageMedia().reapLocalTwinMedia(whom, ourPatp, sentMs)
         if (reaped > 0) {
             // Round-trip: sentMs is stamped at poke time, so this is the
-            // full send→echo→grey-clears latency. Investigation showed
-            // this is dominated by the ship's poke-processing time (a
-            // heavy ship is slow to accept a channel post), not our
-            // ingest/reap. Only warn when it's actually slow, so a normal
-            // send doesn't spam the log but a laggy ship is self-evident.
+            // full send→echo→grey-clears latency, which investigation
+            // showed is the ship's poke-processing time, not our wire.
             val latencyMs = nowMs() - sentMs
-            if (latencyMs > 1_000) {
-                Log.w(TAG, "slow send whom=$whom latencyMs=$latencyMs (ship poke-processing)")
-            }
+            Log.i(TAG, "echo reaped twin whom=$whom latencyMs=$latencyMs")
         } else if (nowMs() - sentMs < 60_000) {
             val fallback = db.messages().reapOldestLocalTwin(whom, ourPatp)
             if (fallback > 0) {
@@ -3379,15 +3370,17 @@ class TlonChatRepo(
 
     /**
      * Scry the full pending-DM-invite list at (re)connect. `%chat`
-     * `/dm/invited` returns a JSON array of inviter patps. Bootstrap
-     * doesn't notify — a launch shouldn't fire a balloon for every
-     * already-pending request; only live arrivals (via [applyEvent]) do.
+     * `/dm/invited` returns a JSON array of inviter patps. A session's
+     * first pass doesn't notify — a launch shouldn't fire a balloon for
+     * every already-pending request; a reconnect does, because a
+     * request new since the last pass arrived while we were down and
+     * nobody has been told.
      */
-    private suspend fun bootstrapDmInvites(channel: UrbitChannel) {
+    private suspend fun bootstrapDmInvites(channel: UrbitChannel, notify: Boolean) {
         val body = runCatching { channel.scry("chat", "/dm/invited") }
             .onFailure { Log.w(TAG, "dm/invited scry failed", it) }
             .getOrNull() as? JsonArray ?: return
-        applyDmInvites(body, notify = false)
+        applyDmInvites(body, notify = notify)
     }
 
     /**
@@ -3410,6 +3403,24 @@ class TlonChatRepo(
         }
         removed.forEach { db.dmInvites().delete(it) }
         if (notify) added.forEach { ship -> runCatching { dmInviteListener?.invoke(ship) } }
+        // A request withdrawn by a live fact was answered on another
+        // client. Accepted, the conversation may have no rows here: the
+        // init scry leaves invited DMs out, and a writ that came while
+        // this session was down is gone. Fetch it, or it stays unseen
+        // until the next full bootstrap. Declined, the DM is gone and
+        // the accepted-DM scry does not name it.
+        if (notify && removed.isNotEmpty()) scope.launch { adoptAcceptedDms(removed) }
+    }
+
+    private suspend fun adoptAcceptedDms(ships: Set<String>) {
+        val ch = channel ?: return
+        val accepted = runCatching { ch.scry("chat", "/dm") }
+            .onFailure { Log.w(TAG, "dm scry failed", it) }
+            .getOrNull()
+        for (ship in acceptedAmong(ships, accepted)) {
+            runCatching { refreshConversation(ship) }
+                .onFailure { Log.w(TAG, "refreshConversation($ship) after an rsvp elsewhere failed", it) }
+        }
     }
 
     /**
@@ -3455,6 +3466,12 @@ class TlonChatRepo(
 
         // Clear the badge locally immediately so the list flips the moment
         // the user enters the conversation. The server fact will confirm.
+        //
+        // The chat list's own cache has to hear about this too: it is
+        // torn down while the conversation is open, so it cannot see
+        // the write below and would replay the old count on the way
+        // back.
+        io.nisfeb.talon.ui.screens.noteConversationRead(whom)
         db.unreads().upsert(
             UnreadEntity(
                 whom = whom,
@@ -4209,6 +4226,37 @@ class TlonChatRepo(
     }
 
     companion object {
+        /**
+         * `#FF5050` → `ff.5050` for a profile tint.
+         *
+         * The json-1 mark decodes a tint as `(slav %ux (cat 3 '0x' s))`
+         * -- it prepends the `0x` itself, so the value must not carry
+         * one. And slav wants the canonical @ux rather than merely a
+         * parseable one: four-digit groups counted from the right, and
+         * no leading zero on the group at the front.
+         *
+         * Padding every colour to six digits and cutting it 2+4 met
+         * that for bright colours and missed it for any colour whose
+         * red channel was below 0x10: `0xff.5050` parses, `0x0a.1b2c`
+         * is refused. The mark's grab then crashed and the whole
+         * profile save nacked with `gall: poke-as: cast: key=%self`,
+         * which says nothing whatsoever about colours.
+         *
+         * Both forms checked against slav in a dojo.
+         */
+        internal fun urbitHexColor(hex: String): String {
+            val digits = hex.trim().removePrefix("#").lowercase()
+                .padStart(6, '0').takeLast(6)
+                .trimStart('0')
+            if (digits.isEmpty()) return "0"
+            val head = digits.length % 4
+            val groups = buildList {
+                if (head != 0) add(digits.substring(0, head))
+                for (i in head until digits.length step 4) add(digits.substring(i, i + 4))
+            }
+            return groups.joinToString(".")
+        }
+
         private const val TAG = "TlonChatRepo"
 
         /**
@@ -4426,3 +4474,15 @@ internal fun imageStory(src: String, width: Int, height: Int, alt: String): Json
             })
         })
     }
+
+/**
+ * Which of [ships] the ship now counts as DMs: `%chat /dm` lists the
+ * accepted ones (net inviting or done), so a request that left the
+ * pending list and is named here was accepted, and one that is not was
+ * declined.
+ */
+internal fun acceptedAmong(ships: Set<String>, dmScry: JsonElement?): Set<String> {
+    val accepted = (dmScry as? JsonArray).orEmpty()
+        .mapNotNull { (it as? JsonPrimitive)?.takeIf { p -> p.isString }?.content }
+    return ships.intersect(accepted.toSet())
+}

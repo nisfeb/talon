@@ -13,17 +13,20 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.MicOff
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -31,12 +34,16 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.nisfeb.talon.call.PartyMember
 import io.nisfeb.talon.call.PeerLink
+import io.nisfeb.talon.ui.icons.TalonIcons
 
 /**
- * The conference tile grid, shared by the mobile full-screen view and
- * the desktop expanded bar so both show the same video. One tile per
- * person: their camera when on, avatar otherwise. Tapping a remote tile
- * pins it to full resolution (see PartyLine.setFocusedVideo).
+ * The conference pictures, shared by the mobile full-screen view and
+ * the desktop expanded bar so both show the same video.
+ *
+ * One picture is front and centre: whoever is pinned, else whoever
+ * spoke last, else the first camera on. Everyone else's camera is a
+ * row of small tiles underneath; tapping one pins it, tapping the
+ * pinned one lets go. Ourselves only when nobody else has a camera on.
  */
 @Composable
 internal fun PartyVideoGrid(
@@ -50,31 +57,71 @@ internal fun PartyVideoGrid(
     onFocusVideo: (String?) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    LazyVerticalGrid(
-        columns = GridCells.Adaptive(160.dp),
-        modifier = modifier,
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp),
-    ) {
-        // Only people sharing video get a tile. An avatar box per
-        // non-video member said nothing the roster doesn't, and on a
-        // phone it crowded the one or two cameras that matter.
-        items(members.filter { it.ship in videoOnShips }, key = { it.ship }) { m ->
+    // Who spoke last, kept until somebody else does: the level flag
+    // flickers with every pause, and a picture that swapped on each
+    // one would be unwatchable.
+    var lastSpeaker by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(members) {
+        members.firstOrNull { it.ship != selfShip && it.speaking && it.ship in videoOnShips }
+            ?.let { lastSpeaker = it.ship }
+    }
+    val onCamera = members.filter { it.ship in videoOnShips }
+    val featured = featuredVideo(onCamera.map { it.ship }, selfShip, focusedShip, lastSpeaker)
+        ?: return
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        onCamera.firstOrNull { it.ship == featured }?.let { m ->
             val isSelf = m.ship == selfShip
             VideoTile(
                 member = m,
                 isSelf = isSelf,
                 nameFor = nameFor,
                 link = if (isSelf) localVideoLink else videoLinkFor(m.ship),
-                videoOn = m.ship in videoOnShips,
+                videoOn = true,
                 focused = m.ship == focusedShip,
                 onTap = if (isSelf) null else {
                     { onFocusVideo(if (m.ship == focusedShip) null else m.ship) }
                 },
+                modifier = Modifier.fillMaxWidth().weight(1f),
             )
+        }
+        val rest = onCamera.filter { it.ship != featured }
+        if (rest.isNotEmpty()) {
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                items(rest, key = { it.ship }) { m ->
+                    val isSelf = m.ship == selfShip
+                    VideoTile(
+                        member = m,
+                        isSelf = isSelf,
+                        nameFor = nameFor,
+                        link = if (isSelf) localVideoLink else videoLinkFor(m.ship),
+                        videoOn = true,
+                        focused = false,
+                        onTap = if (isSelf) null else {
+                            { onFocusVideo(m.ship) }
+                        },
+                        modifier = Modifier.size(96.dp),
+                    )
+                }
+            }
         }
     }
 }
+
+/**
+ * Which camera goes front and centre: the pinned one, else the last
+ * to speak, else the first that is not our own, else our own. Null
+ * when nobody has a camera on.
+ */
+internal fun featuredVideo(
+    onCamera: List<String>,
+    selfShip: String,
+    focusedShip: String?,
+    lastSpeaker: String?,
+): String? =
+    focusedShip?.takeIf { it in onCamera }
+        ?: lastSpeaker?.takeIf { it in onCamera }
+        ?: onCamera.firstOrNull { it != selfShip }
+        ?: onCamera.firstOrNull()
 
 /** One conference tile: camera when on, avatar otherwise, with a name,
  *  mic-off marker, and a ring while speaking or pinned. */
@@ -87,21 +134,15 @@ internal fun VideoTile(
     videoOn: Boolean = false,
     focused: Boolean = false,
     onTap: (() -> Unit)? = null,
+    /** The caller's shape; the renderers fit the picture into it. */
+    modifier: Modifier = Modifier.fillMaxWidth().aspectRatio(1f),
 ) {
     // Camera on/off is signalled explicitly (videoOn), not inferred from
     // the track: a down link always carries an empty video transceiver,
     // so track presence would light every tile up as "on".
     val on = videoOn
-    // Square rather than 4:3, because the mobile renderers aspect-FILL:
-    // a landscape tile showed only the middle 56% of a phone's portrait
-    // frame, a band across the speaker's face. A square costs a landscape
-    // camera a modest side crop and gives portrait video most of its
-    // height back. The other half of the fix — per-platform scaling — has
-    // to happen in the VideoSurface actuals.
     Box(
-        Modifier
-            .fillMaxWidth()
-            .aspectRatio(1f)
+        modifier
             .clip(RoundedCornerShape(10.dp))
             .background(MaterialTheme.colorScheme.surfaceVariant)
             .then(if (onTap != null) Modifier.clickable(onClick = onTap) else Modifier),
@@ -118,7 +159,7 @@ internal fun VideoTile(
         ) {
             if (member.muted || member.mutedByAdmin) {
                 Icon(
-                    Icons.Filled.MicOff,
+                    TalonIcons.MicOff,
                     contentDescription = "Muted",
                     tint = MaterialTheme.colorScheme.error,
                     modifier = Modifier.size(14.dp),

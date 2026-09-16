@@ -82,30 +82,23 @@ fun rememberUrbLinkHandler(
                 installError = null
                 scope.launch {
                     val s = shipUrl()
-                    val (app, mark, body) = LatticeInstall.installPoke()
-                    val poked = s != null && poke(app, mark, body)
-                    if (!poked) {
+                    if (s == null) {
                         installing = false
-                        installError = "Your ship refused the install."
+                        installError = "Not signed in to a ship."
                         return@launch
                     }
-                    // The desk arrives over the network after kiln
-                    // accepts the poke; poll the manifest until it does.
-                    val deadline = nowMs() + INSTALL_TIMEOUT_MS
-                    while (nowMs() < deadline) {
-                        delay(3_000)
-                        if (s != null && LatticeInstall.isInstalled(http, s)) {
+                    LatticeInstall.installAndWait(http, s, poke, INSTALL_TIMEOUT_MS).fold(
+                        onSuccess = {
                             known = true
                             installing = false
                             offerUrl = null
                             open(pendingUrl)
-                            return@launch
-                        }
-                    }
-                    installing = false
-                    installError =
-                        "Install is taking a while — it may still finish. " +
-                        "Try the link again shortly."
+                        },
+                        onFailure = {
+                            installing = false
+                            installError = it.message
+                        },
+                    )
                 }
             },
             onDismiss = {

@@ -10,8 +10,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ExpandLess
-import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -31,6 +29,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.nisfeb.talon.call.AudioDevices
+import io.nisfeb.talon.ui.icons.TalonIcons
 
 /**
  * Microphone and speaker pickers for a call in progress.
@@ -76,7 +75,7 @@ fun AudioDeviceControls(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Icon(
-                    if (open) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
+                    if (open) TalonIcons.ExpandLess else TalonIcons.ExpandMore,
                     contentDescription = if (open) "Hide audio devices" else "Choose audio devices",
                     modifier = Modifier.size(18.dp),
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,

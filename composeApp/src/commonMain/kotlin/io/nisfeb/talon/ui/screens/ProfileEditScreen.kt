@@ -49,6 +49,8 @@ import io.nisfeb.talon.urbit.TlonChatRepo
 import io.nisfeb.talon.util.decodeImageDimensions
 import io.nisfeb.talon.util.rememberImagePicker
 import kotlinx.coroutines.launch
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 
 @Composable
 fun ProfileEditScreen(
@@ -56,6 +58,11 @@ fun ProfileEditScreen(
     repo: TlonChatRepo,
     ourPatp: String,
     onBack: () -> Unit,
+    /** Reads this ship's public keys out of Azimuth, for showing and copying.
+     *  Comets have no Azimuth point; the section says so rather than asking. */
+    keys: io.nisfeb.talon.ui.AzimuthRpc = io.nisfeb.talon.ui.AzimuthRpc.None,
+    /** Signs and checks through this ship's Lattice. Null where there is none. */
+    signer: io.nisfeb.talon.urbit.LatticeSign? = null,
     modifier: Modifier = Modifier,
 ) {
     val scope = rememberCoroutineScope()
@@ -68,6 +75,31 @@ fun ProfileEditScreen(
     var saving by remember { mutableStateOf(false) }
     var uploading by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
+    var shipKeys by remember(ourPatp) { mutableStateOf<io.nisfeb.talon.ui.AzimuthRpc.Keys?>(null) }
+    var keysProblem by remember(ourPatp) { mutableStateOf<String?>(null) }
+    val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
+    var copied by remember(ourPatp) { mutableStateOf(false) }
+    var signing by remember(ourPatp) { mutableStateOf(false) }
+
+    LaunchedEffect(ourPatp, keys) {
+        if (ourPatp.isBlank()) return@LaunchedEffect
+        // A host with no %azimuth-rpc wires None; asking can only fail.
+        if (keys === io.nisfeb.talon.ui.AzimuthRpc.None) return@LaunchedEffect
+        // A comet is not in Azimuth at all, so asking can only fail.
+        if (io.nisfeb.talon.ui.isComet(ourPatp)) {
+            keysProblem = "This is a comet: its name is the fingerprint of its own keys, so " +
+                "Azimuth holds no point for it. A Groundwire comet is attested on Bitcoin instead. " +
+                "Signing and checking still work; they use the key your ship publishes."
+            return@LaunchedEffect
+        }
+        keys.keys(ourPatp).fold(
+            onSuccess = { k ->
+                shipKeys = k
+                keysProblem = if (k == null) "Azimuth holds no keys for this ship." else null
+            },
+            onFailure = { keysProblem = "Could not read your keys from your ship's Azimuth mirror." },
+        )
+    }
 
     LaunchedEffect(ourPatp) {
         val c = db.contacts().get(ourPatp) ?: return@LaunchedEffect
@@ -130,6 +162,7 @@ fun ProfileEditScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
+                .verticalScroll(rememberScrollState())
                 .padding(horizontal = 24.dp, vertical = 16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
@@ -227,7 +260,66 @@ fun ProfileEditScreen(
                 enabled = !saving && !uploading,
                 modifier = Modifier.fillMaxWidth(),
             ) { Text(if (saving) "Saving…" else "Save") }
+
+            if (keys !== io.nisfeb.talon.ui.AzimuthRpc.None || signer != null) {
+                HorizontalDivider()
+                // The ship's own networking keys, which are public: whatever
+                // registry attests the ship already publishes them, so anyone
+                // can read them. Shown here so they can be handed over when
+                // somebody asks.
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    if (keys !== io.nisfeb.talon.ui.AzimuthRpc.None) {
+                        Text(
+                            "Public keys",
+                            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
+                        )
+                        val k = shipKeys
+                        if (k == null) {
+                            Text(
+                                keysProblem ?: "Reading your keys…",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        } else {
+                            Text(
+                                "Your ship's networking keys, as Azimuth holds them.",  // an Azimuth ship; a comet says so above
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            Spacer(Modifier.height(6.dp))
+                            KeyLine("Signing", k.auth)
+                            KeyLine("Encryption", k.crypt)
+                            TextButton(onClick = {
+                                clipboard.setText(androidx.compose.ui.text.AnnotatedString(io.nisfeb.talon.ui.shipKeyBlock(ourPatp, k)))
+                                copied = true
+                            }) { Text(if (copied) "Copied" else "Copy keys") }
+                        }
+                    }
+                    if (signer != null) {
+                        Text(
+                            "Sign something with this ship's key, or check what someone else signed.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        TextButton(onClick = { signing = true }) { Text("Sign or check") }
+                    }
+                }
+            }
+
+            HorizontalDivider()
+            // A code to post where people will see it. Someone who runs a
+            // group scans it from Talon's + screen and invites this ship.
+            io.nisfeb.talon.ui.ShareQr(
+                link = io.nisfeb.talon.urbit.TalonLink.forInviteMe(ourPatp),
+                title = "Invite me",
+                caption = "Post this anywhere. Someone who scans it in Talon can message you or invite you to their groups.",
+                fileName = "invite-" + ourPatp.removePrefix("~"),
+            )
         }
+    }
+
+    if (signing && signer != null) {
+        io.nisfeb.talon.ui.SignVerifyDialog(signer = signer, ourShip = ourPatp, onDismiss = { signing = false })
     }
 }
 
@@ -293,4 +385,14 @@ private fun parseSwatch(hex: String): Color {
     val g = h.substring(2, 4).toInt(16)
     val b = h.substring(4, 6).toInt(16)
     return Color(r, g, b)
+}
+
+
+/** One key, labelled, wrapping rather than trailing off the screen. */
+@Composable
+private fun KeyLine(label: String, key: String) {
+    Column(modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp)) {
+        Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(key, style = MaterialTheme.typography.bodySmall)
+    }
 }

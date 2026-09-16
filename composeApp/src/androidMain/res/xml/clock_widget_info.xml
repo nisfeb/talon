@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  updatePeriodMillis is half an hour because that is the system's
+  floor; anything smaller is silently rounded up to it. That is the
+  slow lane: the weather, and the widget's way back after a reboot.
+
+  It is not what keeps the clock right. Half an hour of drift is
+  nothing to the dial, where the sun moves a degree every four
+  minutes, and is simply a wrong clock to the figures under it, so
+  ClockWidgetProvider re-arms a minute alarm of its own for those.
+
+  No maxResize. It used to stop at 300dp, which on a tablet is a
+  postage stamp, and the ceiling bought nothing: the dial is square and
+  drawn at whatever size it is given. Where it stops now is where the
+  launcher's own grid stops.
+
+  resizeMode is both ways because the dial is square and somebody will
+  want it three cells or six.
+-->
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    android:minWidth="110dp"
+    android:minHeight="110dp"
+    android:targetCellWidth="3"
+    android:targetCellHeight="3"
+    android:minResizeWidth="110dp"
+    android:minResizeHeight="110dp"
+    android:updatePeriodMillis="1800000"
+    android:resizeMode="horizontal|vertical"
+    android:widgetCategory="home_screen"
+    android:initialLayout="@layout/widget_clock"
+    android:description="@string/widget_clock_description" />

@@ -23,6 +23,14 @@ private val sharedOkHttp: OkHttpClient = OkHttpClient.Builder()
     .writeTimeout(15, TimeUnit.SECONDS)
     .build()
 
+/**
+ * Every client built from this shares [sharedOkHttp], so DO NOT CLOSE
+ * one. Closing a Ktor client built on a preconfigured OkHttpClient
+ * shuts down that client's dispatcher, which is process-wide: every
+ * request the app makes afterwards fails with "executor rejected"
+ * until it is restarted, and nothing about the failure points back
+ * here. Build one client and keep it, or use the app's own.
+ */
 actual fun httpEngineFactory(): HttpClientEngineFactory<*> =
     object : HttpClientEngineFactory<OkHttpConfig> {
         override fun create(block: OkHttpConfig.() -> Unit): HttpClientEngine =

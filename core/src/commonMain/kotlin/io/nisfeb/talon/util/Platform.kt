@@ -64,3 +64,11 @@ expect val isMacOsHost: Boolean
  * Backs [createTempFileUri].
  */
 expect val tempDirPath: String
+
+/**
+ * Where the app keeps copies it can fetch again, as an absolute path.
+ * Private to the app everywhere and reclaimable by the system on phones:
+ * Android's cache dir (which the runtime sets as `java.io.tmpdir`), iOS
+ * Caches, and a `cache` folder in the desktop user-data dir.
+ */
+expect val cacheDirPath: String

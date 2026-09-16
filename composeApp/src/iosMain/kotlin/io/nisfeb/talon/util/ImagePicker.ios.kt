@@ -18,9 +18,15 @@ import platform.UIKit.UIImagePickerControllerDelegateProtocol
 import platform.UIKit.UIImagePickerControllerOriginalImage
 import platform.UIKit.UIImagePickerControllerSourceType
 import platform.UIKit.UINavigationControllerDelegateProtocol
+import platform.UIKit.UISceneActivationStateForegroundActive
 import platform.UIKit.UIViewController
+import platform.UIKit.UIWindow
+import platform.UIKit.UIWindowScene
+import platform.UIKit.endEditing
 import platform.UniformTypeIdentifiers.UTTypeItem
 import platform.darwin.NSObject
+import platform.darwin.dispatch_async
+import platform.darwin.dispatch_get_main_queue
 import kotlin.coroutines.resume
 
 // Delegates are retained here for the lifetime of the presentation —
@@ -48,42 +54,83 @@ actual fun decodeImageDimensions(bytes: ByteArray): Pair<Int, Int>? {
     }
 }
 
+/** The foreground scene's key window, walking scenes — the app's
+ *  keyWindow is deprecated (same walk as QrLoginScanner). */
+private fun activeWindow(): UIWindow? {
+    val scenes = UIApplication.sharedApplication.connectedScenes
+        .filterIsInstance<UIWindowScene>()
+    val scene = scenes.firstOrNull { it.activationState == UISceneActivationStateForegroundActive }
+        ?: scenes.firstOrNull()
+    val windows = scene?.windows?.filterIsInstance<UIWindow>().orEmpty()
+    return windows.firstOrNull { it.isKeyWindow() } ?: windows.firstOrNull()
+}
+
 private fun topViewController(): UIViewController? {
-    var vc = UIApplication.sharedApplication.keyWindow?.rootViewController
-    while (vc?.presentedViewController != null) vc = vc.presentedViewController
+    var vc = activeWindow()?.rootViewController
+    while (true) {
+        // A controller on its way out cannot present anything: UIKit
+        // drops the presentation without a word, and the picker never
+        // opens. Stop at the last one that is actually staying.
+        val next = vc?.presentedViewController ?: break
+        if (next.isBeingDismissed()) break
+        vc = next
+    }
     return vc
 }
 
-private suspend fun pickPhoto(): PickedImage? = suspendCancellableCoroutine { cont ->
-    val root = topViewController()
-    if (root == null) {
-        cont.resume(null)
-        return@suspendCancellableCoroutine
+/**
+ * Show a picker, or say it never opened.
+ *
+ * Three things, each a tap somebody lost. The keyboard is a first
+ * responder and presenting while it dismisses is a race, so editing
+ * ends first. The presentation goes on the main queue, after that
+ * dismissal has begun. And a presentation UIKit declines is checked
+ * for rather than assumed, because the delegate would never fire and
+ * the caller would wait for ever.
+ */
+private fun present(picker: UIViewController, onDropped: () -> Unit) {
+    activeWindow()?.endEditing(true)
+    dispatch_async(dispatch_get_main_queue()) {
+        val root = topViewController()
+        if (root == null || root.isBeingDismissed() || root.isBeingPresented()) {
+            onDropped()
+            return@dispatch_async
+        }
+        root.presentViewController(picker, animated = true, completion = null)
+        dispatch_async(dispatch_get_main_queue()) {
+            if (picker.presentingViewController == null) onDropped()
+        }
     }
+}
+
+private suspend fun pickPhoto(): PickedImage? = suspendCancellableCoroutine { cont ->
     val picker = UIImagePickerController()
+    var done = false
     val delegate = PhotoPickerDelegate { result ->
-        cont.resume(result)
+        if (!done) { done = true; cont.resume(result) }
     }
     activeDelegates.add(delegate)
     picker.sourceType =
         UIImagePickerControllerSourceType.UIImagePickerControllerSourceTypePhotoLibrary
     picker.delegate = delegate
-    root.presentViewController(picker, animated = true, completion = null)
+    present(picker) {
+        activeDelegates.remove(delegate)
+        if (!done) { done = true; cont.resume(null) }
+    }
 }
 
 private suspend fun pickDocument(): PickedImage? = suspendCancellableCoroutine { cont ->
-    val root = topViewController()
-    if (root == null) {
-        cont.resume(null)
-        return@suspendCancellableCoroutine
-    }
+    var done = false
     val delegate = DocumentPickerDelegate { result ->
-        cont.resume(result)
+        if (!done) { done = true; cont.resume(result) }
     }
     activeDelegates.add(delegate)
     val picker = UIDocumentPickerViewController(forOpeningContentTypes = listOf(UTTypeItem))
     picker.delegate = delegate
-    root.presentViewController(picker, animated = true, completion = null)
+    present(picker) {
+        activeDelegates.remove(delegate)
+        if (!done) { done = true; cont.resume(null) }
+    }
 }
 
 private class PhotoPickerDelegate(
@@ -128,7 +175,7 @@ private class DocumentPickerDelegate(
             data?.let {
                 PickedImage(
                     bytes = it.toByteArray(),
-                    mimeType = mimeFor(u.pathExtension),
+                    mimeType = io.nisfeb.talon.ui.mimeForName(u.lastPathComponent ?: ""),
                     displayName = u.lastPathComponent ?: "file",
                 )
             }
@@ -143,16 +190,4 @@ private class DocumentPickerDelegate(
         activeDelegates.remove(this)
         onResult(null)
     }
-}
-
-/** Best-effort MIME from a file extension for the picked document; the
- *  upload path re-derives content type, so octet-stream is a safe floor. */
-private fun mimeFor(ext: String?): String = when (ext?.lowercase()) {
-    "png" -> "image/png"
-    "jpg", "jpeg" -> "image/jpeg"
-    "gif" -> "image/gif"
-    "webp" -> "image/webp"
-    "pdf" -> "application/pdf"
-    "txt" -> "text/plain"
-    else -> "application/octet-stream"
 }

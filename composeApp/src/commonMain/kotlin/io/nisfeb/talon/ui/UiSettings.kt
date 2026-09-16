@@ -69,6 +69,10 @@ interface UiSettings {
     val chatPaneListFraction: StateFlow<Float>
     fun setChatPaneListFraction(value: Float)
 
+    /** Width, in dp, of the thread / info pane on wide windows. */
+    val rightPaneWidthDp: StateFlow<Float>
+    fun setRightPaneWidthDp(value: Float)
+
     /**
      * Which surface the desktop / tablet-landscape rail has selected for
      * the left pane. Default [RailTab.Chats]. Persists per ship across
@@ -103,6 +107,48 @@ interface UiSettings {
      * on; the chip is hidden otherwise.
      */
     val smartSearchPreferred: StateFlow<Boolean>
+
+    /**
+     * Where the home page's dial thinks you are, as one encoded line,
+     * or empty when nobody has said. Per install rather than per ship:
+     * it is a fact about the device, not about the identity.
+     */
+    val homePlace: StateFlow<String>
+    fun setHomePlace(encoded: String)
+
+    /** Calendars switched off on this device, by id. */
+    val hiddenCalendars: StateFlow<Set<String>>
+    fun setHiddenCalendars(ids: Set<String>)
+
+    /** The calendar a new event goes to unless another is picked; "" for the first one. */
+    val defaultCalendar: StateFlow<String>
+    fun setDefaultCalendar(id: String)
+
+    /** Whether the calendar opens on the week rather than the month. Per device. */
+    val calendarWeekView: StateFlow<Boolean>
+    fun setCalendarWeekView(on: Boolean)
+
+    /**
+     * How the home dial reads out temperature and the hour.
+     *
+     * Per install, like the place: which units somebody reads is a fact
+     * about them and their device, not about the ship they are logged
+     * into. Defaults match where the app has most of its users rather
+     * than where most of the world is, so the setting exists precisely
+     * so everyone else can put it right once.
+     */
+    val homeFahrenheit: StateFlow<Boolean>
+    fun setHomeFahrenheit(on: Boolean)
+    val homeTwentyFourHour: StateFlow<Boolean>
+    fun setHomeTwentyFourHour(on: Boolean)
+
+    /**
+     * Which widgets the home page carries, in what order and at what
+     * size, as one encoded line. Empty means nobody has arranged it and
+     * the default stands.
+     */
+    val homeLayout: StateFlow<String>
+    fun setHomeLayout(encoded: String)
     fun setSmartSearchPreferred(preferred: Boolean)
 
     /**
@@ -132,6 +178,15 @@ interface UiSettings {
      */
     val powerFeaturesEnabled: StateFlow<Boolean>
     fun setPowerFeaturesEnabled(enabled: Boolean)
+
+    /**
+     * What a swipe on a message does: quote it in the composer (the
+     * default) or open its thread. A touch gesture, so a per-device
+     * preference. Where a quote cannot be sent -- a DM, a reply -- the
+     * swipe opens the thread whatever this says.
+     */
+    val swipeQuotes: StateFlow<Boolean>
+    fun setSwipeQuotes(quotes: Boolean)
 
     /**
      * Per-device density preference for chat-list and message-row
@@ -263,6 +318,9 @@ class InMemoryUiSettings(
     override fun setChatPaneListFraction(value: Float) {
         _chatPaneListFraction.value = value.coerceIn(0.20f, 0.50f)
     }
+    private val _rightPaneWidthDp = MutableStateFlow(360f)
+    override val rightPaneWidthDp: StateFlow<Float> = _rightPaneWidthDp.asStateFlow()
+    override fun setRightPaneWidthDp(value: Float) { _rightPaneWidthDp.value = value.coerceIn(280f, 900f) }
 
     private val _activeRailTab = MutableStateFlow(initialActiveRailTab)
     override val activeRailTab: StateFlow<RailTab> =
@@ -285,6 +343,31 @@ class InMemoryUiSettings(
         }
     }
 
+    private val _homePlace = MutableStateFlow("")
+    override val homePlace: StateFlow<String> = _homePlace.asStateFlow()
+    override fun setHomePlace(encoded: String) { _homePlace.value = encoded }
+    private val _hiddenCalendars = MutableStateFlow<Set<String>>(emptySet())
+    override val hiddenCalendars: StateFlow<Set<String>> = _hiddenCalendars.asStateFlow()
+    override fun setHiddenCalendars(ids: Set<String>) { _hiddenCalendars.value = ids }
+    private val _defaultCalendar = MutableStateFlow("")
+    override val defaultCalendar: StateFlow<String> = _defaultCalendar.asStateFlow()
+    override fun setDefaultCalendar(id: String) { _defaultCalendar.value = id }
+    private val _calendarWeekView = MutableStateFlow(false)
+    override val calendarWeekView: StateFlow<Boolean> = _calendarWeekView.asStateFlow()
+    override fun setCalendarWeekView(on: Boolean) { _calendarWeekView.value = on }
+
+    private val _homeFahrenheit = MutableStateFlow(true)
+    override val homeFahrenheit: StateFlow<Boolean> = _homeFahrenheit.asStateFlow()
+    override fun setHomeFahrenheit(on: Boolean) { _homeFahrenheit.value = on }
+
+    private val _homeTwentyFourHour = MutableStateFlow(false)
+    override val homeTwentyFourHour: StateFlow<Boolean> = _homeTwentyFourHour.asStateFlow()
+    override fun setHomeTwentyFourHour(on: Boolean) { _homeTwentyFourHour.value = on }
+
+    private val _homeLayout = MutableStateFlow("")
+    override val homeLayout: StateFlow<String> = _homeLayout.asStateFlow()
+    override fun setHomeLayout(encoded: String) { _homeLayout.value = encoded }
+
     private val _smartSearchPreferred = MutableStateFlow(initialSmartSearchPreferred)
     override val smartSearchPreferred: StateFlow<Boolean> =
         _smartSearchPreferred.asStateFlow()
@@ -302,6 +385,12 @@ class InMemoryUiSettings(
     override val powerFeaturesEnabled: StateFlow<Boolean> = _powerFeaturesEnabled.asStateFlow()
     override fun setPowerFeaturesEnabled(enabled: Boolean) {
         _powerFeaturesEnabled.value = enabled
+    }
+
+    private val _swipeQuotes = MutableStateFlow(true)
+    override val swipeQuotes: StateFlow<Boolean> = _swipeQuotes.asStateFlow()
+    override fun setSwipeQuotes(quotes: Boolean) {
+        _swipeQuotes.value = quotes
     }
 
     private val _density = MutableStateFlow(Density.Comfortable)
