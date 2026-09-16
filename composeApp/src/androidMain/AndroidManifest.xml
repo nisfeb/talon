@@ -158,10 +158,12 @@
 
 
         <!--
-          The home-screen clock. Exported because the launcher is what
-          sends it its update broadcasts, which is the one case where
-          exported="true" on a receiver is not a way in for anybody
-          else: APPWIDGET_UPDATE is delivered by the system.
+          The home-screen clock. Exported because AppWidgetProvider
+          only receives APPWIDGET_UPDATE this way — but exported means
+          ANY app can broadcast it (or our ACTION_TICK), not just the
+          system, and every one of them lands in onUpdate. The
+          provider rate-limits its paints so a chatty or hostile
+          broadcaster costs at most one redraw per interval.
         -->
         <receiver
             android:name="io.nisfeb.talon.widget.ClockWidgetProvider"

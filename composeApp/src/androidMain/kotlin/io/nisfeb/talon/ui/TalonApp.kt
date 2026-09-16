@@ -562,6 +562,11 @@ fun TalonApp(
     LaunchedEffect(mailRepo) {
         mailRepo.onNewMail = { news ->
             news.forEach {
+                // The thread (or the list, for the aggregate) is already
+                // on screen — a notification would say what the user is
+                // reading. Same suppression chat pushes get.
+                val key = "mail:" + it.threadId.ifBlank { "more" }
+                if (key in io.nisfeb.talon.notify.ShownConversation.keys) return@forEach
                 io.nisfeb.talon.Notifications.showMail(
                     mailContext,
                     it.threadId,
@@ -1166,7 +1171,7 @@ fun TalonApp(
 
     // Dismiss any lingering notification for the conversation we just opened.
     LaunchedEffect(openWhom) {
-        openWhom?.let { Notifications.cancelAllForChat(context, it) }
+        openWhom?.let { Notifications.cancelAllForChat(context, it, forShip = loggedInShip) }
     }
 
     // Screens handle their own window insets via Modifier.windowInsetsPadding
@@ -1325,7 +1330,7 @@ fun TalonApp(
                 MediaKind.VIDEO -> InlineVideoPlayer(url = url)
             }
         },
-        io.nisfeb.talon.notify.LocalNotificationClearer provides remember(context) { { key: String -> Notifications.cancelAllForChat(context, key) } },
+        io.nisfeb.talon.notify.LocalNotificationClearer provides remember(context, loggedInShip) { { key: String -> Notifications.cancelAllForChat(context, key, forShip = loggedInShip) } },
         io.nisfeb.talon.calendar.LocalCalendarRepo provides calendarRepo,
         LocalCalendarLauncher provides calendarLauncher,
         LocalMapsLauncher provides mapsLauncher,
@@ -1685,14 +1690,27 @@ fun TalonApp(
                 return@LaunchedEffect
             }
             var fetchedAt = 0L
+            var failures = 0
+            var nextAttemptAt = 0L
             while (true) {
-                if (io.nisfeb.talon.ui.screens.weatherIsStale(
-                        fetchedAt, io.nisfeb.talon.util.nowMs(),
-                    )
+                val now = io.nisfeb.talon.util.nowMs()
+                // Backgrounded: nobody is looking at the dial, and a
+                // fetch would only warm a cache the widget keeps too.
+                val inForeground = ProcessLifecycleOwner.get()
+                    .lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)
+                if (inForeground && now >= nextAttemptAt &&
+                    io.nisfeb.talon.ui.screens.weatherIsStale(fetchedAt, now)
                 ) {
                     weatherFor(where).onSuccess {
                         homeWeather = it
                         fetchedAt = io.nisfeb.talon.util.nowMs()
+                        failures = 0
+                    }.onFailure {
+                        // Back off doubling rather than retry every
+                        // minute forever: two, four, eight … capped at
+                        // half an hour.
+                        failures = (failures + 1).coerceAtMost(5)
+                        nextAttemptAt = now + 60_000L * (1L shl failures)
                     }
                 }
                 kotlinx.coroutines.delay(60_000L)

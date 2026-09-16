@@ -131,6 +131,15 @@ class ClockWidgetProvider : AppWidgetProvider() {
 
     private fun refresh(context: Context, manager: AppWidgetManager, ids: IntArray) {
         if (ids.isEmpty()) return
+        // This receiver is exported (the manifest says why), so any
+        // app can broadcast APPWIDGET_UPDATE or ACTION_TICK at it and
+        // each one lands here, costing a bitmap render. Collapse
+        // repeats inside half a minute unless the widget set changed —
+        // a new widget or a resize always paints.
+        val now = nowMs()
+        if (now - lastRenderAt < MIN_RENDER_GAP_MS && ids.toSet() == lastRenderIds) return
+        lastRenderAt = now
+        lastRenderIds = ids.toSet()
         // Held past the end of onUpdate, because the forecast is a
         // network call and a broadcast receiver's process is killable
         // the moment it returns.
@@ -150,9 +159,13 @@ class ClockWidgetProvider : AppWidgetProvider() {
                 val known = cached ?: WidgetSky.staleForecast(context)
                 paint(context, manager, ids, settings, at, known)
 
-                // Then a fresh one, if what we had was not current.
-                if (cached == null) {
+                // Then a fresh one, if what we had was not current —
+                // unless a recent failure says the network is not
+                // answering: the tick is a minute, and a dead endpoint
+                // is otherwise sixty requests an hour.
+                if (cached == null && !WidgetSky.inFetchBackoff(context, at)) {
                     val fetched = fetch(context, settings, at)
+                    if (fetched == null) WidgetSky.noteFetchFailure(context, at)
                     if (fetched != null && fetched != known) {
                         paint(context, manager, ids, settings, at, fetched)
                     }
@@ -324,6 +337,14 @@ class ClockWidgetProvider : AppWidgetProvider() {
         private const val TICK_REQUEST = 1
 
         private const val WEATHER_TIMEOUT_MS = 8_000L
+
+        /**
+         * Rate limit on [refresh] — see its comment. Receiver
+         * callbacks all run on the main thread, so plain fields do.
+         */
+        private var lastRenderAt = 0L
+        private var lastRenderIds: Set<Int>? = null
+        private const val MIN_RENDER_GAP_MS = 30_000L
 
         /** What to draw at when the launcher will not say. */
         private const val DEFAULT_SIDE_DP = 180

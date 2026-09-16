@@ -32,9 +32,8 @@ internal var talonAppContext: android.content.Context? = null
 
 class TalonApplication : Application() {
     // Always-on singletons — not ship-scoped.
-    // OkHttp client for the Android-only leaf consumers (image
-    // downloader, daily-digest weather fetch). Session/repo/UI use
-    // [ktorHttp] instead.
+    // OkHttp client for the Android-only leaf consumers (the image
+    // downloader). Session/repo/UI use [ktorHttp] instead.
     lateinit var http: OkHttpClient
         private set
     // Shared multiplatform HTTP client threaded into common
@@ -266,8 +265,8 @@ class TalonApplication : Application() {
 
 
         // User loops — headless scheduled agent runs. Ship-scoped deps
-        // resolved lazily (getDb/getRepo/getEmbedder) like dailyDigest, so
-        // a ship switch is picked up on the next run rather than captured.
+        // resolved lazily (getDb/getRepo/getEmbedder), so a ship switch
+        // is picked up on the next run rather than captured.
         loops = io.nisfeb.talon.ai.Loops(
             context = this,
             sessionStore = sessionStore,
@@ -531,8 +530,11 @@ class TalonApplication : Application() {
         refreshAllShips()
         io.nisfeb.talon.ui.screens.forgetHomeListSnapshot(ship)
         if (!wasActive) {
-            // Its database is not open. Erase now.
-            erase()
+            // Its database is not open. Erase now — on appScope rather
+            // than the caller: the switcher calls this on the main
+            // thread, and deleteDatabase plus file deletes are not
+            // frame-sized work.
+            appScope.launch { erase() }
             return
         }
         // The active ship's database is still being read by the mounted

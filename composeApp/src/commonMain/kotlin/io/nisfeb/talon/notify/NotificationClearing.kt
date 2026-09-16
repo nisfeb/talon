@@ -10,13 +10,25 @@ val LocalNotificationClearer = staticCompositionLocalOf<(String) -> Unit> { {} }
 
 /** The keys on screen while the app is in front, so a push about one can be dropped on arrival. */
 object ShownConversation {
-    // ponytail: written only from composition (one thread), read from a push receiver; a volatile list, not a lock.
+    // ponytail: written only from composition (one thread), read from a push receiver; a volatile map, not a lock.
+    // Reference-counted: two surfaces can show the same key at once
+    // (a chat and its thread), and removing on the first hide leaked
+    // the other's registration — pushes kept being dropped after it
+    // closed.
     @Volatile
-    var keys: List<String> = emptyList()
-        private set
+    private var counts: Map<String, Int> = emptyMap()
 
-    internal fun shown(key: String) { keys = keys + key }
-    internal fun hidden(key: String) { keys = keys - key }
+    val keys: Set<String>
+        get() = counts.keys
+
+    internal fun shown(key: String) {
+        counts = counts + (key to (counts[key] ?: 0) + 1)
+    }
+
+    internal fun hidden(key: String) {
+        val n = counts[key] ?: return
+        counts = if (n <= 1) counts - key else counts + (key to n - 1)
+    }
 }
 
 /**

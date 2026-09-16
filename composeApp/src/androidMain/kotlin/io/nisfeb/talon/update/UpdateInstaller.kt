@@ -45,7 +45,15 @@ class UpdateInstaller(private val context: Context) : UpdateInstallerHook {
         // the universal APK's size; the universal one only when none fits.
         val asset = manifest.androidAssetFor(android.os.Build.SUPPORTED_ABIS.toList())
         val updatesDir = File(context.getExternalFilesDir(null), "updates").apply { mkdirs() }
-        val target = File(updatesDir, asset.url.substringAfterLast('/'))
+        // A trailing-slash URL yields an empty name; strip path
+        // separators and ".." so a hostile manifest can't write
+        // outside the updates dir.
+        val name = asset.url.substringAfterLast('/')
+            .ifBlank { "talon-update.apk" }
+            .replace("..", "")
+            .replace('/', '_')
+            .replace('\\', '_')
+        val target = File(updatesDir, name)
         if (target.exists()) target.delete()
 
         val dm = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
@@ -59,7 +67,9 @@ class UpdateInstaller(private val context: Context) : UpdateInstallerHook {
 
         // Poll. DownloadManager's broadcast is racy in our use case
         // (we want fine-grained progress); polling at 250ms is fine
-        // for a single foreground-bounded download.
+        // for a single foreground-bounded download. The overall
+        // deadline keeps a stalled connection from spinning forever.
+        val deadline = System.currentTimeMillis() + DOWNLOAD_TIMEOUT_MS
         while (true) {
             val q = DownloadManager.Query().setFilterById(downloadId)
             val cursor: Cursor = dm.query(q) ?: run {
@@ -89,6 +99,11 @@ class UpdateInstaller(private val context: Context) : UpdateInstallerHook {
                             onFailure("downloaded APK failed SHA-256 check")
                             return
                         }
+                        // Prune older APKs so the updates dir doesn't
+                        // accumulate one download per past update.
+                        updatesDir.listFiles()
+                            ?.filter { it.name != target.name && it.extension == "apk" }
+                            ?.forEach { it.delete() }
                         onReady(target.absolutePath)
                         return
                     }
@@ -110,6 +125,12 @@ class UpdateInstaller(private val context: Context) : UpdateInstallerHook {
                         onProgress(pct.coerceIn(0, 99))
                     }
                 }
+            }
+            if (System.currentTimeMillis() > deadline) {
+                dm.remove(downloadId)
+                target.delete()
+                onFailure("Download timed out — check your connection and retry")
+                return
             }
             delay(250)
         }
@@ -163,5 +184,10 @@ class UpdateInstaller(private val context: Context) : UpdateInstallerHook {
         }
         val got = md.digest().joinToString("") { "%02x".format(it) }
         return got.equals(expected, ignoreCase = true)
+    }
+
+    private companion object {
+        /** Overall cap on the DownloadManager poll — 15 minutes. */
+        const val DOWNLOAD_TIMEOUT_MS = 15L * 60 * 1000
     }
 }

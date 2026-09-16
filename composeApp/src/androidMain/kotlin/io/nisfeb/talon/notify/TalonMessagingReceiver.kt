@@ -84,6 +84,17 @@ class TalonMessagingReceiver : MessagingReceiver() {
         if (event == "ring") {
             val from = parsed?.get("from")?.jsonPrimitive?.content
             if (from.isNullOrBlank() || eventId.isNullOrBlank()) return
+            // This receiver is exported and UnifiedPush broadcasts are
+            // unauthenticated — any app on the phone can forge one, and
+            // a forged ring is a fake incoming call over the lock
+            // screen. The relay only ever rings us for a ship this
+            // device is signed into, so anything else is dropped.
+            val knownShips = (context.applicationContext as? io.nisfeb.talon.TalonApplication)
+                ?.allShipsFlow?.value.orEmpty()
+            if (patp == null || patp !in knownShips) {
+                Log.w(TAG, "dropping ring for a ship we are not signed into: $patp")
+                return
+            }
             io.nisfeb.talon.Notifications.showIncomingCall(context, from, eventId)
             // Telecom hears about the ring from here, not only from the
             // app: this is the path a phone in a pocket takes, and a
@@ -121,8 +132,16 @@ class TalonMessagingReceiver : MessagingReceiver() {
         }
 
         if (whom.isNullOrBlank()) return
-        // On screen right now: the app already shows it, and a notification would only need clearing.
-        if (whom in io.nisfeb.talon.notify.ShownConversation.keys) return
+        // On screen right now: the app already shows it, and a
+        // notification would only need clearing. Only when the push is
+        // for the ship actually signed in, though — the same whom open
+        // on ship A says nothing about ship B's conversation of that
+        // name. A missing patp (older relay) keeps the old behaviour.
+        val currentShip = (context.applicationContext as? io.nisfeb.talon.TalonApplication)
+            ?.activeShipFlow?.value
+        if ((patp == null || patp == currentShip) &&
+            whom in io.nisfeb.talon.notify.ShownConversation.keys
+        ) return
         val title = patp ?: "Talon"
         val body = "New activity in $whom"
         // The relay sends the globally-unique post id as `id`

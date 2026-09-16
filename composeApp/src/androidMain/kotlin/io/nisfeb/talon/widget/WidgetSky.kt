@@ -23,6 +23,7 @@ object WidgetSky {
     private const val KEY_FORECAST = "forecast_body"
     private const val KEY_FORECAST_AT = "forecast_at"
     private const val KEY_FORECAST_FOR = "forecast_for"
+    private const val KEY_FETCH_FAILED_AT = "fetch_failed_at"
 
     data class Settings(
         val place: HomePlace?,
@@ -73,7 +74,28 @@ object WidgetSky {
             .putString(KEY_FORECAST, body)
             .putString(KEY_FORECAST_FOR, placeKey(place))
             .putLong(KEY_FORECAST_AT, nowMs)
+            // A success ends any failure backoff.
+            .remove(KEY_FETCH_FAILED_AT)
             .apply()
+    }
+
+    /** Note a failed fetch, so the next ticks stop hammering the
+     *  network for a forecast that is not coming. */
+    fun noteFetchFailure(context: Context, nowMs: Long) {
+        context.getSharedPreferences(WIDGET_PREFS, Context.MODE_PRIVATE).edit()
+            .putLong(KEY_FETCH_FAILED_AT, nowMs)
+            .apply()
+    }
+
+    /**
+     * True while a recent failure says to leave the network alone. An
+     * expired cache plus a failing fetch is otherwise a network
+     * attempt a minute off the widget's tick.
+     */
+    fun inFetchBackoff(context: Context, nowMs: Long): Boolean {
+        val at = context.getSharedPreferences(WIDGET_PREFS, Context.MODE_PRIVATE)
+            .getLong(KEY_FETCH_FAILED_AT, 0L)
+        return at > 0L && nowMs >= at && nowMs - at < FETCH_BACKOFF_MS
     }
 
     /** Coarse on purpose: a place that has moved a few hundred metres
@@ -85,11 +107,13 @@ object WidgetSky {
      *  wakes less often should not throw away what it has. */
     const val FORECAST_GOOD_FOR_MS = 60 * 60_000L
 
+    /** How long a failed fetch keeps the network alone. */
+    const val FETCH_BACKOFF_MS = 10 * 60_000L
+
     /**
      * The dial's state, from a place, a moment and whatever weather is
-     * to hand. The same arithmetic the app's own home page does.
+     * to hand — the dial's own arithmetic, not a copy of it.
      */
-    /** The dial's own arithmetic, not a copy of it. */
     fun skyFor(atMs: Long, place: HomePlace?, forecastBody: String?): SkyClock.Sky =
         io.nisfeb.talon.ui.screens.skyFor(atMs, place, forecastBody?.let { parseForecast(it) })
 }

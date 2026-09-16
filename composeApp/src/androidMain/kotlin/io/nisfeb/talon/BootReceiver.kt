@@ -44,8 +44,10 @@ class BootReceiver : BroadcastReceiver() {
                         }
                     }
                 } catch (t: Throwable) {
+                    // Same containment as the coroutine's: rethrowing
+                    // here crashes the process at boot, on every boot.
+                    Log.w("BootReceiver", "could not arm the loop re-arm", t)
                     runCatching { pending.finish() }
-                    throw t
                 }
             }
         }

@@ -173,7 +173,6 @@ object DialPainter {
         return bmp
     }
 
-    /** The ring itself, for cutting things off at its edges. */
     private fun stars(
         c: Canvas,
         paint: Paint,
@@ -264,8 +263,7 @@ object DialPainter {
         }
     }
 
-    /** How dark the sky is at a minute, hour by hour where that is known. */
-    /** The dial's own rule, not a copy of it. */
+    /** How dark the sky is at a minute — the dial's own rule, not a copy. */
     private fun gloomAt(minute: Int, sky: SkyClock.Sky): Float =
         io.nisfeb.talon.ui.screens.gloomAt(minute, sky.hourlyCondition, sky.condition)
 
@@ -295,11 +293,6 @@ object DialPainter {
         c.drawText(label, at.x, at.y + paint.textSize * 0.35f, paint)
     }
 
-    /**
-     * The lit part of the moon: the limb facing the sun, and the same
-     * half circle squashed by the phase. Signed, so it bulges into the
-     * lit side for a crescent and away for a gibbous.
-     */
     /**
      * Time, date and temperature, thinning out as the dial does — the
      * same tiers the app's dial uses, because a widget is small and a

@@ -42,8 +42,10 @@ class LoopAlarmReceiver : BroadcastReceiver() {
                 }
             }
         } catch (t: Throwable) {
+            // Same containment as the coroutine's: rethrowing here
+            // crashes the process in the background, on every alarm.
+            Log.w("LoopAlarmReceiver", "could not fire the loop alarm", t)
             runCatching { pending.finish() }
-            throw t
         }
     }
 }

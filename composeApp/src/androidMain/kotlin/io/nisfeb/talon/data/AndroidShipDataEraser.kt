@@ -36,8 +36,18 @@ class AndroidShipDataEraser(context: Context) : ShipDataEraser {
         // The relay device id is dropped by forgetShip, which also
         // tells the relay; this only ever runs after that.
 
+        if (pendingFile().run { exists() && readText().trim() == ship }) pendingFile().delete()
         Log.i(TAG, "erased $ship (db=$goneDb)")
     }
+
+    private fun pendingFile(): java.io.File = java.io.File(app.filesDir, "pending-erase")
+
+    override fun markPending(ship: String) {
+        runCatching { pendingFile().writeText(ship) }
+    }
+
+    override fun takePending(): String? =
+        pendingFile().takeIf { it.exists() }?.readText()?.trim()?.takeIf { it.isNotBlank() }
 
     /**
      * Clearing a SharedPreferences leaves an empty XML file behind.

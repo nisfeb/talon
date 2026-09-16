@@ -34,11 +34,9 @@ class MainActivity : ComponentActivity() {
     private val deepLinkMessageId = mutableStateOf<String?>(null)
     private val deepLinkThreadParent = mutableStateOf<String?>(null)
     private val deepLinkThreadAnchor = mutableStateOf<String?>(null)
-    /** Retired with the daily digest. Left so the field order in this
-     *  class does not shift; nothing sets it now. The next line's doc
-     *  composition. The value is the ship the digest belongs to —
-     *  stashed for completeness even though the screen reads the
-     *  active ship's digest itself. */
+    /** Set by a tapped mail notification (EXTRA_OPEN_MAIL): TalonApp
+     *  opens Mail on arrival. Routed like the other deep links — see
+     *  consumeIntent. */
     private val deepLinkOpenMail = mutableStateOf(false)
     /** Set when the user hit Answer on the incoming-call notification.
      *  The action can only open the activity — accepting needs the

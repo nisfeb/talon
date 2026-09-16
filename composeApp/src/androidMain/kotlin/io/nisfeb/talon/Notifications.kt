@@ -438,9 +438,11 @@ object Notifications {
             .setShowWhen(true)
             .build()
 
-        // Tag = whom so new messages from the same conversation replace
-        // the previous notification rather than stacking.
-        mgr.notify(whom, NOTIFICATION_ID, notification)
+        // Tag = ship + whom so new messages from the same conversation
+        // replace the previous notification rather than stacking — and
+        // the same whom on two ships keeps two rows, matching the
+        // request code above.
+        mgr.notify(forShip.orEmpty() + whom, NOTIFICATION_ID, notification)
     }
 
     /**
@@ -476,7 +478,8 @@ object Notifications {
         }
         val pending = PendingIntent.getActivity(
             context,
-            ("watchword:$whom").hashCode(),
+            // The ship is part of the identity, as in showMessage.
+            ("watchword:" + forShip.orEmpty() + whom).hashCode(),
             tapIntent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
@@ -496,10 +499,11 @@ object Notifications {
             .setShowWhen(true)
             .build()
 
-        // Tag = "watchword:<whom>" so repeated hits in the same chat
-        // collapse into one row, but never collide with showMessage's
-        // <whom>-tagged notification for the same chat.
-        mgr.notify("watchword:$whom", NOTIFICATION_ID, notification)
+        // Tag = "watchword:<ship><whom>" so repeated hits in the same
+        // chat collapse into one row, but never collide with
+        // showMessage's row for the same chat — or with the same
+        // chat's watchword row on another ship.
+        mgr.notify("watchword:" + forShip.orEmpty() + whom, NOTIFICATION_ID, notification)
     }
 
     /**
@@ -584,12 +588,23 @@ object Notifications {
 
     /** Cancel all notifications associated with a chat — called when the
      *  user opens the conversation. Also cancels the watchword tag for the
-     *  same chat so both notification rows disappear together. */
-    fun cancelAllForChat(context: Context, whom: String) {
+     *  same chat so both notification rows disappear together.
+     *
+     *  Rows are tagged with the ship they were posted for, and
+     *  [forShip] is the ship the open conversation belongs to. The
+     *  bare tags are cancelled too: mail rows carry no ship, and a row
+     *  posted before the tags grew one can still be up after an
+     *  upgrade. Cancelling a tag nothing posted is a no-op. */
+    fun cancelAllForChat(context: Context, whom: String, forShip: String? = null) {
         val mgr = ContextCompat.getSystemService(context, NotificationManager::class.java)
             ?: return
-        mgr.cancel(whom, NOTIFICATION_ID)
-        mgr.cancel("watchword:$whom", NOTIFICATION_ID)
+        val tagged = forShip.orEmpty() + whom
+        mgr.cancel(tagged, NOTIFICATION_ID)
+        mgr.cancel("watchword:$tagged", NOTIFICATION_ID)
+        if (forShip != null) {
+            mgr.cancel(whom, NOTIFICATION_ID)
+            mgr.cancel("watchword:$whom", NOTIFICATION_ID)
+        }
     }
 
     private const val NOTIFICATION_ID = 1001
