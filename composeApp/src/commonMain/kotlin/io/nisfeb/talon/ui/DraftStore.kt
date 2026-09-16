@@ -31,8 +31,11 @@ abstract class DraftStore {
      * ship switch: by then the incoming ship's composer has already
      * loaded the same conversation, so anything keyed by conversation
      * has been re-pointed at the new ship. The pin has to belong to the
-     * composer instance, which is what this handle is. Stores with one
-     * ship's drafts, or none, are their own handle.
+     * composer instance, which is what this handle is. Stores built
+     * per ship (Android) are their own handle. InMemoryDraftStore is
+     * too, but only because it scopes nothing: it holds every ship's
+     * drafts mixed (desktop, pre-existing — see the PR's known
+     * follow-ups), so there is no ship to pin to.
      */
     open fun bound(): DraftStore = this
 }

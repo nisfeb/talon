@@ -29,7 +29,10 @@ import kotlin.test.assertTrue
 class DraftShipBindingTest {
 
     /** Drafts per ship, resolving the active ship at call time the way
-     *  the iOS store does, and binding the way it does too. */
+     *  the iOS store does, and binding the way it does too. A fake on
+     *  purpose: the real IosDraftStore is iosMain and unreachable from
+     *  here, so this mirrors its Bound semantics — the contract this
+     *  test exists to pin. */
     private class ShipDrafts(private val active: () -> String) : DraftStore() {
         val byShip = mutableMapOf<String, MutableMap<String, String>>()
         private fun of(ship: String) = byShip.getOrPut(ship) { mutableMapOf() }
