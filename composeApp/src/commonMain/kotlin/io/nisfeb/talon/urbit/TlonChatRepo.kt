@@ -554,8 +554,11 @@ class TlonChatRepo(
                     runCatching { bootstrapChannelOrders(ch) }
                         .onFailure { Log.e(TAG, "channel orders scry failed", it) }
                 }
+                // A request that arrived while this session was down is
+                // news on a reconnect, so it notifies; only the first
+                // pass of a session stays quiet.
                 val dmInvitesJob = async {
-                    runCatching { bootstrapDmInvites(ch) }
+                    runCatching { bootstrapDmInvites(ch, notify = !firstRun) }
                         .onFailure { Log.e(TAG, "dm-invites scry failed", it) }
                 }
                 // Group invites had no bootstrap at all — refreshInvites ran
@@ -2858,8 +2861,8 @@ class TlonChatRepo(
         }
         if (response != "diff") return
         // %chat pushes the full pending-DM-invite ship list as a bare
-        // JSON array on the chat /v4 subscription (the other agents only
-        // ever emit objects, so an array is unambiguously this). Handle
+        // JSON array on its /dm/invited subscription (the other agents
+        // only ever emit objects, so an array is unambiguously this). Handle
         // it before the object cast below drops it on the floor — that
         // drop is why brand-new DMs were invisible.
         (outer["json"] as? JsonArray)?.let { applyDmInvites(it, notify = true); return }
@@ -3367,15 +3370,17 @@ class TlonChatRepo(
 
     /**
      * Scry the full pending-DM-invite list at (re)connect. `%chat`
-     * `/dm/invited` returns a JSON array of inviter patps. Bootstrap
-     * doesn't notify — a launch shouldn't fire a balloon for every
-     * already-pending request; only live arrivals (via [applyEvent]) do.
+     * `/dm/invited` returns a JSON array of inviter patps. A session's
+     * first pass doesn't notify — a launch shouldn't fire a balloon for
+     * every already-pending request; a reconnect does, because a
+     * request new since the last pass arrived while we were down and
+     * nobody has been told.
      */
-    private suspend fun bootstrapDmInvites(channel: UrbitChannel) {
+    private suspend fun bootstrapDmInvites(channel: UrbitChannel, notify: Boolean) {
         val body = runCatching { channel.scry("chat", "/dm/invited") }
             .onFailure { Log.w(TAG, "dm/invited scry failed", it) }
             .getOrNull() as? JsonArray ?: return
-        applyDmInvites(body, notify = false)
+        applyDmInvites(body, notify = notify)
     }
 
     /**
@@ -3398,6 +3403,24 @@ class TlonChatRepo(
         }
         removed.forEach { db.dmInvites().delete(it) }
         if (notify) added.forEach { ship -> runCatching { dmInviteListener?.invoke(ship) } }
+        // A request withdrawn by a live fact was answered on another
+        // client. Accepted, the conversation may have no rows here: the
+        // init scry leaves invited DMs out, and a writ that came while
+        // this session was down is gone. Fetch it, or it stays unseen
+        // until the next full bootstrap. Declined, the DM is gone and
+        // the accepted-DM scry does not name it.
+        if (notify && removed.isNotEmpty()) scope.launch { adoptAcceptedDms(removed) }
+    }
+
+    private suspend fun adoptAcceptedDms(ships: Set<String>) {
+        val ch = channel ?: return
+        val accepted = runCatching { ch.scry("chat", "/dm") }
+            .onFailure { Log.w(TAG, "dm scry failed", it) }
+            .getOrNull()
+        for (ship in acceptedAmong(ships, accepted)) {
+            runCatching { refreshConversation(ship) }
+                .onFailure { Log.w(TAG, "refreshConversation($ship) after an rsvp elsewhere failed", it) }
+        }
     }
 
     /**
@@ -4451,3 +4474,15 @@ internal fun imageStory(src: String, width: Int, height: Int, alt: String): Json
             })
         })
     }
+
+/**
+ * Which of [ships] the ship now counts as DMs: `%chat /dm` lists the
+ * accepted ones (net inviting or done), so a request that left the
+ * pending list and is named here was accepted, and one that is not was
+ * declined.
+ */
+internal fun acceptedAmong(ships: Set<String>, dmScry: JsonElement?): Set<String> {
+    val accepted = (dmScry as? JsonArray).orEmpty()
+        .mapNotNull { (it as? JsonPrimitive)?.takeIf { p -> p.isString }?.content }
+    return ships.intersect(accepted.toSet())
+}

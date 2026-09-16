@@ -86,6 +86,16 @@ class DmInviteTest {
     }
 
     @Test
+    fun `a request accepted elsewhere is the one the dm list names`() {
+        val gone = setOf("~a-a", "~b-b")
+        // ~a-a accepted on another client, ~b-b declined: /dm names only
+        // the accepted one, and only it is worth fetching.
+        assertEquals(setOf("~a-a"), acceptedAmong(gone, ships("~a-a", "~zod")))
+        assertTrue(acceptedAmong(gone, null).isEmpty(), "no answer means nothing to fetch")
+        assertTrue(acceptedAmong(gone, JsonPrimitive("nope")).isEmpty())
+    }
+
+    @Test
     fun `non-ship and non-string entries are ignored`() = runBlocking {
         val arr = buildJsonArray {
             add(JsonPrimitive("~ok-ok"))
