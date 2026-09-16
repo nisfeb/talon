@@ -78,6 +78,7 @@ import io.nisfeb.talon.ai.SearchEmbedderClient
 import io.nisfeb.talon.ai.Tool
 import io.nisfeb.talon.ai.ToolCall
 import io.nisfeb.talon.ai.ToolCatalog
+import io.nisfeb.talon.ai.dedupToolNames
 import io.nisfeb.talon.ai.unpackEmbedding
 import io.nisfeb.talon.data.AppDatabase
 import io.nisfeb.talon.data.AssistantConversationEntity
@@ -275,11 +276,17 @@ fun AssistantScreen(
                 completer = { sys, msgs, tools ->
                     agentClient.completeWithTools(sys + "\n\n" + io.nisfeb.talon.ai.nowLine(zoneFor(calendarZone)), msgs, tools)
                 },
-                tools = ToolCatalog.default(
+                // Built-ins first, then the assistant's actions, then the
+                // ship's MCP tools — de-duplicated across the concatenation:
+                // an MCP tool whose sanitized name equals a built-in would
+                // otherwise advertise two specs under one name (providers
+                // 400 the whole request) and shadow the built-in in the
+                // loop's name→tool map. The first occurrence keeps the name.
+                tools = (ToolCatalog.default(
                     repo, db, embedder,
                     braveSearch = if (braveKeyPresent) braveSearch else null,
                     urlFetcher = urlFetcher,
-                ) { contactMap.displayName(it) } + io.nisfeb.talon.ai.actionTools(actions) + mcpTools,
+                ) { contactMap.displayName(it) } + io.nisfeb.talon.ai.actionTools(actions) + mcpTools).dedupToolNames(),
                 systemPrompt = systemPrompt,
             )
         } else null
@@ -700,7 +707,7 @@ fun AssistantScreen(
             // The write-confirmation card — the Phase 2 trust boundary.
             pending?.let { p ->
                 ConfirmCard(
-                    summary = describe(p.call, contactMap),
+                    summary = describe(p.call, contactMap, calendar),
                     onAllow = { p.gate.complete(true) },
                     onDeny = { p.gate.complete(false) },
                 )
@@ -1073,14 +1080,30 @@ private fun AgentLoop.Event.toLine(): Line = when (this) {
 }
 
 /** Human-readable summary of a proposed action, resolving patps to
- *  display names where the arg looks like one. */
-private fun describe(call: ToolCall, contactMap: ContactMap): String {
+ *  display names where the arg looks like one. Calendar event/task ids
+ *  resolve to their names too: a delete confirmed against a bare
+ *  "0v…" id is a blind approval, so the card names what would go. */
+private fun describe(
+    call: ToolCall,
+    contactMap: ContactMap,
+    calendar: io.nisfeb.talon.calendar.CalendarRepo? = null,
+): String {
+    // The id's current name from the loaded window / task list, or the
+    // raw id when the entry isn't in view (still better than nothing —
+    // the id itself is shown either way).
+    fun entryLabel(id: String): String {
+        if (calendar == null) return id
+        val name = calendar.rows.value.orEmpty().firstOrNull { it.id == id }?.name
+            ?: calendar.tasks.value.orEmpty().firstOrNull { it.id == id }?.name
+        return if (name.isNullOrBlank()) id else "\"$name\" ($id)"
+    }
     val args = call.args.entries.joinToString("\n") { (k, v) ->
         val raw = v.toString().trim('"')
         // Resolve conversation ids to titles so the user is approving a
         // legible target, not an opaque "chat/~zod/general" / "0v..." id.
         val shown = when {
             k == "whom" -> contactMap.conversationLabel(raw)
+            k == "event" || k == "task" -> entryLabel(raw)
             raw.startsWith("~") -> contactMap.displayName(raw)
             else -> raw
         }

@@ -88,6 +88,22 @@ class AgentClientTest {
     }
 
     @Test
+    fun `parse anthropic tolerates a block with an object-valued type`() {
+        // A garbled block from a proxy/ provider — {"type":{…}} — must not
+        // fail the whole turn: asText() degrades it to null and the block
+        // is skipped, where .jsonPrimitive threw and lost the answer.
+        val body = json.parseToJsonElement(
+            """
+            {"content":[
+              {"type":{"unexpected":"object"},"text":"junk"},
+              {"type":"text","text":"still works"}
+            ],"stop_reason":"end_turn"}
+            """.trimIndent(),
+        ).jsonObject
+        assertEquals(AgentTurn.Final("still works"), parseAnthropicTurn(body))
+    }
+
+    @Test
     fun `parse openai tool_calls decodes the arguments string`() {
         val body = json.parseToJsonElement(
             """

@@ -59,4 +59,37 @@ class AssistantActionsTest {
         )
         assertEquals("event=e2 2026-09-19 all day (2 days) Fair (calendar default)", describeRow(fair, TimeZone.of("America/New_York"), emptyMap()))
     }
+
+    @Test fun `formatThread caps at 20 messages and notes how many earlier ones it dropped`() {
+        // A busy thread (a mailing list runs to hundreds) must not blow the
+        // tool result past the context budget: the last 20 are shown, the
+        // rest summarized as a count so the model knows they exist.
+        val msgs = (1..25).map { i ->
+            io.nisfeb.talon.mail.MailMessage(
+                id = "m$i", from = "~bus", to = listOf("~zod"),
+                subject = "s$i", body = "body $i", sent = 1_789_776_000_000L + i * 60_000L,
+            )
+        }
+        val t = io.nisfeb.talon.mail.MailThread(id = "t1", messages = msgs, participants = listOf("~bus", "~zod"))
+        val out = formatThread(t, TimeZone.UTC)
+        assertTrue(
+            out.contains("… and 5 earlier messages in this thread, not shown; these are the 20 most recent."),
+            out,
+        )
+        assertTrue(!out.contains("message=m5 "), "the 5th message was capped away")
+        assertTrue(out.contains("message=m6 "), "the 6th message is the oldest shown")
+        assertTrue(out.contains("message=m25 "), "the newest message is shown")
+    }
+
+    @Test fun `sane coercion bounds absurd tool args`() {
+        // A hallucinated duration_min=100000 must be coerced at the tool
+        // boundary, not poked to the calendar as-is.
+        assertEquals(7 * 24 * 60, saneDurMin(100000))
+        assertEquals(0, saneDurMin(-5))
+        assertEquals(60, saneDurMin(60))
+        assertEquals(62, saneSpanDays(100000))
+        assertEquals(1, saneSpanDays(0))
+        assertEquals(1000, saneCount(100000))
+        assertEquals(0, saneCount(-1))
+    }
 }

@@ -18,6 +18,12 @@ import kotlinx.datetime.TimeZone
  * flag can never mutate the ship by construction — its write tools are
  * filtered out AND confirm declines.
  *
+ * [DESTRUCTIVE_TOOLS] (delete_event and its ilk) are filtered out for
+ * EVERY loop, authorized or not: an unattended run auto-confirms its own
+ * writes, so an irreversible delete must never be one prompt-injection
+ * away from firing. Destructive actions stay with the interactive
+ * assistant, where a human reads the confirmation card.
+ *
  * Persists each run to `loop_run`, prunes the per-loop history, stamps
  * `lastRunAt`, and fires a notification. Platform-agnostic: the Android
  * alarm receiver and the desktop ticker both call [runDue] / [runLoop];
@@ -51,8 +57,10 @@ class LoopRunner(
         // Defence in depth: drop write tools unless this loop opted in, AND
         // gate confirm on the same flag. Either alone would block writes;
         // both means a non-authorized loop can't write even if a tool is
-        // mis-tagged or the catalog changes.
-        val active = if (loop.writesAuthorized) tools else tools.filter { !it.write }
+        // mis-tagged or the catalog changes. Destructive tools are dropped
+        // for EVERY loop: an unattended run auto-confirms, so nothing
+        // irreversible may be within the model's reach here.
+        val active = tools.filter { it.spec.name !in DESTRUCTIVE_TOOLS && (loop.writesAuthorized || !it.write) }
         // Stamp the run with the current local date/day/time so the agent
         // can reason about "now" (e.g. "what happened today?") — a headless
         // run has no other way to know when it fired.
@@ -112,5 +120,11 @@ class LoopRunner(
     companion object {
         const val RUN_HISTORY_KEEP = 20
         const val NOTIFY_BODY_CHARS = 200
+
+        /** Tools no loop may ever call, even with writesAuthorized set:
+         *  irreversible-by-design actions stay behind the interactive
+         *  assistant's human confirmation. Matched on the model-facing
+         *  [ToolSpec.name]. */
+        val DESTRUCTIVE_TOOLS = setOf("delete_event")
     }
 }

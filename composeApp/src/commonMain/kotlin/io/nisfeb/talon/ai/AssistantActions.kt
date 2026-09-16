@@ -35,9 +35,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
-import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
-import kotlinx.serialization.json.putJsonArray
 
 /**
  * What the assistant can act on beyond chat: people, conversations,
@@ -244,18 +242,7 @@ fun actionTools(a: AssistantActions): List<Tool> = buildList {
         ) { args ->
             val id = args.text("thread")?.trim()?.takeIf { it.isNotEmpty() } ?: return@Tool "Error: thread is required."
             val t = mail.loadThread(id) ?: return@Tool "No thread $id${mail.error.value?.let { ": $it" } ?: ""}."
-            val zone = a.zone()
-            fun two(n: Int) = n.toString().padStart(2, '0')
-            buildString {
-                append("thread=${t.id} link=${io.nisfeb.talon.urbit.TalonLink.forMail(t.id)} participants=${t.participants.joinToString(", ")}")
-                if (t.labels.isNotEmpty()) append(" labels=${t.labels.joinToString(", ")}")
-                t.messages.forEach { m ->
-                    val at = Instant.fromEpochMilliseconds(m.sent).toLocalDateTime(zone)
-                    append("\n\nmessage=${m.id} from=${m.from} to=${m.to.joinToString(", ")} sent=${at.date} ${two(at.hour)}:${two(at.minute)} subject=${m.subject.ifBlank { "(no subject)" }}\n")
-                    append(m.body.take(4000))
-                    if (m.attachments.isNotEmpty()) append("\nattachments: " + m.attachments.joinToString(", ") { "${it.name} (${it.mime})" })
-                }
-            }
+            formatThread(t, a.zone())
         })
     }
     a.calendar?.let { cal ->
@@ -328,8 +315,8 @@ fun actionTools(a: AssistantActions): List<Tool> = buildList {
                 cal = calId,
                 cat = if (minute == null) EventCat.ALLDAY else EventCat.TIMED,
                 date = date, minuteOfDay = minute ?: 0,
-                durMin = args.int("duration_min") ?: 60, spanDays = args.int("days") ?: 1,
-                repeat = repeat, weekdays = weekdays, count = args.int("count") ?: 0,
+                durMin = saneDurMin(args.int("duration_min") ?: 60), spanDays = saneSpanDays(args.int("days") ?: 1),
+                repeat = repeat, weekdays = weekdays, count = saneCount(args.int("count") ?: 0),
                 ordinal = ordinal ?: "first", nthDay = nthDay, periodMin = (args.int("every_min") ?: 60).coerceAtLeast(1),
                 zone = if (minute != null) zoneArg else null,
                 tags = io.nisfeb.talon.calendar.parseTags(args.text("tags").orEmpty()),
@@ -401,8 +388,8 @@ fun actionTools(a: AssistantActions): List<Tool> = buildList {
                 note = args.text("note") ?: d0.note,
                 tags = args.text("tags")?.let { io.nisfeb.talon.calendar.parseTags(it) } ?: d0.tags,
                 cal = calId,
-                durMin = args.int("duration_min") ?: d0.durMin,
-                spanDays = args.int("days") ?: d0.spanDays,
+                durMin = saneDurMin(args.int("duration_min") ?: d0.durMin),
+                spanDays = saneSpanDays(args.int("days") ?: d0.spanDays),
             )
             if (d.cat == EventCat.TODO) {
                 if (newDate != null) d = d.copy(due = newDate, date = newDate)
@@ -412,22 +399,28 @@ fun actionTools(a: AssistantActions): List<Tool> = buildList {
             }
             val occText = args.text("occurrence")?.trim()?.takeIf { it.isNotEmpty() }
             val oneOnly = occText != null && d0.repeats
-            val ok = if (oneOnly) {
+            if (oneOnly) {
                 val occ = parseDate(occText) ?: return@Tool "Error: occurrence must be YYYY-MM-DD."
                 val row = findOccurrence(cal, id, occ, zone) ?: return@Tool "Error: \"${d0.name}\" has no occurrence on $occ."
                 val evZone = d0.zone?.let { z -> runCatching { TimeZone.of(z) }.getOrNull() } ?: zone
                 val at = Instant.fromEpochMilliseconds(row.l).toLocalDateTime(if (row.all) TimeZone.UTC else evZone)
-                // The calendar page's own two steps: skip the old, add a one-off.
+                // The calendar page's own two steps, in the safe order: add
+                // the one-off FIRST, then skip the original. Skip-first
+                // silently LOSES the occurrence when the add then fails;
+                // add-first can only leave a visible duplicate, and the
+                // partial state is reported honestly below.
                 val one = d.copy(
                     repeat = Repeat.ONCE, rawKind = null, rawArgs = null, rawStartMs = null, count = 0, until = null,
                     date = newDate ?: at.date,
                     minuteOfDay = newMinute ?: (at.hour * 60 + at.minute),
                 )
-                cal.poke(buildJsonObject { put("action", "skip-event"); put("id", id); put("idx", row.idx) }) && cal.poke(eventBody(one))
-            } else {
-                cal.poke(eventBody(d, id))
+                if (!cal.poke(eventBody(one))) return@Tool "The calendar did not take it."
+                if (!cal.poke(buildJsonObject { put("action", "skip-event"); put("id", id); put("idx", row.idx) })) {
+                    return@Tool "Half done: the changed \"${d.name}\" was added, but the original occurrence on $occ is still there too — the calendar refused the skip. Skip it by hand, or try again."
+                }
+                return@Tool "Updated \"${d.name}\" for that occurrence."
             }
-            if (ok) "Updated \"${d.name}\"${if (oneOnly) " for that occurrence" else ""}." else "The calendar did not take it."
+            if (cal.poke(eventBody(d, id))) "Updated \"${d.name}\"." else "The calendar did not take it."
         })
         add(Tool(
             spec = ToolSpec(
@@ -498,8 +491,11 @@ fun actionTools(a: AssistantActions): List<Tool> = buildList {
         ) { args ->
             val withDone = args.text("include_done") == "true"
             val all = taskOrder(cal.tasks.value.orEmpty().filter { withDone || !it.done })
+            // Calendar by NAME, the way list_events shows it — the raw id
+            // is opaque to the model and the user alike.
+            val names = cal.calendars.value.associate { it.id to it.name.ifBlank { it.id } }
             if (all.isEmpty()) (if (withDone) "No tasks." else "No open tasks.")
-            else all.joinToString("\n") { t -> "task=${t.id} ${t.dueDate()?.let { "due $it " } ?: ""}${t.name}${if (t.done) " (done)" else ""} (calendar ${t.cal})" }
+            else all.joinToString("\n") { t -> "task=${t.id} ${t.dueDate()?.let { "due $it " } ?: ""}${t.name}${if (t.done) " (done)" else ""} (calendar ${names[t.cal] ?: t.cal})" }
         })
         add(Tool(
             spec = ToolSpec(
@@ -670,15 +666,41 @@ fun actionTools(a: AssistantActions): List<Tool> = buildList {
 private fun JsonObject.text(key: String): String? = this[key]?.let { (it as? JsonPrimitive)?.contentOrNull }
 private fun JsonObject.int(key: String): Int? = this[key]?.let { (it as? JsonPrimitive)?.contentOrNull?.toIntOrNull() }
 
-internal fun toolSchema(vararg props: Pair<String, Pair<String, String>>, required: List<String>): JsonObject = buildJsonObject {
-    put("type", "object")
-    put("properties", buildJsonObject {
-        props.forEach { (name, td) -> put(name, buildJsonObject { put("type", td.first); put("description", td.second) }) }
-    })
-    putJsonArray("required") { required.forEach { add(JsonPrimitive(it)) } }
+private const val DAY_MS = 86_400_000L
+
+/** read_mail bounds: each body is capped, and so is the message COUNT —
+ *  a long thread (a busy mailing list runs to hundreds) would otherwise
+ *  blow the tool result past any sane context budget. */
+internal const val READ_MAIL_BODY_CHARS = 4000
+internal const val READ_MAIL_MAX_MESSAGES = 20
+
+/** One mail thread as the model reads it: header, then the last
+ *  [READ_MAIL_MAX_MESSAGES] messages, each body capped. Older messages
+ *  are summarized as a count so the model knows they exist. */
+internal fun formatThread(t: io.nisfeb.talon.mail.MailThread, zone: TimeZone): String {
+    fun two(n: Int) = n.toString().padStart(2, '0')
+    val shown = t.messages.takeLast(READ_MAIL_MAX_MESSAGES)
+    val earlier = t.messages.size - shown.size
+    return buildString {
+        append("thread=${t.id} link=${io.nisfeb.talon.urbit.TalonLink.forMail(t.id)} participants=${t.participants.joinToString(", ")}")
+        if (t.labels.isNotEmpty()) append(" labels=${t.labels.joinToString(", ")}")
+        if (earlier > 0) append("\n\n… and $earlier earlier message${if (earlier == 1) "" else "s"} in this thread, not shown; these are the ${shown.size} most recent.")
+        shown.forEach { m ->
+            val at = Instant.fromEpochMilliseconds(m.sent).toLocalDateTime(zone)
+            append("\n\nmessage=${m.id} from=${m.from} to=${m.to.joinToString(", ")} sent=${at.date} ${two(at.hour)}:${two(at.minute)} subject=${m.subject.ifBlank { "(no subject)" }}\n")
+            append(m.body.take(READ_MAIL_BODY_CHARS))
+            if (m.attachments.isNotEmpty()) append("\nattachments: " + m.attachments.joinToString(", ") { "${it.name} (${it.mime})" })
+        }
+    }
 }
 
-private const val DAY_MS = 86_400_000L
+/** Tool-arg hygiene for the calendar writes: the model can hand us an
+ *  absurd duration_min / days / count (a hallucinated 3_000_000). Coerce
+ *  at the tool boundary, the way eventFrom does, with upper caps matched
+ *  to what the calendar can sanely hold. */
+internal fun saneDurMin(v: Int): Int = v.coerceIn(0, 7 * 24 * 60) // up to a week
+internal fun saneSpanDays(v: Int): Int = v.coerceIn(1, 62) // daysOf's own display cap
+internal fun saneCount(v: Int): Int = v.coerceIn(0, 1000)
 
 private fun mailLines(threads: List<io.nisfeb.talon.mail.InboxEntry>): String = threads.joinToString("\n") {
     "thread=${it.id} link=${io.nisfeb.talon.urbit.TalonLink.forMail(it.id)} from=${it.from} participants=${it.participants.joinToString(",")} subject=${it.subject.ifBlank { "(no subject)" }}${if (it.unread) " unread" else ""}"
@@ -734,11 +756,11 @@ private suspend fun eventFrom(args: JsonObject, a: AssistantActions, zone: TimeZ
     val end: Long
     if (time == null) {
         start = date.atTime(0, 0).toInstant(TimeZone.UTC).toEpochMilliseconds()
-        end = start + (args.int("days") ?: 1).coerceAtLeast(1) * DAY_MS
+        end = start + saneSpanDays(args.int("days") ?: 1) * DAY_MS
     } else {
         val minute = parseClock(time) ?: return null to "Error: time must be HH:MM."
         start = date.atTime(minute / 60, minute % 60).toInstant(zone).toEpochMilliseconds()
-        end = start + (args.int("duration_min") ?: 60).coerceAtLeast(0) * 60_000L
+        end = start + saneDurMin(args.int("duration_min") ?: 60) * 60_000L
     }
     val meta = buildJsonObject {
         put("name", name)

@@ -204,12 +204,16 @@ internal fun parseAnthropicTurn(body: JsonObject): AgentTurn {
     val calls = mutableListOf<ToolCall>()
     for (block in content) {
         val obj = block as? JsonObject ?: continue
-        when (obj["type"]?.jsonPrimitive?.content) {
-            "text" -> text.append(obj["text"]?.jsonPrimitive?.content.orEmpty())
+        // asText() degrades a non-primitive "type"/"text"/id to null
+        // instead of throwing the way .jsonPrimitive does — a provider
+        // sending one garbled block must not fail the whole turn (the
+        // OpenAI dialect parser already tolerates this).
+        when (obj["type"].asText()) {
+            "text" -> text.append(obj["text"].asText().orEmpty())
             "tool_use" -> calls.add(
                 ToolCall(
-                    id = obj["id"]?.jsonPrimitive?.content.orEmpty(),
-                    name = obj["name"]?.jsonPrimitive?.content.orEmpty(),
+                    id = obj["id"].asText().orEmpty(),
+                    name = obj["name"].asText().orEmpty(),
                     args = obj["input"] as? JsonObject ?: JsonObject(emptyMap()),
                 ),
             )
