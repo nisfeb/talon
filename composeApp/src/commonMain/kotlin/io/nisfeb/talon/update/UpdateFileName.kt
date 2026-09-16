@@ -7,10 +7,14 @@ package io.nisfeb.talon.update
  * parent-references and separators FIRST, then fall back when nothing
  * is left — the other order turns a bare `..` into the updates
  * directory itself (which the Android installer then deleted).
+ *
+ * Dots at either end go too: stripping `..` out of `...` leaves `.`,
+ * which is also the directory itself.
  */
 internal fun sanitizedUpdateFileName(url: String, fallback: String): String =
     url.substringAfterLast('/')
         .replace("..", "")
         .replace('/', '_')
         .replace('\\', '_')
+        .trim('.')
         .ifBlank { fallback }

@@ -23,6 +23,18 @@ abstract class DraftStore {
     abstract fun load(whom: String): String
     abstract fun save(whom: String, draft: String)
     abstract fun clear(whom: String)
+
+    /**
+     * This store, fixed to whichever ship is active right now.
+     *
+     * A composer saves on dispose, and that can fire a frame after a
+     * ship switch: by then the incoming ship's composer has already
+     * loaded the same conversation, so anything keyed by conversation
+     * has been re-pointed at the new ship. The pin has to belong to the
+     * composer instance, which is what this handle is. Stores with one
+     * ship's drafts, or none, are their own handle.
+     */
+    open fun bound(): DraftStore = this
 }
 
 /**

@@ -19,6 +19,14 @@ class UpdateFileNameTest {
     }
 
     @Test
+    fun `a run of dots falls back instead of naming the directory`() {
+        // Stripping `..` from `...` leaves `.`, which is the directory too.
+        assertEquals("fb", sanitizedUpdateFileName("https://x/...", "fb"))
+        assertEquals("fb", sanitizedUpdateFileName("https://x/.....", "fb"))
+        assertEquals("a", sanitizedUpdateFileName("https://x/a...", "fb"))
+    }
+
+    @Test
     fun `a trailing slash falls back`() {
         assertEquals("fb", sanitizedUpdateFileName("https://x/releases/", "fb"))
     }

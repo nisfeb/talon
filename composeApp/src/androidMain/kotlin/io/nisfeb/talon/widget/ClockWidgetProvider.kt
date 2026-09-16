@@ -387,11 +387,12 @@ class ClockWidgetProvider : AppWidgetProvider() {
                 ComponentName(context, ClockWidgetProvider::class.java),
             )
             if (ids.isEmpty()) return
+            // Our own tick, token and all, not the system's update action:
+            // that one arrives untrusted and was throttled for half a
+            // minute, which is exactly the delay a nudge exists to avoid.
             context.sendBroadcast(
-                Intent(context, ClockWidgetProvider::class.java).apply {
-                    action = AppWidgetManager.ACTION_APPWIDGET_UPDATE
-                    putExtra(AppWidgetManager.EXTRA_APPWIDGET_IDS, ids)
-                },
+                Intent(context, ClockWidgetProvider::class.java).setAction(ACTION_TICK)
+                    .putExtra(EXTRA_TICK_TOKEN, tickToken),
             )
         }
     }

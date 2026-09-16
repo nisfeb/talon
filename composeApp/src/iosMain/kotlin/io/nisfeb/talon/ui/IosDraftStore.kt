@@ -14,20 +14,18 @@ import kotlinx.serialization.json.Json
  * across a relaunch, as the Android store does.
  *
  * Per-ship files so ship-switch hides the other ship's drafts (the
- * Android store's per-ship prefs file, mirrored). A draft is pinned to
- * the ship it was LOADED under: the composer saves on dispose, which
- * can fire a frame after a ship switch, and resolving the active ship
- * at save time writes the outgoing ship's text into the incoming
- * ship's file.
+ * Android store's per-ship prefs file, mirrored). The composer saves
+ * on dispose, which can fire a frame after a ship switch, so it works
+ * through [bound]: a handle fixed to the ship that was active when the
+ * composer was built. Pinning by conversation instead did not hold,
+ * because the incoming ship's composer loads the same conversation
+ * first and re-points the pin before the outgoing one saves.
  */
 class IosDraftStore(private val activeShip: () -> String?) : DraftStore() {
 
     /** Every loaded ship's drafts, keyed so a save can only ever land
      *  in the file the draft was composed under. */
     private val byShip = mutableMapOf<String, MutableMap<String, String>>()
-
-    /** The ship a whom's draft was last loaded under. */
-    private val loadedUnder = mutableMapOf<String, String>()
 
     private fun draftsFor(ship: String): MutableMap<String, String> =
         byShip.getOrPut(ship) {
@@ -36,27 +34,41 @@ class IosDraftStore(private val activeShip: () -> String?) : DraftStore() {
             }.getOrNull().orEmpty().toMutableMap()
         }
 
-    override fun load(whom: String): String {
-        val s = activeShip() ?: return ""
-        loadedUnder[whom] = s
-        backing.value = draftsFor(s).toMap()
-        return draftsFor(s)[whom] ?: ""
-    }
+    override fun load(whom: String): String = activeShip()?.let { loadFor(it, whom) } ?: ""
 
     override fun save(whom: String, draft: String) {
-        // Pin, not re-resolve: a dispose-time save after a ship switch
-        // belongs to the ship the draft was composed under.
-        val s = loadedUnder[whom] ?: activeShip() ?: return
-        if (draft.isBlank()) draftsFor(s).remove(whom) else draftsFor(s)[whom] = draft
-        persist(s)
-        if (s == activeShip()) backing.value = draftsFor(s).toMap()
+        saveFor(activeShip() ?: return, whom, draft)
     }
 
     override fun clear(whom: String) {
-        val s = loadedUnder[whom] ?: activeShip() ?: return
-        draftsFor(s).remove(whom)
-        persist(s)
-        if (s == activeShip()) backing.value = draftsFor(s).toMap()
+        clearFor(activeShip() ?: return, whom)
+    }
+
+    override fun bound(): DraftStore = activeShip()?.let { Bound(it) } ?: this
+
+    /** The store as one ship sees it, whatever the active ship becomes later. */
+    private inner class Bound(private val ship: String) : DraftStore() {
+        override fun load(whom: String): String = loadFor(ship, whom)
+        override fun save(whom: String, draft: String) = saveFor(ship, whom, draft)
+        override fun clear(whom: String) = clearFor(ship, whom)
+    }
+
+    private fun loadFor(ship: String, whom: String): String {
+        if (ship == activeShip()) backing.value = draftsFor(ship).toMap()
+        return draftsFor(ship)[whom] ?: ""
+    }
+
+    private fun saveFor(ship: String, whom: String, draft: String) {
+        if (draft.isBlank()) draftsFor(ship).remove(whom) else draftsFor(ship)[whom] = draft
+        persist(ship)
+        // The list's "Draft:" previews follow the active ship only.
+        if (ship == activeShip()) backing.value = draftsFor(ship).toMap()
+    }
+
+    private fun clearFor(ship: String, whom: String) {
+        draftsFor(ship).remove(whom)
+        persist(ship)
+        if (ship == activeShip()) backing.value = draftsFor(ship).toMap()
     }
 
     private fun persist(ship: String) {

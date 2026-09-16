@@ -240,6 +240,10 @@ class CalendarRepo(
         // them lazily between writes stored a fresh window beside
         // empty calendars. Then one transaction, all of it or none.
         val snapWindow = _rows.value
+        // Null here means a detach emptied the flows between the fetch and
+        // this save. Writing that would replace a good cache with an
+        // empty one; the next attach reads again anyway.
+        if (snapWindow == null) return
         val snapCalendars = _calendars.value
         val snapTasks = _tasks.value
         val snapTags = _tags.value

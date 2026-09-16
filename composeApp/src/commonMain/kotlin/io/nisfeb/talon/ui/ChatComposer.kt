@@ -293,6 +293,10 @@ fun ChatComposer(
     // rather than on the flag, so switching to a different edit fires
     // and ending one (-> null) does not bring the keyboard back.
     val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
+    // Fixed to the ship this composer was built under. The dispose-time
+    // save below can run a frame after a ship switch, and must not land
+    // in the incoming ship's drafts. See DraftStore.bound.
+    val store = remember(whom) { drafts.bound() }
     val fieldFocus = remember { FocusRequester() }
     LaunchedEffect(state, state.editing?.postId, state.pendingQuote?.id, state.pendingAttachment) {
         val typingNext = focusOnOpen || state.editing != null ||
@@ -388,7 +392,7 @@ fun ChatComposer(
                     // the conversation list stops advertising "Draft:".
                     state.pendingAttachment = null
                     state.draft = TextFieldValue("")
-                    drafts.clear(whom)
+                    store.clear(whom)
                 }.onFailure { err ->
                     val kind = if (pending.isImage) "image" else "file"
                     state.sendError = "$kind failed: ${err.message ?: err::class.simpleName}"
@@ -432,7 +436,7 @@ fun ChatComposer(
                     strategy.sendText(hostedUrl)
                 }
                 state.draft = TextFieldValue("")
-                drafts.clear(whom)
+                store.clear(whom)
             }.onFailure { err ->
                 state.sendError = "upload failed: ${err.message ?: err::class.simpleName}"
             }
@@ -458,7 +462,7 @@ fun ChatComposer(
         state.draft = next
         // An edit is not a draft: saving it would bring it back as a new
         // message. The draft it displaced stays saved underneath.
-        if (state.editing == null) drafts.save(whom, next.text)
+        if (state.editing == null) store.save(whom, next.text)
     }
 
     // Typing presence. Keying on the draft text means a keystroke
@@ -498,7 +502,7 @@ fun ChatComposer(
             // follows the focused field it stayed up over the next screen.
             runCatching { focusManager.clearFocus(force = true) }
             // Leaving mid-edit abandons the edit and keeps the real draft.
-            drafts.save(whom, state.editing?.priorDraftText ?: state.draft.text)
+            store.save(whom, state.editing?.priorDraftText ?: state.draft.text)
             // Leaving the screen mid-draft must not leave us announcing
             // forever on the peer's side.
             repo.retractPresenceNow(whom)
@@ -751,7 +755,7 @@ fun ChatComposer(
                 else -> false
             }
             state.draft = TextFieldValue("")
-            drafts.clear(whom)
+            store.clear(whom)
             state.sendError = null
             onBeforeLocalEcho()
             state.pendingQuote = null
@@ -866,7 +870,7 @@ fun ChatComposer(
                             // for the DisposableEffect to reap.
                             state.pendingVoice = null
                             state.draft = TextFieldValue("")
-                            drafts.clear(whom)
+                            store.clear(whom)
                             deleteFile(pv.path)
                         }.onFailure { err ->
                             Log.e("ChatComposer", "voice send failed", err)
