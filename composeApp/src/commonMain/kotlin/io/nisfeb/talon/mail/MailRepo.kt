@@ -99,6 +99,13 @@ class MailRepo(
     private val _error = MutableStateFlow<String?>(null)
     val error: StateFlow<String?> = _error.asStateFlow()
 
+    /** Bumped each time a refused write's optimistic edit is rolled
+     *  back, so a view holding its own copy of a thread can re-derive
+     *  it. A flow of the error text cannot do it: two refusals with the
+     *  same reason are one emission. */
+    private val _rollbacks = MutableStateFlow(0)
+    val rollbacks: StateFlow<Int> = _rollbacks.asStateFlow()
+
     /**
      * Raised for mail that arrived since the last read. Set by the host,
      * which owns the platform's notifier; null means nothing is
@@ -269,7 +276,21 @@ class MailRepo(
         val p = read(a, maxOf(_page.value?.threads?.size ?: 0, AuspexApi.DEFAULT_PAGE))
             ?: return@withLock
         _availability.value = MailAvailability.PRESENT
-        if (ourShip == null) ourShip = runCatching { a.whoami() }.getOrNull()
+        if (ourShip == null) {
+            ourShip = try {
+                a.whoami()
+            } catch (e: AuspexError) {
+                // Mail still works; filing to Lattice is what breaks,
+                // and a quiet null there reads as "no address" rather
+                // than a failure. Say which it was.
+                _error.value = when (e) {
+                    is AuspexError.Refused -> e.reason
+                    is AuspexError.Garbled -> "The ship answered something we could not read."
+                    is AuspexError.Unreachable -> "No answer from the ship."
+                }
+                null
+            }
+        }
         announce(p)
     }
 
@@ -279,7 +300,7 @@ class MailRepo(
      * has open. Null when the ship refused or is out of reach.
      */
     suspend fun listing(view: MailView = MailView.INBOX, query: String? = null, limit: Int = AuspexApi.DEFAULT_PAGE): InboxPage? =
-        call { it.inbox(view = view, query = query?.takeIf { q -> q.isNotBlank() }, limit = limit.coerceAtMost(MAX_PAGE)) }
+        call(probeAbsentApp = true) { it.inbox(view = view, query = query?.takeIf { q -> q.isNotBlank() }, limit = limit.coerceAtMost(MAX_PAGE)) }
 
     /** One listing read for the open folder, or null after [onFailure]. */
     private suspend fun read(a: AuspexApi, limit: Int): InboxPage? {
@@ -299,7 +320,7 @@ class MailRepo(
             _error.value = null
             return p
         } catch (e: AuspexError) {
-            onFailure(e)
+            onFailure(e, probeAbsentApp = true)
             return null
         } finally {
             _loading.value = false
@@ -327,13 +348,21 @@ class MailRepo(
     }
 
     /**
-     * Work out why a read failed, and in particular tell "this ship has
+     * Work out why a call failed, and in particular tell "this ship has
      * no mail app" apart from "mail is broken". Auspex has no
      * unauthenticated surface, so unlike lattice this cannot be probed
      * without a session — which is also why a dead session has to be its
      * own answer rather than being read as an absent app.
+     *
+     * [probeAbsentApp] is for the inbox read path ONLY: a 404 there
+     * means the nexus is gone, so grubbery is asked whether it ever
+     * arrived. Every other call routes a 404 to the ordinary refusal
+     * branch — a thread or draft that is gone is the thing being written
+     * to having vanished, not the app, and swapping the whole inbox for
+     * an install prompt over it is how a deleted thread used to look
+     * like an uninstalled one.
      */
-    private suspend fun onFailure(e: AuspexError) {
+    private suspend fun onFailure(e: AuspexError, probeAbsentApp: Boolean = false) {
         when {
             e.isSignedOut -> {
                 _availability.value = MailAvailability.SIGNED_OUT
@@ -342,7 +371,7 @@ class MailRepo(
                 poller?.cancel()
                 poller = null
             }
-            e is AuspexError.Refused && e.status == AuspexApi.NOT_FOUND -> {
+            probeAbsentApp && e is AuspexError.Refused && e.status == AuspexApi.NOT_FOUND -> {
                 val url = shipUrl
                 val grubbery = url != null && LatticeInstall.isInstalled(http, url)
                 _availability.value =
@@ -430,12 +459,18 @@ class MailRepo(
      * other client, so nothing else will ever tell us.
      */
     fun markRead(msgIds: List<String>, threadId: String? = null) =
-        act({ readState(msgIds, threadId, read = true) }) { it.markRead(msgIds) }
+        act(threadOf(msgIds, threadId), { readState(msgIds, threadId, read = true) }) { it.markRead(msgIds) }
 
     /** Put a thread back to unread, so it stands out again on return.
      *  Also local, so this refreshes its own view like the rest. */
     fun markUnread(msgIds: List<String>, threadId: String? = null) =
-        act({ readState(msgIds, threadId, read = false) }) { it.markUnread(msgIds) }
+        act(threadOf(msgIds, threadId), { readState(msgIds, threadId, read = false) }) { it.markUnread(msgIds) }
+
+    /** The thread a read-mark edits on screen, when that can be told.
+     *  Null only means the optimistic half has nothing to edit; the
+     *  write goes either way. */
+    private fun threadOf(msgIds: List<String>, threadId: String?): String? =
+        threadId ?: threadCache.value.values.firstOrNull { t -> t.messages.any { it.id in msgIds } }?.id
 
     private fun readState(msgIds: List<String>, threadId: String?, read: Boolean) {
         val tid = threadId ?: threadCache.value.values.firstOrNull { t -> t.messages.any { it.id in msgIds } }?.id ?: return
@@ -443,12 +478,12 @@ class MailRepo(
         editThread(tid) { t -> t.copy(messages = t.messages.map { m -> if (m.id in msgIds) m.copy(read = read) else m }) }
     }
 
-    fun setArchived(threadId: String, archived: Boolean) = act({
+    fun setArchived(threadId: String, archived: Boolean) = act(threadId, {
         editPages { key, p -> p.archived(key.view, threadId, archived) }
         editThread(threadId) { it.copy(archived = archived) }
     }) { it.setArchived(threadId, archived) }
 
-    fun deleteThread(threadId: String) = act({
+    fun deleteThread(threadId: String) = act(threadId, {
         editPages { _, p -> p.without(threadId) }
         threadCache.update { it - threadId }
     }) { it.deleteThread(threadId); forget(threadId) }
@@ -477,14 +512,15 @@ class MailRepo(
     ): Boolean {
         // A reply shows in its thread at once, as this ship's own message,
         // until the thread is read again; a refused send takes it back out.
-        val threadsBefore = threadCache.value
+        var optimistic: Pair<String, MailThread>? = null
         if (prev != null) {
             threadCache.value.values.firstOrNull { t -> t.messages.any { it.id == prev } }?.let { t ->
+                optimistic = t.id to t
                 val now = nowMs()
                 editThread(t.id) {
                     it.copy(
                         messages = it.messages + MailMessage(
-                            id = "local-$now", from = ourShip.orEmpty(), to = to, subject = subject, body = body,
+                            id = "local-$now-${localSeq++}", from = ourShip.orEmpty(), to = to, subject = subject, body = body,
                             sent = now, prev = prev, verdict = Verdict.VERIFIED, read = true,
                             attachments = attachments.map { a -> Attachment(name = a.name, mime = a.mime, hash = a.hash) },
                         ),
@@ -493,12 +529,33 @@ class MailRepo(
             }
         }
         if (call { it.send(to, subject, body, prev, attachments) } == null) {
-            threadCache.value = threadsBefore
+            // Only the thread the phantom reply went into goes back; a
+            // refresh that landed while the send was out stays.
+            optimistic?.let { (id, before) ->
+                threadCache.update { it + (id to before) }
+                _rollbacks.update { it + 1 }
+            }
             return false
         }
         refresh()
         return true
     }
+
+    /**
+     * Sign and send a stored draft. The ship drops the draft itself,
+     * and only when the send landed, so a send its writer silently
+     * refuses keeps the draft — which is the whole reason to send one
+     * this way rather than [send] plus [deleteDraft].
+     */
+    suspend fun sendDraft(id: String): Boolean {
+        if (call { it.sendDraft(id) } == null) return false
+        refresh()
+        refreshDrafts()
+        return true
+    }
+
+    /** Distinguishes two phantom replies minted inside one millisecond. */
+    private var localSeq = 0
 
     /** Store one file, answering the address a send will name. */
     suspend fun uploadBlob(bytes: ByteArray): String {
@@ -506,20 +563,22 @@ class MailRepo(
         return a.uploadBlob(bytes)
     }
 
-    /** One request against the ship, or null after [onFailure]. */
-    private suspend fun <T> call(block: suspend (AuspexApi) -> T): T? {
+    /** One request against the ship, or null after [onFailure]. The
+     *  inbox read path alone passes [probeAbsentApp]; everything else
+     *  treats a 404 as an ordinary refusal. */
+    private suspend fun <T> call(probeAbsentApp: Boolean = false, block: suspend (AuspexApi) -> T): T? {
         val a = api ?: return null
         return try {
             block(a)
         } catch (e: AuspexError) {
-            onFailure(e)
+            onFailure(e, probeAbsentApp)
             null
         }
     }
 
     /** A write, and the re-read that shows it, unless the write failed. */
     private suspend fun mutate(refresh: suspend () -> Unit, block: suspend (AuspexApi) -> Unit) {
-        call(block) ?: return
+        call(block = block) ?: return
         refresh()
     }
 
@@ -528,11 +587,17 @@ class MailRepo(
      * goes to the ship in the background, and a refused write puts the
      * screen back as it was. Returns straight away, so a view that leaves
      * after the action does not cancel the write by leaving.
+     *
+     * [tid] is the one thread [local] touches, and the rollback puts
+     * back only that thread and its listing rows — never a wholesale
+     * snapshot, which would throw away a refresh that landed while the
+     * write was out.
      */
-    private fun act(local: () -> Unit, write: suspend (AuspexApi) -> Unit) {
-        val pagesBefore = pageCache.value
-        val threadsBefore = threadCache.value
-        val shownBefore = _page.value
+    private fun act(tid: String?, local: () -> Unit, write: suspend (AuspexApi) -> Unit) {
+        val threadBefore = tid?.let { threadCache.value[it] }
+        val rowsBefore = tid?.let { id -> pageCache.value.mapValues { (_, p) -> p.rowAt(id) } }.orEmpty()
+        val shownKey = pageKey()
+        val shownRowBefore = tid?.let { id -> _page.value?.rowAt(id) }
         local()
         scope.launch {
             val a = api ?: return@launch
@@ -548,9 +613,17 @@ class MailRepo(
                     refresh()
                     return@launch
                 }
-                pageCache.value = pagesBefore
-                threadCache.value = threadsBefore
-                _page.value = shownBefore
+                if (tid != null) {
+                    // Only what local() touched goes back. Anything a
+                    // refresh landed meanwhile is newer than the snapshot
+                    // and stays.
+                    if (threadBefore != null) threadCache.update { it + (tid to threadBefore) }
+                    pageCache.update { m -> m.mapValues { (k, p) -> p.restoring(tid, rowsBefore[k]) } }
+                    if (pageKey() == shownKey) {
+                        _page.value?.let { _page.value = it.restoring(tid, shownRowBefore) }
+                    }
+                    _rollbacks.update { it + 1 }
+                }
                 onFailure(e)
                 return@launch
             }
@@ -595,7 +668,7 @@ class MailRepo(
         .map { page -> page?.threads.orEmpty().flatMap { it.labels }.distinct().sorted() }
         .stateIn(scope, SharingStarted.Eagerly, emptyList())
 
-    fun setLabel(threadId: String, label: String, add: Boolean) = act({
+    fun setLabel(threadId: String, label: String, add: Boolean) = act(threadId, {
         editPages { key, p ->
             if (!add && key.view == MailView.LABEL && key.label == label) p.without(threadId)
             else p.editRow(threadId) { r -> r.copy(labels = if (add) (r.labels + label).distinct() else r.labels - label) }
@@ -709,6 +782,28 @@ val LocalGrubberyInstall =
 /** A listing without one thread, and one fewer in its total. */
 internal fun InboxPage.without(id: String): InboxPage =
     if (threads.none { it.id == id }) this else copy(threads = threads.filter { it.id != id }, total = (total - 1).coerceAtLeast(0))
+
+/** Where a row sits in this listing, and the row — or null when it is not here. */
+private fun InboxPage.rowAt(id: String): Pair<Int, InboxEntry>? =
+    threads.indexOfFirst { it.id == id }.let { if (it < 0) null else it to threads[it] }
+
+/**
+ * A listing with one row put back the way [before] remembers: replaced
+ * where it still sits, re-seated at its old place where an optimistic
+ * edit took it out, and left alone where it never was — a row that
+ * turned up meanwhile is a refresh's news, not a rollback's to take.
+ */
+internal fun InboxPage.restoring(id: String, before: Pair<Int, InboxEntry>?): InboxPage {
+    val at = threads.indexOfFirst { it.id == id }
+    return when {
+        before == null -> this
+        at >= 0 -> copy(threads = threads.mapIndexed { i, r -> if (i == at) before.second else r })
+        else -> copy(
+            threads = threads.toMutableList().apply { add(before.first.coerceIn(0, size), before.second) },
+            total = total + 1,
+        )
+    }
+}
 
 /** A listing with one row changed. */
 internal fun InboxPage.editRow(id: String, f: (InboxEntry) -> InboxEntry): InboxPage =

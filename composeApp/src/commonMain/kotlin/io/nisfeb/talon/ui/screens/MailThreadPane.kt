@@ -64,6 +64,7 @@ import io.nisfeb.talon.mail.threadTree
 import io.nisfeb.talon.ui.ContactMap
 import io.nisfeb.talon.ui.shortRelativeTime
 import io.nisfeb.talon.util.nowMs
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.launch
 
 /**
@@ -102,6 +103,10 @@ fun MailThreadPane(
     val folded = remember(threadId) { mutableStateListOf<String>() }
     val shut = remember(threadId) { mutableStateListOf<String>() }
     var selected by remember(threadId) { mutableStateOf<String?>(null) }
+    // Remote images in a sender-controlled body are a read receipt and
+    // an IP leak, so they never load unasked. One tap trusts the thread
+    // — the sender is one party — and the remembering is per thread.
+    var imagesShown by remember(threadId) { mutableStateOf(false) }
 
     io.nisfeb.talon.notify.ClearNotificationsWhileShown("mail:$threadId")
     LaunchedEffect(threadId) {
@@ -119,6 +124,17 @@ fun MailThreadPane(
         val unread = t?.messages.orEmpty().filter { !it.read }.map { it.id }
         if (unread.isNotEmpty()) {
             repo.markRead(unread, threadId)
+            thread = repo.cachedThread(threadId) ?: thread
+        }
+    }
+
+    // A refused write's rollback lands in the repo's caches, not in the
+    // copy of the thread this pane holds — the label toggle above edits
+    // both optimistically, and without this only the repo's half came
+    // back. The counter, not the error text: two refusals with the same
+    // reason are one emission there.
+    LaunchedEffect(threadId) {
+        repo.rollbacks.drop(1).collect {
             thread = repo.cachedThread(threadId) ?: thread
         }
     }
@@ -147,7 +163,7 @@ fun MailThreadPane(
     fun intent(forwarding: Boolean) = MailIntent(
         prev = answering,
         to = if (forwarding) emptyList() else thread?.participants.orEmpty().filter { it != ourShip },
-        subject = thread?.messages?.firstOrNull()?.subject.orEmpty(),
+        subject = answerSubject(thread?.messages?.firstOrNull()?.subject.orEmpty(), forwarding),
         travels = travelling.size,
         forwarding = forwarding,
     )
@@ -282,6 +298,8 @@ fun MailThreadPane(
                                 nameFor = nameFor,
                                 onFile = { fileMessage(shown) },
                                 repo = repo,
+                                imagesShown = imagesShown,
+                                onShowImages = { imagesShown = true },
                             )
                         }
                     }
@@ -312,6 +330,8 @@ fun MailThreadPane(
                             onSelect = { selected = node.message.id },
                             onFile = { fileMessage(node.message) },
                             repo = repo,
+                            imagesShown = imagesShown,
+                            onShowImages = { imagesShown = true },
                         )
                         HorizontalDivider()
                     }
@@ -479,6 +499,14 @@ internal fun unreadableThreadLine(n: Int): String =
     if (n == 1) "1 copy here is in a form this build cannot read."
     else "$n copies here are in a form this build cannot read."
 
+/** The subject a reply or forward opens with: marked, and never stacked
+ *  — a reply to "Re: Plans" is "Re: Plans", not "Re: Re: Plans". */
+internal fun answerSubject(subject: String, forwarding: Boolean): String {
+    val prefix = if (forwarding) "Fwd: " else "Re: "
+    if (subject.startsWith(prefix, ignoreCase = true)) return subject
+    return if (subject.isBlank()) prefix.trimEnd() else prefix + subject
+}
+
 /** What a reply or forward from the selected message would carry. Drawn
  *  from the same path the tree lights, because they are one fact. */
 @Composable
@@ -513,6 +541,10 @@ private fun MailMessageCard(
     onSelect: () -> Unit = {},
     onFile: () -> Unit,
     repo: MailRepo,
+    /** Whether remote images may load. False shows the affordance
+     *  instead; true only after the reader asked, per thread. */
+    imagesShown: Boolean = false,
+    onShowImages: () -> Unit = {},
 ) {
     val m = node.message
     val ground = when {
@@ -626,20 +658,33 @@ private fun MailMessageCard(
             }
             val images = remember(m.body) { io.nisfeb.talon.ui.imageUrlsIn(m.body) }
             if (images.isNotEmpty()) {
-                val uriHandler = androidx.compose.ui.platform.LocalUriHandler.current
-                Column(Modifier.padding(top = 6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    images.take(6).forEach { url ->
-                        coil3.compose.AsyncImage(
-                            model = url,
-                            contentDescription = url,
-                            contentScale = androidx.compose.ui.layout.ContentScale.Fit,
-                            error = androidx.compose.ui.graphics.vector.rememberVectorPainter(Icons.Filled.BrokenImage),
-                            modifier = Modifier
-                                .widthIn(max = 480.dp).heightIn(max = 360.dp)
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(MaterialTheme.colorScheme.surfaceVariant)
-                                .clickable { runCatching { uriHandler.openUri(url) } },
+                if (!imagesShown) {
+                    // Loading these tells the sender's server — and
+                    // whatever sits between — that this was read, and
+                    // from where. So they load when asked, not before.
+                    TextButton(onClick = onShowImages) {
+                        Text(
+                            if (images.size == 1) "Load 1 remote image"
+                            else "Load ${images.size} remote images",
+                            style = MaterialTheme.typography.labelSmall,
                         )
+                    }
+                } else {
+                    val uriHandler = androidx.compose.ui.platform.LocalUriHandler.current
+                    Column(Modifier.padding(top = 6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        images.take(6).forEach { url ->
+                            coil3.compose.AsyncImage(
+                                model = url,
+                                contentDescription = url,
+                                contentScale = androidx.compose.ui.layout.ContentScale.Fit,
+                                error = androidx.compose.ui.graphics.vector.rememberVectorPainter(Icons.Filled.BrokenImage),
+                                modifier = Modifier
+                                    .widthIn(max = 480.dp).heightIn(max = 360.dp)
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(MaterialTheme.colorScheme.surfaceVariant)
+                                    .clickable { runCatching { uriHandler.openUri(url) } },
+                            )
+                        }
                     }
                 }
             }

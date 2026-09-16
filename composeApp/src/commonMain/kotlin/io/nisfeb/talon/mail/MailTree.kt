@@ -97,15 +97,33 @@ fun threadTree(raw: List<MailMessage>): List<MailNode> {
     fun order(list: List<MailMessage>) = list.sortedWith(compareBy({ it.sent }, { it.id }))
 
     // A content-addressed id cannot really cycle, but a malformed thread
-    // must not be able to hang the reader.
+    // must not be able to hang the reader. And none of this recurses:
+    // a ten-thousand-message chain of self-replies is a shape that
+    // arrives over the wire, and recursion on it is a stack overflow
+    // somebody else chooses to hand us.
     val seen = mutableSetOf<String>()
-    fun build(m: MailMessage): MailNode {
-        if (!seen.add(m.id)) return MailNode(m)
-        return MailNode(
-            message = m,
-            children = order(childrenOf[m.id].orEmpty()).map { build(it) },
-            orphaned = m.id in orphans,
-        )
+    fun build(root: MailMessage): MailNode {
+        val built = HashMap<String, MailNode>()
+        val stack = ArrayDeque<Pair<MailMessage, Boolean>>()
+        stack.addLast(root to false)
+        while (stack.isNotEmpty()) {
+            val (m, childrenDone) = stack.removeLast()
+            if (!childrenDone) {
+                if (!seen.add(m.id)) {
+                    built[m.id] = MailNode(m)
+                    continue
+                }
+                stack.addLast(m to true)
+                for (c in order(childrenOf[m.id].orEmpty()).asReversed()) stack.addLast(c to false)
+            } else {
+                built[m.id] = MailNode(
+                    message = m,
+                    children = order(childrenOf[m.id].orEmpty()).map { built.getValue(it.id) },
+                    orphaned = m.id in orphans,
+                )
+            }
+        }
+        return built.getValue(root.id)
     }
 
     return order(roots).map { build(it) }
@@ -120,18 +138,24 @@ fun threadTree(raw: List<MailMessage>): List<MailNode> {
  * where a caller silently showing a whole thread is not.
  */
 fun pathTo(forest: List<MailNode>, id: String): List<MailMessage> {
-    fun walk(node: MailNode, acc: MutableList<MailMessage>): Boolean {
-        acc += node.message
-        if (node.message.id == id) return true
-        for (c in node.children) if (walk(c, acc)) return true
-        acc.removeAt(acc.size - 1)
-        return false
+    // Depth-first with the path kept on the heap: the walk goes as deep
+    // as the thread does, and the thread goes as deep as the wire says.
+    val path = mutableListOf<MailMessage>()
+    val stack = ArrayDeque<Iterator<MailNode>>()
+    var level = forest.iterator()
+    while (true) {
+        if (level.hasNext()) {
+            val n = level.next()
+            path += n.message
+            if (n.message.id == id) return path
+            stack.addLast(level)
+            level = n.children.iterator()
+        } else {
+            if (stack.isEmpty()) return emptyList()
+            level = stack.removeLast()
+            path.removeAt(path.size - 1)
+        }
     }
-    for (root in forest) {
-        val acc = mutableListOf<MailMessage>()
-        if (walk(root, acc)) return acc
-    }
-    return emptyList()
 }
 
 /**
@@ -147,23 +171,45 @@ fun flattenVisible(
     forest: List<MailNode>,
     collapsed: Set<String>,
     depth: Int = 0,
-): List<VisibleNode> = forest.flatMap { n ->
-    val hidden = if (n.message.id in collapsed) countDescendants(n) else 0
-    listOf(VisibleNode(n, depth, hidden)) +
-        if (hidden > 0) emptyList() else flattenVisible(n.children, collapsed, depth + 1)
+): List<VisibleNode> {
+    val out = ArrayList<VisibleNode>()
+    val stack = ArrayDeque<Pair<MailNode, Int>>()
+    for (n in forest.asReversed()) stack.addLast(n to depth)
+    while (stack.isNotEmpty()) {
+        val (n, d) = stack.removeLast()
+        val hidden = if (n.message.id in collapsed) countDescendants(n) else 0
+        out += VisibleNode(n, d, hidden)
+        if (hidden == 0) for (c in n.children.asReversed()) stack.addLast(c to d + 1)
+    }
+    return out
 }
 
 data class VisibleNode(val node: MailNode, val depth: Int, val hidden: Int)
 
-fun countDescendants(n: MailNode): Int =
-    n.children.size + n.children.sumOf { countDescendants(it) }
+fun countDescendants(n: MailNode): Int {
+    var count = 0
+    val stack = ArrayDeque<MailNode>()
+    stack.addAll(n.children)
+    while (stack.isNotEmpty()) {
+        val c = stack.removeLast()
+        count++
+        stack.addAll(c.children)
+    }
+    return count
+}
 
 /** Does this thread actually branch? A reader can offer the tree only
  *  where there is one, and say nothing where the thread is a line. */
 fun branches(forest: List<MailNode>): Boolean {
     if (forest.size > 1) return true
-    fun any(n: MailNode): Boolean = n.children.size > 1 || n.children.any { any(it) }
-    return forest.any { any(it) }
+    val stack = ArrayDeque<MailNode>()
+    stack.addAll(forest)
+    while (stack.isNotEmpty()) {
+        val n = stack.removeLast()
+        if (n.children.size > 1) return true
+        stack.addAll(n.children)
+    }
+    return false
 }
 
 /**

@@ -20,4 +20,24 @@ class MailCacheTest {
         assertEquals(false, page.editRow("a") { it.copy(unread = false) }.threads.first().unread)
         assertEquals(listOf("a"), page.without("b").threads.map { it.id })
     }
+
+    @Test fun `a rollback replaces the row where it sits and re-seats a row the edit removed`() {
+        val before = 0 to page.threads.first()
+        // The row is still listed: only its fields go back to the snapshot.
+        val edited = page.editRow("a") { it.copy(unread = false) }
+        assertEquals(true, edited.restoring("a", before).threads.first().unread)
+        // The row was optimistically removed: it is re-seated at its old
+        // place, with the total it was counted in.
+        val back = page.without("a").restoring("a", before)
+        assertEquals(listOf("a", "b"), back.threads.map { it.id })
+        assertEquals(2, back.total)
+    }
+
+    @Test fun `a rollback with nothing remembered changes nothing`() {
+        // A row that turned up meanwhile is a refresh's news, not a
+        // rollback's to take — and a thread the snapshot never held is
+        // not invented either.
+        assertSame(page, page.restoring("a", null))
+        assertSame(page, page.restoring("never-listed", null))
+    }
 }

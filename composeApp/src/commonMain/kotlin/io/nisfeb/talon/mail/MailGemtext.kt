@@ -15,14 +15,16 @@ package io.nisfeb.talon.mail
 object MailGemtext {
 
     /** One message, as its own note. */
-    fun message(m: MailMessage, nameFor: (String) -> String, when_: (Long) -> String): String =
-        buildString {
-            append("# ").append(m.subject.ifBlank { "(no subject)" }).append("\n\n")
-            append(provenance(m, nameFor, when_))
+    fun message(m: MailMessage, nameFor: (String) -> String, when_: (Long) -> String): String {
+        val names = { s: String -> oneLine(nameFor(s)) }
+        return buildString {
+            append("# ").append(oneLine(m.subject).ifBlank { "(no subject)" }).append("\n\n")
+            append(provenance(m, names, when_))
             append("\n")
             append(body(m))
             append(attachments(m))
         }.trimEnd() + "\n"
+    }
 
     /**
      * A whole thread, in send order.
@@ -36,9 +38,11 @@ object MailGemtext {
         t: MailThread,
         nameFor: (String) -> String,
         when_: (Long) -> String,
-    ): String = buildString {
+    ): String {
+        val names = { s: String -> oneLine(nameFor(s)) }
+        return buildString {
         val shown = collapse(t.messages)
-        val subject = shown.firstOrNull()?.subject?.ifBlank { null } ?: "(no subject)"
+        val subject = shown.firstOrNull()?.subject?.let { oneLine(it) }?.ifBlank { null } ?: "(no subject)"
         append("# ").append(subject).append("\n\n")
         // Messages, not copies: several grubs under one id are one
         // message, and counting copies would overstate the conversation.
@@ -46,7 +50,7 @@ object MailGemtext {
             .append(shown.size)
             .append(if (shown.size == 1) " message" else " messages")
         if (t.participants.isNotEmpty()) {
-            append(", between ").append(t.participants.joinToString { nameFor(it) })
+            append(", between ").append(t.participants.joinToString { names(it) })
         }
         append(".\n")
         if (t.unreadable > 0) {
@@ -62,11 +66,11 @@ object MailGemtext {
             )
         }
         val counts = copyCounts(t.messages)
-        for (m in collapse(t.messages).sortedWith(compareBy({ it.sent }, { it.id }))) {
-            append("\n## ").append(nameFor(m.from))
+        for (m in shown.sortedWith(compareBy({ it.sent }, { it.id }))) {
+            append("\n## ").append(names(m.from))
             append(" · ").append(when_(m.sent))
             append("\n\n")
-            append(provenance(m, nameFor, when_, short = true))
+            append(provenance(m, names, when_, short = true))
             val n = counts[m.id] ?: 1
             if (n > 1) {
                 append(n).append(" stored copies of this message; the verdict above ")
@@ -76,7 +80,8 @@ object MailGemtext {
             append(body(m))
             append(attachments(m))
         }
-    }.trimEnd() + "\n"
+        }.trimEnd() + "\n"
+    }
 
     /**
      * Who wrote it, to whom, and what the ship concluded about the
@@ -117,8 +122,28 @@ object MailGemtext {
         if (n == 1) "1 copy on the ship is in a form this build cannot read, and is not below."
         else "$n copies on the ship are in a form this build cannot read, and are not below."
 
+    /**
+     * One line of it. Anything sender-controlled that lands on a line
+     * the note already owns — a heading, a From line — goes through
+     * here, because a newline in it is how a message plants its own
+     * markup in somebody's notes.
+     */
+    internal fun oneLine(s: String): String = s.replace('\r', ' ').replace('\n', ' ')
+
+    /**
+     * The body, verbatim but disarmed. A line that opens with a gemtext
+     * marker would render as the note's own markup — a fake heading, a
+     * link nobody filed, a pre block swallowing the rest of the page.
+     * A leading space keeps the text and takes the marker away, which
+     * is the least destructive disarmament there is.
+     */
     private fun body(m: MailMessage): String =
-        m.body.trimEnd().ifBlank { "(no text)" } + "\n"
+        m.body.trimEnd().ifBlank { "(no text)" }
+            .lines().joinToString("\n") { l -> if (l.opensMarkup()) " $l" else l } + "\n"
+
+    /** The gemtext markers a body line must not be allowed to open with. */
+    private fun String.opensMarkup(): Boolean =
+        startsWith("=>") || startsWith("#") || startsWith("```") || startsWith("* ")
 
     private fun attachments(m: MailMessage): String {
         if (m.attachments.isEmpty()) return ""
@@ -128,8 +153,8 @@ object MailGemtext {
                 // The name and type are the author's claims; only the
                 // address is checkable. The note says so rather than
                 // presenting them as facts about the bytes.
-                append("* ").append(a.name.ifBlank { "(unnamed)" })
-                if (a.mime.isNotBlank()) append(" · ").append(a.mime)
+                append("* ").append(oneLine(a.name).ifBlank { "(unnamed)" })
+                if (a.mime.isNotBlank()) append(" · ").append(oneLine(a.mime))
                 append(" · ").append(a.hash).append("\n")
             }
         }

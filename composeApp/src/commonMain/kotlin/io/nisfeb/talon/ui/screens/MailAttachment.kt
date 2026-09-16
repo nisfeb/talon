@@ -25,9 +25,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.nisfeb.talon.mail.Attachment
+import io.nisfeb.talon.mail.Blob
 import io.nisfeb.talon.mail.MailRepo
 import io.nisfeb.talon.ui.LocalImageDownloader
 import io.nisfeb.talon.ui.SaveResult
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -68,7 +70,9 @@ fun MailAttachmentRow(
         }
     }
     Column(modifier) {
-    (state as? AttachState.Held)?.takeIf { isImage }?.let { held ->
+    // The claimed size decided whether to fetch unasked; the real one
+    // decides whether to draw. A claim is cheap to lie about.
+    (state as? AttachState.Held)?.takeIf { isImage && it.bytes.size.toLong() <= IMAGE_AUTO_MAX }?.let { held ->
         coil3.compose.AsyncImage(
             model = held.bytes,
             contentDescription = attachment.name,
@@ -116,6 +120,10 @@ fun MailAttachmentRow(
                 },
             ) { Text("Save") } else Unit
 
+            // Saved is terminal: the bytes are on disk, and offering
+            // "Get" again would say they were not.
+            is AttachState.Saved -> Unit
+
             else -> TextButton(
                 onClick = {
                     scope.launch {
@@ -158,8 +166,11 @@ fun MailAttachmentRow(
     }
 }
 
-/** Bytes a picture may cost without being asked for. */
-private const val IMAGE_AUTO_MAX = 1_500_000L
+/** Bytes a picture may cost without being asked for. Bounded by the
+ *  ship's own blob cap: anything bigger cannot come from this ship
+ *  anyway, so the sender-claimed size is never what lets a large
+ *  fetch through (AuspexApi refuses over-cap blobs on read). */
+private const val IMAGE_AUTO_MAX = 262_144L
 
 /**
  * Ask for the bytes; if this ship has none, ask the network and wait
@@ -172,7 +183,7 @@ private suspend fun pull(
     from: String,
     say: (String) -> Unit,
 ): AttachState {
-    val held = runCatching { repo.blob(a.hash, a.name, a.mime) }.getOrNull()
+    val held = fetching { repo.blob(a.hash, a.name, a.mime) }
     if (held != null) return AttachState.Held(held.bytes, held.name)
 
     say("Asking the network")
@@ -180,12 +191,22 @@ private suspend fun pull(
     repeat(POLLS) {
         delay(POLL_MS)
         say("Waiting for it (${it + 1} of $POLLS)")
-        val now = runCatching { repo.blob(a.hash, a.name, a.mime) }.getOrNull()
+        val now = fetching { repo.blob(a.hash, a.name, a.mime) }
         if (now != null) return AttachState.Held(now.bytes, now.name)
     }
     return AttachState.Failed(
         "No copy came back. Whoever holds it may be offline; it can be asked for again.",
     )
+}
+
+/** One blob read where null means "not here" — never "the view went
+ *  away", which a blanket runCatching would swallow mid-poll. */
+private suspend fun fetching(block: suspend () -> Blob?): Blob? = try {
+    block()
+} catch (c: CancellationException) {
+    throw c
+} catch (e: Exception) {
+    null
 }
 
 private const val POLLS = 15
@@ -208,7 +229,8 @@ internal fun statusLine(state: AttachState, a: Attachment): String = when (state
     ).joinToString(" · ")
 
     is AttachState.Working -> state.what
-    is AttachState.Held -> "Ready to save · ${sizeLabel(a.size)}"
+    // The bytes we hold, not the size the sender claimed for them.
+    is AttachState.Held -> "Ready to save · ${sizeLabel(state.bytes.size.toLong())}"
     is AttachState.Saved -> "Saved to ${state.location}"
     is AttachState.Failed -> state.message
 }

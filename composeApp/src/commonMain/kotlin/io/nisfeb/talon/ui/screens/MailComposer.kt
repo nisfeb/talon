@@ -138,6 +138,14 @@ fun MailComposer(
                             )
                             onCancel()
                         }
+                    } else if (intent.draftId != null) {
+                        // Opened from a draft and emptied out: keeping
+                        // the husk would say there is still something
+                        // to send.
+                        scope.launch {
+                            repo.deleteDraft(intent.draftId)
+                            onCancel()
+                        }
                     } else {
                         onCancel()
                     }
@@ -194,12 +202,35 @@ fun MailComposer(
                                     return@launch
                                 }
                                 progress = "Sending"
-                                val ok = repo.send(to, subject, body, intent.prev, refs)
+                                // A draft goes out AS a draft: save the
+                                // edits, then sendDraft, which the ship
+                                // deletes only when the send landed. A
+                                // send() + deleteDraft() drops it on an
+                                // accepted poke — and an accepted poke is
+                                // not an applied one. With files attached
+                                // there is no draft route that carries
+                                // them, so that send goes direct.
+                                val ok = if (intent.draftId != null && refs.isEmpty()) {
+                                    repo.saveDraft(
+                                        io.nisfeb.talon.mail.Draft(
+                                            id = draftId,
+                                            to = to,
+                                            subject = subject,
+                                            body = body,
+                                            prev = intent.prev,
+                                        ),
+                                    )
+                                    repo.sendDraft(draftId)
+                                } else {
+                                    repo.send(to, subject, body, intent.prev, refs)
+                                }
                                 progress = null
                                 sending = false
                                 if (ok) {
-                                    // The draft, if this was one, is done.
-                                    if (intent.draftId != null) repo.deleteDraft(intent.draftId)
+                                    // The draft, if this was one, is done
+                                    // — unless the ship already dropped
+                                    // it for a landed sendDraft.
+                                    if (intent.draftId != null && refs.isNotEmpty()) repo.deleteDraft(intent.draftId)
                                     onSent()
                                 } else {
                                     problem = repo.error.value ?: "Send refused."

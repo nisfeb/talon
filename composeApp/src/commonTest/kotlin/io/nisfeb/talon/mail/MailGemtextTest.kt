@@ -147,4 +147,79 @@ class MailGemtextTest {
         assertTrue("2 stored copies" in out, "and the note says there were two")
         assertTrue("FORGED" in out, "with the strongest verdict among them")
     }
+
+    // ---- sender-controlled text cannot plant markup in a note ----------
+    //
+    // A newline in a subject or a rendered name is how a message writes
+    // its own heading into somebody's notes; a body line opening with a
+    // gemtext marker is how it files a link nobody filed.
+
+    @Test
+    fun `a subject cannot smuggle a heading into the note`() {
+        val out = MailGemtext.message(
+            msg("s", subject = "Plans\r\n## fake section"),
+            name, at,
+        )
+        assertEquals(
+            "# Plans  ## fake section",
+            out.lines().first(),
+            "the line break is collapsed, so the injected marker is just words on the real heading",
+        )
+        assertFalse(
+            out.lines().any { it == "## fake section" },
+            "no line of the note opens with the injected marker:\n$out",
+        )
+    }
+
+    @Test
+    fun `a thread note collapses its subject line the same way`() {
+        val t = MailThread(id = "0vt", messages = listOf(msg("root", subject = "real\n## fake")))
+        val out = MailGemtext.thread(t, name, at)
+        assertEquals("# real ## fake", out.lines().first())
+        assertFalse(out.lines().any { it == "## fake" }, out)
+    }
+
+    @Test
+    fun `a rendered name cannot break out of its line either`() {
+        val pwned: (String) -> String = { "$it\n## pwned" }
+        val out = MailGemtext.message(msg("n"), pwned, at)
+        assertFalse(out.lines().any { it == "## pwned" }, out)
+        assertTrue("From ~zod ## pwned" in out, "the name still reads, on the note's own line")
+    }
+
+    @Test
+    fun `a name is disarmed in a thread heading too`() {
+        val pwned: (String) -> String = { "$it\n## pwned" }
+        val t = MailThread(id = "0vt", participants = listOf("~zod"), messages = listOf(msg("root")))
+        val out = MailGemtext.thread(t, pwned, at)
+        assertFalse(out.lines().any { it == "## pwned" }, out)
+        assertTrue("## ~zod ## pwned ·" in out, "the per-message heading keeps the name, flattened")
+    }
+
+    @Test
+    fun `a body line that opens with gemtext markup is disarmed, not rendered`() {
+        val body = listOf(
+            "=> gemini://evil.example/click",
+            "# fake heading",
+            "## fake section",
+            "```",
+            "* fake bullet",
+            "an ordinary => mention mid-line is fine",
+        ).joinToString("\n")
+        val out = MailGemtext.message(msg("b", body = body), name, at)
+        // Each marker line keeps its text behind a leading space, which
+        // gemtext reads as plain text rather than markup.
+        assertTrue("\n => gemini://evil.example/click\n" in out, out)
+        assertTrue("\n # fake heading\n" in out, out)
+        assertTrue("\n ## fake section\n" in out, out)
+        assertTrue("\n ```\n" in out, out)
+        assertTrue("\n * fake bullet\n" in out, out)
+        assertTrue(
+            "\nan ordinary => mention mid-line is fine\n" in out,
+            "only line-initial markers are guarded; the text is otherwise verbatim",
+        )
+        // So nothing the body carried can render as the note's own link or heading.
+        assertFalse(out.lines().any { it.startsWith("=>") }, out)
+        assertFalse(out.lines().any { it == "# fake heading" }, out)
+    }
 }

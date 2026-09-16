@@ -214,6 +214,51 @@ class MailTreeTest {
         assertEquals(3, v.single().hidden, "a fold that does not count is just an ending")
     }
 
+    // ---- depth: a shape the wire can simply hand us --------------------
+
+    @Test
+    fun `a ten-thousand-message chain of self-replies does not blow the stack`() {
+        // This is not a pathological input; it is a long conversation.
+        // Anything recursive over it is a stack overflow somebody else
+        // chooses to hand us, so every walk below is iterative — and the
+        // assertions here walk iteratively too, or the test would fail
+        // for the reason the fix exists.
+        val depth = 10_000
+        val chain = (0 until depth).map {
+            msg("m$it", prev = if (it == 0) null else "m${it - 1}", sent = it.toLong())
+        }
+        val forest = threadTree(chain)
+        assertEquals(1, forest.size, "one root, and the whole chain under it")
+
+        var tip = forest.single()
+        var walked = 1
+        while (tip.children.isNotEmpty()) {
+            tip = tip.children.single()
+            walked++
+        }
+        assertEquals(depth, walked, "every message is on the one chain")
+        assertEquals("m${depth - 1}", tip.message.id)
+
+        val open = flattenVisible(forest, emptySet())
+        assertEquals(depth, open.size)
+        assertEquals("m4999", open[4999].node.message.id, "a straight chain flattens in order")
+        assertEquals(4999, open[4999].depth, "row i is generation i")
+
+        val shut = flattenVisible(forest, setOf("m0"))
+        assertEquals(1, shut.size)
+        assertEquals(depth - 1, shut.single().hidden, "folding the root counts the whole chain under it")
+
+        val mid = flattenVisible(forest, setOf("m5000"))
+        assertEquals(5001, mid.size)
+        assertEquals(4999, mid.last().hidden, "a fold halfway down counts what is under it, no more")
+
+        val path = pathTo(forest, "m${depth - 1}")
+        assertEquals(depth, path.size, "a reply from the tip carries the whole chain")
+        assertEquals("m0", path.first().id)
+        assertEquals("m5000", path[5000].id)
+        assertEquals("m${depth - 1}", path.last().id)
+    }
+
     // ---- copies of one message -----------------------------------------
     //
     // Several grubs can share an id and differ only in signature. Each
