@@ -79,7 +79,8 @@ class CalendarCacheTest {
             warm.attach("https://ship.example")
             // The window lands early in a refresh and the save comes at its
             // end, so wait for what was actually written, not for the flow.
-            waitFor { db.calendarCache().read("window").isNotEmpty() }
+            // The parts are written in turn; wait for the last one asserted.
+            waitFor { db.calendarCache().read("calendars").isNotEmpty() }
             warm.detach()
 
             val cold = repo(scope, db) { 503 to """{"error":"down"}""" }

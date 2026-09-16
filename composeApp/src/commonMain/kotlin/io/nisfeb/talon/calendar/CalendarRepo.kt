@@ -163,10 +163,16 @@ class CalendarRepo(
     }
 
     /** Share a local calendar with a ship. Null: refused. False: recorded,
-     *  but the ship could not be told (down, or no calendar yet). */
+     *  but the ship could not be told (down, or no calendar yet). A ship
+     *  that cannot be reached at all is an error, not a refusal. */
     suspend fun share(calId: String, ship: String, edit: Boolean): Boolean? {
         val a = api ?: return null
-        val told = runCatching { a.share(calId, ship, edit) }.getOrNull()
+        val told = try {
+            a.share(calId, ship, edit)
+        } catch (e: AuspexError.Unreachable) {
+            _error.value = e.message
+            throw e
+        }
         refresh()
         return told
     }
@@ -230,12 +236,16 @@ class CalendarRepo(
         val json = AuspexApi.json
         fun rows(kind: String, texts: List<String>) =
             texts.mapIndexed { i, t -> CalendarCacheEntity(kind, i, t) }
+        // All of it or none: the parts are written in turn, and a detach
+        // between two of them left a window with no calendars beside it.
         runCatching {
+            kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
             c.replace("window", rows("window", _rows.value.orEmpty().map { json.encodeToString(CalendarRow.serializer(), it) }))
             c.replace("calendars", rows("calendars", _calendars.value.map { json.encodeToString(CalendarInfo.serializer(), it) }))
             c.replace("tasks", rows("tasks", _tasks.value.orEmpty().map { json.encodeToString(CalendarTask.serializer(), it) }))
             c.replace("tags", rows("tags", _tags.value))
             c.replace("zone", rows("zone", listOfNotNull(_zone.value)))
+            }
         }.onFailure { Log.w(TAG, "calendar not kept", it) }
     }
 
@@ -283,14 +293,12 @@ class CalendarRepo(
     }
 
     fun attach(baseUrl: String) {
-        if (api != null && api?.let { true } == true && shipUrl == baseUrl) return
+        if (api != null && shipUrl == baseUrl) return
         shipUrl = baseUrl
         zoneAdopted = false
         zoneNames = null
         api = CalendarApi(http, baseUrl)
-        _availability.value = CalendarAvailability.UNKNOWN
-        _rows.value = null
-        _error.value = null
+        clearShipState()
         poller?.cancel()
         poller = scope.launch {
             // What the ship last said, while it is asked again. A month
@@ -305,14 +313,34 @@ class CalendarRepo(
     }
     private var shipUrl: String? = null
 
+    /** Nothing of the last ship may greet the next one: a stale zone
+     *  would stop adoptZoneIfNone, and stale rows would pose as the
+     *  new ship's own until it answered. */
+    private fun clearShipState() {
+        _availability.value = CalendarAvailability.UNKNOWN
+        _rows.value = null
+        _rangeRows.value = null
+        range = null
+        _tasks.value = null
+        _calendars.value = emptyList()
+        _shares.value = null
+        _tags.value = emptyList()
+        _zone.value = null
+        _conflicts.value = emptyList()
+        _sync.value = emptyMap()
+        _error.value = null
+        ball = ""
+        lastShareSyncMs = 0
+    }
+
     fun detach() {
         poller?.cancel()
         poller = null
         api = null
         shipUrl = null
-        _availability.value = CalendarAvailability.UNKNOWN
-        _rows.value = null
-        _error.value = null
+        zoneAdopted = false
+        zoneNames = null
+        clearShipState()
     }
 
     private var lastShareSyncMs = 0L
@@ -340,7 +368,7 @@ class CalendarRepo(
             val now = nowMs()
             val w = a.window(now - BEHIND_MS, now + AHEAD_MS)
             _rows.value = w.rows.sortedWith(compareBy({ it.l }, { it.r }))
-            _calendars.value = runCatching { a.calendars() }.getOrDefault(emptyList())
+            _calendars.value = runCatching { a.calendars() }.getOrNull() ?: _calendars.value
             _tasks.value = runCatching { a.tasks() }.getOrNull() ?: _tasks.value
             // Null only when the calendar has no sharing (404); a hiccup
             // keeps the last answer, and with it the read-only guard.
@@ -353,7 +381,7 @@ class CalendarRepo(
                 runCatching { a.caldavSubscriptions() }.getOrNull()?.forEach { put(it.id, SyncRow(it.lastMs, it.error)) }
                 _shares.value?.accepted?.forEach { (id, acc) -> put(id, SyncRow(acc.lastMs, acc.error)) }
             }.ifEmpty { if (_calendars.value.any { it.kind != "local" }) _sync.value else emptyMap() }
-            _tags.value = runCatching { a.tags() }.getOrDefault(emptyList()).map { it.tag }
+            _tags.value = runCatching { a.tags() }.getOrNull()?.map { it.tag } ?: _tags.value
             keep()
             runCatching { a.config() }.getOrNull()?.let { _zone.value = it.zone; ball = it.ball }
             _availability.value = CalendarAvailability.PRESENT
