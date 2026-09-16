@@ -58,8 +58,6 @@ fun AppsSettingsScreen(
     calendar: CalendarRepo?,
     /** Probes whether Grubbery is on the ship; null where no ship is known. */
     latticeInstalled: (suspend () -> Boolean)?,
-    /** Installs the calendar desk. Null hides the offer. */
-    onInstallCalendar: (suspend () -> Result<Unit>)?,
     /** This ship's base URL, for the permits page. Null when signed out. */
     shipUrl: String?,
     onBack: () -> Unit,
@@ -85,22 +83,22 @@ fun AppsSettingsScreen(
 
     val rows = buildList {
         if (mailAvailability != null) add(mailRow(mailAvailability, mailError))
-        if (calendarAvailability != null) add(calendarRow(calendarAvailability, calendarError))
+        if (calendarAvailability != null) add(calendarRow(calendarAvailability, calendarError, lattice))
         add(latticeRow(lattice))
     }
 
-    /** Run an install, then re-ask the app whether it is there now. */
+    /**
+     * Install, then re-ask every app whether it is there now. One action:
+     * mail, the calendar and lattice all arrive in the Grubbery desk, so
+     * there is nothing else left to install.
+     */
     fun install(row: AppRow) {
-        val action: (suspend () -> Result<Unit>)? = when (row.name) {
-            "Calendar" -> onInstallCalendar
-            else -> installGrubbery
-        }
-        if (action == null) return
+        val action = installGrubbery ?: return
         busy = row.name
         note = null
         scope.launch {
             action().fold(
-                onSuccess = { note = "${row.name} installed." },
+                onSuccess = { note = "Installed Grubbery. The apps arrive with it." },
                 onFailure = { note = it.message ?: "The install did not finish." },
             )
             probeLattice()
@@ -176,9 +174,8 @@ fun AppsSettingsScreen(
                     }
                     if (busy == row.name) {
                         CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
-                    } else if (row.canInstall) {
-                        val can = if (row.name == "Calendar") onInstallCalendar != null else installGrubbery != null
-                        if (can) TextButton(enabled = busy == null, onClick = { install(row) }) { Text("Install") }
+                    } else if (row.canInstall && installGrubbery != null) {
+                        TextButton(enabled = busy == null, onClick = { install(row) }) { Text("Install") }
                     }
                 }
                 HorizontalDivider()

@@ -1917,7 +1917,6 @@ fun App(
                         latticeInstalled = sessionStore.active()?.shipUrl?.let { url ->
                             { io.nisfeb.talon.urbit.LatticeInstall.isInstalled(http, url) }
                         },
-                        onInstallCalendar = calendarInstall,
                         shipUrl = sessionStore.active()?.shipUrl,
                         onBack = { showApps = false },
                     )

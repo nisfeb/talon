@@ -1993,7 +1993,6 @@ fun TalonApp(
                 latticeInstalled = app.sessionStore.active()?.shipUrl?.let { url ->
                     { io.nisfeb.talon.urbit.LatticeInstall.isInstalled(app.ktorHttp, url) }
                 },
-                onInstallCalendar = calendarInstall,
                 shipUrl = app.sessionStore.active()?.shipUrl,
                 onBack = { appsOpen = false },
                 modifier = mod,

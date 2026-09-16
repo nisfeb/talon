@@ -51,12 +51,26 @@ fun mailRow(availability: MailAvailability, error: String?): AppRow = when (avai
     MailAvailability.UNKNOWN -> AppRow("Mail", AppState.UNKNOWN, "Not asked yet.", false, error)
 }
 
-/** The calendar is its own desk, so absent means absent. */
-fun calendarRow(availability: CalendarAvailability, error: String?): AppRow = when (availability) {
-    CalendarAvailability.PRESENT -> AppRow("Calendar", AppState.WORKING, "Answering on this ship.", false, error)
-    CalendarAvailability.ABSENT -> AppRow("Calendar", AppState.MISSING, "This ship has no calendar yet.", true, error)
-    CalendarAvailability.SIGNED_OUT -> AppRow("Calendar", AppState.SIGNED_OUT, "Signed out of the ship.", false, error)
-    CalendarAvailability.UNKNOWN -> AppRow("Calendar", AppState.UNKNOWN, "Not asked yet.", false, error)
+/**
+ * The calendar ships inside Grubbery now, so a calendar that does not
+ * answer is a statement about Grubbery: absent where the desk is absent,
+ * out of date where the desk is here and predates it. [grubbery] is
+ * whether the desk answered, or null before we have asked — and before
+ * we know, nothing is offered, because installing on a guess is how
+ * somebody installs a desk they already have.
+ */
+fun calendarRow(availability: CalendarAvailability, error: String?, grubbery: Boolean?): AppRow = when {
+    availability == CalendarAvailability.PRESENT ->
+        AppRow("Calendar", AppState.WORKING, "Answering on this ship.", false, error)
+    availability == CalendarAvailability.SIGNED_OUT ->
+        AppRow("Calendar", AppState.SIGNED_OUT, "Signed out of the ship.", false, error)
+    availability == CalendarAvailability.UNKNOWN ->
+        AppRow("Calendar", AppState.UNKNOWN, "Not asked yet.", false, error)
+    grubbery == false ->
+        AppRow("Calendar", AppState.MISSING, "The calendar comes with Grubbery, which this ship does not have.", true, error)
+    grubbery == true ->
+        AppRow("Calendar", AppState.OUTDATED, "This ship's Grubbery predates the calendar. It updates itself from its publisher.", false, error)
+    else -> AppRow("Calendar", AppState.UNKNOWN, "Not answering. Checking whether Grubbery is here.", false, error)
 }
 
 /**

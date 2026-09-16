@@ -13,8 +13,24 @@ class GrubberyAppsTest {
     @Test
     fun `a missing app offers the install`() {
         assertTrue(mailRow(MailAvailability.NO_GRUBBERY, null).canInstall)
-        assertTrue(calendarRow(CalendarAvailability.ABSENT, null).canInstall)
+        assertTrue(calendarRow(CalendarAvailability.ABSENT, null, grubbery = false).canInstall)
         assertTrue(latticeRow(installed = false).canInstall)
+    }
+
+    // The calendar ships inside Grubbery, so its absence is a statement
+    // about the desk, and only one of the two readings is installable.
+    @Test
+    fun `a calendar missing from a grubbery that is here is out of date`() {
+        val row = calendarRow(CalendarAvailability.ABSENT, null, grubbery = true)
+        assertEquals(AppState.OUTDATED, row.state)
+        assertFalse(row.canInstall)
+    }
+
+    @Test
+    fun `a calendar is offered nothing until we know about grubbery`() {
+        val row = calendarRow(CalendarAvailability.ABSENT, null, grubbery = null)
+        assertEquals(AppState.UNKNOWN, row.state)
+        assertFalse(row.canInstall)
     }
 
     @Test
@@ -28,7 +44,7 @@ class GrubberyAppsTest {
     @Test
     fun `being signed out is not an app problem, and neither is silence`() {
         assertEquals(AppState.SIGNED_OUT, mailRow(MailAvailability.SIGNED_OUT, null).state)
-        assertEquals(AppState.SIGNED_OUT, calendarRow(CalendarAvailability.SIGNED_OUT, null).state)
+        assertEquals(AppState.SIGNED_OUT, calendarRow(CalendarAvailability.SIGNED_OUT, null, grubbery = true).state)
         assertEquals(AppState.UNKNOWN, latticeRow(installed = null).state)
         assertFalse(mailRow(MailAvailability.SIGNED_OUT, null).canInstall)
         assertFalse(latticeRow(installed = null).canInstall)
@@ -36,7 +52,7 @@ class GrubberyAppsTest {
 
     @Test
     fun `a working app carries the ship's last words anyway`() {
-        val row = calendarRow(CalendarAvailability.PRESENT, "the ship did not answer")
+        val row = calendarRow(CalendarAvailability.PRESENT, "the ship did not answer", grubbery = true)
         assertEquals(AppState.WORKING, row.state)
         assertEquals("the ship did not answer", row.error)
     }
