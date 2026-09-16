@@ -36,9 +36,9 @@ import androidx.compose.ui.unit.dp
 import io.nisfeb.talon.data.AppDatabase
 import io.nisfeb.talon.ui.Avatar
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import io.nisfeb.talon.ui.icons.TalonIcons
 
 @Composable
 fun NewDmScreen(
@@ -149,7 +149,7 @@ fun NewDmScreen(
             )
             if (scan != null) {
                 IconButton(onClick = { scanProblem = null; scan() }) {
-                    Icon(Icons.Filled.QrCodeScanner, contentDescription = "Scan a group or invite code")
+                    Icon(TalonIcons.QrCodeScanner, contentDescription = "Scan a group or invite code")
                 }
             }
         }

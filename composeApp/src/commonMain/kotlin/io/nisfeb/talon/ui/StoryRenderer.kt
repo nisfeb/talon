@@ -21,7 +21,6 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.BrokenImage
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -55,6 +54,7 @@ import io.nisfeb.talon.urbit.MENTION_TAG
 import io.nisfeb.talon.urbit.StoryPart
 import io.nisfeb.talon.urbit.URL_TAG
 import kotlinx.coroutines.sync.withLock
+import io.nisfeb.talon.ui.icons.TalonIcons
 
 /**
  * Resolver for citation lookups. The production app couples this
@@ -278,7 +278,7 @@ fun StoryRenderer(
                         // A dead URL used to render as a 0-height nothing —
                         // the message looked empty. The tile makes the
                         // failure visible.
-                        error = rememberVectorPainter(Icons.Filled.BrokenImage),
+                        error = rememberVectorPainter(TalonIcons.BrokenImage),
                         modifier = Modifier
                             .widthIn(max = 320.dp)
                             .heightIn(max = 360.dp)

@@ -38,9 +38,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Done
 import androidx.compose.material.icons.filled.Home
-import androidx.compose.material.icons.filled.DragHandle
 import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.MoreVert
@@ -104,6 +102,7 @@ import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
 import sh.calvin.reorderable.ReorderableItem
 import sh.calvin.reorderable.rememberReorderableLazyListState
+import io.nisfeb.talon.ui.icons.TalonIcons
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -2295,7 +2294,7 @@ private fun ConversationRow(
         }
         if (editMode && dragHandleModifier != null) {
             Icon(
-                imageVector = Icons.Filled.DragHandle,
+                imageVector = TalonIcons.DragHandle,
                 contentDescription = "Drag to reorder",
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(start = 4.dp).size(20.dp),
@@ -2547,7 +2546,7 @@ private fun GroupHeaderRow(
             // (0° expanded = points down, -90° collapsed = points right).
             // Swapping the icon AND rotating produced an up-pointing arrow
             // when expanded.
-            imageVector = Icons.Filled.ExpandMore,
+            imageVector = TalonIcons.ExpandMore,
             contentDescription = if (expanded) "Collapse" else "Expand",
             tint = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier
@@ -2556,7 +2555,7 @@ private fun GroupHeaderRow(
         )
         if (editMode && dragHandleModifier != null) {
             Icon(
-                imageVector = Icons.Filled.DragHandle,
+                imageVector = TalonIcons.DragHandle,
                 contentDescription = "Drag to reorder",
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(start = 4.dp).size(20.dp),

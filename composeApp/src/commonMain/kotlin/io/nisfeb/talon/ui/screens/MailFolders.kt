@@ -14,13 +14,9 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Archive
 import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.Inbox
-import androidx.compose.material.icons.filled.Label
 import androidx.compose.material.icons.filled.MailOutline
 import androidx.compose.material.icons.automirrored.filled.Send
-import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -37,6 +33,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.nisfeb.talon.mail.MailFolder
 import io.nisfeb.talon.mail.MailView
+import io.nisfeb.talon.ui.icons.TalonIcons
 
 /**
  * The mailbox column.
@@ -74,11 +71,11 @@ fun MailFolderColumn(
             )
             labels.forEach { l ->
                 val f = MailFolder.Label(l)
-                FolderRow(l, Icons.Filled.Label, selected == f) { onSelect(f) }
+                FolderRow(l, TalonIcons.Label, selected == f) { onSelect(f) }
             }
         }
         HorizontalDivider(Modifier.padding(horizontal = 10.dp, vertical = 6.dp))
-        FolderRow("Filters and lists", Icons.Filled.Tune, false, onOrganise)
+        FolderRow("Filters and lists", TalonIcons.Tune, false, onOrganise)
     }
 }
 
@@ -106,10 +103,10 @@ fun MailFolderSheet(
 }
 
 private val FOLDERS: List<Pair<MailFolder, ImageVector>> = listOf(
-    MailFolder.View(MailView.INBOX) to Icons.Filled.Inbox,
+    MailFolder.View(MailView.INBOX) to TalonIcons.Inbox,
     MailFolder.Drafts to Icons.Filled.Edit,
     MailFolder.View(MailView.SENT) to Icons.AutoMirrored.Filled.Send,
-    MailFolder.View(MailView.ARCHIVED) to Icons.Filled.Archive,
+    MailFolder.View(MailView.ARCHIVED) to TalonIcons.Archive,
     MailFolder.View(MailView.ALL) to Icons.Filled.MailOutline,
 )
 

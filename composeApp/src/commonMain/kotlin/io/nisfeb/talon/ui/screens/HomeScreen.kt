@@ -25,8 +25,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.Chat
-import androidx.compose.material.icons.filled.CalendarToday
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.MailOutline
 import androidx.compose.material.icons.filled.Notifications
@@ -63,7 +61,6 @@ import io.nisfeb.talon.data.AppDatabase
 import io.nisfeb.talon.mail.MailAvailability
 import io.nisfeb.talon.mail.MailRepo
 import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.Mic
 import kotlinx.coroutines.launch
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.draw.clip
@@ -108,6 +105,7 @@ import io.nisfeb.talon.ui.ContactMap
 import io.nisfeb.talon.ui.shortRelativeTime
 import io.nisfeb.talon.urbit.StoryCache
 import io.nisfeb.talon.util.nowMs
+import io.nisfeb.talon.ui.icons.TalonIcons
 
 /**
  * The home page.
@@ -932,7 +930,7 @@ private fun ChatsPanel(
     onAll: () -> Unit,
     onLongPress: () -> Unit,
 ) {
-    Panel(title(HomeWidgetKind.MESSAGES), Icons.AutoMirrored.Filled.Chat, "All chats" to onAll) {
+    Panel(title(HomeWidgetKind.MESSAGES), TalonIcons.Chat, "All chats" to onAll) {
         if (recent.isEmpty()) {
             Empty("Nothing yet.")
         } else {
@@ -1222,7 +1220,7 @@ private fun AssistantPanel(onOpen: ((Boolean) -> Unit)?, onLongPress: () -> Unit
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(
-                    if (listens) Icons.Filled.Mic else Icons.Filled.Edit,
+                    if (listens) TalonIcons.Mic else Icons.Filled.Edit,
                     contentDescription = when {
                         onOpen == null -> "Assistant is off"
                         listens -> "Tell your assistant"
@@ -1281,7 +1279,7 @@ private fun CalendarPanel(
         }
     }
     val action = onOpen?.takeIf { availability == CalendarAvailability.PRESENT }?.let { "Calendar" to it }
-    Panel("Today", Icons.Filled.CalendarToday, action, scrollable = true) {
+    Panel("Today", TalonIcons.CalendarToday, action, scrollable = true) {
         when {
             calendar == null -> Empty("This host has no calendar.")
 

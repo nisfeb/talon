@@ -41,7 +41,6 @@ import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
-import androidx.compose.material.icons.filled.Mic
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -103,6 +102,7 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import io.nisfeb.talon.ui.icons.TalonIcons
 
 /**
  * Talon Assistant (docs/assistant.md). One opt-in agent: it answers
@@ -650,7 +650,7 @@ fun AssistantScreen(
                     {
                         androidx.compose.material3.IconButton(onClick = dictate, enabled = ready && !busy) {
                             androidx.compose.material3.Icon(
-                                androidx.compose.material.icons.Icons.Filled.Mic,
+                                TalonIcons.Mic,
                                 contentDescription = "Speak to your assistant",
                             )
                         }

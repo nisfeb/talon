@@ -10,7 +10,6 @@ import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Public
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -26,6 +25,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import io.nisfeb.talon.urbit.UrbHttp
+import io.nisfeb.talon.ui.icons.TalonIcons
 
 /**
  * Full-screen in-app viewer for a `urb://` link (Android/iOS). A
@@ -82,7 +82,7 @@ fun UrbViewerSheet(
                         modifier = Modifier.weight(1f),
                     )
                     IconButton(onClick = { runCatching { uriHandler.openUri(readerUrl) } }) {
-                        Icon(Icons.Filled.Public, contentDescription = "Open in browser")
+                        Icon(TalonIcons.Public, contentDescription = "Open in browser")
                     }
                 }
                 HorizontalDivider()

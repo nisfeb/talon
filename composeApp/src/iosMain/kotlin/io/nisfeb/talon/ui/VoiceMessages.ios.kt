@@ -9,10 +9,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Mic
-import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -71,6 +68,7 @@ import platform.UIKit.UIWindow
 import platform.UIKit.UIWindowScene
 import platform.darwin.dispatch_async
 import platform.darwin.dispatch_get_main_queue
+import io.nisfeb.talon.ui.icons.TalonIcons
 
 /**
  * Voice messages on iOS: AVAudioRecorder writes the same AAC m4a
@@ -210,7 +208,7 @@ actual fun VoiceRecordButton(
         contentAlignment = Alignment.Center,
     ) {
         Icon(
-            imageVector = if (recording) Icons.Filled.Stop else Icons.Filled.Mic,
+            imageVector = if (recording) TalonIcons.Stop else TalonIcons.Mic,
             contentDescription = if (recording) "Stop recording" else "Record voice",
             tint = if (recording) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.size(22.dp),
@@ -242,7 +240,7 @@ actual fun VoicePreviewPlayButton(path: String, enabled: Boolean) {
             p.play(); playing = true
         }
     }) {
-        Icon(if (playing) Icons.Filled.Pause else Icons.Filled.PlayArrow, contentDescription = if (playing) "Pause" else "Play")
+        Icon(if (playing) TalonIcons.Pause else Icons.Filled.PlayArrow, contentDescription = if (playing) "Pause" else "Play")
     }
 }
 
@@ -276,7 +274,7 @@ private fun IosInlineAudioPlayer(url: String) {
                 runCatching { AVAudioSession.sharedInstance().setCategory(AVAudioSessionCategoryPlayback, null) }
                 player.play(); playing = true
             }
-        }) { Icon(if (playing) Icons.Filled.Pause else Icons.Filled.PlayArrow, contentDescription = if (playing) "Pause" else "Play") }
+        }) { Icon(if (playing) TalonIcons.Pause else Icons.Filled.PlayArrow, contentDescription = if (playing) "Pause" else "Play") }
         fun clock(s: Double) = "${(s / 60).toInt()}:${(s % 60).toInt().toString().padStart(2, '0')}"
         Text(
             if (length > 0) "${clock(position)} / ${clock(length)}" else if (playing) clock(position) else "Voice message",

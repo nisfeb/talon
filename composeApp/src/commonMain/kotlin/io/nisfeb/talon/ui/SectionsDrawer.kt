@@ -10,7 +10,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -21,6 +20,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import io.nisfeb.talon.ui.screens.MenuBadgeDot
+import io.nisfeb.talon.ui.icons.TalonIcons
 
 /**
  * The sections, as a drawer.
@@ -92,7 +92,7 @@ fun SectionsDrawer(
             NavigationDrawerItem(
                 selected = false,
                 label = { Text("Edit menu") },
-                icon = { Icon(Icons.Filled.Tune, contentDescription = null, modifier = Modifier.size(22.dp)) },
+                icon = { Icon(TalonIcons.Tune, contentDescription = null, modifier = Modifier.size(22.dp)) },
                 onClick = onEditMenu,
                 modifier = Modifier.padding(horizontal = 12.dp),
             )

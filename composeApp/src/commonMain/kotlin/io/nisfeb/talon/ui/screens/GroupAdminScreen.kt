@@ -15,11 +15,9 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
-import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
 import io.nisfeb.talon.ui.isCallsSupported
-import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material3.Switch
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -60,6 +58,7 @@ import io.nisfeb.talon.urbit.TlonChatRepo
 import io.nisfeb.talon.util.decodeImageDimensions
 import io.nisfeb.talon.util.rememberImagePicker
 import kotlinx.coroutines.launch
+import io.nisfeb.talon.ui.icons.TalonIcons
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -1053,7 +1052,7 @@ private fun PartyLineSection(
             )
         }
         Icon(
-            if (sfuOpen) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
+            if (sfuOpen) TalonIcons.ExpandLess else TalonIcons.ExpandMore,
             contentDescription = if (sfuOpen) "Hide server settings" else "Server settings",
         )
     }

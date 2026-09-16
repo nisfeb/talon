@@ -14,12 +14,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.AcUnit
-import androidx.compose.material.icons.filled.Air
-import androidx.compose.material.icons.filled.Cloud
-import androidx.compose.material.icons.filled.Grain
-import androidx.compose.material.icons.filled.Thunderstorm
-import androidx.compose.material.icons.filled.WaterDrop
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -63,6 +57,7 @@ import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.roundToInt
 import kotlin.math.sin
+import io.nisfeb.talon.ui.icons.TalonIcons
 
 /**
  * The day as a dial: night at the bottom, noon at the top, the sun
@@ -184,7 +179,7 @@ fun SkyClockDial(
     // The same glyph the condition line uses, painted onto the ring.
     // Three overlapping circles were a good enough cloud for a
     // thumbnail and an obvious three circles at this size.
-    val cloudPainter = rememberVectorPainter(Icons.Filled.Cloud)
+    val cloudPainter = rememberVectorPainter(TalonIcons.Cloud)
     val faceColor = MaterialTheme.colorScheme.surface
     val inkColor = MaterialTheme.colorScheme.onSurface
     val markColor = MaterialTheme.colorScheme.onSurfaceVariant
@@ -510,13 +505,13 @@ internal val TWILIGHT_COLD = Color(0xFFE8956B)
  */
 internal fun conditionIcon(w: SkyClock.Weather): Pair<ImageVector, String>? = when (w) {
     SkyClock.Weather.CLEAR -> null
-    SkyClock.Weather.CLOUD -> Icons.Filled.Cloud to "Cloudy"
-    SkyClock.Weather.FOG -> Icons.Filled.Air to "Fog"
-    SkyClock.Weather.DRIZZLE -> Icons.Filled.Grain to "Drizzle"
-    SkyClock.Weather.RAIN -> Icons.Filled.WaterDrop to "Rain"
-    SkyClock.Weather.SLEET -> Icons.Filled.Grain to "Sleet"
-    SkyClock.Weather.SNOW -> Icons.Filled.AcUnit to "Snow"
-    SkyClock.Weather.THUNDER -> Icons.Filled.Thunderstorm to "Storm"
+    SkyClock.Weather.CLOUD -> TalonIcons.Cloud to "Cloudy"
+    SkyClock.Weather.FOG -> TalonIcons.Air to "Fog"
+    SkyClock.Weather.DRIZZLE -> TalonIcons.Grain to "Drizzle"
+    SkyClock.Weather.RAIN -> TalonIcons.WaterDrop to "Rain"
+    SkyClock.Weather.SLEET -> TalonIcons.Grain to "Sleet"
+    SkyClock.Weather.SNOW -> TalonIcons.AcUnit to "Snow"
+    SkyClock.Weather.THUNDER -> TalonIcons.Thunderstorm to "Storm"
 }
 
 /** The most cloud the ring will carry at once. */

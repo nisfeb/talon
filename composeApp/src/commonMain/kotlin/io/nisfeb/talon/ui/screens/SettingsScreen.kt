@@ -25,9 +25,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
-import androidx.compose.material.icons.filled.ExpandMore
-import androidx.compose.material.icons.filled.Visibility
-import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -78,6 +75,7 @@ import io.nisfeb.talon.ui.isCallsSupported
 import io.nisfeb.talon.ui.isLoopsSupported
 import io.nisfeb.talon.ui.isOnDeviceAiSupported
 import io.nisfeb.talon.ui.theme.ThemePreference
+import io.nisfeb.talon.ui.icons.TalonIcons
 
 @Composable
 fun SettingsScreen(
@@ -758,7 +756,7 @@ fun SettingsScreen(
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     Text(provider.label, modifier = Modifier.weight(1f))
-                    Icon(Icons.Filled.ExpandMore, contentDescription = null)
+                    Icon(TalonIcons.ExpandMore, contentDescription = null)
                 }
                 DropdownMenu(
                     expanded = providerMenuOpen,
@@ -786,8 +784,8 @@ fun SettingsScreen(
                 trailingIcon = {
                     IconButton(onClick = { revealKey = !revealKey }) {
                         Icon(
-                            imageVector = if (revealKey) Icons.Filled.VisibilityOff
-                            else Icons.Filled.Visibility,
+                            imageVector = if (revealKey) TalonIcons.VisibilityOff
+                            else TalonIcons.Visibility,
                             contentDescription = if (revealKey) "Hide key" else "Show key",
                         )
                     }
@@ -929,8 +927,8 @@ fun SettingsScreen(
                         trailingIcon = {
                             IconButton(onClick = { revealBrave = !revealBrave }) {
                                 Icon(
-                                    imageVector = if (revealBrave) Icons.Filled.VisibilityOff
-                                    else Icons.Filled.Visibility,
+                                    imageVector = if (revealBrave) TalonIcons.VisibilityOff
+                                    else TalonIcons.Visibility,
                                     contentDescription = if (revealBrave) "Hide key" else "Show key",
                                 )
                             }
@@ -1013,8 +1011,8 @@ fun SettingsScreen(
                 trailingIcon = {
                     IconButton(onClick = { revealStt = !revealStt }) {
                         Icon(
-                            imageVector = if (revealStt) Icons.Filled.VisibilityOff
-                            else Icons.Filled.Visibility,
+                            imageVector = if (revealStt) TalonIcons.VisibilityOff
+                            else TalonIcons.Visibility,
                             contentDescription = if (revealStt) "Hide key" else "Show key",
                         )
                     }

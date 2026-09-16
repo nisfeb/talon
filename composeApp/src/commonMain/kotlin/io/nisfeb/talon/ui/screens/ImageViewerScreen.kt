@@ -22,7 +22,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Download
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
@@ -59,6 +58,7 @@ import coil3.compose.AsyncImage
 import io.nisfeb.talon.ui.LocalImageDownloader
 import io.nisfeb.talon.ui.SaveResult
 import kotlinx.coroutines.launch
+import io.nisfeb.talon.ui.icons.TalonIcons
 
 /**
  * State holder for the multi-image viewer mode (the photo / gif
@@ -293,7 +293,7 @@ fun ImageViewerScreen(
                     enabled = !saving,
                     contentDescription = "Download",
                 ) {
-                    Icon(Icons.Filled.Download, contentDescription = null)
+                    Icon(TalonIcons.Download, contentDescription = null)
                 }
             } else {
                 // Spacer so the n-of-N text stays centred even when

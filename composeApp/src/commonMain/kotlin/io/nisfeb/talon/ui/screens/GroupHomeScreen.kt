@@ -21,7 +21,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -52,6 +51,7 @@ import io.nisfeb.talon.ui.Avatar
 import io.nisfeb.talon.urbit.TlonChatRepo
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
+import io.nisfeb.talon.ui.icons.TalonIcons
 
 /**
  * Landing screen for a single group, used when the user taps a group
@@ -157,7 +157,7 @@ fun GroupHomeScreen(
                             text = { Text("Leave group") },
                             leadingIcon = {
                                 Icon(
-                                    Icons.AutoMirrored.Filled.Logout,
+                                    TalonIcons.Logout,
                                     contentDescription = null,
                                 )
                             },

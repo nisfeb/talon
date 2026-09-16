@@ -16,13 +16,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.CallEnd
-import androidx.compose.material.icons.filled.Mic
-import androidx.compose.material.icons.filled.Videocam
-import androidx.compose.material.icons.filled.VideocamOff
-import androidx.compose.material.icons.filled.ExpandMore
-import androidx.compose.material.icons.filled.ExpandLess
-import androidx.compose.material.icons.filled.MicOff
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -54,6 +47,7 @@ import androidx.compose.ui.platform.LocalClipboardManager
 import io.nisfeb.talon.call.MediaState
 import io.nisfeb.talon.call.PartyLine
 import io.nisfeb.talon.call.PartyState
+import io.nisfeb.talon.ui.icons.TalonIcons
 
 /**
  * The "who's on the line" strip, shown under a channel header while a
@@ -275,7 +269,7 @@ fun PartyLineBarContent(
                             contentColor = MaterialTheme.colorScheme.onError,
                         ),
                     ) {
-                        Icon(Icons.Filled.CallEnd, contentDescription = "Leave the line")
+                        Icon(TalonIcons.CallEnd, contentDescription = "Leave the line")
                     }
                 }
 
@@ -375,7 +369,7 @@ fun PartyLineBarContent(
                         if (s.canSpeak) {
                             IconButton(onClick = { onToggleMute(!s.muted) }) {
                                 Icon(
-                                    if (s.muted) Icons.Filled.MicOff else Icons.Filled.Mic,
+                                    if (s.muted) TalonIcons.MicOff else TalonIcons.Mic,
                                     contentDescription = if (s.muted) "Unmute" else "Mute",
                                 )
                             }
@@ -412,8 +406,8 @@ fun PartyLineBarContent(
                                 onToggleCamera()
                             }) {
                                 Icon(
-                                    if (cameraOn) Icons.Filled.Videocam
-                                    else Icons.Filled.VideocamOff,
+                                    if (cameraOn) TalonIcons.Videocam
+                                    else TalonIcons.VideocamOff,
                                     contentDescription =
                                         if (cameraOn) "Turn the camera off"
                                         else "Turn the camera on",
@@ -425,8 +419,8 @@ fun PartyLineBarContent(
                                 if (immersive) fullScreen = true else expanded = !expanded
                             }) {
                                 Icon(
-                                    if (expanded) Icons.Filled.ExpandLess
-                                    else Icons.Filled.ExpandMore,
+                                    if (expanded) TalonIcons.ExpandLess
+                                    else TalonIcons.ExpandMore,
                                     contentDescription =
                                         if (immersive) "Open the full-screen call"
                                         else if (expanded) "Hide who's on the line"
@@ -441,7 +435,7 @@ fun PartyLineBarContent(
                                 contentColor = MaterialTheme.colorScheme.onError,
                             ),
                         ) {
-                            Icon(Icons.Filled.CallEnd, contentDescription = "Leave the line")
+                            Icon(TalonIcons.CallEnd, contentDescription = "Leave the line")
                         }
                     }
                 }
@@ -638,7 +632,7 @@ private fun Roster(
                     if (m.mutedByAdmin) {
                         Spacer(Modifier.width(6.dp))
                         Icon(
-                            Icons.Filled.MicOff,
+                            TalonIcons.MicOff,
                             contentDescription = "Muted by an admin",
                             tint = MaterialTheme.colorScheme.error,
                             modifier = Modifier.size(14.dp),
@@ -646,7 +640,7 @@ private fun Roster(
                     } else if (m.muted) {
                         Spacer(Modifier.width(6.dp))
                         Icon(
-                            Icons.Filled.MicOff,
+                            TalonIcons.MicOff,
                             contentDescription = "Muted",
                             tint = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.size(14.dp),

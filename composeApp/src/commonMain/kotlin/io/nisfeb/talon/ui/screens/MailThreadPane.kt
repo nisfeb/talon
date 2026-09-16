@@ -17,7 +17,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.selection.SelectionContainer
-import androidx.compose.material.icons.filled.BrokenImage
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.layout.heightIn
@@ -66,6 +65,7 @@ import io.nisfeb.talon.ui.shortRelativeTime
 import io.nisfeb.talon.util.nowMs
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.launch
+import io.nisfeb.talon.ui.icons.TalonIcons
 
 /**
  * One thread, read.
@@ -677,7 +677,7 @@ private fun MailMessageCard(
                                 model = url,
                                 contentDescription = url,
                                 contentScale = androidx.compose.ui.layout.ContentScale.Fit,
-                                error = androidx.compose.ui.graphics.vector.rememberVectorPainter(Icons.Filled.BrokenImage),
+                                error = androidx.compose.ui.graphics.vector.rememberVectorPainter(TalonIcons.BrokenImage),
                                 modifier = Modifier
                                     .widthIn(max = 480.dp).heightIn(max = 360.dp)
                                     .clip(RoundedCornerShape(10.dp))

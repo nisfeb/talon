@@ -34,17 +34,12 @@ import androidx.compose.ui.unit.Dp
 import kotlinx.datetime.minus
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Checklist
-import androidx.compose.material.icons.filled.ContentCopy
-import androidx.compose.material.icons.filled.Link
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material.icons.filled.Phone
 import androidx.compose.material.icons.filled.Place
 import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.filled.KeyboardArrowRight
-import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
@@ -128,6 +123,7 @@ import kotlinx.datetime.toInstant
 import kotlinx.datetime.toLocalDateTime
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
+import io.nisfeb.talon.ui.icons.TalonIcons
 
 /**
  * The calendar section: a month with its events, the day picked out
@@ -410,14 +406,14 @@ fun CalendarScreen(
                 monthSteps()
             }
             IconButton(onClick = { showTasks = !showTasks }) {
-                if (showTasks) Icon(Icons.Filled.CalendarMonth, contentDescription = "Month")
-                else Icon(Icons.Filled.Checklist, contentDescription = "Tasks")
+                if (showTasks) Icon(TalonIcons.CalendarMonth, contentDescription = "Month")
+                else Icon(TalonIcons.Checklist, contentDescription = "Tasks")
             }
             IconButton(onClick = { say("Refreshing…", "The ship did not answer.") { repo.refreshAll(); repo.error.value == null } }) {
                 Icon(Icons.Filled.Refresh, contentDescription = "Refresh")
             }
             IconButton(onClick = { managing = true }) {
-                Icon(Icons.Filled.Tune, contentDescription = "Calendars")
+                Icon(TalonIcons.Tune, contentDescription = "Calendars")
             }
         }
         when (availability) {
@@ -693,7 +689,7 @@ fun CalendarScreen(
                                 Text(r.location, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.clickable { open(mapsSearchUri(r.location)) })
                             }
                             IconButton(onClick = { copy(r.location) }, modifier = Modifier.size(32.dp)) {
-                                Icon(Icons.Filled.ContentCopy, contentDescription = "Copy the place", modifier = Modifier.size(16.dp))
+                                Icon(TalonIcons.ContentCopy, contentDescription = "Copy the place", modifier = Modifier.size(16.dp))
                             }
                         }
                     }
@@ -703,17 +699,17 @@ fun CalendarScreen(
                             Icon(Icons.Filled.Phone, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
                             Text(phone, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f).clickable { open(telUri(phone)) })
                             IconButton(onClick = { copy(phone) }, modifier = Modifier.size(32.dp)) {
-                                Icon(Icons.Filled.ContentCopy, contentDescription = "Copy the number", modifier = Modifier.size(16.dp))
+                                Icon(TalonIcons.ContentCopy, contentDescription = "Copy the number", modifier = Modifier.size(16.dp))
                             }
                         }
                     }
                     // Links in the place or the note: opened, or copied.
                     urlsIn(r.location + "\n" + r.note).forEach { url ->
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                            Icon(Icons.Filled.Link, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
+                            Icon(TalonIcons.Link, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
                             Text(url, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f).clickable { open(openableUrl(url)) })
                             IconButton(onClick = { copy(url) }, modifier = Modifier.size(32.dp)) {
-                                Icon(Icons.Filled.ContentCopy, contentDescription = "Copy the link", modifier = Modifier.size(16.dp))
+                                Icon(TalonIcons.ContentCopy, contentDescription = "Copy the link", modifier = Modifier.size(16.dp))
                             }
                         }
                     }

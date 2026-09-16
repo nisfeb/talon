@@ -18,7 +18,6 @@ import androidx.compose.foundation.lazy.staggeredgrid.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.BrokenImage
 import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
@@ -52,6 +51,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
+import io.nisfeb.talon.ui.icons.TalonIcons
 
 /**
  * Staggered-grid view of a gallery (%heap) channel. Each tile shows
@@ -225,7 +225,7 @@ private fun GalleryTile(
                     AsyncImage(
                         model = primary.src,
                         contentDescription = primary.alt,
-                        error = rememberVectorPainter(Icons.Filled.BrokenImage),
+                        error = rememberVectorPainter(TalonIcons.BrokenImage),
                         modifier = Modifier
                             .fillMaxWidth()
                             .aspectRatio(ratio.coerceIn(0.4f, 2.5f))
@@ -237,7 +237,7 @@ private fun GalleryTile(
                         AsyncImage(
                             model = url,
                             contentDescription = null,
-                            error = rememberVectorPainter(Icons.Filled.BrokenImage),
+                            error = rememberVectorPainter(TalonIcons.BrokenImage),
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .aspectRatio(16f / 9f)

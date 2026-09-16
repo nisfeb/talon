@@ -28,9 +28,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.ClickableText
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.QrCodeScanner
-import androidx.compose.material.icons.filled.Visibility
-import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -71,6 +68,7 @@ import io.nisfeb.talon.update.UpdateState
 import io.nisfeb.talon.update.UpdateStatus
 import io.nisfeb.talon.urbit.UrbitSession
 import kotlinx.coroutines.launch
+import io.nisfeb.talon.ui.icons.TalonIcons
 
 private const val GETTING_STARTED_URL = "https://urbit.org/overview/running-urbit"
 
@@ -254,8 +252,8 @@ fun LoginScreen(
                         trailingIcon = {
                             IconButton(onClick = { codeVisible = !codeVisible }) {
                                 Icon(
-                                    imageVector = if (codeVisible) Icons.Filled.VisibilityOff
-                                        else Icons.Filled.Visibility,
+                                    imageVector = if (codeVisible) TalonIcons.VisibilityOff
+                                        else TalonIcons.Visibility,
                                     contentDescription = if (codeVisible) "Hide code" else "Show code",
                                 )
                             }
@@ -294,7 +292,7 @@ fun LoginScreen(
                             modifier = Modifier.fillMaxWidth(),
                         ) {
                             Icon(
-                                imageVector = Icons.Filled.QrCodeScanner,
+                                imageVector = TalonIcons.QrCodeScanner,
                                 contentDescription = null,
                                 modifier = Modifier.size(18.dp),
                             )

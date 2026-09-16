@@ -105,8 +105,14 @@ that's the gap to be aware of when shipping Android-specific changes.
   (per-ABI splits + universal — see ABI splits in build.gradle.kts)
 - Desktop AppImage: `dist/Talon-x86_64.AppImage` via
   `scripts/build-appimage.sh` (depends on `slimReleaseDistributable`
-  Gradle task, which strips non-host native libs and the unused
-  Material Icons Extended classes)
+  Gradle task, which strips non-host native libs)
+- Icons: material-icons-core plus `ui/icons/TalonIcons.kt`, a generated
+  copy of the few extended icons the app uses. The extended library is
+  a desktop test dependency only (it made the iOS link run out of
+  memory on the free CI runner). To add or change one: edit
+  `desktopTest/.../icons/TalonIconSources.kt`, then
+  `TALON_GENERATE_ICONS=1 ./gradlew :composeApp:desktopTest --tests '*GenerateTalonIcons'`;
+  `TalonIconsFidelityTest` proves the copies equal the originals.
 
 ## Releasing — let CI ship, don't `gh release create`
 

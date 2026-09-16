@@ -18,7 +18,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
@@ -44,6 +43,7 @@ import io.nisfeb.talon.ui.MarkdownText
 import io.nisfeb.talon.urbit.NotesFlag
 import io.nisfeb.talon.urbit.TlonChatRepo
 import kotlinx.coroutines.launch
+import io.nisfeb.talon.ui.icons.TalonIcons
 
 /**
  * A single Markdown note: rendered for reading, raw for editing.
@@ -189,7 +189,7 @@ fun NoteScreen(
                     }
                 }) {
                     Icon(
-                        Icons.Filled.Public,
+                        TalonIcons.Public,
                         contentDescription = if (published) "Unpublish" else "Publish to web",
                         tint = if (published) {
                             MaterialTheme.colorScheme.primary

@@ -56,19 +56,12 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.automirrored.filled.Send
-import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Call
-import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.Notifications
-import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Call
-import androidx.compose.material.icons.filled.Groups
-import androidx.compose.material.icons.filled.NotificationsOff
-import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.Topic
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
@@ -145,6 +138,7 @@ import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.launch
 import io.ktor.client.HttpClient
+import io.nisfeb.talon.ui.icons.TalonIcons
 
 @OptIn(
     ExperimentalFoundationApi::class,
@@ -713,7 +707,7 @@ fun DmChatScreen(
                 ) {
                     IconButton(onClick = onPartyLine) {
                         Icon(
-                            Icons.Filled.Groups,
+                            TalonIcons.Groups,
                             contentDescription = if (partyPresent > 0) {
                                 "Party line — $partyPresent on the line"
                             } else {
@@ -741,7 +735,7 @@ fun DmChatScreen(
                 )
             ) {
                 IconButton(onClick = { topicsSheetOpen = true }) {
-                    Icon(Icons.Filled.Topic, contentDescription = "Topics in this chat")
+                    Icon(TalonIcons.Topic, contentDescription = "Topics in this chat")
                 }
             }
             // For group channels, the Info pane already exposes the
@@ -1592,7 +1586,7 @@ private fun MessageRow(
                     // a failed send must never be invisible.
                     if (m.status == "pending") {
                         Icon(
-                            imageVector = Icons.Filled.Schedule,
+                            imageVector = TalonIcons.Schedule,
                             contentDescription = "Sending",
                             tint = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.size(14.dp),
@@ -1620,7 +1614,7 @@ private fun MessageRow(
                     horizontalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
                     Icon(
-                        imageVector = Icons.Filled.ErrorOutline,
+                        imageVector = TalonIcons.ErrorOutline,
                         contentDescription = "Send failed",
                         tint = MaterialTheme.colorScheme.error,
                         modifier = Modifier.size(14.dp),
@@ -1790,7 +1784,7 @@ private fun PinnedPostBanner(
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Icon(
-            imageVector = Icons.Filled.PushPin,
+            imageVector = TalonIcons.PushPin,
             contentDescription = "Pinned",
             tint = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.size(14.dp),
@@ -2095,7 +2089,7 @@ private fun NotifyLevelDropdown(
         IconButton(onClick = { if (enabled) open = true }, enabled = enabled) {
             Icon(
                 imageVector = if (level == NotifyLevel.NONE)
-                    Icons.Filled.NotificationsOff
+                    TalonIcons.NotificationsOff
                 else Icons.Filled.Notifications,
                 contentDescription = "Notifications",
             )

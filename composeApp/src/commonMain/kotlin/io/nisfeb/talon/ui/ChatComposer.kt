@@ -17,10 +17,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.automirrored.filled.Send
-import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.ContentPaste
-import androidx.compose.material.icons.filled.Image
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -74,6 +71,7 @@ import io.nisfeb.talon.util.readFileBytes
 import io.nisfeb.talon.util.rememberImagePicker
 import kotlinx.coroutines.launch
 import io.ktor.client.HttpClient
+import io.nisfeb.talon.ui.icons.TalonIcons
 
 /**
  * Shared chat composer used by [DmChatScreen]'s main message input and
@@ -939,7 +937,7 @@ fun ChatComposer(
                         modifier = Modifier.size(36.dp),
                     ) {
                         Icon(
-                            Icons.Filled.ContentPaste,
+                            TalonIcons.ContentPaste,
                             contentDescription = "Paste image",
                             modifier = Modifier.size(22.dp),
                         )
@@ -959,7 +957,7 @@ fun ChatComposer(
                         )
                     } else {
                         Icon(
-                            Icons.Filled.Image,
+                            TalonIcons.Image,
                             contentDescription = "Attach image",
                             modifier = Modifier.size(22.dp),
                         )
@@ -971,7 +969,7 @@ fun ChatComposer(
                     modifier = Modifier.size(36.dp),
                 ) {
                     Icon(
-                        Icons.Filled.AttachFile,
+                        TalonIcons.AttachFile,
                         contentDescription = "Attach file",
                         modifier = Modifier.size(22.dp),
                     )
@@ -1275,7 +1273,7 @@ internal fun AttachmentPreviewRow(
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(
-                    Icons.Filled.AttachFile,
+                    TalonIcons.AttachFile,
                     contentDescription = null,
                     modifier = Modifier.size(24.dp),
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,

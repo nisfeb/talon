@@ -41,7 +41,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.material3.VerticalDivider
-import androidx.compose.material.icons.filled.Inbox
 import io.nisfeb.talon.mail.MailFolder
 import io.nisfeb.talon.mail.InboxEntry
 import io.nisfeb.talon.mail.MailAvailability
@@ -52,6 +51,7 @@ import io.nisfeb.talon.ui.ContactMap
 import io.nisfeb.talon.ui.shortRelativeTime
 import io.nisfeb.talon.util.nowMs
 import kotlinx.coroutines.launch
+import io.nisfeb.talon.ui.icons.TalonIcons
 
 /**
  * The mailbox: one page of threads, read from the ship.
@@ -314,7 +314,7 @@ private fun MailToolbar(
             // ones stacked down the left of a mail screen is a way of
             // asking somebody to guess which is which.
             IconButton(onClick = onFolders) {
-                Icon(Icons.Filled.Inbox, contentDescription = "Mailboxes")
+                Icon(TalonIcons.Inbox, contentDescription = "Mailboxes")
             }
         }
         var searching by remember(query.isEmpty()) { mutableStateOf(query.isNotEmpty()) }

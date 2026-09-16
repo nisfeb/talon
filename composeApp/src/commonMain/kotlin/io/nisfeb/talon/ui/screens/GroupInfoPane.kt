@@ -17,9 +17,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ExitToApp
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Notifications
-import androidx.compose.material.icons.filled.NotificationsOff
-import androidx.compose.material.icons.filled.People
-import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -47,6 +44,7 @@ import io.nisfeb.talon.urbit.mediaCategoryOrLink
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
+import io.nisfeb.talon.ui.icons.TalonIcons
 
 /**
  * Group info body: header + mute toggle + member-count link + media
@@ -218,7 +216,7 @@ fun GroupInfoPane(
             Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(
-                        if (level == NotifyLevel.NONE) Icons.Filled.NotificationsOff
+                        if (level == NotifyLevel.NONE) TalonIcons.NotificationsOff
                         else Icons.Filled.Notifications,
                         contentDescription = null,
                     )
@@ -300,7 +298,7 @@ fun GroupInfoPane(
                         .padding(horizontal = 16.dp, vertical = 12.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Icon(Icons.Filled.People, contentDescription = null)
+                    Icon(TalonIcons.People, contentDescription = null)
                     Spacer(Modifier.size(12.dp))
                     Text(
                         memberCount?.let { "View members ($it)" } ?: "View members",
@@ -324,7 +322,7 @@ fun GroupInfoPane(
                         .padding(horizontal = 16.dp, vertical = 12.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Icon(Icons.Filled.PersonAdd, contentDescription = null)
+                    Icon(TalonIcons.PersonAdd, contentDescription = null)
                     Spacer(Modifier.size(12.dp))
                     Text("Invite someone", modifier = Modifier.weight(1f).padding(end = 8.dp))
                 }

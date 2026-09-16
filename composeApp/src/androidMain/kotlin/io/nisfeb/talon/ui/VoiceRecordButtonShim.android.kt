@@ -20,8 +20,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Mic
-import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
@@ -38,6 +36,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import java.io.File
+import io.nisfeb.talon.ui.icons.TalonIcons
 
 private const val TAG = "VoiceRecordButton"
 
@@ -197,7 +196,7 @@ actual fun VoiceRecordButton(
         contentAlignment = Alignment.Center,
     ) {
         Icon(
-            imageVector = if (recording) Icons.Filled.Stop else Icons.Filled.Mic,
+            imageVector = if (recording) TalonIcons.Stop else TalonIcons.Mic,
             contentDescription = if (recording) "Stop recording" else "Record voice",
             tint = if (recording) MaterialTheme.colorScheme.error
             else MaterialTheme.colorScheme.onSurfaceVariant,

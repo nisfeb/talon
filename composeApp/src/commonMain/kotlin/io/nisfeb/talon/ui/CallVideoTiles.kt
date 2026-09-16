@@ -18,7 +18,6 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.MicOff
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -35,6 +34,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.nisfeb.talon.call.PartyMember
 import io.nisfeb.talon.call.PeerLink
+import io.nisfeb.talon.ui.icons.TalonIcons
 
 /**
  * The conference pictures, shared by the mobile full-screen view and
@@ -159,7 +159,7 @@ internal fun VideoTile(
         ) {
             if (member.muted || member.mutedByAdmin) {
                 Icon(
-                    Icons.Filled.MicOff,
+                    TalonIcons.MicOff,
                     contentDescription = "Muted",
                     tint = MaterialTheme.colorScheme.error,
                     modifier = Modifier.size(14.dp),

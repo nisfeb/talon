@@ -16,7 +16,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Call
-import androidx.compose.material.icons.filled.CallEnd
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
@@ -52,6 +51,7 @@ import io.nisfeb.talon.call.VideoState
 import kotlinx.coroutines.flow.MutableStateFlow
 import io.nisfeb.talon.util.nowMs
 import kotlinx.coroutines.delay
+import io.nisfeb.talon.ui.icons.TalonIcons
 
 /**
  * Trunkline call surface, floated via Popup so it renders over any
@@ -93,7 +93,7 @@ fun CallOverlay(
         ) {
             Row(horizontalArrangement = Arrangement.spacedBy(48.dp)) {
                 RoundAction(
-                    icon = Icons.Filled.CallEnd,
+                    icon = TalonIcons.CallEnd,
                     label = "Decline",
                     container = MaterialTheme.colorScheme.error,
                     content = MaterialTheme.colorScheme.onError,
@@ -114,7 +114,7 @@ fun CallOverlay(
             subtitle = "Calling…",
         ) {
             RoundAction(
-                icon = Icons.Filled.CallEnd,
+                icon = TalonIcons.CallEnd,
                 label = "Cancel",
                 container = MaterialTheme.colorScheme.error,
                 content = MaterialTheme.colorScheme.onError,
