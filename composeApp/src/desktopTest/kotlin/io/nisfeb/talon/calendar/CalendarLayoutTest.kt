@@ -20,6 +20,7 @@ import io.nisfeb.talon.ui.screens.CalendarScreen
 import io.nisfeb.talon.ui.theme.TalonTheme
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.datetime.toLocalDateTime
 import kotlin.test.Test
 import kotlin.test.assertTrue
 
@@ -65,5 +66,27 @@ class CalendarLayoutTest {
         onNodeWithText("Week").performClick()
         waitForIdle()
         assertTrue(repo.weekView.value)
+    }
+
+    // The regression: nine controls and a title shared one row, the title
+    // was left a few dip, and "Sep 2026" wrapped one letter to a line.
+    @Test
+    fun `a phone puts the month on its own line, one line tall`() = layout(400.dp) {
+        val month = onNodeWithText(monthLabel()).getUnclippedBoundsInRoot()
+        assertTrue(month.top > 40.dp, "month sits under the toolbar, not in it: top ${month.top}")
+        val tall = month.bottom - month.top
+        assertTrue(tall < 60.dp, "month is one line, not a stack of letters: $tall")
+    }
+
+    @Test
+    fun `a wide window keeps the month in the toolbar`() = layout(1200.dp) {
+        val month = onNodeWithText(monthLabel()).getUnclippedBoundsInRoot()
+        assertTrue(month.top < 40.dp, "month stays in the toolbar: top ${month.top}")
+    }
+
+    private fun monthLabel(): String {
+        val today = kotlinx.datetime.Instant.fromEpochMilliseconds(io.nisfeb.talon.util.nowMs())
+            .toLocalDateTime(kotlinx.datetime.TimeZone.currentSystemDefault()).date
+        return "${kotlinx.datetime.format.MonthNames.ENGLISH_ABBREVIATED.names[today.monthNumber - 1]} ${today.year}"
     }
 }

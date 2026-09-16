@@ -343,30 +343,47 @@ fun CalendarScreen(
         }
     }
 
-    Column(modifier.windowInsetsPadding(WindowInsets.safeDrawing)) {
+    // A title and nine controls do not fit a phone. The title was left a
+    // few dip of a shared row and wrapped ONE LETTER TO A LINE, which made
+    // the bar a quarter of the screen. Narrow gives the month and its
+    // arrows their own line under the chips; the line limit is the guard
+    // that stops any of this wrapping again.
+    BoxWithConstraints(modifier) {
+    val narrow = maxWidth < 600.dp
+    fun step(days: Int) {
+        selected = selected.plus(days, DateTimeUnit.DAY)
+        year = selected.year; month = selected.monthNumber
+    }
+    val title = if (showTasks) "Tasks" else "${MonthNames.ENGLISH_ABBREVIATED.names[month - 1]} $year"
+    val monthSteps: @Composable () -> Unit = {
+        if (!showTasks) {
+            IconButton(onClick = { if (weekView) step(-7) else if (month == 1) { month = 12; year -= 1 } else month -= 1 }) {
+                Icon(Icons.Filled.KeyboardArrowLeft, contentDescription = if (weekView) "Previous week" else "Previous month")
+            }
+            TextButton(onClick = { year = today.year; month = today.monthNumber; selected = today }) { Text("Today") }
+            IconButton(onClick = { if (weekView) step(7) else if (month == 12) { month = 1; year += 1 } else month += 1 }) {
+                Icon(Icons.Filled.KeyboardArrowRight, contentDescription = if (weekView) "Next week" else "Next month")
+            }
+            TextButton(onClick = { repo.weekView.value = !weekView }) { Text(if (weekView) "Month" else "Week") }
+        }
+    }
+    Column(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing)) {
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             io.nisfeb.talon.ui.NavIcon(onBack = onBack)
-            Text(
-                if (showTasks) "Tasks" else "${MonthNames.ENGLISH_ABBREVIATED.names[month - 1]} $year",
-                style = MaterialTheme.typography.titleLarge,
-                modifier = Modifier.weight(1f),
-            )
-            if (!showTasks) {
-                fun step(days: Int) {
-                    selected = selected.plus(days, DateTimeUnit.DAY)
-                    year = selected.year; month = selected.monthNumber
-                }
-                IconButton(onClick = { if (weekView) step(-7) else if (month == 1) { month = 12; year -= 1 } else month -= 1 }) {
-                    Icon(Icons.Filled.KeyboardArrowLeft, contentDescription = if (weekView) "Previous week" else "Previous month")
-                }
-                TextButton(onClick = { year = today.year; month = today.monthNumber; selected = today }) { Text("Today") }
-                IconButton(onClick = { if (weekView) step(7) else if (month == 12) { month = 1; year += 1 } else month += 1 }) {
-                    Icon(Icons.Filled.KeyboardArrowRight, contentDescription = if (weekView) "Next week" else "Next month")
-                }
-                TextButton(onClick = { repo.weekView.value = !weekView }) { Text(if (weekView) "Month" else "Week") }
+            if (narrow) {
+                Spacer(Modifier.weight(1f))
+            } else {
+                Text(
+                    title,
+                    style = MaterialTheme.typography.titleLarge,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+                monthSteps()
             }
             IconButton(onClick = { showTasks = !showTasks }) {
                 if (showTasks) Icon(Icons.Filled.CalendarMonth, contentDescription = "Month")
@@ -423,6 +440,21 @@ fun CalendarScreen(
                 }
             }
             Spacer(Modifier.height(4.dp))
+        }
+        if (narrow) {
+            Row(
+                Modifier.fillMaxWidth().padding(start = 14.dp, end = 4.dp, bottom = 2.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    title,
+                    style = MaterialTheme.typography.titleLarge,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+                monthSteps()
+            }
         }
         if (showTasks) {
             TasksView(
@@ -602,6 +634,7 @@ fun CalendarScreen(
                 }
             }
         }
+    }
     }
 
     viewing?.let { r ->
