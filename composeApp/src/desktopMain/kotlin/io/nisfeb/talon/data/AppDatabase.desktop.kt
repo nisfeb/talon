@@ -49,6 +49,7 @@ actual abstract class AppDatabase : RoomDatabase() {
     actual abstract fun loopRuns(): LoopRunDao
     actual abstract fun notes(): NotesDao
     actual abstract fun mailRows(): MailRowDao
+    actual abstract fun calendarCache(): CalendarCacheDao
 }
 
 /**
@@ -117,7 +118,7 @@ private const val SMOKE_TEST_TIMEOUT_MS = 15_000L
 private fun buildAndPing(dbFile: File): AppDatabase {
     val db = Room.databaseBuilder<AppDatabase>(name = dbFile.absolutePath)
         .setDriver(BundledSQLiteDriver())
-        .addMigrations(MAIL_ROWS_MIGRATION)
+        .addMigrations(MAIL_ROWS_MIGRATION, CALENDAR_ROWS_MIGRATION)
         .fallbackToDestructiveMigration(dropAllTables = true)
         .build()
     try {

@@ -4,6 +4,7 @@ import io.ktor.client.HttpClient
 import io.nisfeb.talon.mail.AuspexApi
 import io.nisfeb.talon.mail.AuspexError
 import io.nisfeb.talon.mail.isSignedOut
+import io.nisfeb.talon.data.CalendarCacheEntity
 import io.nisfeb.talon.util.Log
 import io.nisfeb.talon.util.nowMs
 import kotlinx.coroutines.CoroutineScope
@@ -36,6 +37,8 @@ class CalendarRepo(
     private val http: HttpClient,
     private val scope: CoroutineScope,
     private val pollIntervalMs: Long = 10 * 60 * 1000L,
+    /** This ship's last answer, kept across restarts. Null keeps none. */
+    private val cache: io.nisfeb.talon.data.CalendarCacheDao? = null,
 ) {
     private var api: CalendarApi? = null
     private var poller: Job? = null
@@ -193,6 +196,49 @@ class CalendarRepo(
     }
 
     /** Occurrences between two moments, read without moving the screen's month or the widget's window. */
+    /**
+     * Put the last answer back on screen, unless the ship has already
+     * answered. Anything unreadable is dropped rather than shown: a row
+     * written by an older build is not worth a crash.
+     */
+    private suspend fun restore() {
+        val c = cache ?: return
+        if (_rows.value != null) return
+        val json = AuspexApi.json
+        suspend fun read(kind: String) = runCatching { c.read(kind) }.getOrNull().orEmpty()
+        val window = read("window").mapNotNull { r ->
+            runCatching { json.decodeFromString(CalendarRow.serializer(), r.json) }.getOrNull()
+        }
+        if (_rows.value == null && window.isNotEmpty()) _rows.value = window
+        if (_calendars.value.isEmpty()) {
+            _calendars.value = read("calendars").mapNotNull { r ->
+                runCatching { json.decodeFromString(CalendarInfo.serializer(), r.json) }.getOrNull()
+            }
+        }
+        if (_tasks.value == null) {
+            read("tasks").mapNotNull { r ->
+                runCatching { json.decodeFromString(CalendarTask.serializer(), r.json) }.getOrNull()
+            }.takeIf { it.isNotEmpty() }?.let { _tasks.value = it }
+        }
+        if (_tags.value.isEmpty()) _tags.value = read("tags").map { it.json }
+        if (_zone.value == null) _zone.value = read("zone").firstOrNull()?.json
+    }
+
+    /** Keep what the ship just said, for the next cold start. */
+    private suspend fun keep() {
+        val c = cache ?: return
+        val json = AuspexApi.json
+        fun rows(kind: String, texts: List<String>) =
+            texts.mapIndexed { i, t -> CalendarCacheEntity(kind, i, t) }
+        runCatching {
+            c.replace("window", rows("window", _rows.value.orEmpty().map { json.encodeToString(CalendarRow.serializer(), it) }))
+            c.replace("calendars", rows("calendars", _calendars.value.map { json.encodeToString(CalendarInfo.serializer(), it) }))
+            c.replace("tasks", rows("tasks", _tasks.value.orEmpty().map { json.encodeToString(CalendarTask.serializer(), it) }))
+            c.replace("tags", rows("tags", _tags.value))
+            c.replace("zone", rows("zone", listOfNotNull(_zone.value)))
+        }.onFailure { Log.w(TAG, "calendar not kept", it) }
+    }
+
     suspend fun windowRows(fromMs: Long, toMs: Long): List<CalendarRow>? =
         api?.let { a -> runCatching { a.window(fromMs, toMs).rows.sortedWith(compareBy({ it.l }, { it.r })) }.getOrNull() }
 
@@ -247,6 +293,9 @@ class CalendarRepo(
         _error.value = null
         poller?.cancel()
         poller = scope.launch {
+            // What the ship last said, while it is asked again. A month
+            // that was right ten minutes ago beats an empty grid.
+            restore()
             refresh()
             while (isActive) {
                 delay(pollIntervalMs)
@@ -305,6 +354,7 @@ class CalendarRepo(
                 _shares.value?.accepted?.forEach { (id, acc) -> put(id, SyncRow(acc.lastMs, acc.error)) }
             }.ifEmpty { if (_calendars.value.any { it.kind != "local" }) _sync.value else emptyMap() }
             _tags.value = runCatching { a.tags() }.getOrDefault(emptyList()).map { it.tag }
+            keep()
             runCatching { a.config() }.getOrNull()?.let { _zone.value = it.zone; ball = it.ball }
             _availability.value = CalendarAvailability.PRESENT
             _error.value = null

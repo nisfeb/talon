@@ -961,7 +961,7 @@ fun App(
         }
         // The calendar rides the same surface as mail.
         val calendarRepo = remember(session) {
-            io.nisfeb.talon.calendar.CalendarRepo(session.http, loopScope)
+            io.nisfeb.talon.calendar.CalendarRepo(session.http, loopScope, cache = db.calendarCache())
         }
         LaunchedEffect(calendarRepo, mailShipUrl) {
             if (mailShipUrl != null) calendarRepo.attach(mailShipUrl) else calendarRepo.detach()

@@ -400,7 +400,7 @@ fun TalonApp(
     // The calendar rides the same surface as mail: the ship's own HTTP,
     // the session's cookie, a poll and a refresh on coming back.
     val calendarRepo = remember(app.session) {
-        io.nisfeb.talon.calendar.CalendarRepo(app.session.http, appScope)
+        io.nisfeb.talon.calendar.CalendarRepo(app.session.http, appScope, cache = app.db.calendarCache())
     }
     LaunchedEffect(calendarRepo) {
         calendarRepo.seedHidden(app.uiSettings.hiddenCalendars.value)
