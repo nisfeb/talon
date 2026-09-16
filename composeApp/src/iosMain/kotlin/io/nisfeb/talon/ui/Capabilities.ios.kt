@@ -4,9 +4,10 @@ import platform.UIKit.UIDevice
 
 // iOS capability matrix. On-device AI (MediaPipe / DJL-ONNX) has no iOS
 // backend, so every on-device feature gates off; the cloud Assistant is
-// pure HTTP and works. Background scheduling (digest / loops) would need
-// BGTaskScheduler wiring that doesn't exist yet, so those gate off too.
-// Touch affordances (swipe-nav, tap-to-open-menu) are on.
+// pure HTTP and works. Loops run while the app is up; true background
+// scheduling (digest) would need BGTaskScheduler wiring that doesn't
+// exist yet, so that gates off. Touch affordances (swipe-nav,
+// tap-to-open-menu) are on.
 
 actual val isVoiceMessagesSupported: Boolean = true
 actual val isOnDeviceAiSupported: Boolean = false
@@ -34,8 +35,10 @@ actual val isCallsSupported: Boolean = true
 actual val isCallRecordingSupported: Boolean = false
 actual val isWindowFullScreenSupported: Boolean = false
 
-// No CallKit/PushKit by design; UIBackgroundModes audio only sustains
-// a call already in progress. Backgrounded, the app can't hear a ring.
+// CallKit/PushKit live in the Xcode target (CallPush.swift): a PushKit
+// VoIP token reaches the relay through IosVoipBridge/IosPushTokenProvider,
+// so a backgrounded phone hears a ring. UIBackgroundModes audio sustains
+// a call already in progress.
 actual val isBackgroundCallRingSupported: Boolean = true
 
 // Supplied by MainViewController's edge strip -> IosBackDispatcher.

@@ -18,7 +18,10 @@ import platform.UIKit.UIImagePickerControllerDelegateProtocol
 import platform.UIKit.UIImagePickerControllerOriginalImage
 import platform.UIKit.UIImagePickerControllerSourceType
 import platform.UIKit.UINavigationControllerDelegateProtocol
+import platform.UIKit.UISceneActivationStateForegroundActive
 import platform.UIKit.UIViewController
+import platform.UIKit.UIWindow
+import platform.UIKit.UIWindowScene
 import platform.UIKit.endEditing
 import platform.UniformTypeIdentifiers.UTTypeItem
 import platform.darwin.NSObject
@@ -51,8 +54,19 @@ actual fun decodeImageDimensions(bytes: ByteArray): Pair<Int, Int>? {
     }
 }
 
+/** The foreground scene's key window, walking scenes — the app's
+ *  keyWindow is deprecated (same walk as QrLoginScanner). */
+private fun activeWindow(): UIWindow? {
+    val scenes = UIApplication.sharedApplication.connectedScenes
+        .filterIsInstance<UIWindowScene>()
+    val scene = scenes.firstOrNull { it.activationState == UISceneActivationStateForegroundActive }
+        ?: scenes.firstOrNull()
+    val windows = scene?.windows?.filterIsInstance<UIWindow>().orEmpty()
+    return windows.firstOrNull { it.isKeyWindow() } ?: windows.firstOrNull()
+}
+
 private fun topViewController(): UIViewController? {
-    var vc = UIApplication.sharedApplication.keyWindow?.rootViewController
+    var vc = activeWindow()?.rootViewController
     while (true) {
         // A controller on its way out cannot present anything: UIKit
         // drops the presentation without a word, and the picker never
@@ -75,7 +89,7 @@ private fun topViewController(): UIViewController? {
  * the caller would wait for ever.
  */
 private fun present(picker: UIViewController, onDropped: () -> Unit) {
-    UIApplication.sharedApplication.keyWindow?.endEditing(true)
+    activeWindow()?.endEditing(true)
     dispatch_async(dispatch_get_main_queue()) {
         val root = topViewController()
         if (root == null || root.isBeingDismissed() || root.isBeingPresented()) {

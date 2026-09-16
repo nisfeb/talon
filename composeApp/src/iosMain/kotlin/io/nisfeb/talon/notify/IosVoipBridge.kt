@@ -20,6 +20,16 @@ object IosVoipBridge {
         voipToken.value = hex
     }
 
+    /**
+     * True while a 1:1 call or a party line is up. TalonRtc.swift owns
+     * the shared AVAudioSession for that span (it configures playAndRecord
+     * when a call starts and restores ambient when the last one ends), so
+     * nothing else — the voice-note recorder, dictation — may reconfigure
+     * or deactivate it underneath: doing so stomps the call's audio.
+     * Written by the call/party trackers in NativeCallActions.
+     */
+    val callLive = MutableStateFlow(false)
+
     /** The APNs device token for user-visible alerts; null until iOS
      *  hands one over, empty forever if notifications were refused. */
     val alertToken = MutableStateFlow<String?>(null)

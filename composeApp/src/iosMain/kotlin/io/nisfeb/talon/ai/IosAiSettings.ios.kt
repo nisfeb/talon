@@ -8,7 +8,7 @@ import kotlinx.serialization.json.Json
 import platform.Foundation.NSUUID
 
 /** iOS assistant-settings persistence — the whole [AiSettings.Config]
- *  as JSON under Documents, with a stable device id minted on first
+ *  as JSON under Application Support, with a stable device id minted on first
  *  load. No legacy-key migration (iOS has no prior schema). */
 fun createAiSettings(): AiSettingsRepository = IosAiSettings()
 

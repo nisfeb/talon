@@ -29,7 +29,11 @@ import platform.UIKit.UIColor
 import platform.UIKit.UIControlEventTouchUpInside
 import platform.UIKit.UIControlStateNormal
 import platform.UIKit.UILabel
+import platform.UIKit.UIModalPresentationFullScreen
+import platform.UIKit.UISceneActivationStateForegroundActive
 import platform.UIKit.UIViewController
+import platform.UIKit.UIWindow
+import platform.UIKit.UIWindowScene
 import platform.UIKit.NSTextAlignmentCenter
 import platform.darwin.NSObject
 import platform.darwin.dispatch_async
@@ -49,20 +53,38 @@ actual fun rememberQrScanLauncher(prompt: String, onResult: (String?) -> Unit): 
     return remember { { QrScanPresenter.present(shown.value) { raw -> current.value(raw) } } }
 }
 
+/** The key window's root, walking scenes — keyWindow is deprecated. */
+@OptIn(ExperimentalForeignApi::class)
+private fun qrTopController(): UIViewController? {
+    val scenes = UIApplication.sharedApplication.connectedScenes
+        .filterIsInstance<UIWindowScene>()
+    val scene = scenes.firstOrNull { it.activationState == UISceneActivationStateForegroundActive }
+        ?: scenes.firstOrNull()
+    val windows = scene?.windows?.filterIsInstance<UIWindow>().orEmpty()
+    val window = windows.firstOrNull { it.isKeyWindow() } ?: windows.firstOrNull()
+    var top = window?.rootViewController
+    while (top?.presentedViewController != null) top = top.presentedViewController
+    return top
+}
+
 @OptIn(ExperimentalForeignApi::class)
 private object QrScanPresenter {
     fun present(prompt: String, onCode: (String?) -> Unit) {
         val go = {
             dispatch_async(dispatch_get_main_queue()) {
-                var top = UIApplication.sharedApplication.keyWindow?.rootViewController
-                while (top?.presentedViewController != null) top = top.presentedViewController
-                val host = top
-                if (host == null) onCode(null)
-                else host.presentViewController(QrScanController(prompt, onCode), animated = true, completion = null)
+                when (val host = qrTopController()) {
+                    null -> onCode(null)
+                    else -> host.presentViewController(QrScanController(prompt, onCode), animated = true, completion = null)
+                }
             }
         }
         if (AVCaptureDevice.authorizationStatusForMediaType(AVMediaTypeVideo) == AVAuthorizationStatusAuthorized) go()
-        else AVCaptureDevice.requestAccessForMediaType(AVMediaTypeVideo) { granted -> if (granted) go() else onCode(null) }
+        // The access answer arrives on an AVFoundation background queue;
+        // hop like the granted path does so the caller sees one thread.
+        else AVCaptureDevice.requestAccessForMediaType(AVMediaTypeVideo) { granted ->
+            if (granted) go()
+            else dispatch_async(dispatch_get_main_queue()) { onCode(null) }
+        }
     }
 }
 
@@ -70,6 +92,8 @@ private object QrScanPresenter {
 private class QrScanController(private val prompt: String, private val onCode: (String?) -> Unit) : UIViewController(nibName = null, bundle = null) {
     private val session = AVCaptureSession()
     private var preview: AVCaptureVideoPreviewLayer? = null
+    private var hint: UILabel? = null
+    private var cancel: UIButton? = null
     private var delivered = false
     // Held here: the output keeps only a weak reference to its delegate.
     private val reader = object : NSObject(), AVCaptureMetadataOutputObjectsDelegateProtocol {
@@ -81,6 +105,10 @@ private class QrScanController(private val prompt: String, private val onCode: (
 
     override fun viewDidLoad() {
         super.viewDidLoad()
+        // Full screen: the default page sheet lets a swipe-down dismiss
+        // without finish() ever running — the camera keeps running and
+        // the caller waits on a code that can no longer arrive.
+        modalPresentationStyle = UIModalPresentationFullScreen
         view.backgroundColor = UIColor.blackColor
         val device = AVCaptureDevice.defaultDeviceWithMediaType(AVMediaTypeVideo)
         val input = device?.let { AVCaptureDeviceInput.deviceInputWithDevice(it, null) }
@@ -95,28 +123,29 @@ private class QrScanController(private val prompt: String, private val onCode: (
         layer.videoGravity = AVLayerVideoGravityResizeAspectFill
         view.layer.addSublayer(layer)
         preview = layer
-        val hint = UILabel().apply {
+        hint = UILabel().apply {
             text = prompt
             textColor = UIColor.whiteColor
             textAlignment = NSTextAlignmentCenter
-        }
-        view.addSubview(hint)
-        val cancel = UIButton.buttonWithType(UIButtonTypeSystem).apply {
+        }.also(view::addSubview)
+        cancel = UIButton.buttonWithType(UIButtonTypeSystem).apply {
             setTitle("Cancel", forState = UIControlStateNormal)
             setTitleColor(UIColor.whiteColor, forState = UIControlStateNormal)
             addTarget(this@QrScanController, action = NSSelectorFromString("cancelTapped"), forControlEvents = UIControlEventTouchUpInside)
-        }
-        view.addSubview(cancel)
-        view.bounds.useContents {
-            hint.setFrame(CGRectMake(0.0, 60.0, size.width, 30.0))
-            cancel.setFrame(CGRectMake(0.0, size.height - 90.0, size.width, 44.0))
-        }
+        }.also(view::addSubview)
         dispatch_async(dispatch_get_global_queue(0, 0u)) { session.startRunning() }
     }
 
     override fun viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
+        // Frames belong here, not viewDidLoad: a programmatically
+        // created controller has zero bounds at load, which used to put
+        // the Cancel button at a zero-sized frame off the layout.
         preview?.setFrame(view.bounds)
+        view.bounds.useContents {
+            hint?.setFrame(CGRectMake(0.0, 60.0, size.width, 30.0))
+            cancel?.setFrame(CGRectMake(0.0, size.height - 90.0, size.width, 44.0))
+        }
     }
 
     @ObjCAction
@@ -125,7 +154,10 @@ private class QrScanController(private val prompt: String, private val onCode: (
     private fun finish(code: String?) {
         if (delivered) return
         delivered = true
-        if (session.running) session.stopRunning()
+        // stopRunning blocks; startRunning already runs on this queue.
+        dispatch_async(dispatch_get_global_queue(0, 0u)) {
+            if (session.running) session.stopRunning()
+        }
         dismissViewControllerAnimated(true) { onCode(code) }
     }
 }

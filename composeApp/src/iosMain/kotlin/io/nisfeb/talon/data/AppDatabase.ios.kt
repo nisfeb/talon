@@ -3,14 +3,18 @@ package io.nisfeb.talon.data
 import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.sqlite.driver.bundled.BundledSQLiteDriver
+import platform.Foundation.NSApplicationSupportDirectory
 import platform.Foundation.NSDocumentDirectory
+import platform.Foundation.NSFileManager
+import platform.Foundation.NSFileProtectionComplete
+import platform.Foundation.NSFileProtectionKey
 import platform.Foundation.NSSearchPathForDirectoriesInDomains
 import platform.Foundation.NSUserDomainMask
 
 // Room's KSP processor generates the DAO impls, AppDatabase_Impl, and the
 // AppDatabaseConstructor actual for each iOS target — we only supply the
 // abstract actual + the per-target createAppDatabase factory (mirroring
-// the desktop shape: one SQLite file per ship under Documents).
+// the desktop shape: one SQLite file per ship under Application Support).
 
 actual abstract class AppDatabase : RoomDatabase() {
     actual abstract fun messages(): MessageDao
@@ -48,8 +52,45 @@ private fun documentsDir(): String =
     NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, true)
         .first() as String
 
+/**
+ * Application Support, created if needed with NSFileProtectionComplete
+ * so everything in it inherits the protection. Documents is unsafe for
+ * data like this: Info.plist sets UIFileSharingEnabled, which publishes
+ * that directory to the Files app and over AFC (see IosFiles). Shared
+ * with IosShipDataEraser so erase looks where the db actually lives.
+ */
+internal fun appSupportDir(): String {
+    val dir = NSSearchPathForDirectoriesInDomains(
+        NSApplicationSupportDirectory, NSUserDomainMask, true,
+    ).first() as String
+    val fm = NSFileManager.defaultManager
+    if (!fm.fileExistsAtPath(dir)) {
+        fm.createDirectoryAtPath(
+            path = dir,
+            withIntermediateDirectories = true,
+            attributes = mapOf<Any?, Any?>(NSFileProtectionKey to NSFileProtectionComplete),
+            error = null,
+        )
+    }
+    return dir
+}
+
 fun createAppDatabase(shipKey: String): AppDatabase {
-    val path = "${documentsDir()}/talon-${sanitizeShipKey(shipKey)}.db"
+    val name = "talon-${sanitizeShipKey(shipKey)}.db"
+    val dir = appSupportDir()
+    // Builds before the move kept the db in Documents; bring it across
+    // once, -wal/-shm included, or an upgrade would open an empty db
+    // and leave the real one exposed.
+    val fm = NSFileManager.defaultManager
+    val docs = documentsDir()
+    for (suffix in listOf("", "-wal", "-shm")) {
+        val old = "$docs/$name$suffix"
+        val new = "$dir/$name$suffix"
+        if (fm.fileExistsAtPath(old) && !fm.fileExistsAtPath(new)) {
+            runCatching { fm.moveItemAtPath(srcPath = old, toPath = new, error = null) }
+        }
+    }
+    val path = "$dir/$name"
     // Explicit factory: the default path resolves @ConstructedBy via
     // K/N findAssociatedObject, which returns null in optimized Release
     // binaries — "Cannot find the associated RoomDatabaseConstructor"

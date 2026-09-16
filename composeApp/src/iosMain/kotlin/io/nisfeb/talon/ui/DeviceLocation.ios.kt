@@ -5,6 +5,7 @@ import androidx.compose.runtime.remember
 import kotlinx.cinterop.ExperimentalForeignApi
 import kotlinx.cinterop.useContents
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withTimeoutOrNull
 import platform.CoreLocation.CLLocation
 import platform.CoreLocation.CLLocationManager
 import platform.CoreLocation.CLLocationManagerDelegateProtocol
@@ -15,6 +16,8 @@ import platform.CoreLocation.kCLAuthorizationStatusRestricted
 import platform.CoreLocation.kCLLocationAccuracyKilometer
 import platform.Foundation.NSError
 import platform.darwin.NSObject
+import platform.darwin.dispatch_async
+import platform.darwin.dispatch_get_main_queue
 import kotlin.coroutines.resume
 
 /**
@@ -48,8 +51,17 @@ actual fun rememberDeviceLocation(): DeviceLocation? = remember {
  */
 private val inFlight = mutableSetOf<Any>()
 
+/** Android bounds the same wait with FIX_TIMEOUT_MS; without a bound a
+ *  fix that never arrives hangs the picker forever. */
+private const val FIX_TIMEOUT_MS = 20_000L
+
 @OptIn(ExperimentalForeignApi::class)
 private suspend fun requestFix(): Result<HomePlace> =
+    withTimeoutOrNull(FIX_TIMEOUT_MS) { awaitFix() }
+        ?: Result.failure(IllegalStateException("location fix timed out"))
+
+@OptIn(ExperimentalForeignApi::class)
+private suspend fun awaitFix(): Result<HomePlace> =
     suspendCancellableCoroutine { cont ->
         val manager = CLLocationManager()
         manager.desiredAccuracy = kCLLocationAccuracyKilometer
@@ -126,5 +138,11 @@ private suspend fun requestFix(): Result<HomePlace> =
         // prompt that will never appear.
         manager.requestWhenInUseAuthorization()
 
-        cont.invokeOnCancellation { settle(Result.failure(IllegalStateException("cancelled"))) }
+        cont.invokeOnCancellation {
+            // Cancellation can land on any thread (the timeout's, for
+            // one); inFlight is main-only, so the settle hops.
+            dispatch_async(dispatch_get_main_queue()) {
+                settle(Result.failure(IllegalStateException("cancelled")))
+            }
+        }
     }

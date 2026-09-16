@@ -5,7 +5,7 @@
 	<key>NSSpeechRecognitionUsageDescription</key>
 	<string>Talon turns what you say to your assistant into text on this device.</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>Talon uses your microphone for voice calls and party lines.</string>
+	<string>Talon uses your microphone for voice calls and party lines, for recording voice messages, and for dictation.</string>
 	<!-- Without this, iOS suspends the app the moment it is backgrounded
 	     and the audio session goes with it — the call dies outright,
 	     not just the microphone. The .playAndRecord category TalonRtc
@@ -23,9 +23,9 @@
 		<string>voip</string>
 	</array>
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>Talon uses your location to show sunrise, sunset and weather for where you are on the home dial. It is kept on this device.</string>
+	<string>Talon uses your location to show sunrise, sunset and weather for where you are on the home dial. Weather requests send a position rounded to about a kilometre to the Open-Meteo forecast service; the precise fix never leaves this device.</string>
 	<key>NSCameraUsageDescription</key>
-	<string>Talon uses your camera for video calls, and only while a call is on screen and you have turned your camera on.</string>
+	<string>Talon uses your camera for video calls — only while a call is on screen and you have turned your camera on — and to scan the QR code when you log in with one.</string>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleExecutable</key>

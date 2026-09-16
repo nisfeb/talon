@@ -4,8 +4,10 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import platform.Foundation.NSNotificationCenter
 import platform.Foundation.NSOperationQueue
+import platform.UIKit.UIApplication
 import platform.UIKit.UIApplicationDidBecomeActiveNotification
 import platform.UIKit.UIApplicationDidEnterBackgroundNotification
+import platform.UIKit.UIApplicationStateBackground
 
 /**
  * Whether the app is in front, from UIKit's own notifications.
@@ -25,6 +27,11 @@ object IosAppLifecycle {
     fun observe() {
         if (observing) return
         observing = true
+        // Seed from the real state: observe() runs after launch, and an
+        // app started into the background (a VoIP push, say) would
+        // otherwise read foreground=true until the first notification.
+        _foreground.value =
+            UIApplication.sharedApplication.applicationState != UIApplicationStateBackground
         val centre = NSNotificationCenter.defaultCenter
         centre.addObserverForName(UIApplicationDidBecomeActiveNotification, null, NSOperationQueue.mainQueue) {
             _foreground.value = true

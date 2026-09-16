@@ -23,12 +23,14 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
+import io.nisfeb.talon.notify.IosVoipBridge
 import io.nisfeb.talon.util.nowMs
 import kotlinx.cinterop.ExperimentalForeignApi
 import kotlinx.coroutines.delay
@@ -59,6 +61,14 @@ import platform.CoreMedia.CMTimeMake
 import platform.Foundation.NSFileManager
 import platform.Foundation.NSTemporaryDirectory
 import platform.Foundation.NSURL
+import platform.UIKit.UIAlertAction
+import platform.UIKit.UIAlertActionStyleDefault
+import platform.UIKit.UIAlertController
+import platform.UIKit.UIAlertControllerStyleAlert
+import platform.UIKit.UIApplication
+import platform.UIKit.UISceneActivationStateForegroundActive
+import platform.UIKit.UIWindow
+import platform.UIKit.UIWindowScene
 import platform.darwin.dispatch_async
 import platform.darwin.dispatch_get_main_queue
 
@@ -72,13 +82,23 @@ private class IosVoiceRecorder {
     private var recorder: AVAudioRecorder? = null
     private var path: String? = null
     private var startedAt = 0L
+    /** True when start() activated the shared session, so stop()/cancel()
+     *  must hand it back. False when a call owns it (see below). */
+    private var ownsSession = false
 
     fun start(): Boolean {
         cancel()
         val file = NSTemporaryDirectory() + "voice-${nowMs()}.m4a"
         val session = AVAudioSession.sharedInstance()
-        session.setCategory(AVAudioSessionCategoryPlayAndRecord, AVAudioSessionCategoryOptionDefaultToSpeaker, null)
-        session.setActive(true, null)
+        // During a call TalonRtc owns the shared session — reconfiguring
+        // it here stomps the call's audio, and deactivating it on stop
+        // would drop the call outright. It is already playAndRecord then,
+        // so the recorder can just use it.
+        if (!IosVoipBridge.callLive.value) {
+            session.setCategory(AVAudioSessionCategoryPlayAndRecord, AVAudioSessionCategoryOptionDefaultToSpeaker, null)
+            session.setActive(true, null)
+            ownsSession = true
+        }
         val settings = mapOf<Any?, Any?>(
             AVFormatIDKey to kAudioFormatMPEG4AAC.toInt(),
             AVSampleRateKey to 44_100.0,
@@ -86,7 +106,12 @@ private class IosVoiceRecorder {
             AVEncoderBitRateKey to 96_000,
         )
         val rec = AVAudioRecorder(NSURL.fileURLWithPath(file), settings, null)
-        if (!rec.prepareToRecord() || !rec.record()) return false
+        if (!rec.prepareToRecord() || !rec.record()) {
+            // Don't leave the empty file or the activated session behind.
+            NSFileManager.defaultManager.removeItemAtPath(file, null)
+            releaseSession()
+            return false
+        }
         recorder = rec
         path = file
         startedAt = nowMs()
@@ -100,7 +125,7 @@ private class IosVoiceRecorder {
         val out = path ?: return null
         val ms = nowMs() - startedAt
         recorder = null; path = null; startedAt = 0
-        runCatching { AVAudioSession.sharedInstance().setActive(false, null) }
+        releaseSession()
         return out to ms
     }
 
@@ -108,6 +133,33 @@ private class IosVoiceRecorder {
         recorder?.stop()
         path?.let { NSFileManager.defaultManager.removeItemAtPath(it, null) }
         recorder = null; path = null; startedAt = 0
+        releaseSession()
+    }
+
+    private fun releaseSession() {
+        if (!ownsSession) return
+        ownsSession = false
+        // A call that came up while we were recording owns the session
+        // now; deactivating it here would kill the call's audio.
+        if (IosVoipBridge.callLive.value) return
+        runCatching { AVAudioSession.sharedInstance().setActive(false, null) }
+    }
+}
+
+/** The iOS Toast: a one-message alert. Always on the main queue. */
+@OptIn(ExperimentalForeignApi::class)
+private fun showVoiceAlert(message: String) {
+    dispatch_async(dispatch_get_main_queue()) {
+        val scenes = UIApplication.sharedApplication.connectedScenes
+            .filterIsInstance<UIWindowScene>()
+        val scene = scenes.firstOrNull { it.activationState == UISceneActivationStateForegroundActive }
+            ?: scenes.firstOrNull()
+        val windows = scene?.windows?.filterIsInstance<UIWindow>().orEmpty()
+        var top = (windows.firstOrNull { it.isKeyWindow() } ?: windows.firstOrNull())?.rootViewController
+        while (top?.presentedViewController != null) top = top.presentedViewController
+        val alert = UIAlertController.alertControllerWithTitle(null, message, UIAlertControllerStyleAlert)
+        alert.addAction(UIAlertAction.actionWithTitle("OK", UIAlertActionStyleDefault, handler = null))
+        top?.presentViewController(alert, animated = true, completion = null)
     }
 }
 
@@ -133,11 +185,24 @@ actual fun VoiceRecordButton(
             }
         } else if (enabled) {
             AVAudioSession.sharedInstance().requestRecordPermission { granted ->
-                if (granted) dispatch_async(dispatch_get_main_queue()) { if (recorder.start()) recording = true }
+                dispatch_async(dispatch_get_main_queue()) {
+                    when {
+                        // Android says this with a Toast; silence here
+                        // reads as a dead button.
+                        !granted -> showVoiceAlert(
+                            "Talon needs microphone access to record a voice message. You can turn it on in Settings.",
+                        )
+                        recorder.start() -> recording = true
+                        else -> showVoiceAlert("Couldn't start the recorder.")
+                    }
+                }
             }
         }
     }
-    if (externalTrigger != null) LaunchedEffect(externalTrigger) { externalTrigger.collect { toggle() } }
+    // The effect keys on the flow, so without this it would keep the
+    // first composition's toggle — stale enabled/onRecorded and all.
+    val currentToggle = rememberUpdatedState(toggle)
+    if (externalTrigger != null) LaunchedEffect(externalTrigger) { externalTrigger.collect { currentToggle.value() } }
     Box(
         modifier = modifier.size(36.dp).clip(CircleShape)
             .background(if (recording) MaterialTheme.colorScheme.errorContainer else Color.Transparent)
@@ -156,17 +221,25 @@ actual fun VoiceRecordButton(
 @OptIn(ExperimentalForeignApi::class)
 @Composable
 actual fun VoicePreviewPlayButton(path: String, enabled: Boolean) {
-    val player = remember(path) { AVAudioPlayer(NSURL.fileURLWithPath(path), null) }
+    // init(contentsOfURL:) returns nil for a missing or unreadable
+    // file, and K/N turns that nil into a null-to-non-null crash —
+    // check the file is there before constructing.
+    val player = remember(path) {
+        if (NSFileManager.defaultManager.fileExistsAtPath(path)) {
+            AVAudioPlayer(NSURL.fileURLWithPath(path), null)
+        } else null
+    }
     var playing by remember(path) { mutableStateOf(false) }
-    DisposableEffect(path) { onDispose { player.stop() } }
+    DisposableEffect(path) { onDispose { player?.stop() } }
     // AVAudioPlayer has a delegate for "finished"; a poll is less code
     // and the preview is seconds long.
-    LaunchedEffect(playing) { while (playing) { delay(250); if (!player.playing) playing = false } }
-    IconButton(enabled = enabled, onClick = {
-        if (playing) { player.pause(); playing = false } else {
+    LaunchedEffect(playing) { while (playing) { delay(250); if (player?.playing != true) playing = false } }
+    IconButton(enabled = enabled && player != null, onClick = {
+        val p = player ?: return@IconButton
+        if (playing) { p.pause(); playing = false } else {
             runCatching { AVAudioSession.sharedInstance().setCategory(AVAudioSessionCategoryPlayback, null) }
-            if (player.currentTime >= player.duration) player.currentTime = 0.0
-            player.play(); playing = true
+            if (p.currentTime >= p.duration) p.currentTime = 0.0
+            p.play(); playing = true
         }
     }) {
         Icon(if (playing) Icons.Filled.Pause else Icons.Filled.PlayArrow, contentDescription = if (playing) "Pause" else "Play")

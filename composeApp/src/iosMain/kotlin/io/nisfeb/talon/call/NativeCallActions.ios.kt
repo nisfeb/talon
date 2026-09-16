@@ -35,6 +35,15 @@ actual fun bindNativeCallActions(
 internal object IosCallKitCalls {
     private var scope: CoroutineScope? = null
 
+    // The two halves of IosVoipBridge.callLive: a 1:1 call and a party
+    // line each hold the shared audio session on their own.
+    private var callUp = false
+    private var partyUp = false
+
+    private fun publishLive() {
+        IosVoipBridge.callLive.value = callUp || partyUp
+    }
+
     fun bind(
         controller: CallController,
         party: PartyLine?,
@@ -44,6 +53,9 @@ internal object IosCallKitCalls {
         scope?.cancel()
         val s = CoroutineScope(SupervisorJob() + Dispatchers.Main)
         scope = s
+        // The fresh collectors below re-emit the current states at once,
+        // so this is only the gap between binds.
+        callUp = false; partyUp = false; publishLive()
         // Hold has no wire in %trunk: being held mutes us and being
         // resumed unmutes — only if the hold is what muted.
         var heldMute = false
@@ -95,6 +107,11 @@ internal object IosCallKitCalls {
         var connected = false
         var lastMuted: Boolean? = null
         controller.state.collect { s ->
+            callUp = when (s) {
+                is CallUiState.Outgoing, is CallUiState.Incoming, is CallUiState.Active -> true
+                is CallUiState.Ended, CallUiState.None -> false
+            }
+            publishLive()
             val kit = IosVoipBridge.callKit ?: return@collect
             when (s) {
                 is CallUiState.Outgoing -> {
@@ -144,6 +161,11 @@ internal object IosCallKitCalls {
             it is CallUiState.Active || it is CallUiState.Outgoing || it is CallUiState.Incoming
         }
         party.state.collect { s ->
+            partyUp = when (s) {
+                is PartyState.Connecting, is PartyState.Live -> true
+                is PartyState.Idle, is PartyState.Failed -> false
+            }
+            publishLive()
             val kit = IosVoipBridge.callKit ?: return@collect
             when (s) {
                 is PartyState.Connecting -> if (!reported) {
