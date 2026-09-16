@@ -41,6 +41,9 @@ if [ -n "$DIRTY" ]; then
 fi
 
 WANT="$(grep -E '^talon\.versionName=' gradle.properties | cut -d= -f2)"
+# The marketing version is the app's version without its rc suffix:
+# Apple takes dotted numbers only, so 1.7.9-rc69 ships as 1.7.9.
+WANT="${WANT%%-*}"
 HAVE="$(grep -m1 -E 'MARKETING_VERSION = ' iosApp/iosApp.xcodeproj/project.pbxproj \
     | sed 's/.*MARKETING_VERSION = //; s/;//' | tr -d ' ')"
 if [ "$WANT" != "$HAVE" ]; then
