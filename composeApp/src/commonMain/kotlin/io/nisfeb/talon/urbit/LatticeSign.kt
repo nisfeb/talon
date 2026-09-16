@@ -55,10 +55,13 @@ class LatticeSign(private val http: HttpClient, shipUrl: String) {
     suspend fun verify(rec: SignedRecord, content: String? = null): Verdict {
         // digest and sig are 256- and 512-bit atoms in decimal, past every
         // integer type there is, and the route reads them as JSON numbers.
-        // So they go back out as the digits that came in, unquoted.
+        // So they go back out as the digits that came in, unquoted. life is
+        // a small atom but the same JSON-number reader, and it is
+        // digit-validated at parse (signedRecordIn), so it goes unquoted
+        // too rather than as a string the route would have to slav apart.
         val body = buildJsonObject {
             put("ship", rec.ship)
-            put("life", rec.life)
+            put("life", JsonUnquotedLiteral(rec.life))
             put("digest", JsonUnquotedLiteral(rec.digest))
             put("sig", JsonUnquotedLiteral(rec.sig))
             if (content != null) put("content", content)

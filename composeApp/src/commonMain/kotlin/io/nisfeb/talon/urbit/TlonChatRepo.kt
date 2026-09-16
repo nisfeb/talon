@@ -117,7 +117,7 @@ class TlonChatRepo(
     /**
      * Optional %settings sync surface. Production app/ Android passes
      * the real implementation (constructed from EncryptedSharedPreferences-
-     * backed AiSettings/DailyDigestSettings); composeApp desktop passes
+     * backed AiSettings); composeApp desktop passes
      * `null` until a desktop %settings bridge is added in Stage F.
      */
     val settingsSync: SettingsSync? = null,
@@ -1652,7 +1652,7 @@ class TlonChatRepo(
             color?.let {
                 put("color", buildJsonObject {
                     put("type", "tint")
-                    put("value", toUrbitHexColor(it))
+                    put("value", urbitHexColor(it))
                 })
             }
         }
@@ -1692,23 +1692,6 @@ class TlonChatRepo(
             },
         )
     }
-
-    /**
-     * `#FF5050` → `ff.5050` for the JSON `tint` value.
-     *
-     * The hoon json-1 mark decodes a tint as `(slav %ux (cat 3 '0x' s))` —
-     * it prepends `0x` itself, so the value we send must not carry one.
-     *
-     * And slav wants the canonical @ux, not merely a parseable one:
-     * four-digit groups counted from the right, and no leading zero on
-     * the group at the front. `0xff.5050` is accepted and `0x0a.1b2c`
-     * is not, so padding every colour to six digits and cutting it 2+4
-     * worked for bright colours and crashed the mark for any colour
-     * whose red channel was below 0x10 -- a nack reading
-     * `gall: poke-as: cast: key=%self`, which says nothing about
-     * colours at all. Verified against slav in a dojo, both ways.
-     */
-    private fun toUrbitHexColor(hex: String): String = urbitHexColor(hex)
 
     /**
      * One row for the Activity feed screen. Best-effort parse of the
@@ -4250,9 +4233,6 @@ class TlonChatRepo(
             }
             return groups.joinToString(".")
         }
-
-        /** Test seam for [urbitHexColor]. */
-        internal fun urbitHexColorForTest(hex: String): String = urbitHexColor(hex)
 
         private const val TAG = "TlonChatRepo"
 

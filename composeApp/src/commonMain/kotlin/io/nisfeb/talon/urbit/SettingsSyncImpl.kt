@@ -137,6 +137,18 @@ class SettingsSyncImpl(
         // ponytail: last-write-wins + settle. If it ever double-fires,
         // upgrade to per-device claim sub-keys (<gid>~<deviceId>, lowest id
         // wins) — deterministic, no settle window.
+        /** Buckets whose apply path writes Room tables. [bootstrap]
+         *  ship-wins applies these, and the recovery pass below re-seeds
+         *  the ones the ship is missing; ai-settings / ui-prefs /
+         *  status-seen / assistant / loops apply (and recover) on
+         *  their own paths. */
+        val ROOM_BACKED_BUCKETS = setOf(
+            BUCKET_GROUP_ORDERS, BUCKET_FOLDERS, BUCKET_FOLDER_MEMBERS,
+            BUCKET_NOTIFY_PREFS, BUCKET_RAIL_ITEMS,
+            BUCKET_BOOKMARKS, BUCKET_BOOKMARK_FOLDERS, BUCKET_BOOKMARK_FOLDER_MEMBERS,
+            BUCKET_WATCHWORDS, BUCKET_WATCHWORD_EXCLUDES,
+        )
+
         private const val CLAIM_SETTLE_MS = 3_000L
         // Single-entry bucket: the seen high-water mark is global to the
         // user, not per-anything, so one stable key holds it.
@@ -157,10 +169,21 @@ class SettingsSyncImpl(
     // Bootstrap can beat the host's attachUiSettings call. Hold what
     // the ship said until there's somewhere to put it.
     @Volatile private var pendingUiPrefs: JsonObject? = null
-    // Set while a remote value is being written into the local store,
-    // so the resulting flow emission doesn't bounce straight back to
-    // the ship as a fresh push.
-    @Volatile private var applyingRemote = false
+    // The value each ui-prefs entry last took from the ship (an apply)
+    // or sent to it (a push). The watch collectors compare every
+    // emission against this to tell a user edit from our own apply
+    // coming back through the StateFlow — a flag window used to do
+    // that job, but the flag cleared synchronously while the emission
+    // arrived a coroutine later, and the just-received remote value
+    // bounced straight back to the ship as a fresh poke.
+    private val lastSyncedUiPref = HashMap<String, JsonElement>()
+    private val lastSyncedUiPrefLock = kotlinx.atomicfu.locks.SynchronizedObject()
+
+    private fun lastSyncedUiPref(entry: String): JsonElement? =
+        kotlinx.atomicfu.locks.synchronized(lastSyncedUiPrefLock) { lastSyncedUiPref[entry] }
+
+    private fun noteSyncedUiPref(entry: String, value: JsonElement) =
+        kotlinx.atomicfu.locks.synchronized(lastSyncedUiPrefLock) { lastSyncedUiPref[entry] = value }
 
     private val _statusesSeenMs = MutableStateFlow(0L)
     override val statusesSeenMs: StateFlow<Long> = _statusesSeenMs.asStateFlow()
@@ -218,13 +241,17 @@ class SettingsSyncImpl(
         }
         // Watch each synced preference and push changes the user makes
         // here. drop(1) skips the current value — attaching is not an
-        // edit — and `applyingRemote` keeps an incoming change from
-        // echoing back out.
+        // edit — and the last-synced value keeps an incoming change
+        // from echoing back out.
         fun <T> watch(flow: Flow<T>, entry: String, encode: (T) -> JsonElement) {
             scope.launch {
                 flow.drop(1).collect { v ->
-                    if (applyingRemote) return@collect
-                    runCatching { pokePutEntry(BUCKET_UI_PREFS, entry, encode(v)) }
+                    val encoded = encode(v)
+                    // Our own apply coming back through the StateFlow,
+                    // or a duplicate of what we last pushed: not an edit.
+                    if (lastSyncedUiPref(entry) == encoded) return@collect
+                    noteSyncedUiPref(entry, encoded)
+                    runCatching { pokePutEntry(BUCKET_UI_PREFS, entry, encoded) }
                 }
             }
         }
@@ -233,40 +260,50 @@ class SettingsSyncImpl(
         watch(settings.smartSearchPreferred, ENTRY_SMART_SEARCH) { bool(it) }
         watch(settings.powerFeaturesEnabled, ENTRY_POWER_FEATURES) { bool(it) }
         watch(settings.hideComposerButtons, ENTRY_HIDE_COMPOSER_BUTTONS) { bool(it) }
-        watch(settings.railItemOrder, ENTRY_RAIL_ITEM_ORDER) { order ->
-            buildJsonObject {
-                put("order", JsonArray(order.map { JsonPrimitive(it.name) }))
-            }
-        }
-        watch(settings.accentSettings, ENTRY_ACCENT) { a ->
-            buildJsonObject {
-                a.enabled?.let { put("enabled", it) }
-                put("mode", a.mode.name)
-                a.customHex?.let { put("customHex", it) }
-            }
-        }
-        watch(settings.themeSettings, ENTRY_THEMES) { t -> Json.parseToJsonElement(t.toJson()) }
+        watch(settings.railItemOrder, ENTRY_RAIL_ITEM_ORDER, ::encodeRailItemOrder)
+        watch(settings.accentSettings, ENTRY_ACCENT, ::encodeAccent)
+        watch(settings.themeSettings, ENTRY_THEMES, ::encodeThemes)
     }
+
+    private fun encodeRailItemOrder(order: List<RailItem>): JsonElement =
+        buildJsonObject {
+            put("order", JsonArray(order.map { JsonPrimitive(it.name) }))
+        }
+
+    private fun encodeAccent(a: io.nisfeb.talon.ui.AccentSettings): JsonElement =
+        buildJsonObject {
+            a.enabled?.let { put("enabled", it) }
+            put("mode", a.mode.name)
+            a.customHex?.let { put("customHex", it) }
+        }
+
+    private fun encodeThemes(t: io.nisfeb.talon.ui.theme.ThemeSettings): JsonElement =
+        Json.parseToJsonElement(t.toJson())
 
     private fun bool(v: Boolean): JsonElement = buildJsonObject { put("enabled", v) }
     private fun str(v: String): JsonElement = buildJsonObject { put("value", v) }
 
     /** Write a remote ui-prefs entry into the local store without
-     *  bouncing it back out as a push. */
-    private inline fun applyLocal(block: () -> Unit) {
-        applyingRemote = true
-        try {
-            block()
-        } finally {
-            applyingRemote = false
-        }
+     *  bouncing it back out as a push: the watch collectors compare
+     *  every emission against the value noted here. */
+    private inline fun applyLocal(entry: String, value: JsonElement, block: () -> Unit) {
+        noteSyncedUiPref(entry, value)
+        block()
     }
 
     /** Apply one ui-prefs entry that lives in [io.nisfeb.talon.ui.UiSettings]. */
     private fun applyUiPref(entry: String, value: JsonElement?) {
-        val settings = ui ?: return
+        val settings = ui ?: run {
+            // Live facts can beat attachUiSettings; park the single
+            // entry the way applyBucket parks the whole bucket, or the
+            // ship's word is lost. (Values park unwrapped — the drain's
+            // unwrap leaves an already-decoded object untouched.)
+            val parked = pendingUiPrefs ?: JsonObject(emptyMap())
+            pendingUiPrefs = JsonObject(parked + (entry to (value ?: JsonNull)))
+            return
+        }
         val obj = value as? JsonObject ?: return
-        applyLocal {
+        applyLocal(entry, obj) {
             when (entry) {
                 ENTRY_GROUP_CHANNEL_ORDER -> obj["value"].asStr()?.let { name ->
                     runCatching { io.nisfeb.talon.ui.GroupChannelOrder.valueOf(name) }
@@ -387,19 +424,40 @@ class SettingsSyncImpl(
             // Loop definitions. Upsert (not replace-all) so loops created
             // offline on this device survive; lastRunAt is preserved per row.
             applyBucket(BUCKET_LOOPS, deskMap[BUCKET_LOOPS] as? JsonObject)
+
+            // Per-bucket recovery for the Room-backed buckets: any the
+            // ship is missing (or holds empty) gets re-seeded from the
+            // local tables. Buckets the ship holds were applied above
+            // and stay ship-wins. The pushes are idempotent (put-entry
+            // is upsert) and only fire on a gap, so we never overwrite
+            // a peer device's good state with ours.
+            for (bucket in ROOM_BACKED_BUCKETS) {
+                if ((deskMap[bucket] as? JsonObject).isNullOrEmpty()) {
+                    Log.i(TAG, "ship missing $bucket bucket — seeding from local")
+                    runCatching { seedBucketFromLocal(bucket) }
+                        .onFailure { Log.w(TAG, "$bucket seed push failed", it) }
+                }
+            }
+            // ui-prefs isn't Room-backed (it lives in the UiSettings
+            // flows + name-display singletons), so it recovers through
+            // its own push rather than seedBucketFromLocal.
+            if ((deskMap[BUCKET_UI_PREFS] as? JsonObject).isNullOrEmpty()) {
+                Log.i(TAG, "ship missing ui-prefs bucket — seeding from local")
+                runCatching { pushUiPrefsFromLocal() }
+                    .onFailure { Log.w(TAG, "ui-prefs seed push failed", it) }
+            }
         }
 
-        // Per-bucket recovery: catch buckets that aren't on the ship
-        // even though other buckets are. The 0.11.0-rc8 era ran for
-        // months with Android's aiSettings.onStateChange unwired —
-        // every phone-side AI feature toggle stayed local, so the
-        // ship's ai-settings bucket was empty for affected users
-        // even though their daily-digest / group-orders / etc. were
-        // populated. Without per-bucket recovery a fresh desktop
-        // install would inherit the gap forever. The pushes are
-        // idempotent (put-entry is upsert), and they only fire when
-        // the ship is missing the bucket, so we don't overwrite a
-        // peer device's good state with ours.
+        // ai-settings recovers on its own path (it runs either way:
+        // in the seed case above it doubles as the bucket's first
+        // push). The 0.11.0-rc8 era ran for months with Android's
+        // aiSettings.onStateChange unwired — every phone-side AI
+        // feature toggle stayed local, so the ship's ai-settings
+        // bucket was empty for affected users even though their
+        // group-orders / folders / etc. were populated. Without
+        // per-bucket recovery a fresh install would inherit the gap
+        // forever. Same idempotent-gap-fill rules as the Room-backed
+        // recovery above.
         if ((deskMap?.get(BUCKET_AI_SETTINGS) as? JsonObject).isNullOrEmpty()) {
             Log.i(TAG, "ship missing ai-settings bucket — seeding from local")
             runCatching { pushAiSettings() }
@@ -431,9 +489,44 @@ class SettingsSyncImpl(
 
     private fun JsonObject?.isNullOrEmpty(): Boolean = bucketIsMissingOrEmpty(this)
 
-    /** First-time setup: push whatever's in Room to the ship. */
+    /** First-time setup: push whatever's local to the ship. */
     private suspend fun seedFromLocal() {
-        // Group orders
+        seedGroupOrders()
+        seedFolders()
+        seedFolderMembers()
+        seedNotifyPrefs()
+        seedRailItems()
+        seedBookmarks()
+        seedBookmarkFolders()
+        seedBookmarkFolderMembers()
+        // Watchwords key on a sanitized term rather than a Room id, so
+        // they ride their own per-entry push path.
+        pushAllWatchwords()
+        // UI prefs live in the UiSettings flows + name-display
+        // singletons, not Room.
+        pushUiPrefsFromLocal()
+    }
+
+    /** Re-seed one Room-backed bucket from local state — the recovery
+     *  counterpart of [seedFromLocal], dispatched per [ROOM_BACKED_BUCKETS]. */
+    private suspend fun seedBucketFromLocal(bucket: String) {
+        when (bucket) {
+            BUCKET_GROUP_ORDERS -> seedGroupOrders()
+            BUCKET_FOLDERS -> seedFolders()
+            BUCKET_FOLDER_MEMBERS -> seedFolderMembers()
+            BUCKET_NOTIFY_PREFS -> seedNotifyPrefs()
+            BUCKET_RAIL_ITEMS -> seedRailItems()
+            BUCKET_BOOKMARKS -> seedBookmarks()
+            BUCKET_BOOKMARK_FOLDERS -> seedBookmarkFolders()
+            BUCKET_BOOKMARK_FOLDER_MEMBERS -> seedBookmarkFolderMembers()
+            // One flush covers both watchword buckets; put-entry is an
+            // upsert, so re-pushing the half the ship already has is
+            // harmless.
+            BUCKET_WATCHWORDS, BUCKET_WATCHWORD_EXCLUDES -> pushAllWatchwords()
+        }
+    }
+
+    private suspend fun seedGroupOrders() {
         db.groupOrders().stream().first()
             .takeIf { it.isNotEmpty() }?.let { orders ->
                 pokePutBucket(
@@ -445,7 +538,9 @@ class SettingsSyncImpl(
                     },
                 )
             }
-        // Folders
+    }
+
+    private suspend fun seedFolders() {
         db.folders().streamFolders().first()
             .takeIf { it.isNotEmpty() }?.let { folders ->
                 pokePutBucket(
@@ -460,7 +555,9 @@ class SettingsSyncImpl(
                     },
                 )
             }
-        // Folder members
+    }
+
+    private suspend fun seedFolderMembers() {
         db.folders().streamMembers().first()
             .takeIf { it.isNotEmpty() }?.let { members ->
                 pokePutBucket(
@@ -475,9 +572,37 @@ class SettingsSyncImpl(
                     },
                 )
             }
-        // Notify prefs aren't accessible by bulk stream in current DAO.
-        // Future: add a streamAll() if we need to seed them on first run.
-        // Bookmarks
+    }
+
+    private suspend fun seedNotifyPrefs() {
+        db.notifyPrefs().streamAll().first()
+            .takeIf { it.isNotEmpty() }?.let { prefs ->
+                pokePutBucket(
+                    BUCKET_NOTIFY_PREFS,
+                    buildJsonObject {
+                        prefs.forEach { p ->
+                            put(p.whom, buildJsonObject { put("level", p.level) })
+                        }
+                    },
+                )
+            }
+    }
+
+    private suspend fun seedRailItems() {
+        db.railItemPrefs().streamAll().first()
+            .takeIf { it.isNotEmpty() }?.let { rows ->
+                pokePutBucket(
+                    BUCKET_RAIL_ITEMS,
+                    buildJsonObject {
+                        rows.forEach { r ->
+                            put(r.itemName, buildJsonObject { put("visible", r.visible) })
+                        }
+                    },
+                )
+            }
+    }
+
+    private suspend fun seedBookmarks() {
         db.bookmarks().streamAll().first()
             .takeIf { it.isNotEmpty() }?.let { bookmarks ->
                 pokePutBucket(
@@ -491,7 +616,9 @@ class SettingsSyncImpl(
                     },
                 )
             }
-        // Bookmark folders
+    }
+
+    private suspend fun seedBookmarkFolders() {
         db.bookmarkFolders().streamFolders().first()
             .takeIf { it.isNotEmpty() }?.let { folders ->
                 pokePutBucket(
@@ -506,6 +633,9 @@ class SettingsSyncImpl(
                     },
                 )
             }
+    }
+
+    private suspend fun seedBookmarkFolderMembers() {
         db.bookmarkFolders().streamMembers().first()
             .takeIf { it.isNotEmpty() }?.let { members ->
                 pokePutBucket(
@@ -520,6 +650,34 @@ class SettingsSyncImpl(
                     },
                 )
             }
+    }
+
+    /**
+     * Push the current local UI preferences to %settings — the seed
+     * counterpart of the attachUiSettings watchers, which only fire on
+     * edits. Reads the flows' current values directly, so it serves
+     * both bootstrap's first seed and the missing-bucket recovery.
+     * Name-display toggles live on singletons rather than in
+     * UiSettings; they push through their existing entry points.
+     */
+    private suspend fun pushUiPrefsFromLocal() {
+        val settings = ui
+        if (settings != null) {
+            suspend fun push(entry: String, encoded: JsonElement) {
+                noteSyncedUiPref(entry, encoded)
+                pokePutEntry(BUCKET_UI_PREFS, entry, encoded)
+            }
+            push(ENTRY_GROUP_CHANNEL_ORDER, str(settings.groupChannelOrder.value.name))
+            push(ENTRY_FOLDER_ITEM_ORDER, str(settings.folderItemOrder.value.name))
+            push(ENTRY_SMART_SEARCH, bool(settings.smartSearchPreferred.value))
+            push(ENTRY_POWER_FEATURES, bool(settings.powerFeaturesEnabled.value))
+            push(ENTRY_HIDE_COMPOSER_BUTTONS, bool(settings.hideComposerButtons.value))
+            push(ENTRY_RAIL_ITEM_ORDER, encodeRailItemOrder(settings.railItemOrder.value))
+            push(ENTRY_ACCENT, encodeAccent(settings.accentSettings.value))
+            push(ENTRY_THEMES, encodeThemes(settings.themeSettings.value))
+        }
+        pushAlwaysPatp(io.nisfeb.talon.ui.ShipNames.alwaysPatp.value)
+        pushNonCometNames(io.nisfeb.talon.ui.AzimuthNames.enabled.value)
     }
 
     /** Apply a %settings SSE fact to the right bucket. */
@@ -700,9 +858,8 @@ class SettingsSyncImpl(
 
     /**
      * Push the current AI settings to %settings. Per-feature toggles
-     * (catchMeUp, dailyDigest, smartFeatures, the assistant)
-     * ALWAYS push — they
-     * are user preferences with no security cost and should follow
+     * (catchMeUp, smartFeatures, ask-Urbit, the agent) ALWAYS push —
+     * they are user preferences with no security cost and should follow
      * the user across devices. Cloud-key fields (provider / apiKey /
      * model / baseUrl) only push when the user has explicitly opted
      * into sync via `syncEnabled`; the API key is service credential

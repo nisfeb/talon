@@ -43,11 +43,6 @@ interface SettingsSync : io.nisfeb.talon.ai.LoopWriteCoordinator {
      */
     suspend fun pushAiSettings() {}
 
-
-
-    /** Push the mnemonym-naming preference (ui-prefs bucket) so every
-     *  device shows the same fallback ship names. Default no-op. */
-
     /** Push the always-show-@p preference (ui-prefs bucket). Naming is
      *  one decision to the user, so both halves travel together. */
     suspend fun pushAlwaysPatp(enabled: Boolean) {}

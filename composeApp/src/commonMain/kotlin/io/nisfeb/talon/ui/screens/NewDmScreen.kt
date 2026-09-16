@@ -52,8 +52,9 @@ fun NewDmScreen(
      *  "Add contact" affordance shows. NOT the broad /v1/all table
      *  (which includes every known peer). */
     bookContacts: Set<String> = emptySet(),
-    /** A scanned group code: join the group. With [onInviteShip], puts a
-     *  camera on this screen where the platform has a scanner. */
+    /** A scanned group code, confirmed with the user first: join the
+     *  group. Either this or [onInviteShip] puts a camera on this
+     *  screen where the platform has a scanner. */
     onJoinGroup: ((flag: String) -> Unit)? = null,
     /** A scanned invite-me code: invite that ship to one of our groups. */
     onInviteShip: ((ship: String) -> Unit)? = null,
@@ -98,15 +99,42 @@ fun NewDmScreen(
     val resolveHint = io.nisfeb.talon.ui.NameToShip.hint(resolved, trimmedInput)
     val alreadyContact = remember(asPatp, bookContacts) { asPatp in bookContacts }
     var scanProblem by remember { mutableStateOf<String?>(null) }
-    val scan = if (io.nisfeb.talon.ui.isQrScanSupported && onJoinGroup != null && onInviteShip != null) {
+    // A scanned group code parks here before any poke: joining is a
+    // ship-side action with no undo on this screen, so it confirms
+    // first — the same courtesy the invite path gets from its dialog.
+    var pendingJoinFlag by remember { mutableStateOf<String?>(null) }
+    // Either handler alone is enough to offer the scanner; a code whose
+    // handler isn't wired gets a plain explanation instead of a poke.
+    val scan = if (io.nisfeb.talon.ui.isQrScanSupported && (onJoinGroup != null || onInviteShip != null)) {
         io.nisfeb.talon.ui.rememberQrScanLauncher("Point the camera at a group or invite code") { raw ->
             when (val link = raw?.let { io.nisfeb.talon.urbit.TalonLink.parse(it) }) {
-                is io.nisfeb.talon.urbit.TalonLink.Group -> onJoinGroup(link.flag)
-                is io.nisfeb.talon.urbit.TalonLink.InviteMe -> onInviteShip(link.ship)
+                is io.nisfeb.talon.urbit.TalonLink.Group ->
+                    if (onJoinGroup != null) pendingJoinFlag = link.flag
+                    else scanProblem = "That is a group code, and joining groups isn't available here."
+                is io.nisfeb.talon.urbit.TalonLink.InviteMe ->
+                    if (onInviteShip != null) onInviteShip(link.ship)
+                    else scanProblem = "That is an invite code, and invites aren't available here."
                 else -> if (raw != null) scanProblem = "That is not a Talon group or invite code."
             }
         }
     } else null
+
+    pendingJoinFlag?.let { flag ->
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { pendingJoinFlag = null },
+            title = { Text("Join group?") },
+            text = { Text(flag) },
+            confirmButton = {
+                TextButton(onClick = {
+                    pendingJoinFlag = null
+                    onJoinGroup?.invoke(flag)
+                }) { Text("Join") }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingJoinFlag = null }) { Text("Cancel") }
+            },
+        )
+    }
 
     Column(modifier = modifier.windowInsetsPadding(WindowInsets.safeDrawing)) {
         Row(

@@ -15,23 +15,6 @@ object LatticeInstall {
     const val PUBLISHER = "~ricsul-bilwyt"
     const val DESK = "grubbery"
 
-    /** Chat itself: a different desk from a different publisher. */
-    const val GROUPS_PUBLISHER = "~nisfeb"
-    const val GROUPS_DESK = "groups"
-
-    /**
-     * Whether %groups is on [shipUrl]. Unlike the lattice probe this one
-     * is authenticated — groups has no unauthenticated surface — so it
-     * needs the session's own client, and anything other than an answer
-     * reads as absent rather than as an error.
-     */
-    suspend fun groupsInstalled(http: HttpClient, shipUrl: String): Boolean =
-        runCatching {
-            val resp: HttpResponse =
-                http.get("${shipUrl.trimEnd('/')}/~/scry/groups/groups/v2/groups.json")
-            resp.status.value == 200
-        }.getOrDefault(false)
-
     /**
      * Whether lattice is installed on [shipUrl]. Probes the PWA
      * manifest, which lattice serves UNAUTHENTICATED, so this needs no
@@ -95,14 +78,23 @@ object LatticeInstall {
         installed: (suspend (String) -> Boolean)? = null,
         publisher: String = PUBLISHER,
         poke: suspend (String, String, JsonElement) -> Boolean,
-    ): suspend () -> Result<Unit> = {
-        val url = shipUrl()
-        if (url == null) Result.failure(IllegalStateException("Not signed in to a ship."))
-        else installAndWait(
-            http, url, poke, desk = desk,
-            installed = { installed?.invoke(url) ?: isInstalled(http, url) },
-            publisher = publisher,
-        )
+    ): suspend () -> Result<Unit> {
+        // The default probe reads the lattice manifest, which only the
+        // lattice desk serves — a caller installing another desk must
+        // say how THAT desk shows it has arrived, or the wait would
+        // watch the wrong surface and never finish.
+        require(desk == DESK || installed != null) {
+            "installing $desk needs an `installed` probe; the default checks the lattice manifest"
+        }
+        return {
+            val url = shipUrl()
+            if (url == null) Result.failure(IllegalStateException("Not signed in to a ship."))
+            else installAndWait(
+                http, url, poke, desk = desk,
+                installed = { installed?.invoke(url) ?: isInstalled(http, url) },
+                publisher = publisher,
+            )
+        }
     }
 
     private const val POLL_MS = 3_000L

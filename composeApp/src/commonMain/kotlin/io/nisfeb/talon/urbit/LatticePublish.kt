@@ -56,7 +56,7 @@ object LatticePublish {
 
     /**
      * A stable, readable slug under a `talon/` namespace, made unique
-     * per source thread by a short hash of [seed] (the parent post id)
+     * per source thread by a hash of [seed] (the parent post id)
      * so two threads with the same title don't clobber each other,
      * while re-publishing the same thread edits in place.
      */
@@ -68,7 +68,16 @@ object LatticePublish {
             .replace(Regex("-+"), "-")
             .take(48)
             .ifEmpty { "note" }
-        val suffix = seed.hashCode().toUInt().toString(36).takeLast(4)
+        // 64-bit FNV-1a, eight base-36 digits (~41 bits). The 32-bit
+        // hashCode suffix this replaces collided inside ~2^16 same-title
+        // threads; String.hashCode was already stable, but four digits
+        // only ever carried ~20 bits of it.
+        var h = -3750763034362895579L // 0xcbf29ce484222325
+        for (b in seed.encodeToByteArray()) {
+            h = h xor (b.toLong() and 0xff)
+            h *= 1099511628211L
+        }
+        val suffix = (h and Long.MAX_VALUE).toString(36).padStart(8, '0').takeLast(8)
         return "talon/$base-$suffix"
     }
 }

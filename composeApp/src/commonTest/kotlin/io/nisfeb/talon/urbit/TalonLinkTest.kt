@@ -27,4 +27,18 @@ class TalonLinkTest {
         assertNull(TalonLink.parse("talon://invite/zod"))
         assertNull(TalonLink.parse("talon://invite/~zod/x"))
     }
+
+    @Test
+    fun chatLinksValidateWhom() {
+        assertNull(TalonLink.parse("talon://chat/not-a-ship?id=1"))
+        assertNull(TalonLink.parse("talon://chat/?id=1"))
+        assertNull(TalonLink.parse("talon://chat/~zod/extra?id=1"))
+        assertNull(TalonLink.parse("talon://chat/~zod?id="))
+        assertEquals(TalonLink.Message("~zod", "1", null), TalonLink.parse("talon://chat/~zod?id=1"))
+        assertEquals(
+            TalonLink.Message("chat/~zod/general", "1", null),
+            TalonLink.parse("talon://chat/chat%2F~zod%2Fgeneral?id=1"),
+        )
+        assertEquals(TalonLink.Message("0v1.a2c3d", "1", null), TalonLink.parse("talon://chat/0v1.a2c3d?id=1"))
+    }
 }

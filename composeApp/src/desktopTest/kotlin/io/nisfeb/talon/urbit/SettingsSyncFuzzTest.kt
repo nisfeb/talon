@@ -156,8 +156,8 @@ class SettingsSyncFuzzTest {
 }
 
 // ──────────────────────────────────────────────────────────────────
-// Test doubles. Settings sync exercises aiSettings + dailyDigest only
-// in the AI / daily-digest bucket paths; mostly null-safe shims here.
+// Test doubles. Settings sync exercises aiSettings only in the AI
+// bucket path; mostly null-safe shims here.
 // ──────────────────────────────────────────────────────────────────
 
 private class NoopAiSettings : AiSettingsRepository {

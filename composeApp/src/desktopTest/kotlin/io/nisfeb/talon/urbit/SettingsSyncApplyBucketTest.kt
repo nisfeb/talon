@@ -46,7 +46,6 @@ import kotlin.test.assertTrue
  *   - notify-prefs
  *   - bookmarks + bookmark-folders + bookmark-folder-members
  *   - ai-settings (apply path)
- *   - daily-digest (apply + per-key event dispatch)
  *
  * Plus the four envelope shapes for applySettingsEvent
  * (put-entry / del-entry / put-bucket / del-bucket) and the desk-
@@ -662,10 +661,6 @@ class SettingsSyncApplyBucketTest {
             assertEquals(true, cfg.smartFeaturesEnabled)
         }
 
-    // ── daily-digest ────────────────────────────────────────────────
-
-
-
     // ── applySettingsEvent envelopes ────────────────────────────────
 
     @Test
@@ -848,11 +843,6 @@ class SettingsSyncApplyBucketTest {
 
         assertEquals(listOf("~zod"), db.watchwords().excludesAsList())
     }
-
-    // ── applyEntry per-key paths for daily-digest ────────────────────
-
-
-
 
     // ── status-seen (cross-device fresh-status marker) ──────────────
 

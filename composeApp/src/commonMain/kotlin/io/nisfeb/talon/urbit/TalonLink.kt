@@ -25,6 +25,8 @@ sealed interface TalonLink {
         const val SCHEME = "talon://"
         private val SHIP = Regex("~[a-z]+(-[a-z]+)*")
         private val FLAG = Regex("~[a-z]+(-[a-z]+)*/[a-z0-9][a-z0-9-]*")
+        private val NEST = Regex("(chat|heap|diary)/~[a-z]+(-[a-z]+)*/[a-z0-9][a-z0-9-]*")
+        private val CLUB = Regex("0v[0-9a-v]+(\\.[0-9a-v]+)*")
 
         fun forMessage(whom: String, id: String, parentId: String? = null): String =
             "${SCHEME}chat/${whom.encodeURLParameter()}?id=${id.encodeURLParameter()}" +
@@ -32,9 +34,9 @@ sealed interface TalonLink {
 
         fun forMail(threadId: String): String = "${SCHEME}mail/${threadId.encodeURLParameter()}"
 
-        fun forGroup(flag: String): String = "${SCHEME}group/$flag"
+        fun forGroup(flag: String): String = "${SCHEME}group/${flag.encodeURLParameter()}"
 
-        fun forInviteMe(ship: String): String = "${SCHEME}invite/$ship"
+        fun forInviteMe(ship: String): String = "${SCHEME}invite/${ship.encodeURLParameter()}"
 
         fun isTalonUrl(s: String): Boolean = s.trim().startsWith(SCHEME)
 
@@ -50,7 +52,12 @@ sealed interface TalonLink {
                 path.startsWith("chat/") -> {
                     val whom = path.removePrefix("chat/").decodeURLPart()
                     val id = query["id"] ?: return null
-                    if (whom.isBlank() || id.isBlank()) null else Message(whom, id, query["parent"]?.takeIf { it.isNotBlank() })
+                    // whom names a conversation: a ship, a channel nest,
+                    // or a club — the same shapes the rest of the app
+                    // insists on, so a garbage link can't open a
+                    // conversation that doesn't exist.
+                    if (id.isBlank() || !(SHIP.matches(whom) || NEST.matches(whom) || CLUB.matches(whom))) null
+                    else Message(whom, id, query["parent"]?.takeIf { it.isNotBlank() })
                 }
                 path.startsWith("mail/") -> path.removePrefix("mail/").decodeURLPart().takeIf { it.isNotBlank() }?.let { Mail(it) }
                 path.startsWith("group/") -> path.removePrefix("group/").decodeURLPart().takeIf { FLAG.matches(it) }?.let { Group(it) }

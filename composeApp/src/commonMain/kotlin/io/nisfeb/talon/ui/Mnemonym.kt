@@ -28,8 +28,8 @@ import okio.ByteString.Companion.toByteString
  */
 object Mnemonym {
 
-    /** Full nym for [ship], or null when the ship isn't a planet/moon/
-     *  comet or doesn't parse. Verified against the reference
+    /** Full nym for [ship], or null when the ship isn't a comet or
+     *  doesn't parse. Verified against the reference
      *  implementation's test vectors. Memoized — displayName and the
      *  mention matcher run per row/keystroke, and the answer never
      *  changes. */

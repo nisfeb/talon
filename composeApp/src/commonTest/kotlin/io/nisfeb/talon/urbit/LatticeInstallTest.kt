@@ -7,8 +7,11 @@ import io.ktor.client.engine.mock.respondError
 import io.ktor.http.HttpStatusCode
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 
 /**
@@ -75,5 +78,44 @@ class LatticeInstallTest {
         val (app, mark, _) = LatticeInstall.installPoke()
         assertEquals("hood", app)
         assertEquals("kiln-install", mark)
+    }
+
+    @Test
+    fun `another desk without a probe is refused up front`() {
+        // The default probe reads the lattice manifest, which only the
+        // lattice desk serves — watching it for any other desk would
+        // wait out the whole timeout and report failure onto a desk
+        // that arrived long ago.
+        val e = assertFailsWith<IllegalArgumentException> {
+            LatticeInstall.installer(
+                HttpClient(MockEngine { respond("{}") }),
+                { "https://ship" },
+                desk = "wiki",
+                poke = yes,
+            )
+        }
+        assertTrue(e.message!!.contains("installed"), e.message)
+    }
+
+    @Test
+    fun `another desk waits on its own probe, not the lattice manifest`() = runTest {
+        var httpAsks = 0
+        var probes = 0
+        var pokedDesk: String? = null
+        val install = LatticeInstall.installer(
+            HttpClient(MockEngine { httpAsks++; respond("{}") }),
+            { "https://ship" },
+            desk = "wiki",
+            installed = { ++probes > 2 },
+            poke = { _, _, body ->
+                pokedDesk = body.jsonObject["desk"]?.jsonPrimitive?.content
+                true
+            },
+        )
+        val r = install()
+        assertTrue(r.isSuccess)
+        assertEquals(3, probes, "it kept probing until the desk was there")
+        assertEquals(0, httpAsks, "the lattice manifest probe never fired")
+        assertEquals("wiki", pokedDesk, "kiln was asked for the right desk")
     }
 }

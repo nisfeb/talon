@@ -12,7 +12,7 @@ import kotlin.test.assertEquals
  */
 class UrbitHexColorTest {
 
-    private fun tint(hex: String) = TlonChatRepo.urbitHexColorForTest(hex)
+    private fun tint(hex: String) = TlonChatRepo.urbitHexColor(hex)
 
     @Test
     fun `a bright colour groups two and four`() {
