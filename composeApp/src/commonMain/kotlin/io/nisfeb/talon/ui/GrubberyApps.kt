@@ -29,26 +29,31 @@ enum class AppState {
     UNKNOWN,
 }
 
+/** Which desk an install would fetch, and from whom. */
+enum class AppInstall { GRUBBERY, GROUPS }
+
 data class AppRow(
     val name: String,
     val state: AppState,
     /** The sentence under the name. */
     val detail: String,
-    /** Whether to offer the install. Only where installing is the fix. */
-    val canInstall: Boolean,
+    /** What installing would fetch, or null where installing is not the fix. */
+    val install: AppInstall?,
     /** The ship's own words, when it had any. */
     val error: String? = null,
-)
+) {
+    val canInstall: Boolean get() = install != null
+}
 
 /** Mail rides inside the grubbery desk, so it can be missing two ways. */
 fun mailRow(availability: MailAvailability, error: String?): AppRow = when (availability) {
-    MailAvailability.PRESENT -> AppRow("Mail", AppState.WORKING, "Answering on this ship.", false, error)
+    MailAvailability.PRESENT -> AppRow("Mail", AppState.WORKING, "Answering on this ship.", null, error)
     MailAvailability.NO_GRUBBERY ->
-        AppRow("Mail", AppState.MISSING, "Mail runs inside Grubbery, which this ship does not have.", true, error)
+        AppRow("Mail", AppState.MISSING, "Mail runs inside Grubbery, which this ship does not have.", AppInstall.GRUBBERY, error)
     MailAvailability.OLD_GRUBBERY ->
-        AppRow("Mail", AppState.OUTDATED, "This ship's Grubbery predates Mail. It updates itself from its publisher.", false, error)
-    MailAvailability.SIGNED_OUT -> AppRow("Mail", AppState.SIGNED_OUT, "Signed out of the ship.", false, error)
-    MailAvailability.UNKNOWN -> AppRow("Mail", AppState.UNKNOWN, "Not asked yet.", false, error)
+        AppRow("Mail", AppState.OUTDATED, "This ship's Grubbery predates Mail. It updates itself from its publisher.", null, error)
+    MailAvailability.SIGNED_OUT -> AppRow("Mail", AppState.SIGNED_OUT, "Signed out of the ship.", null, error)
+    MailAvailability.UNKNOWN -> AppRow("Mail", AppState.UNKNOWN, "Not asked yet.", null, error)
 }
 
 /**
@@ -61,16 +66,16 @@ fun mailRow(availability: MailAvailability, error: String?): AppRow = when (avai
  */
 fun calendarRow(availability: CalendarAvailability, error: String?, grubbery: Boolean?): AppRow = when {
     availability == CalendarAvailability.PRESENT ->
-        AppRow("Calendar", AppState.WORKING, "Answering on this ship.", false, error)
+        AppRow("Calendar", AppState.WORKING, "Answering on this ship.", null, error)
     availability == CalendarAvailability.SIGNED_OUT ->
-        AppRow("Calendar", AppState.SIGNED_OUT, "Signed out of the ship.", false, error)
+        AppRow("Calendar", AppState.SIGNED_OUT, "Signed out of the ship.", null, error)
     availability == CalendarAvailability.UNKNOWN ->
-        AppRow("Calendar", AppState.UNKNOWN, "Not asked yet.", false, error)
+        AppRow("Calendar", AppState.UNKNOWN, "Not asked yet.", null, error)
     grubbery == false ->
-        AppRow("Calendar", AppState.MISSING, "The calendar comes with Grubbery, which this ship does not have.", true, error)
+        AppRow("Calendar", AppState.MISSING, "The calendar comes with Grubbery, which this ship does not have.", AppInstall.GRUBBERY, error)
     grubbery == true ->
-        AppRow("Calendar", AppState.OUTDATED, "This ship's Grubbery predates the calendar. It updates itself from its publisher.", false, error)
-    else -> AppRow("Calendar", AppState.UNKNOWN, "Not answering. Checking whether Grubbery is here.", false, error)
+        AppRow("Calendar", AppState.OUTDATED, "This ship's Grubbery predates the calendar. It updates itself from its publisher.", null, error)
+    else -> AppRow("Calendar", AppState.UNKNOWN, "Not answering. Checking whether Grubbery is here.", null, error)
 }
 
 /**
@@ -78,10 +83,24 @@ fun calendarRow(availability: CalendarAvailability, error: String?, grubbery: Bo
  * null is "not asked yet", which is not the same as absent.
  */
 fun latticeRow(installed: Boolean?, error: String? = null): AppRow = when (installed) {
-    true -> AppRow("Lattice", AppState.WORKING, "Answering on this ship.", false, error)
-    false -> AppRow("Lattice", AppState.MISSING, "Grubbery is not on this ship. Lattice comes with it.", true, error)
-    null -> AppRow("Lattice", AppState.UNKNOWN, "Not asked yet.", false, error)
+    true -> AppRow("Lattice", AppState.WORKING, "Answering on this ship.", null, error)
+    false -> AppRow("Lattice", AppState.MISSING, "Grubbery is not on this ship. Lattice comes with it.", AppInstall.GRUBBERY, error)
+    null -> AppRow("Lattice", AppState.UNKNOWN, "Not asked yet.", null, error)
 }
 
-/** Where a ship's Grubbery keeps the permissions its apps ask for. */
-fun permitsUrl(shipUrl: String): String = shipUrl.trimEnd('/') + "/grubbery/permits"
+/**
+ * Groups is its own desk, from its own publisher, and it is what chat
+ * itself runs on: without it there are no groups, channels or DMs.
+ */
+fun groupsRow(installed: Boolean?, error: String? = null): AppRow = when (installed) {
+    true -> AppRow("Groups", AppState.WORKING, "Answering on this ship.", null, error)
+    false -> AppRow("Groups", AppState.MISSING, "Chat runs on Groups, which this ship does not have.", AppInstall.GROUPS, error)
+    null -> AppRow("Groups", AppState.UNKNOWN, "Not asked yet.", null, error)
+}
+
+/**
+ * Where a ship's Grubbery keeps the permissions its apps ask for.
+ * Under /apps like any installed app's own pages, not under /grubbery,
+ * which is the framework's internal nexuses.
+ */
+fun permitsUrl(shipUrl: String): String = shipUrl.trimEnd('/') + "/apps/grubbery/permits"

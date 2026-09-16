@@ -651,6 +651,7 @@ fun TalonApp(
         homeOpen = false
         settingsOpen = false
         sidebarSettingsOpen = false
+        appsOpen = false
         adminListOpen = false
         adminGroupFlag = null
         invitesOpen = false
@@ -1993,6 +1994,13 @@ fun TalonApp(
                 latticeInstalled = app.sessionStore.active()?.shipUrl?.let { url ->
                     { io.nisfeb.talon.urbit.LatticeInstall.isInstalled(app.ktorHttp, url) }
                 },
+                groupsInstalled = app.sessionStore.active()?.shipUrl?.let { url ->
+                    { io.nisfeb.talon.urbit.GroupsInstall.isInstalled(app.session.http, url) }
+                },
+                onInstallGroups = io.nisfeb.talon.urbit.GroupsInstall.installer(
+                    app.session.http,
+                    { app.sessionStore.active()?.shipUrl },
+                ) { a, mark, body -> runCatching { app.repo.pokeRaw(a, mark, body) }.isSuccess },
                 shipUrl = app.sessionStore.active()?.shipUrl,
                 onBack = { appsOpen = false },
                 modifier = mod,

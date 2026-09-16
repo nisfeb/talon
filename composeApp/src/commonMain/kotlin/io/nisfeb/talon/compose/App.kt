@@ -388,6 +388,7 @@ fun App(
     // first, or the tap sets openChat and shows nothing.
     val jumpToChat: (String) -> Unit = { who ->
         showSettings = false
+        showApps = false
         showSelfProfile = false
         showStatusFeed = false
         showInvites = false
@@ -437,6 +438,7 @@ fun App(
         showSelfProfile = false
         showSettings = false
         showSidebarSettings = false
+        showApps = false
     }
     // A tapped system notification (iOS) asks for a chat from outside
     // the composition; land there the way the call strip's Message
@@ -1917,6 +1919,13 @@ fun App(
                         latticeInstalled = sessionStore.active()?.shipUrl?.let { url ->
                             { io.nisfeb.talon.urbit.LatticeInstall.isInstalled(http, url) }
                         },
+                        groupsInstalled = sessionStore.active()?.shipUrl?.let { url ->
+                            { io.nisfeb.talon.urbit.GroupsInstall.isInstalled(session.http, url) }
+                        },
+                        onInstallGroups = io.nisfeb.talon.urbit.GroupsInstall.installer(
+                            session.http,
+                            { sessionStore.active()?.shipUrl },
+                        ) { a, mark, body -> runCatching { repo.pokeRaw(a, mark, body) }.isSuccess },
                         shipUrl = sessionStore.active()?.shipUrl,
                         onBack = { showApps = false },
                     )
@@ -2800,6 +2809,7 @@ fun App(
                             showGroupAdminList = false
                             showInvites = false
                             showSettings = false
+                            showApps = false
                             showLoops = false
                             showContacts = false
                             showSearch = false

@@ -38,6 +38,7 @@ import io.nisfeb.talon.mail.MailRepo
 import io.nisfeb.talon.ui.AppRow
 import io.nisfeb.talon.ui.AppState
 import io.nisfeb.talon.ui.calendarRow
+import io.nisfeb.talon.ui.groupsRow
 import io.nisfeb.talon.ui.latticeRow
 import io.nisfeb.talon.ui.mailRow
 import io.nisfeb.talon.ui.permitsUrl
@@ -58,6 +59,10 @@ fun AppsSettingsScreen(
     calendar: CalendarRepo?,
     /** Probes whether Grubbery is on the ship; null where no ship is known. */
     latticeInstalled: (suspend () -> Boolean)?,
+    /** Probes whether %groups is on the ship, which chat itself runs on. */
+    groupsInstalled: (suspend () -> Boolean)? = null,
+    /** Installs %groups from its own publisher. Null hides the offer. */
+    onInstallGroups: (suspend () -> Result<Unit>)? = null,
     /** This ship's base URL, for the permits page. Null when signed out. */
     shipUrl: String?,
     onBack: () -> Unit,
@@ -73,18 +78,26 @@ fun AppsSettingsScreen(
     val calendarError by (calendar?.error ?: kotlinx.coroutines.flow.MutableStateFlow(null)).collectAsState()
 
     var lattice by remember { mutableStateOf<Boolean?>(null) }
+    var groups by remember { mutableStateOf<Boolean?>(null) }
     var busy by remember { mutableStateOf<String?>(null) }
     var note by remember { mutableStateOf<String?>(null) }
 
     suspend fun probeLattice() {
         lattice = latticeInstalled?.let { runCatching { it() }.getOrNull() }
     }
-    LaunchedEffect(latticeInstalled) { probeLattice() }
+    suspend fun probeGroups() {
+        groups = groupsInstalled?.let { runCatching { it() }.getOrNull() }
+    }
+    LaunchedEffect(latticeInstalled, groupsInstalled) {
+        probeLattice()
+        probeGroups()
+    }
 
     val rows = buildList {
         if (mailAvailability != null) add(mailRow(mailAvailability, mailError))
         if (calendarAvailability != null) add(calendarRow(calendarAvailability, calendarError, lattice))
         add(latticeRow(lattice))
+        add(groupsRow(groups))
     }
 
     /**
@@ -93,15 +106,23 @@ fun AppsSettingsScreen(
      * there is nothing else left to install.
      */
     fun install(row: AppRow) {
-        val action = installGrubbery ?: return
+        val action = when (row.install) {
+            io.nisfeb.talon.ui.AppInstall.GROUPS -> onInstallGroups
+            io.nisfeb.talon.ui.AppInstall.GRUBBERY -> installGrubbery
+            null -> null
+        } ?: return
         busy = row.name
         note = null
         scope.launch {
             action().fold(
-                onSuccess = { note = "Installed Grubbery. The apps arrive with it." },
+                onSuccess = {
+                    note = if (row.install == io.nisfeb.talon.ui.AppInstall.GROUPS) "Installed Groups."
+                    else "Installed Grubbery. The apps arrive with it."
+                },
                 onFailure = { note = it.message ?: "The install did not finish." },
             )
             probeLattice()
+            probeGroups()
             runCatching { mail?.refresh() }
             runCatching { calendar?.refreshAll() }
             busy = null
@@ -126,6 +147,7 @@ fun AppsSettingsScreen(
                     scope.launch {
                         busy = "all"
                         probeLattice()
+                        probeGroups()
                         runCatching { mail?.refresh() }
                         runCatching { calendar?.refreshAll() }
                         busy = null
@@ -174,7 +196,7 @@ fun AppsSettingsScreen(
                     }
                     if (busy == row.name) {
                         CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
-                    } else if (row.canInstall && installGrubbery != null) {
+                    } else if (row.canInstall && (if (row.install == io.nisfeb.talon.ui.AppInstall.GROUPS) onInstallGroups != null else installGrubbery != null)) {
                         TextButton(enabled = busy == null, onClick = { install(row) }) { Text("Install") }
                     }
                 }

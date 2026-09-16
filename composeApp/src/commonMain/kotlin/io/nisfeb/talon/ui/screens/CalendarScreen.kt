@@ -1524,10 +1524,11 @@ private fun WeekGrid(
     val nowMinute = remember(today) { Instant.fromEpochMilliseconds(nowMs()).toLocalDateTime(zone).let { it.hour * 60 + it.minute } }
     BoxWithConstraints(modifier) {
         val colWidth = maxOf(88.dp, (maxWidth - gutter) / 7)
-        Column(Modifier.fillMaxSize().horizontalScroll(hScroll)) {
+        Column(Modifier.fillMaxSize()) {
             // Day heads, then the all-day strip.
             Row {
                 Spacer(Modifier.width(gutter))
+                Row(Modifier.horizontalScroll(hScroll)) {
                 days.forEach { d ->
                     val isSel = d == selected
                     Column(
@@ -1544,9 +1545,11 @@ private fun WeekGrid(
                         )
                     }
                 }
+                }
             }
             Row(Modifier.padding(bottom = 2.dp)) {
                 Spacer(Modifier.width(gutter))
+                Row(Modifier.horizontalScroll(hScroll)) {
                 days.forEach { d ->
                     Column(Modifier.width(colWidth).padding(horizontal = 1.dp), verticalArrangement = Arrangement.spacedBy(1.dp)) {
                         byDay[d].orEmpty().filter { it.all }.take(3).forEach { r ->
@@ -1560,6 +1563,7 @@ private fun WeekGrid(
                             )
                         }
                     }
+                }
                 }
             }
             HorizontalDivider()
@@ -1577,6 +1581,7 @@ private fun WeekGrid(
                             }
                         }
                     }
+                    Row(Modifier.horizontalScroll(hScroll)) {
                     days.forEach { d ->
                         val timed = byDay[d].orEmpty().filter { !it.all }.sortedWith(compareBy({ it.l }, { it.r }))
                         // Blocks that overlap sit in lanes, leftmost first.
@@ -1620,6 +1625,7 @@ private fun WeekGrid(
                                 HorizontalDivider(Modifier.offset(y = hourDp * nowMinute / 60f), thickness = 2.dp, color = MaterialTheme.colorScheme.error)
                             }
                         }
+                    }
                     }
                 }
             }
