@@ -605,6 +605,7 @@ fun TalonApp(
     }
     var loopsOpen by remember { mutableStateOf(false) }
     var sidebarSettingsOpen by remember { mutableStateOf(false) }
+    var appsOpen by remember { mutableStateOf(false) }
     var adminListOpen by remember { mutableStateOf(false) }
     var adminGroupFlag by remember { mutableStateOf<String?>(null) }
     var invitesOpen by remember { mutableStateOf(false) }
@@ -1417,6 +1418,7 @@ fun TalonApp(
         BackHandler(enabled = assistantOpen) { assistantOpen = false }
         BackHandler(enabled = loopsOpen) { loopsOpen = false }
         BackHandler(enabled = sidebarSettingsOpen) { sidebarSettingsOpen = false }
+        BackHandler(enabled = appsOpen) { appsOpen = false }
         BackHandler(enabled = adminGroupFlag != null) { adminGroupFlag = null }
         BackHandler(enabled = adminListOpen && adminGroupFlag == null) {
             adminListOpen = false
@@ -1501,6 +1503,7 @@ fun TalonApp(
             invitesOpen -> "Invites"
             openGroupFlag != null -> "GroupHome($openGroupFlag)"
             sidebarSettingsOpen -> "SidebarSettings"
+            appsOpen -> "Apps"
             assistantOpen -> "Assistant"
             loopsOpen -> "Loops"
             settingsOpen -> "Settings"
@@ -1984,6 +1987,18 @@ fun TalonApp(
             // are true while the user is in Sidebar. Order this
             // branch BEFORE `settingsOpen` so the deeper screen
             // wins (mirrors App.kt's same fix).
+            appsOpen -> io.nisfeb.talon.ui.screens.AppsSettingsScreen(
+                mail = mailRepo,
+                calendar = calendarRepo,
+                latticeInstalled = app.sessionStore.active()?.shipUrl?.let { url ->
+                    { io.nisfeb.talon.urbit.LatticeInstall.isInstalled(app.ktorHttp, url) }
+                },
+                onInstallCalendar = calendarInstall,
+                shipUrl = app.sessionStore.active()?.shipUrl,
+                onBack = { appsOpen = false },
+                modifier = mod,
+            )
+
             sidebarSettingsOpen -> {
                 SidebarSettingsScreen(
                     repo = app.repo,
@@ -2079,6 +2094,7 @@ fun TalonApp(
                     ),
                     onBack = { settingsOpen = false },
                     onOpenSidebarSettings = { sidebarSettingsOpen = true },
+                    onOpenApps = { appsOpen = true },
                     onOpenShareLoginQr = { shareLoginQrOpen = true },
                     onOpenLoops = { loopsOpen = true },
                     onAlwaysPatpChanged = { on ->

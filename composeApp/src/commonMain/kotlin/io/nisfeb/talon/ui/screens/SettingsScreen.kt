@@ -126,6 +126,8 @@ fun SettingsScreen(
      *  toggle which rail items show. Defaults to no-op for callers
      *  that haven't wired the sub-screen yet. */
     onOpenSidebarSettings: () -> Unit = {},
+    /** Opens the Apps page: what this ship's Grubbery apps are doing. */
+    onOpenApps: () -> Unit = {},
     /** Opens the login-handoff QR generator. Defaults to no-op so
      *  hosts that haven't wired the share screen yet (tests, older
      *  call sites) don't render the row. */
@@ -245,6 +247,23 @@ fun SettingsScreen(
             // for the rail, though the same preference decides what
             // the kebab holds there, and a setting that vanishes with
             // the window is one nobody finds.
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable(onClick = onOpenApps)
+                    .padding(vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Apps", style = MaterialTheme.typography.bodyLarge)
+                    Text(
+                        "Mail, the calendar and Lattice: whether they answer, and their permissions.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
             val drawerNav = io.nisfeb.talon.ui.isDrawerNavigation
             Row(
                 modifier = Modifier

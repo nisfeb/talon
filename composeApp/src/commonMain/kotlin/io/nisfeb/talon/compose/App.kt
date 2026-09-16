@@ -256,6 +256,7 @@ fun App(
     var settingsStartOnAccount by remember { mutableStateOf(false) }
     var showSettings by remember { mutableStateOf(false) }
     var showSidebarSettings by remember { mutableStateOf(false) }
+    var showApps by remember { mutableStateOf(false) }
     var showLoops by remember { mutableStateOf(false) }
     var openChat by remember { mutableStateOf<String?>(null) }
     // Optional message id to scroll-and-flash when DmChatScreen mounts /
@@ -605,6 +606,7 @@ fun App(
     PlatformBackHandler(enabled = showSidebarSettings) {
         showSidebarSettings = false
     }
+    PlatformBackHandler(enabled = showApps) { showApps = false }
     PlatformBackHandler(enabled = showLoops) {
         showLoops = false
     }
@@ -1907,6 +1909,18 @@ fun App(
                     // — which renders Settings, giving the user a
                     // breadcrumb pop instead of a full unwind to the
                     // chat list.
+                    // Before showSettings, so Back from Apps pops to
+                    // Settings rather than out of it (same as Sidebar).
+                    showApps -> io.nisfeb.talon.ui.screens.AppsSettingsScreen(
+                        mail = mailRepo,
+                        calendar = calendarRepo,
+                        latticeInstalled = sessionStore.active()?.shipUrl?.let { url ->
+                            { io.nisfeb.talon.urbit.LatticeInstall.isInstalled(http, url) }
+                        },
+                        onInstallCalendar = calendarInstall,
+                        shipUrl = sessionStore.active()?.shipUrl,
+                        onBack = { showApps = false },
+                    )
                     showSidebarSettings -> {
                         SidebarSettingsScreen(
                             repo = repo,
@@ -1970,6 +1984,7 @@ fun App(
                             // wires it to dailyDigest.generateAndNotifyAsync
                             // when the production MainActivity migrates here.
                             onOpenSidebarSettings = { showSidebarSettings = true },
+                            onOpenApps = { showApps = true },
                             onOpenShareLoginQr = { shareLoginQrOpen = true },
                             onOpenLoops = { showLoops = true },
                             localShip = localShip,
