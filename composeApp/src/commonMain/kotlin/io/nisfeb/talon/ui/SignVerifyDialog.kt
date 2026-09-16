@@ -72,7 +72,8 @@ fun SignVerifyDialog(signer: LatticeSign, ourShip: String, onDismiss: () -> Unit
                 }
                 if (signing) {
                     Text(
-                        "Signs with $ourShip's own key. Anyone can check it against Azimuth.",
+                        "Signs with $ourShip's own key. Anyone can check it against the key your " +
+                            "ship publishes: Azimuth for an Azimuth ship, Bitcoin for a Groundwire comet.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )

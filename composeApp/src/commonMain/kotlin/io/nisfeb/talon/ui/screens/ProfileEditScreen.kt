@@ -58,7 +58,8 @@ fun ProfileEditScreen(
     repo: TlonChatRepo,
     ourPatp: String,
     onBack: () -> Unit,
-    /** Reads this ship's public keys out of Azimuth, for showing and copying. */
+    /** Reads this ship's public keys out of Azimuth, for showing and copying.
+     *  Comets have no Azimuth point; the section says so rather than asking. */
     keys: io.nisfeb.talon.ui.AzimuthRpc = io.nisfeb.talon.ui.AzimuthRpc.None,
     /** Signs and checks through this ship's Lattice. Null where there is none. */
     signer: io.nisfeb.talon.urbit.LatticeSign? = null,
@@ -82,12 +83,19 @@ fun ProfileEditScreen(
 
     LaunchedEffect(ourPatp, keys) {
         if (ourPatp.isBlank()) return@LaunchedEffect
+        // A comet is not in Azimuth at all, so asking can only fail.
+        if (io.nisfeb.talon.ui.isComet(ourPatp)) {
+            keysProblem = "This is a comet: its name is the fingerprint of its own keys, so " +
+                "Azimuth holds no point for it. A Groundwire comet is attested on Bitcoin instead. " +
+                "Signing and checking still work; they use the key your ship publishes."
+            return@LaunchedEffect
+        }
         keys.keys(ourPatp).fold(
             onSuccess = { k ->
                 shipKeys = k
                 keysProblem = if (k == null) "Azimuth holds no keys for this ship." else null
             },
-            onFailure = { keysProblem = "Could not read your keys from your ship's Azimuth." },
+            onFailure = { keysProblem = "Could not read your keys from your ship's Azimuth mirror." },
         )
     }
 
@@ -252,9 +260,10 @@ fun ProfileEditScreen(
             ) { Text(if (saving) "Saving…" else "Save") }
 
             HorizontalDivider()
-            // The ship's own networking keys, which are public: Azimuth
-            // holds them, so anyone can already read them. Shown here so
-            // they can be handed to someone who asks for them.
+            // The ship's own networking keys, which are public: whatever
+            // registry attests the ship already publishes them, so anyone
+            // can read them. Shown here so they can be handed over when
+            // somebody asks.
             Column(modifier = Modifier.fillMaxWidth()) {
                 Text(
                     "Public keys",
@@ -269,7 +278,7 @@ fun ProfileEditScreen(
                     )
                 } else {
                     Text(
-                        "Your ship's networking keys, as Azimuth holds them.",
+                        "Your ship's networking keys, as Azimuth holds them.",  // an Azimuth ship; a comet says so above
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )

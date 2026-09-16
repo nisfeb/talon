@@ -165,6 +165,17 @@ object AzimuthNames {
     }
 }
 
+/**
+ * Whether [ship] is a comet, by the length of its @p: sixteen syllables
+ * where a planet has four and a moon eight.
+ *
+ * Worth asking before reaching for Azimuth. A comet has no Azimuth
+ * point at all — its name IS the fingerprint of its keys — and a
+ * Groundwire comet's credential is attested on Bitcoin instead.
+ */
+internal fun isComet(ship: String): Boolean =
+    ship.startsWith("~") && ship.drop(1).replace("-", "").length == 48
+
 /** Reads a ship's Azimuth keys. Separate so the naming path can be
  *  tested without a network, and so a host with no %azimuth-rpc can
  *  wire [None] instead. */
@@ -181,8 +192,10 @@ interface AzimuthRpc {
     /** A ship's public keys, as Azimuth holds them. */
     data class Keys(val auth: String, val crypt: String, val suite: Int)
 
-    /** [Keys] for a ship, or null where Azimuth holds none. Failure is
-     *  the lookup itself not happening. */
+    /** [Keys] for a ship, or null where Azimuth holds none — which
+     *  includes every comet, Groundwire's among them: those are attested
+     *  on Bitcoin and Azimuth has no point for them. Failure is the
+     *  lookup itself not happening. */
     suspend fun keys(ship: String): kotlin.Result<Keys?> =
         kotlin.Result.failure(IllegalStateException("no azimuth-rpc"))
 

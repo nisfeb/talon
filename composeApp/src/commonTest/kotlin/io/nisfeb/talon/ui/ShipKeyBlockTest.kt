@@ -2,6 +2,8 @@ package io.nisfeb.talon.ui
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertTrue
 
 /** What someone pastes when they are asked for their public key. */
 class ShipKeyBlockTest {
@@ -17,5 +19,15 @@ class ShipKeyBlockTest {
             """.trimIndent(),
             shipKeyBlock("~sampel-palnet", keys),
         )
+    }
+
+    @Test
+    fun `a comet is told apart from the ships Azimuth knows`() {
+        assertTrue(isComet("~dilnym-ritmet-haddeb-sigfen--maslun-labtem-pilryc-locwep"))
+        assertFalse(isComet("~sampel-palnet"))
+        assertFalse(isComet("~zod"))
+        assertFalse(isComet("~marzod"))
+        assertFalse(isComet("~sampel-palnet-sampel-palnet"))
+        assertFalse(isComet("not-a-ship"))
     }
 }
