@@ -7,7 +7,7 @@ import platform.Foundation.NSOperationQueue
 import platform.UIKit.UIApplication
 import platform.UIKit.UIApplicationDidBecomeActiveNotification
 import platform.UIKit.UIApplicationDidEnterBackgroundNotification
-import platform.UIKit.UIApplicationStateBackground
+import platform.UIKit.UIApplicationState
 
 /**
  * Whether the app is in front, from UIKit's own notifications.
@@ -31,7 +31,7 @@ object IosAppLifecycle {
         // app started into the background (a VoIP push, say) would
         // otherwise read foreground=true until the first notification.
         _foreground.value =
-            UIApplication.sharedApplication.applicationState != UIApplicationStateBackground
+            UIApplication.sharedApplication.applicationState != UIApplicationState.UIApplicationStateBackground
         val centre = NSNotificationCenter.defaultCenter
         centre.addObserverForName(UIApplicationDidBecomeActiveNotification, null, NSOperationQueue.mainQueue) {
             _foreground.value = true

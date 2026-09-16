@@ -20,11 +20,13 @@ class IosNotifier : Notifier {
         // A non-null key that isn't mail is a chat whom, and chat is
         // APNs-covered. Null keys and mail threads post locally.
         if (key != null && !key.startsWith("mail:")) return
-        val content = UNMutableNotificationContent().apply {
-            this.title = title
-            this.body = body
-            if (key != null) threadIdentifier = key
-        }
+        val content = UNMutableNotificationContent()
+        // The platform lib maps the properties read-only (the parent's
+        // declaration wins over the mutable subclass's), so set them
+        // through the Objective-C accessors it does export.
+        content.setTitle(title)
+        content.setBody(body)
+        if (key != null) content.setThreadIdentifier(key)
         // A stable identifier per key replaces a still-pending repeat
         // rather than stacking duplicates.
         val request = UNNotificationRequest.requestWithIdentifier(

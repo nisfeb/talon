@@ -59,6 +59,7 @@ private fun documentsDir(): String =
  * that directory to the Files app and over AFC (see IosFiles). Shared
  * with IosShipDataEraser so erase looks where the db actually lives.
  */
+@OptIn(kotlinx.cinterop.ExperimentalForeignApi::class)
 internal fun appSupportDir(): String {
     val dir = NSSearchPathForDirectoriesInDomains(
         NSApplicationSupportDirectory, NSUserDomainMask, true,
@@ -75,6 +76,7 @@ internal fun appSupportDir(): String {
     return dir
 }
 
+@OptIn(kotlinx.cinterop.ExperimentalForeignApi::class)
 fun createAppDatabase(shipKey: String): AppDatabase {
     val name = "talon-${sanitizeShipKey(shipKey)}.db"
     val dir = appSupportDir()
