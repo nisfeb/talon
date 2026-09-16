@@ -1996,6 +1996,10 @@ fun App(
                                 ?.let { io.nisfeb.talon.ui.EyreAzimuthRpc(session.http, it) }
                                 ?: io.nisfeb.talon.ui.AzimuthRpc.None
                         },
+                        signer = remember(session) {
+                            session.baseUrl?.takeIf { it.isNotBlank() }
+                                ?.let { io.nisfeb.talon.urbit.LatticeSign(session.http, it) }
+                        },
                     )
                     showStatusFeed -> StatusFeedScreen(
                         db = db,

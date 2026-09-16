@@ -60,6 +60,8 @@ fun ProfileEditScreen(
     onBack: () -> Unit,
     /** Reads this ship's public keys out of Azimuth, for showing and copying. */
     keys: io.nisfeb.talon.ui.AzimuthRpc = io.nisfeb.talon.ui.AzimuthRpc.None,
+    /** Signs and checks through this ship's Lattice. Null where there is none. */
+    signer: io.nisfeb.talon.urbit.LatticeSign? = null,
     modifier: Modifier = Modifier,
 ) {
     val scope = rememberCoroutineScope()
@@ -76,6 +78,7 @@ fun ProfileEditScreen(
     var keysProblem by remember(ourPatp) { mutableStateOf<String?>(null) }
     val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
     var copied by remember(ourPatp) { mutableStateOf(false) }
+    var signing by remember(ourPatp) { mutableStateOf(false) }
 
     LaunchedEffect(ourPatp, keys) {
         if (ourPatp.isBlank()) return@LaunchedEffect
@@ -278,6 +281,14 @@ fun ProfileEditScreen(
                         copied = true
                     }) { Text(if (copied) "Copied" else "Copy keys") }
                 }
+                if (signer != null) {
+                    Text(
+                        "Sign something with this ship's key, or check what someone else signed.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    TextButton(onClick = { signing = true }) { Text("Sign or check") }
+                }
             }
 
             HorizontalDivider()
@@ -290,6 +301,10 @@ fun ProfileEditScreen(
                 fileName = "invite-" + ourPatp.removePrefix("~"),
             )
         }
+    }
+
+    if (signing && signer != null) {
+        io.nisfeb.talon.ui.SignVerifyDialog(signer = signer, ourShip = ourPatp, onDismiss = { signing = false })
     }
 }
 
@@ -356,6 +371,7 @@ private fun parseSwatch(hex: String): Color {
     val b = h.substring(4, 6).toInt(16)
     return Color(r, g, b)
 }
+
 
 /** One key, labelled, wrapping rather than trailing off the screen. */
 @Composable

@@ -1778,6 +1778,10 @@ fun TalonApp(
                         ?.let { io.nisfeb.talon.ui.EyreAzimuthRpc(app.session.http, it) }
                         ?: io.nisfeb.talon.ui.AzimuthRpc.None
                 },
+                signer = remember(app.session) {
+                    app.session.baseUrl?.takeIf { it.isNotBlank() }
+                        ?.let { io.nisfeb.talon.urbit.LatticeSign(app.session.http, it) }
+                },
                 modifier = mod,
             )
 
