@@ -49,6 +49,8 @@ class OrreryRepo(
     private val scope: CoroutineScope,
     private val db: AppDatabase,
     private val platform: String,
+    /** The device's embedder, where it has one; the pattern gate needs it. */
+    private val embedder: io.nisfeb.talon.ai.SearchEmbedderClient? = null,
 ) {
     // Writes under the key ride a client with no cookie: with both on
     // one request the ship would take the cookie and write as the owner.
@@ -236,6 +238,10 @@ class OrreryRepo(
         val allowed = db.orreryChannels().all().toSet()
         val ourNick = db.contacts().get(s)?.nickname
         val model = if (isLocalTriageSupported) LocalModels.best()?.second else null
+        val emb = embedder
+        val gate = if (model != null && emb != null) runCatching {
+            PatternGate.build(emb, db.orreryNoticed().snippets(s, "confirmed", GATE_EXAMPLES), db.orreryNoticed().snippets(s, "discarded", GATE_EXAMPLES))
+        }.getOrNull() else null
         var modelRuns = 0
         var up = Facts()
         for (m in posts) {
@@ -246,7 +252,11 @@ class OrreryRepo(
             // The rules first, then the model where there is one: the
             // same claim from both is one row, and the rules got there.
             val byRules = ruleFacts(text, m.author, m.sentMs, s, index)
-            val byModel = if (model != null && modelRuns < MODEL_PER_PASS && text.length >= 8) {
+            // The gate, once the person has taught it: a message that
+            // reads like what they discard does not spend a model run.
+            val worth = gate == null || emb == null ||
+                (runCatching { emb.embed(text) }.getOrNull()?.let { gate.worthAModel(it) } ?: true)
+            val byModel = if (model != null && worth && modelRuns < MODEL_PER_PASS && text.length >= 8) {
                 modelRuns++
                 ModelExtractor.extract(model, index, bodies, text, m.author, m.sentMs, s, view.attrs)
             } else emptyList()
@@ -327,6 +337,7 @@ class OrreryRepo(
         const val TRUST_AFTER = 3
         // ponytail: a per-pass cap; a per-day budget when a phone needs one.
         const val MODEL_PER_PASS = 20
+        const val GATE_EXAMPLES = 50
 
         /** A noticed row as the facts it stands for. */
         fun factsOf(n: OrreryNoticedEntity): Facts = Facts(

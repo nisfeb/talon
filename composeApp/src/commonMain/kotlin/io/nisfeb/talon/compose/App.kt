@@ -1004,7 +1004,7 @@ fun App(
         }
         // Orrery rides the same surface, under a key of its own.
         val orreryRepo = remember(session, db) {
-            io.nisfeb.talon.orrery.OrreryRepo(session.http, loopScope, db, io.nisfeb.talon.ui.platformLabel)
+            io.nisfeb.talon.orrery.OrreryRepo(session.http, loopScope, db, io.nisfeb.talon.ui.platformLabel, searchEmbedderClient)
         }
         LaunchedEffect(orreryRepo, mailShipUrl, loggedInShip) {
             val ship = loggedInShip
