@@ -51,7 +51,11 @@ class OrreryRepo(
     private val platform: String,
     /** The device's embedder, where it has one; the pattern gate needs it. */
     private val embedder: io.nisfeb.talon.ai.SearchEmbedderClient? = null,
+    /** The cloud opt-in, where the shell offers one. */
+    val cloud: CloudTriage? = null,
 ) {
+    private var cloudModel: LocalModel? = null
+
     // Writes under the key ride a client with no cookie: with both on
     // one request the ship would take the cookie and write as the owner.
     private val bare: HttpClient by lazy { createAppHttpClient() }
@@ -242,7 +246,7 @@ class OrreryRepo(
 
     private suspend fun reading(a: OrreryApi, row: OrreryAccountEntity, s: String): Reading? {
         val view = runCatching { a.state(row.token) }.getOrElse { Log.i(TAG, "state view skipped: ${it.message}"); return null }
-        val model = if (isLocalTriageSupported) LocalModels.best()?.second else null
+        val model = cloudModelIfOn() ?: (if (isLocalTriageSupported) LocalModels.best()?.second else null)
         val emb = embedder
         val gate = if (model != null && emb != null) runCatching {
             PatternGate.build(emb, db.orreryNoticed().snippets(s, "confirmed", GATE_EXAMPLES), db.orreryNoticed().snippets(s, "discarded", GATE_EXAMPLES))
@@ -326,8 +330,18 @@ class OrreryRepo(
         _actions.value = _actions.value.filterNot { it.id == id }
     }
 
+    /** The cloud rung, opened once, only while the person has it on and a key is set. */
+    private suspend fun cloudModelIfOn(): LocalModel? {
+        val c = cloud ?: return null
+        if (!c.on.value) return null
+        if (c.rung.status() != RungStatus.Ready) return null
+        return cloudModel ?: runCatching { c.rung.open() }.getOrNull()?.also { cloudModel = it }
+    }
+
     /** Where the ladder stands on this device, for Settings. */
     suspend fun refreshModel() {
+        val c = cloud
+        if (c != null && c.on.value) { _model.value = c.rung.name to c.rung.status(); return }
         if (!isLocalTriageSupported) { _model.value = null; return }
         val all = LocalModels.statuses()
         val pick = all.firstOrNull { it.second == RungStatus.Ready }

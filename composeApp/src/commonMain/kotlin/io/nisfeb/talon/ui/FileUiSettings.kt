@@ -62,6 +62,7 @@ class FileUiSettings(
         val hiddenCalendars: List<String> = emptyList(),
         val defaultCalendar: String = "",
         val calendarWeekView: Boolean = false,
+        val orreryCloudTriage: Boolean = false,
         val homeFahrenheit: Boolean = true,
         val homeTwentyFourHour: Boolean = false,
         val homeLayout: String = "",
@@ -184,6 +185,14 @@ class FileUiSettings(
     override fun setCalendarWeekView(on: Boolean) {
         if (_calendarWeekView.value == on) return
         _calendarWeekView.value = on
+        persistCurrent()
+    }
+
+    private val _orreryCloudTriage = MutableStateFlow(initial.orreryCloudTriage)
+    override val orreryCloudTriage: StateFlow<Boolean> = _orreryCloudTriage.asStateFlow()
+    override fun setOrreryCloudTriage(on: Boolean) {
+        if (_orreryCloudTriage.value == on) return
+        _orreryCloudTriage.value = on
         persistCurrent()
     }
 
@@ -347,6 +356,7 @@ class FileUiSettings(
                 hiddenCalendars = _hiddenCalendars.value.toList(),
                 defaultCalendar = _defaultCalendar.value,
                 calendarWeekView = _calendarWeekView.value,
+                orreryCloudTriage = _orreryCloudTriage.value,
                 homeFahrenheit = _homeFahrenheit.value,
                 homeTwentyFourHour = _homeTwentyFourHour.value,
                 homeLayout = _homeLayout.value,

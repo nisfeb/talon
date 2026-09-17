@@ -129,6 +129,14 @@ interface UiSettings {
     fun setCalendarWeekView(on: Boolean)
 
     /**
+     * Whether the orrery triage may also read messages with the person's
+     * cloud AI key. Off by default, and stays off until they choose it:
+     * every message the triage reads then leaves the device. Per device.
+     */
+    val orreryCloudTriage: StateFlow<Boolean>
+    fun setOrreryCloudTriage(on: Boolean)
+
+    /**
      * How the home dial reads out temperature and the hour.
      *
      * Per install, like the place: which units somebody reads is a fact
@@ -355,6 +363,9 @@ class InMemoryUiSettings(
     private val _calendarWeekView = MutableStateFlow(false)
     override val calendarWeekView: StateFlow<Boolean> = _calendarWeekView.asStateFlow()
     override fun setCalendarWeekView(on: Boolean) { _calendarWeekView.value = on }
+    private val _orreryCloudTriage = MutableStateFlow(false)
+    override val orreryCloudTriage: StateFlow<Boolean> = _orreryCloudTriage.asStateFlow()
+    override fun setOrreryCloudTriage(on: Boolean) { _orreryCloudTriage.value = on }
 
     private val _homeFahrenheit = MutableStateFlow(true)
     override val homeFahrenheit: StateFlow<Boolean> = _homeFahrenheit.asStateFlow()
