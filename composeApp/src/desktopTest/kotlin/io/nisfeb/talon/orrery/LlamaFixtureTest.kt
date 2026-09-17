@@ -56,7 +56,29 @@ class LlamaFixtureTest {
             println("LlamaFixtureTest: no model given; skipped")
             return
         }
-        LlamaCppModel(path, "fixture").use { model ->
+        LlamaCppModel(path, "fixture").use { model -> judge(model) }
+    }
+
+    /**
+     * The same gate for a model on a local server, to measure a candidate
+     * before the ladder trusts it:
+     *
+     *   TALON_SERVER_URL=http://localhost:1234 TALON_SERVER_MODEL=qwen2.5-7b-instruct ./gradlew :composeApp:desktopTest --tests '*LlamaFixtureTest*'
+     */
+    @Test
+    fun `a server model reads the fixtures at least as well as the rules`() {
+        val url = System.getenv("TALON_SERVER_URL")
+        val name = System.getenv("TALON_SERVER_MODEL")
+        if (url.isNullOrBlank() || name.isNullOrBlank()) {
+            println("LlamaFixtureTest: no server given; skipped")
+            return
+        }
+        val model = serverModel(url, name)
+        model.use { judge(it) }
+    }
+
+    private fun judge(model: LocalModel) {
+        run {
             var hit = 0
             var wanted = 0
             var extra = 0
