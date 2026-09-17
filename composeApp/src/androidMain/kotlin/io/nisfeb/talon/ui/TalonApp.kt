@@ -432,6 +432,17 @@ fun TalonApp(
         if (mailShipUrl != null && loggedInShip != null) orreryRepo.attach(mailShipUrl, loggedInShip)
         else orreryRepo.detach()
     }
+    val orreryActions by orreryRepo.actions.collectAsState()
+    var openAction by remember { mutableStateOf<io.nisfeb.talon.orrery.OrreryAction?>(null) }
+    openAction?.let { action ->
+        io.nisfeb.talon.ui.OrreryActionDialog(
+            action = action,
+            orrery = orreryRepo,
+            send = { whom, text -> app.repo.send(whom, text) },
+            addEvent = { title, start, end -> calendarRepo.addShared(null, title, start, end) },
+            onClose = { openAction = null },
+        )
+    }
     val calendarInstall: suspend () -> Result<Unit> = remember(app, calendarRepo) {
         val install = io.nisfeb.talon.urbit.LatticeInstall.installer(
             app.ktorHttp,
@@ -1966,6 +1977,8 @@ fun TalonApp(
                     invites = app.repo.invitesFlow.collectAsState().value
                         ?.map { it.flag }.orEmpty(),
                     onOpenInvites = { homeOpen = false; invitesOpen = true },
+                    actions = orreryActions.map { io.nisfeb.talon.ui.NewAction(it.id, it.kind, it.title, it.by, it.due?.let { d -> runCatching { kotlinx.datetime.Instant.parse(d).toEpochMilliseconds() }.getOrNull() }) },
+                    onOpenAction = { id -> openAction = orreryActions.firstOrNull { it.id == id } },
                     onOpenContact = { other -> profileSheetShip = other },
                     onOpenStatuses = { homeOpen = false; statusFeedOpen = true },
                     onOpenConversation = { whom -> homeOpen = false; openWhom = whom },

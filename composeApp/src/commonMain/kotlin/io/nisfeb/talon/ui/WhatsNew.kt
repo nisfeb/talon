@@ -30,6 +30,9 @@ enum class NewKind {
     UNREAD,
     MAIL,
     INVITE,
+
+    /** The analyst proposed something, and it waits on you. */
+    ACTION,
 }
 
 data class NewItem(
@@ -40,6 +43,9 @@ data class NewItem(
     val line: String,
     val atMs: Long,
 )
+
+/** One open orrery action, as much of it as this needs. */
+data class NewAction(val id: String, val kind: String, val title: String, val by: String, val dueMs: Long?)
 
 /** One unread mail thread, as much of it as this needs. */
 data class NewMail(val id: String, val from: String, val subject: String, val atMs: Long)
@@ -61,6 +67,7 @@ fun whatsNew(
     limit: Int,
     label: (whom: String) -> String,
     preview: (MessageEntity) -> String,
+    actions: List<NewAction> = emptyList(),
 ): List<NewItem> {
     val mentions = mutableListOf<NewItem>()
     val unread = mutableListOf<NewItem>()
@@ -99,9 +106,21 @@ fun whatsNew(
         )
     }
 
+    // An action waits on the person the way a mention does, so it
+    // sits with the mentions, not after the unread.
+    val actionItems = actions.map {
+        NewItem(
+            kind = NewKind.ACTION,
+            target = it.id,
+            title = it.title,
+            line = it.kind + " proposed by " + it.by.ifBlank { "the assistant" },
+            atMs = it.dueMs ?: 0L,
+        )
+    }
+
     fun newestFirst(rows: List<NewItem>) = rows.sortedByDescending { it.atMs }
     return (
-        newestFirst(mentions) + newestFirst(unread) +
+        newestFirst(mentions) + actionItems + newestFirst(unread) +
             newestFirst(mailItems) + inviteItems
         ).take(limit.coerceAtLeast(0))
 }
