@@ -104,6 +104,62 @@ class OrreryFactsTest {
         assertTrue(f.observations.all { it.sourceKind == "talon-call" && it.sourceId == "urb://~zod/lattice/calls/1" })
     }
 
+    private fun occurrence(idx: Int, startMs: Long, kind: String = "weekly", name: String = "Standup", location: String = "") =
+        CalendarRow(
+            id = "E9", cal = "default", idx = idx, kind = kind,
+            meta = buildJsonObject {
+                put("name", JsonPrimitive(name))
+                if (location.isNotEmpty()) put("location", JsonPrimitive(location))
+            },
+            l = startMs, r = startMs + 1_800_000,
+        )
+
+    @Test
+    fun `a recurring event is one activity with its cadence, last and next`() {
+        val week = 7L * 24 * 3_600_000
+        val rows = (0..3).map { occurrence(it, noon - 2 * week + it * week, location = "the office") }
+        val f = calendarFacts(rows, me, nowMs = noon + 3_600_000)
+        assertEquals(listOf("activity/cal-default-e9"), f.bodies.map { it.id }, "one body for the series, not four")
+        fun value(attr: String) = f.observations.single { it.attr == attr && it.subject.startsWith("activity/") }
+        assertEquals(JsonPrimitive("weekly"), value("cadence").value)
+        assertEquals(JsonPrimitive(isoUtc(noon)), value("last").value, "the most recent one that has started")
+        assertEquals(JsonPrimitive(isoUtc(noon + week)), value("next").value)
+        assertEquals("default/E9", value("last").sourceId, "the series, with no occurrence in the pointer")
+        assertEquals(JsonPrimitive("the office"), value("location").value)
+    }
+
+    @Test
+    fun `the anchors come from the occurrences, so a later pass writes nothing new`() {
+        val week = 7L * 24 * 3_600_000
+        val rows = (0..3).map { occurrence(it, noon - 2 * week + it * week) }
+        val early = activityFacts(rows, me, nowMs = noon + 3_600_000)
+        val later = activityFacts(rows, me, nowMs = noon + 4 * 3_600_000)
+        assertEquals(early.observations.map { it.atMs to it.value }, later.observations.map { it.atMs to it.value })
+        assertEquals(noon, early.observations.single { it.attr == "last" }.atMs, "last is asserted at the occurrence")
+        assertEquals(noon + 1_800_000, early.observations.single { it.attr == "next" }.atMs, "next, at the end of the occurrence before it")
+    }
+
+    @Test
+    fun `an occurrence happening now makes the activity under way, and places us`() {
+        val week = 7L * 24 * 3_600_000
+        val rows = (0..2).map { occurrence(it, noon - week + it * week, location = "the office") }
+        val f = activityFacts(rows, me, nowMs = noon + 600_000)
+        val status = f.observations.single { it.attr == "status" }
+        assertEquals(JsonPrimitive("under way"), status.value)
+        assertEquals(noon + 1_800_000, status.untilMs)
+        val where = f.observations.single { it.subject == "person/me" }
+        assertEquals(60, where.conf)
+        assertTrue(activityFacts(rows, me, nowMs = noon + 3 * 3_600_000).observations.none { it.attr == "status" }, "between occurrences it is not under way")
+    }
+
+    @Test
+    fun `a one-off keeps its situation, and tasks stay out`() {
+        val once = CalendarRow(id = "E1", cal = "default", meta = buildJsonObject { put("name", JsonPrimitive("Dentist")) }, l = noon, r = evening)
+        val series = occurrence(0, noon)
+        val f = calendarFacts(listOf(once, series, once.copy(id = "T1", cat = "todo")), me, nowMs = noon)
+        assertEquals(listOf("situation/cal-default-e1", "activity/cal-default-e9"), f.bodies.map { it.id })
+    }
+
     @Test
     fun `a situation slug is bounded and clean`() {
         val row = CalendarRow(id = "A".repeat(80) + "!!", cal = "Work Cal", meta = buildJsonObject { put("name", JsonPrimitive("x")) }, l = 1, r = 2, idx = 3)
