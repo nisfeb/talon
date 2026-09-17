@@ -111,6 +111,10 @@ interface OrreryNoticedDao {
     @Query("SELECT COUNT(*) FROM orrery_noticed WHERE ship = :ship AND attr = :attr AND state = :state")
     suspend fun countByState(ship: String, attr: String, state: String): Int
 
+    /** The words behind the person's latest verdicts of one kind, for the pattern gate. */
+    @Query("SELECT snippet FROM orrery_noticed WHERE ship = :ship AND state = :state ORDER BY createdMs DESC LIMIT :limit")
+    suspend fun snippets(ship: String, state: String, limit: Int): List<String>
+
     @Query("DELETE FROM orrery_noticed WHERE ship = :ship")
     suspend fun clear(ship: String)
 }

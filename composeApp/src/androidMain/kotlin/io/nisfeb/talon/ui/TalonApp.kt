@@ -423,7 +423,7 @@ fun TalonApp(
     }
     // Orrery rides the same surface, under a key of its own.
     val orreryRepo = remember(app.session) {
-        io.nisfeb.talon.orrery.OrreryRepo(app.session.http, appScope, app.db, io.nisfeb.talon.ui.platformLabel)
+        io.nisfeb.talon.orrery.OrreryRepo(app.session.http, appScope, app.db, io.nisfeb.talon.ui.platformLabel, app.searchEmbedderClient)
     }
     DisposableEffect(orreryRepo) {
         onDispose { runCatching { orreryRepo.detach() } }
