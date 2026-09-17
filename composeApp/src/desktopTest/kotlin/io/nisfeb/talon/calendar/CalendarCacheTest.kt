@@ -11,6 +11,7 @@ import io.ktor.http.headersOf
 import io.ktor.utils.io.ByteReadChannel
 import io.nisfeb.talon.data.AppDatabase
 import io.nisfeb.talon.data.CALENDAR_ROWS_MIGRATION
+import io.nisfeb.talon.data.ORRERY_ACCOUNTS_MIGRATION
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
@@ -41,7 +42,7 @@ class CalendarCacheTest {
 
     private fun db() = Room.databaseBuilder<AppDatabase>(name = dbPath)
         .setDriver(BundledSQLiteDriver())
-        .addMigrations(CALENDAR_ROWS_MIGRATION)
+        .addMigrations(CALENDAR_ROWS_MIGRATION, ORRERY_ACCOUNTS_MIGRATION)
         .build()
 
     private val window = """{"rows":[{"id":"0v1","cal":"home","meta":{"name":"Dentist"},"l":100,"r":200}]}"""

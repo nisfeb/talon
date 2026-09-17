@@ -99,6 +99,18 @@ fun groupsRow(installed: Boolean?, error: String? = null): AppRow = when (instal
 }
 
 /**
+ * Orrery is its own desk app from the same publisher, installed from
+ * the ship's Grubbery shell rather than by kiln, so there is no install
+ * to offer here: the row says where to go.
+ */
+fun orreryRow(availability: io.nisfeb.talon.orrery.OrreryAvailability, error: String? = null): AppRow = when (availability) {
+    io.nisfeb.talon.orrery.OrreryAvailability.PRESENT -> AppRow("Orrery", AppState.WORKING, "Answering on this ship.", null, error)
+    io.nisfeb.talon.orrery.OrreryAvailability.MISSING -> AppRow("Orrery", AppState.MISSING, "Not on this ship. Install it from the Grubbery shell on your ship.", null, error)
+    io.nisfeb.talon.orrery.OrreryAvailability.SIGNED_OUT -> AppRow("Orrery", AppState.SIGNED_OUT, "Signed out of the ship.", null, error)
+    io.nisfeb.talon.orrery.OrreryAvailability.UNKNOWN -> AppRow("Orrery", AppState.UNKNOWN, "Not asked yet.", null, error)
+}
+
+/**
  * Where a ship's Grubbery keeps the permissions its apps ask for.
  * Under /apps like any installed app's own pages, not under /grubbery,
  * which is the framework's internal nexuses.

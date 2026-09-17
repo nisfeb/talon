@@ -421,6 +421,17 @@ fun TalonApp(
         if (mailShipUrl != null && loggedInShip != null) calendarRepo.attach(mailShipUrl)
         else calendarRepo.detach()
     }
+    // Orrery rides the same surface, under a key of its own.
+    val orreryRepo = remember(app.session) {
+        io.nisfeb.talon.orrery.OrreryRepo(app.session.http, appScope, app.db, io.nisfeb.talon.ui.platformLabel)
+    }
+    DisposableEffect(orreryRepo) {
+        onDispose { runCatching { orreryRepo.detach() } }
+    }
+    LaunchedEffect(orreryRepo, mailShipUrl, loggedInShip) {
+        if (mailShipUrl != null && loggedInShip != null) orreryRepo.attach(mailShipUrl, loggedInShip)
+        else orreryRepo.detach()
+    }
     val calendarInstall: suspend () -> Result<Unit> = remember(app, calendarRepo) {
         val install = io.nisfeb.talon.urbit.LatticeInstall.installer(
             app.ktorHttp,
@@ -2007,6 +2018,7 @@ fun TalonApp(
             appsOpen -> io.nisfeb.talon.ui.screens.AppsSettingsScreen(
                 mail = mailRepo,
                 calendar = calendarRepo,
+                orrery = orreryRepo,
                 latticeInstalled = app.sessionStore.active()?.shipUrl?.let { url ->
                     { io.nisfeb.talon.urbit.LatticeInstall.isInstalled(app.ktorHttp, url) }
                 },

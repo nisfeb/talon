@@ -38,6 +38,7 @@ actual abstract class AppDatabase : RoomDatabase() {
     actual abstract fun notes(): NotesDao
     actual abstract fun mailRows(): MailRowDao
     actual abstract fun calendarCache(): CalendarCacheDao
+    actual abstract fun orreryAccounts(): OrreryAccountDao
 }
 
 /**
@@ -61,7 +62,7 @@ fun createAppDatabase(context: Context, name: String): AppDatabase {
             MIGRATION_26_27, MIGRATION_27_28, MIGRATION_28_29,
             MIGRATION_29_30, MIGRATION_30_31, MIGRATION_34_35, MIGRATION_35_36,
             MIGRATION_36_37, MIGRATION_37_38, MIGRATION_38_39,
-            MIGRATION_40_41, MIGRATION_41_42, MIGRATION_42_43,
+            MIGRATION_40_41, MIGRATION_41_42, MIGRATION_42_43, MIGRATION_43_44,
         )
         // dropAllTables = true preserves the pre-2.7 behaviour: when
         // Room can't find a migration path, drop everything and rebuild.
@@ -412,6 +413,13 @@ private val MIGRATION_41_42 = object : Migration(41, 42) {
 private val MIGRATION_42_43 = object : Migration(42, 43) {
     override fun migrate(db: SupportSQLiteDatabase) {
         db.execSQL(CALENDAR_ROWS_SQL)
+    }
+}
+
+/** This install's orrery key and cursors, per ship. Shared statement. */
+private val MIGRATION_43_44 = object : Migration(43, 44) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(ORRERY_ACCOUNTS_SQL)
     }
 }
 

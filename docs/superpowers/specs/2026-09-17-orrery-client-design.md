@@ -25,6 +25,7 @@ Two pipes feed orrery from Talon. The structural pipe turns facts Talon already 
 | A mail message | `person/<ship>` for from and to | `person/x.last-contact`, `at` = sent capped to now, since the author's clock is untrusted | `mail`, `talon://mail/<thread>` |
 | A timed calendar event | `situation/cal-<cal>-<id>`, name from the event, aliases from its tags | `status = "scheduled"` at now until the start; `status = "under way"` at the start until the end; `location`; `started`; `ended`; `participants` = me | `calendar`, `<cal>/<id>` |
 | A calendar event with a location | none | `person/me.location = <place>` at the start until the end, conf 60 | `calendar`, `<cal>/<id>` |
+| A call whose transcript was published, 1:1 or a party line | `situation/call-<time>`, name from the transcript's title, and a `person/<ship>` for each speaker | `started`, `participants` = me and every speaker, `transcript` = the Lattice address; `person/x.last-contact` for each speaker | `talon-call`, the transcript's `urb://` address |
 
 Calendar tasks stay in the calendar. Orrery's `task` is its own list, and orrery's `calendar` action kind runs the other way: the analyst proposes, Talon creates the event. Groups get no bodies in v1.
 
@@ -36,7 +37,7 @@ Every observation carries `by = talon/<platform>` (the key's identity, forced by
 
 Most of what Talon sees is group chatter about nothing in the user's world. The funnel drops it cheaply before the model runs, and the model sees only candidates.
 
-1. **Scope.** DMs, threads the user is in, mentions, mail addressed to the user, and channels on a user allow-list. Nothing else enters.
+1. **Scope.** DMs, threads the user is in, mentions, mail addressed to the user, and channels on a user allow-list. The transcripts of the user's own calls, 1:1 and party lines, enter too, read back from Lattice by the address the call's situation carries. Nothing else enters.
 2. **Names.** The scoped state view, cached by `rev` and refetched when the beacon moves, gives every body with its aliases and ship. A message that names a body, by alias or by ship (the contact map already resolves nicknames and word names), is a candidate. This is deterministic and instant, and it uses orrery's own model as the prior: the more bodies the user has, the better it gates.
 3. **Pattern.** Where the platform has an embedder (Android and desktop today), a nearest-centroid test between a few "claim about the world" prototypes and chit-chat prototypes, with the observations the user confirmed as a growing positive set, the way `Highlights.kt` scores against bookmarks. The gate learns the user's pattern with no training. A platform without an embedder runs gates 1 and 2 only.
 4. **Extraction.** The candidate and the scoped body list (names, aliases, current attributes; sensitive ones are already stripped by the key) go to the local model with a grammar that admits only the answer shape: observations with subject, attr, value, at, until, conf, and any new bodies. Talon validates before submitting: attr charset and length, refs resolve to known bodies, conf capped at 80 for anything model-asserted. A refused attr is dropped and remembered as sensitive.

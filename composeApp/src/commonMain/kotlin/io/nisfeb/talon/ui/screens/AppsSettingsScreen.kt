@@ -57,6 +57,8 @@ import kotlinx.coroutines.launch
 fun AppsSettingsScreen(
     mail: MailRepo?,
     calendar: CalendarRepo?,
+    /** The pipe into orrery on the ship; null where no ship is known. */
+    orrery: io.nisfeb.talon.orrery.OrreryRepo? = null,
     /** Probes whether Grubbery is on the ship; null where no ship is known. */
     latticeInstalled: (suspend () -> Boolean)?,
     /** Probes whether %groups is on the ship, which chat itself runs on. */
@@ -79,6 +81,11 @@ fun AppsSettingsScreen(
     val mailError by (mail?.error ?: noError).collectAsState()
     val calendarAvailability = calendar?.availability?.collectAsState()?.value
     val calendarError by (calendar?.error ?: noError).collectAsState()
+    val orreryAvailability = orrery?.availability?.collectAsState()?.value
+    val orreryError by (orrery?.error ?: noError).collectAsState()
+    val orreryOn = orrery?.enabled?.collectAsState()?.value ?: false
+    val orreryLastMs = orrery?.lastPushMs?.collectAsState()?.value
+    var orreryBusy by remember { mutableStateOf(false) }
 
     var lattice by remember { mutableStateOf<Boolean?>(null) }
     var groups by remember { mutableStateOf<Boolean?>(null) }
@@ -101,6 +108,7 @@ fun AppsSettingsScreen(
         if (calendarAvailability != null) add(calendarRow(calendarAvailability, calendarError, lattice))
         add(latticeRow(lattice))
         add(groupsRow(groups))
+        if (orreryAvailability != null) add(io.nisfeb.talon.ui.orreryRow(orreryAvailability, orreryError))
     }
 
     /**
@@ -128,6 +136,7 @@ fun AppsSettingsScreen(
             probeGroups()
             runCatching { mail?.refresh() }
             runCatching { calendar?.refreshAll() }
+            runCatching { orrery?.probe() }
             busy = null
         }
     }
@@ -153,6 +162,7 @@ fun AppsSettingsScreen(
                         probeGroups()
                         runCatching { mail?.refresh() }
                         runCatching { calendar?.refreshAll() }
+            runCatching { orrery?.probe() }
                         busy = null
                     }
                 },
@@ -209,6 +219,46 @@ fun AppsSettingsScreen(
             note?.let {
                 Spacer(Modifier.height(8.dp))
                 Text(it, style = MaterialTheme.typography.bodySmall)
+            }
+
+            // The pipe into orrery. Off until the person says so: it is
+            // their world model, and what feeds it is theirs to decide.
+            if (orrery != null && orreryAvailability == io.nisfeb.talon.orrery.OrreryAvailability.PRESENT) {
+                Spacer(Modifier.height(16.dp))
+                Row(Modifier.fillMaxWidth().padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Feed Orrery", style = MaterialTheme.typography.bodyLarge)
+                        Text(
+                            "Your contacts, who wrote to you and on which day, and your calendar go to Orrery on your ship as facts, under a key made for this install. Nothing anyone said leaves this device.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        if (orreryOn && orreryLastMs != null) {
+                            Text(
+                                "Pushed ${agoLabel(orreryLastMs)}.",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                    if (orreryBusy) {
+                        CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                    } else {
+                        androidx.compose.material3.Switch(
+                            checked = orreryOn,
+                            onCheckedChange = { on ->
+                                note = null
+                                scope.launch {
+                                    orreryBusy = true
+                                    (if (on) orrery.enable() else orrery.disable())
+                                        .onFailure { note = it.message ?: "Orrery did not answer." }
+                                    orreryBusy = false
+                                }
+                            },
+                        )
+                    }
+                }
+                HorizontalDivider()
             }
 
             Spacer(Modifier.height(16.dp))
