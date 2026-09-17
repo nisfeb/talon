@@ -213,6 +213,10 @@ kotlin {
         val desktopMain by getting
         desktopMain.dependencies {
             implementation(compose.desktop.currentOs)
+            // The orrery triage's floor: llama.cpp on the JVM, CPU natives
+            // for Linux, macOS and Windows, loaded behind a child-process
+            // probe (orrery/LocalModels.desktop.kt).
+            implementation("de.kherud:llama:4.2.0")
             // Trunkline call engine: libwebrtc via JNI. The base jar is
             // pure API; the natives ship per-platform. Bundle only the
             // host's natives (matches the slimReleaseDistributable
@@ -265,6 +269,7 @@ kotlin {
         // app/src/test/ runs against the composeApp/commonMain copy
         // on every supported target.
         commonTest.dependencies {
+            implementation(libs.kotlinx.coroutines.test)
             implementation(kotlin("test"))
             implementation(libs.ktor.client.mock)
         }

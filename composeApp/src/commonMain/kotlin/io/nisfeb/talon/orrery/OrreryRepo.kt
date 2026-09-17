@@ -5,6 +5,7 @@ import io.nisfeb.talon.calendar.CalendarApi
 import io.nisfeb.talon.data.AppDatabase
 import io.nisfeb.talon.data.OrreryAccountEntity
 import io.nisfeb.talon.data.OrreryNoticedEntity
+import io.nisfeb.talon.ui.isLocalTriageSupported
 import io.nisfeb.talon.urbit.StoryCache
 import io.nisfeb.talon.mail.AuspexApi
 import io.nisfeb.talon.ui.shipHandle
@@ -63,6 +64,11 @@ class OrreryRepo(
     val lastPushMs: StateFlow<Long?> = _lastPushMs.asStateFlow()
     private val _pushing = MutableStateFlow(false)
     val pushing: StateFlow<Boolean> = _pushing.asStateFlow()
+    /** The rung the triage reads with, or the best it could, and where it stands. */
+    private val _model = MutableStateFlow<Pair<String, RungStatus>?>(null)
+    val model: StateFlow<Pair<String, RungStatus>?> = _model.asStateFlow()
+    private val _download = MutableStateFlow<Float?>(null)
+    val download: StateFlow<Float?> = _download.asStateFlow()
 
     private var api: OrreryApi? = null
     // Coroutines only touch this, so a mutex is the whole of the guard
@@ -84,6 +90,7 @@ class OrreryRepo(
             probe()
             _enabled.value = db.orreryAccounts().get(ship) != null
             if (_enabled.value) startLoop()
+            runCatching { refreshModel() }
         }
     }
 
@@ -223,16 +230,27 @@ class OrreryRepo(
      */
     private suspend fun triage(a: OrreryApi, row: OrreryAccountEntity, posts: List<io.nisfeb.talon.data.MessageEntity>, s: String, nowMs: Long): Facts {
         if (posts.isEmpty()) return Facts()
-        val index = NameIndex(runCatching { a.state(row.token).bodies }.getOrElse { Log.i(TAG, "state view skipped: ${it.message}"); return Facts() })
+        val view = runCatching { a.state(row.token) }.getOrElse { Log.i(TAG, "state view skipped: ${it.message}"); return Facts() }
+        val bodies = view.bodies
+        val index = NameIndex(bodies)
         val allowed = db.orreryChannels().all().toSet()
         val ourNick = db.contacts().get(s)?.nickname
+        val model = if (isLocalTriageSupported) LocalModels.best()?.second else null
+        var modelRuns = 0
         var up = Facts()
         for (m in posts) {
             val text = StoryCache.textFor(m.id, m.contentJson)
             if (!inScope(m.whom, text, s, ourNick, allowed)) continue
             val kind = if (m.whom.startsWith("~") || m.whom.startsWith("0v")) "talon-dm" else "talon-chat"
             val sourceId = "talon://chat/${m.whom}?id=${m.id}"
-            for (n in ruleFacts(text, m.author, m.sentMs, s, index)) {
+            // The rules first, then the model where there is one: the
+            // same claim from both is one row, and the rules got there.
+            val byRules = ruleFacts(text, m.author, m.sentMs, s, index)
+            val byModel = if (model != null && modelRuns < MODEL_PER_PASS && text.length >= 8) {
+                modelRuns++
+                ModelExtractor.extract(model, index, bodies, text, m.author, m.sentMs, s, view.attrs)
+            } else emptyList()
+            for (n in byRules + byModel) {
                 val trusted = trusted(s, n.attr)
                 val entity = OrreryNoticedEntity(
                     id = noticedId(sourceId, n.subject, n.attr), ship = s, subject = n.subject, attr = n.attr,
@@ -245,6 +263,29 @@ class OrreryRepo(
             }
         }
         return up
+    }
+
+    /** Where the ladder stands on this device, for Settings. */
+    suspend fun refreshModel() {
+        if (!isLocalTriageSupported) { _model.value = null; return }
+        val all = LocalModels.statuses()
+        val pick = all.firstOrNull { it.second == RungStatus.Ready }
+            ?: all.firstOrNull { it.second is RungStatus.NeedsDownload }
+            ?: all.firstOrNull()
+        _model.value = pick?.let { it.first.name to it.second }
+    }
+
+    /** Fetch what the best downloadable rung needs, then re-walk the ladder. */
+    suspend fun prepareModel(): Result<Unit> = runCatching {
+        val rung = LocalModels.statuses().firstOrNull { it.second is RungStatus.NeedsDownload }?.first ?: return@runCatching
+        _download.value = 0f
+        try {
+            rung.prepare { _download.value = it }
+            LocalModels.reset()
+        } finally {
+            _download.value = null
+        }
+        refreshModel()
     }
 
     /** A kind of claim the person has confirmed three times and never discarded goes up on its own. */
@@ -284,6 +325,8 @@ class OrreryRepo(
         const val MESSAGES_PER_PASS = 2000
         const val MAIL_PER_PASS = 200
         const val TRUST_AFTER = 3
+        // ponytail: a per-pass cap; a per-day budget when a phone needs one.
+        const val MODEL_PER_PASS = 20
 
         /** A noticed row as the facts it stands for. */
         fun factsOf(n: OrreryNoticedEntity): Facts = Facts(

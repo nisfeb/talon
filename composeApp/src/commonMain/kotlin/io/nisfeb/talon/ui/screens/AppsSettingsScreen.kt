@@ -240,6 +240,26 @@ fun AppsSettingsScreen(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
+                        // Which model reads messages here, and why not a better one.
+                        val model = orrery.model.collectAsState().value
+                        val download = orrery.download.collectAsState().value
+                        val modelLine = when {
+                            !io.nisfeb.talon.ui.isLocalTriageSupported -> "No local model on this platform yet. The rules alone read messages."
+                            model == null -> null
+                            model.second == io.nisfeb.talon.orrery.RungStatus.Ready -> "Reads with ${model.first}."
+                            model.second is io.nisfeb.talon.orrery.RungStatus.NeedsDownload -> "${model.first} can read messages here after a download of about ${(model.second as io.nisfeb.talon.orrery.RungStatus.NeedsDownload).bytes / 1_000_000} MB."
+                            else -> (model.second as io.nisfeb.talon.orrery.RungStatus.Unavailable).reason
+                        }
+                        modelLine?.let {
+                            Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        if (model?.second is io.nisfeb.talon.orrery.RungStatus.NeedsDownload) {
+                            if (download != null) {
+                                androidx.compose.material3.LinearProgressIndicator(progress = { download }, modifier = Modifier.fillMaxWidth().padding(top = 4.dp))
+                            } else {
+                                TextButton(onClick = { scope.launch { orrery.prepareModel().onFailure { note = it.message ?: "The download did not finish." } } }) { Text("Download the model") }
+                            }
+                        }
                     }
                     if (orreryBusy) {
                         CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)

@@ -91,7 +91,11 @@ class OrreryApi(
                 ship = b["ship"]?.jsonPrimitive?.content?.takeIf { it.startsWith("~") },
             )
         }
-        return StateView(rev = o["rev"]?.jsonPrimitive?.content?.toLongOrNull() ?: 0L, bodies = bodies)
+        // The ship's vocabulary per kind, trimmed to what the key may see.
+        val attrs = o["schema"]?.jsonObject?.get("kinds")?.jsonObject?.mapValues { (_, k) ->
+            k.jsonObject["attrs"]?.jsonArray.orEmpty().mapNotNull { it.jsonPrimitive.content }
+        }.orEmpty()
+        return StateView(rev = o["rev"]?.jsonPrimitive?.content?.toLongOrNull() ?: 0L, bodies = bodies, attrs = attrs)
     }
 
     /** One observe batch under the key. Per-item answers, in order. */
@@ -176,7 +180,7 @@ enum class OrreryAvailability {
 
 data class MintedKey(val id: String, val token: String)
 
-data class StateView(val rev: Long, val bodies: List<KnownBody>)
+data class StateView(val rev: Long, val bodies: List<KnownBody>, val attrs: Map<String, List<String>> = emptyMap())
 
 data class ItemAnswer(val id: String?, val ok: Boolean, val existing: Boolean, val error: String?)
 
