@@ -11,8 +11,10 @@
 		6FA0A19F2F30B95F97E40ABD /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 5155A39BCF46A79C26B04FBD /* PrivacyInfo.xcprivacy */; };
 		79BD1F246DF7015B68EC6D5A /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C59D7E015CDF7DE2CE15FB82 /* ContentView.swift */; };
 		A1B2C3D40000000000000001 /* TalonRtc.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D40000000000000002 /* TalonRtc.swift */; };
+		A1B2C3D40000000000000016 /* TalonModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D40000000000000017 /* TalonModels.swift */; };
 		A1B2C3D40000000000000011 /* CallPush.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D40000000000000012 /* CallPush.swift */; };
 		A1B2C3D40000000000000003 /* WebRTC in Frameworks */ = {isa = PBXBuildFile; productRef = A1B2C3D40000000000000005 /* WebRTC */; };
+		A1B2C3D40000000000000013 /* llama in Frameworks */ = {isa = PBXBuildFile; productRef = A1B2C3D40000000000000015 /* llama */; };
 		91E076838EB2739CA6E107D9 /* iOSApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 93EB67DAA918B8AABA83E274 /* iOSApp.swift */; };
 		ECF6C90B7BB0861B76E6D297 /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = F1E41978D0D84124A680A94B /* Foundation.framework */; };
 /* End PBXBuildFile section */
@@ -24,6 +26,7 @@
 		93EB67DAA918B8AABA83E274 /* iOSApp.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = iOSApp.swift; sourceTree = "<group>"; };
 		B2A4155216FD0194E961E0B9 /* Info.plist */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		A1B2C3D40000000000000002 /* TalonRtc.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TalonRtc.swift; sourceTree = "<group>"; };
+		A1B2C3D40000000000000017 /* TalonModels.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TalonModels.swift; sourceTree = "<group>"; };
 		A1B2C3D40000000000000012 /* CallPush.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CallPush.swift; sourceTree = "<group>"; };
 		C59D7E015CDF7DE2CE15FB82 /* ContentView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		DAE4233A28E6986BDB47DC4B /* Assets.xcassets */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
@@ -37,6 +40,7 @@
 			files = (
 				ECF6C90B7BB0861B76E6D297 /* Foundation.framework in Frameworks */,
 				A1B2C3D40000000000000003 /* WebRTC in Frameworks */,
+				A1B2C3D40000000000000013 /* llama in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -49,6 +53,7 @@
 				93EB67DAA918B8AABA83E274 /* iOSApp.swift */,
 				C59D7E015CDF7DE2CE15FB82 /* ContentView.swift */,
 				A1B2C3D40000000000000002 /* TalonRtc.swift */,
+				A1B2C3D40000000000000017 /* TalonModels.swift */,
 				A1B2C3D40000000000000012 /* CallPush.swift */,
 				DAE4233A28E6986BDB47DC4B /* Assets.xcassets */,
 				5155A39BCF46A79C26B04FBD /* PrivacyInfo.xcprivacy */,
@@ -120,6 +125,7 @@
 			name = iosApp;
 			packageProductDependencies = (
 				A1B2C3D40000000000000005 /* WebRTC */,
+				A1B2C3D40000000000000015 /* llama */,
 			);
 			productName = iosApp;
 			productReference = 72840D7390381B5B6437B9D7 /* iosApp.app */;
@@ -147,6 +153,7 @@
 			preferredProjectObjectVersion = 100;
 			packageReferences = (
 				A1B2C3D40000000000000004 /* XCRemoteSwiftPackageReference "WebRTC" */,
+				A1B2C3D40000000000000014 /* XCLocalSwiftPackageReference "LlamaKit" */,
 			);
 			productRefGroup = A72B00CE2D0AA8D452137D74 /* Products */;
 			projectDirPath = "";
@@ -199,6 +206,7 @@
 				91E076838EB2739CA6E107D9 /* iOSApp.swift in Sources */,
 				79BD1F246DF7015B68EC6D5A /* ContentView.swift in Sources */,
 				A1B2C3D40000000000000001 /* TalonRtc.swift in Sources */,
+				A1B2C3D40000000000000016 /* TalonModels.swift in Sources */,
 				A1B2C3D40000000000000011 /* CallPush.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -409,6 +417,13 @@
 		};
 /* End XCConfigurationList section */
 
+/* Begin XCLocalSwiftPackageReference section */
+		A1B2C3D40000000000000014 /* XCLocalSwiftPackageReference "LlamaKit" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = LlamaKit;
+		};
+/* End XCLocalSwiftPackageReference section */
+
 /* Begin XCRemoteSwiftPackageReference section */
 		A1B2C3D40000000000000004 /* XCRemoteSwiftPackageReference "WebRTC" */ = {
 			isa = XCRemoteSwiftPackageReference;
@@ -425,6 +440,10 @@
 			isa = XCSwiftPackageProductDependency;
 			package = A1B2C3D40000000000000004 /* XCRemoteSwiftPackageReference "WebRTC" */;
 			productName = WebRTC;
+		};
+		A1B2C3D40000000000000015 /* llama */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = llama;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};
