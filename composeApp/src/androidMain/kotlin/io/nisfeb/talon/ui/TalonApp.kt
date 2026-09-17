@@ -427,6 +427,7 @@ fun TalonApp(
             app.session.http, appScope, app.db, io.nisfeb.talon.ui.platformLabel, app.searchEmbedderClient,
             cloud = io.nisfeb.talon.orrery.CloudTriage(app.uiSettings.orreryCloudTriage, app.uiSettings::setOrreryCloudTriage) { app.aiSettings.state.value },
             book = { app.repo.bookContacts.value },
+            standDown = io.nisfeb.talon.orrery.StandDown(app.uiSettings.orreryStandDown, app.uiSettings::setOrreryStandDown),
         )
     }
     DisposableEffect(orreryRepo) {

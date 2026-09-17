@@ -84,6 +84,16 @@ class OrreryTriageTest {
     }
 
     @Test
+    fun `a phone yields only to a computer whose key was used in the last two hours`() {
+        val now = 1_789_646_400_000L
+        val hour = 3_600_000L
+        assertTrue(computerActive(listOf(ClientKey("k", "talon/desktop-linux-6.6", now - hour)), now))
+        assertTrue(!computerActive(listOf(ClientKey("k", "talon/desktop-linux-6.6", now - 3 * hour)), now), "a computer quiet for three hours does not hold the phone")
+        assertTrue(!computerActive(listOf(ClientKey("k", "talon/desktop-linux-6.6", null)), now), "never used is not active")
+        assertTrue(!computerActive(listOf(ClientKey("a", "talon/android-17", now), ClientKey("b", "claude-code", now)), now), "another phone or the analyst is not a computer running Talon")
+    }
+
+    @Test
     fun `a claim keeps its id across passes`() {
         assertEquals(noticedId("talon://chat/~bus?id=1", "person/bus", "location"), noticedId("talon://chat/~bus?id=1", "person/bus", "location"))
     }

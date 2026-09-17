@@ -34,3 +34,6 @@ class CloudRung(private val config: () -> AiSettings.Config) : Rung() {
         override fun close() = Unit
     }
 }
+
+/** The phone's choice to leave reading to a computer, and the setter behind the switch. */
+class StandDown(val on: StateFlow<Boolean>, val set: (Boolean) -> Unit)

@@ -98,6 +98,26 @@ class OrreryApi(
         return StateView(rev = o["rev"]?.jsonPrimitive?.content?.toLongOrNull() ?: 0L, bodies = bodies, attrs = attrs)
     }
 
+    /**
+     * This ship's minted keys, as the owner sees them: no secret, but
+     * when each was last used, to the hour. The owner cookie only; a
+     * phone holds it too, which is how it knows a computer is on the
+     * job.
+     */
+    suspend fun clients(): List<ClientKey> {
+        val text = request(owner, HttpMethod.Get, "/api/clients")
+        val el = reading { Json.parseToJsonElement(text) }
+        val arr = (el as? kotlinx.serialization.json.JsonArray) ?: el.jsonObject["clients"]?.jsonArray.orEmpty()
+        return arr.mapNotNull { e ->
+            val c = e.jsonObject
+            ClientKey(
+                id = c["id"]?.jsonPrimitive?.content ?: return@mapNotNull null,
+                by = c["by"]?.jsonPrimitive?.content ?: "",
+                usedMs = c["used"]?.jsonPrimitive?.content?.takeIf { it != "null" }?.let { runCatching { kotlinx.datetime.Instant.parse(it).toEpochMilliseconds() }.getOrNull() },
+            )
+        }
+    }
+
     /** The open actions the key may see: proposed and approved, newest first as the ship lists them. */
     suspend fun actions(token: String): List<OrreryAction> {
         val text = request(bare, HttpMethod.Get, "/api/actions?status=open") { header(HttpHeaders.Authorization, "Bearer $token") }
@@ -204,6 +224,9 @@ enum class OrreryAvailability {
 }
 
 data class MintedKey(val id: String, val token: String)
+
+/** One of this ship's keys, as the owner lists them. */
+data class ClientKey(val id: String, val by: String, val usedMs: Long?)
 
 /** Something the analyst proposed, as the ship holds it. */
 data class OrreryAction(
