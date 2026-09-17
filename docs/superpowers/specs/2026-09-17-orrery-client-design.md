@@ -61,7 +61,7 @@ Rules of the ladder:
 - Detection is per device and per launch, and Settings shows which rung is in use, by name, with the reason the higher rungs are not (no Apple Intelligence, no AICore, not enough memory). A user who wants a rung the device could run but has not downloaded gets the download offered there.
 - Models are downloaded on first use, never bundled, and the download is offered rather than started silently on mobile data.
 - Desktop rungs that load native code run in a probed child process like `EmbedderProbe`, so a runtime that crashes takes nothing with it.
-- Every rung is local. The cloud extractor is not a rung; it is a separate switch under the AI settings, off, with its consequence written beside it.
+- Every rung the device lists is local. The cloud extractor is a separate switch beside the pipe on the Apps page, off, with its consequence written beside it, and needs a key set under AI. While it is on it is the top of the ladder, because the person chose it knowing what it costs.
 
 The grammar guarantees valid JSON on the llama.cpp rungs and Apple's guided generation does the same; on rungs without constrained decoding the answer is validated and retried once, then dropped. A bad answer is therefore a wrong claim that meets validation and the tray, never a parse failure.
 

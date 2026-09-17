@@ -1004,7 +1004,10 @@ fun App(
         }
         // Orrery rides the same surface, under a key of its own.
         val orreryRepo = remember(session, db) {
-            io.nisfeb.talon.orrery.OrreryRepo(session.http, loopScope, db, io.nisfeb.talon.ui.platformLabel, searchEmbedderClient)
+            io.nisfeb.talon.orrery.OrreryRepo(
+                session.http, loopScope, db, io.nisfeb.talon.ui.platformLabel, searchEmbedderClient,
+                cloud = io.nisfeb.talon.orrery.CloudTriage(uiSettings.orreryCloudTriage, uiSettings::setOrreryCloudTriage) { aiSettings.state.value },
+            )
         }
         LaunchedEffect(orreryRepo, mailShipUrl, loggedInShip) {
             val ship = loggedInShip

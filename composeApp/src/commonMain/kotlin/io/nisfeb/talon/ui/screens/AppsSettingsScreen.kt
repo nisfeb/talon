@@ -260,6 +260,27 @@ fun AppsSettingsScreen(
                                 TextButton(onClick = { scope.launch { orrery.prepareModel().onFailure { note = it.message ?: "The download did not finish." } } }) { Text("Download the model") }
                             }
                         }
+                        // The cloud opt-in: theirs to choose, with the cost said.
+                        orrery.cloud?.let { cloud ->
+                            val cloudOn by cloud.on.collectAsState()
+                            val hasKey = cloud.config().apiKey.isNotBlank()
+                            Row(Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Column(Modifier.weight(1f)) {
+                                    Text("Read with your cloud AI key instead", style = MaterialTheme.typography.bodyMedium)
+                                    Text(
+                                        if (hasKey) "Every message the triage reads leaves this device for ${cloud.config().provider.label}. A larger model reads better; that is the trade."
+                                        else "Needs an API key under AI. Off until then.",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                                androidx.compose.material3.Switch(
+                                    checked = cloudOn && hasKey,
+                                    enabled = hasKey,
+                                    onCheckedChange = { on -> cloud.set(on); scope.launch { orrery.refreshModel() } },
+                                )
+                            }
+                        }
                     }
                     if (orreryBusy) {
                         CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
