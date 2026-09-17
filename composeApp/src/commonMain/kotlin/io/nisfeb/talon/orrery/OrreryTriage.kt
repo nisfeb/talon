@@ -58,6 +58,19 @@ class NameIndex(bodies: List<KnownBody>) {
         }
     }
 
+    /** The id [author] goes by: the ship's own body when the ship has one, else `person/<slug>`. */
+    fun authorId(author: String, ourShip: String): String =
+        if (author == ourShip) "person/me" else forShip(author)?.id ?: personId(author)
+
+    /** The body whose id, ship, name or alias is exactly [said], case-insensitive. */
+    fun resolveExact(said: String): KnownBody? {
+        val s = said.trim()
+        if (s.isEmpty()) return null
+        byId[s]?.let { return it }
+        byShip[s]?.let { return it }
+        return byId.values.firstOrNull { b -> b.name.equals(s, true) || b.aliases.any { it.equals(s, true) } }
+    }
+
     /** The body a place name refers to, when one is known by that name. */
     fun place(name: String): KnownBody? =
         find(name).firstOrNull { (b, alias) -> b.id.startsWith("place/") && alias.equals(name.trim(), ignoreCase = true) }?.first
@@ -95,7 +108,7 @@ private val RE_X_STATUS = Regex("\\b(%s)\\s+(?:is|'s)\\s+(sick|ill|stranded|stuc
 fun ruleFacts(text: String, author: String, atMs: Long, ourShip: String, index: NameIndex): List<Noticed> {
     if (text.isBlank() || text.trimEnd().endsWith("?")) return emptyList()
     val out = mutableListOf<Noticed>()
-    val self = if (author == ourShip) "person/me" else personId(author)
+    val self = index.authorId(author, ourShip)
     val selfBody = if (author == ourShip || index.has(self)) null else OBody(self, aliases = listOf(author))
     fun place(raw: String): JsonElement {
         val name = raw.trim().trimEnd('.', ',', '!')
