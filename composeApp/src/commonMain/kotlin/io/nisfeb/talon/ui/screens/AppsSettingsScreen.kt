@@ -233,12 +233,21 @@ fun AppsSettingsScreen(
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
-                        if (orreryOn && orreryLastMs != null) {
-                            Text(
-                                "Pushed ${agoLabel(orreryLastMs)}.",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
+                        if (orreryOn) {
+                            val pushing by orrery.pushing.collectAsState()
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    if (orreryLastMs != null) "Pushed ${agoLabel(orreryLastMs)}." else "Not pushed yet.",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.weight(1f),
+                                )
+                                // For whoever is checking a phone: a pass on demand,
+                                // and what it refused shown in the row's error line.
+                                TextButton(enabled = !pushing, onClick = { scope.launch { orrery.push() } }) {
+                                    Text(if (pushing) "Pushing" else "Push now")
+                                }
+                            }
                         }
                         // Which model reads messages here, and why not a better one.
                         val model = orrery.model.collectAsState().value
