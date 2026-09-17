@@ -1007,6 +1007,7 @@ fun App(
             io.nisfeb.talon.orrery.OrreryRepo(
                 session.http, loopScope, db, io.nisfeb.talon.ui.platformLabel, searchEmbedderClient,
                 cloud = io.nisfeb.talon.orrery.CloudTriage(uiSettings.orreryCloudTriage, uiSettings::setOrreryCloudTriage) { aiSettings.state.value },
+                book = { repo.bookContacts.value },
             )
         }
         LaunchedEffect(orreryRepo, mailShipUrl, loggedInShip) {

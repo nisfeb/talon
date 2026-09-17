@@ -20,8 +20,8 @@ Two pipes feed orrery from Talon. The structural pipe turns facts Talon already 
 
 | Talon data | Body | Observations | source kind and id |
 |---|---|---|---|
-| A contact: ship, nickname, word name, status line | `person/<ship slug>` with `ship` set. Name is the nickname, else the word name. Aliases: nickname, @p, word names | `status` from the status line, `at` = statusUpdatedMs | `contacts`, `<ship>` |
-| A DM or group post from a contact | none new | `person/x.last-contact` = ISO time, `at` = sentMs | `talon-dm` for a DM, `talon-chat` for a channel post, id `talon://chat/<whom>?id=<post>` |
+| A contact in the person's own book (never a ship merely seen; the profile cache holds thousands) | `person/<ship slug>`. Name is the nickname, else the word name. Aliases: nickname, @p, word names | `status` from the status line, `at` = statusUpdatedMs | `contacts`, `<ship>` |
+| A DM or group DM from anyone; a channel post only from someone in the book | none new | `person/x.last-contact` = the day, `at` = the start of that day | `talon-dm` for a DM, `talon-chat` for a channel post, id `talon://chat/<whom>?id=<post>` |
 | A mail message | `person/<ship>` for from and to | `person/x.last-contact`, `at` = sent capped to now, since the author's clock is untrusted | `mail`, `talon://mail/<thread>` |
 | A timed calendar event | `situation/cal-<cal>-<id>`, name from the event, aliases from its tags | `status = "scheduled"` at now until the start; `status = "under way"` at the start until the end; `location`; `started`; `ended`; `participants` = me | `calendar`, `<cal>/<id>` |
 | A calendar event with a location | none | `person/me.location = <place>` at the start until the end, conf 60 | `calendar`, `<cal>/<id>` |

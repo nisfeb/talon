@@ -53,6 +53,12 @@ class OrreryRepo(
     private val embedder: io.nisfeb.talon.ai.SearchEmbedderClient? = null,
     /** The cloud opt-in, where the shell offers one. */
     val cloud: CloudTriage? = null,
+    /**
+     * The ships in the person's own contacts book. Bodies are made for
+     * these and for nobody else the ship has merely heard of: the
+     * contacts table holds every peer ever seen, which is thousands.
+     */
+    private val book: () -> Set<String> = { emptySet() },
 ) {
     private var cloudModel: LocalModel? = null
 
@@ -199,12 +205,16 @@ class OrreryRepo(
             queued.forEach { facts += it }
             queuedForRetry = queued
 
-            db.contacts().all().forEach { c ->
+            val book = book()
+            db.contacts().all().filter { it.ship == s || it.ship in book }.forEach { c ->
                 facts += contactFacts(c, s, shipHandle(c.ship), shipHandleLong(c.ship))
             }
 
             val posts = db.messages().postsAfter(row.messagesCursor, s, MESSAGES_PER_PASS)
-            facts += Facts(observations = posts.mapNotNull { messageFacts(it, s) })
+            // Contact from a DM is contact with you. In a channel it is only
+            // worth a body when the author is already in your book.
+            val direct = posts.filter { it.whom.startsWith("~") || it.whom.startsWith("0v") || it.author in book }
+            facts += Facts(observations = direct.mapNotNull { messageFacts(it, s) })
             val messagesCursor = posts.maxOfOrNull { it.sentMs } ?: row.messagesCursor
 
             // Mail and the calendar may be absent on this ship; a source
