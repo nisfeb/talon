@@ -78,6 +78,22 @@ class OrreryApi(
         request(owner, HttpMethod.Delete, "/api/clients/$id")
     }
 
+    /** The bodies the key may see, with the rev the view was at. */
+    suspend fun state(token: String): StateView {
+        val text = request(bare, HttpMethod.Get, "/api/state") { header(HttpHeaders.Authorization, "Bearer $token") }
+        val o = reading { Json.parseToJsonElement(text).jsonObject }
+        val bodies = o["bodies"]?.jsonArray.orEmpty().mapNotNull { e ->
+            val b = e.jsonObject
+            KnownBody(
+                id = b["id"]?.jsonPrimitive?.content ?: return@mapNotNull null,
+                name = b["name"]?.jsonPrimitive?.content,
+                aliases = b["aliases"]?.jsonArray.orEmpty().mapNotNull { it.jsonPrimitive.content },
+                ship = b["ship"]?.jsonPrimitive?.content?.takeIf { it.startsWith("~") },
+            )
+        }
+        return StateView(rev = o["rev"]?.jsonPrimitive?.content?.toLongOrNull() ?: 0L, bodies = bodies)
+    }
+
     /** One observe batch under the key. Per-item answers, in order. */
     suspend fun observe(batch: JsonObject, token: String): ObserveAnswer {
         val text = request(bare, HttpMethod.Post, "/api/observe", batch.toString()) {
@@ -159,6 +175,8 @@ enum class OrreryAvailability {
 }
 
 data class MintedKey(val id: String, val token: String)
+
+data class StateView(val rev: Long, val bodies: List<KnownBody>)
 
 data class ItemAnswer(val id: String?, val ok: Boolean, val existing: Boolean, val error: String?)
 

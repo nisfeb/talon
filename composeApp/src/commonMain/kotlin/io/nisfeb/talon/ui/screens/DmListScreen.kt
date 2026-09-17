@@ -100,6 +100,7 @@ import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
+import kotlinx.serialization.json.jsonPrimitive
 import sh.calvin.reorderable.ReorderableItem
 import sh.calvin.reorderable.rememberReorderableLazyListState
 import io.nisfeb.talon.ui.icons.TalonIcons
@@ -229,6 +230,10 @@ fun DmListScreen(
     // Rendered as a "Requests" section at the top of the list.
     val dmInvites by remember { db.dmInvites().stream() }
         .collectAsState(initial = emptyList())
+    // What the orrery triage noticed in what people said, waiting for a word.
+    val noticed by remember(activeShip) {
+        activeShip?.let { db.orreryNoticed().pending(it) } ?: kotlinx.coroutines.flow.flowOf(emptyList())
+    }.collectAsState(initial = emptyList())
     val rows by remember {
         combine(
             db.messages().conversationLatest().distinctUntilChanged(),
@@ -1138,6 +1143,29 @@ fun DmListScreen(
             contentPadding = PaddingValues(vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(0.dp),
         ) {
+            // Claims the triage noticed, above everything: each is one tap
+            // to confirm or discard, and a kind confirmed enough times
+            // stops asking.
+            if (noticed.isNotEmpty()) {
+                item(key = "__noticed_header", contentType = "req_header") {
+                    Text(
+                        "Noticed",
+                        style = MaterialTheme.typography.titleSmall,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                    )
+                }
+                items(items = noticed, key = { "noticed:${it.id}" }, contentType = { "noticed" }) { n ->
+                    NoticedRow(
+                        n = n,
+                        contactMap = contactMap,
+                        onConfirm = { repo.pushScope.launch { io.nisfeb.talon.orrery.OrreryRepo.confirm(db, n.id) } },
+                        onDiscard = { repo.pushScope.launch { io.nisfeb.talon.orrery.OrreryRepo.discard(db, n.id) } },
+                    )
+                    HorizontalDivider()
+                }
+            }
+
             // Pending DM requests pinned to the top — Accept opens the
             // conversation, Decline dismisses it. Always shown (any tab)
             // so a new DM can't hide behind a folder/special selection.
@@ -2188,6 +2216,47 @@ private fun DmRequestRow(
             Text("Decline", color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         TextButton(onClick = onAccept) { Text("Accept") }
+    }
+}
+
+/** One noticed claim: who, what, and the words it came from. */
+@Composable
+private fun NoticedRow(
+    n: io.nisfeb.talon.data.OrreryNoticedEntity,
+    contactMap: ContactMap,
+    onConfirm: () -> Unit,
+    onDiscard: () -> Unit,
+) {
+    fun who(id: String): String = when {
+        id == "person/me" -> "You"
+        id.startsWith("person/") -> id.removePrefix("person/").let { s -> contactMap.nickname("~$s") ?: "~$s" }
+        else -> id.substringAfter('/')
+    }
+    val value = remember(n.valueJson) {
+        runCatching {
+            val e = kotlinx.serialization.json.Json.parseToJsonElement(n.valueJson)
+            (e as? kotlinx.serialization.json.JsonObject)?.get("ref")?.let { r -> who(r.jsonPrimitive.content) }
+                ?: e.jsonPrimitive.content
+        }.getOrDefault(n.valueJson)
+    }
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text("${who(n.subject)}: ${n.attr} is $value", style = MaterialTheme.typography.bodyLarge, maxLines = 2)
+            Text(
+                n.snippet,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 2,
+            )
+        }
+        TextButton(onClick = onDiscard) {
+            Text("Discard", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        TextButton(onClick = onConfirm) { Text("Confirm") }
     }
 }
 

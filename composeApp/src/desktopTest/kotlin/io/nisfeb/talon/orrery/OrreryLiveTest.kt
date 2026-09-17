@@ -18,6 +18,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.Json
@@ -65,6 +66,7 @@ class OrreryLiveTest {
                 db.contacts().upsert(ContactEntity(ship = peer, nickname = "Sampel", bio = null, avatarUrl = null, status = "on the road", statusUpdatedMs = nowMs() - 60_000))
                 db.messages().upsertAllWithMedia(db.messageMedia(), listOf(
                     MessageEntity(whom = peer, id = "170.141.184.506", author = peer, sentMs = nowMs() - 3_600_000, contentJson = "[]", kind = "chat"),
+                    MessageEntity(whom = peer, id = "170.141.184.507", author = peer, sentMs = nowMs() - 1_800_000, contentJson = """[{"inline":["I'm at the shop now"]}]""", kind = "chat"),
                 ))
 
                 val repo = OrreryRepo(owner, scope, db, "live test")
@@ -76,6 +78,9 @@ class OrreryLiveTest {
                 assertTrue(row.token.startsWith(row.clientId + "."), "the token names its key")
                 withTimeout(60_000) { while (repo.lastPushMs.value == null) delay(200) }
                 assertEquals(null, repo.error.value, "the pass reported nothing refused")
+                val noticed = db.orreryNoticed().pending(ship).first()
+                assertEquals(listOf("location"), noticed.map { it.attr }, "the triage read the DM against the ship's bodies: $noticed")
+                assertEquals(personId(peer), noticed.single().subject)
 
                 val body = owner.get("$url/apps/orrery/api/body/${personId(peer)}").bodyAsText()
                 val view = Json.parseToJsonElement(body).jsonObject

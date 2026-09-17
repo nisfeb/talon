@@ -4,6 +4,8 @@ import io.ktor.client.HttpClient
 import io.nisfeb.talon.calendar.CalendarApi
 import io.nisfeb.talon.data.AppDatabase
 import io.nisfeb.talon.data.OrreryAccountEntity
+import io.nisfeb.talon.data.OrreryNoticedEntity
+import io.nisfeb.talon.urbit.StoryCache
 import io.nisfeb.talon.mail.AuspexApi
 import io.nisfeb.talon.ui.shipHandle
 import io.nisfeb.talon.ui.shipHandleLong
@@ -19,6 +21,11 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import io.nisfeb.talon.util.nowMs
 
 /**
@@ -161,6 +168,7 @@ class OrreryRepo(
             val posts = db.messages().postsAfter(row.messagesCursor, s, MESSAGES_PER_PASS)
             facts += Facts(observations = posts.mapNotNull { messageFacts(it, s) })
             val messagesCursor = posts.maxOfOrNull { it.sentMs } ?: row.messagesCursor
+            facts += triage(a, row, posts, s, nowMs)
 
             // Mail and the calendar may be absent on this ship; a source
             // that is not there is skipped, not an error of the pipe.
@@ -207,6 +215,42 @@ class OrreryRepo(
         }
     }
 
+    /**
+     * The funnel over this pass's messages: the ones in scope go through
+     * the rules against the ship's own bodies, and each claim lands in
+     * the tray, or goes straight up when the person has trusted that
+     * kind of claim. A claim already noticed is the same row again.
+     */
+    private suspend fun triage(a: OrreryApi, row: OrreryAccountEntity, posts: List<io.nisfeb.talon.data.MessageEntity>, s: String, nowMs: Long): Facts {
+        if (posts.isEmpty()) return Facts()
+        val index = NameIndex(runCatching { a.state(row.token).bodies }.getOrElse { Log.i(TAG, "state view skipped: ${it.message}"); return Facts() })
+        val allowed = db.orreryChannels().all().toSet()
+        val ourNick = db.contacts().get(s)?.nickname
+        var up = Facts()
+        for (m in posts) {
+            val text = StoryCache.textFor(m.id, m.contentJson)
+            if (!inScope(m.whom, text, s, ourNick, allowed)) continue
+            val kind = if (m.whom.startsWith("~") || m.whom.startsWith("0v")) "talon-dm" else "talon-chat"
+            val sourceId = "talon://chat/${m.whom}?id=${m.id}"
+            for (n in ruleFacts(text, m.author, m.sentMs, s, index)) {
+                val trusted = trusted(s, n.attr)
+                val entity = OrreryNoticedEntity(
+                    id = noticedId(sourceId, n.subject, n.attr), ship = s, subject = n.subject, attr = n.attr,
+                    valueJson = n.value.toString(), atMs = n.atMs, untilMs = n.untilMs, conf = n.conf,
+                    sourceKind = kind, sourceId = sourceId, bodyJson = n.body?.toJson()?.toString(),
+                    whom = m.whom, postId = m.id, snippet = text.take(200),
+                    state = if (trusted) "confirmed" else "pending", createdMs = nowMs,
+                )
+                if (db.orreryNoticed().insertIfNew(entity) != -1L && trusted) up += factsOf(entity)
+            }
+        }
+        return up
+    }
+
+    /** A kind of claim the person has confirmed three times and never discarded goes up on its own. */
+    private suspend fun trusted(s: String, attr: String): Boolean =
+        db.orreryNoticed().countByState(s, attr, "discarded") == 0 && db.orreryNoticed().countByState(s, attr, "confirmed") >= TRUST_AFTER
+
     private fun by(): String =
         "talon/" + platform.lowercase().replace(Regex("[^a-z0-9.]+"), "-").trim('-').take(50)
 
@@ -239,6 +283,35 @@ class OrreryRepo(
         const val PUSH_EVERY_MS = 10L * 60 * 1000
         const val MESSAGES_PER_PASS = 2000
         const val MAIL_PER_PASS = 200
+        const val TRUST_AFTER = 3
+
+        /** A noticed row as the facts it stands for. */
+        fun factsOf(n: OrreryNoticedEntity): Facts = Facts(
+            bodies = listOfNotNull(n.bodyJson?.let { bodyOf(Json.parseToJsonElement(it).jsonObject) }),
+            observations = listOf(Obs(n.subject, n.attr, Json.parseToJsonElement(n.valueJson), n.atMs, n.untilMs, n.conf, n.sourceKind, n.sourceId)),
+        )
+
+        private fun bodyOf(o: JsonObject) = OBody(
+            id = o["id"]!!.jsonPrimitive.content,
+            name = o["name"]?.jsonPrimitive?.content,
+            aliases = o["aliases"]?.jsonArray.orEmpty().map { it.jsonPrimitive.content },
+        )
+
+        /**
+         * The person's word on a noticed claim. Confirming sends it up
+         * through the attached pipe; false means there is none to send
+         * it through, and the row stays pending for when there is.
+         */
+        suspend fun confirm(db: AppDatabase, id: String): Boolean {
+            val n = db.orreryNoticed().get(id) ?: return false
+            val repo = current ?: return false
+            if (!repo._enabled.value) return false
+            db.orreryNoticed().setState(id, "confirmed")
+            note(factsOf(n))
+            return true
+        }
+
+        suspend fun discard(db: AppDatabase, id: String) = db.orreryNoticed().setState(id, "discarded")
     }
 }
 

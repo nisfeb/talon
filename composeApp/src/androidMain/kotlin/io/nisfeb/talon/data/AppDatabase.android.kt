@@ -39,6 +39,8 @@ actual abstract class AppDatabase : RoomDatabase() {
     actual abstract fun mailRows(): MailRowDao
     actual abstract fun calendarCache(): CalendarCacheDao
     actual abstract fun orreryAccounts(): OrreryAccountDao
+    actual abstract fun orreryNoticed(): OrreryNoticedDao
+    actual abstract fun orreryChannels(): OrreryChannelDao
 }
 
 /**
@@ -420,6 +422,8 @@ private val MIGRATION_42_43 = object : Migration(42, 43) {
 private val MIGRATION_43_44 = object : Migration(43, 44) {
     override fun migrate(db: SupportSQLiteDatabase) {
         db.execSQL(ORRERY_ACCOUNTS_SQL)
+        db.execSQL(ORRERY_NOTICED_SQL)
+        db.execSQL(ORRERY_CHANNELS_SQL)
     }
 }
 

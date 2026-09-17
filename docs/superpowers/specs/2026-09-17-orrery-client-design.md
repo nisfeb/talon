@@ -87,7 +87,7 @@ Extraction runs in the background: on Android under WorkManager when charging or
 ## 8. Phases
 
 1. **Plumbing and the structural pipe.** `OrreryApi`, the probe, the Apps row, key minting, the sync table, contacts, chat and mail last-contact, and calendar situations, batched, backfilled over the window. The switch, off by default.
-2. **The funnel and the tray.** Gates 1 to 3 and the Noticed tray, with a rule-only extractor for the simplest shapes (a status line, "I'm at <place>") so the tray is useful before the model lands.
+2. **The funnel and the tray.** Scope, the names gate against the keyed state view, the Noticed tray with its trust rule (a kind of claim confirmed three times and never discarded goes up on its own), a per-channel switch, and a rule-only extractor for the simplest shapes (a status line, "I'm at <place>", a named body's whereabouts) so the tray is useful before the model lands. The embedding pattern gate waits for phase 3: its positive set is the claims the tray has confirmed, and the rules are their own gate until then.
 3. **The model ladder.** The floor first, since it is one runtime and one grammar on all three platforms, then each platform's top rung, because that is where most current devices sit: Apple Foundation Models on iOS and macOS, AICore on Android, the local server on desktop. The fixtures, the download, the rung display in Settings, the budget.
 4. **Actions back.** Open actions in the New widget, execution of `message` and `calendar`, done and failed.
 5. **The middle rungs and the opt-in.** MediaPipe on Android, GPU offload on desktop, and the cloud extractor behind its switch.
