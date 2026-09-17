@@ -82,6 +82,8 @@ fun SettingsScreen(
     aiSettings: AiSettingsRepository,
     themePreference: ThemePreference,
     uiSettings: UiSettings,
+    /** The orrery pipe, for its section under AI; null where no ship is known. */
+    orrery: io.nisfeb.talon.orrery.OrreryRepo? = null,
     /** Whether the user is logged into 2+ ships. Drives the
      *  accent-color section's auto-default — multi-ship users land
      *  with the toggle on so they don't lose the per-ship pip / send
@@ -1122,6 +1124,9 @@ fun SettingsScreen(
 
             }
             if (safeTab == SettingsTab.Ai) {
+            // Orrery: the pipe, and the model that reads messages for it,
+            // which is its own configuration and not the provider above.
+            orrery?.let { OrrerySettingsSection(it, uiSettings) }
             // Loops — scheduled agent prompts. Needs a cloud key (it runs
             // the agent) and a platform that can fire it, so it's gated on
             // isLoopsSupported (Android via AlarmManager; desktop via the

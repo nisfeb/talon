@@ -160,6 +160,22 @@ class AndroidUiSettings(
         _orreryStandDown.value = on
     }
 
+    private val _orreryServerUrl = MutableStateFlow(prefs.getString(KEY_ORRERY_SERVER_URL, "") ?: "")
+    override val orreryServerUrl: StateFlow<String> = _orreryServerUrl.asStateFlow()
+    override fun setOrreryServerUrl(url: String) {
+        if (_orreryServerUrl.value == url) return
+        prefs.edit().putString(KEY_ORRERY_SERVER_URL, url).apply()
+        _orreryServerUrl.value = url
+    }
+
+    private val _orreryServerModel = MutableStateFlow(prefs.getString(KEY_ORRERY_SERVER_MODEL, "") ?: "")
+    override val orreryServerModel: StateFlow<String> = _orreryServerModel.asStateFlow()
+    override fun setOrreryServerModel(model: String) {
+        if (_orreryServerModel.value == model) return
+        prefs.edit().putString(KEY_ORRERY_SERVER_MODEL, model).apply()
+        _orreryServerModel.value = model
+    }
+
     private val _defaultCalendar = MutableStateFlow(prefs.getString(KEY_DEFAULT_CALENDAR, "") ?: "")
     override val defaultCalendar: StateFlow<String> = _defaultCalendar.asStateFlow()
     override fun setDefaultCalendar(id: String) {
@@ -400,6 +416,8 @@ class AndroidUiSettings(
         private const val KEY_CALENDAR_WEEK_VIEW = "calendar_week_view"
         private const val KEY_ORRERY_CLOUD_TRIAGE = "orrery_cloud_triage"
         private const val KEY_ORRERY_STAND_DOWN = "orrery_stand_down"
+        private const val KEY_ORRERY_SERVER_URL = "orrery_server_url"
+        private const val KEY_ORRERY_SERVER_MODEL = "orrery_server_model"
         private const val KEY_HOME_FAHRENHEIT = HomePrefs.FAHRENHEIT
         private const val KEY_HOME_24H = HomePrefs.TWENTY_FOUR_HOUR
         private const val KEY_HOME_LAYOUT = "home_layout"

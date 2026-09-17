@@ -53,16 +53,28 @@ object LocalServerRung : Rung() {
     @Volatile private var found: Server? = null
 
     override suspend fun status(): RungStatus {
-        found = probe("LM Studio", "http://localhost:1234") { it.jsonObject["data"]?.jsonArray.orEmpty().mapNotNull { m -> m.jsonObject["id"]?.jsonPrimitive?.content } }
-            ?: probe("Ollama", "http://localhost:11434") { it.jsonObject["models"]?.jsonArray.orEmpty().mapNotNull { m -> m.jsonObject["name"]?.jsonPrimitive?.content } }
-        return if (found != null) RungStatus.Ready else RungStatus.Unavailable("No LM Studio (port 1234) or Ollama (port 11434) is running.")
+        val chosen = LocalModels.serverUrl.trim().trimEnd('/')
+        found = if (chosen.isNotEmpty()) {
+            // The person named a server: that one, whichever shape it speaks.
+            probe("The server at $chosen", chosen, "/v1/models") { it.jsonObject["data"]?.jsonArray.orEmpty().mapNotNull { m -> m.jsonObject["id"]?.jsonPrimitive?.content } }
+                ?: probe("The server at $chosen", chosen, "/api/tags") { it.jsonObject["models"]?.jsonArray.orEmpty().mapNotNull { m -> m.jsonObject["name"]?.jsonPrimitive?.content } }
+        } else {
+            probe("LM Studio", "http://localhost:1234", "/v1/models") { it.jsonObject["data"]?.jsonArray.orEmpty().mapNotNull { m -> m.jsonObject["id"]?.jsonPrimitive?.content } }
+                ?: probe("Ollama", "http://localhost:11434", "/api/tags") { it.jsonObject["models"]?.jsonArray.orEmpty().mapNotNull { m -> m.jsonObject["name"]?.jsonPrimitive?.content } }
+        }
+        return if (found != null) RungStatus.Ready
+        else RungStatus.Unavailable(if (chosen.isNotEmpty()) "Nothing answers at $chosen." else "No LM Studio (port 1234) or Ollama (port 11434) is running.")
     }
 
-    private suspend fun probe(label: String, base: String, names: (kotlinx.serialization.json.JsonElement) -> List<String>): Server? = runCatching {
-        val path = if (label == "Ollama") "/api/tags" else "/v1/models"
+    private suspend fun probe(label: String, base: String, path: String, names: (kotlinx.serialization.json.JsonElement) -> List<String>): Server? = runCatching {
         val text = http.get("$base$path") { timeout { requestTimeoutMillis = 1500 } }.bodyAsText()
         val all = names(Json.parseToJsonElement(text)).filterNot { it.contains("embed", ignoreCase = true) }
-        val pick = preferred.firstNotNullOfOrNull { pre -> all.firstOrNull { it.lowercase().contains(pre) } } ?: all.firstOrNull()
+        val wanted = LocalModels.serverModel.trim()
+        val pick = when {
+            // A named model is used as named, listed or not: a server may load it on demand.
+            wanted.isNotEmpty() -> all.firstOrNull { it.equals(wanted, ignoreCase = true) } ?: wanted
+            else -> preferred.firstNotNullOfOrNull { pre -> all.firstOrNull { it.lowercase().contains(pre) } } ?: all.firstOrNull()
+        }
         pick?.let { Server(label, base, it) }
     }.getOrNull()
 

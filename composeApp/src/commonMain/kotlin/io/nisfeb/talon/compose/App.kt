@@ -1016,6 +1016,9 @@ fun App(
             if (mailShipUrl != null && ship != null) orreryRepo.attach(mailShipUrl, ship) else orreryRepo.detach()
         }
         val orreryActions by orreryRepo.actions.collectAsState()
+        // The triage's own server, from Settings, into the ladder.
+        LaunchedEffect(uiSettings) { uiSettings.orreryServerUrl.collect { io.nisfeb.talon.orrery.LocalModels.serverUrl = it } }
+        LaunchedEffect(uiSettings) { uiSettings.orreryServerModel.collect { io.nisfeb.talon.orrery.LocalModels.serverModel = it } }
         var openAction by remember { mutableStateOf<io.nisfeb.talon.orrery.OrreryAction?>(null) }
         openAction?.let { action ->
             io.nisfeb.talon.ui.OrreryActionDialog(
@@ -2043,6 +2046,7 @@ fun App(
                             ship?.let { sessionStore.all().firstOrNull { it.ship == ship } }?.shipUrl
                         }
                         SettingsScreen(
+                            orrery = orreryRepo,
                             // Anyone who has ever posted a status, plus
                             // whoever is already pinned so a pin can be
                             // taken off again when they go quiet.
