@@ -162,6 +162,27 @@ class OrreryRepo(
         }
     }
 
+    /**
+     * One pass and nothing kept, for a background worker: attach without
+     * a loop or a probe, push, then let the model and the ship go, so a
+     * runtime of a gigabyte does not stay resident after the work.
+     */
+    suspend fun pass(shipUrl: String, ship: String) {
+        this.shipUrl = shipUrl
+        this.ship = ship
+        api = OrreryApi(http, bare, shipUrl)
+        try {
+            push()
+        } finally {
+            runCatching { LocalModels.reset() }
+            cloudModel?.close()
+            cloudModel = null
+            api = null
+            this.ship = null
+            this.shipUrl = null
+        }
+    }
+
     /** One pass over every source from its cursor. Safe to call any time. */
     suspend fun push() {
         val a = api ?: return
