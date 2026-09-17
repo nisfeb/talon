@@ -42,7 +42,7 @@ import platform.UIKit.UIViewController
 
 /**
  * iOS entry point. The Xcode host (iosApp) calls
- * `MainViewControllerKt.MainViewController(rtc:)` and embeds the
+ * `MainViewControllerKt.MainViewController(rtc:models:)` and embeds the
  * returned controller. Wires the six required App() dependencies with iOS-backed
  * impls; the rest take their commonMain defaults.
  *
@@ -52,7 +52,9 @@ import platform.UIKit.UIViewController
  * projection). Update install is a no-op — App Store owns updates.
  * On-device AI / digest / loops are gated off in Capabilities.ios.kt.
  */
-fun MainViewController(rtc: NativeRtcFactory?): UIViewController {
+fun MainViewController(rtc: NativeRtcFactory?, models: io.nisfeb.talon.orrery.NativeModelFactory?): UIViewController {
+    // The orrery triage's models live in Swift; the ladder asks this.
+    io.nisfeb.talon.orrery.IosModels.factory = models
     // Kotlin/Native terminates on any exception that escapes to a foreign
     // (GCD) frame — Apple review hit that as an undiagnosable SIGABRT
     // crash-loop, and the .ips logs carry no Kotlin frames. Write the

@@ -30,7 +30,7 @@ package io.nisfeb.talon.ui
  *  - needsManualImagePaste — D, i; A: the text field's content receiver takes pasted images.
  *  - isImmersiveCallSupported — A, i (full-screen call view); D: the inline roster toggles in place.
  *  - isUrbWebViewSupported — A, i (in-app webview popover); D: hands off to the system browser.
- *  - isLocalTriageSupported — D (llama.cpp on the JVM, or a local Ollama), A (MediaPipe LLM Inference); i: no rung built yet, the rules alone read messages.
+ *  - isLocalTriageSupported — D (llama.cpp on the JVM, or a local Ollama), A (MediaPipe LLM Inference), i (Apple's system model on iOS 26, else llama.cpp).
  *
  * [platformLabel] and [isOnDeviceAiFeatureSupported] are declared
  * below too — a display name and a per-feature predicate, not flags.
@@ -94,9 +94,9 @@ expect val isQrScanSupported: Boolean
  * triage (see docs/superpowers/specs/2026-09-17-orrery-client-design.md,
  * section 5). Desktop: true, the llama.cpp JVM binding behind a
  * child-process probe, or a local Ollama when one is running. Android:
- * true, MediaPipe LLM Inference with the same Qwen model. iOS: false
- * until its rung lands; the rules read messages alone there, and the
- * copy says so.
+ * true, MediaPipe LLM Inference with the same Qwen model. iOS: true,
+ * Apple's on-device model on iOS 26 with Apple Intelligence, else
+ * llama.cpp through the XCFramework with the same Qwen model.
  */
 expect val isLocalTriageSupported: Boolean
 
