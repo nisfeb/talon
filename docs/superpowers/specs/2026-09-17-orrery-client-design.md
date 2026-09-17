@@ -14,6 +14,7 @@ Two pipes feed orrery from Talon. The structural pipe turns facts Talon already 
 - Talon pushes every structural fact it can, from contacts, chat, mail and the calendar. When auspex and the calendar push their own facts from the ship, the matching sources leave Talon. Source ids are chosen so that handoff is a no-op, not a duplicate.
 - Triage runs locally by default on every platform. A cloud provider may be used for triage only when the user opts into it explicitly, in its own switch, with the consequence stated. Sending every message to a cloud provider is against the privacy principles of Urbit. A frontier model reading the orrery state on the ship's behalf is not, because that state is claims and pointers, never the text.
 - Text never leaves the device for the ship. An observation's source is a pointer that Talon can open, and its value is a claim.
+- The best model a device can run is the one it uses. The floor exists so that every supported device works, not so that every device gets the floor. A newer system with better on-device model access uses that access, and the experience is never lowered to what the oldest supported version can do.
 
 ## 3. The structural pipe
 
@@ -41,19 +42,31 @@ Most of what Talon sees is group chatter about nothing in the user's world. The 
 4. **Extraction.** The candidate and the scoped body list (names, aliases, current attributes; sensitive ones are already stripped by the key) go to the local model with a grammar that admits only the answer shape: observations with subject, attr, value, at, until, conf, and any new bodies. Talon validates before submitting: attr charset and length, refs resolve to known bodies, conf capped at 80 for anything model-asserted. A refused attr is dropped and remembered as sensitive.
 5. **The person.** A Noticed tray in Talon, like the Requests section, shows each proposed observation with its source message: confirm or discard. A per-kind threshold lets confirmed kinds submit on their own once the user trusts them. Retract from the same tray. New places, things and situations are created only through the tray at first; people are created freely, because a ship is identity.
 
-## 5. Local extraction
+## 5. Local extraction: a ladder, best rung first
 
-One runtime on every platform: llama.cpp, with one GGUF model and one GBNF grammar, so the extraction behaves the same everywhere and one fixture set tests it. Bindings exist for Android (JNI), iOS (the Swift package) and the JVM desktop. The model is a 1B to 2B instruction-tuned model at 4-bit, under a gigabyte, downloaded on first use the way the desktop embedder is, never bundled in the app. The grammar guarantees valid JSON, so a bad answer is a wrong claim, never a parse failure, and a wrong claim meets the validation and the tray.
+Every device runs the best local model it has access to, chosen at runtime, and falls to the next rung only when the one above is absent. The contract is the same on every rung: the same prompt, the same answer shape, the same validation, the same tray. What differs is the model behind it. The bottom rung is a shared runtime that works everywhere, and it is there so that no device is left out, not as the target.
 
-Per-platform notes:
+| Platform | Top rung | Middle | Floor |
+|---|---|---|---|
+| iOS | Apple Foundation Models on iOS 26 and an Apple Intelligence device: the system model, guided generation as the grammar, no download | llama.cpp with the largest model the device's memory allows, Metal | llama.cpp, a 1B to 2B model at 4-bit |
+| Android | Gemini Nano through AICore where the device has it (the ML Kit GenAI prompt API; verify its status at build time, it has been pre-release) | MediaPipe LLM Inference running Gemma 3n on the GPU or NPU on devices that carry it | llama.cpp, a 1B to 2B model at 4-bit on the CPU |
+| macOS | Apple Foundation Models on macOS 26 and Apple silicon, through a small Swift helper the JVM app talks to over stdio | llama.cpp with Metal and a 4B to 8B model, sized to memory | llama.cpp, 1B to 2B |
+| Linux and Windows | A local server already running on the machine (Ollama or LM Studio at their default ports), which is local by definition and may hold a model far larger than anything Talon would download | llama.cpp with Vulkan or CUDA where a GPU is present, and a 4B to 8B model sized to memory | llama.cpp, 1B to 2B on the CPU |
 
-- iOS ships at 15.0, so Apple's Foundation Models (iOS 26, Apple Intelligence devices) cannot be the default. It is an upgrade where present, with guided generation as the grammar.
-- Android's MediaPipe LLM Inference API (Gemma 3 1B, GPU and NPU delegates) is an acceleration to consider once the shared runtime works, not a second default.
-- Desktop runs the model in a probed child process like `EmbedderProbe`, since a native runtime that crashes must not take the app with it.
+Rules of the ladder:
 
-A capability flag, `isLocalTriageSupported`, gates the funnel's model stage per platform, and the copy says when it is off. The cloud extractor is a separate switch under the AI settings, off, with its consequence written beside it. Nothing in gates 1 to 3 needs a model.
+- A rung is used only after it has passed the extraction fixtures at least as well as the rung below it, on that platform, in CI or on the device the first time it is enabled. A faster model that answers worse is not a better experience.
+- The floor's model is sized to the device too: the shared runtime picks the largest of a short list that fits memory with headroom, so a flagship phone on the floor still runs a better model than a budget one.
+- Detection is per device and per launch, and Settings shows which rung is in use, by name, with the reason the higher rungs are not (no Apple Intelligence, no AICore, not enough memory). A user who wants a rung the device could run but has not downloaded gets the download offered there.
+- Models are downloaded on first use, never bundled, and the download is offered rather than started silently on mobile data.
+- Desktop rungs that load native code run in a probed child process like `EmbedderProbe`, so a runtime that crashes takes nothing with it.
+- Every rung is local. The cloud extractor is not a rung; it is a separate switch under the AI settings, off, with its consequence written beside it.
 
-Extraction runs in the background: on Android under WorkManager when charging or idle, on desktop and iOS while the app is open, with a per-day budget so a busy channel cannot run the phone flat.
+The grammar guarantees valid JSON on the llama.cpp rungs and Apple's guided generation does the same; on rungs without constrained decoding the answer is validated and retried once, then dropped. A bad answer is therefore a wrong claim that meets validation and the tray, never a parse failure.
+
+A capability flag, `isLocalTriageSupported`, gates the funnel's model stage per platform, and the copy says when it is off. Nothing in gates 1 to 3 needs a model.
+
+Extraction runs in the background: on Android under WorkManager when charging or idle, on desktop and iOS while the app is open, with a per-day budget so a busy channel cannot run a phone flat.
 
 ## 6. Auth and transport
 
@@ -74,15 +87,15 @@ Extraction runs in the background: on Android under WorkManager when charging or
 
 1. **Plumbing and the structural pipe.** `OrreryApi`, the probe, the Apps row, key minting, the sync table, contacts, chat and mail last-contact, and calendar situations, batched, backfilled over the window. The switch, off by default.
 2. **The funnel and the tray.** Gates 1 to 3 and the Noticed tray, with a rule-only extractor for the simplest shapes (a status line, "I'm at <place>") so the tray is useful before the model lands.
-3. **The local model.** llama.cpp on all three platforms, the grammar, the prompt, the fixtures, the download, the budget.
+3. **The model ladder.** The floor first, since it is one runtime and one grammar on all three platforms, then each platform's top rung, because that is where most current devices sit: Apple Foundation Models on iOS and macOS, AICore on Android, the local server on desktop. The fixtures, the download, the rung display in Settings, the budget.
 4. **Actions back.** Open actions in the New widget, execution of `message` and `calendar`, done and failed.
-5. **Accelerations and the opt-in.** Apple Foundation Models where present, MediaPipe on Android if it is measurably better, and the cloud extractor behind its switch.
+5. **The middle rungs and the opt-in.** MediaPipe on Android, GPU offload on desktop, and the cloud extractor behind its switch.
 
 ## 9. Gates
 
 - Unit: the structural mappers are pure functions from Talon rows to observation JSON, tested against fixtures, including the id alignment with what the ship-side pushes would produce.
 - The funnel: a labelled set of messages (claims and chatter) with the expected gate outcome, run on every platform's embedder where one exists.
-- Extraction: a fixture set of candidates and expected observations, run against the local model in CI on desktop with a pinned model file, judged by field match, not by text.
+- Extraction: a fixture set of candidates and expected observations, judged by field match, not by text. It runs in CI against the floor on desktop with a pinned model file, and it is the gate every higher rung must pass, on its platform, before the ladder may select it.
 - Against `~wex`: the phase 1 pipe writes, the state view shows it, a resend answers `existing` on every item, and a revoked key answers 403.
 
 ## 10. Not in v1
@@ -91,5 +104,6 @@ Bodies for groups. Mirroring calendar tasks into orrery actions. Embedding resol
 
 ## 11. Open
 
-- Which model. Candidates at 1B to 2B: Gemma 3 1B, Qwen2.5 1.5B, Llama 3.2 1B. Decided by the fixture set in phase 3, not by reputation.
+- Which models, per rung. Floor candidates at 1B to 2B: Gemma 3 1B, Qwen2.5 1.5B, Llama 3.2 1B; middle candidates at 4B to 8B for desktops with the memory. Decided by the fixture set in phase 3, not by reputation.
+- Android's AICore prompt API has been pre-release; if it is not usable when phase 3 starts, MediaPipe with Gemma 3n is Android's top rung until it is.
 - Whether mail `last-contact` alone is worth a mail source before auspex pushes its own facts, or whether mail subjects with dates should feed the funnel from the start.
