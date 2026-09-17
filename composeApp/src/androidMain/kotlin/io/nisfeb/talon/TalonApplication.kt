@@ -278,6 +278,8 @@ class TalonApplication : Application() {
         // calling on every cold start doesn't reset the schedule.
         // The worker itself no-ops when no ship is bound.
         CatchUpWorker.schedule(this)
+        // The orrery pass while charging and idle; a no-op until the pipe is on.
+        OrreryWorker.schedule(this)
 
 
         // User loops — headless scheduled agent runs. Ship-scoped deps
