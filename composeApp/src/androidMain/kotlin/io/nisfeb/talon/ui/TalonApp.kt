@@ -438,6 +438,8 @@ fun TalonApp(
         else orreryRepo.detach()
     }
     val orreryActions by orreryRepo.actions.collectAsState()
+    LaunchedEffect(app.uiSettings) { app.uiSettings.orreryServerUrl.collect { io.nisfeb.talon.orrery.LocalModels.serverUrl = it } }
+    LaunchedEffect(app.uiSettings) { app.uiSettings.orreryServerModel.collect { io.nisfeb.talon.orrery.LocalModels.serverModel = it } }
     var openAction by remember { mutableStateOf<io.nisfeb.talon.orrery.OrreryAction?>(null) }
     openAction?.let { action ->
         io.nisfeb.talon.ui.OrreryActionDialog(
@@ -2121,6 +2123,7 @@ fun TalonApp(
                     io.nisfeb.talon.notify.AndroidSystemNotificationProbe(app)
                 }
                 SettingsScreen(
+                    orrery = orreryRepo,
                     aiSettings = app.aiSettings,
                     themePreference = app.themePreference,
                     uiSettings = app.uiSettings,

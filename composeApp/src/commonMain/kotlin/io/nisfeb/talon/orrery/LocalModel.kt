@@ -48,6 +48,14 @@ expect fun localModelRungs(): List<Rung>
  * every message.
  */
 object LocalModels {
+    /**
+     * The triage's own server, from Settings: a base URL to use instead
+     * of looking on the usual ports, and a model name to use instead of
+     * the server's best by name. Empty means look and pick.
+     */
+    @kotlin.concurrent.Volatile var serverUrl: String = ""
+    @kotlin.concurrent.Volatile var serverModel: String = ""
+
     private val lock = Mutex()
     private var opened: Pair<Rung, LocalModel>? = null
     private val failed = mutableSetOf<String>()

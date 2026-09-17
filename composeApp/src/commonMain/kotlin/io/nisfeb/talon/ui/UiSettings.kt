@@ -146,6 +146,18 @@ interface UiSettings {
     fun setOrreryStandDown(on: Boolean)
 
     /**
+     * The local model server the orrery triage reads with, its own
+     * configuration and nothing to do with the AI provider used for
+     * summaries and actions: a base URL such as http://localhost:1234
+     * (empty means find LM Studio or Ollama on their usual ports) and a
+     * model name (empty means the server's best by name). Per device.
+     */
+    val orreryServerUrl: StateFlow<String>
+    fun setOrreryServerUrl(url: String)
+    val orreryServerModel: StateFlow<String>
+    fun setOrreryServerModel(model: String)
+
+    /**
      * How the home dial reads out temperature and the hour.
      *
      * Per install, like the place: which units somebody reads is a fact
@@ -378,6 +390,12 @@ class InMemoryUiSettings(
     private val _orreryStandDown = MutableStateFlow(true)
     override val orreryStandDown: StateFlow<Boolean> = _orreryStandDown.asStateFlow()
     override fun setOrreryStandDown(on: Boolean) { _orreryStandDown.value = on }
+    private val _orreryServerUrl = MutableStateFlow("")
+    override val orreryServerUrl: StateFlow<String> = _orreryServerUrl.asStateFlow()
+    override fun setOrreryServerUrl(url: String) { _orreryServerUrl.value = url }
+    private val _orreryServerModel = MutableStateFlow("")
+    override val orreryServerModel: StateFlow<String> = _orreryServerModel.asStateFlow()
+    override fun setOrreryServerModel(model: String) { _orreryServerModel.value = model }
 
     private val _homeFahrenheit = MutableStateFlow(true)
     override val homeFahrenheit: StateFlow<Boolean> = _homeFahrenheit.asStateFlow()

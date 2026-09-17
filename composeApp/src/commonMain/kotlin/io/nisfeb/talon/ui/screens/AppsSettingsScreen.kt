@@ -84,8 +84,6 @@ fun AppsSettingsScreen(
     val orreryAvailability = orrery?.availability?.collectAsState()?.value
     val orreryError by (orrery?.error ?: noError).collectAsState()
     val orreryOn = orrery?.enabled?.collectAsState()?.value ?: false
-    val orreryLastMs = orrery?.lastPushMs?.collectAsState()?.value
-    var orreryBusy by remember { mutableStateOf(false) }
 
     var lattice by remember { mutableStateOf<Boolean?>(null) }
     var groups by remember { mutableStateOf<Boolean?>(null) }
@@ -221,111 +219,15 @@ fun AppsSettingsScreen(
                 Text(it, style = MaterialTheme.typography.bodySmall)
             }
 
-            // The pipe into orrery. Off until the person says so: it is
-            // their world model, and what feeds it is theirs to decide.
+            // Feeding orrery, and which model reads for it, live under
+            // Settings > AI, beside the rest of the AI configuration.
             if (orrery != null && orreryAvailability == io.nisfeb.talon.orrery.OrreryAvailability.PRESENT) {
-                Spacer(Modifier.height(16.dp))
-                Row(Modifier.fillMaxWidth().padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text("Feed Orrery", style = MaterialTheme.typography.bodyLarge)
-                        Text(
-                            "The people in your contacts book, who wrote to you and on which day, and your calendar go to Orrery on your ship as facts, under a key made for this install. Nothing anyone said leaves this device.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        if (orreryOn) {
-                            val pushing by orrery.pushing.collectAsState()
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(
-                                    if (orreryLastMs != null) "Pushed ${agoLabel(orreryLastMs)}." else "Not pushed yet.",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.weight(1f),
-                                )
-                                // For whoever is checking a phone: a pass on demand,
-                                // and what it refused shown in the row's error line.
-                                TextButton(enabled = !pushing, onClick = { scope.launch { orrery.push() } }) {
-                                    Text(if (pushing) "Pushing" else "Push now")
-                                }
-                            }
-                        }
-                        // Which model reads messages here, and why not a better one.
-                        val model = orrery.model.collectAsState().value
-                        val download = orrery.download.collectAsState().value
-                        val modelLine = when {
-                            !io.nisfeb.talon.ui.isLocalTriageSupported -> "No local model on this platform yet. The rules alone read messages."
-                            model == null -> null
-                            model.second == io.nisfeb.talon.orrery.RungStatus.Ready -> "Reads with ${model.first}."
-                            model.second is io.nisfeb.talon.orrery.RungStatus.NeedsDownload -> "${model.first} can read messages here after a download of about ${(model.second as io.nisfeb.talon.orrery.RungStatus.NeedsDownload).bytes / 1_000_000} MB."
-                            else -> (model.second as io.nisfeb.talon.orrery.RungStatus.Unavailable).reason
-                        }
-                        modelLine?.let {
-                            Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                        if (model?.second is io.nisfeb.talon.orrery.RungStatus.NeedsDownload) {
-                            if (download != null) {
-                                androidx.compose.material3.LinearProgressIndicator(progress = { download }, modifier = Modifier.fillMaxWidth().padding(top = 4.dp))
-                            } else {
-                                TextButton(onClick = { scope.launch { orrery.prepareModel().onFailure { note = it.message ?: "The download did not finish." } } }) { Text("Download the model") }
-                            }
-                        }
-                        // On a phone: yield to a computer that has read lately.
-                        if (io.nisfeb.talon.ui.isTouchPrimary) orrery.standDown?.let { sd ->
-                            val on by sd.on.collectAsState()
-                            val yielding by orrery.yielding.collectAsState()
-                            Row(Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                                Column(Modifier.weight(1f)) {
-                                    Text("Leave reading to your computer", style = MaterialTheme.typography.bodyMedium)
-                                    Text(
-                                        if (on && yielding) "A computer running Talon has been on the job in the last two hours, so this phone is leaving the reading to its bigger model. Facts still go up from here."
-                                        else "When a computer running Talon has been on the job in the last two hours, this phone leaves the reading to its bigger model. Facts still go up from here.",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    )
-                                }
-                                androidx.compose.material3.Switch(checked = on, onCheckedChange = { sd.set(it) })
-                            }
-                        }
-                        // The cloud opt-in: theirs to choose, with the cost said.
-                        orrery.cloud?.let { cloud ->
-                            val cloudOn by cloud.on.collectAsState()
-                            val hasKey = cloud.config().apiKey.isNotBlank()
-                            Row(Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                                Column(Modifier.weight(1f)) {
-                                    Text("Read with your cloud AI key instead", style = MaterialTheme.typography.bodyMedium)
-                                    Text(
-                                        if (hasKey) "Every message the triage reads leaves this device for ${cloud.config().provider.label}. A larger model reads better; that is the trade."
-                                        else "Needs an API key under AI. Off until then.",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    )
-                                }
-                                androidx.compose.material3.Switch(
-                                    checked = cloudOn && hasKey,
-                                    enabled = hasKey,
-                                    onCheckedChange = { on -> cloud.set(on); scope.launch { orrery.refreshModel() } },
-                                )
-                            }
-                        }
-                    }
-                    if (orreryBusy) {
-                        CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
-                    } else {
-                        androidx.compose.material3.Switch(
-                            checked = orreryOn,
-                            onCheckedChange = { on ->
-                                note = null
-                                scope.launch {
-                                    orreryBusy = true
-                                    (if (on) orrery.enable() else orrery.disable())
-                                        .onFailure { note = it.message ?: "Orrery did not answer." }
-                                    orreryBusy = false
-                                }
-                            },
-                        )
-                    }
-                }
-                HorizontalDivider()
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    if (orreryOn) "Talon is feeding Orrery. Its settings are under AI." else "Feed Orrery from Settings, under AI.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
 
             Spacer(Modifier.height(16.dp))

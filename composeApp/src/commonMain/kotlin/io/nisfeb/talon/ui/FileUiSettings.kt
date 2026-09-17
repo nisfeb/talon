@@ -64,6 +64,8 @@ class FileUiSettings(
         val calendarWeekView: Boolean = false,
         val orreryCloudTriage: Boolean = false,
         val orreryStandDown: Boolean = true,
+        val orreryServerUrl: String = "",
+        val orreryServerModel: String = "",
         val homeFahrenheit: Boolean = true,
         val homeTwentyFourHour: Boolean = false,
         val homeLayout: String = "",
@@ -202,6 +204,22 @@ class FileUiSettings(
     override fun setOrreryStandDown(on: Boolean) {
         if (_orreryStandDown.value == on) return
         _orreryStandDown.value = on
+        persistCurrent()
+    }
+
+    private val _orreryServerUrl = MutableStateFlow(initial.orreryServerUrl)
+    override val orreryServerUrl: StateFlow<String> = _orreryServerUrl.asStateFlow()
+    override fun setOrreryServerUrl(url: String) {
+        if (_orreryServerUrl.value == url) return
+        _orreryServerUrl.value = url
+        persistCurrent()
+    }
+
+    private val _orreryServerModel = MutableStateFlow(initial.orreryServerModel)
+    override val orreryServerModel: StateFlow<String> = _orreryServerModel.asStateFlow()
+    override fun setOrreryServerModel(model: String) {
+        if (_orreryServerModel.value == model) return
+        _orreryServerModel.value = model
         persistCurrent()
     }
 
@@ -367,6 +385,8 @@ class FileUiSettings(
                 calendarWeekView = _calendarWeekView.value,
                 orreryCloudTriage = _orreryCloudTriage.value,
                 orreryStandDown = _orreryStandDown.value,
+                orreryServerUrl = _orreryServerUrl.value,
+                orreryServerModel = _orreryServerModel.value,
                 homeFahrenheit = _homeFahrenheit.value,
                 homeTwentyFourHour = _homeTwentyFourHour.value,
                 homeLayout = _homeLayout.value,
