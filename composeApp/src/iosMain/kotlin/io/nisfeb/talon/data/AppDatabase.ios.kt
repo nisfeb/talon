@@ -43,6 +43,8 @@ actual abstract class AppDatabase : RoomDatabase() {
     actual abstract fun mailRows(): MailRowDao
     actual abstract fun calendarCache(): CalendarCacheDao
     actual abstract fun orreryAccounts(): OrreryAccountDao
+    actual abstract fun orreryNoticed(): OrreryNoticedDao
+    actual abstract fun orreryChannels(): OrreryChannelDao
 }
 
 internal fun sanitizeShipKey(shipKey: String): String =

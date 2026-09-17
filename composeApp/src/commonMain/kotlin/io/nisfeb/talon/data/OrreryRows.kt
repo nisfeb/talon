@@ -59,5 +59,86 @@ internal const val ORRERY_ACCOUNTS_SQL =
 
 /** 43 to 44 over a driver connection, for desktop and iOS. Android runs the same statement its own way. */
 val ORRERY_ACCOUNTS_MIGRATION = object : Migration(43, 44) {
-    override fun migrate(connection: SQLiteConnection) = connection.execSQL(ORRERY_ACCOUNTS_SQL)
+    override fun migrate(connection: SQLiteConnection) {
+        connection.execSQL(ORRERY_ACCOUNTS_SQL)
+        connection.execSQL(ORRERY_NOTICED_SQL)
+        connection.execSQL(ORRERY_CHANNELS_SQL)
+    }
 }
+
+/**
+ * Something the triage noticed in what somebody said: one claim, with
+ * where it came from, waiting for the person to confirm or discard it.
+ * The snippet is the source text and stays on this device; only the
+ * claim and the pointer ever go to the ship.
+ */
+@Entity(tableName = "orrery_noticed")
+data class OrreryNoticedEntity(
+    @PrimaryKey val id: String,
+    val ship: String,
+    val subject: String,
+    val attr: String,
+    val valueJson: String,
+    val atMs: Long,
+    val untilMs: Long?,
+    val conf: Int,
+    val sourceKind: String,
+    val sourceId: String,
+    /** A body the claim needs that the ship may not have, as JSON, or null. */
+    val bodyJson: String?,
+    val whom: String,
+    val postId: String,
+    val snippet: String,
+    /** pending, confirmed or discarded. */
+    val state: String,
+    val createdMs: Long,
+)
+
+@Dao
+interface OrreryNoticedDao {
+    @Query("SELECT * FROM orrery_noticed WHERE ship = :ship AND state = 'pending' ORDER BY createdMs DESC")
+    fun pending(ship: String): Flow<List<OrreryNoticedEntity>>
+
+    @Query("SELECT * FROM orrery_noticed WHERE id = :id")
+    suspend fun get(id: String): OrreryNoticedEntity?
+
+    @androidx.room.Insert(onConflict = androidx.room.OnConflictStrategy.IGNORE)
+    suspend fun insertIfNew(row: OrreryNoticedEntity): Long
+
+    @Query("UPDATE orrery_noticed SET state = :state WHERE id = :id")
+    suspend fun setState(id: String, state: String)
+
+    @Query("SELECT COUNT(*) FROM orrery_noticed WHERE ship = :ship AND attr = :attr AND state = :state")
+    suspend fun countByState(ship: String, attr: String, state: String): Int
+
+    @Query("DELETE FROM orrery_noticed WHERE ship = :ship")
+    suspend fun clear(ship: String)
+}
+
+/** A channel the person lets the triage read. DMs need no row: they are always in scope. */
+@Entity(tableName = "orrery_channels")
+data class OrreryChannelEntity(@PrimaryKey val whom: String)
+
+@Dao
+interface OrreryChannelDao {
+    @Query("SELECT whom FROM orrery_channels")
+    fun stream(): Flow<List<String>>
+
+    @Query("SELECT whom FROM orrery_channels")
+    suspend fun all(): List<String>
+
+    @Upsert
+    suspend fun put(row: OrreryChannelEntity)
+
+    @Query("DELETE FROM orrery_channels WHERE whom = :whom")
+    suspend fun remove(whom: String)
+}
+
+internal const val ORRERY_NOTICED_SQL =
+    "CREATE TABLE IF NOT EXISTS `orrery_noticed` (`id` TEXT NOT NULL, `ship` TEXT NOT NULL, `subject` TEXT NOT NULL, " +
+        "`attr` TEXT NOT NULL, `valueJson` TEXT NOT NULL, `atMs` INTEGER NOT NULL, `untilMs` INTEGER, `conf` INTEGER NOT NULL, " +
+        "`sourceKind` TEXT NOT NULL, `sourceId` TEXT NOT NULL, `bodyJson` TEXT, `whom` TEXT NOT NULL, `postId` TEXT NOT NULL, " +
+        "`snippet` TEXT NOT NULL, `state` TEXT NOT NULL, `createdMs` INTEGER NOT NULL, PRIMARY KEY(`id`))"
+
+internal const val ORRERY_CHANNELS_SQL =
+    "CREATE TABLE IF NOT EXISTS `orrery_channels` (`whom` TEXT NOT NULL, PRIMARY KEY(`whom`))"

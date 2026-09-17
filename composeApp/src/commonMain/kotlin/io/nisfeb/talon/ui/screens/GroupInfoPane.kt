@@ -281,6 +281,30 @@ fun GroupInfoPane(
                         },
                     )
                 }
+                // Channels are out of the orrery triage's scope unless
+                // the person lets it read this one. DMs need no switch.
+                if (!whom.startsWith("~") && !whom.startsWith("0v")) {
+                    val fed by remember { db.orreryChannels().stream() }.collectAsState(initial = emptyList())
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            "Let Orrery read this channel",
+                            style = MaterialTheme.typography.bodyMedium,
+                            modifier = Modifier.weight(1f),
+                        )
+                        Switch(
+                            checked = whom in fed,
+                            onCheckedChange = { on ->
+                                scope.launch {
+                                    if (on) db.orreryChannels().put(io.nisfeb.talon.data.OrreryChannelEntity(whom))
+                                    else db.orreryChannels().remove(whom)
+                                }
+                            },
+                        )
+                    }
+                }
             }
             HorizontalDivider()
         }
