@@ -229,7 +229,7 @@ fun AppsSettingsScreen(
                     Column(Modifier.weight(1f)) {
                         Text("Feed Orrery", style = MaterialTheme.typography.bodyLarge)
                         Text(
-                            "Your contacts, who wrote to you and on which day, and your calendar go to Orrery on your ship as facts, under a key made for this install. Nothing anyone said leaves this device.",
+                            "The people in your contacts book, who wrote to you and on which day, and your calendar go to Orrery on your ship as facts, under a key made for this install. Nothing anyone said leaves this device.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )

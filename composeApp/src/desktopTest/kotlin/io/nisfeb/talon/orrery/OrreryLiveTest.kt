@@ -69,7 +69,7 @@ class OrreryLiveTest {
                     MessageEntity(whom = peer, id = "170.141.184.507", author = peer, sentMs = nowMs() - 1_800_000, contentJson = """[{"inline":["I'm at the shop now"]}]""", kind = "chat"),
                 ))
 
-                val repo = OrreryRepo(owner, scope, db, "live test")
+                val repo = OrreryRepo(owner, scope, db, "live test", book = { setOf(peer) })
                 repo.attach(url, ship)
                 withTimeout(30_000) { while (repo.availability.value != OrreryAvailability.PRESENT) delay(200) }
 
