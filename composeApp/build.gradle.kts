@@ -172,6 +172,9 @@ kotlin {
             // MediaPipe text tasks back the on-device Embedder used by
             // the SmartFeatures suite + EmbeddingIndexer.
             implementation(libs.mediapipe.tasks.text)
+            // The orrery triage's Android rung: MediaPipe LLM Inference,
+            // GPU where the phone has it (orrery/LocalModels.android.kt).
+            implementation(libs.mediapipe.tasks.genai)
             // ZXing scanner Activity for the LoginScreen "Scan QR"
             // button. Pure FOSS; works on degoogled Android (GrapheneOS,
             // LineageOS without GApps) since it doesn't depend on Play

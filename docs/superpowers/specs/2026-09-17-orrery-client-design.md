@@ -50,7 +50,7 @@ Every device runs the best local model it has access to, chosen at runtime, and 
 | Platform | Top rung | Middle | Floor |
 |---|---|---|---|
 | iOS | Apple Foundation Models on iOS 26 and an Apple Intelligence device: the system model, guided generation as the grammar, no download | llama.cpp with the largest model the device's memory allows, Metal | llama.cpp, a 1B to 2B model at 4-bit |
-| Android | Gemini Nano through AICore where the device has it (the ML Kit GenAI prompt API; verify its status at build time, it has been pre-release) | MediaPipe LLM Inference running Gemma 3n on the GPU or NPU on devices that carry it | llama.cpp, a 1B to 2B model at 4-bit on the CPU |
+| Android | Gemini Nano through AICore where the device has it (the ML Kit GenAI prompt API; verify its status at build time, it has been pre-release) | MediaPipe LLM Inference running Gemma 3n on the GPU or NPU on devices that carry it (Gemma's bundles are gated behind Google's terms, so this needs a signed download, not an in-app fetch) | MediaPipe LLM Inference with LiteRT's ungated Qwen2.5 1.5B bundle, GPU where the phone has it, else CPU |
 | macOS | Apple Foundation Models on macOS 26 and Apple silicon, through a small Swift helper the JVM app talks to over stdio | llama.cpp with Metal and a 4B to 8B model, sized to memory | llama.cpp, 1B to 2B |
 | Linux and Windows | A local server already running on the machine (Ollama or LM Studio at their default ports), which is local by definition and may hold a model far larger than anything Talon would download | llama.cpp with Vulkan or CUDA where a GPU is present, and a 4B to 8B model sized to memory | llama.cpp, 1B to 2B on the CPU |
 
