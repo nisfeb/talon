@@ -59,6 +59,8 @@ class OrreryRepo(
      * contacts table holds every peer ever seen, which is thousands.
      */
     private val book: () -> Set<String> = { emptySet() },
+    /** On a phone, whether to leave the reading to a computer that has read lately. */
+    val standDown: StandDown? = null,
 ) {
     private var cloudModel: LocalModel? = null
 
@@ -84,6 +86,9 @@ class OrreryRepo(
     /** The analyst's open actions, as of the last pass. */
     private val _actions = MutableStateFlow<List<OrreryAction>>(emptyList())
     val actions: StateFlow<List<OrreryAction>> = _actions.asStateFlow()
+    /** True while this phone is leaving the reading to a computer. */
+    private val _yielding = MutableStateFlow(false)
+    val yielding: StateFlow<Boolean> = _yielding.asStateFlow()
 
     private var api: OrreryApi? = null
     // Coroutines only touch this, so a mutex is the whole of the guard
@@ -296,6 +301,18 @@ class OrreryRepo(
     private suspend fun triage(a: OrreryApi, row: OrreryAccountEntity, posts: List<io.nisfeb.talon.data.MessageEntity>, s: String, nowMs: Long, url: String, freshMail: List<io.nisfeb.talon.mail.InboxEntry>): Facts {
         val spoken = pendingLock.withLock { transcripts.toList().also { transcripts.clear() } }
         if (posts.isEmpty() && spoken.isEmpty() && freshMail.isEmpty()) return Facts()
+        // A phone with a computer on the job leaves the reading to it. The
+        // phone's cursor still moves; the computer reads these from its
+        // own, which did not. ponytail: a computer that never returns
+        // leaves them unread; a second cursor would need a column, and
+        // the table is already on testers' phones.
+        if (io.nisfeb.talon.ui.isTouchPrimary && standDown?.on?.value == true) {
+            val yielded = runCatching { computerActive(a.clients(), nowMs) }.getOrDefault(false)
+            _yielding.value = yielded
+            if (yielded) return Facts()
+        } else {
+            _yielding.value = false
+        }
         val r = reading(a, row, s) ?: return Facts()
         val allowed = db.orreryChannels().all().toSet()
         val ourNick = db.contacts().get(s)?.nickname

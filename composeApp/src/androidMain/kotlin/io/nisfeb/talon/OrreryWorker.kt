@@ -38,6 +38,7 @@ class OrreryWorker(context: Context, params: WorkerParameters) : CoroutineWorker
             app.session.http, scope, app.db, io.nisfeb.talon.ui.platformLabel, app.searchEmbedderClient,
             cloud = CloudTriage(app.uiSettings.orreryCloudTriage, app.uiSettings::setOrreryCloudTriage) { app.aiSettings.state.value },
             book = { app.repo.bookContacts.value },
+            standDown = io.nisfeb.talon.orrery.StandDown(app.uiSettings.orreryStandDown, app.uiSettings::setOrreryStandDown),
         )
         try {
             repo.pass(session.shipUrl, session.ship)

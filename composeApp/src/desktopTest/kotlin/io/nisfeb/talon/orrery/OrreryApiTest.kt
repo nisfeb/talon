@@ -86,6 +86,16 @@ class OrreryApiTest {
     }
 
     @Test
+    fun `the owner's key list says when each was used`() = runTest {
+        val keys = api(body = """[{"id":"k1","name":"Talon on Desktop (Linux)","by":"talon/desktop-linux","scope":{},"made":"2026-09-17T00:00:00Z","used":"2026-09-17T12:00:00Z"},{"id":"k2","name":"Talon on Android 17","by":"talon/android-17","scope":{},"made":"2026-09-17T00:00:00Z","used":null}]""")
+            .clients()
+        assertEquals(listOf("talon/desktop-linux", "talon/android-17"), keys.map { it.by })
+        assertEquals(1_789_646_400_000L, keys[0].usedMs)
+        assertNull(keys[1].usedMs)
+        assertEquals("https://ship/apps/orrery/api/clients", seen!!.url.toString())
+    }
+
+    @Test
     fun `a refusal names the ship's reason`() = runTest {
         val e = assertFailsWith<OrreryError.Refused> { api(HttpStatusCode.Forbidden, """{"error":"read only key"}""").observe(buildJsonObject { }, "t") }
         assertEquals(403, e.status)

@@ -170,3 +170,13 @@ fun mergeSpoken(lines: List<Spoken>, maxChars: Int = 1000): List<Spoken> {
     }
     return out
 }
+
+/**
+ * Whether a key belonging to a computer running Talon was used within
+ * [windowMs] of [nowMs]. A key's identity is `talon/<platform>` and a
+ * computer's platform begins with "desktop"; the ship records a key's
+ * use once an hour, so two hours is the honest window. A phone reads
+ * this and leaves the reading to the bigger model while it is on.
+ */
+fun computerActive(keys: List<ClientKey>, nowMs: Long, windowMs: Long = 2L * 60 * 60 * 1000): Boolean =
+    keys.any { it.by.startsWith("talon/desktop") && it.usedMs != null && nowMs - it.usedMs <= windowMs }

@@ -269,6 +269,23 @@ fun AppsSettingsScreen(
                                 TextButton(onClick = { scope.launch { orrery.prepareModel().onFailure { note = it.message ?: "The download did not finish." } } }) { Text("Download the model") }
                             }
                         }
+                        // On a phone: yield to a computer that has read lately.
+                        if (io.nisfeb.talon.ui.isTouchPrimary) orrery.standDown?.let { sd ->
+                            val on by sd.on.collectAsState()
+                            val yielding by orrery.yielding.collectAsState()
+                            Row(Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Column(Modifier.weight(1f)) {
+                                    Text("Leave reading to your computer", style = MaterialTheme.typography.bodyMedium)
+                                    Text(
+                                        if (on && yielding) "A computer running Talon has been on the job in the last two hours, so this phone is leaving the reading to its bigger model. Facts still go up from here."
+                                        else "When a computer running Talon has been on the job in the last two hours, this phone leaves the reading to its bigger model. Facts still go up from here.",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                                androidx.compose.material3.Switch(checked = on, onCheckedChange = { sd.set(it) })
+                            }
+                        }
                         // The cloud opt-in: theirs to choose, with the cost said.
                         orrery.cloud?.let { cloud ->
                             val cloudOn by cloud.on.collectAsState()

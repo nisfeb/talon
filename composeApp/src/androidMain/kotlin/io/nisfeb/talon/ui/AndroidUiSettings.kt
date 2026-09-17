@@ -152,6 +152,14 @@ class AndroidUiSettings(
         _orreryCloudTriage.value = on
     }
 
+    private val _orreryStandDown = MutableStateFlow(prefs.getBoolean(KEY_ORRERY_STAND_DOWN, true))
+    override val orreryStandDown: StateFlow<Boolean> = _orreryStandDown.asStateFlow()
+    override fun setOrreryStandDown(on: Boolean) {
+        if (_orreryStandDown.value == on) return
+        prefs.edit().putBoolean(KEY_ORRERY_STAND_DOWN, on).apply()
+        _orreryStandDown.value = on
+    }
+
     private val _defaultCalendar = MutableStateFlow(prefs.getString(KEY_DEFAULT_CALENDAR, "") ?: "")
     override val defaultCalendar: StateFlow<String> = _defaultCalendar.asStateFlow()
     override fun setDefaultCalendar(id: String) {
@@ -391,6 +399,7 @@ class AndroidUiSettings(
         private const val KEY_DEFAULT_CALENDAR = "default_calendar"
         private const val KEY_CALENDAR_WEEK_VIEW = "calendar_week_view"
         private const val KEY_ORRERY_CLOUD_TRIAGE = "orrery_cloud_triage"
+        private const val KEY_ORRERY_STAND_DOWN = "orrery_stand_down"
         private const val KEY_HOME_FAHRENHEIT = HomePrefs.FAHRENHEIT
         private const val KEY_HOME_24H = HomePrefs.TWENTY_FOUR_HOUR
         private const val KEY_HOME_LAYOUT = "home_layout"
