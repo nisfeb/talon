@@ -71,6 +71,9 @@ class OrreryRepo(
     val model: StateFlow<Pair<String, RungStatus>?> = _model.asStateFlow()
     private val _download = MutableStateFlow<Float?>(null)
     val download: StateFlow<Float?> = _download.asStateFlow()
+    /** The analyst's open actions, as of the last pass. */
+    private val _actions = MutableStateFlow<List<OrreryAction>>(emptyList())
+    val actions: StateFlow<List<OrreryAction>> = _actions.asStateFlow()
 
     private var api: OrreryApi? = null
     // Coroutines only touch this, so a mutex is the whole of the guard
@@ -205,6 +208,7 @@ class OrreryRepo(
                 }
             }
             db.orreryAccounts().upsert(row.copy(messagesCursor = messagesCursor, mailCursor = mailCursor, calendarCursor = nowMs))
+            runCatching { a.actions(row.token) }.onSuccess { _actions.value = it }.onFailure { Log.i(TAG, "actions skipped: ${it.message}") }
             _lastPushMs.value = nowMs
             _error.value = if (refused == 0) null else "$refused refused: ${firstReason ?: "no reason given"}"
         } catch (e: OrreryError.Refused) {
@@ -311,6 +315,15 @@ class OrreryRepo(
             if (db.orreryNoticed().insertIfNew(entity) != -1L && trusted) up += factsOf(entity)
         }
         return up
+    }
+
+    /** The person's word on an action: done, dismissed, or failed with why. */
+    suspend fun setAction(id: String, status: String, note: String = ""): Result<Unit> = runCatching {
+        val a = api ?: error("Not attached to a ship.")
+        val s = ship ?: error("Not attached to a ship.")
+        val row = db.orreryAccounts().get(s) ?: error("The pipe is off.")
+        a.transition(row.token, id, status, note)
+        _actions.value = _actions.value.filterNot { it.id == id }
     }
 
     /** Where the ladder stands on this device, for Settings. */

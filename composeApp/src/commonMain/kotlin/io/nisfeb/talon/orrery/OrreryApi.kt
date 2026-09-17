@@ -98,6 +98,31 @@ class OrreryApi(
         return StateView(rev = o["rev"]?.jsonPrimitive?.content?.toLongOrNull() ?: 0L, bodies = bodies, attrs = attrs)
     }
 
+    /** The open actions the key may see: proposed and approved, newest first as the ship lists them. */
+    suspend fun actions(token: String): List<OrreryAction> {
+        val text = request(bare, HttpMethod.Get, "/api/actions?status=open") { header(HttpHeaders.Authorization, "Bearer $token") }
+        val arr = reading { Json.parseToJsonElement(text) }.let { it as? kotlinx.serialization.json.JsonArray ?: it.jsonObject["actions"]?.jsonArray }.orEmpty()
+        return arr.mapNotNull { e ->
+            val a = e.jsonObject
+            OrreryAction(
+                id = a["id"]?.jsonPrimitive?.content ?: return@mapNotNull null,
+                kind = a["kind"]?.jsonPrimitive?.content ?: return@mapNotNull null,
+                title = a["title"]?.jsonPrimitive?.content ?: "",
+                payload = a["payload"] as? JsonObject ?: JsonObject(emptyMap()),
+                about = a["about"]?.jsonArray.orEmpty().mapNotNull { it.jsonPrimitive.content },
+                due = a["due"]?.jsonPrimitive?.content?.takeIf { it.isNotBlank() && it != "null" },
+                status = a["status"]?.jsonPrimitive?.content ?: "proposed",
+                by = a["by"]?.jsonPrimitive?.content ?: "",
+            )
+        }
+    }
+
+    /** Move an action: approved, done, dismissed or failed, with a note where one is due. */
+    suspend fun transition(token: String, id: String, status: String, note: String = "") {
+        val body = buildJsonObject { put("status", status); if (note.isNotBlank()) put("note", note.take(500)) }
+        request(bare, HttpMethod.Post, "/api/actions/$id", body.toString()) { header(HttpHeaders.Authorization, "Bearer $token") }
+    }
+
     /** One observe batch under the key. Per-item answers, in order. */
     suspend fun observe(batch: JsonObject, token: String): ObserveAnswer {
         val text = request(bare, HttpMethod.Post, "/api/observe", batch.toString()) {
@@ -179,6 +204,18 @@ enum class OrreryAvailability {
 }
 
 data class MintedKey(val id: String, val token: String)
+
+/** Something the analyst proposed, as the ship holds it. */
+data class OrreryAction(
+    val id: String,
+    val kind: String,
+    val title: String,
+    val payload: JsonObject,
+    val about: List<String>,
+    val due: String?,
+    val status: String,
+    val by: String,
+)
 
 data class StateView(val rev: Long, val bodies: List<KnownBody>, val attrs: Map<String, List<String>> = emptyMap())
 

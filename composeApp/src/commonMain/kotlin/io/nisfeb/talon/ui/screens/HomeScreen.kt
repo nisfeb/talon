@@ -172,6 +172,9 @@ fun HomeScreen(
      *  widget. Empty where the host has not wired invitations. */
     invites: List<String> = emptyList(),
     onOpenInvites: () -> Unit = {},
+    /** The analyst's open actions, for the New widget. */
+    actions: List<io.nisfeb.talon.ui.NewAction> = emptyList(),
+    onOpenAction: (String) -> Unit = {},
     onOpenConversation: (whom: String) -> Unit,
     onOpenChats: () -> Unit,
     onOpenMailThread: (threadId: String) -> Unit,
@@ -374,6 +377,8 @@ fun HomeScreen(
                         onOpenStatuses = onOpenStatuses,
                         invites = invites,
                         onOpenInvites = onOpenInvites,
+                        actions = actions,
+                        onOpenAction = onOpenAction,
                         onLongPress = { editing = true },
                     )
 
@@ -748,12 +753,14 @@ private fun WidgetBody(
     onOpenStatuses: () -> Unit,
     invites: List<String>,
     onOpenInvites: () -> Unit,
+    actions: List<io.nisfeb.talon.ui.NewAction>,
+    onOpenAction: (String) -> Unit,
     onLongPress: () -> Unit,
 ) {
     when (widget.kind) {
         HomeWidgetKind.NEEDS -> NewPanel(
-            recent, unreadBy, mail, invites, contacts, ourShip, widget,
-            onOpenConversation, onOpenMailThread, onOpenInvites, onLongPress,
+            recent, unreadBy, mail, invites, actions, contacts, ourShip, widget,
+            onOpenConversation, onOpenMailThread, onOpenInvites, onOpenAction, onLongPress,
         )
         HomeWidgetKind.CLOCK -> ClockWeatherPanel(
             dialSizeFor(widget.rows),
@@ -1464,12 +1471,14 @@ private fun NewPanel(
     unreadBy: Map<String, io.nisfeb.talon.data.UnreadEntity>,
     mail: MailRepo?,
     invites: List<String>,
+    actions: List<io.nisfeb.talon.ui.NewAction>,
     contacts: ContactMap,
     ourShip: String,
     widget: HomeWidget,
     onOpenConversation: (String) -> Unit,
     onOpenMailThread: (String) -> Unit,
     onOpenInvites: () -> Unit,
+    onOpenAction: (String) -> Unit,
     onLongPress: () -> Unit,
 ) {
     val page = mail?.page?.collectAsState()?.value
@@ -1477,7 +1486,7 @@ private fun NewPanel(
         page?.threads.orEmpty().filter { it.unread }
             .map { io.nisfeb.talon.ui.NewMail(it.id, it.from, it.subject, it.last) }
     }
-    val rows = remember(recent, unreadBy, mailNeeds, invites, ourShip, widget.count) {
+    val rows = remember(recent, unreadBy, mailNeeds, invites, actions, ourShip, widget.count) {
         io.nisfeb.talon.ui.whatsNew(
             latest = recent,
             unreadBy = unreadBy,
@@ -1487,6 +1496,7 @@ private fun NewPanel(
             limit = widget.count,
             label = { contacts.conversationLabel(it) },
             preview = { preview(it, contacts, ourShip) },
+            actions = actions,
         )
     }
     Panel("New", Icons.Filled.Notifications) {
@@ -1506,6 +1516,7 @@ private fun NewPanel(
                         when (row.kind) {
                             io.nisfeb.talon.ui.NewKind.MAIL -> onOpenMailThread(row.target)
                             io.nisfeb.talon.ui.NewKind.INVITE -> onOpenInvites()
+                            io.nisfeb.talon.ui.NewKind.ACTION -> onOpenAction(row.target)
                             else -> onOpenConversation(row.target)
                         }
                     },

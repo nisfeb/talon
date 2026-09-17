@@ -34,6 +34,18 @@ class WhatsNewTest {
     ) = whatsNew(latest, unreads, mail, invites, us, limit, { it }, { "said something" })
 
     @Test
+    fun `an action sits with the mentions, ahead of the unread`() {
+        val rows = whatsNew(
+            listOf(msg("~dalsyd", "~dalsyd", 100), msg("~nec", "~nec", 200)),
+            mapOf("~dalsyd" to unread(1), "~nec" to unread(1, notify = 1)),
+            emptyList(), emptyList(), us, 10, { it }, { "said" },
+            actions = listOf(NewAction("a1", "task", "Call the shop", "claude-code", null)),
+        )
+        assertEquals(listOf(NewKind.MENTION, NewKind.ACTION, NewKind.UNREAD), rows.map { it.kind })
+        assertEquals("task proposed by claude-code", rows[1].line)
+    }
+
+    @Test
     fun `nothing is new about our own last word`() {
         val rows = run(
             listOf(msg("~dalsyd", us, 100)),
