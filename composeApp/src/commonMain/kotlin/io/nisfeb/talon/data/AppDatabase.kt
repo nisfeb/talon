@@ -58,8 +58,9 @@ import androidx.room.RoomDatabaseConstructor
         NotesNoteEntity::class,
         MailRowEntity::class,
         CalendarCacheEntity::class,
+        OrreryAccountEntity::class,
     ],
-    version = 43,
+    version = 44,
     exportSchema = false,
 )
 @ConstructedBy(AppDatabaseConstructor::class)
@@ -89,6 +90,7 @@ expect abstract class AppDatabase : RoomDatabase {
     abstract fun notes(): NotesDao
     abstract fun mailRows(): MailRowDao
     abstract fun calendarCache(): CalendarCacheDao
+    abstract fun orreryAccounts(): OrreryAccountDao
 }
 
 /**

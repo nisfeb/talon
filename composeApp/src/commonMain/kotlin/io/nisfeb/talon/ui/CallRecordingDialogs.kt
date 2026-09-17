@@ -155,6 +155,13 @@ fun RecordingResultDialog(
                             publishedUrl = it
                             message = "Published to $it"
                             kept = true
+                            // The call is a fact about the world: who was on
+                            // it, and where its transcript is.
+                            io.nisfeb.talon.orrery.OrreryRepo.note(
+                                io.nisfeb.talon.orrery.callFacts(
+                                    it, title, rec.clips.keys, ourShip, io.nisfeb.talon.util.nowMs(), nameFor,
+                                ),
+                            )
                         }.onFailure { message = "Publish failed: ${it.message ?: "error"}" }
                         busy = false
                     }

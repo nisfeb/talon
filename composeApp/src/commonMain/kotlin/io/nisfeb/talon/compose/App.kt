@@ -1002,6 +1002,14 @@ fun App(
         LaunchedEffect(calendarRepo, mailShipUrl) {
             if (mailShipUrl != null) calendarRepo.attach(mailShipUrl) else calendarRepo.detach()
         }
+        // Orrery rides the same surface, under a key of its own.
+        val orreryRepo = remember(session, db) {
+            io.nisfeb.talon.orrery.OrreryRepo(session.http, loopScope, db, io.nisfeb.talon.ui.platformLabel)
+        }
+        LaunchedEffect(orreryRepo, mailShipUrl, loggedInShip) {
+            val ship = loggedInShip
+            if (mailShipUrl != null && ship != null) orreryRepo.attach(mailShipUrl, ship) else orreryRepo.detach()
+        }
         // Desktop loop runner. No AlarmManager on desktop, so loops run
         // via a while-open ticker (below, inside the logged-in guard) plus
         // the "Run now" button. Built here so both the ticker and the
@@ -1974,6 +1982,7 @@ fun App(
                     showApps -> io.nisfeb.talon.ui.screens.AppsSettingsScreen(
                         mail = mailRepo,
                         calendar = calendarRepo,
+                        orrery = orreryRepo,
                         latticeInstalled = sessionStore.active()?.shipUrl?.let { url ->
                             { io.nisfeb.talon.urbit.LatticeInstall.isInstalled(http, url) }
                         },

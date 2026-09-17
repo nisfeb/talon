@@ -1672,7 +1672,7 @@ private fun WeekGrid(
 }
 
 /** "3 min ago", "2 h ago", "yesterday": for a sync's last pull. */
-private fun agoLabel(ms: Long): String {
+internal fun agoLabel(ms: Long): String {
     val d = (nowMs() - ms).coerceAtLeast(0) / 60_000
     return when {
         d < 1 -> "just now"
