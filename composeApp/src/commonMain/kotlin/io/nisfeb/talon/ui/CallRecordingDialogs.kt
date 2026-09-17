@@ -151,16 +151,23 @@ fun RecordingResultDialog(
                                 http, stt!!, shipUrl!!, ourShip, cookie!!,
                                 title, whenLabel, rec, nameFor,
                             )
-                        }.onSuccess {
-                            publishedUrl = it
-                            message = "Published to $it"
+                        }.onSuccess { published ->
+                            publishedUrl = published.address
+                            message = "Published to ${published.address}"
                             kept = true
                             // The call is a fact about the world: who was on
-                            // it, and where its transcript is.
+                            // it, where its transcript is, and what was said,
+                            // which the triage reads here and now.
+                            val speakers = rec.clips.keys
                             io.nisfeb.talon.orrery.OrreryRepo.note(
                                 io.nisfeb.talon.orrery.callFacts(
-                                    it, title, rec.clips.keys, ourShip, io.nisfeb.talon.util.nowMs(), nameFor,
+                                    published.address, title, speakers, ourShip, io.nisfeb.talon.util.nowMs(), nameFor,
                                 ),
+                            )
+                            val shipOf = speakers.associateBy { nameFor(it) }
+                            io.nisfeb.talon.orrery.OrreryRepo.noteTranscript(
+                                published.address,
+                                published.utterances.mapNotNull { u -> shipOf[u.speaker]?.let { io.nisfeb.talon.orrery.Spoken(it, u.text) } },
                             )
                         }.onFailure { message = "Publish failed: ${it.message ?: "error"}" }
                         busy = false

@@ -104,9 +104,14 @@ object CallRecordingPublisher {
         return Transcript(utterances.sortedBy { it.startMs }, failed)
     }
 
+    /** A published transcript: where it lives, and the words, which stay on this device. */
+    data class PublishedTranscript(val address: String, val utterances: List<TranscriptGemtext.Utterance>)
+
     /**
      * Transcribe every speaker and publish the merged transcript to
-     * Lattice. Returns the canonical urb:// address of the new page.
+     * Lattice. Returns the canonical urb:// address of the new page
+     * with the utterances, so the orrery triage can read them here
+     * rather than fetch its own words back.
      */
     suspend fun publishTranscript(
         http: HttpClient,
@@ -118,7 +123,7 @@ object CallRecordingPublisher {
         whenLabel: String,
         call: RecordedCall,
         nameFor: (String) -> String,
-    ): String {
+    ): PublishedTranscript {
         val t = transcribeAll(http, stt, call, nameFor)
         val gemtext = TranscriptGemtext.build(
             title = title.ifBlank { "Party line" },
@@ -132,7 +137,7 @@ object CallRecordingPublisher {
             title.ifBlank { "party-line" },
             "$ourShip-$whenLabel-${nowMs()}",
         )
-        return LatticePublish.publish(http, shipUrl, ourShip, cookie, slug, gemtext)
+        return PublishedTranscript(LatticePublish.publish(http, shipUrl, ourShip, cookie, slug, gemtext), t.utterances)
     }
 
     /**

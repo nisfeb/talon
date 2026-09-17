@@ -76,6 +76,7 @@ class OrreryRepo(
     // Coroutines only touch this, so a mutex is the whole of the guard
     // (commonMain has no synchronized: iOS is native).
     private val pending = mutableListOf<Facts>()
+    private val transcripts = mutableListOf<Pair<String, List<Spoken>>>()
     private val pendingLock = Mutex()
     private var shipUrl: String? = null
     private var ship: String? = null
@@ -177,16 +178,17 @@ class OrreryRepo(
             val posts = db.messages().postsAfter(row.messagesCursor, s, MESSAGES_PER_PASS)
             facts += Facts(observations = posts.mapNotNull { messageFacts(it, s) })
             val messagesCursor = posts.maxOfOrNull { it.sentMs } ?: row.messagesCursor
-            facts += triage(a, row, posts, s, nowMs)
 
             // Mail and the calendar may be absent on this ship; a source
             // that is not there is skipped, not an error of the pipe.
             var mailCursor = row.mailCursor
+            var freshMail: List<io.nisfeb.talon.mail.InboxEntry> = emptyList()
             runCatching { AuspexApi(http, url).inbox(limit = MAIL_PER_PASS) }.onSuccess { page ->
-                val fresh = page.threads.filter { it.last > row.mailCursor }
-                facts += Facts(observations = fresh.flatMap { mailFacts(it, s, nowMs) })
-                mailCursor = fresh.maxOfOrNull { it.last } ?: mailCursor
+                freshMail = page.threads.filter { it.last > row.mailCursor }
+                facts += Facts(observations = freshMail.flatMap { mailFacts(it, s, nowMs) })
+                mailCursor = freshMail.maxOfOrNull { it.last } ?: mailCursor
             }.onFailure { Log.i(TAG, "mail skipped: ${it.message}") }
+            facts += triage(a, row, posts, s, nowMs, url, freshMail)
 
             runCatching { CalendarApi(http, url).window(nowMs - BACKFILL_MS, nowMs + AHEAD_MS) }.onSuccess { w ->
                 w.rows.forEach { facts += eventFacts(it, s) }
@@ -224,53 +226,89 @@ class OrreryRepo(
         }
     }
 
-    /**
-     * The funnel over this pass's messages: the ones in scope go through
-     * the rules against the ship's own bodies, and each claim lands in
-     * the tray, or goes straight up when the person has trusted that
-     * kind of claim. A claim already noticed is the same row again.
-     */
-    private suspend fun triage(a: OrreryApi, row: OrreryAccountEntity, posts: List<io.nisfeb.talon.data.MessageEntity>, s: String, nowMs: Long): Facts {
-        if (posts.isEmpty()) return Facts()
-        val view = runCatching { a.state(row.token) }.getOrElse { Log.i(TAG, "state view skipped: ${it.message}"); return Facts() }
-        val bodies = view.bodies
-        val index = NameIndex(bodies)
-        val allowed = db.orreryChannels().all().toSet()
-        val ourNick = db.contacts().get(s)?.nickname
+    /** What one pass reads with: the ship's bodies, the model if any, and the gate. */
+    private class Reading(
+        val bodies: List<KnownBody>,
+        val index: NameIndex,
+        val attrs: Map<String, List<String>>,
+        val model: LocalModel?,
+        val gate: PatternGate?,
+        var modelRuns: Int = 0,
+    )
+
+    private suspend fun reading(a: OrreryApi, row: OrreryAccountEntity, s: String): Reading? {
+        val view = runCatching { a.state(row.token) }.getOrElse { Log.i(TAG, "state view skipped: ${it.message}"); return null }
         val model = if (isLocalTriageSupported) LocalModels.best()?.second else null
         val emb = embedder
         val gate = if (model != null && emb != null) runCatching {
             PatternGate.build(emb, db.orreryNoticed().snippets(s, "confirmed", GATE_EXAMPLES), db.orreryNoticed().snippets(s, "discarded", GATE_EXAMPLES))
         }.getOrNull() else null
-        var modelRuns = 0
+        return Reading(view.bodies, NameIndex(view.bodies), view.attrs, model, gate)
+    }
+
+    /**
+     * The funnel over this pass's messages, the transcripts published
+     * since the last, and the mail that arrived: the ones in scope go
+     * through the rules and, where there is one, the model, against
+     * the ship's own bodies. Each claim lands in the tray, or goes
+     * straight up when the person has trusted that kind of claim. A
+     * claim already noticed is the same row again.
+     */
+    private suspend fun triage(a: OrreryApi, row: OrreryAccountEntity, posts: List<io.nisfeb.talon.data.MessageEntity>, s: String, nowMs: Long, url: String, freshMail: List<io.nisfeb.talon.mail.InboxEntry>): Facts {
+        val spoken = pendingLock.withLock { transcripts.toList().also { transcripts.clear() } }
+        if (posts.isEmpty() && spoken.isEmpty() && freshMail.isEmpty()) return Facts()
+        val r = reading(a, row, s) ?: return Facts()
+        val allowed = db.orreryChannels().all().toSet()
+        val ourNick = db.contacts().get(s)?.nickname
         var up = Facts()
         for (m in posts) {
             val text = StoryCache.textFor(m.id, m.contentJson)
             if (!inScope(m.whom, text, s, ourNick, allowed)) continue
             val kind = if (m.whom.startsWith("~") || m.whom.startsWith("0v")) "talon-dm" else "talon-chat"
-            val sourceId = "talon://chat/${m.whom}?id=${m.id}"
-            // The rules first, then the model where there is one: the
-            // same claim from both is one row, and the rules got there.
-            val byRules = ruleFacts(text, m.author, m.sentMs, s, index)
-            // The gate, once the person has taught it: a message that
-            // reads like what they discard does not spend a model run.
-            val worth = gate == null || emb == null ||
-                (runCatching { emb.embed(text) }.getOrNull()?.let { gate.worthAModel(it) } ?: true)
-            val byModel = if (model != null && worth && modelRuns < MODEL_PER_PASS && text.length >= 8) {
-                modelRuns++
-                ModelExtractor.extract(model, index, bodies, text, m.author, m.sentMs, s, view.attrs)
-            } else emptyList()
-            for (n in byRules + byModel) {
-                val trusted = trusted(s, n.attr)
-                val entity = OrreryNoticedEntity(
-                    id = noticedId(sourceId, n.subject, n.attr), ship = s, subject = n.subject, attr = n.attr,
-                    valueJson = n.value.toString(), atMs = n.atMs, untilMs = n.untilMs, conf = n.conf,
-                    sourceKind = kind, sourceId = sourceId, bodyJson = n.body?.toJson()?.toString(),
-                    whom = m.whom, postId = m.id, snippet = text.take(200),
-                    state = if (trusted) "confirmed" else "pending", createdMs = nowMs,
-                )
-                if (db.orreryNoticed().insertIfNew(entity) != -1L && trusted) up += factsOf(entity)
+            up += triageText(r, s, nowMs, text, m.author, m.sentMs, m.whom, m.id, kind, "talon://chat/${m.whom}?id=${m.id}")
+        }
+        // A call's words, by speaker: each run of one voice is one message.
+        for ((address, lines) in spoken) {
+            mergeSpoken(lines).forEachIndexed { i, sp ->
+                up += triageText(r, s, nowMs, sp.text, sp.ship, nowMs, address, "$i", "talon-call", "$address#$i")
             }
+        }
+        // Mail is addressed to us, so every message in a fresh thread is in scope.
+        for (e in freshMail.take(MAIL_THREADS_PER_PASS)) {
+            val thread = runCatching { AuspexApi(http, url).thread(e.id) }.getOrNull() ?: continue
+            for (msg in thread.messages) {
+                if (msg.from == s || msg.body.isBlank()) continue
+                up += triageText(r, s, nowMs, msg.body, msg.from, msg.sent.coerceAtMost(nowMs), "mail:${e.id}", msg.id, "mail", "talon://mail/${e.id}")
+            }
+        }
+        return up
+    }
+
+    /** One text through the rules and the model; what it claims goes to the tray or up. */
+    private suspend fun triageText(r: Reading, s: String, nowMs: Long, text: String, author: String, atMs: Long, whom: String, postId: String, kind: String, sourceId: String): Facts {
+        var up = Facts()
+        // The rules first, then the model where there is one: the same
+        // claim from both is one row, and the rules got there.
+        val byRules = ruleFacts(text, author, atMs, s, r.index)
+        val emb = embedder
+        // The gate, once the person has taught it: a message that reads
+        // like what they discard does not spend a model run.
+        val worth = r.gate == null || emb == null ||
+            (runCatching { emb.embed(text) }.getOrNull()?.let { r.gate.worthAModel(it) } ?: true)
+        val byModel = if (r.model != null && worth && r.modelRuns < MODEL_PER_PASS && text.length >= 8) {
+            r.modelRuns++
+            ModelExtractor.extract(r.model, r.index, r.bodies, text, author, atMs, s, r.attrs)
+        } else emptyList()
+        for (n in byRules + byModel) {
+            val trusted = trusted(s, n.attr)
+            val entity = OrreryNoticedEntity(
+                id = noticedId(sourceId, n.subject, n.attr), ship = s, subject = n.subject, attr = n.attr,
+                valueJson = n.value.toString(), atMs = n.atMs, untilMs = n.untilMs, conf = n.conf,
+                sourceKind = kind, sourceId = sourceId, bodyJson = n.body?.toJson()?.toString(),
+                whom = whom, postId = postId, snippet = text.take(200),
+                state = if (trusted) "confirmed" else "pending", createdMs = nowMs,
+            )
+            if (db.orreryNoticed().insertIfNew(entity) != -1L && trusted) up += factsOf(entity)
         }
         return up
     }
@@ -338,6 +376,7 @@ class OrreryRepo(
         // ponytail: a per-pass cap; a per-day budget when a phone needs one.
         const val MODEL_PER_PASS = 20
         const val GATE_EXAMPLES = 50
+        const val MAIL_THREADS_PER_PASS = 10
 
         /** A noticed row as the facts it stands for. */
         fun factsOf(n: OrreryNoticedEntity): Facts = Facts(
@@ -366,6 +405,19 @@ class OrreryRepo(
         }
 
         suspend fun discard(db: AppDatabase, id: String) = db.orreryNoticed().setState(id, "discarded")
+
+        /**
+         * The words of a call just transcribed, read on the next pass by
+         * speaker. Dropped when the pipe is off, like [note].
+         */
+        fun noteTranscript(address: String, lines: List<Spoken>) {
+            val repo = current ?: return
+            if (!repo._enabled.value || lines.isEmpty()) return
+            repo.scope.launch {
+                repo.pendingLock.withLock { repo.transcripts += address to lines }
+                repo.push()
+            }
+        }
     }
 }
 
