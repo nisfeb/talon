@@ -234,7 +234,7 @@ class OrreryRepo(
             facts += triage(a, row, posts, s, nowMs, url, freshMail)
 
             runCatching { CalendarApi(http, url).window(nowMs - BACKFILL_MS, nowMs + AHEAD_MS) }.onSuccess { w ->
-                w.rows.forEach { facts += eventFacts(it, s) }
+                facts += calendarFacts(w.rows, s, nowMs)
             }.onFailure { Log.i(TAG, "calendar skipped: ${it.message}") }
 
             var refused = 0

@@ -94,7 +94,11 @@ fun mailFacts(e: InboxEntry, ourShip: String, nowMs: Long): List<Obs> {
         .map { lastContact(it, at, "mail", "talon://mail/${e.id}") }
 }
 
-/** A timed event as a situation that is under way between its ends, and where it puts us. */
+/**
+ * One occurrence as a situation that is under way between its ends, and
+ * where it puts us. A recurring event becomes an activity instead;
+ * [calendarFacts] is what routes them.
+ */
 fun eventFacts(row: CalendarRow, ourShip: String): Facts {
     if (row.isTask || row.name.isBlank() || row.r <= row.l) return Facts()
     val id = situationId(row)
@@ -110,6 +114,67 @@ fun eventFacts(row: CalendarRow, ourShip: String): Facts {
         if (row.location.isNotBlank()) {
             obs("location", JsonPrimitive(row.location))
             add(Obs("person/me", "location", JsonPrimitive(row.location), row.l, row.r, 60, "calendar", source))
+        }
+    }
+    return Facts(listOf(body), obs)
+}
+
+/**
+ * A window of the calendar: what happens once is a situation, and what
+ * recurs is one activity carrying its cadence and its last and next,
+ * not a body per occurrence. A standing weekly meeting is one thing in
+ * the world that keeps happening, which is what the kind is for.
+ */
+fun calendarFacts(rows: List<CalendarRow>, ourShip: String, nowMs: Long): Facts {
+    val usable = rows.filter { !it.isTask && it.name.isNotBlank() && it.r > it.l }
+    var out = Facts()
+    usable.filterNot { it.repeats }.forEach { out += eventFacts(it, ourShip) }
+    usable.filter { it.repeats }
+        .groupBy { it.cal to it.id }
+        .forEach { (_, occurrences) -> out += activityFacts(occurrences, ourShip, nowMs) }
+    return out
+}
+
+/**
+ * One recurring event, from the occurrences of it the window holds.
+ *
+ * Every `at` here comes from an occurrence rather than from the clock,
+ * because an observation's id hashes its `at`: asserting "next is
+ * Tuesday" at the moment of each pass would write a new row every ten
+ * minutes. Anchored this way, a pass that learns nothing new writes
+ * nothing new, and the rows turn over once per occurrence.
+ *
+ * ponytail: the series' own attributes are re-asserted whenever the
+ * last occurrence moves, since the ship is not read back before
+ * writing. Reading the body first would cut that to one row per real
+ * change; retention culls the superseded ones meanwhile.
+ */
+fun activityFacts(occurrences: List<CalendarRow>, ourShip: String, nowMs: Long): Facts {
+    val rows = occurrences.filter { !it.isTask && it.name.isNotBlank() && it.r > it.l }.sortedBy { it.l }
+    val first = rows.firstOrNull() ?: return Facts()
+    val id = activityId(first)
+    val source = "${first.cal}/${first.id}"
+    val body = OBody(id, name = first.name, aliases = first.tags.filter { it.isNotBlank() })
+    val last = rows.lastOrNull { it.l <= nowMs }
+    val next = rows.firstOrNull { it.l > nowMs }
+    val underWay = rows.firstOrNull { it.l <= nowMs && nowMs < it.r }
+    // What the series is, as of the occurrence it was last read from.
+    val asOf = last?.l ?: first.l
+    val obs = buildList {
+        fun obs(attr: String, value: JsonElement, at: Long, untilMs: Long? = null, conf: Int = 100) =
+            add(Obs(id, attr, value, at, untilMs, conf, "calendar", source))
+        obs("cadence", JsonPrimitive(first.kind), asOf)
+        obs("participants", buildJsonObject { put("ref", "person/me") }, asOf)
+        if (first.location.isNotBlank()) obs("location", JsonPrimitive(first.location), asOf)
+        last?.let { obs("last", JsonPrimitive(isoUtc(it.l)), it.l) }
+        // The next one became the next when the previous ended. With no
+        // previous in the window, the day is the steadiest anchor there is.
+        next?.let { obs("next", JsonPrimitive(isoUtc(it.l)), last?.r ?: dayOf(nowMs).second) }
+        underWay?.let {
+            obs("status", JsonPrimitive("under way"), it.l, untilMs = it.r)
+            if (first.location.isNotBlank()) {
+                add(Obs("person/me", "location", JsonPrimitive(first.location), it.l, it.r, 60, "calendar", source))
+            }
         }
     }
     return Facts(listOf(body), obs)
@@ -145,10 +210,15 @@ fun callFacts(
 }
 
 /** `situation/cal-<calendar>-<event>[-<instance>]`, within the slug's 64 bytes. */
-internal fun situationId(row: CalendarRow): String {
-    val raw = "cal-${row.cal}-${row.id}" + if (row.idx > 0) "-${row.idx}" else ""
+internal fun situationId(row: CalendarRow): String = calId("situation", row, withInstance = true)
+
+/** `activity/cal-<calendar>-<event>`: the series, not one of its occurrences. */
+internal fun activityId(row: CalendarRow): String = calId("activity", row, withInstance = false)
+
+private fun calId(kind: String, row: CalendarRow, withInstance: Boolean): String {
+    val raw = "cal-${row.cal}-${row.id}" + if (withInstance && row.idx > 0) "-${row.idx}" else ""
     val slug = raw.lowercase().replace(Regex("[^a-z0-9-]+"), "-").trim('-').replace(Regex("-{3,}"), "--")
-    return "situation/" + slug.take(64).trimEnd('-')
+    return "$kind/" + slug.take(64).trimEnd('-')
 }
 
 // ---- the wire ------------------------------------------------------
