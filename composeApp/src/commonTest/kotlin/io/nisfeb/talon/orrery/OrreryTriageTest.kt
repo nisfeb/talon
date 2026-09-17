@@ -77,6 +77,13 @@ class OrreryTriageTest {
     }
 
     @Test
+    fun `a speaker's run of lines is one message, up to a cap`() {
+        val lines = listOf(Spoken("~bus", "so the car"), Spoken("~bus", " died on route 9 "), Spoken("~zod", "oh no"), Spoken("~bus", ""), Spoken("~bus", "yeah"))
+        assertEquals(listOf(Spoken("~bus", "so the car died on route 9"), Spoken("~zod", "oh no"), Spoken("~bus", "yeah")), mergeSpoken(lines))
+        assertEquals(2, mergeSpoken(listOf(Spoken("~bus", "a".repeat(600)), Spoken("~bus", "b".repeat(600)))).size)
+    }
+
+    @Test
     fun `a claim keeps its id across passes`() {
         assertEquals(noticedId("talon://chat/~bus?id=1", "person/bus", "location"), noticedId("talon://chat/~bus?id=1", "person/bus", "location"))
     }

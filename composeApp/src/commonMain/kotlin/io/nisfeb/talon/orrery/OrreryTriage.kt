@@ -147,3 +147,26 @@ fun ruleFacts(text: String, author: String, atMs: Long, ourShip: String, index: 
 
 /** Stable per claim and source, so a message re-read on the next pass is the same row. */
 fun noticedId(sourceId: String, subject: String, attr: String): String = "$sourceId|$subject|$attr"
+
+/** One thing somebody said on a call. */
+data class Spoken(val ship: String, val text: String)
+
+/**
+ * Consecutive lines by one speaker as one message, so a claim split
+ * across two breaths is read whole, capped so a monologue stays
+ * within what a prompt takes.
+ */
+fun mergeSpoken(lines: List<Spoken>, maxChars: Int = 1000): List<Spoken> {
+    val out = mutableListOf<Spoken>()
+    for (l in lines) {
+        val text = l.text.trim()
+        if (text.isEmpty()) continue
+        val last = out.lastOrNull()
+        if (last != null && last.ship == l.ship && last.text.length + text.length + 1 <= maxChars) {
+            out[out.size - 1] = Spoken(l.ship, last.text + " " + text)
+        } else {
+            out += Spoken(l.ship, text)
+        }
+    }
+    return out
+}
