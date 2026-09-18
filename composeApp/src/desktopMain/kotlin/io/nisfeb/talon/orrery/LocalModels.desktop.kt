@@ -45,93 +45,6 @@ actual fun localModelRungs(): List<Rung> = listOf(LocalServerRung, LlamaRung)
  * hold a far larger model than anything Talon would download. The
  * first that answers wins; a model is picked by name preference.
  */
-object LocalServerRung : Rung() {
-    override val name: String get() = found?.let { "${it.label} on this computer (${it.model})" } ?: "A local model server"
-    private val http: HttpClient by lazy { createAppHttpClient() }
-    private val preferred = listOf("qwen2.5", "qwen3", "llama-3", "llama3", "gemma-3", "gemma3", "gemma", "mistral", "phi")
-
-    data class Server(val label: String, val base: String, val model: String)
-    @Volatile private var found: Server? = null
-
-    override suspend fun status(): RungStatus {
-        val chosen = LocalModels.serverUrl.trim().trimEnd('/')
-        found = if (chosen.isNotEmpty()) {
-            // The person named a server: that one, whichever shape it speaks.
-            probe("The server at $chosen", chosen, "/v1/models") { it.jsonObject["data"]?.jsonArray.orEmpty().mapNotNull { m -> m.jsonObject["id"]?.jsonPrimitive?.content } }
-                ?: probe("The server at $chosen", chosen, "/api/tags") { it.jsonObject["models"]?.jsonArray.orEmpty().mapNotNull { m -> m.jsonObject["name"]?.jsonPrimitive?.content } }
-        } else {
-            probe("LM Studio", "http://localhost:1234", "/v1/models") { it.jsonObject["data"]?.jsonArray.orEmpty().mapNotNull { m -> m.jsonObject["id"]?.jsonPrimitive?.content } }
-                ?: probe("Ollama", "http://localhost:11434", "/api/tags") { it.jsonObject["models"]?.jsonArray.orEmpty().mapNotNull { m -> m.jsonObject["name"]?.jsonPrimitive?.content } }
-        }
-        return if (found != null) RungStatus.Ready
-        else RungStatus.Unavailable(if (chosen.isNotEmpty()) "Nothing answers at $chosen." else "No LM Studio (port 1234) or Ollama (port 11434) is running.")
-    }
-
-    private suspend fun probe(label: String, base: String, path: String, names: (kotlinx.serialization.json.JsonElement) -> List<String>): Server? = runCatching {
-        val text = http.get("$base$path") { timeout { requestTimeoutMillis = 1500 } }.bodyAsText()
-        val all = names(Json.parseToJsonElement(text)).filterNot { it.contains("embed", ignoreCase = true) }
-        val wanted = LocalModels.serverModel.trim()
-        val pick = when {
-            // A named model is used as named, listed or not: a server may load it on demand.
-            wanted.isNotEmpty() -> all.firstOrNull { it.equals(wanted, ignoreCase = true) } ?: wanted
-            else -> preferred.firstNotNullOfOrNull { pre -> all.firstOrNull { it.lowercase().contains(pre) } } ?: all.firstOrNull()
-        }
-        pick?.let { Server(label, base, it) }
-    }.getOrNull()
-
-    override suspend fun open(): LocalModel = OpenAiShapeModel(http, found ?: error("no server"), name)
-}
-
-/**
- * The OpenAI chat shape with the answer's schema attached, which both
- * servers can enforce; a server that refuses the schema gets JSON mode,
- * and one that refuses that gets the prompt alone and the parse's
- * checks.
- */
-internal class OpenAiShapeModel(private val http: HttpClient, private val server: LocalServerRung.Server, override val rung: String) : LocalModel {
-    private var format = 0 // 0 schema, 1 json_object, 2 none
-
-    override suspend fun complete(system: String, user: String, grammar: String?, maxTokens: Int): String {
-        while (true) {
-            val body = buildJsonObject {
-                put("model", server.model)
-                put("temperature", 0)
-                put("max_tokens", maxTokens)
-                when (format) {
-                    0 -> put("response_format", buildJsonObject {
-                        put("type", "json_schema")
-                        put("json_schema", buildJsonObject { put("name", "claims"); put("strict", true); put("schema", Json.parseToJsonElement(CLAIMS_SCHEMA)) })
-                    })
-                    1 -> put("response_format", buildJsonObject { put("type", "json_object") })
-                }
-                put("messages", buildJsonArray {
-                    add(buildJsonObject { put("role", "system"); put("content", system) })
-                    add(buildJsonObject { put("role", "user"); put("content", user) })
-                })
-            }
-            val resp = http.post("${server.base}/v1/chat/completions") {
-                contentType(ContentType.Application.Json)
-                // A server of your own usually wants no key. One behind a
-                // proxy, or a hosted private model, does.
-                LocalModels.serverKey.takeIf { it.isNotBlank() }
-                    ?.let { header(io.ktor.http.HttpHeaders.Authorization, "Bearer $it") }
-                setBody(body.toString())
-                timeout { requestTimeoutMillis = 180_000 }
-            }
-            val text = resp.bodyAsText()
-            if (resp.status.value == 400 && format < 2) { format++; continue }
-            if (resp.status.value >= 400) error("${server.label} answered ${resp.status.value}: ${text.take(160)}")
-            return Json.parseToJsonElement(text).jsonObject["choices"]!!.jsonArray[0].jsonObject["message"]!!.jsonObject["content"]!!.jsonPrimitive.content
-        }
-    }
-
-    override fun close() = Unit
-
-    companion object {
-        /** The answer's shape as JSON Schema, the same one the grammar bounds on the floor. */
-        const val CLAIMS_SCHEMA = """{"type":"object","properties":{"claims":{"type":"array","items":{"type":"object","properties":{"subject":{"type":"string"},"attr":{"type":"string"},"value":{"anyOf":[{"type":"string"},{"type":"null"},{"type":"object","properties":{"ref":{"type":"string"}},"required":["ref"],"additionalProperties":false}]},"conf":{"type":"number"},"until_hours":{"type":"number"}},"required":["subject","attr","value","conf"],"additionalProperties":false}}},"required":["claims"],"additionalProperties":false}"""
-    }
-}
 
 /**
  * The floor: llama.cpp on the JVM, CPU, with Qwen2.5 1.5B at 4-bit
@@ -231,6 +144,3 @@ object LlamaProbe {
     }
 }
 
-/** A server model by address and name, with no probe, for the fixture gate. */
-internal fun serverModel(base: String, model: String): LocalModel =
-    OpenAiShapeModel(createAppHttpClient(), LocalServerRung.Server("server", base.trimEnd('/'), model), "$model at $base")

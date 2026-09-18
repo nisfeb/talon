@@ -26,7 +26,10 @@ import java.io.File
  * a person. AICore's Gemini Nano is the rung above this one when its
  * prompt API ships.
  */
-actual fun localModelRungs(): List<Rung> = listOf(MediaPipeRung)
+// A server you named comes first: the machine under your desk holds a
+// far larger model than the one in your pocket. It is skipped in a
+// blink when no server is set.
+actual fun localModelRungs(): List<Rung> = listOf(LocalServerRung, MediaPipeRung)
 
 object MediaPipeRung : Rung() {
     override val name = "Qwen2.5 1.5B on this phone"

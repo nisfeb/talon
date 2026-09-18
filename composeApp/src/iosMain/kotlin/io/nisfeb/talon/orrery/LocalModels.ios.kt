@@ -17,7 +17,10 @@ object IosModels {
  * then the floor, llama.cpp with the same Qwen2.5 1.5B the desktop
  * runs, fetched on first use.
  */
-actual fun localModelRungs(): List<Rung> = listOf(SystemModelRung, LlamaIosRung)
+// A server you named comes first: the machine under your desk holds a
+// far larger model than the one in your pocket. It is skipped in a
+// blink when no server is set.
+actual fun localModelRungs(): List<Rung> = listOf(LocalServerRung, SystemModelRung, LlamaIosRung)
 
 private class Wrapped(private val native: NativeModel) : LocalModel {
     override val rung: String get() = native.name

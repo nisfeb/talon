@@ -87,14 +87,18 @@ fun PrivateModelSection(orrery: OrreryRepo?, aiSettings: AiSettingsRepository) {
     }
     note?.let { Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error) }
 
-    if (!isTouchPrimary) {
+    run {
         // A server of your own, here or on another machine you have.
         var url by remember(cfg.privateBaseUrl) { mutableStateOf(cfg.privateBaseUrl.orEmpty()) }
         var name by remember(cfg.privateModel) { mutableStateOf(cfg.privateModel.orEmpty()) }
         var key by remember(cfg.privateApiKey) { mutableStateOf(cfg.privateApiKey) }
         Spacer(Modifier.height(8.dp))
         Text(
-            "LM Studio or Ollama on this computer, or another machine of yours. Leave the address empty to use whichever is running on its usual port, and the name empty to take that server's best.",
+            if (isTouchPrimary) {
+                "LM Studio or Ollama on a machine of yours, reached over your network. Leave the address empty and this device reads with its own model."
+            } else {
+                "LM Studio or Ollama on this computer, or another machine of yours. Leave the address empty to use whichever is running on its usual port, and the name empty to take that server's best."
+            },
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
